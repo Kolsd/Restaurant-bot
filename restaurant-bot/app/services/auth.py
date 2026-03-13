@@ -1,37 +1,23 @@
 import hashlib
 import secrets
-import os
-from datetime import datetime
+from app.services import database as db
 
-# Usuarios en memoria — en producción usar base de datos
-# Formato: { username: { password_hash, restaurant_name, token } }
-users: dict = {
-    "demo@restaurante.com": {
-        "password_hash": hashlib.sha256("demo123".encode()).hexdigest(),
-        "restaurant_name": "La Trattoria Italiana",
-        "token": None
-    }
-}
-
-active_tokens: dict = {}  # token → username
+active_tokens: dict = {}  # token → username (en memoria está bien, se regenera al login)
 
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def login(username: str, password: str) -> dict:
-    username = username.lower().strip()
-    if username not in users:
+async def login(username: str, password: str) -> dict:
+    user = await db.db_get_user(username)
+    if not user:
         return {"success": False, "error": "Usuario no encontrado"}
-
-    user = users[username]
     if user["password_hash"] != hash_password(password):
         return {"success": False, "error": "Contraseña incorrecta"}
 
     token = secrets.token_hex(32)
-    active_tokens[token] = username
-    users[username]["token"] = token
+    active_tokens[token] = username.lower().strip()
 
     return {
         "success": True,
@@ -48,25 +34,15 @@ def verify_token(token: str) -> str | None:
 
 
 def logout(token: str):
-    if token in active_tokens:
-        username = active_tokens[token]
-        del active_tokens[token]
-        if username in users:
-            users[username]["token"] = None
+    active_tokens.pop(token, None)
 
 
-def create_user(username: str, password: str, restaurant_name: str) -> dict:
-    username = username.lower().strip()
-    if username in users:
+async def create_user(username: str, password: str, restaurant_name: str) -> dict:
+    success = await db.db_create_user(username, hash_password(password), restaurant_name)
+    if not success:
         return {"success": False, "error": "Usuario ya existe"}
-
-    users[username] = {
-        "password_hash": hash_password(password),
-        "restaurant_name": restaurant_name,
-        "token": None
-    }
     return {"success": True, "message": f"Usuario {username} creado"}
 
 
-def get_users() -> list:
-    return [{"username": u, "restaurant": d["restaurant_name"]} for u, d in users.items()]
+async def get_users() -> list:
+    return await db.db_get_all_users()
