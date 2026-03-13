@@ -1,0 +1,179 @@
+import re
+from anthropic import Anthropic
+from app.data.restaurant import RESTAURANT_INFO, MENU, get_top_dishes
+from app.services.orders import add_to_cart, remove_from_cart, cart_summary, create_order, clear_cart
+from app.services import database as db
+
+client = Anthropic()
+
+
+def build_system_prompt() -> str:
+    menu_text = ""
+    for category, dishes in MENU.items():
+        menu_text += f"\n### {category}\n"
+        for dish in dishes:
+            veg = "🌱" if dish["vegetarian"] else ""
+            menu_text += f"- **{dish['name']}** {veg} - ${dish['price']} MXN\n"
+            menu_text += f"  {dish['description']}\n"
+
+    top_dishes = get_top_dishes(5)
+    top_text = "\n".join([f"- {d['name']} ({d['orders']} pedidos)" for d in top_dishes])
+    hours_text = "\n".join([f"- {day.capitalize()}: {hours}" for day, hours in RESTAURANT_INFO["hours"].items()])
+
+    return f"""Eres el asistente virtual de WhatsApp de **{RESTAURANT_INFO['name']}**, un restaurante italiano en Ciudad de México.
+
+Tu personalidad es: cálida, amable, profesional y un poco italiana 🇮🇹. Usas emojis ocasionalmente para dar cercanía.
+
+## TU MISIÓN
+Ayudar a los clientes con:
+1. **Información del menú** - precios, ingredientes, opciones
+2. **Reservaciones** - tomar datos y confirmar
+3. **Pedidos** - domicilio o para recoger
+4. **Horarios y ubicación**
+5. **Recomendaciones** - basadas en los platos más populares
+6. **Escalar a humano** - cuando no puedas ayudar
+
+---
+
+## INFORMACIÓN DEL RESTAURANTE
+
+📍 **Dirección:** {RESTAURANT_INFO['address']}
+📞 **Teléfono:** {RESTAURANT_INFO['phone']}
+📸 **Instagram:** {RESTAURANT_INFO['instagram']}
+
+### Horarios:
+{hours_text}
+
+---
+
+## MENÚ COMPLETO
+{menu_text}
+
+---
+
+## 🔥 PLATOS MÁS PEDIDOS
+{top_text}
+
+---
+
+## REGLAS
+
+### RESERVACIONES:
+- Necesitas: nombre completo, fecha, hora, número de personas, teléfono
+- Máximo 15 personas por WhatsApp (más → llamar)
+- Una vez que tengas TODOS los datos di: [RESERVACION: nombre|fecha|hora|personas|telefono|notas]
+
+### PEDIDOS (domicilio o para recoger):
+1. Confirma si es domicilio o para recoger
+2. Toma los platos. Para agregar: [AGREGAR: nombre_plato|cantidad]
+3. Para eliminar: [ELIMINAR: nombre_plato]
+4. Para mostrar carrito: [VER_CARRITO]
+5. Para crear la orden:
+   - Domicilio: pide dirección → [CREAR_ORDEN: domicilio|dirección|notas]
+   - Recoger: [CREAR_ORDEN: recoger||notas]
+Domicilio tiene costo de $5,000 COP adicional.
+
+### ESCALAR:
+- Di [ESCALAR: motivo] cuando no puedas resolver algo
+
+### TONO:
+- Respuestas CORTAS (WhatsApp, no email)
+- Máximo 3-4 líneas
+- Nunca seas robótico
+"""
+
+
+async def process_agent_response(response_text: str, user_phone: str) -> dict:  # noqa: C901
+    actions = []
+    clean_response = response_text
+
+    # Reservación
+    res_match = re.search(r'\[RESERVACION: ([^\]]+)\]', response_text)
+    if res_match:
+        datos = res_match.group(1).split('|')
+        if len(datos) >= 5:
+            reservation = await db.db_add_reservation(
+                name=datos[0].strip(), date=datos[1].strip(),
+                time=datos[2].strip(), guests=int(datos[3].strip()),
+                phone=datos[4].strip(), notes=datos[5].strip() if len(datos) > 5 else ""
+            )
+            actions.append({"type": "reservation_created", "data": reservation})
+        clean_response = re.sub(r'\[RESERVACION: [^\]]+\]', '', clean_response).strip()
+
+    # Escalar
+    escalar_match = re.search(r'\[ESCALAR: ([^\]]+)\]', response_text)
+    if escalar_match:
+        actions.append({"type": "escalate_to_human", "reason": escalar_match.group(1), "user_phone": user_phone})
+        clean_response = re.sub(r'\[ESCALAR: [^\]]+\]', '', clean_response).strip()
+
+    # Agregar al carrito
+    for match in re.finditer(r'\[AGREGAR: ([^\]]+)\]', response_text):
+        parts = match.group(1).split('|')
+        dish_name = parts[0].strip()
+        quantity = int(parts[1].strip()) if len(parts) > 1 else 1
+        result = add_to_cart(user_phone, dish_name, quantity)
+        actions.append({"type": "add_to_cart", "result": result})
+        clean_response = re.sub(r'\[AGREGAR: [^\]]+\]', '', clean_response).strip()
+
+    # Eliminar del carrito
+    for match in re.finditer(r'\[ELIMINAR: ([^\]]+)\]', response_text):
+        result = remove_from_cart(user_phone, match.group(1).strip())
+        actions.append({"type": "remove_from_cart", "result": result})
+        clean_response = re.sub(r'\[ELIMINAR: [^\]]+\]', '', clean_response).strip()
+
+    # Ver carrito
+    if '[VER_CARRITO]' in response_text:
+        summary = cart_summary(user_phone)
+        clean_response = re.sub(r'\[VER_CARRITO\]', summary, clean_response).strip()
+        actions.append({"type": "view_cart"})
+
+    # Crear orden
+    crear_match = re.search(r'\[CREAR_ORDEN: ([^\]]+)\]', response_text)
+    if crear_match:
+        parts = crear_match.group(1).split('|')
+        order_type = parts[0].strip()
+        address = parts[1].strip() if len(parts) > 1 else None
+        notes = parts[2].strip() if len(parts) > 2 else ""
+        result = create_order(user_phone, order_type, address, notes)
+        if result["success"]:
+            order = result["order"]
+            await db.db_save_order(order)
+            payment_msg = (
+                f"\n\n✅ *Pedido {order['id']} creado*\n"
+                f"Total: ${order['total']:,} COP\n"
+                f"{'🛵 Domicilio a: ' + order['address'] if order['order_type'] == 'domicilio' else '🏃 Para recoger en el restaurante'}\n\n"
+                f"💳 *Paga aquí:*\n{order['payment_url']}\n\n"
+                f"_Una vez confirmado el pago comenzamos tu pedido_ 🍽️"
+            )
+            clean_response = re.sub(r'\[CREAR_ORDEN: [^\]]+\]', payment_msg, clean_response).strip()
+            actions.append({"type": "order_created", "order": order})
+        else:
+            clean_response = re.sub(r'\[CREAR_ORDEN: [^\]]+\]', f"❌ {result['error']}", clean_response).strip()
+
+    return {"message": clean_response, "actions": actions}
+
+
+async def chat(user_phone: str, user_message: str) -> dict:
+    # Cargar historial desde DB
+    history = await db.db_get_history(user_phone)
+
+    history.append({"role": "user", "content": user_message})
+
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1000,
+        system=build_system_prompt(),
+        messages=history[-20:]
+    )
+
+    assistant_message = response.content[0].text
+    history.append({"role": "assistant", "content": assistant_message})
+
+    # Guardar historial en DB
+    await db.db_save_history(user_phone, history)
+
+    return await process_agent_response(assistant_message, user_phone)
+
+
+async def reset_conversation(user_phone: str):
+    await db.db_delete_conversation(user_phone)
