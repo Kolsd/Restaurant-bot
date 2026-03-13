@@ -120,6 +120,8 @@ Cobrando $99-149/mes por restaurante = **$74-124 de ganancia por cliente** 🚀
 
 ## 🗺️ Roadmap
 
+
+
 - [ ] Dashboard web para ver conversaciones y reservaciones
 - [ ] Integración con Google Calendar para reservaciones
 - [ ] Notificaciones por email al dueño
