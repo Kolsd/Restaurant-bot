@@ -1,130 +1,134 @@
-from fastapi import APIRouter, Request, HTTPException
-from datetime import datetime
-from app.services.orders import orders, get_all_orders
+from fastapi import APIRouter, Request, HTTPException, Query
+from datetime import datetime, timedelta
 from app.services.auth import verify_token
-from app.data.restaurant import reservations
-from app.services.agent import conversation_history
+from app.services import database as db
 
 router = APIRouter()
 
 
 def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not token:
-        token = request.cookies.get("rb_token", "")
     username = verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="No autorizado")
     return username
 
 
-def today_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+def get_date_range(period: str):
+    """Retorna (date_from, date_to) como strings YYYY-MM-DD según el período."""
+    today = datetime.now().date()
+    if period == "today":
+        return str(today), str(today)
+    elif period == "week":
+        return str(today - timedelta(days=6)), str(today)
+    elif period == "month":
+        return str(today.replace(day=1)), str(today)
+    elif period == "semester":
+        if today.month <= 6:
+            return str(today.replace(month=1, day=1)), str(today)
+        else:
+            return str(today.replace(month=7, day=1)), str(today)
+    elif period == "year":
+        return str(today.replace(month=1, day=1)), str(today)
+    else:
+        return str(today), str(today)
 
-
-# ─────────────────────────────────────────────
-# STATS GENERALES
-# ─────────────────────────────────────────────
 
 @router.get("/api/dashboard/stats")
-async def dashboard_stats(request: Request):
+async def dashboard_stats(request: Request, period: str = Query("today")):
     require_auth(request)
-    today = today_str()
+    date_from, date_to = get_date_range(period)
 
-    all_orders = get_all_orders()
-    today_orders = [o for o in all_orders if o["created_at"].startswith(today)]
-    paid_orders = [o for o in today_orders if o["paid"]]
-    pending_orders = [o for o in today_orders if not o["paid"]]
-    revenue = sum(o["total"] for o in paid_orders)
+    orders = await db.db_get_orders_range(date_from, date_to)
+    paid = [o for o in orders if o["paid"]]
+    pending = [o for o in orders if not o["paid"]]
+    revenue = sum(o["total"] for o in paid)
 
-    today_reservations = [r for r in reservations if r.get("date", "") == today]
-    total_guests = sum(r.get("guests", 0) for r in today_reservations)
-
-    active_convs = len(conversation_history)
+    reservations = await db.db_get_reservations_range(date_from, date_to)
+    total_guests = sum(r.get("guests", 0) for r in reservations)
+    convs = await db.db_get_all_conversations()
 
     return {
-        "date": today,
-        "orders": {
-            "total": len(today_orders),
-            "paid": len(paid_orders),
-            "pending": len(pending_orders),
-            "revenue": revenue
-        },
-        "reservations": {
-            "total": len(today_reservations),
-            "guests": total_guests
-        },
-        "conversations": {
-            "active": active_convs
-        }
+        "period": period,
+        "date_from": date_from,
+        "date_to": date_to,
+        "orders": {"total": len(orders), "paid": len(paid), "pending": len(pending), "revenue": revenue},
+        "reservations": {"total": len(reservations), "guests": total_guests},
+        "conversations": {"active": len(convs)}
     }
 
 
-# ─────────────────────────────────────────────
-# PEDIDOS
-# ─────────────────────────────────────────────
-
 @router.get("/api/dashboard/orders")
-async def dashboard_orders(request: Request):
+async def dashboard_orders(request: Request, period: str = Query("today")):
     require_auth(request)
-    today = today_str()
-    all_orders = get_all_orders()
-    today_orders = [o for o in all_orders if o["created_at"].startswith(today)]
-    today_orders.sort(key=lambda x: x["created_at"], reverse=True)
-
+    date_from, date_to = get_date_range(period)
+    orders = await db.db_get_orders_range(date_from, date_to)
     result = []
-    for o in today_orders:
-        items_summary = ", ".join(
-            f"{item['quantity']}x {item['name']}" for item in o.get("items", [])
-        )
+    for o in orders:
+        items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in o.get("items", []))
+        created = datetime.fromisoformat(o["created_at"])
         result.append({
-            "id": o["id"],
-            "items": items_summary or "—",
-            "type": o["order_type"],
-            "paid": o["paid"],
-            "total": o["total"],
-            "address": o.get("address", ""),
+            "id": o["id"], "items": items_summary or "—",
+            "type": o["order_type"], "paid": o["paid"],
+            "total": o["total"], "address": o.get("address", ""),
             "status": o["status"],
-            "time": datetime.fromisoformat(o["created_at"]).strftime("%H:%M"),
+            "time": created.strftime("%d/%m %H:%M") if period != "today" else created.strftime("%H:%M"),
             "phone": o.get("phone", "")
         })
     return {"orders": result}
 
 
-# ─────────────────────────────────────────────
-# RESERVACIONES
-# ─────────────────────────────────────────────
-
 @router.get("/api/dashboard/reservations")
-async def dashboard_reservations(request: Request):
+async def dashboard_reservations(request: Request, period: str = Query("today")):
     require_auth(request)
-    today = today_str()
-    today_res = [r for r in reservations if r.get("date", "") == today]
-    today_res.sort(key=lambda x: x.get("time", ""))
-    return {"reservations": today_res}
+    date_from, date_to = get_date_range(period)
+    reservations = await db.db_get_reservations_range(date_from, date_to)
+    return {"reservations": reservations}
 
-
-# ─────────────────────────────────────────────
-# CONVERSACIONES
-# ─────────────────────────────────────────────
 
 @router.get("/api/dashboard/conversations")
 async def dashboard_conversations(request: Request):
     require_auth(request)
-    result = []
-    for phone, history in conversation_history.items():
-        if not history:
-            continue
-        last_msg = history[-1]
-        last_user_msg = next(
-            (m["content"] for m in reversed(history) if m["role"] == "user"), ""
-        )
-        result.append({
-            "phone": phone,
-            "messages": len(history),
-            "last_message": last_user_msg[:80] if last_user_msg else "...",
-            "last_role": last_msg["role"],
-            "preview": last_user_msg[:60] if last_user_msg else "..."
-        })
-    result.sort(key=lambda x: x["messages"], reverse=True)
-    return {"conversations": result}
+    convs = await db.db_get_all_conversations()
+    return {"conversations": convs}
+
+
+@router.get("/api/dashboard/chart")
+async def dashboard_chart(request: Request, period: str = Query("week")):
+    """Datos agrupados por día para las gráficas de tendencia."""
+    require_auth(request)
+    date_from, date_to = get_date_range(period)
+    orders = await db.db_get_orders_range(date_from, date_to)
+
+    # Agrupar por fecha
+    by_date: dict = {}
+    start = datetime.strptime(date_from, "%Y-%m-%d").date()
+    end = datetime.strptime(date_to, "%Y-%m-%d").date()
+    current = start
+    while current <= end:
+        by_date[str(current)] = {"revenue": 0, "orders": 0, "paid": 0}
+        current += timedelta(days=1)
+
+    for o in orders:
+        day = o["created_at"][:10]
+        if day in by_date:
+            by_date[day]["orders"] += 1
+            if o["paid"]:
+                by_date[day]["revenue"] += o["total"]
+                by_date[day]["paid"] += 1
+
+    labels = []
+    revenue_data = []
+    orders_data = []
+    for date_str, data in sorted(by_date.items()):
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        if period in ("today", "week"):
+            labels.append(d.strftime("%a %d"))
+        elif period in ("month",):
+            labels.append(d.strftime("%d/%m"))
+        else:
+            labels.append(d.strftime("%d/%m"))
+        revenue_data.append(data["revenue"])
+        orders_data.append(data["orders"])
+
+    return {"labels": labels, "revenue": revenue_data, "orders": orders_data}

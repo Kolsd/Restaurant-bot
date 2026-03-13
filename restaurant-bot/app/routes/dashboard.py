@@ -19,10 +19,6 @@ class CreateUserRequest(BaseModel):
     admin_key: str
 
 
-# ─────────────────────────────────────────────
-# PÁGINAS HTML
-# ─────────────────────────────────────────────
-
 @router.get("/login", response_class=HTMLResponse)
 async def login_page():
     return (STATIC / "login.html").read_text()
@@ -33,7 +29,6 @@ async def dashboard_page():
 
 @router.get("/demo", response_class=HTMLResponse)
 async def demo_page():
-    """Dashboard demo público — sin login, datos de ejemplo. Ideal para ventas."""
     return (STATIC / "dashboard-demo.html").read_text()
 
 @router.get("/", response_class=RedirectResponse)
@@ -41,13 +36,9 @@ async def root_redirect():
     return RedirectResponse(url="/demo")
 
 
-# ─────────────────────────────────────────────
-# AUTH API
-# ─────────────────────────────────────────────
-
 @router.post("/api/auth/login")
 async def auth_login(request: LoginRequest):
-    result = login(request.username, request.password)
+    result = await login(request.username, request.password)
     if not result["success"]:
         raise HTTPException(status_code=401, detail=result["error"])
     return result
@@ -58,18 +49,12 @@ async def auth_logout(request: Request):
     logout(token)
     return {"success": True}
 
-
-# ─────────────────────────────────────────────
-# ADMIN — Crear clientes nuevos
-# ─────────────────────────────────────────────
-
 @router.post("/api/admin/create-user")
 async def admin_create_user(request: CreateUserRequest):
     import os
-    admin_key = os.getenv("ADMIN_KEY", "restaurantbot2024")
-    if request.admin_key != admin_key:
+    if request.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"):
         raise HTTPException(status_code=403, detail="Clave de administrador incorrecta")
-    result = create_user(request.username, request.password, request.restaurant_name)
+    result = await create_user(request.username, request.password, request.restaurant_name)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -79,4 +64,4 @@ async def admin_list_users(admin_key: str = ""):
     import os
     if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"):
         raise HTTPException(status_code=403, detail="No autorizado")
-    return {"users": get_users()}
+    return {"users": await get_users()}
