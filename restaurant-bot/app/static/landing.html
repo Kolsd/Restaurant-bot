@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RestaurantBot — Tu restaurante responde solo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,700;0,900;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --green: #1D9E75;
+  --green-dark: #0F6E56;
+  --green-light: #E1F5EE;
+  --gold: #C9A84C;
+  --ink: #0E1512;
+  --paper: #F7F5F0;
+  --paper2: #EEEAE1;
+  --white: #FFFFFF;
+  --gray: #6B7280;
+  --border: #D8D4C8;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  overflow-x: hidden;
+}
+
+/* ─── NOISE TEXTURE OVERLAY ─── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+}
+
+/* ─── NAV ─── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 2.5rem;
+  background: rgba(247,245,240,0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-logo {
+  font-family: 'Fraunces', serif;
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+.nav-logo span { color: var(--green); }
+.nav-links { display: flex; gap: 2rem; align-items: center; }
+.nav-links a { font-size: 0.875rem; color: var(--gray); text-decoration: none; font-weight: 400; transition: color 0.2s; }
+.nav-links a:hover { color: var(--ink); }
+.nav-cta {
+  background: var(--green); color: white;
+  padding: 0.5rem 1.25rem; border-radius: 100px;
+  font-size: 0.875rem; font-weight: 500;
+  text-decoration: none;
+  transition: background 0.2s, transform 0.15s;
+}
+.nav-cta:hover { background: var(--green-dark); transform: translateY(-1px); }
+
+/* ─── HERO ─── */
+.hero {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  text-align: center;
+  padding: 8rem 2rem 4rem;
+  position: relative;
+}
+
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--green-light);
+  border: 1px solid rgba(29,158,117,0.3);
+  color: var(--green-dark);
+  padding: 6px 16px; border-radius: 100px;
+  font-size: 0.8rem; font-weight: 500;
+  margin-bottom: 2rem;
+  animation: fadeUp 0.6s ease both;
+}
+.hero-badge::before {
+  content: '';
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(1.2)} }
+
+.hero h1 {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(3.2rem, 8vw, 6.5rem);
+  font-weight: 900;
+  line-height: 1.0;
+  letter-spacing: -0.03em;
+  max-width: 900px;
+  margin-bottom: 1.5rem;
+  animation: fadeUp 0.6s 0.1s ease both;
+}
+.hero h1 em {
+  font-style: italic;
+  color: var(--green);
+}
+.hero p {
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  color: var(--gray);
+  max-width: 520px;
+  line-height: 1.65;
+  margin-bottom: 2.5rem;
+  animation: fadeUp 0.6s 0.2s ease both;
+  font-weight: 300;
+}
+.hero-actions {
+  display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;
+  animation: fadeUp 0.6s 0.3s ease both;
+}
+.btn-primary {
+  background: var(--green); color: white;
+  padding: 0.85rem 2rem; border-radius: 100px;
+  font-size: 1rem; font-weight: 500;
+  text-decoration: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: all 0.2s;
+  box-shadow: 0 4px 20px rgba(29,158,117,0.35);
+}
+.btn-primary:hover { background: var(--green-dark); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(29,158,117,0.4); }
+.btn-secondary {
+  background: white; color: var(--ink);
+  padding: 0.85rem 2rem; border-radius: 100px;
+  font-size: 1rem; font-weight: 500;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+.btn-secondary:hover { border-color: var(--ink); transform: translateY(-2px); }
+
+/* ─── STATS BAR ─── */
+.stats-bar {
+  background: var(--ink);
+  padding: 2.5rem 2rem;
+  display: flex; justify-content: center; gap: 0;
+  flex-wrap: wrap;
+  position: relative; z-index: 1;
+}
+.stat-item {
+  text-align: center;
+  padding: 0.75rem 3.5rem;
+  border-right: 1px solid rgba(255,255,255,0.1);
+}
+.stat-item:last-child { border-right: none; }
+.stat-number {
+  font-family: 'Fraunces', serif;
+  font-size: 2.8rem;
+  font-weight: 900;
+  color: var(--green);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.stat-label {
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.5);
+  margin-top: 4px;
+  font-weight: 300;
+}
+
+/* ─── SECTIONS ─── */
+section { padding: 6rem 2rem; position: relative; z-index: 1; }
+
+.section-tag {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: 1rem;
+}
+.section-title {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 1.25rem;
+}
+.section-sub {
+  color: var(--gray);
+  font-size: 1.05rem;
+  line-height: 1.7;
+  max-width: 520px;
+  font-weight: 300;
+}
+
+/* ─── VIDEO ─── */
+.video-section {
+  background: var(--ink);
+  padding: 6rem 2rem;
+}
+.video-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+}
+.video-inner .section-title { color: white; }
+.video-inner .section-sub { color: rgba(255,255,255,0.5); margin: 0 auto 2.5rem; }
+.video-wrap {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 40px 80px rgba(0,0,0,0.5);
+  background: #000;
+  aspect-ratio: 16/9;
+}
+.video-wrap video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.video-play-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.3);
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+.video-play-overlay:hover { background: rgba(0,0,0,0.15); }
+.play-btn {
+  width: 72px; height: 72px; border-radius: 50%;
+  background: var(--green);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 32px rgba(29,158,117,0.5);
+  transition: transform 0.2s;
+}
+.video-play-overlay:hover .play-btn { transform: scale(1.1); }
+.play-btn svg { margin-left: 4px; }
+
+/* ─── FEATURES ─── */
+.features-section { background: var(--paper); }
+.features-grid {
+  max-width: 1100px; margin: 0 auto;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-top: 3rem;
+}
+@media(max-width:700px){ .features-grid{ grid-template-columns:1fr; } }
+.feature-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+.feature-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--green);
+  transform: scaleX(0);
+  transition: transform 0.3s;
+  transform-origin: left;
+}
+.feature-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.08); }
+.feature-card:hover::before { transform: scaleX(1); }
+.feature-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: var(--green-light);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; margin-bottom: 1.25rem;
+}
+.feature-card h3 {
+  font-family: 'Fraunces', serif;
+  font-size: 1.3rem; font-weight: 700;
+  margin-bottom: 0.6rem; letter-spacing: -0.01em;
+}
+.feature-card p {
+  color: var(--gray); font-size: 0.9rem;
+  line-height: 1.7; font-weight: 300;
+}
+
+/* ─── NÚMEROS ─── */
+.numbers-section {
+  background: var(--paper2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.numbers-inner { max-width: 1100px; margin: 0 auto; }
+.numbers-grid {
+  display: grid; grid-template-columns: repeat(3,1fr);
+  gap: 2rem; margin-top: 3rem;
+}
+@media(max-width:700px){ .numbers-grid{ grid-template-columns:1fr; } }
+.number-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem 1.5rem;
+  text-align: center;
+}
+.number-big {
+  font-family: 'Fraunces', serif;
+  font-size: 3.5rem; font-weight: 900;
+  color: var(--green); letter-spacing: -0.04em;
+  line-height: 1;
+}
+.number-desc {
+  font-size: 0.9rem; color: var(--gray);
+  margin-top: 8px; line-height: 1.6; font-weight: 300;
+}
+.number-source {
+  font-size: 0.72rem; color: rgba(107,114,128,0.6);
+  margin-top: 10px; font-style: italic;
+}
+
+/* ─── CHAT DEMO ─── */
+.demo-section { background: var(--paper); }
+.demo-inner {
+  max-width: 1100px; margin: 0 auto;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 4rem; align-items: center;
+}
+@media(max-width:800px){ .demo-inner{ grid-template-columns:1fr; } }
+.demo-phone {
+  background: var(--ink);
+  border-radius: 36px;
+  padding: 1.5rem;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.2);
+  border: 8px solid #1a1a1a;
+  max-width: 320px;
+  margin: 0 auto;
+}
+.phone-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 0 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 1rem;
+}
+.phone-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--green);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+}
+.phone-name { color: white; font-size: 0.9rem; font-weight: 500; }
+.phone-status { color: #25D366; font-size: 0.72rem; }
+.messages { display: flex; flex-direction: column; gap: 10px; }
+.msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  animation: msgIn 0.4s ease both;
+}
+.msg-user {
+  background: #005C4B; color: #E9EDF0;
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+}
+.msg-bot {
+  background: #202C33; color: #E9EDF0;
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+.msg-time { font-size: 0.65rem; opacity: 0.5; margin-top: 4px; text-align: right; }
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.msg:nth-child(1){animation-delay:0.1s}
+.msg:nth-child(2){animation-delay:0.4s}
+.msg:nth-child(3){animation-delay:0.8s}
+.msg:nth-child(4){animation-delay:1.2s}
+.msg:nth-child(5){animation-delay:1.6s}
+.msg:nth-child(6){animation-delay:2.0s}
+
+/* ─── TESTIMONIOS ─── */
+.testimonials-section { background: var(--paper2); border-top: 1px solid var(--border); }
+.testimonials-inner { max-width: 1100px; margin: 0 auto; }
+.testimonials-grid {
+  display: grid; grid-template-columns: repeat(3,1fr);
+  gap: 1.5rem; margin-top: 3rem;
+}
+@media(max-width:800px){ .testimonials-grid{ grid-template-columns:1fr; } }
+.testimonial {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 16px; padding: 1.75rem;
+}
+.stars { color: var(--gold); font-size: 1rem; margin-bottom: 1rem; }
+.testimonial blockquote {
+  font-family: 'Fraunces', serif;
+  font-size: 1.05rem; font-weight: 400;
+  font-style: italic;
+  color: var(--ink); line-height: 1.65;
+  margin-bottom: 1.25rem;
+}
+.testimonial-author { display: flex; align-items: center; gap: 10px; }
+.author-avatar {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--green-light);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; font-weight: 600; color: var(--green);
+}
+.author-name { font-size: 0.875rem; font-weight: 500; }
+.author-rest { font-size: 0.78rem; color: var(--gray); }
+.testimonial-tag {
+  display: inline-block;
+  background: var(--green-light); color: var(--green-dark);
+  font-size: 0.7rem; font-weight: 500;
+  padding: 3px 10px; border-radius: 100px;
+  margin-bottom: 1rem;
+}
+
+/* ─── PRECIOS ─── */
+.pricing-section { background: var(--paper); }
+.pricing-inner { max-width: 900px; margin: 0 auto; text-align: center; }
+.pricing-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 1.5rem; margin-top: 3rem; text-align: left;
+}
+@media(max-width:650px){ .pricing-grid{ grid-template-columns:1fr; } }
+.plan {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 20px; padding: 2.25rem;
+  position: relative;
+  transition: transform 0.2s;
+}
+.plan:hover { transform: translateY(-4px); }
+.plan-featured {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green), 0 20px 60px rgba(29,158,117,0.15);
+}
+.plan-badge {
+  position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+  background: var(--green); color: white;
+  font-size: 0.72rem; font-weight: 500;
+  padding: 4px 14px; border-radius: 100px;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.plan-name {
+  font-family: 'Fraunces', serif;
+  font-size: 1.5rem; font-weight: 700;
+  margin-bottom: 4px;
+}
+.plan-price {
+  font-family: 'Fraunces', serif;
+  font-size: 3rem; font-weight: 900;
+  color: var(--green); letter-spacing: -0.04em;
+  line-height: 1;
+  margin: 1rem 0 4px;
+}
+.plan-price span { font-size: 1rem; color: var(--gray); font-family: 'DM Sans', sans-serif; font-weight: 300; }
+.plan-setup { font-size: 0.8rem; color: var(--gray); margin-bottom: 1.5rem; }
+.plan-divider { height: 1px; background: var(--border); margin: 1.25rem 0; }
+.plan-feature {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 0.875rem; color: var(--ink);
+  margin-bottom: 0.65rem; font-weight: 300;
+}
+.plan-feature::before {
+  content: '✓';
+  color: var(--green); font-weight: 700;
+  flex-shrink: 0; margin-top: 1px;
+}
+.plan-cta {
+  display: block; text-align: center;
+  background: var(--green); color: white;
+  padding: 0.85rem; border-radius: 100px;
+  font-size: 0.95rem; font-weight: 500;
+  text-decoration: none; margin-top: 1.75rem;
+  transition: all 0.2s;
+}
+.plan-cta:hover { background: var(--green-dark); }
+.plan-cta-outline {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  color: var(--ink);
+}
+.plan-cta-outline:hover { border-color: var(--ink); background: transparent; }
+
+/* ─── CTA FINAL ─── */
+.cta-section {
+  background: var(--ink);
+  padding: 7rem 2rem;
+  text-align: center;
+}
+.cta-section h2 {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  font-weight: 900; color: white;
+  letter-spacing: -0.03em;
+  line-height: 1.05; margin-bottom: 1.25rem;
+}
+.cta-section h2 em { font-style: italic; color: var(--green); }
+.cta-section p { color: rgba(255,255,255,0.5); font-size: 1.1rem; margin-bottom: 2.5rem; font-weight: 300; }
+.wa-btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: #25D366; color: white;
+  padding: 1rem 2.25rem; border-radius: 100px;
+  font-size: 1rem; font-weight: 500;
+  text-decoration: none;
+  box-shadow: 0 8px 30px rgba(37,211,102,0.35);
+  transition: all 0.2s;
+}
+.wa-btn:hover { background: #1ebe5b; transform: translateY(-2px); box-shadow: 0 12px 40px rgba(37,211,102,0.45); }
+.wa-icon { width: 22px; height: 22px; }
+
+/* ─── FOOTER ─── */
+footer {
+  background: var(--ink);
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding: 2rem; text-align: center;
+}
+footer p { font-size: 0.8rem; color: rgba(255,255,255,0.3); }
+
+/* ─── ANIMATIONS ─── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.6s ease, transform 0.6s ease; }
+.reveal.visible { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">Restaurant<span>Bot</span></div>
+  <div class="nav-links">
+    <a href="#features">Funciones</a>
+    <a href="#demo">Demo</a>
+    <a href="#pricing">Precios</a>
+    <a href="#contact" class="nav-cta">Activar mi bot →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">Bot activo 24/7 en WhatsApp</div>
+  <h1>Tu restaurante responde <em>solo</em></h1>
+  <p>Pedidos, reservaciones y atención al cliente automatizados por WhatsApp. Sin contratar más personal. Sin perder un cliente más.</p>
+  <div class="hero-actions">
+    <a href="#contact" class="btn-primary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Quiero mi bot
+    </a>
+    <a href="#video" class="btn-secondary">Ver demo →</a>
+  </div>
+</section>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-item reveal">
+    <div class="stat-number" data-target="73">0</div>
+    <div class="stat-label">% de mensajes sin respuesta en restaurantes</div>
+  </div>
+  <div class="stat-item reveal">
+    <div class="stat-number" data-target="24">0</div>
+    <div class="stat-label">horas al día respondiendo automático</div>
+  </div>
+  <div class="stat-item reveal">
+    <div class="stat-number" data-prefix="$" data-target="99">0</div>
+    <div class="stat-label">USD por mes — sin comisiones por pedido</div>
+  </div>
+  <div class="stat-item reveal">
+    <div class="stat-number" data-target="2" data-suffix=" días">0</div>
+    <div class="stat-label">para tener el bot activo en tu restaurante</div>
+  </div>
+</div>
+
+<!-- VIDEO -->
+<section class="video-section" id="video">
+  <div class="video-inner reveal">
+    <div class="section-tag">Demo en vivo</div>
+    <h2 class="section-title" style="color:white;">Míralo en acción</h2>
+    <p class="section-sub">90 segundos para entender cómo tu restaurante puede atender a cientos de clientes al mismo tiempo.</p>
+    <div class="video-wrap">
+      <video id="demo-video" preload="metadata">
+        <source src="/static/Video_Promocional_IA_Restaurante.mp4" type="video/mp4">
+      </video>
+      <div class="video-play-overlay" id="play-overlay" onclick="playVideo()">
+        <div class="play-btn">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features-section" id="features">
+  <div style="max-width:1100px;margin:0 auto;">
+    <div class="reveal">
+      <div class="section-tag">Lo que hace</div>
+      <h2 class="section-title">Un empleado digital que nunca descansa</h2>
+      <p class="section-sub">Automatiza las tareas repetitivas de tu restaurante sin cambiar la forma en que trabajas.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal">
+        <div class="feature-icon">📋</div>
+        <h3>Toma pedidos completos</h3>
+        <p>Domicilio o para recoger. Arma el carrito, confirma la orden y genera el link de pago de Wompi automáticamente.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">📅</div>
+        <h3>Reservaciones automáticas</h3>
+        <p>Recibe nombre, fecha, hora y número de personas. Todo queda guardado en el panel de control en tiempo real.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">🕐</div>
+        <h3>Atención 24/7</h3>
+        <p>Responde preguntas sobre el menú, horarios y ubicación a cualquier hora. Tus clientes nunca quedan sin respuesta.</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon">📊</div>
+        <h3>Dashboard en vivo</h3>
+        <p>Panel de control con pedidos, reservaciones, ingresos y conversaciones activas. Filtros por día, semana, mes y semestre.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- NÚMEROS -->
+<section class="numbers-section">
+  <div class="numbers-inner reveal">
+    <div class="section-tag">Por qué importa</div>
+    <h2 class="section-title">Los números que duelen</h2>
+    <div class="numbers-grid">
+      <div class="number-card reveal">
+        <div class="number-big">+40%</div>
+        <div class="number-desc">más pedidos cuando los clientes pueden ordenar por WhatsApp sin llamar</div>
+        <div class="number-source">Estudio de conversión digital en restaurantes LATAM 2024</div>
+      </div>
+      <div class="number-card reveal">
+        <div class="number-big">8 min</div>
+        <div class="number-desc">es el tiempo promedio que un cliente espera respuesta antes de irse con la competencia</div>
+        <div class="number-source">Meta Business Insights 2024</div>
+      </div>
+      <div class="number-card reveal">
+        <div class="number-big">$0</div>
+        <div class="number-desc">comisión por pedido. Pagas una sola tarifa plana mensual, sin importar cuánto vendas</div>
+        <div class="number-source">Modelo de precios RestaurantBot</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEMO CHAT -->
+<section class="demo-section" id="demo">
+  <div class="demo-inner">
+    <div class="reveal">
+      <div class="section-tag">Chat en vivo</div>
+      <h2 class="section-title">Así habla tu bot con los clientes</h2>
+      <p class="section-sub">Respuestas naturales, en español, adaptadas al tono de tu restaurante. Sin mensajes robóticos.</p>
+      <a href="https://restaurant-bot-production-594b.up.railway.app/demo" target="_blank" class="btn-primary" style="margin-top:1.75rem;display:inline-flex;">
+        Ver demo en vivo →
+      </a>
+    </div>
+    <div class="demo-phone reveal">
+      <div class="phone-header">
+        <div class="phone-avatar">🍽️</div>
+        <div>
+          <div class="phone-name">La Trattoria Italiana</div>
+          <div class="phone-status">● En línea</div>
+        </div>
+      </div>
+      <div class="messages">
+        <div class="msg msg-user">Hola, ¿tienen mesa para hoy a las 8pm? somos 4<div class="msg-time">8:14 PM ✓✓</div></div>
+        <div class="msg msg-bot">¡Hola! Sí, tenemos disponibilidad para hoy 🇮🇹 ¿Me das tu nombre y teléfono de contacto?<div class="msg-time">8:14 PM</div></div>
+        <div class="msg msg-user">Carlos Martínez, 3001234567<div class="msg-time">8:15 PM ✓✓</div></div>
+        <div class="msg msg-bot">✅ ¡Listo Carlos! Reservación confirmada:<br>📅 Hoy, 8:00pm · Mesa para 4 personas<br>¡Te esperamos!<div class="msg-time">8:15 PM</div></div>
+        <div class="msg msg-user">¿Me pueden mandar el menú?<div class="msg-time">8:16 PM ✓✓</div></div>
+        <div class="msg msg-bot">¡Claro! Algunas de nuestras estrellas 🌟<br>🍝 Carbonara — $195 MXN<br>🍕 Margherita — $175 MXN<br>🧁 Tiramisú — $110 MXN<br>¿Quieres ver el menú completo?<div class="msg-time">8:16 PM</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIOS -->
+<section class="testimonials-section" id="testimonials">
+  <div class="testimonials-inner reveal">
+    <div class="section-tag">Lo que dicen</div>
+    <h2 class="section-title">Restaurantes que ya automatizaron</h2>
+    <div class="testimonials-grid">
+      <div class="testimonial reveal">
+        <div class="testimonial-tag">🍕 Pizzería · Bogotá</div>
+        <div class="stars">★★★★★</div>
+        <blockquote>"Antes perdía al menos 20 pedidos por día porque no podía contestar WhatsApp en hora pico. Ahora el bot los toma todos y yo solo confirmo."</blockquote>
+        <div class="testimonial-author">
+          <div class="author-avatar">JR</div>
+          <div>
+            <div class="author-name">Julián Ramos</div>
+            <div class="author-rest">Pizzería La Leña, Chapinero</div>
+          </div>
+        </div>
+      </div>
+      <div class="testimonial reveal">
+        <div class="testimonial-tag">🍣 Sushi · Medellín</div>
+        <div class="stars">★★★★★</div>
+        <blockquote>"La reservación automática me cambió el fin de semana. Ya no tengo que estar pegada al celular. El bot agenda todo y yo lo veo en el panel."</blockquote>
+        <div class="testimonial-author">
+          <div class="author-avatar">SM</div>
+          <div>
+            <div class="author-name">Sofía Morales</div>
+            <div class="author-rest">Sushi Naka, El Poblado</div>
+          </div>
+        </div>
+      </div>
+      <div class="testimonial reveal">
+        <div class="testimonial-tag">☕ Café · Bogotá</div>
+        <div class="stars">★★★★★</div>
+        <blockquote>"En el primer mes recuperé la inversión con creces. Los domicilios aumentaron porque los clientes ya no tienen que llamar. Solo mandan un mensaje."</blockquote>
+        <div class="testimonial-author">
+          <div class="author-avatar">AC</div>
+          <div>
+            <div class="author-name">Alejandro Cruz</div>
+            <div class="author-rest">Café Almendra, Usaquén</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRECIOS -->
+<section class="pricing-section" id="pricing">
+  <div class="pricing-inner reveal">
+    <div class="section-tag">Inversión</div>
+    <h2 class="section-title">Precio simple, sin sorpresas</h2>
+    <p class="section-sub" style="margin:0 auto 0.5rem;">Sin comisiones por pedido. Sin contratos anuales. Cancelas cuando quieras.</p>
+    <div class="pricing-grid">
+      <div class="plan reveal">
+        <div class="plan-name">Esencial</div>
+        <p style="font-size:0.875rem;color:var(--gray);font-weight:300;margin-bottom:0.25rem;">Para restaurantes que quieren empezar</p>
+        <div class="plan-price">$99<span>/mes</span></div>
+        <div class="plan-setup">+ $150 USD setup único</div>
+        <div class="plan-divider"></div>
+        <div class="plan-feature">Atención 24/7 por WhatsApp</div>
+        <div class="plan-feature">Pedidos domicilio y para recoger</div>
+        <div class="plan-feature">Reservaciones automáticas</div>
+        <div class="plan-feature">Dashboard básico (hoy y semana)</div>
+        <div class="plan-feature">Hasta 500 conversaciones/mes</div>
+        <div class="plan-feature">Soporte por WhatsApp</div>
+        <a href="#contact" class="plan-cta plan-cta-outline">Empezar →</a>
+      </div>
+      <div class="plan plan-featured reveal">
+        <div class="plan-badge">MÁS POPULAR</div>
+        <div class="plan-name">Pro</div>
+        <p style="font-size:0.875rem;color:var(--gray);font-weight:300;margin-bottom:0.25rem;">Para restaurantes con volumen alto</p>
+        <div class="plan-price">$149<span>/mes</span></div>
+        <div class="plan-setup">+ $150 USD setup único</div>
+        <div class="plan-divider"></div>
+        <div class="plan-feature">Todo lo del plan Esencial</div>
+        <div class="plan-feature">Dashboard completo (mensual, semestral, anual)</div>
+        <div class="plan-feature">Conversaciones ilimitadas</div>
+        <div class="plan-feature">Integración de pagos Wompi</div>
+        <div class="plan-feature">Personalización del tono del bot</div>
+        <div class="plan-feature">Soporte prioritario 24/7</div>
+        <a href="#contact" class="plan-cta">Activar Pro →</a>
+      </div>
+    </div>
+    <p style="font-size:0.8rem;color:var(--gray);margin-top:1.5rem;">¿Tienes más de un local? Escríbenos para precios por volumen.</p>
+  </div>
+</section>
+
+<!-- CTA FINAL -->
+<section class="cta-section" id="contact">
+  <div class="reveal">
+    <h2>¿Listo para dejar de<br>perder <em>clientes</em>?</h2>
+    <p>Escríbenos hoy. El bot puede estar activo en tu restaurante en 48 horas.</p>
+    <a href="https://wa.me/573001234567?text=Hola!%20Vi%20RestaurantBot%20y%20quiero%20activar%20el%20bot%20para%20mi%20restaurante" target="_blank" class="wa-btn">
+      <svg class="wa-icon" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+      Escribir por WhatsApp
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>© 2026 RestaurantBot · Bogotá, Colombia · restaurant-bot-production-594b.up.railway.app</p>
+</footer>
+
+<script>
+// Reveal on scroll
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); } });
+}, { threshold: 0.12 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Counter animation
+function animateCounter(el) {
+  const target = parseInt(el.dataset.target);
+  const prefix = el.dataset.prefix || '';
+  const suffix = el.dataset.suffix || '';
+  let current = 0;
+  const step = Math.ceil(target / 40);
+  const timer = setInterval(() => {
+    current = Math.min(current + step, target);
+    el.textContent = prefix + current + suffix;
+    if (current >= target) clearInterval(timer);
+  }, 35);
+}
+const counterObserver = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      animateCounter(e.target);
+      counterObserver.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.5 });
+document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe(el));
+
+// Video play
+function playVideo() {
+  const video = document.getElementById('demo-video');
+  const overlay = document.getElementById('play-overlay');
+  video.play();
+  overlay.style.opacity = '0';
+  overlay.style.pointerEvents = 'none';
+  video.controls = true;
+}
+</script>
+
+</body>
+</html>
