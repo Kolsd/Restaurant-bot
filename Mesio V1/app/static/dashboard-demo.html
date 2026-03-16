@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Demo Interactivo</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root { --g: #1D9E75; --bg: #f5f5f0; --ink: #111; --border: #e0e0d8; }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -29,18 +30,35 @@
   .g-main { margin-left: 220px; padding: 2rem; }
   .g-logo { font-size: 15px; font-weight: 700; margin-bottom: 2rem; display: flex; align-items: center; gap: 10px; }
   .g-logo-icon { width: 32px; height: 32px; background: var(--g); color: #fff; display: flex; align-items: center; justify-content: center; border-radius: 8px; }
-  .nav-item { display: block; padding: 10px 12px; color: #555; text-decoration: none; font-size: 13px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; }
+  .nav-item { display: block; padding: 10px 12px; color: #555; text-decoration: none; font-size: 13px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; transition: 0.2s; }
+  .nav-item:hover { background: #f0f0e8; }
   .nav-item.active { background: #E1F5EE; color: #0F6E56; font-weight: 600; }
+  
+  .g-section { display: none; animation: fadeIn 0.3s ease; }
+  .g-section.active { display: block; }
+
   .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 1.5rem; }
   .metric { background: #fff; padding: 1.25rem; border-radius: 12px; border: 1px solid var(--border); }
   .m-lbl { font-size: 12px; color: #888; margin-bottom: 4px; }
   .m-val { font-size: 24px; font-weight: 700; }
   .m-trend { font-size: 11px; color: var(--g); margin-top: 4px; font-weight: 500; }
   .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
-  .card { background: #fff; padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border); }
+  .card { background: #fff; padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 1.5rem;}
   .c-title { font-size: 14px; font-weight: 600; margin-bottom: 1rem; color: #333; }
   .ai-box { background: linear-gradient(135deg, #0D2A1F 0%, #0F3D2A 100%); border-radius: 12px; padding: 1.5rem; color: #fff; margin-bottom: 1.5rem; border: 1px solid var(--g); }
   .ai-title { color: #39FF6A; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 8px; text-transform: uppercase; }
+
+  /* TABLAS DEMO */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 12px; font-size: 12px; color: #888; border-bottom: 1px solid var(--border); font-weight: 600; }
+  td { padding: 12px; border-bottom: 1px solid #f0f0e8; vertical-align: middle; }
+  .badge { font-size: 11px; padding: 4px 8px; border-radius: 6px; font-weight: 600; }
+  .badge-paid { background: #E1F5EE; color: #0F6E56; }
+  .badge-pending { background: #FAEEDA; color: #BA7517; }
+  .badge-delivery { background: #E6F1FB; color: #185FA5; }
+  .badge-pickup { background: #EEEDFE; color: #534AB7; }
+  .conv-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f0f0e8; }
+  .conv-avatar { width: 40px; height: 40px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: #0F6E56; flex-shrink: 0; }
 
   /* ─── VISTA COCINA (KDS) ─── */
   #view-cocina { background: #0D1412; color: #fff; padding: 1.5rem; }
@@ -86,49 +104,121 @@
   <div class="demo-title">Mesio <span class="demo-badge">VISTA DEMO</span></div>
   <div class="role-switcher">
     <button class="role-btn active" onclick="switchRole('gerente')">👨‍💼 Vista Gerente</button>
-    <button class="role-btn" onclick="switchRole('cocina')">👨‍🍳 Vista Cocina</button>
-    <button class="role-btn" onclick="switchRole('mesero')">🏃‍♂️ Vista Mesero</button>
+    <button class="role-btn" onclick="switchRole('cocina')">👨‍🍳 Vista Cocina (KDS)</button>
+    <button class="role-btn" onclick="switchRole('mesero')">🏃‍♂️ Vista Mesero (Móvil)</button>
   </div>
-  <a href="/login" class="cta-demo">Entrar a mi cuenta</a>
+  <a href="/login" class="cta-demo">Cerrar Demo</a>
 </header>
 
 <div id="view-gerente" class="view-container active">
   <div class="g-sidebar">
     <div class="g-logo"><div class="g-logo-icon">M</div> La Trattoria</div>
-    <a class="nav-item active">Resumen en vivo</a>
-    <a class="nav-item">Pedidos (47)</a>
-    <a class="nav-item">Conversaciones (12)</a>
-    <a class="nav-item">POS con IA</a>
-    <a class="nav-item">Mesas & QR</a>
+    <a class="nav-item active" onclick="showDemoSection('g-resumen', this)">Resumen en vivo</a>
+    <a class="nav-item" onclick="showDemoSection('g-pedidos', this)">Pedidos (47)</a>
+    <a class="nav-item" onclick="showDemoSection('g-conversaciones', this)">Conversaciones (12)</a>
+    <a class="nav-item" onclick="showDemoSection('g-pos', this)">POS con IA</a>
+    <a class="nav-item" onclick="showDemoSection('g-mesas', this)">Mesas & QR</a>
   </div>
   <div class="g-main">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
-      <h2 style="font-size:22px;">Operación de Hoy</h2>
-      <span style="font-size:12px; color:#888;">Actualizado hace 2 min</span>
-    </div>
-
-    <div class="ai-box">
-      <div class="ai-title">✦ Mesio IA - Análisis en tiempo real</div>
-      <p style="font-size:14px; line-height:1.5;">La rotación de mesas aumentó un <strong>15%</strong> usando pedidos por QR. Sugerencia: La <em>Pizza Margherita</em> se está vendiendo rápido; el inventario de albahaca fresca podría agotarse a las 8:00 PM.</p>
-    </div>
-
-    <div class="metrics">
-      <div class="metric"><div class="m-lbl">Ventas Hoy</div><div class="m-val">$1,240,500</div><div class="m-trend">↑ 18% vs ayer</div></div>
-      <div class="metric"><div class="m-lbl">Pedidos QR (Mesa)</div><div class="m-val">32</div><div class="m-trend">↑ Ticket prom: $54k</div></div>
-      <div class="metric"><div class="m-lbl">Pedidos WhatsApp (Dom)</div><div class="m-val">15</div><div class="m-trend">0 llamadas perdidas</div></div>
-      <div class="metric"><div class="m-lbl">Upsell por IA</div><div class="m-val">$185,000</div><div class="m-trend">↑ Postres y bebidas</div></div>
-    </div>
-
-    <div class="grid-2">
-      <div class="card">
-        <div class="c-title">Ingresos de la semana</div>
-        <div style="height:200px;"><canvas id="chart-ventas"></canvas></div>
+    
+    <div id="g-resumen" class="g-section active">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+        <h2 style="font-size:22px;">Operación de Hoy</h2>
+        <span style="font-size:12px; color:#888;">Actualizado hace 2 min</span>
       </div>
-      <div class="card">
-        <div class="c-title">Origen de Pedidos</div>
-        <div style="height:200px;"><canvas id="chart-origen"></canvas></div>
+
+      <div class="ai-box">
+        <div class="ai-title">✦ Mesio IA - Análisis en tiempo real</div>
+        <p style="font-size:14px; line-height:1.5;">La rotación de mesas aumentó un <strong>15%</strong> usando pedidos por QR. Sugerencia: La <em>Pizza Margherita</em> se está vendiendo rápido; el inventario de albahaca fresca podría agotarse a las 8:00 PM.</p>
+      </div>
+
+      <div class="metrics">
+        <div class="metric"><div class="m-lbl">Ventas Hoy</div><div class="m-val">$1,240,500</div><div class="m-trend">↑ 18% vs ayer</div></div>
+        <div class="metric"><div class="m-lbl">Pedidos QR (Mesa)</div><div class="m-val">32</div><div class="m-trend">Ticket prom: $54k</div></div>
+        <div class="metric"><div class="m-lbl">Pedidos WhatsApp</div><div class="m-val">15</div><div class="m-trend">0 llamadas perdidas</div></div>
+        <div class="metric"><div class="m-lbl">Upsell por IA</div><div class="m-val">$185,000</div><div class="m-trend">↑ Postres sugeridos</div></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card"><div class="c-title">Ingresos de la semana</div><div style="height:200px;"><canvas id="chart-ventas"></canvas></div></div>
+        <div class="card"><div class="c-title">Origen de Pedidos</div><div style="height:200px;"><canvas id="chart-origen"></canvas></div></div>
       </div>
     </div>
+
+    <div id="g-pedidos" class="g-section">
+      <h2 style="font-size:22px; margin-bottom:1.5rem;">Historial de Pedidos</h2>
+      <div class="card">
+        <table>
+          <thead><tr><th>ID</th><th>Mesa / Origen</th><th>Platos</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead>
+          <tbody>
+            <tr><td style="font-weight:600;">MESA-01</td><td><span class="badge badge-pickup">Mesa 5</span></td><td>2x Margherita, 1x Vino</td><td><span class="badge badge-paid">Pagado</span></td><td style="font-weight:600;">$95,000</td><td>19:42</td></tr>
+            <tr><td style="font-weight:600;">ORD-B2</td><td><span class="badge badge-delivery">Domicilio</span></td><td>1x Lasagna, 2x Tiramisú</td><td><span class="badge badge-paid">Pagado</span></td><td style="font-weight:600;">$68,000</td><td>19:28</td></tr>
+            <tr><td style="font-weight:600;">MESA-08</td><td><span class="badge badge-pickup">Mesa 2</span></td><td>3x Pasta Carbonara</td><td><span class="badge badge-pending">En curso</span></td><td style="font-weight:600;">$115,000</td><td>19:15</td></tr>
+            <tr><td style="font-weight:600;">ORD-D4</td><td><span class="badge badge-delivery">Domicilio</span></td><td>1x Quattro Formaggi</td><td><span class="badge badge-paid">Pagado</span></td><td style="font-weight:600;">$45,000</td><td>18:58</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="g-conversaciones" class="g-section">
+      <h2 style="font-size:22px; margin-bottom:1.5rem;">Conversaciones con Clientes (WhatsApp)</h2>
+      <div class="card">
+        <div class="conv-row">
+          <div class="conv-avatar">3122</div>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:600;margin-bottom:2px;">+57 312 555 1234 <span class="badge badge-pickup" style="margin-left:8px;">Mesa 5</span></div>
+            <div style="font-size:13px;color:#666;">"Sí, por favor añádele una copa de vino. Gracias." <span style="color:#1D9E75; font-size:11px; margin-left:10px;">✦ Upsell exitoso de la IA</span></div>
+          </div>
+          <div style="font-size:12px; color:#aaa;">Hace 2 min</div>
+        </div>
+        <div class="conv-row">
+          <div class="conv-avatar">3189</div>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:600;margin-bottom:2px;">+57 318 444 9876 <span class="badge badge-delivery" style="margin-left:8px;">Domicilio</span></div>
+            <div style="font-size:13px;color:#666;">"La dirección es Calle 45 #12-34. Soy alérgico al maní." <span style="color:#1D9E75; font-size:11px; margin-left:10px;">✦ IA detectó alergia</span></div>
+          </div>
+          <div style="font-size:12px; color:#aaa;">Hace 15 min</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="g-pos" class="g-section">
+      <h2 style="font-size:22px; margin-bottom:1.5rem;">POS Predictivo</h2>
+      <div class="metrics" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="metric"><div class="m-lbl">Hora Pico Estimada Hoy</div><div class="m-val">20:30h</div></div>
+        <div class="metric"><div class="m-lbl">Plato Más Rentable</div><div class="m-val">Lasagna</div></div>
+        <div class="metric"><div class="m-lbl">Conversión de Upsell</div><div class="m-val">28%</div></div>
+      </div>
+      <div class="card">
+        <div class="c-title">✦ Sugerencias de Venta de la IA (Para activar en WhatsApp)</div>
+        <div style="background:#f9f9f9; padding:15px; border-radius:8px; margin-bottom:10px; border-left:3px solid var(--g);">
+          <strong>🍕 Sugerir postre:</strong> "El 40% de los clientes que compran Margherita terminan pidiendo Tiramisú. Mesio empezará a ofrecerlo automáticamente hoy."
+        </div>
+        <div style="background:#f9f9f9; padding:15px; border-radius:8px; border-left:3px solid #378ADD;">
+          <strong>🍷 Oferta de bebidas:</strong> "Las ventas de vino bajan los martes. Sugiero configurar a Mesio para que ofrezca 2x1 en copas de vino a clientes recurrentes."
+        </div>
+      </div>
+    </div>
+
+    <div id="g-mesas" class="g-section">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+        <h2 style="font-size:22px;">Gestión de Mesas y Códigos QR</h2>
+        <button style="background:var(--g); color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600;">+ Nueva Mesa</button>
+      </div>
+      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px;">
+        <div class="card" style="text-align:center; margin-bottom:0;">
+          <h3 style="font-size:16px; margin-bottom:15px;">Mesa 1</h3>
+          <div id="demo-qr-1" style="width:130px; height:130px; margin:0 auto 15px;"></div>
+          <button style="background:#E1F5EE; color:#0F6E56; border:none; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600;">🖨️ Imprimir QR</button>
+        </div>
+        <div class="card" style="text-align:center; margin-bottom:0;">
+          <h3 style="font-size:16px; margin-bottom:15px;">Mesa 2</h3>
+          <div id="demo-qr-2" style="width:130px; height:130px; margin:0 auto 15px;"></div>
+          <button style="background:#E1F5EE; color:#0F6E56; border:none; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600;">🖨️ Imprimir QR</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -214,7 +304,7 @@
 </div>
 
 <script>
-  // 1. Cambio de Roles
+  // 1. Cambio de Vistas Principales (Roles)
   function switchRole(role) {
     document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`.role-btn[onclick="switchRole('${role}')"]`).classList.add('active');
@@ -223,7 +313,19 @@
     document.getElementById(`view-${role}`).classList.add('active');
   }
 
-  // 2. Simulación en la Cocina (Mover Tickets)
+  // 2. Cambio de Pestañas en Vista Gerente
+  function showDemoSection(sectionId, btn) {
+    // Ocultar todas las sub-secciones
+    document.querySelectorAll('.g-section').forEach(s => s.classList.remove('active'));
+    // Quitar active a todos los botones del menú lateral
+    document.querySelectorAll('.g-sidebar .nav-item').forEach(b => b.classList.remove('active'));
+    
+    // Activar lo seleccionado
+    document.getElementById(sectionId).classList.add('active');
+    btn.classList.add('active');
+  }
+
+  // 3. Simulación en la Cocina (Mover Tickets)
   function moveTicket(ticketId, target) {
     const ticket = document.getElementById(ticketId);
     if(!ticket) return;
@@ -243,7 +345,7 @@
     }
   }
 
-  // 3. Simulación de alerta a Mesero
+  // 4. Simulación de alerta a Mesero
   function sendWaiterAlert(mesa) {
     const container = document.getElementById('waiter-alerts');
     const alertHtml = `
@@ -255,13 +357,12 @@
     `;
     container.insertAdjacentHTML('afterbegin', alertHtml);
     
-    // Si estamos en la vista de cocina, mostrar un pequeño toast
     if(document.getElementById('view-cocina').classList.contains('active')){
-      alert(`¡Ping enviado al teléfono del mesero para la ${mesa}!`);
+      alert(`¡Notificación enviada al teléfono del mesero para la ${mesa}!`);
     }
   }
 
-  // 4. Inicializar Gráficas (Vista Gerente)
+  // 5. Inicializar Gráficas y QR
   window.onload = function() {
     new Chart(document.getElementById('chart-ventas'), {
       type: 'line',
@@ -285,6 +386,10 @@
       },
       options: { responsive: true, maintainAspectRatio: false, cutout: '70%' }
     });
+
+    // Generar QRs de prueba
+    new QRCode(document.getElementById("demo-qr-1"), {text: "https://mesio.co", width: 130, height: 130, colorDark : "#111", colorLight : "#fff", correctLevel : QRCode.CorrectLevel.M});
+    new QRCode(document.getElementById("demo-qr-2"), {text: "https://mesio.co", width: 130, height: 130, colorDark : "#111", colorLight : "#fff", correctLevel : QRCode.CorrectLevel.M});
   };
 </script>
 
