@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -15,7 +14,6 @@ app = FastAPI(
     description="IA colombiana para restaurantes",
     version="5.5.0"
 )
-app.add_middleware(HTTPSRedirectMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
