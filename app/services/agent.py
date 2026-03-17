@@ -217,9 +217,9 @@ async def process_agent_response(response_text: str, user_phone: str, bot_number
     return {"message": clean_response, "actions": actions}
 
 
-async def detect_table_context(message: str, phone: str) -> dict:
+async def detect_table_context(message: str, phone: str, bot_number: str) -> dict:
     import re as _re
-    history = await db.db_get_history(phone)
+    history = await db.db_get_history(phone, bot_number)
     for msg in reversed(history[-6:]):
         if msg.get('role') == 'user':
             m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', msg['content'], _re.IGNORECASE)
@@ -242,11 +242,11 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     if restaurant.get('subscription_status') == 'past_due':
         return {"message": "Lo sentimos, el servicio virtual de este establecimiento está inactivo. Por favor, contacta a un mesero directamente.", "actions": []}
 
-    conversation_details = await db.db_get_conversation_details(user_phone)
+    conversation_details = await db.db_get_conversation_details(user_phone, bot_number)
     if conversation_details and conversation_details.get('bot_paused') is True:
         return None
 
-    table_context = await detect_table_context(user_message, user_phone)
+    table_context = await detect_table_context(user_message, user_phone, bot_number)
     menu = await db.db_get_menu(bot_number) or {}
     menu_availability = await db.db_get_menu_availability()
     
@@ -258,7 +258,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     for dish in top_dishes:
         dish['available'] = menu_availability.get(dish['name'], True)
 
-    history = await db.db_get_history(user_phone)
+    history = await db.db_get_history(user_phone, bot_number)
     history.append({"role": "user", "content": user_message})
 
     system_prompt = await build_system_prompt(restaurant, menu, top_dishes, table_context)
@@ -273,7 +273,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     assistant_message = response.content[0].text
     history.append({"role": "assistant", "content": assistant_message})
 
-    await db.db_save_history(user_phone, history)
+    await db.db_save_history(user_phone, bot_number, history)
     return await process_agent_response(assistant_message, user_phone, bot_number, table_context)
 
 async def reset_conversation(user_phone: str):

@@ -92,7 +92,8 @@ async def init_db():
                 paid_at TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS conversations (
-                phone TEXT PRIMARY KEY,
+                phone TEXT NOT NULL,
+                bot_number TEXT NOT NULL DEFAULT '',
                 history JSONB NOT NULL DEFAULT '[]',
                 bot_paused BOOLEAN DEFAULT FALSE,
                 updated_at TIMESTAMP DEFAULT NOW()
@@ -108,6 +109,9 @@ async def init_db():
         # 2. Forzamos a que las columnas nuevas existan por si usamos una base de datos vieja
         try:
             await conn.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_paused BOOLEAN DEFAULT FALSE;")
+            await conn.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_number TEXT NOT NULL DEFAULT '';")
+            await conn.execute("ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_pkey;")
+            await conn.execute("ALTER TABLE conversations ADD CONSTRAINT conversations_pkey PRIMARY KEY (phone, bot_number);")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS whatsapp_number TEXT UNIQUE;")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';")
@@ -230,25 +234,25 @@ async def db_get_all_orders():
 # CONVERSACIONES
 # ─────────────────────────────────────────────
 
-async def db_get_history(phone: str) -> list:
+async def db_get_history(phone: str, bot_number: str) -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT history FROM conversations WHERE phone=$1", phone)
+            "SELECT history FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
         if row:
             h = row["history"]
             return h if isinstance(h, list) else json.loads(h)
         return []
 
 
-async def db_save_history(phone: str, history: list):
+async def db_save_history(phone: str, bot_number: str, history: list):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO conversations (phone, history, updated_at)
-            VALUES ($1,$2,NOW())
-            ON CONFLICT (phone) DO UPDATE SET history=EXCLUDED.history, updated_at=NOW()
-        """, phone, json.dumps(history[-20:]))
+            INSERT INTO conversations (phone, bot_number, history, updated_at)
+            VALUES ($1,$2,$3,NOW())
+            ON CONFLICT (phone, bot_number) DO UPDATE SET history=EXCLUDED.history, updated_at=NOW()
+        """, phone, bot_number, json.dumps(history[-20:]))
 
 
 async def db_get_all_conversations():
@@ -541,7 +545,7 @@ async def db_update_subscription(restaurant_id: int, new_status: str):
 # BOT PAUSE/FUNCIONES PARA CONVERSACIONES
 # ─────────────────────────────────────────────
 
-async def db_get_conversation_details(phone: str):
+async def db_get_conversation_details(phone: str, bot_number: str):
     """
     Retorna un dict con 'history' y 'bot_paused' para un número de teléfono.
     Si no existe el registro, retorna {'history': [], 'bot_paused': False}
@@ -549,7 +553,7 @@ async def db_get_conversation_details(phone: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT history, bot_paused FROM conversations WHERE phone=$1", phone
+            "SELECT history, bot_paused FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number
         )
         if row:
             history = row["history"] if isinstance(row["history"], list) else json.loads(row["history"])
@@ -558,7 +562,7 @@ async def db_get_conversation_details(phone: str):
     return {"history": [], "bot_paused": False}
 
 
-async def db_toggle_bot(phone: str, pause: bool):
+async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
     """
     Actualiza el estado de bot_paused para una conversación dada por phone.
     Crea el registro si no existe.
@@ -566,9 +570,9 @@ async def db_toggle_bot(phone: str, pause: bool):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_paused, updated_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (phone)
+            INSERT INTO conversations (phone, bot_number, bot_paused, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (phone, bot_number)
             DO UPDATE SET bot_paused=EXCLUDED.bot_paused, updated_at=NOW()
-        """, phone, pause)
+        """, phone, bot_number, pause)
         # ─────────────────────────────────────────────
