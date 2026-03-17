@@ -83,7 +83,7 @@ def generate_wompi_payment_link(order_id: str, amount_cop: int) -> str:
         f"public-key={WOMPI_PUBLIC_KEY}"
         f"&currency=COP&amount-in-cents={amount_cents}"
         f"&reference={order_id}&signature:integrity={signature}"
-        f"&redirect-url=https://restaurant-bot-production-594b.up.railway.app/api/payment/confirm"
+        f"&redirect-url=https://mesioai.com/api/payment/confirm"
     )
 
 async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str) -> dict:
