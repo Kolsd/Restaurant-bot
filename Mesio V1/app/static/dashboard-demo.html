@@ -6,6 +6,7 @@
 <title>Mesio — Demo Interactivo</title>
 <link rel="icon" type="image/png" href="/static/logo.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root { --g: #1D9E75; --bg: #f5f5f0; --ink: #111; --border: #e0e0d8; }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -20,7 +21,7 @@
   .role-btn.active { background: var(--g); color: #fff; }
   .cta-demo { background: #fff; color: #000; text-decoration: none; padding: 6px 16px; border-radius: 100px; font-size: 13px; font-weight: 600; }
   
-  /* CONTENEDORES DE VISTAS */
+  /* CONTENEDORES PRINCIPALES */
   .view-container { display: none; margin-top: 56px; min-height: calc(100vh - 56px); }
   .view-container.active { display: block; animation: fadeIn 0.3s ease; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -30,19 +31,53 @@
   .g-main { margin-left: 220px; padding: 2rem; }
   .g-logo { font-size: 15px; font-weight: 700; margin-bottom: 2rem; display: flex; align-items: center; gap: 10px; }
   .g-logo-icon { width: 32px; height: 32px; background: var(--g); color: #fff; display: flex; align-items: center; justify-content: center; border-radius: 8px; }
-  .nav-item { display: block; padding: 10px 12px; color: #555; text-decoration: none; font-size: 13px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; }
+  .nav-item { display: block; padding: 10px 12px; color: #555; text-decoration: none; font-size: 13px; border-radius: 8px; margin-bottom: 4px; cursor: pointer; transition: 0.1s; }
+  .nav-item:hover { background: #f0f0e8; }
   .nav-item.active { background: #E1F5EE; color: #0F6E56; font-weight: 600; }
+  
+  /* SECCIONES DEL GERENTE */
+  .g-section { display: none; }
+  .g-section.active { display: block; animation: fadeIn 0.3s ease; }
+
+  /* COMPONENTES COMPARTIDOS */
   .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 1.5rem; }
   .metric { background: #fff; padding: 1.25rem; border-radius: 12px; border: 1px solid var(--border); }
   .m-lbl { font-size: 12px; color: #888; margin-bottom: 4px; }
   .m-val { font-size: 24px; font-weight: 700; }
-  .m-trend { font-size: 11px; color: var(--g); margin-top: 4px; font-weight: 500; }
+  .m-trend { font-size: 11px; margin-top: 4px; font-weight: 500; }
+  .trend-up { color: var(--g); } .trend-warn { color: #BA7517; }
   .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
-  .card { background: #fff; padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border); }
+  .card { background: #fff; padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 1.5rem; }
   .c-title { font-size: 14px; font-weight: 600; margin-bottom: 1rem; color: #333; }
-  .ai-box { background: linear-gradient(135deg, #0D2A1F 0%, #0F3D2A 100%); border-radius: 12px; padding: 1.5rem; color: #fff; margin-bottom: 1.5rem; border: 1px solid var(--g); }
+  
+  /* TABLAS Y BADGES */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; font-size: 12px; color: #888; border-bottom: 0.5px solid var(--border); font-weight: 500; }
+  td { padding: 12px; border-bottom: 0.5px solid #f0f0e8; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .badge { font-size: 11px; padding: 4px 8px; border-radius: 8px; font-weight: 600; }
+  .badge-paid { background: #E1F5EE; color: #0F6E56; }
+  .badge-pending { background: #FAEEDA; color: #854F0B; }
+  .badge-delivery { background: #E6F1FB; color: #185FA5; }
+  .badge-pickup { background: #EEEDFE; color: #534AB7; }
+  
+  /* CONVERSACIONES */
+  .conv-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 0.5px solid #f0f0e8; }
+  .conv-row:last-child { border-bottom: none; }
+  .conv-avatar { width: 38px; height: 38px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #0F6E56; flex-shrink: 0; }
+  
+  /* POS IA */
+  .ai-box { background: linear-gradient(135deg, #0D2A1F 0%, #0F3D2A 100%); border-radius: 12px; padding: 1.5rem; color: #fff; margin-bottom: 1.5rem; border: 1px solid var(--g); position: relative; overflow: hidden; }
   .ai-title { color: #39FF6A; font-size: 12px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 8px; text-transform: uppercase; }
-
+  .ai-text { font-size: 14px; line-height: 1.6; color: #E0F5EC; }
+  .ai-text strong { color: #39FF6A; }
+  .predict-bar { margin-bottom: 10px; }
+  .predict-label { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-bottom: 4px; }
+  .predict-track { height: 8px; background: #f0f0e8; border-radius: 4px; overflow: hidden; }
+  .predict-fill { height: 100%; background: var(--g); border-radius: 4px; }
+  .predict-fill.warn { background: #FAC775; }
+  .upsell-card { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 1rem; display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  
   /* ─── VISTA COCINA (KDS) ─── */
   #view-cocina { background: #0D1412; color: #fff; padding: 1.5rem; }
   .k-header { display: flex; justify-content: space-between; margin-bottom: 1.5rem; }
@@ -97,40 +132,173 @@
 <div id="view-gerente" class="view-container active">
   <div class="g-sidebar">
     <div class="g-logo"><div class="g-logo-icon">M</div> La Trattoria</div>
-    <a class="nav-item active" onclick="demoNav(this, 'Resumen en vivo')">Resumen en vivo</a>
-    <a class="nav-item" onclick="demoNav(this, 'Pedidos')">Pedidos (47)</a>
-    <a class="nav-item" onclick="demoNav(this, 'Conversaciones')">Conversaciones (12)</a>
-    <a class="nav-item" onclick="demoNav(this, 'POS con IA')">POS con IA</a>
-    <a class="nav-item" onclick="demoNav(this, 'Mesas y QR')">Mesas & QR</a>
+    <a class="nav-item active" onclick="demoNav(this, 'sec-resumen')">Resumen en vivo</a>
+    <a class="nav-item" onclick="demoNav(this, 'sec-pedidos')">Pedidos (47)</a>
+    <a class="nav-item" onclick="demoNav(this, 'sec-conversaciones')">Conversaciones (12)</a>
+    <a class="nav-item" onclick="demoNav(this, 'sec-pos')">POS con IA</a>
+    <a class="nav-item" onclick="demoNav(this, 'sec-mesas')">Mesas & QR</a>
   </div>
+  
   <div class="g-main">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
-      <h2 style="font-size:22px;">Operación de Hoy</h2>
-      <span style="font-size:12px; color:#888;">Actualizado hace 2 min</span>
+      <h2 style="font-size:22px;" id="main-title">Operación de Hoy</h2>
+      <span style="font-size:12px; color:#888;">Actualizado hace 2 min (Modo Demo)</span>
     </div>
 
-    <div class="ai-box">
-      <div class="ai-title">✦ Mesio IA - Análisis en tiempo real</div>
-      <p style="font-size:14px; line-height:1.5;">La rotación de mesas aumentó un <strong>15%</strong> usando pedidos por QR. Sugerencia: La <em>Pizza Margherita</em> se está vendiendo rápido; el inventario de albahaca fresca podría agotarse a las 8:00 PM.</p>
+    <div id="sec-resumen" class="g-section active">
+      <div class="ai-box">
+        <div class="ai-title">✦ Mesio IA - Análisis en tiempo real</div>
+        <p class="ai-text">La rotación de mesas aumentó un <strong>15%</strong> usando pedidos por QR. Sugerencia: La <em>Pizza Margherita</em> se está vendiendo rápido; el inventario de albahaca fresca podría agotarse a las 8:00 PM.</p>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="m-lbl">Ventas Hoy</div><div class="m-val">$1,240,500</div><div class="m-trend trend-up">↑ 18% vs ayer</div></div>
+        <div class="metric"><div class="m-lbl">Pedidos QR (Mesa)</div><div class="m-val">32</div><div class="m-trend trend-up">↑ Ticket prom: $54k</div></div>
+        <div class="metric"><div class="m-lbl">Pedidos WhatsApp (Dom)</div><div class="m-val">15</div><div class="m-trend trend-up">0 llamadas perdidas</div></div>
+        <div class="metric"><div class="m-lbl">Upsell por IA</div><div class="m-val">$185,000</div><div class="m-trend trend-up">↑ Postres y bebidas</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="c-title">Ingresos de la semana</div>
+          <div style="height:200px;"><canvas id="chart-ventas"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="c-title">Origen de Pedidos</div>
+          <div style="height:200px;"><canvas id="chart-origen"></canvas></div>
+        </div>
+      </div>
     </div>
 
-    <div class="metrics">
-      <div class="metric"><div class="m-lbl">Ventas Hoy</div><div class="m-val">$1,240,500</div><div class="m-trend">↑ 18% vs ayer</div></div>
-      <div class="metric"><div class="m-lbl">Pedidos QR (Mesa)</div><div class="m-val">32</div><div class="m-trend">↑ Ticket prom: $54k</div></div>
-      <div class="metric"><div class="m-lbl">Pedidos WhatsApp (Dom)</div><div class="m-val">15</div><div class="m-trend">0 llamadas perdidas</div></div>
-      <div class="metric"><div class="m-lbl">Upsell por IA</div><div class="m-val">$185,000</div><div class="m-trend">↑ Postres y bebidas</div></div>
-    </div>
-
-    <div class="grid-2">
-      <div class="card">
-        <div class="c-title">Ingresos de la semana</div>
-        <div style="height:200px;"><canvas id="chart-ventas"></canvas></div>
+    <div id="sec-pedidos" class="g-section">
+      <div class="metrics" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="metric"><div class="m-lbl">Total Pedidos</div><div class="m-val">47</div></div>
+        <div class="metric"><div class="m-lbl">Pagados (Wompi)</div><div class="m-val trend-up">42</div></div>
+        <div class="metric"><div class="m-lbl">Pendientes de Pago</div><div class="m-val trend-warn">5</div></div>
       </div>
       <div class="card">
-        <div class="c-title">Origen de Pedidos</div>
-        <div style="height:200px;"><canvas id="chart-origen"></canvas></div>
+        <div class="c-title">Pedidos recientes</div>
+        <table>
+          <thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead>
+          <tbody>
+            <tr><td style="font-weight:600;">ORD-A1B2</td><td style="color:#555;">2x Margherita, 1x Limonada</td><td><span class="badge badge-pickup">Mesa 5</span></td><td><span class="badge badge-paid">Pagado</span></td><td style="font-weight:600;">$42,500</td><td>Hace 2m</td></tr>
+            <tr><td style="font-weight:600;">ORD-C3D4</td><td style="color:#555;">1x Lasagna, 2x Tiramisú</td><td><span class="badge badge-delivery">Domicilio</span></td><td><span class="badge badge-paid">Pagado</span></td><td style="font-weight:600;">$62,000</td><td>Hace 15m</td></tr>
+            <tr><td style="font-weight:600;">ORD-E5F6</td><td style="color:#555;">3x Carbonara, 1x Vino Tinto</td><td><span class="badge badge-pickup">Mesa 2</span></td><td><span class="badge badge-pending">Pendiente</span></td><td style="font-weight:600;">$85,000</td><td>Hace 22m</td></tr>
+            <tr><td style="font-weight:600;">ORD-G7H8</td><td style="color:#555;">1x Diavola</td><td><span class="badge badge-delivery">Domicilio</span></td><td><span class="badge badge-pending">Pendiente</span></td><td style="font-weight:600;">$25,000</td><td>Hace 35m</td></tr>
+            <tr><td style="font-weight:600;">ORD-I9J0</td><td style="color:#555;">4x Gelato Artesanal</td><td><span class="badge badge-pickup">Para llevar</span></td><td><span class="badge badge-paid">Pagado</span></td><td style="font-weight:600;">$34,000</td><td>Hace 42m</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
+
+    <div id="sec-conversaciones" class="g-section">
+      <div class="metrics" style="grid-template-columns: repeat(2, 1fr);">
+        <div class="metric"><div class="m-lbl">Conversaciones activas hoy</div><div class="m-val">12</div></div>
+        <div class="metric"><div class="m-lbl">Tiempo de respuesta del bot</div><div class="m-val trend-up">1.2s</div></div>
+      </div>
+      <div class="card">
+        <div class="c-title">Historial de WhatsApp (Simulado)</div>
+        
+        <div class="conv-row">
+          <div class="conv-avatar">8812</div>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:600;">+57 310 456 8812</div>
+            <div style="font-size:12px;color:#888;">Cliente: "Sí, con el vino tinto está bien." -> Bot: "Perfecto, agregado a la Mesa 5. Total..."</div>
+          </div>
+          <div style="font-size:11px;color:#aaa;">8 mensajes</div>
+        </div>
+
+        <div class="conv-row">
+          <div class="conv-avatar">3390</div>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:600;">+57 320 987 3390</div>
+            <div style="font-size:12px;color:#888;">Cliente: "Ya realicé el pago por Wompi" -> Bot: "¡Pago confirmado! Tu domicilio va en camino."</div>
+          </div>
+          <div style="font-size:11px;color:#aaa;">4 mensajes</div>
+        </div>
+
+        <div class="conv-row">
+          <div class="conv-avatar">4421</div>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:600;">+57 314 321 4421</div>
+            <div style="font-size:12px;color:#888;">Cliente: "¿Tienen opciones sin gluten?" -> Bot: "¡Hola! Sí, nuestras pastas pueden prepararse..."</div>
+          </div>
+          <div style="font-size:11px;color:#aaa;">2 mensajes</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="sec-pos" class="g-section">
+      <div class="ai-box" style="margin-bottom:1rem;">
+        <div class="ai-title">✦ IA Predictiva de Inventario</div>
+        <p class="ai-text">Hoy es Viernes. Basado en el histórico, la <strong>Lasagna della Nonna</strong> será altamente demandada entre las 19:00 y 21:00. Asegura al menos 15 porciones listas.</p>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:1.5rem;">
+        <div class="card" style="margin-bottom:0;">
+          <div class="c-title">Predicción de Demanda (Próx. horas)</div>
+          <div class="predict-bar">
+            <div class="predict-label"><span>19:00h — Alta demanda</span><span>~24 pedidos</span></div>
+            <div class="predict-track"><div class="predict-fill" style="width:85%"></div></div>
+          </div>
+          <div class="predict-bar">
+            <div class="predict-label"><span>20:00h — Alta demanda</span><span>~32 pedidos</span></div>
+            <div class="predict-track"><div class="predict-fill" style="width:95%"></div></div>
+          </div>
+          <div class="predict-bar">
+            <div class="predict-label"><span>21:00h — Demanda media</span><span>~15 pedidos</span></div>
+            <div class="predict-track"><div class="predict-fill warn" style="width:45%"></div></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:0;">
+          <div class="c-title">Sugerencias de Upsell Activas en el Bot</div>
+          <div class="upsell-card">
+            <span style="font-size:20px;">🍷</span>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;">Vino con Pastas</div>
+              <div style="font-size:11px;color:#888;">El bot sugiere Copa de Vino Tinto al pedir Lasagna.</div>
+            </div>
+            <span class="badge badge-paid">Convierte 22%</span>
+          </div>
+          <div class="upsell-card">
+            <span style="font-size:20px;">🍰</span>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;">Tiramisú fin de cena</div>
+              <div style="font-size:11px;color:#888;">El bot lo ofrece en pedidos a domicilio > $50k.</div>
+            </div>
+            <span class="badge badge-paid">Convierte 15%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="sec-mesas" class="g-section">
+      <div style="margin-bottom:1.5rem;">
+        <p style="font-size:14px; color:#555;">Imprime estos códigos QR y ponlos en las mesas. Cuando el cliente escanee, el bot de WhatsApp sabrá exactamente de qué mesa viene el pedido.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">
+        
+        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:12px;">Mesa 1 (Terraza)</div>
+          <div id="qr-demo-1" style="width:130px;height:130px;margin:0 auto 15px;"></div>
+          <button style="font-size:11px;padding:6px 12px;background:#E1F5EE;color:#0F6E56;border:none;border-radius:6px;font-weight:600;cursor:pointer;">🖨️ Imprimir QR</button>
+        </div>
+
+        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:12px;">Mesa 2 (Terraza)</div>
+          <div id="qr-demo-2" style="width:130px;height:130px;margin:0 auto 15px;"></div>
+          <button style="font-size:11px;padding:6px 12px;background:#E1F5EE;color:#0F6E56;border:none;border-radius:6px;font-weight:600;cursor:pointer;">🖨️ Imprimir QR</button>
+        </div>
+
+        <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:12px;">Mesa 3 (Interior)</div>
+          <div id="qr-demo-3" style="width:130px;height:130px;margin:0 auto 15px;"></div>
+          <button style="font-size:11px;padding:6px 12px;background:#E1F5EE;color:#0F6E56;border:none;border-radius:6px;font-weight:600;cursor:pointer;">🖨️ Imprimir QR</button>
+        </div>
+
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -140,7 +308,6 @@
     <div style="font-size:13px; color:#aaa;">Vista optimizada para Tablet de cocina</div>
   </div>
   <div class="k-board">
-    
     <div class="k-col">
       <div class="k-col-title t-recibido">🔔 Recibidos (2)</div>
       
@@ -186,7 +353,6 @@
         <div style="font-size:11px; color:#888; text-align:center; padding:8px; border:1px dashed #333; border-radius:6px;">Esperando al mesero...</div>
       </div>
     </div>
-
   </div>
 </div>
 
@@ -198,25 +364,22 @@
       <div style="font-size:12px; color:#888;">Mesio automatiza las comandas. Tú solo sirves.</div>
     </div>
     <div class="p-body" id="waiter-alerts">
-      
       <div class="alert-card">
         <div class="al-title">🔔 Comida lista en cocina</div>
         <div class="al-desc">La orden de <strong>Mesa 8</strong> (2x Ensalada) está caliente y lista para servir.</div>
         <button class="al-btn" onclick="this.parentElement.remove()">Ya la entregué 👍</button>
       </div>
-
       <div class="alert-card pay">
         <div class="al-title">💳 Pago confirmado</div>
         <div class="al-desc"><strong>Mesa 3</strong> acaba de pagar $85,000 por Wompi. Puedes despedirlos y limpiar la mesa.</div>
         <button class="al-btn" onclick="this.parentElement.remove()">Entendido</button>
       </div>
-
     </div>
   </div>
 </div>
 
 <script>
-  // 1. Cambio de Roles
+  // 1. Cambio de Roles Principales
   function switchRole(role) {
     document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`.role-btn[onclick="switchRole('${role}')"]`).classList.add('active');
@@ -225,7 +388,29 @@
     document.getElementById(`view-${role}`).classList.add('active');
   }
 
-  // 2. Simulación en la Cocina (Mover Tickets)
+  // 2. Navegación del Dashboard del Gerente (Real)
+  const titulos = {
+    'sec-resumen': 'Operación de Hoy',
+    'sec-pedidos': 'Registro de Pedidos',
+    'sec-conversaciones': 'Conversaciones en WhatsApp',
+    'sec-pos': 'Inteligencia de Negocio',
+    'sec-mesas': 'Gestión de Mesas y Códigos QR'
+  };
+
+  function demoNav(btn, sectionId) {
+    // Cambiar estado activo en el sidebar
+    document.querySelectorAll('.g-sidebar .nav-item').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+    
+    // Cambiar vista
+    document.querySelectorAll('.g-section').forEach(el => el.classList.remove('active'));
+    document.getElementById(sectionId).classList.add('active');
+
+    // Cambiar título
+    document.getElementById('main-title').innerText = titulos[sectionId];
+  }
+
+  // 3. Simulación en la Cocina (Mover Tickets)
   function moveTicket(ticketId, target) {
     const ticket = document.getElementById(ticketId);
     if(!ticket) return;
@@ -233,19 +418,17 @@
     if (target === 'prep') {
       ticket.classList.remove('new');
       ticket.querySelector('.tk-btn').outerHTML = `<button class="tk-btn tk-btn-listo" onclick="moveTicket('${ticketId}', 'listo')">Marcar como Listo ✅</button>`;
-      document.querySelectorAll('.k-col')[1].appendChild(ticket); // Mover a col 2
+      document.querySelectorAll('.k-col')[1].appendChild(ticket); 
     } 
     else if (target === 'listo') {
       const mesaName = ticket.querySelector('span').innerText;
       ticket.querySelector('.tk-btn').outerHTML = `<div style="font-size:11px; color:#888; text-align:center; padding:8px; border:1px dashed #333; border-radius:6px;">Mesero notificado...</div>`;
-      document.querySelectorAll('.k-col')[2].appendChild(ticket); // Mover a col 3
-      
-      // Simular alerta al mesero
+      document.querySelectorAll('.k-col')[2].appendChild(ticket); 
       sendWaiterAlert(mesaName);
     }
   }
 
-  // 3. Simulación de alerta a Mesero
+  // 4. Alerta al Mesero
   function sendWaiterAlert(mesa) {
     const container = document.getElementById('waiter-alerts');
     const alertHtml = `
@@ -256,15 +439,14 @@
       </div>
     `;
     container.insertAdjacentHTML('afterbegin', alertHtml);
-    
-    // Si estamos en la vista de cocina, mostrar un pequeño toast
     if(document.getElementById('view-cocina').classList.contains('active')){
       alert(`¡Ping enviado al teléfono del mesero para la ${mesa}!`);
     }
   }
 
-  // 4. Inicializar Gráficas (Vista Gerente)
+  // 5. Inicialización de Gráficas y QR
   window.onload = function() {
+    // Gráfico de Ventas
     new Chart(document.getElementById('chart-ventas'), {
       type: 'line',
       data: { 
@@ -279,6 +461,7 @@
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
     });
 
+    // Gráfico de Origen
     new Chart(document.getElementById('chart-origen'), {
       type: 'doughnut',
       data: { 
@@ -287,24 +470,13 @@
       },
       options: { responsive: true, maintainAspectRatio: false, cutout: '70%' }
     });
+
+    // Generar códigos QR Falsos para la Demo
+    const qrOptions = { width: 130, height: 130, colorDark: "#111", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M };
+    new QRCode(document.getElementById("qr-demo-1"), { text: "https://wa.me/573144914554?text=Hola,%20estoy%20en%20Mesa%201", ...qrOptions });
+    new QRCode(document.getElementById("qr-demo-2"), { text: "https://wa.me/573144914554?text=Hola,%20estoy%20en%20Mesa%202", ...qrOptions });
+    new QRCode(document.getElementById("qr-demo-3"), { text: "https://wa.me/573144914554?text=Hola,%20estoy%20en%20Mesa%203", ...qrOptions });
   };
-  // 5. Navegación ficticia para la Demo
-  function demoNav(element, section) {
-    // Cambiar la clase activa visualmente
-    document.querySelectorAll('.g-sidebar .nav-item').forEach(el => el.classList.remove('active'));
-    element.classList.add('active');
-    
-    // Si hacen clic en algo que no sea el resumen, mostramos el mensaje de venta
-    if (section !== 'Resumen en vivo') {
-      alert(`🚀 Estás viendo la versión de demostración.\n\nAl adquirir Mesio, la pestaña de "${section}" te mostrará todos los datos e interacciones de tu restaurante en tiempo real.`);
-      
-      // Regresar visualmente al resumen después de 2 segundos
-      setTimeout(() => {
-        document.querySelectorAll('.g-sidebar .nav-item').forEach(el => el.classList.remove('active'));
-        document.querySelector('.g-sidebar .nav-item').classList.add('active');
-      }, 2500);
-    }
-  }
 </script>
 
 </body>
