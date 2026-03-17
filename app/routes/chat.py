@@ -20,6 +20,7 @@ def _normalize_number(number: str) -> str:
 class ChatRequest(BaseModel):
     phone: str
     message: str
+    bot_number: str = "15556293573"
 
 class ResetRequest(BaseModel):
     phone: str
@@ -27,7 +28,7 @@ class ResetRequest(BaseModel):
 @router.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     # Endpoint para pruebas desde el dashboard o terminal
-    result = await chat(request.phone, request.message, "TEST_BOT")
+    result = await chat(request.phone, request.message, request.bot_number)
     return {"success": True, "response": result["message"]}
 
 @router.post("/reset")
