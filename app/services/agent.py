@@ -129,9 +129,10 @@ async def process_agent_response(response_text: str, user_phone: str, bot_number
         datos = res_match.group(1).split('|')
         if len(datos) >= 5:
             reservation = await db.db_add_reservation(
-                name=datos[0].strip(), date=datos[1].strip(),
+                name=datos[0].strip(), date_str=datos[1].strip(),
                 time=datos[2].strip(), guests=int(datos[3].strip()),
-                phone=datos[4].strip(), notes=datos[5].strip() if len(datos) > 5 else ""
+                phone=datos[4].strip(), bot_number=bot_number,
+                notes=datos[5].strip() if len(datos) > 5 else ""
             )
             actions.append({"type": "reservation_created", "data": reservation})
         clean_response = re.sub(r'\[RESERVACION: [^\]]+\]', '', clean_response).strip()
