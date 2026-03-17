@@ -129,8 +129,23 @@
 
   async function createRestaurant() {
     const key = getAdminKey(); if(!key) return;
+
+    let menuJson;
     try {
-      const menuJson = JSON.parse(document.getElementById('r_menu').value || '{}');
+      // 1. Tomamos el texto en crudo
+      let rawText = document.getElementById('r_menu').value || '{}';
+      
+      // 2. MAGIA: Eliminamos cualquier salto de línea, retorno o tabulación "ilegal"
+      rawText = rawText.replace(/[\n\r\t]/g, ' '); 
+      
+      // 3. Convertimos a JSON de forma segura
+      menuJson = JSON.parse(rawText);
+    } catch (e) {
+      alert("❌ Error: El JSON tiene formato inválido. Revisa si hay comillas dobles mal cerradas.");
+      return; // Detenemos la ejecución si falla aquí
+    }
+
+    try {
       const res = await fetch('/api/admin/create-restaurant', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -143,8 +158,10 @@
         })
       });
       const data = await res.json();
-      alert(data.success ? "✅ Restaurante guardado!" : "❌ Error: " + (data.detail || data.error));
-    } catch (e) { alert("❌ Error en el JSON del menú. Revisa las comillas."); }
+      alert(data.success ? "✅ Restaurante guardado!" : "❌ Error del servidor: " + (data.detail || data.error));
+    } catch (e) { 
+      alert("❌ Error de red al intentar guardar. Revisa tu conexión."); 
+    }
   }
 
   async function createUser() {
