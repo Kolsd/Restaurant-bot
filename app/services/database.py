@@ -116,6 +116,10 @@ async def init_db():
             await conn.execute("ALTER TABLE conversations ADD CONSTRAINT conversations_pkey PRIMARY KEY (phone, bot_number);")
             await conn.execute("ALTER TABLE reservations ADD COLUMN IF NOT EXISTS bot_number TEXT NOT NULL DEFAULT '';")
             await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS bot_number TEXT NOT NULL DEFAULT '';")
+            await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS parent_restaurant_id INTEGER;")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner';")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_id INTEGER;")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_user TEXT;");
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS whatsapp_number TEXT UNIQUE;")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';")
@@ -327,14 +331,21 @@ async def db_get_restaurant_by_phone(whatsapp_number: str):
         return _serialize(dict(row)) if row else None
 
 
-async def db_create_user(username: str, password_hash: str, restaurant_name: str):
+async def db_create_user(
+    username: str,
+    password_hash: str,
+    restaurant_name: str,
+    role: str = "owner",
+    branch_id: int | None = None,
+    parent_user: str | None = None,
+):
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
             await conn.execute("""
-                INSERT INTO users (username, password_hash, restaurant_name)
-                VALUES ($1,$2,$3)
-            """, username.lower().strip(), password_hash, restaurant_name)
+                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, parent_user)
+                VALUES ($1,$2,$3,$4,$5,$6)
+            """, username.lower().strip(), password_hash, restaurant_name, role, branch_id, parent_user)
             return True
         except asyncpg.UniqueViolationError:
             return False
@@ -343,8 +354,15 @@ async def db_create_user(username: str, password_hash: str, restaurant_name: str
 async def db_get_all_users():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT username, restaurant_name FROM users")
+        rows = await conn.fetch("SELECT username, restaurant_name, role, branch_id, parent_user FROM users")
         return [dict(r) for r in rows]
+
+
+async def db_get_all_restaurants():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM restaurants ORDER BY id ASC")
+        return [_serialize(dict(r)) for r in rows]
 
 
 # ─────────────────────────────────────────────
@@ -533,6 +551,16 @@ async def db_get_restaurant_by_name(name: str):
         row = await conn.fetchrow(
             "SELECT * FROM restaurants WHERE name=$1",
             name,
+        )
+        return _serialize(dict(row)) if row else None
+
+
+async def db_get_restaurant_by_id(restaurant_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM restaurants WHERE id=$1",
+            restaurant_id,
         )
         return _serialize(dict(row)) if row else None
 
