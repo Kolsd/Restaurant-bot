@@ -68,6 +68,22 @@ async def auth_logout(request: Request):
     logout(token)
     return {"success": True}
 
+
+def require_auth(request: Request) -> str:
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="No autorizado")
+    return username
+
+
+async def get_current_user(request: Request) -> dict:
+    username = require_auth(request)
+    user = await db.db_get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+    return user
+
 @router.post("/api/admin/create-user")
 async def admin_create_user(request: CreateUserRequest):
     if request.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"):
@@ -81,6 +97,125 @@ async def admin_list_users(admin_key: str = ""):
     if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"):
         raise HTTPException(status_code=403, detail="No autorizado")
     return {"users": await get_users()}
+
+
+class TeamInviteRequest(BaseModel):
+    username: str
+    password: str
+    role: str  # owner/admin/cook/waiter
+    branch_id: int | None = None
+
+
+class CreateBranchRequest(BaseModel):
+    name: str
+    whatsapp_number: str
+    address: str
+    menu: dict
+
+
+@router.get("/api/team/branches")
+async def list_team_branches(request: Request):
+    """
+    Lista sucursales visibles para el usuario actual.
+    - owner: todas las sucursales (restaurants)
+    - admin: solo su sucursal (branch_id)
+    """
+    user = await get_current_user(request)
+    role = user.get("role", "owner")
+    if role == "owner":
+        restaurants = await db.db_get_all_restaurants()
+        return {"branches": restaurants}
+    branch_id = user.get("branch_id")
+    if role == "admin" and branch_id:
+        restaurant = await db.db_get_restaurant_by_id(branch_id)
+        if restaurant:
+            return {"branches": [restaurant]}
+    raise HTTPException(status_code=403, detail="No autorizado")
+
+
+@router.post("/api/team/branches")
+async def create_branch(request: Request, body: CreateBranchRequest):
+    """
+    Crea una nueva sucursal (restaurant). Solo dueño.
+    """
+    user = await get_current_user(request)
+    role = user.get("role", "owner")
+    if role != "owner":
+        raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
+    await db.db_create_restaurant(body.name, body.whatsapp_number, body.address, body.menu)
+    return {"success": True}
+
+
+@router.get("/api/team/users")
+async def list_team_users(request: Request):
+    """
+    Lista usuarios del sistema. Owner ve todos, admin solo los de su sucursal.
+    """
+    user = await get_current_user(request)
+    role = user.get("role", "owner")
+    branch_id = user.get("branch_id")
+    all_users = await db.db_get_all_users()
+    if role == "owner":
+        return {"users": all_users}
+    if role == "admin" and branch_id:
+        filtered = [u for u in all_users if u.get("branch_id") == branch_id]
+        return {"users": filtered}
+    raise HTTPException(status_code=403, detail="No autorizado")
+
+
+@router.post("/api/team/invite")
+async def team_invite(request: Request, body: TeamInviteRequest):
+    """
+    Crea un usuario dentro de la jerarquía:
+    - owner: puede crear admins para cualquier sucursal (branch_id requerido)
+    - admin: puede crear cooks/waiters para su propia sucursal
+    """
+    creator = await get_current_user(request)
+    creator_role = creator.get("role", "owner")
+    creator_username = creator["username"]
+    target_role = body.role
+
+    if creator_role == "owner":
+        if target_role not in ("admin", "cook", "waiter"):
+            raise HTTPException(status_code=400, detail="Rol inválido para invitación")
+        if not body.branch_id:
+            raise HTTPException(status_code=400, detail="branch_id requerido para crear usuarios")
+        branch = await db.db_get_restaurant_by_id(body.branch_id)
+        if not branch:
+            raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+        restaurant_name = branch["name"]
+        success = await db.db_create_user(
+            body.username,
+            hash_password(body.password),
+            restaurant_name,
+            role=target_role,
+            branch_id=body.branch_id,
+            parent_user=creator_username,
+        )
+    elif creator_role == "admin":
+        if target_role not in ("cook", "waiter"):
+            raise HTTPException(status_code=403, detail="Un administrador solo puede crear cocineros o meseros")
+        branch_id = creator.get("branch_id")
+        if not branch_id:
+            raise HTTPException(status_code=400, detail="Administrador sin sucursal asignada")
+        branch = await db.db_get_restaurant_by_id(branch_id)
+        if not branch:
+            raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+        restaurant_name = branch["name"]
+        success = await db.db_create_user(
+            body.username,
+            hash_password(body.password),
+            restaurant_name,
+            role=target_role,
+            branch_id=branch_id,
+            parent_user=creator_username,
+        )
+    else:
+        raise HTTPException(status_code=403, detail="No autorizado para invitar usuarios")
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Usuario ya existe")
+    return {"success": True}
 
 @router.post("/api/admin/create-restaurant")
 async def admin_create_restaurant(request: CreateRestaurantRequest):

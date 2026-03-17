@@ -160,6 +160,7 @@
   <button class="nav-item" onclick="showSection('menu',this)">&#9632; Menú</button>
   <button class="nav-item" onclick="showSection('pos',this)">&#9632; POS con IA</button>
   <button class="nav-item" onclick="showSection('mesas',this)">&#9632; Mesas &amp; QR</button>
+  <button class="nav-item" id="nav-team" style="display:none;" onclick="showSection('equipo',this)">&#9632; Mi equipo</button>
   <div class="live-badge"><div class="live-dot"></div>Bot activo 24/7</div>
 </div>
 
@@ -364,6 +365,21 @@
       <div class="menu-grid" id="menu-grid"></div>
     </div>
   </div>
+
+  <!-- MI EQUIPO -->
+  <div id="equipo" class="section">
+    <div class="card">
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Mi equipo y sucursales</span>
+        <button id="btn-add-branch" onclick="openCreateBranch()" style="font-size:11px;padding:6px 10px;border:1px solid #e0e0d8;border-radius:6px;background:#1D9E75;color:#fff;cursor:pointer;display:none;">+ Agregar sucursal</button>
+      </div>
+      <div id="branches-container"><div class="empty-state">Cargando sucursales…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Usuarios por sucursal</div>
+      <div id="team-users-container"><div class="empty-state">Cargando equipo…</div></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -371,6 +387,11 @@ const token = localStorage.getItem('rb_token');
 if (!token) window.location.href = '/login';
 const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":"Mi Restaurante"}');
 document.getElementById('sidebar-name').textContent = restaurant.name || 'Mi Restaurante';
+const currentRole = (restaurant && restaurant.role) || 'owner';
+if (currentRole === 'owner' || currentRole === 'admin') {
+  const navTeam = document.getElementById('nav-team');
+  if (navTeam) navTeam.style.display = 'flex';
+}
 
 let currentPeriod = 'today';
 let revenueChart = null, statusChart = null, tiposChart = null;
@@ -378,7 +399,7 @@ const headers = { 'Authorization': 'Bearer ' + token };
 const fmt = n => '$' + Number(n).toLocaleString('es-CO');
 
 const periodLabels = { today:'Hoy', week:'Últimos 7 días', month:'Este mes', semester:'Este semestre', year:'Este año' };
-const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR' };
+const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi equipo' };
 
 function updateTime() {
   document.getElementById('current-time').textContent = new Date().toLocaleString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
@@ -394,6 +415,7 @@ function logout() {
 function showSection(id, btn) {
   if (id === 'pos') { loadPOSData(); }
   if (id === 'mesas') { loadTables(); }
+  if (id === 'equipo') { loadTeam(); }
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -691,6 +713,108 @@ async function cleanupConversations() {
       fetchConversations();
     }
   } catch(e) { console.error(e); }
+}
+
+// ── MI EQUIPO ─────────────────────────────────────────────
+
+async function loadTeam() {
+  try {
+    await Promise.all([loadBranches(), loadTeamUsers()]);
+  } catch(e) { console.error('loadTeam', e); }
+}
+
+async function loadBranches() {
+  const container = document.getElementById('branches-container');
+  try {
+    const r = await fetch('/api/team/branches', { headers });
+    if (!r.ok) {
+      container.innerHTML = '<div class="empty-state">No se pudieron cargar las sucursales.</div>';
+      return;
+    }
+    const d = await r.json();
+    const branches = d.branches || [];
+    if (!branches.length) {
+      container.innerHTML = '<div class="empty-state">Aún no tienes sucursales configuradas.</div>';
+      return;
+    }
+    let html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+    branches.forEach(b => {
+      html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:0.5px solid #e0e0d8;border-radius:10px;background:#fff;">
+        <div>
+          <div style="font-size:13px;font-weight:600;">${b.name}</div>
+          <div style="font-size:11px;color:#888;">${b.address || ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span style="font-size:11px;color:#999;">${b.whatsapp_number || ''}</span>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+  } catch(e) {
+    console.error('loadBranches', e);
+    container.innerHTML = '<div class="empty-state">Error al cargar sucursales.</div>';
+  }
+}
+
+async function loadTeamUsers() {
+  const container = document.getElementById('team-users-container');
+  try {
+    const r = await fetch('/api/team/users', { headers });
+    if (!r.ok) {
+      container.innerHTML = '<div class="empty-state">No se pudieron cargar los usuarios.</div>';
+      return;
+    }
+    const d = await r.json();
+    const users = d.users || [];
+    if (!users.length) {
+      container.innerHTML = '<div class="empty-state">Aún no hay usuarios en tu equipo.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Usuario</th><th>Rol</th><th>Sucursal (texto)</th></tr></thead><tbody>';
+    users.forEach(u => {
+      html += `<tr>
+        <td style="font-weight:500;">${u.username}</td>
+        <td style="font-size:12px;text-transform:capitalize;">${u.role || 'owner'}</td>
+        <td style="font-size:12px;color:#888;">${u.restaurant_name || ''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch(e) {
+    console.error('loadTeamUsers', e);
+    container.innerHTML = '<div class="empty-state">Error al cargar usuarios.</div>';
+  }
+}
+
+function openCreateBranch() {
+  const name = prompt('Nombre de la nueva sucursal:');
+  if (!name) return;
+  const wa = prompt('Número de WhatsApp (E.164, ej. 57...):');
+  if (!wa) return;
+  const address = prompt('Dirección de la sucursal:') || '';
+  let menuJson = prompt('Menú en formato JSON (o deja vacío para menú vacío):', '{}') || '{}';
+  let menuObj = {};
+  try { menuObj = JSON.parse(menuJson); } catch(e) { alert('El menú no es JSON válido. Se usará un menú vacío.'); menuObj = {}; }
+  createBranch(name, wa, address, menuObj);
+}
+
+async function createBranch(name, whatsapp_number, address, menu) {
+  try {
+    const r = await fetch('/api/team/branches', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, whatsapp_number, address, menu })
+    });
+    if (!r.ok) {
+      alert('Error al crear sucursal');
+      return;
+    }
+    await loadBranches();
+  } catch(e) {
+    console.error('createBranch', e);
+    alert('Error al crear sucursal');
+  }
 }
 
 async function refreshAll() {

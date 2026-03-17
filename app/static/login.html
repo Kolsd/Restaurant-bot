@@ -57,7 +57,12 @@ async function login() {
     if (data.success) {
       localStorage.setItem('rb_token', data.token);
       localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
-      window.location.href = '/dashboard';
+      const role = (data.restaurant && data.restaurant.role) || 'owner';
+      if (role === 'cook') {
+        window.location.href = '/cocina';
+      } else {
+        window.location.href = '/dashboard';
+      }
     } else {
       errorEl.textContent = data.error || 'Credenciales incorrectas';
       errorEl.style.display = 'block';

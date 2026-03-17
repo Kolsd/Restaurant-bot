@@ -19,13 +19,15 @@ async def login(username: str, password: str) -> dict:
     token = secrets.token_hex(32)
     active_tokens[token] = username.lower().strip()
 
+    role = user.get("role", "owner")
     return {
         "success": True,
         "token": token,
         "restaurant": {
             "name": user["restaurant_name"],
-            "username": username
-        }
+            "username": username,
+            "role": role,
+        },
     }
 
 
