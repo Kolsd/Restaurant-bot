@@ -19,32 +19,52 @@ def hash_password(p: str) -> str:
     return hashlib.sha256(p.encode()).hexdigest()
 
 async def geocode_address(address: str) -> tuple:
-    """Geocodifica una dirección usando Nominatim (OpenStreetMap). Sin API key."""
+    """Geocodifica con multiples proveedores: Nominatim → Photon → None."""
+    # Add Colombia context if not present
+    search_query = address
+    if "colombia" not in address.lower() and "bogot" not in address.lower() and        "medell" not in address.lower() and "cali" not in address.lower():
+        search_query = address + ", Colombia"
+
+    headers_ua = {"User-Agent": "Mesio/1.0 (restaurante bot colombia; contact@mesioai.com)"}
+
+    # 1. Nominatim con Colombia
+    for query in [search_query, address]:
+        for cc in ["co", None]:
+            try:
+                params = {"q": query, "format": "json", "limit": 1, "addressdetails": 1}
+                if cc:
+                    params["countrycodes"] = cc
+                async with httpx.AsyncClient(timeout=10) as client:
+                    r = await client.get(
+                        "https://nominatim.openstreetmap.org/search",
+                        params=params, headers=headers_ua
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data:
+                            return float(data[0]["lat"]), float(data[0]["lon"]), data[0].get("display_name", "")
+            except Exception as e:
+                print(f"Nominatim error ({query}): {e}")
+
+    # 2. Photon (Komoot) como fallback
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
+        async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": address, "format": "json", "limit": 1, "countrycodes": "co"},
-                headers={"User-Agent": "Mesio-Restaurant-Bot/1.0"}
+                "https://photon.komoot.io/api/",
+                params={"q": search_query, "limit": 1, "lang": "es"},
+                headers=headers_ua
             )
-            data = r.json()
-            if data:
-                return float(data[0]["lat"]), float(data[0]["lon"]), data[0].get("display_name","")
+            if r.status_code == 200:
+                data = r.json()
+                features = data.get("features", [])
+                if features:
+                    coords = features[0]["geometry"]["coordinates"]
+                    props = features[0].get("properties", {})
+                    display = f"{props.get('name','')}, {props.get('city','')}, {props.get('country','')}".strip(", ")
+                    return float(coords[1]), float(coords[0]), display
     except Exception as e:
-        print(f"Geocode error: {e}")
-    # Retry without country restriction
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": address, "format": "json", "limit": 1},
-                headers={"User-Agent": "Mesio-Restaurant-Bot/1.0"}
-            )
-            data = r.json()
-            if data:
-                return float(data[0]["lat"]), float(data[0]["lon"]), data[0].get("display_name","")
-    except Exception as e:
-        print(f"Geocode retry error: {e}")
+        print(f"Photon error: {e}")
+
     return None, None, None
 
 router = APIRouter()

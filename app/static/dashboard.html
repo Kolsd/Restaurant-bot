@@ -664,13 +664,16 @@ async function fetchConversations() {
     document.getElementById('c-avg').textContent = avg;
     let html = '';
     d.conversations.forEach(c => {
-      html += `<div class="conv-row">
+      html += `<div class="conv-row" onclick="openChat('${c.phone}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
         <div class="conv-avatar">${c.phone.slice(-4)}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;font-weight:500;">${c.phone}</div>
           <div style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">${c.preview}</div>
         </div>
-        <div style="font-size:11px;color:#aaa;white-space:nowrap;">${c.messages} mensajes</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="font-size:11px;color:#aaa;white-space:nowrap;">${c.messages} mensajes</div>
+          <div style="font-size:10px;padding:3px 8px;background:#E1F5EE;color:#0F6E56;border-radius:6px;">Ver chat →</div>
+        </div>
       </div>`;
     });
     container.innerHTML = html;
@@ -1382,6 +1385,117 @@ async function askMesioAI() {
 }
 
 
+
+
+// ── CHAT MODAL — Escalacion humana ─────────────────────────────
+let currentChatPhone = null;
+let botPaused = false;
+
+async function openChat(phone) {
+  currentChatPhone = phone;
+  document.getElementById('chat-modal-phone').textContent = phone;
+  document.getElementById('chat-messages').innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">Cargando...</div>';
+  document.getElementById('chat-modal').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  await loadChatHistory(phone);
+}
+
+function closeChatModal() {
+  document.getElementById('chat-modal').style.display = 'none';
+  document.body.style.overflow = '';
+  currentChatPhone = null;
+}
+
+async function loadChatHistory(phone) {
+  try {
+    const r = await fetch('/api/conversations/' + encodeURIComponent(phone), { headers });
+    if (!r.ok) { 
+      document.getElementById('chat-messages').innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">No se pudo cargar el historial.</div>';
+      return;
+    }
+    const d = await r.json();
+    const msgs = d.history || [];
+    botPaused = d.bot_paused || false;
+    const btn = document.getElementById('chat-pause-btn');
+    btn.textContent = botPaused ? '▶ Reanudar bot' : '⏸ Pausar bot';
+    btn.style.background = botPaused ? '#FDE8E8' : '#fff';
+    btn.style.color = botPaused ? '#C0392B' : '#555';
+    
+    const container = document.getElementById('chat-messages');
+    if (!msgs.length) {
+      container.innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">Sin mensajes.</div>';
+      return;
+    }
+    container.innerHTML = msgs.map(m => {
+      const isUser = m.role === 'user';
+      return `<div style="display:flex;justify-content:${isUser?'flex-end':'flex-start'};">
+        <div style="max-width:75%;padding:8px 12px;border-radius:${isUser?'12px 12px 3px 12px':'12px 12px 12px 3px'};
+          background:${isUser?'#DCF8C6':'#fff'};font-size:13px;line-height:1.5;
+          box-shadow:0 1px 2px rgba(0,0,0,.1);white-space:pre-wrap;">
+          ${m.content}
+        </div>
+      </div>`;
+    }).join('');
+    container.scrollTop = container.scrollHeight;
+  } catch(e) { console.error('loadChatHistory:', e); }
+}
+
+async function toggleBotPause() {
+  if (!currentChatPhone) return;
+  botPaused = !botPaused;
+  try {
+    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/pause', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paused: botPaused })
+    });
+    const btn = document.getElementById('chat-pause-btn');
+    btn.textContent = botPaused ? '▶ Reanudar bot' : '⏸ Pausar bot';
+    btn.style.background = botPaused ? '#FDE8E8' : '#fff';
+    btn.style.color = botPaused ? '#C0392B' : '#555';
+  } catch(e) { console.error(e); }
+}
+
+async function sendManualReply() {
+  const input = document.getElementById('chat-reply-input');
+  const msg = input.value.trim();
+  if (!msg || !currentChatPhone) return;
+  input.value = '';
+  try {
+    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    await loadChatHistory(currentChatPhone);
+  } catch(e) { console.error(e); }
+}
 </script>
+
+  <!-- CHAT MODAL — Escalacion humana -->
+  <div id="chat-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:16px;width:520px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.18);">
+      <!-- Header -->
+      <div style="padding:1rem 1.25rem;border-bottom:0.5px solid #e0e0d8;display:flex;align-items:center;justify-content:space-between;background:#f8f8f5;">
+        <div>
+          <div style="font-size:14px;font-weight:600;" id="chat-modal-phone">+57 300 000 0000</div>
+          <div style="font-size:11px;color:#888;margin-top:1px;">Conversación completa</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="chat-pause-btn" onclick="toggleBotPause()" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #e0e0d8;background:#fff;cursor:pointer;color:#555;">⏸ Pausar bot</button>
+          <button onclick="closeChatModal()" style="font-size:18px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
+        </div>
+      </div>
+      <!-- Messages -->
+      <div id="chat-messages" style="flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:8px;background:#ECE5DD;min-height:300px;"></div>
+      <!-- Input — respuesta manual -->
+      <div style="padding:.75rem 1rem;border-top:0.5px solid #e0e0d8;background:#f8f8f5;display:flex;gap:8px;">
+        <input id="chat-reply-input" placeholder="Escribe una respuesta manual..." 
+          style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:20px;font-size:13px;outline:none;"
+          onkeydown="if(event.key==='Enter')sendManualReply()">
+        <button onclick="sendManualReply()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:20px;font-size:13px;cursor:pointer;font-weight:500;">Enviar</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
