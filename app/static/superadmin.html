@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Super Admin</title>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #111; color: #fff; padding: 2rem; }
+  .container { max-width: 800px; margin: 0 auto; }
+  h1 { color: #39FF6A; margin-bottom: 1.5rem; font-size: 24px; }
+  .card { background: #1a1a1a; border: 1px solid #333; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; }
+  h2 { font-size: 16px; margin-bottom: 1rem; color: #aaa; }
+  label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; margin-top: 12px; }
+  input, textarea, select { width: 100%; padding: 10px; background: #000; border: 1px solid #333; color: #fff; border-radius: 6px; font-family: monospace; font-size: 13px; }
+  textarea { height: 150px; resize: vertical; }
+  button { background: #39FF6A; color: #000; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 15px; }
+  button:hover { background: #2bd654; }
+  .pass-box { background: #333; padding: 10px; border-radius: 6px; margin-bottom: 1.5rem; }
+  .pass-box input { margin: 0; border: 1px solid #555; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Mesio Super Admin ⚙️</h1>
+  
+  <div class="pass-box">
+    <label style="margin-top:0; color:#fff;">Llave Maestra de Administrador (ADMIN_KEY)</label>
+    <input type="password" id="admin_key" placeholder="Ingresa tu clave secreta de Railway..." />
+  </div>
+
+  <div class="card">
+    <h2>1. Inscribir / Actualizar Restaurante</h2>
+    <label>Nombre del Restaurante</label>
+    <input type="text" id="r_name" placeholder="Ej: Pizzería Don Juan" />
+    
+    <label>Número de WhatsApp (Con código de país, sin el '+')</label>
+    <input type="text" id="r_wa" placeholder="Ej: 573168191483" />
+    
+    <label>Dirección</label>
+    <input type="text" id="r_addr" placeholder="Ej: Calle 123 #45-67, Bogotá" />
+    
+    <label>Menú en formato JSON</label>
+    
+    <div style="background: #222; padding: 10px; border-radius: 8px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+      <input type="file" id="menu_file" accept=".pdf, .png, .jpg, .jpeg" style="flex: 1; border: none; padding: 0;" />
+      <button onclick="parseMenuFile()" id="btn_parse" style="margin: 0; background: #378ADD; color: #fff;">✨ Extraer con IA</button>
+    </div>
+    
+    <textarea id="r_menu" placeholder='{"Pizzas": [{"name": "Margarita", "price": 25000, "description": "Queso y tomate"}]}'></textarea>
+    <button onclick="createRestaurant()">Guardar Restaurante</button>
+  </div>
+
+  <div class="card">
+    <h2>2. Crear Usuario (Para que el dueño entre al Dashboard)</h2>
+    <label>Nombre del restaurante (Debe coincidir con el de arriba)</label>
+    <input type="text" id="u_rest" placeholder="Ej: Pizzería Don Juan" />
+    
+    <label>Correo Electrónico (Usuario)</label>
+    <input type="text" id="u_email" placeholder="ejemplo@restaurante.com" />
+    
+    <label>Contraseña</label>
+    <input type="text" id="u_pass" placeholder="Contraseña segura" />
+    
+    <button onclick="createUser()">Crear Usuario</button>
+  </div>
+
+  <div class="card">
+    <h2>3. El "Kill Switch" (Control de Suscripción)</h2>
+    <label>ID del Restaurante (Número)</label>
+    <input type="number" id="k_id" placeholder="Ej: 1" />
+    
+    <label>Estado de la suscripción</label>
+    <select id="k_status">
+      <option value="active">🟢 ACTIVO (Pagó)</option>
+      <option value="past_due">🔴 SUSPENDIDO (Falta de pago)</option>
+    </select>
+    
+    <button onclick="setKillSwitch()">Actualizar Estado</button>
+  </div>
+
+</div>
+
+<script>
+  async function parseMenuFile() {
+    const key = getAdminKey(); if(!key) return;
+    const fileInput = document.getElementById('menu_file');
+    const btn = document.getElementById('btn_parse');
+    
+    if (!fileInput.files.length) {
+      alert("⚠️ Selecciona un archivo PDF o imagen primero");
+      return;
+    }
+
+    btn.innerText = "⏳ Extrayendo...";
+    btn.disabled = true;
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    try {
+      const res = await fetch(`/api/admin/parse-menu?admin_key=${key}`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        // Formatear el JSON para que se vea bonito y pegarlo en el cuadro
+        document.getElementById('r_menu').value = JSON.stringify(data.json_menu, null, 2);
+        alert("✅ ¡Menú extraído mágicamente!");
+      } else {
+        alert("❌ Error: " + (data.detail || data.error));
+      }
+    } catch (e) {
+      alert("❌ Error de conexión con la IA.");
+    } finally {
+      btn.innerText = "✨ Extraer con IA";
+      btn.disabled = false;
+    }
+  }
+  function getAdminKey() {
+    const key = document.getElementById('admin_key').value;
+    if (!key) alert("⚠️ Debes poner tu Llave Maestra arriba");
+    return key;
+  }
+
+  async function createRestaurant() {
+    const key = getAdminKey(); if(!key) return;
+
+    let menuJson;
+    try {
+      let rawText = document.getElementById('r_menu').value || '{}';
+      rawText = rawText.replace(/[\n\r\t]/g, ' '); 
+      menuJson = JSON.parse(rawText);
+    } catch (e) {
+      alert("❌ El texto aún tiene un error de JSON.");
+      return; 
+    }
+
+    try {
+      const res = await fetch('/api/admin/create-restaurant', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          admin_key: key,
+          name: document.getElementById('r_name').value,
+          whatsapp_number: document.getElementById('r_wa').value.replace(/[+\s]/g, ''), // Limpia '+' y espacios
+          address: document.getElementById('r_addr').value,
+          menu: JSON.stringify(menuJson)
+        })
+      });
+      // 
+      // Si el servidor falla (Error 500, 403, etc), leemos el error exacto
+      if (!res.ok) {
+        const errorText = await res.text();
+        alert(`❌ Error del servidor (${res.status}):\n${errorText}`);
+        return;
+      }
+
+      const data = await res.json();
+      alert(data.success ? "✅ ¡Restaurante guardado con éxito!" : "❌ Error: " + data.detail);
+      
+    } catch (e) { 
+      alert("❌ Error de conexión: " + e.message); 
+    }
+  }
+
+  async function createUser() {
+    const key = getAdminKey(); if(!key) return;
+    const res = await fetch('/api/admin/create-user', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        admin_key: key,
+        restaurant_name: document.getElementById('u_rest').value,
+        username: document.getElementById('u_email').value,
+        password: document.getElementById('u_pass').value
+      })
+    });
+    const data = await res.json();
+    alert(data.success ? "✅ Usuario creado!" : "❌ Error: " + (data.detail || data.error));
+  }
+
+  async function setKillSwitch() {
+    const key = getAdminKey(); if(!key) return;
+    const res = await fetch('/api/admin/set-subscription', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        admin_key: key,
+        restaurant_id: parseInt(document.getElementById('k_id').value),
+        status: document.getElementById('k_status').value
+      })
+    });
+    const data = await res.json();
+    alert(data.success ? "✅ Estado actualizado!" : "❌ Error: " + (data.detail || data.error));
+  }
+</script>
+</body>
+</html>
