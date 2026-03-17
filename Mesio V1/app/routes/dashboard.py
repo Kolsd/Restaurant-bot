@@ -149,7 +149,7 @@ async def admin_parse_menu(
 
         # Llamar a Claude 3.5 Sonnet
         response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-3-5-sonnet-latest",
             max_tokens=4000,
             temperature=0,
             system=system_prompt,
