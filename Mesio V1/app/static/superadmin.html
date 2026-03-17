@@ -132,17 +132,12 @@
 
     let menuJson;
     try {
-      // 1. Tomamos el texto en crudo
       let rawText = document.getElementById('r_menu').value || '{}';
-      
-      // 2. MAGIA: Eliminamos cualquier salto de línea, retorno o tabulación "ilegal"
       rawText = rawText.replace(/[\n\r\t]/g, ' '); 
-      
-      // 3. Convertimos a JSON de forma segura
       menuJson = JSON.parse(rawText);
     } catch (e) {
-      alert("❌ Error: El JSON tiene formato inválido. Revisa si hay comillas dobles mal cerradas.");
-      return; // Detenemos la ejecución si falla aquí
+      alert("❌ El texto aún tiene un error de JSON.");
+      return; 
     }
 
     try {
@@ -152,18 +147,27 @@
         body: JSON.stringify({
           admin_key: key,
           name: document.getElementById('r_name').value,
-          whatsapp_number: document.getElementById('r_wa').value,
+          whatsapp_number: document.getElementById('r_wa').value.replace(/\s+/g, ''), // Asegura que no haya espacios
           address: document.getElementById('r_addr').value,
           menu: JSON.stringify(menuJson)
         })
       });
+      
+      // Si el servidor falla (Error 500, 403, etc), leemos el error exacto
+      if (!res.ok) {
+        const errorText = await res.text();
+        alert(`❌ Error del servidor (${res.status}):\n${errorText}`);
+        return;
+      }
+
       const data = await res.json();
-      alert(data.success ? "✅ Restaurante guardado!" : "❌ Error del servidor: " + (data.detail || data.error));
+      alert(data.success ? "✅ ¡Restaurante guardado con éxito!" : "❌ Error: " + data.detail);
+      
     } catch (e) { 
-      alert("❌ Error de red al intentar guardar. Revisa tu conexión."); 
+      alert("❌ Error de conexión: " + e.message); 
     }
   }
-
+  
   async function createUser() {
     const key = getAdminKey(); if(!key) return;
     const res = await fetch('/api/admin/create-user', {
