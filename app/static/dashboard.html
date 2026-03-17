@@ -378,11 +378,41 @@
       <div style="font-size:14px;font-weight:600;margin-bottom:1rem;">Nueva sucursal</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
         <input id="branch-name" placeholder="Nombre del restaurante" style="padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;">
-        <input id="branch-wa" placeholder="Número WhatsApp (ej: 573001234567)" style="padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;">
-        <input id="branch-address" placeholder="Dirección" style="padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;">
+        <input id="branch-wa" type="hidden" value="">
+        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:flex-start;">
+          <input id="branch-address" placeholder="Dirección (ej: Calle 93 #15-32, Bogotá)" 
+            style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();validateAddress();}">
+          <button onclick="validateAddress()" 
+            style="background:#185FA5;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:500;">
+            📍 Validar
+          </button>
+        </div>
       </div>
+      <!-- MAP PREVIEW -->
+      <div id="branch-map-preview" style="display:none;margin-bottom:12px;border:0.5px solid #e0e0d8;border-radius:10px;overflow:hidden;">
+        <div style="background:#E6F1FB;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <div>
+            <div style="font-size:11px;font-weight:600;color:#185FA5;">📍 Ubicación encontrada</div>
+            <div id="branch-address-display" style="font-size:11px;color:#444;margin-top:2px;"></div>
+          </div>
+          <a id="branch-maps-link" href="#" target="_blank" 
+            style="font-size:11px;padding:4px 10px;background:#185FA5;color:#fff;border-radius:6px;text-decoration:none;white-space:nowrap;">
+            Ver en Maps ↗
+          </a>
+        </div>
+        <div style="padding:10px 12px;background:#f8f8f5;">
+          <div style="font-size:11px;color:#888;display:flex;gap:16px;">
+            <span>🌐 Lat: <strong id="branch-lat-display">—</strong></span>
+            <span>🌐 Lon: <strong id="branch-lon-display">—</strong></span>
+          </div>
+        </div>
+      </div>
+      <div id="branch-map-error" style="display:none;background:#FDE8E8;color:#C0392B;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;"></div>
+      <input type="hidden" id="branch-lat" value="">
+      <input type="hidden" id="branch-lon" value="">
       <div style="display:flex;gap:8px;">
-        <button onclick="createBranch()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;">Crear sucursal</button>
+        <button onclick="createBranch()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear sucursal</button>
         <button onclick="document.getElementById('create-branch-form').style.display='none'" style="background:none;border:1px solid #e0e0d8;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
       </div>
     </div>
@@ -874,22 +904,68 @@ function showCreateBranch() {
   document.getElementById('branch-name').focus();
 }
 
+async function validateAddress() {
+  const address = document.getElementById('branch-address').value.trim();
+  if (!address) { alert('Ingresa una dirección primero'); return; }
+  const btn = document.querySelector('[onclick="validateAddress()"]');
+  const prevText = btn.textContent;
+  btn.textContent = '...';
+  btn.disabled = true;
+  document.getElementById('branch-map-preview').style.display = 'none';
+  document.getElementById('branch-map-error').style.display = 'none';
+  try {
+    const r = await fetch('/api/geocode?address=' + encodeURIComponent(address), { headers });
+    if (r.ok) {
+      const d = await r.json();
+      document.getElementById('branch-lat').value = d.latitude;
+      document.getElementById('branch-lon').value = d.longitude;
+      document.getElementById('branch-address-display').textContent = d.display_name;
+      document.getElementById('branch-lat-display').textContent = d.latitude.toFixed(6);
+      document.getElementById('branch-lon-display').textContent = d.longitude.toFixed(6);
+      document.getElementById('branch-maps-link').href = d.maps_url;
+      document.getElementById('branch-map-preview').style.display = 'block';
+    } else {
+      const e = await r.json();
+      const errEl = document.getElementById('branch-map-error');
+      errEl.textContent = '❌ ' + (e.detail || 'No se encontró la dirección. Intenta con más detalle.');
+      errEl.style.display = 'block';
+      document.getElementById('branch-lat').value = '';
+      document.getElementById('branch-lon').value = '';
+    }
+  } catch(e) {
+    const errEl = document.getElementById('branch-map-error');
+    errEl.textContent = '❌ Error de conexión al validar dirección';
+    errEl.style.display = 'block';
+  } finally {
+    btn.textContent = prevText;
+    btn.disabled = false;
+  }
+}
+
 async function createBranch() {
   const name = document.getElementById('branch-name').value.trim();
   const wa = document.getElementById('branch-wa').value.trim();
   const address = document.getElementById('branch-address').value.trim();
-  if (!name || !wa) { alert('Nombre y número de WhatsApp son obligatorios'); return; }
+  const lat = document.getElementById('branch-lat').value;
+  const lon = document.getElementById('branch-lon').value;
+  if (!name) { alert('El nombre de la sucursal es obligatorio'); return; }
+  if (!address) { alert('Ingresa la dirección de la sucursal'); return; }
   try {
+    const body = { name, whatsapp_number: wa, address, menu: {} };
+    if (lat && lon) { body.latitude = parseFloat(lat); body.longitude = parseFloat(lon); }
     const r = await fetch('/api/team/branches', {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, whatsapp_number: wa, address, menu: {} })
+      body: JSON.stringify(body)
     });
     if (r.ok) {
       document.getElementById('create-branch-form').style.display = 'none';
       document.getElementById('branch-name').value = '';
       document.getElementById('branch-wa').value = '';
       document.getElementById('branch-address').value = '';
+      document.getElementById('branch-lat').value = '';
+      document.getElementById('branch-lon').value = '';
+      document.getElementById('branch-map-preview').style.display = 'none';
       loadBranches();
     } else {
       const e = await r.json();
@@ -1081,7 +1157,19 @@ async function loadPOSDataFresh() {
     // Plato más pedido
     const platoCounts = {};
     orders.forEach(o => {
-      const items = o.items ? o.items.split(', ') : [];
+      let items = [];
+      if (!o.items) return;
+      // Handle both formats: "3x Diavola, 1x Carbonara" and JSON array
+      if (typeof o.items === 'string' && o.items.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(o.items);
+          items = parsed.map(i => (i.quantity || 1) + 'x ' + (i.name || ''));
+        } catch(e) { items = o.items.split(', '); }
+      } else if (Array.isArray(o.items)) {
+        items = o.items.map(i => (i.quantity || 1) + 'x ' + (i.name || ''));
+      } else {
+        items = o.items.split(', ');
+      }
       items.forEach(item => {
         const name = item.replace(/^\d+x\s+/, '').trim();
         if (name) platoCounts[name] = (platoCounts[name] || 0) + 1;
