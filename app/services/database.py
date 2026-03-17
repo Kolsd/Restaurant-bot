@@ -376,14 +376,18 @@ async def db_get_tables(branch_id: int = None):
 async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Ensure branch_id column exists
+        try:
+            await conn.execute("ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER;")
+        except Exception:
+            pass
         await conn.execute("""
-            ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER;
-        """)
-        await conn.execute("""
-            INSERT INTO restaurant_tables (id, number, name, branch_id)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, name=EXCLUDED.name, branch_id=EXCLUDED.branch_id
+            INSERT INTO restaurant_tables (id, number, name, branch_id, active)
+            VALUES ($1, $2, $3, $4, TRUE)
+            ON CONFLICT (id) DO UPDATE SET
+                number=EXCLUDED.number,
+                name=EXCLUDED.name,
+                branch_id=EXCLUDED.branch_id,
+                active=TRUE
         """, table_id, number, name, branch_id)
 
 
