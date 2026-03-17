@@ -19,7 +19,6 @@ async def login(username: str, password: str) -> dict:
 
     role = user.get("role", "owner")
     branch_id = user.get("branch_id")
-
     whatsapp_number = ""
     try:
         if branch_id:
@@ -37,7 +36,7 @@ async def login(username: str, password: str) -> dict:
                 whatsapp_number = all_restaurants[0].get("whatsapp_number", "")
                 branch_id = all_restaurants[0].get("id")
     except Exception as e:
-        print(f"Warning login whatsapp_number: {e}")
+        print(f"Warning login: {e}")
 
     return {
         "success": True,
@@ -50,7 +49,6 @@ async def login(username: str, password: str) -> dict:
             "whatsapp_number": whatsapp_number,
         },
     }
-
 def verify_token(token: str) -> str | None:
     return active_tokens.get(token)
 
