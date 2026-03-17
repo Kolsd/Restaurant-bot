@@ -262,7 +262,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     system_prompt = await build_system_prompt(restaurant, menu, top_dishes, table_context)
 
     response = client.messages.create(
-        model="claude-3-5-sonnet-latest",
+        model="claude-3-sonnet-20240229",
         max_tokens=1000,
         system=system_prompt,
         messages=history[-20:]
