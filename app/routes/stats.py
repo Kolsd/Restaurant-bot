@@ -218,9 +218,5 @@ async def manual_reply(phone: str, request: Request):
                 )
         except Exception as e:
             print(f"Meta send error: {e}")
-@router.get("/api/dashboard/menu")
-async def dashboard_menu(request: Request):
-    restaurant = await get_current_restaurant(request)
-    bot_number = restaurant["whatsapp_number"]
-    menu = await db.db_get_menu(bot_number) or {}
-    return {"menu": menu}
+
+    return {"success": True}
