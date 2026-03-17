@@ -147,12 +147,12 @@
         body: JSON.stringify({
           admin_key: key,
           name: document.getElementById('r_name').value,
-          whatsapp_number: document.getElementById('r_wa').value.replace(/\s+/g, ''), // Asegura que no haya espacios
+          whatsapp_number: document.getElementById('r_wa').value.replace(/[+\s]/g, ''), // Limpia '+' y espacios
           address: document.getElementById('r_addr').value,
           menu: JSON.stringify(menuJson)
         })
       });
-      
+      // 
       // Si el servidor falla (Error 500, 403, etc), leemos el error exacto
       if (!res.ok) {
         const errorText = await res.text();
@@ -167,7 +167,7 @@
       alert("❌ Error de conexión: " + e.message); 
     }
   }
-  
+
   async function createUser() {
     const key = getAdminKey(); if(!key) return;
     const res = await fetch('/api/admin/create-user', {

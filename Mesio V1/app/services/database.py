@@ -6,6 +6,17 @@ from datetime import date, datetime
 _pool = None
 
 
+def _normalize_phone(number: str) -> str:
+    """
+    Normaliza números de teléfono/WhatsApp para búsquedas en DB.
+    - Elimina espacios
+    - Elimina '+' inicial
+    """
+    if not number:
+        return ""
+    return number.replace(" ", "").replace("+", "")
+
+
 def _to_date(s: str) -> date:
     """Convierte string YYYY-MM-DD a objeto date de Python."""
     return datetime.strptime(s, "%Y-%m-%d").date()
@@ -281,7 +292,7 @@ async def db_get_restaurant_by_phone(whatsapp_number: str):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM restaurants WHERE whatsapp_number=$1",
-            whatsapp_number.strip(),
+            _normalize_phone(whatsapp_number.strip()),
         )
         return _serialize(dict(row)) if row else None
 
@@ -473,7 +484,8 @@ async def db_get_restaurant_by_bot_number(whatsapp_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM restaurants WHERE whatsapp_number=$1", whatsapp_number
+            "SELECT * FROM restaurants WHERE whatsapp_number=$1",
+            _normalize_phone(whatsapp_number),
         )
         return _serialize(dict(row)) if row else None
 

@@ -6,6 +6,17 @@ from app.services.agent import chat, reset_conversation
 
 router = APIRouter()
 
+
+def _normalize_number(number: str) -> str:
+    """
+    Normaliza números de WhatsApp:
+    - Elimina espacios
+    - Elimina el prefijo '+'
+    """
+    if not number:
+        return ""
+    return number.replace(" ", "").replace("+", "")
+
 class ChatRequest(BaseModel):
     phone: str
     message: str
@@ -51,7 +62,8 @@ async def meta_webhook(request: Request):
         if message:
             user_phone = message.get("from")
             user_text = message.get("text", {}).get("body", "")
-            bot_number = value.get("metadata", {}).get("display_phone_number")
+            raw_bot_number = value.get("metadata", {}).get("display_phone_number")
+            bot_number = _normalize_number(raw_bot_number)
             phone_id = value.get("metadata", {}).get("phone_number_id")
 
             # 1. Procesar respuesta con nuestra IA
