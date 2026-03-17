@@ -112,6 +112,7 @@ async def admin_parse_menu(
     filename = file.filename.lower()
     
     client = Anthropic()
+    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     extracted_text = ""
     messages_content = []
 
@@ -149,7 +150,7 @@ async def admin_parse_menu(
 
         # Llamar a Claude 3.5 Sonnet
         response = client.messages.create(
-            model="claude-3-sonnet-20240229",
+            model=model,
             max_tokens=4000,
             temperature=0,
             system=system_prompt,
