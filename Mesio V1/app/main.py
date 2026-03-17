@@ -8,12 +8,22 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
 from app.services.database import init_db
+from fastapi import FastAPI, Request
+from starlette.responses import RedirectResponse
 
 app = FastAPI(
     title="🍽️ Mesio",
     description="IA colombiana para restaurantes",
     version="5.5.0"
 )
+@app.middleware("http")
+async def force_domain_middleware(request: Request, call_next):
+    host = request.headers.get("host", "")
+    # Si detecta el dominio de Railway, fuerza la redirección al dominio oficial
+    if "railway.app" in host:
+        url = str(request.url).replace(host, "mesioai.com").replace("http://", "https://")
+        return RedirectResponse(url, status_code=301)
+    return await call_next(request)
 
 app.add_middleware(
     CORSMiddleware,
