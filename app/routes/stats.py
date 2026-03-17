@@ -162,3 +162,61 @@ async def cleanup_conversations(request: Request):
     from app.services.database import db_cleanup_old_conversations
     result = await db_cleanup_old_conversations(days=7)
     return {"success": True, "result": str(result)}
+
+@router.get("/api/conversations/{phone}")
+async def get_conversation(phone: str, request: Request):
+    """Retorna el historial completo de una conversacion para el chat modal."""
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    details = await db.db_get_conversation_details(phone, bot_number)
+    return {
+        "phone": phone,
+        "history": details.get("history", []),
+        "bot_paused": details.get("bot_paused", False)
+    }
+
+
+@router.post("/api/conversations/{phone}/pause")
+async def pause_bot_for_conversation(phone: str, request: Request):
+    """Pausa o reanuda el bot para una conversacion especifica."""
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    body = await request.json()
+    paused = body.get("paused", True)
+    await db.db_toggle_bot(phone, bot_number, paused)
+    return {"success": True, "paused": paused}
+
+
+@router.post("/api/conversations/{phone}/reply")
+async def manual_reply(phone: str, request: Request):
+    """Envia un mensaje manual desde el dashboard y lo guarda en el historial."""
+    import os, httpx as _httpx
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    body = await request.json()
+    message = body.get("message", "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Mensaje vacio")
+
+    # Save to history as assistant message
+    details = await db.db_get_conversation_details(phone, bot_number)
+    history = details.get("history", [])
+    history.append({"role": "assistant", "content": f"[Humano] {message}"})
+    await db.db_save_history(phone, bot_number, history)
+
+    # Try to send via Meta WhatsApp API if configured
+    meta_token = os.getenv("META_ACCESS_TOKEN", "")
+    phone_id = os.getenv("META_PHONE_NUMBER_ID", "")
+    if meta_token and phone_id:
+        try:
+            async with _httpx.AsyncClient(timeout=8) as client:
+                await client.post(
+                    f"https://graph.facebook.com/v18.0/{phone_id}/messages",
+                    headers={"Authorization": f"Bearer {meta_token}"},
+                    json={"messaging_product": "whatsapp", "to": phone,
+                          "type": "text", "text": {"body": message}}
+                )
+        except Exception as e:
+            print(f"Meta send error: {e}")
+
+    return {"success": True}
