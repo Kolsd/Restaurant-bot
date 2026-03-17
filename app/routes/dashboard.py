@@ -283,3 +283,32 @@ async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
         return {"success": True, "json_menu": json.loads(result_text)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.post("/api/admin/fix-branch-ids")
+async def fix_branch_ids(request: Request):
+    """Endpoint temporal para asignar branch_id a usuarios existentes."""
+    body = await request.json()
+    if body.get("admin_key") != os.getenv("ADMIN_KEY", "restaurantbot2024"):
+        raise HTTPException(status_code=403, detail="No autorizado")
+    
+    pool = await db.get_pool()
+    fixed = []
+    async with pool.acquire() as conn:
+        # Get all restaurants
+        restaurants = await conn.fetch("SELECT id, name, whatsapp_number FROM restaurants")
+        rest_map = {r['name'].lower().strip(): dict(r) for r in restaurants}
+        
+        # Get all users without branch_id
+        users = await conn.fetch("SELECT username, restaurant_name, role FROM users WHERE branch_id IS NULL")
+        
+        for user in users:
+            rname = user['restaurant_name'].lower().strip()
+            if rname in rest_map:
+                rest = rest_map[rname]
+                await conn.execute(
+                    "UPDATE users SET branch_id=$1, role='owner' WHERE username=$2",
+                    rest['id'], user['username']
+                )
+                fixed.append({"username": user['username'], "branch_id": rest['id'], "restaurant": rest['name']})
+    
+    return {"success": True, "fixed": fixed}
