@@ -106,6 +106,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
         "delivery_fee": delivery_fee, "total": total,
         "status": "pendiente_pago", "paid": False,
         "created_at": datetime.now().isoformat(),
+        "bot_number": bot_number,
         "payment_url": generate_wompi_payment_link(order_id, total)
     }
     clear_cart(phone, bot_number)

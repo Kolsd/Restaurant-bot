@@ -602,34 +602,18 @@ function updateTiposChart(domicilio, recoger) {
   });
 }
 
-const MENU_ITEMS = [
-  {name:'Bruschetta al Pomodoro',cat:'Entradas',price:'$120'},
-  {name:'Carpaccio de Res',cat:'Entradas',price:'$185'},
-  {name:'Burrata Fresca',cat:'Entradas',price:'$210'},
-  {name:'Calamares Fritos',cat:'Entradas',price:'$165'},
-  {name:'Spaghetti Carbonara',cat:'Pastas',price:'$195'},
-  {name:'Penne Arrabiata',cat:'Pastas',price:'$165'},
-  {name:'Fettuccine Alfredo',cat:'Pastas',price:'$180'},
-  {name:'Lasagna della Nonna',cat:'Pastas',price:'$220'},
-  {name:'Tagliatelle al Tartufo',cat:'Pastas',price:'$285'},
-  {name:'Margherita Clásica',cat:'Pizzas',price:'$175'},
-  {name:'Prosciutto e Funghi',cat:'Pizzas',price:'$225'},
-  {name:'Quattro Formaggi',cat:'Pizzas',price:'$240'},
-  {name:'Diavola',cat:'Pizzas',price:'$215'},
-  {name:'Vegetariana',cat:'Pizzas',price:'$195'},
-  {name:'Tiramisú Clásico',cat:'Postres',price:'$110'},
-  {name:'Panna Cotta',cat:'Postres',price:'$95'},
-  {name:'Gelato Artesanal',cat:'Postres',price:'$85'},
-  {name:'Limonada Italiana',cat:'Bebidas',price:'$65'},
-  {name:'Agua Mineral',cat:'Bebidas',price:'$35'},
-  {name:'Café Espresso',cat:'Bebidas',price:'$45'},
-  {name:'Vino de la Casa',cat:'Bebidas',price:'$95'},
-];
-
+let MENU_DATA = {};
 let menuAvailability = {};
 
 async function loadMenu() {
   try {
+    const mRes = await fetch('/api/dashboard/menu', { headers });
+    if (mRes.ok) {
+      const mData = await mRes.json();
+      MENU_DATA = mData.menu || {};
+    } else {
+      MENU_DATA = {};
+    }
     const r = await fetch('/api/menu/availability', { headers });
     if (r.ok) {
       const d = await r.json();
@@ -642,10 +626,14 @@ async function loadMenu() {
 const CAT_ICONS = {'Entradas':'🥗','Pastas':'🍝','Pizzas':'🍕','Postres':'🍮','Bebidas':'🥤'};
 
 function renderMenu() {
-  const cats = [...new Set(MENU_ITEMS.map(m => m.cat))];
+  const cats = Object.keys(MENU_DATA || {});
+  if (!cats.length) {
+    document.getElementById('menu-grid').innerHTML = '<div class="empty-state">Configura el menú de tu restaurante para verlo aquí.</div>';
+    return;
+  }
   let html = '';
   cats.forEach((cat, ci) => {
-    const items = MENU_ITEMS.filter(m => m.cat === cat);
+    const items = Array.isArray(MENU_DATA[cat]) ? MENU_DATA[cat] : [];
     const availCount = items.filter(m => menuAvailability[m.name] !== false).length;
     const icon = CAT_ICONS[cat] || '🍽️';
     const isOpen = ci === 0;
@@ -663,7 +651,8 @@ function renderMenu() {
       html += '<div style="flex:1;min-width:0;">';
       html += '<div class="menu-row-name" style="' + (avail ? '' : 'text-decoration:line-through;color:#bbb;') + '">' + m.name + '</div>';
       html += '</div>';
-      html += '<div class="menu-row-price">' + m.price + '</div>';
+      const priceText = (typeof m.price === 'number') ? ('$' + m.price.toLocaleString('es-CO')) : (m.price || '');
+      html += '<div class="menu-row-price">' + priceText + '</div>';
       html += '<div class="menu-row-status ' + (avail ? 'status-on' : 'status-off') + '">' + (avail ? 'Disponible' : 'No disponible') + '</div>';
       html += '<label class="toggle-switch"><input type="checkbox" ' + (avail ? 'checked' : '') + ' onchange="toggleDish(\'' + safeName + '\', this.checked)"><span class="toggle-slider"></span></label>';
       html += '</div>';

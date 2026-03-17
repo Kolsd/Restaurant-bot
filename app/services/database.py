@@ -71,6 +71,7 @@ async def init_db():
                 time TEXT NOT NULL,
                 guests INTEGER NOT NULL,
                 phone TEXT NOT NULL,
+                bot_number TEXT NOT NULL DEFAULT '',
                 notes TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT NOW()
             );
@@ -89,7 +90,8 @@ async def init_db():
                 payment_url TEXT DEFAULT '',
                 transaction_id TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT NOW(),
-                paid_at TIMESTAMP
+                paid_at TIMESTAMP,
+                bot_number TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS conversations (
                 phone TEXT NOT NULL,
@@ -112,6 +114,8 @@ async def init_db():
             await conn.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_number TEXT NOT NULL DEFAULT '';")
             await conn.execute("ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_pkey;")
             await conn.execute("ALTER TABLE conversations ADD CONSTRAINT conversations_pkey PRIMARY KEY (phone, bot_number);")
+            await conn.execute("ALTER TABLE reservations ADD COLUMN IF NOT EXISTS bot_number TEXT NOT NULL DEFAULT '';")
+            await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS bot_number TEXT NOT NULL DEFAULT '';")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS whatsapp_number TEXT UNIQUE;")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';")
@@ -134,13 +138,13 @@ async def init_db():
 # RESERVACIONES
 # ─────────────────────────────────────────────
 
-async def db_add_reservation(name, date_str, time, guests, phone, notes=""):
+async def db_add_reservation(name, date_str, time, guests, phone, bot_number: str, notes=""):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
-            INSERT INTO reservations (name, date, time, guests, phone, notes)
-            VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
-        """, name, date_str, time, int(guests), phone, notes)
+            INSERT INTO reservations (name, date, time, guests, phone, bot_number, notes)
+            VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *
+        """, name, date_str, time, int(guests), phone, bot_number, notes)
         return _serialize(dict(row))
 
 
@@ -152,13 +156,21 @@ async def db_get_reservations_today(date_str: str):
         return [_serialize(dict(r)) for r in rows]
 
 
-async def db_get_reservations_range(date_from: str, date_to: str):
+async def db_get_reservations_range(date_from: str, date_to: str, bot_number: str | None = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM reservations
-            WHERE date >= $1 AND date <= $2 ORDER BY date, time
-        """, date_from, date_to)
+        if bot_number:
+            rows = await conn.fetch("""
+                SELECT * FROM reservations
+                WHERE date >= $1 AND date <= $2
+                  AND bot_number = $3
+                ORDER BY date, time
+            """, date_from, date_to, bot_number)
+        else:
+            rows = await conn.fetch("""
+                SELECT * FROM reservations
+                WHERE date >= $1 AND date <= $2 ORDER BY date, time
+            """, date_from, date_to)
         return [_serialize(dict(r)) for r in rows]
 
 
@@ -178,8 +190,8 @@ async def db_save_order(order: dict):
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
-                subtotal, delivery_fee, total, status, paid, payment_url)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                subtotal, delivery_fee, total, status, paid, payment_url, bot_number)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             ON CONFLICT (id) DO UPDATE SET
                 status=EXCLUDED.status, paid=EXCLUDED.paid,
                 payment_url=EXCLUDED.payment_url
@@ -187,7 +199,7 @@ async def db_save_order(order: dict):
         order["id"], order["phone"], json.dumps(order["items"]),
         order["order_type"], order.get("address",""), order.get("notes",""),
         order["subtotal"], order["delivery_fee"], order["total"],
-        order["status"], order["paid"], order.get("payment_url",""))
+        order["status"], order["paid"], order.get("payment_url",""), order.get("bot_number",""))
 
 
 async def db_confirm_payment(order_id: str, transaction_id: str):
@@ -201,18 +213,26 @@ async def db_confirm_payment(order_id: str, transaction_id: str):
         return _serialize(dict(row)) if row else None
 
 
-async def db_get_orders_range(date_from: str, date_to: str):
+async def db_get_orders_range(date_from: str, date_to: str, bot_number: str | None = None):
     pool = await get_pool()
     d_from = _to_date(date_from)
     # Add 1 day to d_to so we capture the full day including late UTC times
     from datetime import timedelta
     d_to_inclusive = _to_date(date_to) + timedelta(days=1)
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM orders
-            WHERE created_at >= $1 AND created_at < $2
-            ORDER BY created_at DESC
-        """, d_from, d_to_inclusive)
+        if bot_number:
+            rows = await conn.fetch("""
+                SELECT * FROM orders
+                WHERE created_at >= $1 AND created_at < $2
+                  AND bot_number = $3
+                ORDER BY created_at DESC
+            """, d_from, d_to_inclusive, bot_number)
+        else:
+            rows = await conn.fetch("""
+                SELECT * FROM orders
+                WHERE created_at >= $1 AND created_at < $2
+                ORDER BY created_at DESC
+            """, d_from, d_to_inclusive)
         return [_serialize(dict(r)) for r in rows]
 
 
@@ -255,11 +275,17 @@ async def db_save_history(phone: str, bot_number: str, history: list):
         """, phone, bot_number, json.dumps(history[-20:]))
 
 
-async def db_get_all_conversations():
+async def db_get_all_conversations(bot_number: str | None = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT phone, history, updated_at FROM conversations ORDER BY updated_at DESC")
+        if bot_number:
+            rows = await conn.fetch(
+                "SELECT phone, history, updated_at FROM conversations WHERE bot_number=$1 ORDER BY updated_at DESC",
+                bot_number,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT phone, history, updated_at FROM conversations ORDER BY updated_at DESC")
         result = []
         for r in rows:
             history = r["history"] if isinstance(r["history"], list) else json.loads(r["history"])
@@ -354,13 +380,20 @@ async def db_set_dish_availability(dish_name: str, available: bool):
 # CONVERSACIONES — limpiar antiguas
 # ─────────────────────────────────────────────
 
-async def db_cleanup_old_conversations(days: int = 7):
+async def db_cleanup_old_conversations(days: int = 7, bot_number: str | None = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute("""
-            DELETE FROM conversations
-            WHERE updated_at < NOW() - INTERVAL '7 days'
-        """)
+        if bot_number:
+            result = await conn.execute("""
+                DELETE FROM conversations
+                WHERE updated_at < NOW() - INTERVAL $1 * INTERVAL '1 day'
+                  AND bot_number = $2
+            """, days, bot_number)
+        else:
+            result = await conn.execute("""
+                DELETE FROM conversations
+                WHERE updated_at < NOW() - INTERVAL $1 * INTERVAL '1 day'
+            """, days)
         return result
 
 
@@ -490,6 +523,16 @@ async def db_get_restaurant_by_bot_number(whatsapp_number: str):
         row = await conn.fetchrow(
             "SELECT * FROM restaurants WHERE whatsapp_number=$1",
             _normalize_phone(whatsapp_number),
+        )
+        return _serialize(dict(row)) if row else None
+
+
+async def db_get_restaurant_by_name(name: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM restaurants WHERE name=$1",
+            name,
         )
         return _serialize(dict(row)) if row else None
 
