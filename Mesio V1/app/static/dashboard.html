@@ -941,7 +941,7 @@ async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         system: 'Eres el asistente de IA de Mesio, especializado en análisis de restaurantes colombianos. Responde siempre en español, de forma directa y accionable. Máximo 3 oraciones. Usa <strong> para resaltar números y recomendaciones clave.',
         messages: [{
@@ -966,7 +966,7 @@ Genera un insight principal accionable para el gerente del restaurante hoy. Menc
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         system: 'Eres el asistente de IA de Mesio para restaurantes colombianos. Responde en español, máximo 2 oraciones, enfocado en inventario y compras.',
         messages: [{
@@ -991,7 +991,7 @@ Basado en estos datos y que hoy es ${hoy}, ¿qué ingredientes o productos deber
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         system: 'Eres el asistente de IA de Mesio. Responde SOLO con JSON válido, sin texto adicional ni markdown. El formato debe ser: [{"icon":"emoji","texto":"sugerencia de upsell","ganancia":"impacto estimado"}]. Máximo 3 items.',
         messages: [{
@@ -1037,7 +1037,7 @@ async function askMesioAI() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-3-sonnet-20240229',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         system: `Eres Mesio IA, el asistente inteligente de ${restaurant.name || 'este restaurante'}. Eres un experto en operaciones de restaurantes colombianos. Responde en español de forma directa, práctica y accionable. Máximo 150 palabras.`,
         messages: [{ role: 'user', content: question }]

@@ -1,10 +1,12 @@
 import re
+import os
 import uuid
 from anthropic import Anthropic
 from app.services.orders import add_to_cart, remove_from_cart, cart_summary, create_order, clear_cart
 from app.services import database as db
 
 client = Anthropic()
+MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 async def build_system_prompt(restaurant: dict, menu: dict, top_dishes: list, table_context: dict = None) -> str:
     menu_text = ""
@@ -262,7 +264,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     system_prompt = await build_system_prompt(restaurant, menu, top_dishes, table_context)
 
     response = client.messages.create(
-        model="claude-3-sonnet-20240229",
+        model=MODEL,
         max_tokens=1000,
         system=system_prompt,
         messages=history[-20:]
