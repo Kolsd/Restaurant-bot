@@ -48,6 +48,7 @@ async def init_db():
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 whatsapp_number TEXT NOT NULL UNIQUE,
+                address TEXT NOT NULL DEFAULT '',
                 menu JSONB NOT NULL DEFAULT '{}'::jsonb,
                 subscription_status TEXT NOT NULL DEFAULT 'active',
                 created_at TIMESTAMP DEFAULT NOW()
@@ -98,6 +99,7 @@ async def init_db():
             await conn.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_paused BOOLEAN DEFAULT FALSE;")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';")
             await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS whatsapp_number TEXT UNIQUE;")
+            await conn.execute("ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';")
         except Exception as e:
             print(f"Aviso al parchear tablas: {e}")
 
