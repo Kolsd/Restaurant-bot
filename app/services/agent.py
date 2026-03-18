@@ -47,12 +47,15 @@ TOOLS = [
             "Envia el pedido a cocina para clientes en mesa (dine-in). "
             "Usalo SIEMPRE cuando el cliente en mesa confirme su pedido. "
             "Los items se leen automaticamente del carrito. "
-            "NO usar para domicilio ni recoger."
+            "NO usar para domicilio ni recoger. "
+            "Si el cliente ya tiene un pedido activo en cocina, los nuevos items se agregan a ese mismo pedido (misma cuenta). "
+            "SOLO usa separate_bill=true si el cliente pide explicitamente cuenta separada, cuenta aparte, o cobrar por separado."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "notes": {"type": "string", "description": "Notas para cocina: alergias, termino de coccion, etc (opcional)"}
+                "notes":         {"type": "string",  "description": "Notas para cocina: alergias, termino de coccion, etc (opcional)"},
+                "separate_bill": {"type": "boolean", "description": "true SOLO si el cliente pide explicitamente cuenta separada o cobrar aparte. Por defecto false."}
             },
             "required": []
         }
@@ -301,22 +304,57 @@ async def execute_tool(
             cart = await db.db_get_cart(phone, bot_number)
             if not cart or not cart.get("items"):
                 return "Error: El carrito está vacío."
+
+            cart_total    = await orders.get_cart_total(phone, bot_number)
+            cart_items    = cart["items"]
+            extra_notes   = tool_input.get("notes", "")
+            separate_bill = tool_input.get("separate_bill", False)
+            items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
+
+            # Buscar orden activa (no entregada, no cancelada)
+            active_order = await db.db_get_active_table_order(phone, table_context["id"])
+
+            # CASO 1: cliente pidió cuenta separada → siempre orden nueva
+            if separate_bill:
+                active_order = None
+                print(f"🧾 Cuenta separada solicitada — creando orden nueva", flush=True)
+
+            # CASO 2: hay orden activa → acumular en ella
+            if active_order:
+                await db.db_add_items_to_table_order(
+                    active_order["id"], cart_items, cart_total, extra_notes
+                )
+                await orders.clear_cart(phone, bot_number)
+                await db.db_session_mark_order(phone, bot_number)
+                new_total = (active_order.get("total") or 0) + cart_total
+                print(f"➕ Orden {active_order['id']} actualizada con: {items_summary}", flush=True)
+                return (
+                    f"OK: Items agregados al pedido existente {active_order['id']}. "
+                    f"Nuevos items: {items_summary}. "
+                    f"Total acumulado: ${new_total:,} COP."
+                )
+
+            # CASO 3: no hay orden activa (nueva sesión, post-entrega, o cuenta separada) → crear nueva
             order_id = f"MESA-{uuid.uuid4().hex[:6].upper()}"
-            total    = await orders.get_cart_total(phone, bot_number)
             await db.db_save_table_order({
                 "id":         order_id,
                 "table_id":   table_context["id"],
                 "table_name": table_context["name"],
                 "phone":      phone,
-                "items":      cart["items"],
-                "notes":      tool_input.get("notes", ""),
-                "total":      total,
+                "items":      cart_items,
+                "notes":      extra_notes,
+                "total":      cart_total,
                 "status":     "recibido"
             })
             await orders.clear_cart(phone, bot_number)
             await db.db_session_mark_order(phone, bot_number)
-            items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart["items"])
-            return f"OK: Pedido {order_id} enviado a cocina. Items: {items_summary}. Total: ${total:,} COP."
+            reason = "cuenta separada" if separate_bill else "nueva orden"
+            print(f"🆕 {reason} {order_id}: {items_summary}", flush=True)
+            return (
+                f"OK: Pedido {order_id} enviado a cocina. "
+                f"Items: {items_summary}. "
+                f"Total: ${cart_total:,} COP."
+            )
 
         elif tool_name == "create_reservation":
             name   = tool_input.get("name", "")
