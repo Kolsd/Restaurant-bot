@@ -588,7 +588,7 @@ async def db_get_table_orders(status: str = None):
         if status:
             rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at DESC", status)
         else:
-            rows = await conn.fetch("SELECT * FROM table_orders WHERE status NOT IN ('entregado','cancelado') ORDER BY created_at ASC")
+            rows = await conn.fetch("SELECT * FROM table_orders WHERE status NOT IN ('entregado','factura_entregada','cancelado') ORDER BY created_at ASC")
         result = []
         for r in rows:
             d = _serialize(dict(r))
@@ -602,6 +602,53 @@ async def db_update_table_order_status(order_id: str, status: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
+
+
+async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
+    """Retorna la orden activa (no entregada/cancelada) de una mesa para un cliente."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT * FROM table_orders
+            WHERE phone=$1 AND table_id=$2
+              AND status NOT IN ('entregado','factura_entregada','cancelado')
+            ORDER BY created_at DESC LIMIT 1
+        """, phone, table_id)
+        if not row:
+            return None
+        d = _serialize(dict(row))
+        if isinstance(d['items'], str):
+            d['items'] = json.loads(d['items'])
+        return d
+
+
+async def db_add_items_to_table_order(order_id: str, new_items: list, extra_total: int, extra_notes: str = ""):
+    """Acumula items y suma al total de una orden existente. No cambia el status."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT items, total, notes FROM table_orders WHERE id=$1", order_id)
+        if not row:
+            return False
+        existing = row['items'] if isinstance(row['items'], list) else json.loads(row['items'])
+        # Merge: si el plato ya existe, sumar cantidad; si no, añadir
+        merged = {item['name']: item.copy() for item in existing}
+        for new_item in new_items:
+            name = new_item['name']
+            if name in merged:
+                merged[name]['quantity']  += new_item['quantity']
+                merged[name]['subtotal']   = merged[name]['price'] * merged[name]['quantity']
+            else:
+                merged[name] = new_item.copy()
+        final_items = list(merged.values())
+        new_total   = (row['total'] or 0) + extra_total
+        old_notes   = row['notes'] or ''
+        new_notes   = (old_notes + ' | ' + extra_notes).strip(' |') if extra_notes else old_notes
+        await conn.execute("""
+            UPDATE table_orders
+            SET items=$2, total=$3, notes=$4, updated_at=NOW()
+            WHERE id=$1
+        """, order_id, json.dumps(final_items), new_total, new_notes)
+        return True
 
 
 # ── WAITER ALERTS ────────────────────────────────────────────────────

@@ -175,12 +175,12 @@ async def update_order_status(request: Request, order_id: str):
     await require_auth(request)
     body       = await request.json()
     new_status = body.get("status")
-    if new_status not in ["recibido", "en_preparacion", "listo", "entregado", "cancelado"]:
+    if new_status not in ["recibido", "en_preparacion", "listo", "entregado", "factura_entregada", "cancelado"]:
         raise HTTPException(status_code=400, detail="Estado inválido")
 
     await db.db_update_table_order_status(order_id, new_status)
 
-    # ── FIX: table_orders no tiene bot_number → lo buscamos en table_sessions ──
+    # Cuando se entrega la comida → actualizar sesión (timer 60min)
     if new_status == "entregado":
         try:
             pool = await db.get_pool()

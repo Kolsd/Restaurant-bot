@@ -60,8 +60,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .st-recibido  { background: #FFF3CD; color: #856404; }
 .st-prep      { background: #E6F1FB; color: #185FA5; }
 .st-entregado { background: #f0f0e8; color: #888; }
+.st-factura   { background: #F0E6FF; color: #6B21A8; }
 .btn { padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; }
-.btn-green { background: #1D9E75; color: #fff; }
+.btn-green  { background: #1D9E75; color: #fff; }
+.btn-purple { background: #7C3AED; color: #fff; }
 
 /* ── CHAT ── */
 .conv-item { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
@@ -309,42 +311,78 @@ async function reopenSessionFromAlert(phone, botNumber, alertId) {
 
 // ── ORDERS ────────────────────────────────────────────────────────
 function statusLabel(s) {
-  return { recibido:'Recibido', en_preparacion:'En preparación', listo:'Listo para servir', entregado:'Entregado', pendiente_pago:'Pendiente pago' }[s] || s;
+  return {
+    recibido:'Recibido', en_preparacion:'En preparación', listo:'Listo para servir',
+    entregado:'Entregado', factura_entregada:'Factura entregada', pendiente_pago:'Pendiente pago'
+  }[s] || s;
 }
 function statusClass(s) {
-  if (s === 'listo')          return 'st-listo';
-  if (s === 'en_preparacion') return 'st-prep';
-  if (s === 'entregado')      return 'st-entregado';
+  if (s === 'listo')             return 'st-listo';
+  if (s === 'en_preparacion')    return 'st-prep';
+  if (s === 'entregado')         return 'st-entregado';
+  if (s === 'factura_entregada') return 'st-factura';
   return 'st-recibido';
 }
 
 async function loadOrders() {
   try {
+    // Pedidos de mesa: listos para servir + entregados pendientes de factura
     const [r1, r2] = await Promise.all([
-      fetch('/api/table-orders?status=listo', { headers }),
+      fetch('/api/table-orders', { headers }),
       fetch('/api/dashboard/orders?period=today', { headers })
     ]);
-    const tableOrders   = r1.ok ? (await r1.json()).orders || [] : [];
-    const regularOrders = r2.ok ? (await r2.json()).orders || [] : [];
-    const listoTable     = tableOrders.filter(o => o.status === 'listo');
+    const allTableOrders = r1.ok ? (await r1.json()).orders || [] : [];
+    const regularOrders  = r2.ok ? (await r2.json()).orders || [] : [];
+
+    // Mostrar: listos para servir + entregados (esperando factura)
+    const listoTable    = allTableOrders.filter(o => o.status === 'listo');
+    const entregadoTable = allTableOrders.filter(o => o.status === 'entregado');
     const pendingRegular = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
-    const total = listoTable.length + pendingRegular.length;
+
+    const total = listoTable.length + entregadoTable.length + pendingRegular.length;
     const badge = document.getElementById('badge-pedidos');
     badge.textContent = total;
     badge.style.display = total > 0 ? 'inline-block' : 'none';
 
     let html = '';
+
+    // ── Listos para servir
     if (listoTable.length > 0) {
-      html += '<div class="section-header sh-listo">✅ Listos para servir — Mesa</div>';
+      html += '<div class="section-header sh-listo">✅ Listos para servir</div>';
       listoTable.forEach(o => {
         const items = Array.isArray(o.items) ? o.items.map(i => (i.quantity||1)+'x '+i.name).join(', ') : o.items || '';
+        const total_fmt = '$' + Number(o.total||0).toLocaleString('es-CO');
         html += `<div class="order-card" style="border-left:3px solid #1D9E75;">
-          <div class="order-header"><div class="order-id">${o.table_name}</div><div class="order-time">${o.created_at.substring(11,16)}</div></div>
+          <div class="order-header">
+            <div class="order-id">${o.table_name}</div>
+            <div class="order-time">${(o.created_at||'').substring(11,16)}</div>
+          </div>
           <div class="order-items">${items}</div>
-          <div><button class="btn btn-green" onclick="updateTableOrder('${o.id}','entregado')">Marcar entregado</button></div>
+          <div style="font-size:12px;color:#0F6E56;font-weight:600;margin-bottom:8px;">Total: ${total_fmt}</div>
+          <div><button class="btn btn-green" onclick="updateTableOrder('${o.id}','entregado')">🍽️ Marcar entregado</button></div>
         </div>`;
       });
     }
+
+    // ── Entregados — esperando factura
+    if (entregadoTable.length > 0) {
+      html += '<div class="section-header" style="color:#7C3AED;margin-top:12px;">🧾 Pendiente de factura</div>';
+      entregadoTable.forEach(o => {
+        const items = Array.isArray(o.items) ? o.items.map(i => (i.quantity||1)+'x '+i.name).join(', ') : o.items || '';
+        const total_fmt = '$' + Number(o.total||0).toLocaleString('es-CO');
+        html += `<div class="order-card" style="border-left:3px solid #7C3AED;">
+          <div class="order-header">
+            <div class="order-id">${o.table_name}</div>
+            <div class="order-time">${(o.created_at||'').substring(11,16)}</div>
+          </div>
+          <div class="order-items">${items}</div>
+          <div style="font-size:13px;font-weight:700;color:#7C3AED;margin-bottom:10px;">Total: ${total_fmt}</div>
+          <div><button class="btn btn-purple" onclick="updateTableOrder('${o.id}','factura_entregada')">🧾 Factura entregada</button></div>
+        </div>`;
+      });
+    }
+
+    // ── Pedidos WhatsApp/domicilio
     if (pendingRegular.length > 0) {
       html += '<div class="section-header sh-orders" style="margin-top:12px;color:#185FA5;">📱 Pedidos WhatsApp hoy</div>';
       pendingRegular.forEach(o => {
@@ -356,6 +394,7 @@ async function loadOrders() {
         </div>`;
       });
     }
+
     if (!html) html = '<div class="empty">Sin pedidos activos ahora mismo</div>';
     document.getElementById('orders-list').innerHTML = html;
   } catch(e) { console.error('loadOrders:', e); }
