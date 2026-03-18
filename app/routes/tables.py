@@ -235,13 +235,11 @@ async def update_order_status(request: Request, order_id: str):
                 if session_row and session_row["bot_number"]:
                     bot_number    = session_row["bot_number"]
                     meta_phone_id = session_row["meta_phone_id"] or ""
-                    # Enviar mensaje de despedida
                     await _send_whatsapp_text(
                         phone,
                         "¡Fue un placer atenderles! 🙏✨ Esperamos verlos pronto. Si en algún momento desean pedir algo más, escaneen el código QR de la mesa y con gusto los atendemos. ¡Hasta pronto! 👋",
                         phone_id_override=meta_phone_id
                     )
-                    # Cerrar sesión
                     await db.db_close_session(phone=phone, bot_number=bot_number, reason="factura_entregada", closed_by_username="mesero")
                     async with pool.acquire() as conn3:
                         await conn3.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
@@ -251,6 +249,17 @@ async def update_order_status(request: Request, order_id: str):
             print(f"⚠️ update_order_status factura_entregada error: {traceback.format_exc()}", flush=True)
 
     return {"success": True, "order_id": order_id, "status": new_status}
+
+
+@router.post("/api/table-orders/{order_id}/clear-additional")
+async def clear_order_additional(request: Request, order_id: str):
+    """Limpia los items_additional de una orden sin cambiar su status.
+    Se usa cuando cocina ya preparó el adicional de un pedido que estaba en 'listo',
+    para quitarlo de la vista sin interrumpir el flujo del pedido principal."""
+    await require_auth(request)
+    await db.db_clear_additional(order_id)
+    print(f"🧹 Adicional limpiado en orden {order_id}", flush=True)
+    return {"success": True, "order_id": order_id}
 
 
 @router.get("/cocina", response_class=HTMLResponse)

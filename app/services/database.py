@@ -630,6 +630,18 @@ async def db_update_table_order_status(order_id: str, status: str):
             )
 
 
+async def db_clear_additional(order_id: str):
+    """Limpia items_additional sin tocar el status del pedido.
+    Se usa cuando cocina ya preparó el adicional de un pedido que estaba en 'listo'
+    pero no queremos mover el pedido de vuelta al flujo normal."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE table_orders SET items_additional='[]'::jsonb, updated_at=NOW() WHERE id=$1",
+            order_id
+        )
+
+
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
     """Retorna la orden activa de la sesión (mismo order_id durante toda la visita).
     Excluye solo factura_entregada y cancelado — incluye recibido, en_preparacion, listo, entregado."""
