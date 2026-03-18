@@ -55,16 +55,17 @@ async def geocode_address(address: str) -> tuple:
     return None, None, None
 
 
-def require_auth(request: Request) -> str:
+async def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = verify_token(token)
+    from app.services.auth import verify_token
+    username = await verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="No autorizado")
     return username
 
 
 async def get_current_user(request: Request) -> dict:
-    username = require_auth(request)
+    username = await require_auth(request)
     user = await db.db_get_user(username)
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")

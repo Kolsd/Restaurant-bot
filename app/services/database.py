@@ -103,6 +103,18 @@ async def init_db():
                 parent_user TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             );
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+            CREATE TABLE IF NOT EXISTS carts (
+                phone TEXT NOT NULL,
+                bot_number TEXT NOT NULL,
+                cart_data JSONB NOT NULL DEFAULT '{"items": [], "order_type": null, "address": null, "notes": ""}'::jsonb,
+                updated_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (phone, bot_number)
+            );
         """)
         # Safe migrations
         migrations = [
@@ -592,3 +604,42 @@ async def db_update_table_order_status(order_id: str, status: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
+        # ── SESIONES Y CARRITOS (RAM Fix) ──────────────────────────────────────────
+
+async def db_save_session(token: str, username: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO sessions (token, username) VALUES ($1, $2)", token, username)
+
+async def db_get_session(token: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT username FROM sessions WHERE token=$1", token)
+        return row["username"] if row else None
+
+async def db_delete_session(token: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM sessions WHERE token=$1", token)
+
+async def db_get_cart(phone: str, bot_number: str) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+        if row:
+            return json.loads(row["cart_data"]) if isinstance(row["cart_data"], str) else row["cart_data"]
+        return {"items": [], "order_type": None, "address": None, "notes": ""}
+
+async def db_save_cart(phone: str, bot_number: str, cart_data: dict):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO carts (phone, bot_number, cart_data, updated_at) 
+            VALUES ($1, $2, $3::jsonb, NOW())
+            ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
+        """, phone, bot_number, json.dumps(cart_data))
+
+async def db_clear_cart(phone: str, bot_number: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
