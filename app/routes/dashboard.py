@@ -216,9 +216,9 @@ async def list_team_users(request: Request, branch_id: int = None):
     role = user.get("role", "owner")
     user_branch = user.get("branch_id")
     if role == "owner":
-        return {"users": await db.db_get_all_users_with_roles(branch_id=branch_id)}
+        return {"users": await db.db_get_all_users()}
     if role == "admin" and user_branch:
-        return {"users": await db.db_get_all_users_with_roles(branch_id=user_branch)}
+        return {"users": await db.db_get_all_users()}
     raise HTTPException(status_code=403, detail="No autorizado")
 
 @router.post("/api/team/invite")
