@@ -1015,7 +1015,7 @@ function renderBranches(branches) {
   container.innerHTML = branches.map(b => {
     const roleColor = {'owner':'#1D9E75','admin':'#185FA5','cook':'#854F0B','waiter':'#534AB7'};
     return `<div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;margin-bottom:12px;overflow:hidden;">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
+      <div data-branch-id="${b.id}" style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
         <div>
           <div style="font-size:15px;font-weight:600;">${b.name}</div>
           <div style="font-size:11px;color:#888;margin-top:2px;">
@@ -1036,6 +1036,19 @@ function renderBranches(branches) {
 
   // Load users per branch
   branches.forEach(b => loadBranchUsers(b.id));
+  // Add delete buttons for owner
+  if (role === 'owner') {
+    branches.forEach(b => {
+      const header = document.querySelector('[data-branch-id="' + b.id + '"]');
+      if (header) {
+        const btn = document.createElement('button');
+        btn.textContent = 'Eliminar sucursal';
+        btn.style.cssText = 'background:#FDE8E8;color:#C0392B;border:none;padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;';
+        btn.onclick = () => deleteBranch(b.id, b.name);
+        header.appendChild(btn);
+      }
+    });
+  }
 }
 
 async function loadBranchUsers(branchId) {
