@@ -313,7 +313,7 @@ async def execute_tool(
             separate_bill = tool_input.get("separate_bill", False)
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
-            # Buscar orden en status 'recibido' para acumular
+            # Buscar orden de esta sesión (mismo order_id durante toda la visita)
             active_order = await db.db_get_active_table_order(phone, table_context["id"])
 
             # CASO 1: cliente pidió cuenta separada → siempre orden nueva
@@ -321,24 +321,25 @@ async def execute_tool(
                 active_order = None
                 print(f"🧾 Cuenta separada solicitada — creando orden nueva", flush=True)
 
-            # CASO 2: hay orden en 'recibido' → acumular en ella
+            # CASO 2: hay orden activa en la sesión → acumular en ella (mismo order_id)
+            # Si la orden estaba en_preparacion/listo/entregado, se resetea a 'recibido'
+            # para que cocina procese los nuevos items
             if active_order:
+                prev_status = active_order.get("status", "recibido")
                 await db.db_add_items_to_table_order(
                     active_order["id"], cart_items, cart_total, extra_notes
                 )
                 await orders.clear_cart(phone, bot_number)
                 await db.db_session_mark_order(phone, bot_number)
                 new_total = (active_order.get("total") or 0) + cart_total
-                print(f"➕ Orden {active_order['id']} actualizada con: {items_summary}", flush=True)
+                print(f"➕ Orden {active_order['id']} (estaba {prev_status}) → nuevos items: {items_summary}", flush=True)
                 return (
-                    f"OK: Items agregados al pedido existente {active_order['id']}. "
-                    f"Nuevos items: {items_summary}. "
+                    f"OK: Items agregados al pedido {active_order['id']}. "
+                    f"Nuevos items enviados a cocina: {items_summary}. "
                     f"Total acumulado: ${new_total:,} COP."
                 )
 
-            # CASO 3: no hay orden en 'recibido' → crear orden nueva
-            # (incluye: primera orden, post-entrega, cuenta separada, o pedido adicional
-            #  cuando la orden anterior ya está en_preparacion/listo)
+            # CASO 3: no hay orden activa (nueva visita o post-factura) → crear orden nueva
             order_id = f"MESA-{uuid.uuid4().hex[:6].upper()}"
             await db.db_save_table_order({
                 "id":         order_id,
