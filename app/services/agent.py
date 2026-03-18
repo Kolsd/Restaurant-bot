@@ -97,11 +97,11 @@ TOOLS = [
         "description": (
             "Finaliza la sesion del cliente y limpia el historial. "
             "SOLO usar cuando el cliente claramente se despide y YA NO HAY NADA PENDIENTE. "
-            "Ejemplos VÁLIDOS para usarlo: "
-            "'hasta luego', 'ya me voy', 'nos vemos', 'chao', 'bye', 'hasta pronto', "
-            "'que tengas buen dia/noche', 'gracias por todo', 'muchas gracias fue todo'. "
+            "Ejemplos VALIDOS: 'hasta luego', 'ya me voy', 'nos vemos', 'chao', 'bye', "
+            "'hasta pronto', 'que tengas buen dia', 'gracias por todo', 'muchas gracias fue todo'. "
             "NUNCA usar si el cliente tiene un pedido en cocina que aun no ha sido entregado. "
-            "NUNCA usar si el cliente solo dice 'eso es todo' para terminar de pedir — eso significa que no quiere agregar mas platos, NO que se va."
+            "NUNCA usar si el cliente solo dice 'eso es todo' para terminar de pedir — "
+            "eso significa que no quiere agregar mas platos, NO que se va a retirar."
         ),
         "input_schema": {
             "type": "object",
@@ -146,7 +146,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_touch_session(phone, bot_number)
             return table
 
-    # Fuente de verdad #2: detectar mesa del mensaje
+    # Fuente de verdad #2: detectar del mensaje
     import re as _re
 
     branch_id = None
@@ -160,23 +160,18 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
 
     if m:
         number = m.group(1)
-
-        # Intentar con branch primero
         if branch_id:
             table_id = f"b{branch_id}-mesa-{number}"
             table = await db.db_get_table_by_id(table_id)
             if table:
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                 return table
-
-        # Sin branch
         table_id = f"mesa-{number}"
         table = await db.db_get_table_by_id(table_id)
         if table:
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             return table
-
-        # Fallback: buscar por número en cualquier sucursal
+        # Fallback: buscar por número
         pool = await db.get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -192,7 +187,6 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
 
 
 async def get_session_state(phone: str, bot_number: str) -> dict:
-    """Retorna el estado actual de la sesión para informar al bot."""
     session = await db.db_get_active_session(phone, bot_number)
     if not session:
         return {"has_order": False, "order_delivered": False, "active": False}
@@ -204,75 +198,69 @@ async def get_session_state(phone: str, bot_number: str) -> dict:
 
 
 async def build_system_prompt(phone: str, bot_number: str, table_context: dict | None) -> str:
-    availability   = await db.db_get_menu_availability()
-    menu           = await db.db_get_menu(bot_number) or {}
-    cart_text      = await orders.cart_summary(phone, bot_number)
-    session_state  = await get_session_state(phone, bot_number)
+    availability  = await db.db_get_menu_availability()
+    menu          = await db.db_get_menu(bot_number) or {}
+    cart_text     = await orders.cart_summary(phone, bot_number)
+    session_state = await get_session_state(phone, bot_number)
 
-    menu_text = ""
+    # ── Menú SIN formato markdown (sin asteriscos) ──────────────────
+    menu_lines = []
     for category, dishes in menu.items():
         av_dishes = [d for d in dishes if availability.get(d['name'], True)]
         if not av_dishes:
             continue
-        menu_text += f"\n### {category}\n"
+        menu_lines.append(f"\n{category}:")
         for dish in av_dishes:
-            menu_text += f"- **{dish['name']}** — ${dish['price']:,}\n  {dish['description']}\n"
+            price = f"${dish['price']:,}" if dish.get('price') else ""
+            desc  = dish.get('description', '')
+            menu_lines.append(f"  - {dish['name']} {price}  {desc}")
+    menu_text = "\n".join(menu_lines) if menu_lines else "Sin menu configurado."
 
-    # ── Sección de estado de sesión ────────────────────────────────
+    # ── Contexto de mesa ────────────────────────────────────────────
+    table_section = ""
     session_section = ""
+
     if table_context:
         has_order       = session_state.get("has_order", False)
         order_delivered = session_state.get("order_delivered", False)
 
         if has_order and not order_delivered:
-            session_section = """
-## ⚠️ ESTADO DE SESIÓN — PEDIDO EN COCINA
-El cliente tiene un pedido ACTIVO en cocina que AÚN NO ha sido entregado.
-- Si dice "eso es todo", "listo", "ya está", "gracias" → NO cierres la sesión. Solo confirma que su pedido está en camino.
-- SOLO cierra la sesión (end_session) si el cliente dice explícitamente que se va DESPUÉS de recibir su comida, o usa palabras de despedida definitiva como "hasta luego", "ya me voy", "chao", "bye".
-- Si pide la cuenta → usa call_waiter con alert_type="bill".
-"""
+            session_section = (
+                "\nESTADO: El cliente tiene un pedido en cocina que AUN NO ha sido entregado. "
+                "Si dice 'eso es todo', 'gracias', 'listo' → NO cierres la sesion. "
+                "Solo di que su pedido esta en camino. "
+                "Solo usa end_session cuando se despida definitivamente despues de recibir todo."
+            )
         elif has_order and order_delivered:
-            session_section = """
-## ℹ️ ESTADO DE SESIÓN — PEDIDO ENTREGADO
-El pedido del cliente YA fue entregado.
-- Si dice "gracias", "eso es todo", "listo" → puedes cerrar la sesión con end_session.
-- Si pide la cuenta → usa call_waiter con alert_type="bill".
-"""
-        else:
-            session_section = """
-## ℹ️ ESTADO DE SESIÓN — SIN PEDIDO AÚN
-El cliente aún no ha hecho ningún pedido.
-- Si dice "gracias" o "bye" sin haber pedido nada → cierra la sesión con end_session.
-"""
+            session_section = (
+                "\nESTADO: El pedido ya fue entregado. "
+                "Si el cliente se despide o dice gracias → puedes usar end_session."
+            )
 
-    table_section = ""
-    if table_context:
         table_section = f"""
-## 🪑 MODO MESA — DINE-IN
-El cliente está en **{table_context['name']}** del restaurante.
-- NO pidas dirección de entrega.
-- Para mandar el pedido a cocina: usa `create_table_order` (NUNCA `create_order`).
-- Si el cliente pide la cuenta o quiere pagar: usa `call_waiter` con alert_type="bill" INMEDIATAMENTE.
-- Si necesita un mesero por otra razón: usa `call_waiter` con alert_type="waiter".
-{session_section}"""
+MODO MESA (dine-in): El cliente esta en {table_context['name']}.
+- No pidas direccion de entrega.
+- Para enviar a cocina usa create_table_order (nunca create_order).
+- Si pide la cuenta o quiere pagar: usa call_waiter con alert_type="bill" de inmediato.
+- Si necesita al mesero: usa call_waiter con alert_type="waiter".{session_section}
+"""
 
-    return f"""Eres Mesio, el asistente de IA para restaurantes. Eres cálido, eficiente y directo.
+    return f"""Eres Mesio, asistente de un restaurante. Responde de forma natural, amigable y concisa, como un buen mesero virtual. No uses asteriscos, no uses formato markdown, no pongas categorias del menu en negrita. Escribe como si fuera una conversacion de WhatsApp normal.
+
+Cuando saludes al cliente que llega a una mesa, di simplemente "Hola, bienvenido. ¿Que se te antoja hoy?" — no repitas el nombre de la mesa en el saludo.
 {table_section}
+MENU DISPONIBLE:
+{menu_text}
 
-### MENÚ DISPONIBLE
-{menu_text if menu_text else "Sin menú configurado."}
-
-### CARRITO ACTUAL DEL CLIENTE
+CARRITO ACTUAL:
 {cart_text}
 
-### REGLAS GENERALES
-- Cuando el cliente pida platos → usa `add_to_cart` (una llamada por cada plato distinto).
-- Cuando confirme su pedido en mesa → usa `create_table_order`.
-- Cuando confirme pedido domicilio/recoger → usa `create_order`.
-- Cuando pida la cuenta o al mesero → usa `call_waiter`.
-- `end_session` SOLO cuando el cliente claramente se despide y no tiene pedidos pendientes de entrega.
-- Después de cada herramienta, confirma brevemente al cliente.
+REGLAS:
+- add_to_cart: cuando el cliente pida un plato (una llamada por plato).
+- create_table_order: cuando confirme su pedido en mesa.
+- create_order: para domicilio o recoger.
+- call_waiter: cuando pida la cuenta o necesite al mesero.
+- end_session: solo cuando se despida claramente y no haya pedidos pendientes.
 """
 
 
@@ -358,15 +346,14 @@ async def execute_tool(
             return "OK: Alerta enviada al mesero — viene en camino."
 
         elif tool_name == "end_session":
-            # ── Guardia de seguridad: no cerrar si hay pedido pendiente ──
+            # Guardia: no cerrar si hay pedido pendiente de entrega
             session_state = await get_session_state(phone, bot_number)
             if session_state.get("has_order") and not session_state.get("order_delivered"):
-                print(f"⚠️ end_session bloqueado — pedido en cocina aún no entregado para {phone}", flush=True)
+                print(f"⚠️ end_session bloqueado — pedido en cocina aun no entregado para {phone}", flush=True)
                 return (
-                    "BLOQUEADO: El cliente tiene un pedido en cocina que aún no ha sido entregado. "
-                    "NO cierres la sesión. Responde al cliente que su pedido está en camino."
+                    "BLOQUEADO: El cliente tiene un pedido en cocina que aun no fue entregado. "
+                    "No cierres la sesion. Dile al cliente que su pedido esta en camino."
                 )
-
             farewell = tool_input.get("farewell_message", "")
             await db.db_close_session(
                 phone=phone, bot_number=bot_number,
@@ -378,8 +365,8 @@ async def execute_tool(
                     "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
                     phone, bot_number
                 )
-            print(f"👋 Sesión cerrada por cliente: {phone}", flush=True)
-            return f"OK: Sesión finalizada. {farewell}"
+            print(f"👋 Sesion cerrada por cliente: {phone}", flush=True)
+            return f"OK: Sesion finalizada. {farewell}"
 
         else:
             return f"Error: Herramienta '{tool_name}' no reconocida."
