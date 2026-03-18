@@ -9,10 +9,13 @@ from app.services.auth import verify_token
 router = APIRouter()
 
 
-def require_auth(request: Request):
+async def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
+    from app.services.auth import verify_token
+    username = await verify_token(token)
+    if not username:
         raise HTTPException(status_code=401, detail="No autorizado")
+    return username
 
 
 async def get_restaurant_wa(request: Request) -> str:
@@ -45,7 +48,7 @@ class TableRequest(BaseModel):
 
 @router.get("/api/tables")
 async def get_tables(request: Request):
-    require_auth(request)
+    await require_auth(request)
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     user = await db.db_get_user(username) if username else None
@@ -56,7 +59,7 @@ async def get_tables(request: Request):
 
 @router.post("/api/tables")
 async def create_table(request: Request, body: TableRequest):
-    require_auth(request)
+    await require_auth(request)
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = verify_token(token)
     user = await db.db_get_user(username) if username else None
@@ -72,7 +75,7 @@ async def create_table(request: Request, body: TableRequest):
 
 @router.delete("/api/tables/{table_id}")
 async def delete_table(request: Request, table_id: str):
-    require_auth(request)
+    await require_auth(request)
     await db.db_delete_table(table_id)
     return {"success": True}
 
@@ -171,14 +174,14 @@ async def get_qr_sheet(request: Request, table_id: str):
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None):
-    require_auth(request)
+    await require_auth(request)
     orders = await db.db_get_table_orders(status)
     return {"orders": orders}
 
 
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
-    require_auth(request)
+    await require_auth(request)
     body = await request.json()
     status = body.get("status")
     valid = ['recibido', 'en_preparacion', 'listo', 'entregado', 'cancelado']

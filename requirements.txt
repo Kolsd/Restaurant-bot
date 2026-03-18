@@ -6,3 +6,5 @@ pydantic==2.9.2
 asyncpg==0.29.0
 aiofiles==23.2.1
 pypdf==4.1.0
+passlib==1.7.4
+bcrypt==4.1.2

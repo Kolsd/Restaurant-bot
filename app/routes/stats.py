@@ -7,16 +7,17 @@ from app.services import database as db
 router = APIRouter()
 
 
-def require_auth(request: Request) -> str:
+async def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = verify_token(token)
+    from app.services.auth import verify_token
+    username = await verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="No autorizado")
     return username
 
 
 async def get_current_restaurant(request: Request) -> dict:
-    username = require_auth(request)
+    username = await require_auth(request)
     user = await db.db_get_user(username)
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
@@ -164,14 +165,14 @@ async def dashboard_menu(request: Request):
 
 @router.get("/api/menu/availability")
 async def get_menu_availability(request: Request):
-    require_auth(request)
+    await require_auth(request)
     avail = await db.db_get_menu_availability()
     return {"availability": avail}
 
 
 @router.post("/api/menu/availability")
 async def set_dish_availability(request: Request):
-    require_auth(request)
+    await require_auth(request)
     body = await request.json()
     dish_name = body.get("dish_name")
     available = body.get("available", True)

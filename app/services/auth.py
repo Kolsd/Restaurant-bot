@@ -1,21 +1,29 @@
-﻿import hashlib
-import secrets
+﻿import secrets
+from passlib.context import CryptContext
 from app.services import database as db
 
-active_tokens: dict = {}
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        # Fallback para usuarios viejos con sha256
+        import hashlib
+        return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
 
 async def login(username: str, password: str) -> dict:
     user = await db.db_get_user(username)
     if not user:
         return {"success": False, "error": "Usuario no encontrado"}
-    if user["password_hash"] != hash_password(password):
-        return {"success": False, "error": "Contrasena incorrecta"}
+    if not verify_password(password, user["password_hash"]):
+        return {"success": False, "error": "Contraseña incorrecta"}
 
     token = secrets.token_hex(32)
-    active_tokens[token] = username.lower().strip()
+    await db.db_save_session(token, username.lower().strip())
 
     role = user.get("role", "owner")
     branch_id = user.get("branch_id")
@@ -49,11 +57,12 @@ async def login(username: str, password: str) -> dict:
             "whatsapp_number": whatsapp_number,
         },
     }
-def verify_token(token: str) -> str | None:
-    return active_tokens.get(token)
 
-def logout(token: str):
-    active_tokens.pop(token, None)
+async def verify_token(token: str) -> str | None:
+    return await db.db_get_session(token)
+
+async def logout(token: str):
+    await db.db_delete_session(token)
 
 async def create_user(username: str, password: str, restaurant_name: str) -> dict:
     success = await db.db_create_user(username, hash_password(password), restaurant_name)
