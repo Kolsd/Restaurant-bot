@@ -138,7 +138,6 @@ async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number:
             "id": order_id, "table_id": table_context['id'], "table_name": table_context['name'],
             "phone": phone, "items": items, "notes": tool_input.get("notes",""), "total": 0, "status": "recibido"
         })
-        # LIMPIAMOS EL CARRITO AQUÍ para que puedan seguir pidiendo cosas nuevas
         await orders.clear_cart(phone, bot_number)
         return "Pedido enviado a cocina exitosamente. Carrito vaciado."
 
@@ -170,11 +169,18 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         tool_results = []
         
         for block in response.content:
-            if block.type == "tool_use":
-                result_str = await execute_tool(block.name, block.input, user_phone, bot_number, table_context)
+            # Manejo robusto: verificamos si block es un diccionario o un objeto
+            block_type = block.get('type') if isinstance(block, dict) else block.type
+            
+            if block_type == "tool_use":
+                block_name = block.get('name') if isinstance(block, dict) else block.name
+                block_input = block.get('input') if isinstance(block, dict) else block.input
+                block_id = block.get('id') if isinstance(block, dict) else block.id
+                
+                result_str = await execute_tool(block_name, block_input, user_phone, bot_number, table_context)
                 tool_results.append({
                     "type": "tool_result",
-                    "tool_use_id": block.id,
+                    "tool_use_id": block_id,
                     "content": result_str
                 })
         
@@ -188,20 +194,25 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
             tools=TOOLS
         )
         
-        # BÚSQUEDA SEGURA DEL TEXTO DE RESPUESTA
         assistant_message = ""
         for block in final_response.content:
-            if block.type == "text":
-                assistant_message = block.text
+            block_type = block.get('type') if isinstance(block, dict) else block.type
+            if block_type == "text":
+                assistant_message = block.get('text') if isinstance(block, dict) else block.text
                 break
         
-        # Fallback por si acaso Claude solo responde con herramientas consecutivas
         if not assistant_message:
             assistant_message = "Tu orden ha sido procesada."
             
         history.append({"role": "assistant", "content": assistant_message})
     else:
-        assistant_message = response.content[0].text
+        # Manejo si la respuesta inicial no es tool_use (es un texto directo)
+        assistant_message = ""
+        for block in response.content:
+            block_type = block.get('type') if isinstance(block, dict) else block.type
+            if block_type == "text":
+                assistant_message = block.get('text') if isinstance(block, dict) else block.text
+                break
         history.append({"role": "assistant", "content": assistant_message})
 
     await db.db_save_history(user_phone, bot_number, history)
