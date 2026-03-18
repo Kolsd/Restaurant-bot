@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Request, HTTPException, Query
 from datetime import datetime, timedelta
 from app.services.auth import verify_token
@@ -14,8 +15,26 @@ def require_auth(request: Request) -> str:
     return username
 
 
+async def get_current_restaurant(request: Request) -> dict:
+    username = require_auth(request)
+    user = await db.db_get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+    branch_id = user.get("branch_id")
+    if branch_id:
+        restaurant = await db.db_get_restaurant_by_id(branch_id)
+        if restaurant:
+            return restaurant
+    all_restaurants = await db.db_get_all_restaurants()
+    for r in all_restaurants:
+        if r["name"].lower().strip() == user["restaurant_name"].lower().strip():
+            return r
+    if all_restaurants:
+        return all_restaurants[0]
+    raise HTTPException(status_code=403, detail="Restaurante no encontrado")
+
+
 def get_date_range(period: str):
-    """Retorna (date_from, date_to) como strings YYYY-MM-DD según el período."""
     today = datetime.now().date()
     if period == "today":
         return str(today), str(today)
@@ -36,24 +55,23 @@ def get_date_range(period: str):
 
 @router.get("/api/dashboard/stats")
 async def dashboard_stats(request: Request, period: str = Query("today")):
-    require_auth(request)
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period)
-
-    orders = await db.db_get_orders_range(date_from, date_to)
+    orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     paid = [o for o in orders if o["paid"]]
     pending = [o for o in orders if not o["paid"]]
     revenue = sum(o["total"] for o in paid)
     pending_revenue = sum(o["total"] for o in pending)
-
-    reservations = await db.db_get_reservations_range(date_from, date_to)
+    reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
     total_guests = sum(r.get("guests", 0) for r in reservations)
-    convs = await db.db_get_all_conversations()
-
+    convs = await db.db_get_all_conversations(bot_number=bot_number)
     return {
         "period": period,
         "date_from": date_from,
         "date_to": date_to,
-        "orders": {"total": len(orders), "paid": len(paid), "pending": len(pending), "revenue": revenue, "pending_revenue": pending_revenue},
+        "orders": {"total": len(orders), "paid": len(paid), "pending": len(pending),
+                   "revenue": revenue, "pending_revenue": pending_revenue},
         "reservations": {"total": len(reservations), "guests": total_guests},
         "conversations": {"active": len(convs)}
     }
@@ -61,17 +79,28 @@ async def dashboard_stats(request: Request, period: str = Query("today")):
 
 @router.get("/api/dashboard/orders")
 async def dashboard_orders(request: Request, period: str = Query("today")):
-    require_auth(request)
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period)
-    orders = await db.db_get_orders_range(date_from, date_to)
+    orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     result = []
     for o in orders:
-        items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in o.get("items", []))
+        try:
+            items = o.get("items", [])
+            if isinstance(items, str):
+                import json
+                items = json.loads(items)
+            items_summary = ", ".join(f"{i.get('quantity',1)}x {i.get('name','')}" for i in items) if isinstance(items, list) else str(items)
+        except Exception:
+            items_summary = str(o.get("items", ""))
         created = datetime.fromisoformat(o["created_at"])
         result.append({
-            "id": o["id"], "items": items_summary or "—",
-            "type": o["order_type"], "paid": o["paid"],
-            "total": o["total"], "address": o.get("address", ""),
+            "id": o["id"],
+            "items": items_summary or "-",
+            "type": o["order_type"],
+            "paid": o["paid"],
+            "total": o["total"],
+            "address": o.get("address", ""),
             "status": o["status"],
             "time": created.strftime("%d/%m %H:%M") if period != "today" else created.strftime("%H:%M"),
             "phone": o.get("phone", "")
@@ -81,27 +110,27 @@ async def dashboard_orders(request: Request, period: str = Query("today")):
 
 @router.get("/api/dashboard/reservations")
 async def dashboard_reservations(request: Request, period: str = Query("today")):
-    require_auth(request)
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period)
-    reservations = await db.db_get_reservations_range(date_from, date_to)
+    reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
     return {"reservations": reservations}
 
 
 @router.get("/api/dashboard/conversations")
 async def dashboard_conversations(request: Request):
-    require_auth(request)
-    convs = await db.db_get_all_conversations()
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    convs = await db.db_get_all_conversations(bot_number=bot_number)
     return {"conversations": convs}
 
 
 @router.get("/api/dashboard/chart")
 async def dashboard_chart(request: Request, period: str = Query("week")):
-    """Datos agrupados por día para las gráficas de tendencia."""
-    require_auth(request)
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period)
-    orders = await db.db_get_orders_range(date_from, date_to)
-
-    # Agrupar por fecha
+    orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     by_date: dict = {}
     start = datetime.strptime(date_from, "%Y-%m-%d").date()
     end = datetime.strptime(date_to, "%Y-%m-%d").date()
@@ -109,7 +138,6 @@ async def dashboard_chart(request: Request, period: str = Query("week")):
     while current <= end:
         by_date[str(current)] = {"revenue": 0, "orders": 0, "paid": 0}
         current += timedelta(days=1)
-
     for o in orders:
         day = o["created_at"][:10]
         if day in by_date:
@@ -117,29 +145,27 @@ async def dashboard_chart(request: Request, period: str = Query("week")):
             if o["paid"]:
                 by_date[day]["revenue"] += o["total"]
                 by_date[day]["paid"] += 1
-
-    labels = []
-    revenue_data = []
-    orders_data = []
+    labels, revenue_data, orders_data = [], [], []
     for date_str, data in sorted(by_date.items()):
         d = datetime.strptime(date_str, "%Y-%m-%d")
-        if period in ("today", "week"):
-            labels.append(d.strftime("%a %d"))
-        elif period in ("month",):
-            labels.append(d.strftime("%d/%m"))
-        else:
-            labels.append(d.strftime("%d/%m"))
+        labels.append(d.strftime("%a %d") if period in ("today", "week") else d.strftime("%d/%m"))
         revenue_data.append(data["revenue"])
         orders_data.append(data["orders"])
-
     return {"labels": labels, "revenue": revenue_data, "orders": orders_data}
+
+
+@router.get("/api/dashboard/menu")
+async def dashboard_menu(request: Request):
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    menu = await db.db_get_menu(bot_number) or {}
+    return {"menu": menu}
 
 
 @router.get("/api/menu/availability")
 async def get_menu_availability(request: Request):
     require_auth(request)
-    from app.services.database import db_get_menu_availability
-    avail = await db_get_menu_availability()
+    avail = await db.db_get_menu_availability()
     return {"availability": avail}
 
 
@@ -151,21 +177,20 @@ async def set_dish_availability(request: Request):
     available = body.get("available", True)
     if not dish_name:
         raise HTTPException(status_code=400, detail="dish_name requerido")
-    from app.services.database import db_set_dish_availability
-    await db_set_dish_availability(dish_name, available)
+    await db.db_set_dish_availability(dish_name, available)
     return {"success": True, "dish_name": dish_name, "available": available}
 
 
 @router.delete("/api/conversations/cleanup")
 async def cleanup_conversations(request: Request):
-    require_auth(request)
-    from app.services.database import db_cleanup_old_conversations
-    result = await db_cleanup_old_conversations(days=7)
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    result = await db.db_cleanup_old_conversations(days=7, bot_number=bot_number)
     return {"success": True, "result": str(result)}
+
 
 @router.get("/api/conversations/{phone}")
 async def get_conversation(phone: str, request: Request):
-    """Retorna el historial completo de una conversacion para el chat modal."""
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     details = await db.db_get_conversation_details(phone, bot_number)
@@ -178,7 +203,6 @@ async def get_conversation(phone: str, request: Request):
 
 @router.post("/api/conversations/{phone}/pause")
 async def pause_bot_for_conversation(phone: str, request: Request):
-    """Pausa o reanuda el bot para una conversacion especifica."""
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     body = await request.json()
@@ -189,22 +213,17 @@ async def pause_bot_for_conversation(phone: str, request: Request):
 
 @router.post("/api/conversations/{phone}/reply")
 async def manual_reply(phone: str, request: Request):
-    """Envia un mensaje manual desde el dashboard y lo guarda en el historial."""
-    import os, httpx as _httpx
+    import httpx as _httpx
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     body = await request.json()
     message = body.get("message", "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Mensaje vacio")
-
-    # Save to history as assistant message
     details = await db.db_get_conversation_details(phone, bot_number)
     history = details.get("history", [])
     history.append({"role": "assistant", "content": f"[Humano] {message}"})
     await db.db_save_history(phone, bot_number, history)
-
-    # Try to send via Meta WhatsApp API if configured
     meta_token = os.getenv("META_ACCESS_TOKEN", "")
     phone_id = os.getenv("META_PHONE_NUMBER_ID", "")
     if meta_token and phone_id:
@@ -218,5 +237,4 @@ async def manual_reply(phone: str, request: Request):
                 )
         except Exception as e:
             print(f"Meta send error: {e}")
-
     return {"success": True}
