@@ -26,9 +26,8 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .order-card.recibido{border-left:3px solid #FAC775;}
 .order-card.en_preparacion{border-left:3px solid #378ADD;}
 .order-card.listo{border-left:3px solid #1D9E75;}
-/* Tarjeta de adicional post-entrega: borde naranja pulsante */
-.order-card.adicional-entregado{border-left:3px solid #FF6B35;border-top:1px solid #FF6B35;animation:border-pulse 1.5s ease-in-out infinite;}
-@keyframes border-pulse{0%,100%{border-color:#FF6B35}50%{border-color:#FF9A6B}}
+.order-card.adicional-entregado{border-left:3px solid #FF6B35;border-top:1px solid rgba(255,107,53,.4);animation:border-pulse 1.5s ease-in-out infinite;}
+@keyframes border-pulse{0%,100%{border-color:#FF6B35;border-top-color:rgba(255,107,53,.4);}50%{border-color:#FF9A6B;border-top-color:rgba(255,154,107,.6);}}
 .order-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;}
 .order-id{font-size:11px;font-weight:700;color:#888;letter-spacing:.05em;}
 .order-table{font-size:14px;font-weight:700;color:#fff;}
@@ -40,14 +39,19 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .order-item{font-size:13px;color:#ddd;padding:3px 0;display:flex;gap:6px;}
 .order-item-qty{color:#1D9E75;font-weight:600;flex-shrink:0;}
 .order-notes{font-size:11px;color:#666;background:#111;border-radius:6px;padding:5px 8px;margin-bottom:.75rem;font-style:italic;}
-.order-actions{display:flex;gap:6px;}
+.order-actions{display:flex;gap:6px;flex-direction:column;}
+.btn-row{display:flex;gap:6px;}
 .btn{flex:1;padding:7px;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;}
 .btn:active{transform:scale(.97);}
 .btn-prep{background:rgba(55,138,221,.2);color:#378ADD;border:1px solid rgba(55,138,221,.3);}
 .btn-prep:hover{background:rgba(55,138,221,.35);}
 .btn-listo{background:rgba(29,158,117,.2);color:#1D9E75;border:1px solid rgba(29,158,117,.3);}
 .btn-listo:hover{background:rgba(29,158,117,.35);}
-.listo-badge{width:100%;padding:7px;border-radius:8px;font-size:12px;font-weight:600;text-align:center;background:rgba(29,158,117,.08);color:#1D9E75;border:1px solid rgba(29,158,117,.2);cursor:default;}
+.btn-add-done{background:rgba(250,199,117,.15);color:#FAC775;border:1px solid rgba(250,199,117,.35);font-size:11px;}
+.btn-add-done:hover{background:rgba(250,199,117,.25);}
+.btn-add-urgent{background:rgba(255,107,53,.2);color:#FF6B35;border:1px solid rgba(255,107,53,.4);}
+.btn-add-urgent:hover{background:rgba(255,107,53,.3);}
+.listo-badge{padding:7px;border-radius:8px;font-size:12px;font-weight:600;text-align:center;background:rgba(29,158,117,.08);color:#1D9E75;border:1px solid rgba(29,158,117,.2);cursor:default;flex:1;}
 .empty{text-align:center;padding:2rem;color:#333;font-size:13px;}
 .badge-count{display:inline-block;background:#1D9E75;color:#000;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;margin-left:6px;}
 .notification{position:fixed;top:1rem;right:1rem;background:#1D9E75;color:#000;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;transform:translateY(-100px);transition:transform .3s;z-index:100;}
@@ -55,11 +59,9 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .additional-banner{background:rgba(250,199,117,.08);border:1px solid rgba(250,199,117,.35);border-radius:8px;padding:8px 10px;margin-bottom:.6rem;}
 .additional-label{font-size:10px;font-weight:700;color:#FAC775;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;}
 .order-item-add{font-size:13px;color:#FAC775;padding:2px 0;display:flex;gap:6px;}
-/* Banner especial para adicional cuando ya fue entregado */
 .additional-banner-urgent{background:rgba(255,107,53,.1);border:1.5px solid rgba(255,107,53,.5);border-radius:8px;padding:8px 10px;margin-bottom:.6rem;}
 .additional-label-urgent{font-size:10px;font-weight:700;color:#FF6B35;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;}
 .order-item-add-urgent{font-size:13px;color:#FF9A6B;padding:2px 0;display:flex;gap:6px;}
-/* Tag "ya entregado" */
 .delivered-tag{display:inline-flex;align-items:center;gap:4px;background:rgba(29,158,117,.12);border:1px solid rgba(29,158,117,.3);color:#1D9E75;font-size:10px;font-weight:600;padding:2px 8px;border-radius:8px;margin-bottom:6px;}
 </style>
 </head>
@@ -108,12 +110,11 @@ function clock(){
 clock(); setInterval(clock, 1000);
 
 function elapsed(createdAt) {
-  // Forzar parse UTC: el backend devuelve ISO sin timezone
   const isoUtc = createdAt.endsWith('Z') ? createdAt : createdAt + 'Z';
   const diff = Math.floor((Date.now() - new Date(isoUtc).getTime()) / 1000);
-  const min = Math.max(0, Math.floor(diff / 60));
+  const min  = Math.max(0, Math.floor(diff / 60));
   const secs = Math.max(0, diff % 60);
-  const cls = min < 5 ? 'ok' : min < 12 ? 'warn' : 'late';
+  const cls  = min < 5 ? 'ok' : min < 12 ? 'warn' : 'late';
   return `<span class="elapsed ${cls}">${min}m ${secs}s</span>`;
 }
 
@@ -121,94 +122,135 @@ function notify(msg) {
   const n = document.getElementById('notif');
   n.textContent = msg;
   n.classList.add('show');
-  setTimeout(() => n.classList.remove('show'), 3000);
+  setTimeout(() => n.classList.remove('show'), 3500);
 }
 
 async function updateStatus(orderId, status) {
   try {
     await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST', headers,
-      body: JSON.stringify({status})
+      method: 'POST', headers, body: JSON.stringify({status})
     });
-    if (status === 'listo') notify('✅ Pedido listo para servir — avisa al mesero');
+    if (status === 'listo')         notify('✅ Listo para servir — avisa al mesero');
+    if (status === 'en_preparacion') notify('👨‍🍳 Preparando...');
+    loadOrders();
+  } catch(e) { console.error(e); }
+}
+
+// Limpia items_additional SIN cambiar el status.
+// Caso de uso: pedido en 'listo' + llega un adicional.
+// Cocina lo prepara y presiona este botón → banner desaparece, 'listo' se mantiene.
+async function clearAdditional(orderId) {
+  try {
+    await fetch(`/api/table-orders/${orderId}/clear-additional`, {
+      method: 'POST', headers, body: JSON.stringify({})
+    });
+    notify('✅ Adicional listo');
     loadOrders();
   } catch(e) { console.error(e); }
 }
 
 function renderCard(o) {
-  const additional = Array.isArray(o.items_additional) ? o.items_additional : [];
+  const additional    = Array.isArray(o.items_additional) ? o.items_additional : [];
+  const hasAdditional = additional.length > 0;
+  const isDelivered   = o.status === 'entregado';
   const additionalNames = new Set(additional.map(i => i.name));
-  const isDelivered = o.status === 'entregado';
 
-  // Items base = todos menos los adicionales actuales
+  // Items base (excluir los que están en additional para no duplicar)
   const baseItems = (Array.isArray(o.items) ? o.items : []).filter(i => !additionalNames.has(i.name));
 
+  // Items base HTML
   let itemsHtml = '';
-  // Para pedidos 'entregado' con adicional: mostrar los items base con tachado (ya preparados)
-  // Para el resto: mostrar normalmente
-  if (baseItems.length && !isDelivered) {
-    itemsHtml = baseItems.map(i => {
-      const qty  = i.quantity || 1;
-      const name = i.name || i;
-      return `<div class="order-item"><span class="order-item-qty">${qty}×</span><span>${name}</span></div>`;
-    }).join('');
-  } else if (baseItems.length && isDelivered) {
-    // Items ya entregados — mostrar en gris tachado como referencia
-    itemsHtml = baseItems.map(i => {
-      const qty  = i.quantity || 1;
-      const name = i.name || i;
-      return `<div class="order-item" style="opacity:.4;text-decoration:line-through;"><span class="order-item-qty" style="color:#555;">${qty}×</span><span style="color:#555;">${name}</span></div>`;
-    }).join('');
+  if (baseItems.length) {
+    const fade = isDelivered ? 'style="opacity:.4;text-decoration:line-through;"' : '';
+    const qc   = isDelivered ? 'color:#555;' : '';
+    itemsHtml  = baseItems.map(i =>
+      `<div class="order-item" ${fade}>
+        <span class="order-item-qty" style="${qc}">${i.quantity||1}×</span>
+        <span>${i.name||i}</span>
+      </div>`).join('');
   }
 
-  // Banner de adicionales
+  // Banner adicional
   let additionalHtml = '';
-  if (additional.length) {
+  if (hasAdditional) {
     if (isDelivered) {
-      // Adicional llegó DESPUÉS de que el pedido fue entregado — banner urgente naranja
-      const addRows = additional.map(i =>
-        `<div class="order-item-add-urgent"><span class="order-item-qty" style="color:#FF6B35;">+${i.quantity||1}×</span><span>${i.name||i}</span></div>`
-      ).join('');
+      const rows = additional.map(i =>
+        `<div class="order-item-add-urgent">
+          <span class="order-item-qty" style="color:#FF6B35;">+${i.quantity||1}×</span>
+          <span>${i.name||i}</span>
+        </div>`).join('');
       additionalHtml = `<div class="additional-banner-urgent">
-        <div class="additional-label-urgent">🔥 ADICIONAL POST-ENTREGA</div>
-        ${addRows}
-      </div>`;
+        <div class="additional-label-urgent">🔥 ADICIONAL POST-ENTREGA</div>${rows}</div>`;
     } else {
-      // Adicional normal (pedido en preparación o listo)
-      const addRows = additional.map(i =>
-        `<div class="order-item-add"><span class="order-item-qty" style="color:#FAC775;">+${i.quantity||1}×</span><span>${i.name||i}</span></div>`
-      ).join('');
+      const rows = additional.map(i =>
+        `<div class="order-item-add">
+          <span class="order-item-qty" style="color:#FAC775;">+${i.quantity||1}×</span>
+          <span>${i.name||i}</span>
+        </div>`).join('');
       additionalHtml = `<div class="additional-banner">
-        <div class="additional-label">🆕 ADICIONAL</div>
-        ${addRows}
-      </div>`;
+        <div class="additional-label">🆕 ADICIONAL</div>${rows}</div>`;
     }
   }
 
   const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
-  // Para pedido entregado con adicional: tag informativo + botón para marcar el adicional como preparado
-  let actions = '';
-  let deliveredTagHtml = '';
-  if (isDelivered && additional.length) {
-    deliveredTagHtml = `<div class="delivered-tag">✅ Comida ya entregada</div>`;
-    actions = `<button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')" style="background:rgba(255,107,53,.2);color:#FF6B35;border:1px solid rgba(255,107,53,.3);">
-      🔥 Preparar adicional
-    </button>`;
+  // ── BOTONES según status + presencia de adicional ──────────────────
+  //
+  //  recibido [+ adic.]         → [👨‍🍳 En preparación]
+  //  en_preparacion [+ adic.]   → [✅ Listo para servir]   (al pasar a listo se limpian adic.)
+  //  listo                      → [🛎️ Esperando al mesero]
+  //  listo + adicional          → [🛎️ Esperando al mesero] + [✅ Adicional listo — quitar banner]
+  //  entregado + adicional      → [🔥 Preparar adicional]  (va a en_preparacion, limpia adic.)
+  //
+  let deliveredTag = '';
+  let actionsHtml  = '';
+
+  if (isDelivered && hasAdditional) {
+    deliveredTag = `<div class="delivered-tag">✅ Comida ya entregada</div>`;
+    actionsHtml  = `<div class="btn-row">
+      <button class="btn btn-add-urgent" onclick="updateStatus('${o.id}','en_preparacion')">
+        🔥 Preparar adicional
+      </button>
+    </div>`;
+
   } else if (o.status === 'recibido') {
-    actions = `<button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
+    actionsHtml = `<div class="btn-row">
+      <button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')">
+        👨‍🍳 En preparación
+      </button>
+    </div>`;
+
   } else if (o.status === 'en_preparacion') {
-    actions = `<button class="btn btn-listo" onclick="updateStatus('${o.id}','listo')">✅ Listo para servir</button>`;
+    actionsHtml = `<div class="btn-row">
+      <button class="btn btn-listo" onclick="updateStatus('${o.id}','listo')">
+        ✅ Listo para servir
+      </button>
+    </div>`;
+
   } else if (o.status === 'listo') {
-    actions = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
+    if (hasAdditional) {
+      // Pedido principal listo + llegó adicional que preparar
+      actionsHtml = `
+        <div class="btn-row">
+          <div class="listo-badge">🛎️ Esperando al mesero</div>
+        </div>
+        <div class="btn-row" style="margin-top:4px;">
+          <button class="btn btn-add-done" onclick="clearAdditional('${o.id}')">
+            ✅ Adicional listo — quitar banner
+          </button>
+        </div>`;
+    } else {
+      actionsHtml = `<div class="btn-row">
+        <div class="listo-badge">🛎️ Esperando al mesero</div>
+      </div>`;
+    }
   }
 
-  // Clase CSS de la tarjeta
-  const statusClass = isDelivered && additional.length
+  const cardClass = (isDelivered && hasAdditional)
     ? 'adicional-entregado'
-    : o.status.replace('_','-');
+    : o.status.replace('_', '-');
 
-  return `<div class="order-card ${statusClass}">
+  return `<div class="order-card ${cardClass}" data-order-id="${o.id}">
     <div class="order-header">
       <div>
         <div class="order-table">${o.table_name}</div>
@@ -216,73 +258,70 @@ function renderCard(o) {
       </div>
       ${elapsed(o.created_at)}
     </div>
-    ${deliveredTagHtml}
-    <div class="order-items">${itemsHtml || (additional.length ? '' : '<div class="order-item">Pedido en proceso</div>')}</div>
+    ${deliveredTag}
+    <div class="order-items">
+      ${itemsHtml || (hasAdditional ? '' : '<div class="order-item" style="color:#555;">Pedido en proceso</div>')}
+    </div>
     ${additionalHtml}
     ${notesHtml}
-    <div class="order-actions">${actions}</div>
+    <div class="order-actions">${actionsHtml}</div>
   </div>`;
 }
 
-let prevOrderIds = new Set();
+let prevOrderIds       = new Set();
+let prevAdditionalHash = {};
 
 async function loadOrders() {
   try {
     const r = await fetch('/api/table-orders', { headers: { 'Authorization': 'Bearer ' + token } });
-    if (!r.ok) { if(r.status === 401) window.location.href = '/login'; return; }
-    const d = await r.json();
+    if (!r.ok) { if (r.status === 401) window.location.href = '/login'; return; }
+    const d      = await r.json();
     const orders = d.orders || [];
-
     const currentIds = new Set(orders.map(o => o.id));
+
+    // Notificar pedidos nuevos
     for (const id of currentIds) {
       if (!prevOrderIds.has(id)) {
         const o = orders.find(x => x.id === id);
         if (o) notify(`🔔 Nuevo pedido — ${o.table_name}`);
       }
     }
-    // También notificar si un pedido ya conocido recibió adicional post-entrega
+
+    // Notificar cuando llega un adicional nuevo en un pedido ya conocido
     for (const o of orders) {
-      if (
-        o.status === 'entregado' &&
-        Array.isArray(o.items_additional) &&
-        o.items_additional.length > 0 &&
-        prevOrderIds.has(o.id)
-      ) {
-        // Solo notificar si el set de adicionales cambió (no spammear)
-        const prevCard = document.querySelector(`[data-order-id="${o.id}"]`);
-        if (!prevCard) {
-          notify(`🔥 Adicional post-entrega — ${o.table_name}`);
-        }
+      const addLen  = (o.items_additional || []).length;
+      const prevLen = prevAdditionalHash[o.id] ?? 0;
+      if (addLen > 0 && addLen !== prevLen && prevOrderIds.has(o.id)) {
+        const label = o.status === 'entregado' ? '🔥 Adicional post-entrega' : '🆕 Adicional';
+        notify(`${label} — ${o.table_name}`);
       }
+      prevAdditionalHash[o.id] = addLen;
     }
+
     prevOrderIds = currentIds;
 
-    // Separar por columnas
-    // 'entregado' con items_additional va a la columna de 'recibido' para mayor visibilidad
-    const groups = {recibido: [], en_preparacion: [], listo: []};
+    // Distribuir en columnas
+    // 'entregado' con items_additional → columna Recibidos (máxima atención)
+    const groups = { recibido: [], en_preparacion: [], listo: [] };
     orders.forEach(o => {
-      if (o.status === 'entregado' && Array.isArray(o.items_additional) && o.items_additional.length > 0) {
-        // Adicional post-entrega → columna "Recibidos" para máxima atención
+      if (o.status === 'entregado' && (o.items_additional || []).length > 0) {
         groups.recibido.push(o);
       } else if (groups[o.status]) {
         groups[o.status].push(o);
       }
     });
 
-    ['recibido','en_preparacion','listo'].forEach(s => {
+    ['recibido', 'en_preparacion', 'listo'].forEach(s => {
       const colId   = s === 'en_preparacion' ? 'col-preparacion' : 'col-' + s;
       const countId = s === 'en_preparacion' ? 'count-preparacion' : 'count-' + s;
-      const col   = document.getElementById(colId);
-      const count = document.getElementById(countId);
-      if (col) {
-        // Marcar cada tarjeta con data-order-id para detectar cambios
-        const html = groups[s].length
-          ? groups[s].map(o => `<div data-order-id="${o.id}">${renderCard(o)}</div>`).join('')
-          : '<div class="empty">Sin pedidos</div>';
-        col.innerHTML = html;
-      }
+      const col     = document.getElementById(colId);
+      const count   = document.getElementById(countId);
+      if (col) col.innerHTML = groups[s].length
+        ? groups[s].map(renderCard).join('')
+        : '<div class="empty">Sin pedidos</div>';
       if (count) count.textContent = groups[s].length;
     });
+
   } catch(e) { console.error(e); }
 }
 
