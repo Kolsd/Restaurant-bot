@@ -84,6 +84,11 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 <div class="notification" id="notif"></div>
 
 <script>
+// --- Lógica de autenticación añadida aquí ---
+const token = localStorage.getItem('rb_token');
+if (!token) window.location.href = '/login';
+const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
 function clock(){
   document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
@@ -107,7 +112,7 @@ async function updateStatus(orderId, status) {
   try {
     await fetch(`/api/table-orders/${orderId}/status`, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: headers,
       body: JSON.stringify({status})
     });
     if (status === 'listo') notify('✅ Pedido listo para servir!');
@@ -152,8 +157,11 @@ let prevOrderIds = new Set();
 
 async function loadOrders() {
   try {
-    const r = await fetch('/api/table-orders');
-    if (!r.ok) return;
+    const r = await fetch('/api/table-orders', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!r.ok) {
+        if(r.status === 401) window.location.href = '/login';
+        return;
+    }
     const d = await r.json();
     const orders = d.orders || [];
 
