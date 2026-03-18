@@ -18,14 +18,8 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "dish_name": {
-                    "type": "string",
-                    "description": "Nombre del plato tal como aparece en el menu"
-                },
-                "quantity": {
-                    "type": "integer",
-                    "description": "Cantidad a ordenar (minimo 1)"
-                }
+                "dish_name": {"type": "string", "description": "Nombre del plato tal como aparece en el menu"},
+                "quantity":  {"type": "integer", "description": "Cantidad a ordenar (minimo 1)"}
             },
             "required": ["dish_name", "quantity"]
         }
@@ -40,19 +34,9 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "order_type": {
-                    "type": "string",
-                    "enum": ["domicilio", "recoger"],
-                    "description": "Tipo de pedido"
-                },
-                "address": {
-                    "type": "string",
-                    "description": "Direccion completa de entrega. Dejar vacio si es para recoger."
-                },
-                "notes": {
-                    "type": "string",
-                    "description": "Notas adicionales del pedido (alergias, instrucciones, etc)"
-                }
+                "order_type": {"type": "string", "enum": ["domicilio", "recoger"], "description": "Tipo de pedido"},
+                "address":    {"type": "string", "description": "Direccion completa de entrega. Dejar vacio si es para recoger."},
+                "notes":      {"type": "string", "description": "Notas adicionales del pedido"}
             },
             "required": ["order_type"]
         }
@@ -62,49 +46,28 @@ TOOLS = [
         "description": (
             "Envia el pedido a cocina para clientes en mesa (dine-in). "
             "Usalo SIEMPRE cuando el cliente en mesa confirme su pedido. "
-            "Los items se leen automaticamente del carrito, no los necesitas pasar. "
+            "Los items se leen automaticamente del carrito. "
             "NO usar para domicilio ni recoger."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "notes": {
-                    "type": "string",
-                    "description": "Notas para cocina: alergias, termino de coccion, etc (opcional)"
-                }
+                "notes": {"type": "string", "description": "Notas para cocina: alergias, termino de coccion, etc (opcional)"}
             },
             "required": []
         }
     },
     {
         "name": "create_reservation",
-        "description": (
-            "Guarda una reservacion en el restaurante. "
-            "Usalo cuando el cliente quiera reservar mesa para una fecha y hora especifica."
-        ),
+        "description": "Guarda una reservacion en el restaurante.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Nombre completo del cliente para la reservacion"
-                },
-                "date": {
-                    "type": "string",
-                    "description": "Fecha en formato YYYY-MM-DD"
-                },
-                "time": {
-                    "type": "string",
-                    "description": "Hora en formato HH:MM (24h)"
-                },
-                "guests": {
-                    "type": "integer",
-                    "description": "Numero de personas"
-                },
-                "notes": {
-                    "type": "string",
-                    "description": "Notas especiales: ocasion especial, preferencias, etc (opcional)"
-                }
+                "name":   {"type": "string",  "description": "Nombre completo del cliente"},
+                "date":   {"type": "string",  "description": "Fecha en formato YYYY-MM-DD"},
+                "time":   {"type": "string",  "description": "Hora en formato HH:MM (24h)"},
+                "guests": {"type": "integer", "description": "Numero de personas"},
+                "notes":  {"type": "string",  "description": "Notas especiales (opcional)"}
             },
             "required": ["name", "date", "time", "guests"]
         }
@@ -115,35 +78,37 @@ TOOLS = [
             "Llama al mesero fisicamente o solicita la cuenta. "
             "Usalo SIEMPRE que el cliente diga: 'la cuenta', 'me cobra', 'quiero pagar', "
             "'llama al mesero', 'necesito al mesero', 'necesito ayuda', 'me traes algo', "
-            "'pueden venir a mi mesa', o cualquier solicitud que requiera presencia fisica. "
-            "NO usar para agregar platos al carrito ni para procesar pagos digitales."
+            "'pueden venir a mi mesa', o cualquier solicitud que requiera presencia fisica."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "alert_type": {
-                    "type": "string",
-                    "enum": ["bill", "waiter"],
-                    "description": (
-                        "Tipo de alerta: "
-                        "'bill' cuando el cliente pide la cuenta o quiere pagar, "
-                        "'waiter' para cualquier otra asistencia fisica del mesero"
-                    )
+                    "type": "string", "enum": ["bill", "waiter"],
+                    "description": "'bill' cuando el cliente pide la cuenta, 'waiter' para cualquier otra asistencia"
                 },
-                "message": {
-                    "type": "string",
-                    "description": "Descripcion breve de lo que necesita el cliente"
-                }
+                "message": {"type": "string", "description": "Descripcion breve de lo que necesita el cliente"}
             },
             "required": ["alert_type", "message"]
+        }
+    },
+    {
+        "name": "end_session",
+        "description": (
+            "Finaliza la sesion del cliente y limpia el historial. "
+            "Usalo SIEMPRE que el cliente se despida: "
+            "'hasta luego', 'ya me voy', 'gracias por todo', 'fue todo', 'chao', 'nos vemos'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "farewell_message": {"type": "string", "description": "Mensaje de despedida calido (opcional)"}
+            },
+            "required": []
         }
     }
 ]
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _block_attr(block, attr: str):
     if isinstance(block, dict):
@@ -168,36 +133,36 @@ def _serialize_content(content_blocks) -> list:
     return result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DETECT TABLE CONTEXT
-# ─────────────────────────────────────────────────────────────────────────────
-
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
-    import re as _re
-    pattern = r'(?:estoy en|mesa|table)[\s-]*(\d+)'
-
-    m = _re.search(pattern, message, _re.IGNORECASE)
-    if m:
-        table = await db.db_get_table_by_id(f"mesa-{m.group(1)}")
+    # Fuente de verdad: sesión activa en DB
+    session = await db.db_get_active_session(phone, bot_number)
+    if session and session.get("table_id"):
+        table = await db.db_get_table_by_id(session["table_id"])
         if table:
+            await db.db_touch_session(phone, bot_number)
             return table
 
-    history = await db.db_get_history(phone, bot_number)
-    for msg in reversed(history):
-        if msg.get('role') == 'user':
-            content = msg.get('content', '')
-            if isinstance(content, str):
-                m = _re.search(pattern, content, _re.IGNORECASE)
-                if m:
-                    table = await db.db_get_table_by_id(f"mesa-{m.group(1)}")
-                    if table:
-                        return table
+    # Detectar por regex en el mensaje
+    import re as _re
+    m = _re.search(r'Mesa\s+(\d+)', message, _re.IGNORECASE)
+    if not m:
+        m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', message, _re.IGNORECASE)
+
+    if m:
+        number = m.group(1)
+        branch_match = _re.search(r'\[branch=(\d+)\]', message)
+        if branch_match:
+            table_id = f"b{branch_match.group(1)}-mesa-{number}"
+        else:
+            table_id = f"mesa-{number}"
+
+        table = await db.db_get_table_by_id(table_id)
+        if table:
+            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+            return table
+
     return None
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SYSTEM PROMPT
-# ─────────────────────────────────────────────────────────────────────────────
 
 async def build_system_prompt(phone: str, bot_number: str, table_context: dict | None) -> str:
     availability = await db.db_get_menu_availability()
@@ -218,10 +183,10 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict |
         table_section = f"""
 ## 🪑 MODO MESA — DINE-IN
 El cliente está en **{table_context['name']}** del restaurante.
-Reglas específicas para este modo:
 - NO pidas dirección de entrega.
 - Para mandar el pedido a cocina: usa `create_table_order` (NUNCA `create_order`).
 - Si el cliente pide la cuenta, quiere pagar o necesita ayuda física: usa `call_waiter` INMEDIATAMENTE.
+- Si el cliente se despide: usa `end_session`.
 """
 
     return f"""Eres Mesio, el asistente de IA para restaurantes. Eres cálido, eficiente y directo.
@@ -233,18 +198,15 @@ Reglas específicas para este modo:
 ### CARRITO ACTUAL DEL CLIENTE
 {cart_text}
 
-### REGLAS GENERALES
+### REGLAS
 - Cuando el cliente pida platos → usa `add_to_cart` (una llamada por cada plato distinto).
 - Cuando confirme su pedido en mesa → usa `create_table_order`.
 - Cuando confirme pedido domicilio/recoger → usa `create_order`.
 - Cuando pida la cuenta o al mesero → usa `call_waiter`.
-- Después de usar una herramienta, confirma brevemente al cliente lo que hiciste.
+- Cuando se despida → usa `end_session`.
+- Después de cada herramienta, confirma brevemente al cliente.
 """
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# EXECUTE TOOL
-# ─────────────────────────────────────────────────────────────────────────────
 
 async def execute_tool(
     tool_name: str,
@@ -262,23 +224,19 @@ async def execute_tool(
             res = await orders.add_to_cart(phone, dish_name, quantity, bot_number)
             if res["success"]:
                 return f"OK: '{res['dish']['name']}' x{quantity} agregado al carrito."
-            return f"Error al agregar '{dish_name}': {res.get('error', 'Plato no encontrado en el menú.')}"
+            return f"Error al agregar '{dish_name}': {res.get('error', 'Plato no encontrado.')}"
 
         elif tool_name == "create_order":
             order_type = tool_input.get("order_type", "recoger")
             address    = tool_input.get("address", "")
             notes      = tool_input.get("notes", "")
             if order_type == "domicilio" and not address:
-                return "Error: Se necesita la dirección de entrega para pedidos a domicilio."
+                return "Error: Se necesita la dirección de entrega."
             res = await orders.create_order(phone, order_type, address, notes, bot_number)
             if res["success"]:
                 order = res["order"]
                 await db.db_save_order(order)
-                return (
-                    f"OK: Orden {order['id']} creada. "
-                    f"Total: ${order['total']:,} COP. "
-                    f"Link de pago: {order['payment_url']}"
-                )
+                return f"OK: Orden {order['id']} creada. Total: ${order['total']:,} COP. Link de pago: {order['payment_url']}"
             return f"Error al crear orden: {res.get('error', 'Error desconocido.')}"
 
         elif tool_name == "create_table_order":
@@ -286,7 +244,7 @@ async def execute_tool(
                 return "Error: Esta herramienta es solo para clientes en mesa."
             cart = await db.db_get_cart(phone, bot_number)
             if not cart or not cart.get("items"):
-                return "Error: El carrito está vacío. El cliente debe agregar platos primero."
+                return "Error: El carrito está vacío."
             order_id = f"MESA-{uuid.uuid4().hex[:6].upper()}"
             total    = await orders.get_cart_total(phone, bot_number)
             await db.db_save_table_order({
@@ -300,14 +258,9 @@ async def execute_tool(
                 "status":     "recibido"
             })
             await orders.clear_cart(phone, bot_number)
-            items_summary = ", ".join(
-                f"{i['quantity']}x {i['name']}" for i in cart["items"]
-            )
-            return (
-                f"OK: Pedido {order_id} enviado a cocina. "
-                f"Items: {items_summary}. Total: ${total:,} COP. "
-                f"Carrito vaciado."
-            )
+            await db.db_session_mark_order(phone, bot_number)
+            items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart["items"])
+            return f"OK: Pedido {order_id} enviado a cocina. Items: {items_summary}. Total: ${total:,} COP."
 
         elif tool_name == "create_reservation":
             name   = tool_input.get("name", "")
@@ -328,16 +281,28 @@ async def execute_tool(
             table_id   = table_context["id"]   if table_context else ""
             table_name = table_context["name"] if table_context else ""
             await db.db_create_waiter_alert(
-                phone=phone,
-                bot_number=bot_number,
-                alert_type=alert_type,
-                message=message,
-                table_id=table_id,
-                table_name=table_name,
+                phone=phone, bot_number=bot_number,
+                alert_type=alert_type, message=message,
+                table_id=table_id, table_name=table_name,
             )
             if alert_type == "bill":
                 return "OK: Alerta enviada al mesero — irá a cobrar la cuenta en un momento."
             return "OK: Alerta enviada al mesero — viene en camino."
+
+        elif tool_name == "end_session":
+            farewell = tool_input.get("farewell_message", "")
+            await db.db_close_session(
+                phone=phone, bot_number=bot_number,
+                reason="client_goodbye", closed_by_username=""
+            )
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
+                    phone, bot_number
+                )
+            print(f"👋 Sesión cerrada por cliente: {phone}", flush=True)
+            return f"OK: Sesión finalizada. {farewell}"
 
         else:
             return f"Error: Herramienta '{tool_name}' no reconocida."
@@ -347,18 +312,6 @@ async def execute_tool(
         return f"Error interno al ejecutar '{tool_name}': {str(e)}"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EXECUTE TOOL BLOCKS
-#
-# Race condition fix: add_to_cart SIEMPRE en serie.
-# Si dos add_to_cart corren en paralelo, ambos leen el carrito al mismo tiempo,
-# cada uno agrega su item, y el último en guardar sobreescribe al primero
-# → se pierde un plato. Ejecutándolos en serie se evita completamente.
-#
-# El resto de tools (create_order, call_waiter, create_reservation) no tocan
-# el carrito y pueden correr en paralelo sin problema.
-# ─────────────────────────────────────────────────────────────────────────────
-
 async def execute_tool_blocks(
     tool_blocks: list,
     phone: str,
@@ -367,10 +320,9 @@ async def execute_tool_blocks(
 ) -> list:
     cart_blocks  = [b for b in tool_blocks if _block_attr(b, "name") == "add_to_cart"]
     other_blocks = [b for b in tool_blocks if _block_attr(b, "name") != "add_to_cart"]
-
     results_map: dict[str, str] = {}
 
-    # add_to_cart: serie estricta
+    # add_to_cart en serie (evita race condition en el carrito)
     for block in cart_blocks:
         bid    = _block_attr(block, "id")    or ""
         inp    = _block_attr(block, "input") or {}
@@ -378,7 +330,7 @@ async def execute_tool_blocks(
         results_map[bid] = result
         print(f"🛒 add_to_cart '{inp.get('dish_name')}' → {result}", flush=True)
 
-    # otras tools: paralelo
+    # otras tools en paralelo
     async def run_other(block):
         name   = _block_attr(block, "name")  or ""
         inp    = _block_attr(block, "input") or {}
@@ -391,7 +343,6 @@ async def execute_tool_blocks(
         for bid, result in pairs:
             results_map[bid] = result
 
-    # reconstruir en orden original
     return [
         {
             "type":        "tool_result",
@@ -401,10 +352,6 @@ async def execute_tool_blocks(
         for b in tool_blocks
     ]
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CHAT
-# ─────────────────────────────────────────────────────────────────────────────
 
 MAX_TOOL_ITERATIONS = 8
 
@@ -423,22 +370,13 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     )
 
     iterations = 0
-
     while response.stop_reason == "tool_use" and iterations < MAX_TOOL_ITERATIONS:
         iterations += 1
-
         safe_content = _serialize_content(response.content)
         history.append({"role": "assistant", "content": safe_content})
 
-        tool_blocks = [
-            block for block in response.content
-            if _block_attr(block, "type") == "tool_use"
-        ]
-
-        tool_results = await execute_tool_blocks(
-            tool_blocks, user_phone, bot_number, table_context
-        )
-
+        tool_blocks = [b for b in response.content if _block_attr(b, "type") == "tool_use"]
+        tool_results = await execute_tool_blocks(tool_blocks, user_phone, bot_number, table_context)
         history.append({"role": "user", "content": tool_results})
 
         response = client.messages.create(
@@ -461,7 +399,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
 
     history.append({"role": "assistant", "content": assistant_message})
     await db.db_save_history(user_phone, bot_number, history)
-
     return {"message": assistant_message}
 
 
