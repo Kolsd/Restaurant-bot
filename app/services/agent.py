@@ -1,31 +1,3 @@
-"""
-agent.py — Menú comprimido en contexto + errores de carrito manejados
-
-SOLUCIÓN AL PROBLEMA DEL MENÚ SIN CONTEXTO:
-  El menú completo con descripciones va en la página del QR (menu.html).
-  El menú comprimido (nombres + precios + disponibilidad) va SIEMPRE
-  en el contexto dinámico del mensaje. Son ~100 tokens — insignificante.
-
-  Con esto el bot puede:
-  ✅ Validar que el plato pedido existe en el menú
-  ✅ Rechazar platos desactivados desde el dashboard
-  ✅ Hacer upsell informado ("¿Le agrego un Tiramisú por $11k?")
-  ✅ Sugerir alternativas si el plato no existe
-  ✅ Conocer precios para confirmar totales
-
-TOKENS POR LLAMADA:
-  - System prompt cacheado:    ~300 tokens → costo 10% tras primer write
-  - Menú comprimido (dinámico): ~100 tokens → no cacheado, siempre fresco
-  - Carrito + estado:           ~100 tokens
-  - Historial (5 turnos):       ~400 tokens
-  Total efectivo:               ~700 tokens vs ~9,000 antes = -92%
-
-ERRORES DE CARRITO:
-  Antes: add_to_cart fallaba en logs, el bot respondía "¡Listo!" con ítem vacío.
-  Ahora: los errores se acumulan y se inyectan en el contexto para que el bot
-  los incluya en su respuesta al cliente.
-"""
-
 import uuid
 import json
 import traceback
@@ -37,12 +9,10 @@ client = Anthropic()
 MODEL_FAST    = "claude-haiku-4-5-20251001"
 MODEL_PRECISE = "claude-sonnet-4-6"
 
-
 def _block_attr(block, attr: str):
     if isinstance(block, dict):
         return block.get(attr)
     return getattr(block, attr, None)
-
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
     session = await db.db_get_active_session(phone, bot_number)
@@ -87,7 +57,6 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             return table
     return None
 
-
 async def get_session_state(phone: str, bot_number: str) -> dict:
     session = await db.db_get_active_session(phone, bot_number)
     if not session:
@@ -98,13 +67,7 @@ async def get_session_state(phone: str, bot_number: str) -> dict:
         "order_delivered": session.get("order_delivered", False),
     }
 
-
 def _build_compact_menu(menu: dict, availability: dict) -> str:
-    """
-    Menú comprimido: solo nombre + precio + disponibilidad.
-    Sin descripciones (esas van en la página del QR).
-    ~100 tokens para un menú de 40 platos.
-    """
     lines = []
     for category, dishes in menu.items():
         cat_lines = []
@@ -119,19 +82,14 @@ def _build_compact_menu(menu: dict, availability: dict) -> str:
             lines.append(f"{category}: {', '.join(cat_lines)}")
     return "\n".join(lines) if lines else "Sin menú."
 
-
-# ── SYSTEM PROMPT CACHEADO ───────────────────────────────────────────
-# Sin menú. El menú comprimido va en el contexto dinámico (cambia con disponibilidad).
-# El system prompt es completamente estático → cache siempre válido.
-
 _STATIC_SYSTEM = """Eres Mesio, asistente de restaurante por WhatsApp. Español, natural, muy conciso.
 
-El cliente ya vio el menú con fotos y descripciones antes de escribir (página del QR).
+El cliente ya vio el menú con fotos y descripciones antes de escribir.
 Usa el [MENÚ] del contexto para validar pedidos, sugerir upsell y conocer precios.
 
 RESPONDE SIEMPRE con JSON válido, nada más:
 {
-  "items": [{"name": "nombre exacto del plato del menú", "qty": 1}],
+  "items": [{"name": "nombre exacto del plato", "qty": 1}],
   "action": "chat|order|domicilio|recoger|reserve|bill|waiter|end_session",
   "address": "",
   "notes": "",
@@ -141,7 +99,7 @@ RESPONDE SIEMPRE con JSON válido, nada más:
 }
 
 ACCIONES:
-- chat:        respuesta sin ejecutar (preguntas, bienvenida, mostrar opciones)
+- chat:        respuesta sin ejecutar
 - order:       agregar items y enviar a cocina (modo mesa)
 - domicilio:   agregar items y crear orden delivery con pago
 - recoger:     agregar items y crear orden para recoger con pago
@@ -151,10 +109,10 @@ ACCIONES:
 - end_session: cliente se despide definitivamente
 
 REGLAS DE VALIDACIÓN (usa el [MENÚ] del contexto):
-- Si el plato pedido NO está en [MENÚ] → action=chat, pregunta qué quiso decir o sugiere alternativas
-- Si el plato tiene [NO DISPONIBLE] → action=chat, disculpa y sugiere alternativas disponibles
-- Usa los nombres EXACTOS del menú en "items.name" para que el sistema los encuentre
-- Para upsell: sugiere 1 plato complementario de bajo precio al confirmar pedido
+- Si el plato pedido NO está en [MENÚ] → action=chat, sugiere alternativas
+- Si el plato tiene [NO DISPONIBLE] → action=chat, disculpa y sugiere alternativas
+- Usa los nombres EXACTOS del menú en "items.name"
+- CRÍTICO PARA ÓRDENES ADICIONALES: En "items", incluye **SOLO LOS NUEVOS PLATOS** que el cliente acaba de pedir en su último mensaje. ¡NUNCA repitas los platos que ya están en el [CARRITO] o que ya se pidieron antes!
 
 REGLAS DE FLUJO:
 - Items + confirmación en mismo mensaje → action=order
@@ -163,10 +121,8 @@ REGLAS DE FLUJO:
 - NO uses end_session si hay pedido en cocina no entregado
 - NO uses end_session si hay factura pendiente"""
 
-
 async def build_system_prompt() -> list:
     return [{"type": "text", "text": _STATIC_SYSTEM, "cache_control": {"type": "ephemeral"}}]
-
 
 async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> str:
     response = client.messages.create(
@@ -177,7 +133,6 @@ async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> 
         if text:
             return text
     return ""
-
 
 def _parse_bot_response(raw: str) -> dict | None:
     raw = raw.strip()
@@ -194,7 +149,6 @@ def _parse_bot_response(raw: str) -> dict | None:
         pass
     return None
 
-
 async def execute_action(parsed: dict, phone: str, bot_number: str,
                          table_context: dict | None, session_state: dict) -> str:
     action = parsed.get("action", "chat")
@@ -202,7 +156,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
     reply  = parsed.get("reply", "")
 
     try:
-        # ── Agregar al carrito, capturar errores ─────────────────────
         cart_errors = []
         if items and action in ("order", "domicilio", "recoger"):
             for item in items:
@@ -214,16 +167,12 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 if res["success"]:
                     print(f"🛒 '{res['dish']['name']}' x{qty}", flush=True)
                 else:
-                    # Registrar error para informar al cliente
                     cart_errors.append(name)
                     print(f"⚠️ No encontrado en menú: '{name}'", flush=True)
 
-            # Si TODOS los items fallaron, no crear orden — pedir aclaración
             if cart_errors and len(cart_errors) == len([i for i in items if i.get("name")]):
                 names = ", ".join(cart_errors)
-                return f"No encontré '{names}' en el menú. ¿Puedes verificar el nombre? Revisa el menú con el QR de la mesa."
-
-        # ── Acciones ─────────────────────────────────────────────────
+                return f"No encontré '{names}' en el menú. ¿Puedes verificar el nombre?"
 
         if action == "chat":
             pass
@@ -234,7 +183,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             cart = await db.db_get_cart(phone, bot_number)
             if not cart or not cart.get("items"):
                 if cart_errors:
-                    # Todos fallaron, ya se manejó arriba
                     return reply
                 return reply
 
@@ -244,7 +192,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             separate_bill = parsed.get("separate_bill", False)
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
-            # ── Subórdenes ──────────────────────────────────────────
             base_order_id = await db.db_get_base_order_id(phone, table_context["id"])
 
             if separate_bill or base_order_id is None:
@@ -272,7 +219,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
             print(f"🆕 {order_id} ({tag}): {items_summary}", flush=True)
 
-            # Si algunos items fallaron, avisar en la respuesta
             if cart_errors:
                 failed = ", ".join(cart_errors)
                 reply += f" (No pude agregar: {failed} — no está en el menú)"
@@ -332,9 +278,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
     return reply
 
-
 HISTORY_WINDOW = 5
-
 
 async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
     table_context = await detect_table_context(user_message, user_phone, bot_number)
@@ -346,14 +290,10 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     full_history = await db.db_get_history(user_phone, bot_number)
     cart_text    = await orders.cart_summary(user_phone, bot_number)
 
-    # ── Menú comprimido en contexto dinámico ────────────────────────
-    # ~100 tokens. Permite validación, upsell y respeto a disponibilidad.
-    # Cambia cuando el admin desactiva un plato → siempre fresco, no cacheado.
     availability = await db.db_get_menu_availability()
     menu         = await db.db_get_menu(bot_number) or {}
     compact_menu = _build_compact_menu(menu, availability)
 
-    # Estado dinámico
     table_note   = f"\n[MESA: {table_context['name']}]" if table_context else ""
     session_note = ""
     if session_state.get("has_order") and not session_state.get("order_delivered"):
@@ -392,7 +332,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])
 
     return {"message": assistant_message}
-
 
 async def reset_conversation(user_phone: str):
     await db.db_delete_conversation(user_phone)
