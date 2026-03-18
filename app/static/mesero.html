@@ -12,13 +12,74 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .topbar-title { font-size: 15px; font-weight: 600; flex: 1; }
 .topbar-role { font-size: 11px; padding: 3px 10px; background: #E1F5EE; color: #0F6E56; border-radius: 20px; font-weight: 500; }
 .logout-btn { font-size: 12px; padding: 5px 10px; border: 0.5px solid #ddd; border-radius: 8px; background: none; cursor: pointer; color: #555; }
+
+/* ── TABS ── */
 .tabs { position: fixed; top: 56px; left: 0; right: 0; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; z-index: 90; }
-.tab { flex: 1; padding: 12px; text-align: center; font-size: 13px; font-weight: 500; color: #888; cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; }
+.tab { flex: 1; padding: 12px; text-align: center; font-size: 13px; font-weight: 500; color: #888; cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; position: relative; }
 .tab.active { color: #1D9E75; border-bottom-color: #1D9E75; }
+.tab-badge { display: inline-block; background: #E24B4A; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle; }
+.tab-badge-warn { background: #E8A020; }
+
 .content { margin-top: 104px; padding: 1rem; }
 .section { display: none; }
 .section.active { display: block; }
-/* Orders */
+
+/* ── ALERT CARDS ── */
+.alert-card {
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.08);
+  animation: slideIn .3s ease;
+  position: relative;
+}
+@keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+
+.alert-bill {
+  background: #FFF8E6;
+  border: 1.5px solid #F0A500;
+  border-left: 5px solid #F0A500;
+}
+.alert-waiter {
+  background: #EBF4FF;
+  border: 1.5px solid #2D7DD2;
+  border-left: 5px solid #2D7DD2;
+}
+.alert-icon { font-size: 1.8rem; flex-shrink: 0; line-height: 1; }
+.alert-body { flex: 1; min-width: 0; }
+.alert-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+.alert-title-bill  { color: #7A4F00; }
+.alert-title-waiter { color: #174A80; }
+.alert-meta { font-size: 12px; color: #888; margin-bottom: 6px; }
+.alert-msg  { font-size: 13px; color: #444; }
+.alert-dismiss {
+  position: absolute; top: 10px; right: 10px;
+  background: none; border: none; font-size: 18px; color: #bbb;
+  cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 6px;
+}
+.alert-dismiss:hover { color: #555; background: rgba(0,0,0,.06); }
+.alert-time { font-size: 11px; color: #aaa; white-space: nowrap; }
+
+/* ── TOAST NOTIFICATION ── */
+.toast {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(100px);
+  background: #1D2226; color: #fff;
+  padding: 12px 20px; border-radius: 50px;
+  font-size: 14px; font-weight: 500;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.25);
+  transition: transform .35s cubic-bezier(.34,1.56,.64,1);
+  z-index: 9999; max-width: 90vw; text-align: center;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast-icon { font-size: 1.3rem; flex-shrink: 0; }
+.toast-bill   { border-left: 4px solid #F0A500; }
+.toast-waiter { border-left: 4px solid #2D7DD2; }
+
+/* ── ORDER CARDS (existing style) ── */
 .order-card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 10px; }
 .order-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .order-id { font-size: 13px; font-weight: 600; }
@@ -34,14 +95,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-green { background: #1D9E75; color: #fff; }
 .btn-blue { background: #185FA5; color: #fff; }
 .btn-gray { background: #f0f0e8; color: #555; }
-.empty { text-align: center; padding: 3rem 1rem; color: #aaa; font-size: 14px; }
-/* Chat */
+
+/* ── CHAT ── */
 .conv-item { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
 .conv-avatar { width: 40px; height: 40px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #0F6E56; flex-shrink: 0; }
 .conv-phone { font-size: 13px; font-weight: 600; }
 .conv-preview { font-size: 12px; color: #888; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-count { font-size: 11px; color: #aaa; flex-shrink: 0; }
-/* Chat modal */
+.empty { text-align: center; padding: 3rem 1rem; color: #aaa; font-size: 14px; }
+
+/* ── CHAT MODAL ── */
 .chat-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 2000; align-items: center; justify-content: center; }
 .chat-modal.open { display: flex; }
 .chat-box { background: #fff; border-radius: 16px; width: 520px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -52,13 +115,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .msg { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; max-width: 75%; }
 .msg-user { background: #DCF8C6; align-self: flex-end; border-bottom-right-radius: 3px; }
 .msg-bot { background: #fff; align-self: flex-start; border-bottom-left-radius: 3px; }
-.chat-input { padding: .75rem 1rem; border-top: 0.5px solid #e0e0d8; display: flex; gap: 8px; background: #f8f8f5; }
-.chat-input input { flex: 1; padding: 8px 12px; border: 1px solid #e0e0d8; border-radius: 20px; font-size: 13px; outline: none; }
-.chat-input button { background: #1D9E75; color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: 500; }
-.badge { background: #E24B4A; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 4px; }
+.chat-input-row { padding: .75rem 1rem; border-top: 0.5px solid #e0e0d8; display: flex; gap: 8px; background: #f8f8f5; }
+.chat-input-row input { flex: 1; padding: 8px 12px; border: 1px solid #e0e0d8; border-radius: 20px; font-size: 13px; outline: none; }
+.chat-input-row button { background: #1D9E75; color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: 500; }
+
+/* ── SECTION HEADER ── */
+.section-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; margin-top: 4px; }
+.sh-alert  { color: #F0A500; }
+.sh-listo  { color: #0F6E56; }
+.sh-orders { color: #185FA5; }
 </style>
 </head>
 <body>
+
 <div class="topbar">
   <div class="topbar-logo">M</div>
   <div class="topbar-title" id="rest-name">Mi Restaurante</div>
@@ -67,20 +136,46 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 </div>
 
 <div class="tabs">
-  <div class="tab active" onclick="switchTab('pedidos',this)">Pedidos listos <span class="badge" id="badge-pedidos" style="display:none">0</span></div>
-  <div class="tab" onclick="switchTab('chats',this)">WhatsApp <span class="badge" id="badge-chats" style="display:none">0</span></div>
+  <div class="tab active" id="tab-alertas" onclick="switchTab('alertas', this)">
+    🔔 Alertas
+    <span class="tab-badge tab-badge-warn" id="badge-alertas" style="display:none">0</span>
+  </div>
+  <div class="tab" id="tab-pedidos" onclick="switchTab('pedidos', this)">
+    Pedidos listos
+    <span class="tab-badge" id="badge-pedidos" style="display:none">0</span>
+  </div>
+  <div class="tab" id="tab-chats" onclick="switchTab('chats', this)">
+    WhatsApp
+    <span class="tab-badge" id="badge-chats" style="display:none">0</span>
+  </div>
 </div>
 
 <div class="content">
-  <div id="pedidos" class="section active">
+
+  <!-- ── ALERTAS ── -->
+  <div id="alertas" class="section active">
+    <div id="alerts-list"><div class="empty">Sin alertas activas. Cuando un cliente pida la cuenta o llame al mesero, aparecerá aquí.</div></div>
+  </div>
+
+  <!-- ── PEDIDOS ── -->
+  <div id="pedidos" class="section">
     <div id="orders-list"><div class="empty">Cargando pedidos...</div></div>
   </div>
+
+  <!-- ── CHATS ── -->
   <div id="chats" class="section">
     <div id="chats-list"><div class="empty">Cargando conversaciones...</div></div>
   </div>
+
 </div>
 
-<!-- Chat Modal -->
+<!-- ── TOAST ── -->
+<div class="toast" id="toast">
+  <span class="toast-icon" id="toast-icon">🔔</span>
+  <span id="toast-text">Nueva alerta</span>
+</div>
+
+<!-- ── CHAT MODAL ── -->
 <div class="chat-modal" id="chat-modal">
   <div class="chat-box">
     <div class="chat-head">
@@ -88,7 +183,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <button class="chat-close" onclick="closeChat()">&#10005;</button>
     </div>
     <div class="chat-msgs" id="chat-msgs"></div>
-    <div class="chat-input">
+    <div class="chat-input-row">
       <input id="chat-input-msg" placeholder="Responder manualmente..." onkeydown="if(event.key==='Enter')sendReply()">
       <button onclick="sendReply()">Enviar</button>
     </div>
@@ -96,10 +191,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 </div>
 
 <script>
-const token = localStorage.getItem('rb_token');
+// ── AUTH ──────────────────────────────────────────────────────────
+const token      = localStorage.getItem('rb_token');
 const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
 if (!token) window.location.href = '/login';
-const headers = { 'Authorization': 'Bearer ' + token };
+const headers    = { 'Authorization': 'Bearer ' + token };
 document.getElementById('rest-name').textContent = restaurant.name || 'Mi Restaurante';
 
 let currentChatPhone = null;
@@ -117,86 +213,212 @@ function switchTab(id, btn) {
   btn.classList.add('active');
 }
 
+// ── SOUND (Web Audio API — sin archivos externos) ─────────────────
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let _audioCtx = null;
+function getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new AudioCtx();
+  return _audioCtx;
+}
+
+function playAlertSound(type) {
+  try {
+    const ctx  = getAudioCtx();
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+
+    // bill → dos tonos descendentes | waiter → tres tonos ascendentes
+    const freqs = type === 'bill' ? [880, 660] : [440, 550, 660];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.18);
+      osc.connect(gain);
+      osc.start(ctx.currentTime + i * 0.18);
+      osc.stop(ctx.currentTime + i * 0.18 + 0.15);
+    });
+  } catch(e) { /* silencioso si el navegador bloquea audio */ }
+}
+
+// ── TOAST ─────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(text, type) {
+  const t  = document.getElementById('toast');
+  const ti = document.getElementById('toast-icon');
+  const tt = document.getElementById('toast-text');
+  ti.textContent = type === 'bill' ? '💳' : '🙋';
+  tt.textContent = text;
+  t.className = 'toast show toast-' + type;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 5000);
+}
+
+// ── ALERTS ────────────────────────────────────────────────────────
+let knownAlertIds = new Set();
+
+function timeAgo(isoStr) {
+  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+  if (diff < 60)   return 'hace ' + diff + 's';
+  if (diff < 3600) return 'hace ' + Math.floor(diff/60) + 'min';
+  return 'hace ' + Math.floor(diff/3600) + 'h';
+}
+
+async function loadAlerts() {
+  try {
+    const r = await fetch('/api/waiter-alerts', { headers });
+    if (!r.ok) return;
+    const d = await r.json();
+    const alerts = d.alerts || [];
+
+    // Detectar nuevas alertas para sonido + toast
+    alerts.forEach(a => {
+      if (!knownAlertIds.has(a.id)) {
+        knownAlertIds.add(a.id);
+        playAlertSound(a.alert_type);
+        const label = a.alert_type === 'bill'
+          ? '💳 ' + (a.table_name || 'Cliente') + ' pide la cuenta'
+          : '🙋 ' + (a.table_name || 'Cliente') + ' llama al mesero';
+        showToast(label, a.alert_type);
+        // Cambiar al tab de alertas automáticamente si no está activo
+        if (!document.getElementById('alertas').classList.contains('active')) {
+          document.getElementById('tab-alertas').classList.add('alertas-pulse');
+          setTimeout(() => document.getElementById('tab-alertas').classList.remove('alertas-pulse'), 3000);
+        }
+      }
+    });
+
+    // Badge
+    const badge = document.getElementById('badge-alertas');
+    badge.textContent = alerts.length;
+    badge.style.display = alerts.length > 0 ? 'inline-block' : 'none';
+
+    // Render
+    const container = document.getElementById('alerts-list');
+    if (!alerts.length) {
+      container.innerHTML = '<div class="empty">Sin alertas activas. Cuando un cliente pida la cuenta o llame al mesero, aparecerá aquí.</div>';
+      return;
+    }
+
+    container.innerHTML = alerts.map(a => {
+      const isBill = a.alert_type === 'bill';
+      return `
+        <div class="alert-card ${isBill ? 'alert-bill' : 'alert-waiter'}" id="alert-${a.id}">
+          <div class="alert-icon">${isBill ? '💳' : '🙋'}</div>
+          <div class="alert-body">
+            <div class="alert-title ${isBill ? 'alert-title-bill' : 'alert-title-waiter'}">
+              ${isBill ? 'Solicitud de cuenta' : 'Llamada al mesero'}
+              ${a.table_name ? ' — ' + a.table_name : ''}
+            </div>
+            <div class="alert-meta">
+              ${a.phone}
+              &nbsp;·&nbsp;
+              <span class="alert-time">${timeAgo(a.created_at)}</span>
+            </div>
+            ${a.message ? '<div class="alert-msg">' + a.message + '</div>' : ''}
+          </div>
+          <button class="alert-dismiss" onclick="dismissAlert(${a.id})" title="Descartar">✕</button>
+        </div>
+      `;
+    }).join('');
+  } catch(e) { console.error('loadAlerts:', e); }
+}
+
+async function dismissAlert(id) {
+  // Animación de salida
+  const el = document.getElementById('alert-' + id);
+  if (el) { el.style.opacity = '0'; el.style.transform = 'translateX(30px)'; el.style.transition = 'all .25s'; }
+  setTimeout(async () => {
+    try {
+      await fetch('/api/waiter-alerts/' + id + '/dismiss', { method: 'POST', headers });
+      knownAlertIds.delete(id);
+      loadAlerts();
+    } catch(e) { console.error(e); }
+  }, 250);
+}
+
+// ── ORDERS ────────────────────────────────────────────────────────
 function statusLabel(s) {
-  const map = { recibido: 'Recibido', en_preparacion: 'En preparacion', listo: 'Listo para servir', entregado: 'Entregado', pendiente_pago: 'Pendiente pago', confirmado: 'Confirmado' };
+  const map = { recibido:'Recibido', en_preparacion:'En preparación', listo:'Listo para servir', entregado:'Entregado', pendiente_pago:'Pendiente pago', confirmado:'Confirmado' };
   return map[s] || s;
 }
 function statusClass(s) {
-  if (s === 'listo') return 'st-listo';
+  if (s === 'listo')         return 'st-listo';
   if (s === 'en_preparacion') return 'st-prep';
-  if (s === 'entregado') return 'st-entregado';
+  if (s === 'entregado')     return 'st-entregado';
   return 'st-recibido';
 }
 
 async function loadOrders() {
   try {
-    // Load both table orders (listo) and regular orders
     const [r1, r2] = await Promise.all([
       fetch('/api/table-orders?status=listo', { headers }),
       fetch('/api/dashboard/orders?period=today', { headers })
     ]);
-    const tableOrders = r1.ok ? (await r1.json()).orders || [] : [];
+    const tableOrders   = r1.ok ? (await r1.json()).orders || [] : [];
     const regularOrders = r2.ok ? (await r2.json()).orders || [] : [];
 
-    const listoTable = tableOrders.filter(o => o.status === 'listo');
-    const pendingRegular = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
+    const listoTable      = tableOrders.filter(o => o.status === 'listo');
+    const pendingRegular  = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
 
-    const badge = document.getElementById('badge-pedidos');
     const total = listoTable.length + pendingRegular.length;
+    const badge = document.getElementById('badge-pedidos');
     badge.textContent = total;
-    badge.style.display = total > 0 ? 'inline' : 'none';
+    badge.style.display = total > 0 ? 'inline-block' : 'none';
 
     let html = '';
-
     if (listoTable.length > 0) {
-      html += '<div style="font-size:11px;font-weight:600;color:#0F6E56;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;margin-top:4px;">LISTOS PARA SERVIR — MESA</div>';
+      html += '<div class="section-header sh-listo">✅ Listos para servir — Mesa</div>';
       listoTable.forEach(o => {
         const items = Array.isArray(o.items) ? o.items.map(i => (i.quantity||1)+'x '+i.name).join(', ') : o.items || '';
-        html += '<div class="order-card" style="border-left:3px solid #1D9E75;">';
-        html += '<div class="order-header"><div class="order-id">'+o.table_name+'</div><div class="order-time">'+o.created_at.substring(11,16)+'</div></div>';
-        html += '<div class="order-items">'+items+'</div>';
-        html += '<div class="order-actions">';
-        html += '<button class="btn btn-green" onclick="updateTableOrder(\''+o.id+'\',\'entregado\')">Marcar entregado</button>';
-        html += '</div></div>';
+        html += `<div class="order-card" style="border-left:3px solid #1D9E75;">
+          <div class="order-header"><div class="order-id">${o.table_name}</div><div class="order-time">${o.created_at.substring(11,16)}</div></div>
+          <div class="order-items">${items}</div>
+          <div class="order-actions">
+            <button class="btn btn-green" onclick="updateTableOrder('${o.id}','entregado')">Marcar entregado</button>
+          </div>
+        </div>`;
       });
     }
 
     if (pendingRegular.length > 0) {
-      html += '<div style="font-size:11px;font-weight:600;color:#185FA5;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;margin-top:12px;">PEDIDOS WHATSAPP HOY</div>';
+      html += '<div class="section-header sh-orders" style="margin-top:12px;">📱 Pedidos WhatsApp hoy</div>';
       pendingRegular.forEach(o => {
-        html += '<div class="order-card">';
-        html += '<div class="order-header"><div class="order-id">'+o.id.substring(0,12)+'</div><div class="order-time">'+o.time+'</div></div>';
-        html += '<div class="order-items">'+o.items+'</div>';
-        html += '<div><span class="order-status '+statusClass(o.status)+'">'+statusLabel(o.status)+'</span></div>';
-        if (o.address) html += '<div style="font-size:12px;color:#888;margin-bottom:8px;">'+o.address+'</div>';
-        html += '</div>';
+        html += `<div class="order-card">
+          <div class="order-header"><div class="order-id">${o.id.substring(0,12)}</div><div class="order-time">${o.time}</div></div>
+          <div class="order-items">${o.items}</div>
+          <div><span class="order-status ${statusClass(o.status)}">${statusLabel(o.status)}</span></div>
+          ${o.address ? '<div style="font-size:12px;color:#888;margin-bottom:8px;">'+o.address+'</div>' : ''}
+        </div>`;
       });
     }
 
     if (!html) html = '<div class="empty">Sin pedidos activos ahora mismo</div>';
     document.getElementById('orders-list').innerHTML = html;
-  } catch(e) { console.error(e); }
+  } catch(e) { console.error('loadOrders:', e); }
 }
 
 async function updateTableOrder(id, status) {
   try {
     await fetch('/api/table-orders/'+id+'/status', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
     loadOrders();
   } catch(e) { console.error(e); }
 }
 
+// ── CHATS ─────────────────────────────────────────────────────────
 async function loadChats() {
   try {
     const r = await fetch('/api/dashboard/conversations', { headers });
     if (!r.ok) return;
     const d = await r.json();
     const convs = d.conversations || [];
-    document.getElementById('badge-chats').textContent = convs.length;
-    document.getElementById('badge-chats').style.display = convs.length > 0 ? 'inline' : 'none';
+    const badge = document.getElementById('badge-chats');
+    badge.textContent = convs.length;
+    badge.style.display = convs.length > 0 ? 'inline-block' : 'none';
     if (!convs.length) {
       document.getElementById('chats-list').innerHTML = '<div class="empty">Sin conversaciones activas</div>';
       return;
@@ -210,7 +432,7 @@ async function loadChats() {
         </div>
         <div class="conv-count">${c.messages} msgs</div>
       </div>`).join('');
-  } catch(e) { console.error(e); }
+  } catch(e) { console.error('loadChats:', e); }
 }
 
 async function openChat(phone) {
@@ -224,7 +446,7 @@ async function openChat(phone) {
   const msgs = d.history || [];
   const container = document.getElementById('chat-msgs');
   container.innerHTML = msgs.map(m => `
-    <div class="msg ${m.role==='user'?'msg-user':'msg-bot'}">${m.content}</div>
+    <div class="msg ${m.role==='user'?'msg-user':'msg-bot'}">${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}</div>
   `).join('');
   container.scrollTop = container.scrollHeight;
 }
@@ -237,21 +459,24 @@ function closeChat() {
 
 async function sendReply() {
   const input = document.getElementById('chat-input-msg');
-  const msg = input.value.trim();
+  const msg   = input.value.trim();
   if (!msg || !currentChatPhone) return;
   input.value = '';
   await fetch('/api/conversations/'+encodeURIComponent(currentChatPhone)+'/reply', {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message: msg })
   });
   openChat(currentChatPhone);
 }
 
-// Load data
+// ── POLLING: alertas cada 5s, pedidos/chats cada 15s ──────────────
+loadAlerts();
 loadOrders();
 loadChats();
-setInterval(() => { loadOrders(); loadChats(); }, 15000);
+
+setInterval(loadAlerts,  5000);
+setInterval(loadOrders, 15000);
+setInterval(loadChats,  15000);
 </script>
 </body>
 </html>

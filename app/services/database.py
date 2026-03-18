@@ -604,6 +604,67 @@ async def db_update_table_order_status(order_id: str, status: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
+
+async def db_init_waiter_alerts():
+    """Crea la tabla waiter_alerts si no existe. Llamar en startup."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS waiter_alerts (
+                id SERIAL PRIMARY KEY,
+                table_id   TEXT NOT NULL DEFAULT '',
+                table_name TEXT NOT NULL DEFAULT '',
+                phone      TEXT NOT NULL,
+                bot_number TEXT NOT NULL DEFAULT '',
+                alert_type TEXT NOT NULL DEFAULT 'waiter',  -- 'waiter' | 'bill'
+                message    TEXT NOT NULL DEFAULT '',
+                dismissed  BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+        """)
+ 
+ 
+async def db_create_waiter_alert(
+    phone: str,
+    bot_number: str,
+    alert_type: str,   # 'waiter' | 'bill'
+    message: str,
+    table_id: str = "",
+    table_name: str = "",
+) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO waiter_alerts
+                (table_id, table_name, phone, bot_number, alert_type, message)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+        """, table_id, table_name, phone, bot_number, alert_type, message)
+        return _serialize(dict(row))
+ 
+ 
+async def db_get_waiter_alerts(bot_number: str) -> list:
+    """Devuelve alertas no descartadas para este bot (últimas 2 h)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT * FROM waiter_alerts
+            WHERE bot_number = $1
+              AND dismissed  = FALSE
+              AND created_at > NOW() - INTERVAL '2 hours'
+            ORDER BY created_at DESC
+        """, bot_number)
+        return [_serialize(dict(r)) for r in rows]
+ 
+ 
+async def db_dismiss_waiter_alert(alert_id: int) -> bool:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE waiter_alerts SET dismissed = TRUE WHERE id = $1", alert_id
+        )
+        return result == "UPDATE 1"
+         
         # ── SESIONES Y CARRITOS (RAM Fix) ──────────────────────────────────────────
 
 async def db_save_session(token: str, username: str):
