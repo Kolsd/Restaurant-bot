@@ -141,7 +141,6 @@ async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number:
             "phone": phone, "items": items, "notes": tool_input.get("notes",""), "total": total, "status": "recibido"
         })
         
-        # VACIAR EL CARRITO PARA FUTUROS PEDIDOS
         await orders.clear_cart(phone, bot_number)
         return "Pedido enviado a cocina exitosamente. El carrito ha sido vaciado para permitir nuevos pedidos."
 
@@ -166,8 +165,8 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         tools=TOOLS
     )
 
-    if response.stop_reason == "tool_use":
-        # Evita TypeError: Object of type TextBlock is not JSON serializable
+    # CICLO WHILE PARA SOPORTAR MÚLTIPLES ACCIONES CONSECUTIVAS (ej. agregar + enviar a cocina de una)
+    while response.stop_reason == "tool_use":
         safe_content = [block.model_dump() if hasattr(block, 'model_dump') else block for block in response.content]
         history.append({"role": "assistant", "content": safe_content})
         
@@ -188,7 +187,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         
         history.append({"role": "user", "content": tool_results})
         
-        final_response = client.messages.create(
+        response = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1000,
             system=sys_prompt,
@@ -196,25 +195,17 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
             tools=TOOLS
         )
         
-        assistant_message = ""
-        for block in final_response.content:
-            block_type = block.get('type') if isinstance(block, dict) else block.type
-            if block_type == "text":
-                assistant_message = block.get('text') if isinstance(block, dict) else block.text
-                break
-        
-        if not assistant_message:
-            assistant_message = "Tu orden ha sido procesada."
+    assistant_message = ""
+    for block in response.content:
+        block_type = block.get('type') if isinstance(block, dict) else block.type
+        if block_type == "text":
+            assistant_message = block.get('text') if isinstance(block, dict) else block.text
+            break
             
-        history.append({"role": "assistant", "content": assistant_message})
-    else:
-        assistant_message = ""
-        for block in response.content:
-            block_type = block.get('type') if isinstance(block, dict) else block.type
-            if block_type == "text":
-                assistant_message = block.get('text') if isinstance(block, dict) else block.text
-                break
-        history.append({"role": "assistant", "content": assistant_message})
+    if not assistant_message:
+        assistant_message = "Tu orden ha sido procesada."
+        
+    history.append({"role": "assistant", "content": assistant_message})
 
     await db.db_save_history(user_phone, bot_number, history)
     return {"message": assistant_message}
