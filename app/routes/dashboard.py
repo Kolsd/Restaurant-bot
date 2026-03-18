@@ -216,9 +216,9 @@ async def list_team_users(request: Request, branch_id: int = None):
     role = user.get("role", "owner")
     user_branch = user.get("branch_id")
     if role == "owner":
-        return {"users": await db.db_get_all_users()}
+        return {"users": await db.db_get_all_users_with_roles(branch_id=branch_id)}
     if role == "admin" and user_branch:
-        return {"users": await db.db_get_all_users()}
+        return {"users": await db.db_get_all_users_with_roles(branch_id=user_branch)}
     raise HTTPException(status_code=403, detail="No autorizado")
 
 @router.post("/api/team/invite")
@@ -235,7 +235,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
             raise HTTPException(status_code=400, detail="branch_id requerido")
         branch = await db.db_get_restaurant_by_id(body.branch_id)
         if not branch: raise HTTPException(status_code=404, detail="Sucursal no encontrada")
-        success = await db.db_create_user(
+        success = await db.db_create_user_v2(
             body.username, hash_password(body.password), branch["name"],
             role=target_role, branch_id=body.branch_id, parent_user=creator_username)
     elif creator_role == "admin":
@@ -245,7 +245,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         if not branch_id: raise HTTPException(status_code=400, detail="Admin sin sucursal")
         branch = await db.db_get_restaurant_by_id(branch_id)
         if not branch: raise HTTPException(status_code=404, detail="Sucursal no encontrada")
-        success = await db.db_create_user(
+        success = await db.db_create_user_v2(
             body.username, hash_password(body.password), branch["name"],
             role=target_role, branch_id=branch_id, parent_user=creator_username)
     else:
@@ -327,3 +327,38 @@ async def fix_conversations_bot_number(request: Request):
             bot_number
         )
     return {"success": True, "result": str(result)}
+
+@router.delete("/api/team/users/{username}")
+async def delete_user(username: str, request: Request):
+    """Elimina un usuario. Owner puede eliminar cualquiera, admin solo de su sucursal."""
+    creator = await get_current_user(request)
+    creator_role = creator.get("role", "owner")
+    target = await db.db_get_user(username)
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if creator_role == "admin":
+        if target.get("branch_id") != creator.get("branch_id"):
+            raise HTTPException(status_code=403, detail="Solo puedes eliminar usuarios de tu sucursal")
+    elif creator_role != "owner":
+        raise HTTPException(status_code=403, detail="No autorizado")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM users WHERE username=$1", username.lower().strip())
+    return {"success": True}
+
+
+@router.delete("/api/team/branches/{branch_id}")
+async def delete_branch(branch_id: int, request: Request):
+    """Elimina una sucursal. Solo owner."""
+    user = await get_current_user(request)
+    if user.get("role", "owner") != "owner":
+        raise HTTPException(status_code=403, detail="Solo el dueno puede eliminar sucursales")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
+    return {"success": True}
+
+
+@router.get("/mesero", response_class=HTMLResponse)
+async def mesero_page():
+    return (STATIC / "mesero.html").read_text(encoding="utf-8")

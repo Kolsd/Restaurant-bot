@@ -142,113 +142,137 @@
 
 
   /* ── MOBILE RESPONSIVE ─────────────────────────────── */
+  /* HAMBURGER MENU BUTTON — only on mobile */
+  .hamburger-btn {
+    display: none;
+    position: fixed;
+    top: 12px; left: 12px;
+    z-index: 300;
+    background: #fff;
+    border: 0.5px solid #e0e0d8;
+    border-radius: 10px;
+    width: 40px; height: 40px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    flex-direction: column;
+    gap: 5px;
+    padding: 0;
+  }
+  .hamburger-btn span {
+    display: block;
+    width: 18px; height: 2px;
+    background: #333;
+    border-radius: 2px;
+    transition: all .2s;
+  }
+  .mobile-topbar {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: #fff;
+    border-bottom: 0.5px solid #e0e0d8;
+    z-index: 250;
+    align-items: center;
+    padding: 0 1rem 0 60px;
+    gap: 10px;
+  }
+  .mobile-topbar .mobile-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111;
+    flex: 1;
+  }
+  .mobile-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.4);
+    z-index: 280;
+  }
+  .mobile-overlay.open { display: block; }
+
   @media (max-width: 768px) {
+    /* Show hamburger and mobile topbar */
+    .hamburger-btn { display: flex; }
+    .mobile-topbar { display: flex; }
+
+    /* Sidebar becomes slide-in drawer */
     .sidebar {
-      width: 100%;
-      height: auto;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: auto;
-      flex-direction: row;
-      align-items: center;
-      padding: .5rem .75rem;
-      z-index: 200;
-      overflow-x: auto;
-      overflow-y: hidden;
-      border-right: none;
-      border-bottom: 0.5px solid #e0e0d8;
-      gap: 4px;
-      -webkit-overflow-scrolling: touch;
-    }
-    .sidebar::-webkit-scrollbar { display: none; }
-    .sidebar-logo {
-      margin-bottom: 0;
-      padding-bottom: 0;
-      border-bottom: none;
+      position: fixed !important;
+      top: 0 !important; left: -280px !important;
+      width: 260px !important;
+      height: 100vh !important;
+      flex-direction: column !important;
+      padding: 1.25rem 1rem !important;
+      z-index: 290;
+      transition: left .25s ease;
+      box-shadow: 4px 0 20px rgba(0,0,0,.15);
+      overflow-y: auto;
       border-right: 0.5px solid #e0e0d8;
-      padding-right: 10px;
-      margin-right: 4px;
-      flex-shrink: 0;
     }
-    .logo-sub { display: none; }
-    .logo-text { font-size: 13px; }
-    .logo-icon { width: 28px; height: 28px; font-size: 12px; }
+    .sidebar.open { left: 0 !important; }
+    .sidebar-logo { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 0.5px solid #e0e0d8; }
+    .logo-sub { display: block; }
     .nav-item {
-      white-space: nowrap;
-      padding: 5px 9px;
-      font-size: 11px;
-      margin-bottom: 0;
-      flex-shrink: 0;
+      width: 100%;
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-bottom: 2px;
+      border-radius: 8px;
     }
-    .live-badge {
-      margin-top: 0;
-      margin-left: auto;
-      flex-shrink: 0;
-      font-size: 10px;
-      padding: 4px 7px;
-      white-space: nowrap;
-    }
+    .live-badge { margin-top: auto; }
+
+    /* Main content */
     .main {
-      margin-left: 0;
-      margin-top: 52px;
+      margin-left: 0 !important;
+      margin-top: 56px;
       padding: .75rem;
     }
-    .topbar {
-      flex-wrap: wrap;
-      gap: 4px;
-      margin-bottom: .75rem;
-    }
-    .topbar-left { flex: 1; min-width: 0; }
-    .topbar-right { width: 100%; display: flex; justify-content: space-between; align-items: center; }
-    .page-title { font-size: 16px; }
-    .sync-badge { font-size: 10px; }
+    .topbar { display: none; }
+    .page-title { display: none; }
+    .sync-badge { display: none; }
     .logout-btn { font-size: 11px; padding: 5px 9px; }
+
+    /* Period bar */
     .period-bar {
       overflow-x: auto;
       flex-wrap: nowrap;
       -webkit-overflow-scrolling: touch;
-      padding-bottom: 2px;
     }
     .period-bar::-webkit-scrollbar { display: none; }
     .period-btn { font-size: 11px; padding: 5px 10px; white-space: nowrap; }
-    .metrics {
-      grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
-    }
+
+    /* Metrics 2 col */
+    .metrics { grid-template-columns: repeat(2,1fr); gap: 8px; }
     .metric { padding: .75rem; }
     .metric-label { font-size: 11px; }
     .metric-value { font-size: 20px; }
     .metric-sub { font-size: 11px; }
+
+    /* Charts */
     .grid2 { grid-template-columns: 1fr; gap: 10px; }
+    canvas { max-height: 180px !important; }
     .card { overflow-x: hidden; }
     .card-title { font-size: 13px; }
     table { min-width: 480px; font-size: 12px; }
-    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    /* AI insight — fix text overflow */
-    .ai-insight-card {
-      font-size: 12px;
-      line-height: 1.5;
-      word-break: break-word;
-      overflow-wrap: break-word;
-    }
-    .ai-insight-card strong { display: inline; }
-    #ai-main-text { font-size: 12px; line-height: 1.5; }
-    /* POS grid */
+    .table-wrap { overflow-x: auto; }
+
+    /* AI */
+    #ai-main-text { font-size: 12px; line-height: 1.5; word-break: break-word; }
     .pos-grid { grid-template-columns: 1fr !important; }
-    /* Menu */
     .menu-category { font-size: 12px; }
     .menu-row { flex-wrap: wrap; gap: 6px; }
-    /* Conv rows */
     .conv-row { flex-wrap: wrap; gap: 4px; }
-    /* Charts */
-    canvas { max-height: 180px !important; }
   }
   @media (max-width: 480px) {
     .metrics { grid-template-columns: 1fr 1fr; gap: 6px; }
     .metric { padding: .6rem .75rem; }
     .metric-value { font-size: 17px; }
     .main { padding: .6rem; }
-    .topbar-right .sync-badge { display: none; }
-    .section { padding: 0; }
     canvas { max-height: 160px !important; }
   }
 
@@ -256,7 +280,21 @@
 </head>
 <body>
 
-<div class="sidebar">
+<!-- MOBILE OVERLAY -->
+<div class="mobile-overlay" id="mobile-overlay" onclick="closeSidebar()"></div>
+
+<!-- HAMBURGER BUTTON -->
+<button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()">
+  <span></span><span></span><span></span>
+</button>
+
+<!-- MOBILE TOPBAR -->
+<div class="mobile-topbar">
+  <div class="mobile-title" id="mobile-page-title">Panel de control</div>
+  <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+</div>
+
+<div class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <div class="logo-icon">M</div>
     <div>
@@ -1020,10 +1058,11 @@ async function loadBranchUsers(branchId) {
         <div style="width:28px;height:28px;border-radius:50%;background:${roleBg[u.role]||'#f0f0e8'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:${roleColors[u.role]||'#555'};">
           ${(u.username||'?')[0].toUpperCase()}
         </div>
-        <div>
+        <div style="flex:1;min-width:0;">
           <div style="font-size:12px;font-weight:500;">${u.username}</div>
           <div style="font-size:10px;color:${roleColors[u.role]||'#888'};">${roleLabels[u.role]||u.role}</div>
         </div>
+        <button onclick="deleteUser('${u.username}')" style="background:none;border:none;color:#C0392B;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;" title="Eliminar usuario">&times;</button>
       </div>`).join('') +
     '</div>';
   } catch(e) {}
@@ -1610,6 +1649,49 @@ async function sendManualReply() {
       body: JSON.stringify({ message: msg })
     });
     await loadChatHistory(currentChatPhone);
+  } catch(e) { console.error(e); }
+}
+
+// ── HAMBURGER MENU ──────────────────────────────────────
+function toggleSidebar() {
+  const s = document.getElementById('sidebar');
+  const o = document.getElementById('mobile-overlay');
+  s.classList.toggle('open');
+  o.classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('mobile-overlay').classList.remove('open');
+}
+// Close sidebar when nav item clicked on mobile
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (window.innerWidth <= 768) closeSidebar();
+  });
+});
+// Update mobile title when section changes
+const _origShowSection = showSection;
+function showSection(id, btn) {
+  _origShowSection(id, btn);
+  const titleEl = document.getElementById('mobile-page-title');
+  if (titleEl && titles[id]) titleEl.textContent = titles[id];
+}
+
+async function deleteBranch(id, name) {
+  if (!confirm('Eliminar sucursal "' + name + '"? Esta accion no se puede deshacer.')) return;
+  try {
+    const r = await fetch('/api/team/branches/' + id, { method: 'DELETE', headers });
+    if (r.ok) { loadBranches(); }
+    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo eliminar')); }
+  } catch(e) { console.error(e); }
+}
+
+async function deleteUser(username) {
+  if (!confirm('Eliminar usuario "' + username + '"?')) return;
+  try {
+    const r = await fetch('/api/team/users/' + encodeURIComponent(username), { method: 'DELETE', headers });
+    if (r.ok) { loadBranches(); }
+    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo eliminar')); }
   } catch(e) { console.error(e); }
 }
 </script>
