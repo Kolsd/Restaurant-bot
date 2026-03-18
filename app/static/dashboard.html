@@ -1669,13 +1669,17 @@ document.querySelectorAll('.nav-item').forEach(btn => {
     if (window.innerWidth <= 768) closeSidebar();
   });
 });
-// Update mobile title when section changes
-const _origShowSection = showSection;
-function showSection(id, btn) {
-  _origShowSection(id, btn);
-  const titleEl = document.getElementById('mobile-page-title');
-  if (titleEl && titles[id]) titleEl.textContent = titles[id];
-}
+// Update mobile title when section changes — patch after load
+document.addEventListener('DOMContentLoaded', function() {
+  const origFn = window.showSection;
+  if (origFn) {
+    window.showSection = function(id, btn) {
+      origFn(id, btn);
+      const titleEl = document.getElementById('mobile-page-title');
+      if (titleEl && window.titles && window.titles[id]) titleEl.textContent = window.titles[id];
+    };
+  }
+});
 
 async function deleteBranch(id, name) {
   if (!confirm('Eliminar sucursal "' + name + '"? Esta accion no se puede deshacer.')) return;
