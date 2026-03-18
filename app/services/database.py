@@ -622,6 +622,18 @@ async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
         return d
 
 
+async def db_has_pending_invoice(phone: str) -> bool:
+    """Retorna True si el cliente tiene alguna orden en status 'entregado' (factura no entregada aún)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id FROM table_orders
+            WHERE phone=$1 AND status='entregado'
+            ORDER BY created_at DESC LIMIT 1
+        """, phone)
+        return row is not None
+
+
 async def db_add_items_to_table_order(order_id: str, new_items: list, extra_total: int, extra_notes: str = ""):
     """Acumula items y suma al total de una orden existente. No cambia el status."""
     pool = await get_pool()

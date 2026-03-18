@@ -103,6 +103,7 @@ TOOLS = [
             "Ejemplos VALIDOS: 'hasta luego', 'ya me voy', 'nos vemos', 'chao', 'bye', "
             "'hasta pronto', 'que tengas buen dia', 'gracias por todo', 'muchas gracias fue todo'. "
             "NUNCA usar si el cliente tiene un pedido en cocina que aun no ha sido entregado. "
+            "NUNCA usar si el cliente recibio su comida pero aun no le han entregado la factura. "
             "NUNCA usar si el cliente solo dice 'eso es todo' para terminar de pedir — "
             "eso significa que no quiere agregar mas platos, NO que se va a retirar."
         ),
@@ -232,12 +233,13 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict |
                 "\nESTADO: El cliente tiene un pedido en cocina que AUN NO ha sido entregado. "
                 "Si dice 'eso es todo', 'gracias', 'listo' → NO cierres la sesion. "
                 "Solo di que su pedido esta en camino. "
-                "Solo usa end_session cuando se despida definitivamente despues de recibir todo."
+                "Solo usa end_session cuando se despida definitivamente despues de recibir todo Y de que le hayan entregado la factura."
             )
         elif has_order and order_delivered:
             session_section = (
-                "\nESTADO: El pedido ya fue entregado. "
-                "Si el cliente se despide o dice gracias → puedes usar end_session."
+                "\nESTADO: El pedido ya fue entregado. El mesero todavia NO ha traido la factura. "
+                "Si el cliente se despide → dile amablemente que espere la factura antes de irse, o que llame al mesero si la necesita. "
+                "NO uses end_session hasta que la factura haya sido entregada."
             )
 
         table_section = f"""
@@ -384,7 +386,7 @@ async def execute_tool(
             return "OK: Alerta enviada al mesero — viene en camino."
 
         elif tool_name == "end_session":
-            # Guardia: no cerrar si hay pedido pendiente de entrega
+            # Guardia 1: pedido en cocina no entregado
             session_state = await get_session_state(phone, bot_number)
             if session_state.get("has_order") and not session_state.get("order_delivered"):
                 print(f"⚠️ end_session bloqueado — pedido en cocina aun no entregado para {phone}", flush=True)
@@ -392,6 +394,15 @@ async def execute_tool(
                     "BLOQUEADO: El cliente tiene un pedido en cocina que aun no fue entregado. "
                     "No cierres la sesion. Dile al cliente que su pedido esta en camino."
                 )
+            # Guardia 2: comida entregada pero factura pendiente
+            if session_state.get("order_delivered"):
+                has_pending = await db.db_has_pending_invoice(phone)
+                if has_pending:
+                    print(f"⚠️ end_session bloqueado — factura pendiente para {phone}", flush=True)
+                    return (
+                        "BLOQUEADO: El cliente recibio su comida pero aun no le han entregado la factura. "
+                        "Dile que espere un momento, que el mesero le trae la factura enseguida."
+                    )
             farewell = tool_input.get("farewell_message", "")
             await db.db_close_session(
                 phone=phone, bot_number=bot_number,
