@@ -327,3 +327,11 @@ async def fix_conversations_bot_number(request: Request):
             bot_number
         )
     return {"success": True, "result": str(result)}
+
+
+@router.get('/api/geocode')
+async def geocode_endpoint(address: str):
+    lat, lon, display = await geocode_address(address)
+    if lat is None:
+        raise HTTPException(status_code=404, detail='No se encontro la direccion')
+    return {'latitude': lat, 'longitude': lon, 'display_name': display, 'maps_url': f'https://www.google.com/maps?q={lat},{lon}'}
