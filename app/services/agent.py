@@ -161,7 +161,10 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     )
 
     if response.stop_reason == "tool_use":
-        history.append({"role": "assistant", "content": response.content})
+        # Convertimos los objetos a formato de diccionario (JSON serializable)
+        safe_content = [block.model_dump() if hasattr(block, 'model_dump') else block for block in response.content]
+        history.append({"role": "assistant", "content": safe_content})
+        
         tool_results = []
         
         for block in response.content:
