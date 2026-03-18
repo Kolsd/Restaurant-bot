@@ -108,10 +108,9 @@ async function loadTables() {
       tables.forEach(t => {
         const el = document.getElementById('qr-' + t.id);
         if (el && !el.hasChildNodes()) {
-          const botNum = (rest && rest.whatsapp_number) || '15556293573';
-          const branchKey = t.branch_id ? ' [branch=' + t.branch_id + ']' : '';
-          const waUrl = 'https://wa.me/' + botNum + '?text=' + encodeURIComponent('Hola! Estoy en ' + t.name + branchKey + ' y quiero hacer un pedido');
-          try { new QRCode(el, { text:waUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
+          // Ya no apuntamos a WhatsApp directo, sino al menú
+          const menuUrl = window.location.origin + '/menu/' + t.id;
+          try { new QRCode(el, { text:menuUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
         }
       });
     }
@@ -226,7 +225,7 @@ async function loadBranchUsers(branchId) {
       users.map(u => `<div style="display:flex;align-items:center;gap:8px;background:#f8f8f5;border-radius:8px;padding:6px 12px;">
         <div style="width:28px;height:28px;border-radius:50%;background:${roleBg[u.role]||'#f0f0e8'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:${roleColors[u.role]||'#555'};">${(u.username||'?')[0].toUpperCase()}</div>
         <div><div style="font-size:12px;font-weight:500;">${u.username}</div><div style="font-size:10px;color:${roleColors[u.role]||'#888'};">${roleLabels[u.role]||u.role}</div></div>
-        <button onclick="deleteUser('${u.username}')" style="background:none;border:none;color:#C0392B;font-size:16px;cursor:pointer;padding:0 4px;">&times;</button>
+        <button onclick="deleteUser('${u.username}')" style="background:none;border:none;color:#C0392B;font-size:16px;cursor:pointer;padding:0 4px;">×</button>
       </div>`).join('') + '</div>';
   } catch(e) {}
 }
