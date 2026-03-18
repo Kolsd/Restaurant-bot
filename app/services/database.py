@@ -606,14 +606,14 @@ async def db_update_table_order_status(order_id: str, status: str):
 
 
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
-    """Retorna la orden activa SOLO si está en 'recibido' (se puede acumular).
-    Si está en_preparacion o listo, retorna None para que se cree orden nueva."""
+    """Retorna la orden activa de la sesión (mismo order_id durante toda la visita).
+    Excluye solo factura_entregada y cancelado — incluye recibido, en_preparacion, listo, entregado."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT * FROM table_orders
             WHERE phone=$1 AND table_id=$2
-              AND status = 'recibido'
+              AND status NOT IN ('factura_entregada','cancelado')
             ORDER BY created_at DESC LIMIT 1
         """, phone, table_id)
         if not row:
@@ -637,29 +637,36 @@ async def db_has_pending_invoice(phone: str) -> bool:
 
 
 async def db_add_items_to_table_order(order_id: str, new_items: list, extra_total: int, extra_notes: str = ""):
-    """Acumula items y suma al total de una orden existente. No cambia el status."""
+    """Acumula items y suma al total. SIEMPRE resetea status a 'recibido' para que cocina procese los nuevos items.
+    Guarda los items nuevos claramente separados con prefijo [NUEVO] en las notas."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT items, total, notes FROM table_orders WHERE id=$1", order_id)
+        row = await conn.fetchrow("SELECT items, total, notes, status FROM table_orders WHERE id=$1", order_id)
         if not row:
             return False
         existing = row['items'] if isinstance(row['items'], list) else json.loads(row['items'])
-        # Merge: si el plato ya existe, sumar cantidad; si no, añadir
+        # Merge inteligente: sumar cantidad si mismo plato, añadir si es nuevo
         merged = {item['name']: item.copy() for item in existing}
+        new_names = []
         for new_item in new_items:
             name = new_item['name']
             if name in merged:
-                merged[name]['quantity']  += new_item['quantity']
-                merged[name]['subtotal']   = merged[name]['price'] * merged[name]['quantity']
+                merged[name]['quantity'] += new_item['quantity']
+                merged[name]['subtotal']  = merged[name]['price'] * merged[name]['quantity']
             else:
                 merged[name] = new_item.copy()
+            new_names.append(f"{new_item['quantity']}x {name}")
         final_items = list(merged.values())
         new_total   = (row['total'] or 0) + extra_total
         old_notes   = row['notes'] or ''
-        new_notes   = (old_notes + ' | ' + extra_notes).strip(' |') if extra_notes else old_notes
+        addition_note = f"[+ADICIONAL: {', '.join(new_names)}]"
+        if extra_notes:
+            addition_note += f" {extra_notes}"
+        new_notes = (old_notes + ' ' + addition_note).strip()
+        # Resetear a 'recibido' para que cocina procese los nuevos items
         await conn.execute("""
             UPDATE table_orders
-            SET items=$2, total=$3, notes=$4, updated_at=NOW()
+            SET items=$2, total=$3, notes=$4, status='recibido', updated_at=NOW()
             WHERE id=$1
         """, order_id, json.dumps(final_items), new_total, new_notes)
         return True
