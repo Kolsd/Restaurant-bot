@@ -702,52 +702,54 @@ function updateTiposChart(domicilio, recoger) {
   });
 }
 
-const MENU_ITEMS = [
-  {name:'Bruschetta al Pomodoro',cat:'Entradas',price:'$120'},
-  {name:'Carpaccio de Res',cat:'Entradas',price:'$185'},
-  {name:'Burrata Fresca',cat:'Entradas',price:'$210'},
-  {name:'Calamares Fritos',cat:'Entradas',price:'$165'},
-  {name:'Spaghetti Carbonara',cat:'Pastas',price:'$195'},
-  {name:'Penne Arrabiata',cat:'Pastas',price:'$165'},
-  {name:'Fettuccine Alfredo',cat:'Pastas',price:'$180'},
-  {name:'Lasagna della Nonna',cat:'Pastas',price:'$220'},
-  {name:'Tagliatelle al Tartufo',cat:'Pastas',price:'$285'},
-  {name:'Margherita Clásica',cat:'Pizzas',price:'$175'},
-  {name:'Prosciutto e Funghi',cat:'Pizzas',price:'$225'},
-  {name:'Quattro Formaggi',cat:'Pizzas',price:'$240'},
-  {name:'Diavola',cat:'Pizzas',price:'$215'},
-  {name:'Vegetariana',cat:'Pizzas',price:'$195'},
-  {name:'Tiramisú Clásico',cat:'Postres',price:'$110'},
-  {name:'Panna Cotta',cat:'Postres',price:'$95'},
-  {name:'Gelato Artesanal',cat:'Postres',price:'$85'},
-  {name:'Limonada Italiana',cat:'Bebidas',price:'$65'},
-  {name:'Agua Mineral',cat:'Bebidas',price:'$35'},
-  {name:'Café Espresso',cat:'Bebidas',price:'$45'},
-  {name:'Vino de la Casa',cat:'Bebidas',price:'$95'},
-];
-
 let menuAvailability = {};
+let MENU_ITEMS = [];
+
+const CAT_ICONS = {'Entradas':'🥗','Pastas':'🍝','Pizzas':'🍕','Postres':'🍮','Bebidas':'🥤',
+  'Extras':'🫙','Ensaladas':'🥗','Bebidas':'🥤','Postres':'🍮','default':'🍽️'};
 
 async function loadMenu() {
   try {
-    const r = await fetch('/api/menu/availability', { headers });
-    if (r.ok) {
-      const d = await r.json();
+    const [rMenu, rAvail] = await Promise.all([
+      fetch('/api/dashboard/menu', { headers }),
+      fetch('/api/menu/availability', { headers })
+    ]);
+    if (rAvail.ok) {
+      const d = await rAvail.json();
       menuAvailability = d.availability || {};
     }
-  } catch(e) {}
+    if (rMenu.ok) {
+      const d = await rMenu.json();
+      const menu = d.menu || {};
+      MENU_ITEMS = [];
+      Object.entries(menu).forEach(([cat, dishes]) => {
+        if (Array.isArray(dishes)) {
+          dishes.forEach(dish => {
+            MENU_ITEMS.push({
+              name: dish.name || '',
+              cat: cat,
+              price: dish.price ? '$' + dish.price : '$0',
+              description: dish.description || ''
+            });
+          });
+        }
+      });
+    }
+  } catch(e) { console.error('loadMenu:', e); }
   renderMenu();
 }
 
-const CAT_ICONS = {'Entradas':'🥗','Pastas':'🍝','Pizzas':'🍕','Postres':'🍮','Bebidas':'🥤'};
-
 function renderMenu() {
+  if (!MENU_ITEMS.length) {
+    document.getElementById('menu-grid').innerHTML = '<div style="padding:2rem;text-align:center;color:#aaa;font-size:13px;">Sin platos en el menu. Configura el menu desde el superadmin.</div>';
+    return;
+  }
   const cats = [...new Set(MENU_ITEMS.map(m => m.cat))];
   let html = '';
   cats.forEach((cat, ci) => {
     const items = MENU_ITEMS.filter(m => m.cat === cat);
     const availCount = items.filter(m => menuAvailability[m.name] !== false).length;
-    const icon = CAT_ICONS[cat] || '🍽️';
+    const icon = CAT_ICONS[cat] || CAT_ICONS['default'];
     const isOpen = ci === 0;
     html += '<div class="menu-category">';
     html += '<div class="menu-cat-header" onclick="toggleCat(this)">';
