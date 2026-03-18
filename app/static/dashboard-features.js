@@ -359,6 +359,7 @@ const CLOSE_REASON = {
   waiter_manual:      { text:'Mesero',      icon:'👤', color:'#BA7517', bg:'#FFF8E6' },
   inactivity_timeout: { text:'Inactividad', icon:'⏰', color:'#555',    bg:'#F5F5F0' },
   client_goodbye:     { text:'Cliente',     icon:'👋', color:'#0F6E56', bg:'#E1F5EE' },
+  factura_entregada:  { text:'Factura OK',  icon:'🧾', color:'#6B21A8', bg:'#F0E6FF' },
   superseded:         { text:'Reemplazada', icon:'🔄', color:'#888',    bg:'#F5F5F0' },
 };
 

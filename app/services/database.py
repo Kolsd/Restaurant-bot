@@ -744,6 +744,7 @@ async def db_init_table_sessions():
         for col_sql in [
             "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS closed_by TEXT DEFAULT ''",
             "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS closed_by_username TEXT DEFAULT ''",
+            "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS meta_phone_id TEXT DEFAULT ''",
         ]:
             try:
                 await conn.execute(col_sql)
@@ -775,6 +776,16 @@ async def db_touch_session(phone: str, bot_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_sessions SET last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
+
+
+async def db_touch_session_with_phone_id(phone: str, bot_number: str, meta_phone_id: str):
+    """Actualiza actividad y guarda el phone_id de Meta para poder enviar mensajes proactivos."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE table_sessions SET last_activity=NOW(), meta_phone_id=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'",
+            phone, bot_number, meta_phone_id
+        )
 
 
 async def db_session_mark_order(phone: str, bot_number: str):
