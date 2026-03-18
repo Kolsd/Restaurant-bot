@@ -534,6 +534,10 @@ async def db_init_tables():
             await conn.execute("ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER")
         except Exception:
             pass
+        try:
+            await conn.execute("ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS items_additional JSONB DEFAULT '[]'::jsonb")
+        except Exception:
+            pass
 
 
 async def db_get_tables(branch_id: int = None):
@@ -575,11 +579,13 @@ async def db_save_table_order(order: dict):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO table_orders (id, table_id, table_name, phone, items, status, notes, total)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-            ON CONFLICT (id) DO UPDATE SET items=EXCLUDED.items, status=EXCLUDED.status, notes=EXCLUDED.notes, total=EXCLUDED.total, updated_at=NOW()
+            INSERT INTO table_orders (id, table_id, table_name, phone, items, items_additional, status, notes, total)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            ON CONFLICT (id) DO UPDATE SET items=EXCLUDED.items, items_additional=EXCLUDED.items_additional,
+                status=EXCLUDED.status, notes=EXCLUDED.notes, total=EXCLUDED.total, updated_at=NOW()
         """, order['id'], order['table_id'], order['table_name'], order['phone'],
-            json.dumps(order['items']), order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0))
+            json.dumps(order['items']), json.dumps(order.get('items_additional', [])),
+            order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0))
 
 
 async def db_get_table_orders(status: str = None):
@@ -588,13 +594,16 @@ async def db_get_table_orders(status: str = None):
         if status:
             rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at DESC", status)
         else:
-            # Incluye 'entregado' para que el mesero pueda marcar factura_entregada
             rows = await conn.fetch("SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC")
         result = []
         for r in rows:
             d = _serialize(dict(r))
             if isinstance(d['items'], str):
                 d['items'] = json.loads(d['items'])
+            if isinstance(d.get('items_additional'), str):
+                d['items_additional'] = json.loads(d['items_additional'])
+            elif d.get('items_additional') is None:
+                d['items_additional'] = []
             result.append(d)
         return result
 
@@ -602,7 +611,17 @@ async def db_get_table_orders(status: str = None):
 async def db_update_table_order_status(order_id: str, status: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
+        # Al pasar a en_preparacion, limpiar items_additional (cocina ya tomó el adicional)
+        if status == 'en_preparacion':
+            await conn.execute(
+                "UPDATE table_orders SET status=$2, items_additional='[]'::jsonb, updated_at=NOW() WHERE id=$1",
+                order_id, status
+            )
+        else:
+            await conn.execute(
+                "UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1",
+                order_id, status
+            )
 
 
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
@@ -637,17 +656,17 @@ async def db_has_pending_invoice(phone: str) -> bool:
 
 
 async def db_add_items_to_table_order(order_id: str, new_items: list, extra_total: int, extra_notes: str = ""):
-    """Acumula items y suma al total. SIEMPRE resetea status a 'recibido' para que cocina procese los nuevos items.
-    Guarda los items nuevos claramente separados con prefijo [NUEVO] en las notas."""
+    """Acumula items para la factura final en 'items'.
+    Guarda SOLO los nuevos en 'items_additional' para que cocina los vea claramente.
+    Resetea status a 'recibido' para que cocina procese el adicional."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT items, total, notes, status FROM table_orders WHERE id=$1", order_id)
+        row = await conn.fetchrow("SELECT items, total, notes FROM table_orders WHERE id=$1", order_id)
         if not row:
             return False
         existing = row['items'] if isinstance(row['items'], list) else json.loads(row['items'])
-        # Merge inteligente: sumar cantidad si mismo plato, añadir si es nuevo
+        # Acumular en items (para factura total)
         merged = {item['name']: item.copy() for item in existing}
-        new_names = []
         for new_item in new_items:
             name = new_item['name']
             if name in merged:
@@ -655,20 +674,16 @@ async def db_add_items_to_table_order(order_id: str, new_items: list, extra_tota
                 merged[name]['subtotal']  = merged[name]['price'] * merged[name]['quantity']
             else:
                 merged[name] = new_item.copy()
-            new_names.append(f"{new_item['quantity']}x {name}")
         final_items = list(merged.values())
         new_total   = (row['total'] or 0) + extra_total
         old_notes   = row['notes'] or ''
-        addition_note = f"[+ADICIONAL: {', '.join(new_names)}]"
-        if extra_notes:
-            addition_note += f" {extra_notes}"
-        new_notes = (old_notes + ' ' + addition_note).strip()
-        # Resetear a 'recibido' para que cocina procese los nuevos items
+        new_notes   = (old_notes + ' | ' + extra_notes).strip(' |') if extra_notes else old_notes
+        # items_additional = SOLO los nuevos (para cocina)
         await conn.execute("""
             UPDATE table_orders
-            SET items=$2, total=$3, notes=$4, status='recibido', updated_at=NOW()
+            SET items=$2, items_additional=$3, total=$4, notes=$5, status='recibido', updated_at=NOW()
             WHERE id=$1
-        """, order_id, json.dumps(final_items), new_total, new_notes)
+        """, order_id, json.dumps(final_items), json.dumps(new_items), new_total, new_notes)
         return True
 
 

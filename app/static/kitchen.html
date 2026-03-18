@@ -49,6 +49,9 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .badge-count{display:inline-block;background:#1D9E75;color:#000;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;margin-left:6px;}
 .notification{position:fixed;top:1rem;right:1rem;background:#1D9E75;color:#000;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;transform:translateY(-100px);transition:transform .3s;z-index:100;}
 .notification.show{transform:translateY(0);}
+.additional-banner{background:rgba(250,199,117,.08);border:1px solid rgba(250,199,117,.35);border-radius:8px;padding:8px 10px;margin-bottom:.6rem;}
+.additional-label{font-size:10px;font-weight:700;color:#FAC775;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;}
+.order-item-add{font-size:13px;color:#FAC775;padding:2px 0;display:flex;gap:6px;}
 </style>
 </head>
 <body>
@@ -124,25 +127,36 @@ async function updateStatus(orderId, status) {
 }
 
 function renderCard(o) {
+  // items normales (ya en preparación o listos previamente)
+  const additional = Array.isArray(o.items_additional) ? o.items_additional : [];
+  const additionalNames = new Set(additional.map(i => i.name));
+
+  // Items base = todos menos los adicionales actuales
+  const baseItems = (Array.isArray(o.items) ? o.items : []).filter(i => !additionalNames.has(i.name));
+
   let itemsHtml = '';
-  if (Array.isArray(o.items)) {
-    itemsHtml = o.items.map(i => {
+  if (baseItems.length) {
+    itemsHtml = baseItems.map(i => {
       const qty  = i.quantity || 1;
       const name = i.name || i;
       return `<div class="order-item"><span class="order-item-qty">${qty}×</span><span>${name}</span></div>`;
     }).join('');
-  } else if (typeof o.items === 'string') {
-    try {
-      const parsed = JSON.parse(o.items);
-      if (Array.isArray(parsed)) {
-        itemsHtml = parsed.map(i => `<div class="order-item"><span class="order-item-qty">${i.quantity||1}×</span><span>${i.name||i}</span></div>`).join('');
-      } else { itemsHtml = o.items; }
-    } catch(e) { itemsHtml = o.items; }
+  }
+
+  // Banner de adicionales
+  let additionalHtml = '';
+  if (additional.length) {
+    const addRows = additional.map(i =>
+      `<div class="order-item-add"><span class="order-item-qty" style="color:#FAC775;">+${i.quantity||1}×</span><span>${i.name||i}</span></div>`
+    ).join('');
+    additionalHtml = `<div class="additional-banner">
+      <div class="additional-label">🆕 ADICIONAL</div>
+      ${addRows}
+    </div>`;
   }
 
   const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
-  // Cocinero solo puede avanzar hasta "listo" — el mesero marca "entregado"
   let actions = '';
   if (o.status === 'recibido') {
     actions = `<button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
@@ -160,7 +174,8 @@ function renderCard(o) {
       </div>
       ${elapsed(o.created_at)}
     </div>
-    <div class="order-items">${itemsHtml || '<div class="order-item">Pedido en proceso</div>'}</div>
+    <div class="order-items">${itemsHtml || (additional.length ? '' : '<div class="order-item">Pedido en proceso</div>')}</div>
+    ${additionalHtml}
     ${notesHtml}
     <div class="order-actions">${actions}</div>
   </div>`;
