@@ -733,12 +733,14 @@ async function loadTableOrdersSection() {
     if (!r.ok) { container.innerHTML = '<div class="empty-state">Error cargando pedidos de mesa.</div>'; return; }
     const { orders: all = [] } = await r.json();
 
-    // Mostrar todos los de hoy (incluyendo entregados) + los activos de días anteriores
+    // Mostrar todos excepto factura_entregada y cancelado
     const today = new Date().toISOString().split('T')[0];
     const visible = all.filter(o => {
-      const day = (o.created_at || '').substring(0, 10);
       const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
-      return day === today || (!closed && o.status !== 'entregado');
+      const day = (o.created_at || '').substring(0, 10);
+      // Entregados: solo los de hoy (pendientes de factura)
+      if (o.status === 'entregado') return day === today;
+      return !closed;
     });
 
     // Métricas rápidas

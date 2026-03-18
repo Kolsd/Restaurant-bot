@@ -96,10 +96,13 @@ function clock(){
 clock(); setInterval(clock, 1000);
 
 function elapsed(createdAt) {
-  const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
-  const min = Math.floor(diff / 60);
+  // Forzar parse UTC: el backend devuelve ISO sin timezone
+  const isoUtc = createdAt.endsWith('Z') ? createdAt : createdAt + 'Z';
+  const diff = Math.floor((Date.now() - new Date(isoUtc).getTime()) / 1000);
+  const min = Math.max(0, Math.floor(diff / 60));
+  const secs = Math.max(0, diff % 60);
   const cls = min < 5 ? 'ok' : min < 12 ? 'warn' : 'late';
-  return `<span class="elapsed ${cls}">${min}m ${diff % 60}s</span>`;
+  return `<span class="elapsed ${cls}">${min}m ${secs}s</span>`;
 }
 
 function notify(msg) {
