@@ -6,301 +6,23 @@
 <title>Mesio — Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #111; }
-  .sidebar { width: 220px; background: #fff; border-right: 0.5px solid #e0e0d8; height: 100vh; position: fixed; top: 0; left: 0; display: flex; flex-direction: column; padding: 1.5rem 1rem; }
-  .sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 0.5px solid #e0e0d8; }
-  .logo-icon { width: 36px; height: 36px; background: #1D9E75; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 14px; flex-shrink: 0; }
-  .logo-text { font-size: 14px; font-weight: 600; }
-  .logo-sub { font-size: 11px; color: #888; }
-  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #555; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; }
-  .nav-item:hover { background: #f5f5f0; color: #111; }
-  .nav-item.active { background: #E1F5EE; color: #0F6E56; font-weight: 500; }
-  .live-badge { margin-top: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #1D9E75; background: #E1F5EE; padding: 8px 12px; border-radius: 8px; }
-  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #1D9E75; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-  .main { margin-left: 220px; padding: 1.5rem 2rem; min-height: 100vh; }
-  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 10px; }
-  .topbar-left { display: flex; align-items: center; gap: 12px; }
-  .page-title { font-size: 20px; font-weight: 600; }
-  .topbar-right { display: flex; align-items: center; gap: 10px; }
-  .sync-badge { font-size: 11px; color: #1D9E75; background: #E1F5EE; padding: 4px 10px; border-radius: 20px; }
-  .logout-btn { font-size: 12px; padding: 6px 12px; border: 1px solid #ddd; border-radius: 8px; background: none; cursor: pointer; color: #555; }
-  /* Período selector */
-  .period-bar { display: flex; gap: 4px; background: #fff; border: 0.5px solid #e0e0d8; border-radius: 10px; padding: 4px; margin-bottom: 1.5rem; width: fit-content; }
-  .period-btn { font-size: 12px; padding: 5px 14px; border-radius: 7px; border: none; background: none; cursor: pointer; color: #666; font-weight: 400; }
-  .period-btn.active { background: #1D9E75; color: #fff; font-weight: 500; }
-  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 1.5rem; }
-  .metric { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem 1.25rem; }
-  .metric-label { font-size: 12px; color: #888; margin-bottom: 6px; }
-  .metric-value { font-size: 26px; font-weight: 600; }
-  .metric-delta { font-size: 11px; margin-top: 4px; color: #888; }
-  .delta-up { color: #1D9E75; }
-  .delta-warn { color: #BA7517; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
-  .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; }
-  .card-title { font-size: 13px; font-weight: 500; color: #888; margin-bottom: 1rem; }
-  .chart-wrap { position: relative; width: 100%; height: 220px; }
-  .section { display: none; }
-  .section.active { display: block; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; padding: 8px 12px; font-size: 12px; color: #888; border-bottom: 0.5px solid #e0e0d8; font-weight: 500; }
-  td { padding: 10px 12px; border-bottom: 0.5px solid #f0f0e8; vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #fafaf8; }
-  .badge { font-size: 11px; padding: 3px 8px; border-radius: 10px; font-weight: 500; }
-  .badge-paid { background: #E1F5EE; color: #0F6E56; }
-  .badge-pending { background: #FAEEDA; color: #854F0B; }
-  .badge-delivery { background: #E6F1FB; color: #185FA5; }
-  .badge-pickup { background: #EEEDFE; color: #534AB7; }
-  .badge-confirmed { background: #E1F5EE; color: #0F6E56; }
-  .conv-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid #f0f0e8; }
-  .conv-row:last-child { border-bottom: none; }
-  .conv-avatar { width: 36px; height: 36px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #0F6E56; flex-shrink: 0; }
-  .empty-state { text-align: center; padding: 2.5rem; color: #aaa; font-size: 13px; }
-  .legend { display: flex; gap: 16px; margin-bottom: 8px; font-size: 12px; color: #777; }
-  .legend span { display: flex; align-items: center; gap: 4px; }
-  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
-  .menu-category { margin-bottom: 8px; border: 0.5px solid #e0e0d8; border-radius: 12px; overflow: hidden; }
-  .menu-cat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #fff; cursor: pointer; user-select: none; transition: background .15s; }
-  .menu-cat-header:hover { background: #f8f8f5; }
-  .menu-cat-title { font-size: 14px; font-weight: 600; color: #111; display: flex; align-items: center; gap: 10px; }
-  .menu-cat-meta { font-size: 12px; color: #888; font-weight: 400; }
-  .menu-cat-arrow { font-size: 11px; color: #aaa; transition: transform .2s; }
-  .menu-cat-arrow.open { transform: rotate(180deg); }
-  .menu-cat-body { display: none; border-top: 0.5px solid #f0f0e8; }
-  .menu-cat-body.open { display: block; }
-  .menu-row { display: flex; align-items: center; padding: 11px 16px; border-bottom: 0.5px solid #f5f5f0; transition: background .12s; }
-  .menu-row:last-child { border-bottom: none; }
-  .menu-row:hover { background: #fafaf8; }
-  .menu-row-name { font-size: 13px; font-weight: 500; color: #111; flex: 1; min-width: 0; }
-  .menu-row-desc { font-size: 11px; color: #aaa; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-  .menu-row-price { font-size: 13px; font-weight: 600; color: #1D9E75; margin: 0 20px 0 12px; white-space: nowrap; }
-  .menu-row-status { font-size: 10px; padding: 2px 8px; border-radius: 8px; font-weight: 500; white-space: nowrap; margin-right: 14px; }
-  .status-on { background: #E1F5EE; color: #0F6E56; }
-  .status-off { background: #FDE8E8; color: #C0392B; }
-  .toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
-  .toggle-switch input { opacity: 0; width: 0; height: 0; }
-  .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #e0e0d8; border-radius: 20px; transition: .2s; }
-  .toggle-slider:before { position: absolute; content: ''; height: 14px; width: 14px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .2s; }
-  input:checked + .toggle-slider { background: #1D9E75; }
-  input:checked + .toggle-slider:before { transform: translateX(16px); }
-
-  /* ── POS ── */
-  .ai-insight { background: linear-gradient(135deg, #0D2A1F 0%, #0F3D2A 100%); border: 1px solid #1D9E75; border-radius: 14px; padding: 1.25rem 1.5rem; margin-bottom: 1rem; position: relative; overflow: hidden; }
-  .ai-insight::before { content: ''; position: absolute; top: -30px; right: -30px; width: 120px; height: 120px; background: radial-gradient(circle, rgba(29,158,117,0.15) 0%, transparent 70%); pointer-events: none; }
-  .ai-insight-header { display: flex; align-items: center; gap: 8px; margin-bottom: .6rem; }
-  .ai-spark { font-size: 16px; }
-  .ai-insight-title { font-size: 12px; font-weight: 600; color: #1D9E75; text-transform: uppercase; letter-spacing: .08em; }
-  .ai-insight-body { font-size: 14px; color: #E0F5EC; line-height: 1.6; }
-  .ai-insight-body strong { color: #39FF6A; }
-  .ai-loading { color: #5DCAA5; font-style: italic; font-size: 13px; }
-  .ai-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: .75rem; }
-  .ai-chip { background: rgba(29,158,117,0.15); border: 1px solid rgba(29,158,117,0.3); color: #9FE1CB; font-size: 11px; padding: 4px 10px; border-radius: 20px; }
-  .pos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
-  .pos-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
-  .pos-metric { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem 1.25rem; }
-  .pos-metric-label { font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
-  .pos-metric-value { font-size: 22px; font-weight: 600; color: #111; }
-  .pos-metric-trend { font-size: 11px; margin-top: 3px; }
-  .trend-up { color: #1D9E75; } .trend-dn { color: #E24B4A; } .trend-flat { color: #888; }
-  .predict-bar { margin-bottom: 8px; }
-  .predict-label { display: flex; justify-content: space-between; font-size: 12px; color: #555; margin-bottom: 4px; }
-  .predict-track { height: 8px; background: #f0f0e8; border-radius: 4px; overflow: hidden; }
-  .predict-fill { height: 100%; background: #1D9E75; border-radius: 4px; transition: width 1s ease; }
-  .predict-fill.warn { background: #FAC775; }
-  .predict-fill.danger { background: #E24B4A; }
-  .stock-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 0.5px solid #f0f0e8; font-size: 13px; }
-  .stock-item:last-child { border-bottom: none; }
-  .stock-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .dot-ok { background: #1D9E75; } .dot-warn { background: #FAC775; } .dot-danger { background: #E24B4A; }
-  .upsell-card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 10px; padding: .85rem 1rem; display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-  .upsell-icon { font-size: 1.4rem; flex-shrink: 0; }
-  .upsell-text { flex: 1; font-size: 13px; color: #333; line-height: 1.4; }
-  .upsell-badge { font-size: 11px; background: #E1F5EE; color: #0F6E56; padding: 3px 8px; border-radius: 8px; white-space: nowrap; font-weight: 500; }
-  .ask-ai-wrap { margin-top: 1rem; }
-  .ask-ai-input { width: 100%; padding: 10px 14px; border: 1px solid #e0e0d8; border-radius: 10px; font-size: 13px; background: #fff; color: #111; outline: none; }
-  .ask-ai-input:focus { border-color: #1D9E75; }
-  .ask-ai-btn { margin-top: 8px; background: #1D9E75; color: #fff; border: none; padding: 9px 20px; border-radius: 10px; font-size: 13px; cursor: pointer; font-weight: 500; }
-  .ask-ai-btn:hover { background: #0F6E56; }
-  .ai-response { margin-top: 1rem; background: #0D2A1F; border: 1px solid #1D9E75; border-radius: 10px; padding: 1rem; font-size: 13px; color: #E0F5EC; line-height: 1.7; display: none; }
-  .hora-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; }
-  .hora-bar-wrap { flex: 1; height: 16px; background: #f0f0e8; border-radius: 3px; overflow: hidden; }
-  .hora-bar { height: 100%; background: #1D9E75; border-radius: 3px; }
-  .hora-label { width: 50px; color: #555; }
-  .hora-val { width: 40px; text-align: right; color: #888; font-size: 11px; }
-
-
-  .toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
-  .toggle-switch input { opacity: 0; width: 0; height: 0; }
-  .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #e0e0d8; border-radius: 20px; transition: .2s; }
-  .toggle-slider:before { position: absolute; content: ''; height: 14px; width: 14px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .2s; }
-  input:checked + .toggle-slider { background: #1D9E75; }
-  input:checked + .toggle-slider:before { transform: translateX(16px); }
-  .menu-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
-
-
-  /* ── MOBILE RESPONSIVE ─────────────────────────────── */
-  /* HAMBURGER MENU BUTTON — only on mobile */
-  .hamburger-btn {
-    display: none;
-    position: fixed;
-    top: 12px; left: 12px;
-    z-index: 300;
-    background: #fff;
-    border: 0.5px solid #e0e0d8;
-    border-radius: 10px;
-    width: 40px; height: 40px;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,.1);
-    flex-direction: column;
-    gap: 5px;
-    padding: 0;
-  }
-  .hamburger-btn span {
-    display: block;
-    width: 18px; height: 2px;
-    background: #333;
-    border-radius: 2px;
-    transition: all .2s;
-  }
-  .mobile-topbar {
-    display: none;
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    height: 56px;
-    background: #fff;
-    border-bottom: 0.5px solid #e0e0d8;
-    z-index: 250;
-    align-items: center;
-    padding: 0 1rem 0 60px;
-    gap: 10px;
-  }
-  .mobile-topbar .mobile-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #111;
-    flex: 1;
-  }
-  .mobile-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.4);
-    z-index: 280;
-  }
-  .mobile-overlay.open { display: block; }
-
-  @media (max-width: 768px) {
-    /* Show hamburger and mobile topbar */
-    .hamburger-btn { display: flex; }
-    .mobile-topbar { display: flex; }
-
-    /* Sidebar becomes slide-in drawer */
-    .sidebar {
-      position: fixed !important;
-      top: 0 !important; left: -280px !important;
-      width: 260px !important;
-      height: 100vh !important;
-      flex-direction: column !important;
-      padding: 1.25rem 1rem !important;
-      z-index: 290;
-      transition: left .25s ease;
-      box-shadow: 4px 0 20px rgba(0,0,0,.15);
-      overflow-y: auto;
-      border-right: 0.5px solid #e0e0d8;
-    }
-    .sidebar.open { left: 0 !important; }
-    .sidebar-logo { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 0.5px solid #e0e0d8; }
-    .logo-sub { display: block; }
-    .nav-item {
-      width: 100%;
-      text-align: left;
-      padding: 10px 12px;
-      font-size: 13px;
-      margin-bottom: 2px;
-      border-radius: 8px;
-    }
-    .live-badge { margin-top: auto; }
-
-    /* Main content */
-    .main {
-      margin-left: 0 !important;
-      margin-top: 56px;
-      padding: .75rem;
-    }
-    .topbar { display: none; }
-    .page-title { display: none; }
-    .sync-badge { display: none; }
-    .logout-btn { font-size: 11px; padding: 5px 9px; }
-
-    /* Period bar */
-    .period-bar {
-      overflow-x: auto;
-      flex-wrap: nowrap;
-      -webkit-overflow-scrolling: touch;
-    }
-    .period-bar::-webkit-scrollbar { display: none; }
-    .period-btn { font-size: 11px; padding: 5px 10px; white-space: nowrap; }
-
-    /* Metrics 2 col */
-    .metrics { grid-template-columns: repeat(2,1fr); gap: 8px; }
-    .metric { padding: .75rem; }
-    .metric-label { font-size: 11px; }
-    .metric-value { font-size: 20px; }
-    .metric-sub { font-size: 11px; }
-
-    /* Charts */
-    .grid2 { grid-template-columns: 1fr; gap: 10px; }
-    canvas { max-height: 180px !important; }
-    .card { overflow-x: hidden; }
-    .card-title { font-size: 13px; }
-    table { min-width: 480px; font-size: 12px; }
-    .table-wrap { overflow-x: auto; }
-
-    /* AI */
-    #ai-main-text { font-size: 12px; line-height: 1.5; word-break: break-word; }
-    .pos-grid { grid-template-columns: 1fr !important; }
-    .menu-category { font-size: 12px; }
-    .menu-row { flex-wrap: wrap; gap: 6px; }
-    .conv-row { flex-wrap: wrap; gap: 4px; }
-  }
-  @media (max-width: 480px) {
-    .metrics { grid-template-columns: 1fr 1fr; gap: 6px; }
-    .metric { padding: .6rem .75rem; }
-    .metric-value { font-size: 17px; }
-    .main { padding: .6rem; }
-    canvas { max-height: 160px !important; }
-  }
-
-  </style>
+<link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
 
-<!-- MOBILE OVERLAY -->
+<!-- MOBILE -->
 <div class="mobile-overlay" id="mobile-overlay" onclick="closeSidebar()"></div>
-
-<!-- HAMBURGER BUTTON -->
-<button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()">
-  <span></span><span></span><span></span>
-</button>
-
-<!-- MOBILE TOPBAR -->
+<button class="hamburger-btn" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
 <div class="mobile-topbar">
   <div class="mobile-title" id="mobile-page-title">Panel de control</div>
   <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
 </div>
 
+<!-- SIDEBAR -->
 <div class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <div class="logo-icon">M</div>
-    <div>
-      <div class="logo-text" id="sidebar-name">Cargando...</div>
-      <div class="logo-sub">Panel de control</div>
-    </div>
+    <div><div class="logo-text" id="sidebar-name">Cargando...</div><div class="logo-sub">Panel de control</div></div>
   </div>
   <button class="nav-item active" onclick="showSection('resumen',this)">&#9632; Resumen</button>
   <button class="nav-item" onclick="showSection('pedidos',this)">&#9632; Pedidos</button>
@@ -310,9 +32,11 @@
   <button class="nav-item" onclick="showSection('pos',this)">&#9632; POS con IA</button>
   <button class="nav-item" onclick="showSection('mesas',this)">&#9632; Mesas &amp; QR</button>
   <button class="nav-item" id="nav-equipo" onclick="showSection('equipo',this)">&#9632; Mi Equipo</button>
+  <button class="nav-item" onclick="showSection('sesiones',this)">&#9632; Sesiones</button>
   <div class="live-badge"><div class="live-dot"></div>Bot activo 24/7</div>
 </div>
 
+<!-- MAIN -->
 <div class="main">
   <div class="topbar">
     <div class="topbar-left">
@@ -325,7 +49,7 @@
     </div>
   </div>
 
-  <!-- SELECTOR DE PERÍODO (visible en resumen, pedidos, reservaciones) -->
+  <!-- PERÍODO -->
   <div class="period-bar" id="period-bar">
     <button class="period-btn active" onclick="setPeriod('today',this)">Hoy</button>
     <button class="period-btn" onclick="setPeriod('week',this)">7 días</button>
@@ -334,7 +58,7 @@
     <button class="period-btn" onclick="setPeriod('year',this)">Este año</button>
   </div>
 
-  <!-- RESUMEN -->
+  <!-- ══ RESUMEN ══ -->
   <div id="resumen" class="section active">
     <div class="metrics">
       <div class="metric"><div class="metric-label">Ingresos</div><div class="metric-value" id="m-revenue">—</div><div class="metric-delta" id="m-revenue-sub"></div></div>
@@ -349,50 +73,38 @@
     <div class="grid2">
       <div class="card" style="margin-bottom:0;">
         <div class="card-title">Pedidos pagados vs pendientes</div>
-        <div class="legend">
-          <span><span class="legend-dot" style="background:#1D9E75;"></span>Pagados</span>
-          <span><span class="legend-dot" style="background:#FAC775;"></span>Pendientes</span>
-        </div>
+        <div class="legend"><span><span class="legend-dot" style="background:#1D9E75;"></span>Pagados</span><span><span class="legend-dot" style="background:#FAC775;"></span>Pendientes</span></div>
         <div class="chart-wrap" style="height:170px;"><canvas id="chart-status"></canvas></div>
       </div>
       <div class="card" style="margin-bottom:0;">
         <div class="card-title">Domicilio vs para recoger</div>
-        <div class="legend">
-          <span><span class="legend-dot" style="background:#1D9E75;"></span>Domicilio</span>
-          <span><span class="legend-dot" style="background:#378ADD;"></span>Recoger</span>
-        </div>
+        <div class="legend"><span><span class="legend-dot" style="background:#1D9E75;"></span>Domicilio</span><span><span class="legend-dot" style="background:#378ADD;"></span>Recoger</span></div>
         <div class="chart-wrap" style="height:170px;"><canvas id="chart-tipos"></canvas></div>
       </div>
     </div>
   </div>
 
-  <!-- PEDIDOS -->
+  <!-- ══ PEDIDOS ══ -->
   <div id="pedidos" class="section">
     <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
       <div class="metric"><div class="metric-label">Total</div><div class="metric-value" id="p-total">—</div></div>
       <div class="metric"><div class="metric-label">Pagados</div><div class="metric-value delta-up" id="p-paid">—</div></div>
       <div class="metric"><div class="metric-label">Pendiente pago</div><div class="metric-value delta-warn" id="p-pending">—</div></div>
     </div>
-    <div class="card">
-      <div class="card-title">Pedidos</div>
-      <div id="orders-container"><div class="empty-state">Cargando...</div></div>
-    </div>
+    <div class="card"><div class="card-title">Pedidos</div><div id="orders-container"><div class="empty-state">Cargando...</div></div></div>
   </div>
 
-  <!-- RESERVACIONES -->
+  <!-- ══ RESERVACIONES ══ -->
   <div id="reservaciones" class="section">
     <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
       <div class="metric"><div class="metric-label">Total</div><div class="metric-value" id="r-total">—</div></div>
       <div class="metric"><div class="metric-label">Personas</div><div class="metric-value" id="r-guests">—</div></div>
       <div class="metric"><div class="metric-label">Próxima hoy</div><div class="metric-value" id="r-next" style="font-size:15px;">—</div></div>
     </div>
-    <div class="card">
-      <div class="card-title">Reservaciones</div>
-      <div id="res-container"><div class="empty-state">Cargando...</div></div>
-    </div>
+    <div class="card"><div class="card-title">Reservaciones</div><div id="res-container"><div class="empty-state">Cargando...</div></div></div>
   </div>
 
-  <!-- CONVERSACIONES -->
+  <!-- ══ CONVERSACIONES ══ -->
   <div id="conversaciones" class="section">
     <div class="metrics" style="grid-template-columns:repeat(2,1fr);">
       <div class="metric"><div class="metric-label">Conversaciones activas</div><div class="metric-value" id="c-total">—</div></div>
@@ -407,80 +119,53 @@
     </div>
   </div>
 
+  <!-- ══ MENÚ ══ -->
+  <div id="menu" class="section">
+    <div class="card"><div class="card-title">Platos del menú</div><div id="menu-grid"></div></div>
+  </div>
 
-  <!-- POS CON IA -->
+  <!-- ══ POS CON IA ══ -->
   <div id="pos" class="section">
-
-    <!-- INSIGHTS DE IA -->
     <div id="ai-main-insight" class="ai-insight">
-      <div class="ai-insight-header"><span class="ai-spark">✦</span><span class="ai-insight-title">Mesio IA — Análisis del día</span><button onclick="loadPOSData(true)" style="margin-left:auto;background:rgba(29,158,117,0.2);border:1px solid rgba(29,158,117,0.4);color:#9FE1CB;font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;">↻ Actualizar</button></div>
-      <div class="ai-insight-body" id="ai-main-text"><span class="ai-loading">Analizando tu operación de hoy...</span></div>
+      <div class="ai-insight-header">
+        <span class="ai-spark">✦</span>
+        <span class="ai-insight-title">Mesio IA — Análisis del día</span>
+        <button onclick="loadPOSData(true)" style="margin-left:auto;background:rgba(29,158,117,0.2);border:1px solid rgba(29,158,117,0.4);color:#9FE1CB;font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;">↻ Actualizar</button>
+      </div>
+      <div class="ai-insight-body" id="ai-main-text"><span class="ai-loading">Analizando...</span></div>
     </div>
-
-    <!-- MÉTRICAS POS -->
     <div class="pos-grid3">
-      <div class="pos-metric">
-        <div class="pos-metric-label">Ticket promedio hoy</div>
-        <div class="pos-metric-value" id="pos-ticket">—</div>
-        <div class="pos-metric-trend trend-up" id="pos-ticket-trend"></div>
-      </div>
-      <div class="pos-metric">
-        <div class="pos-metric-label">Hora pico hoy</div>
-        <div class="pos-metric-value" id="pos-hora-pico">—</div>
-        <div class="pos-metric-trend trend-flat" id="pos-hora-sub">según pedidos</div>
-      </div>
-      <div class="pos-metric">
-        <div class="pos-metric-label">Plato más pedido</div>
-        <div class="pos-metric-value" id="pos-top-plato" style="font-size:15px;">—</div>
-        <div class="pos-metric-trend trend-up" id="pos-top-sub"></div>
-      </div>
+      <div class="pos-metric"><div class="pos-metric-label">Ticket promedio hoy</div><div class="pos-metric-value" id="pos-ticket">—</div><div class="pos-metric-trend trend-up" id="pos-ticket-trend"></div></div>
+      <div class="pos-metric"><div class="pos-metric-label">Hora pico hoy</div><div class="pos-metric-value" id="pos-hora-pico">—</div><div class="pos-metric-trend trend-flat">según pedidos</div></div>
+      <div class="pos-metric"><div class="pos-metric-label">Plato más pedido</div><div class="pos-metric-value" id="pos-top-plato" style="font-size:15px;">—</div><div class="pos-metric-trend trend-up" id="pos-top-sub"></div></div>
     </div>
-
     <div class="pos-grid">
-
-      <!-- PREDICCIÓN DE DEMANDA -->
       <div class="card" style="margin-bottom:0;">
         <div class="card-title">Predicción de demanda — próximas horas</div>
-        <div id="demand-bars">
-          <div class="pos-metric-label" style="padding:1rem 0; text-align:center;">Generando predicción...</div>
-        </div>
+        <div id="demand-bars"><div class="pos-metric-label" style="padding:1rem 0;text-align:center;">Generando...</div></div>
         <div class="ai-insight" style="margin-top:1rem;margin-bottom:0;">
           <div class="ai-insight-header"><span class="ai-spark">✦</span><span class="ai-insight-title">Recomendación de inventario</span></div>
-          <div class="ai-insight-body" id="ai-stock-text"><span class="ai-loading">Analizando tendencias...</span></div>
+          <div class="ai-insight-body" id="ai-stock-text"><span class="ai-loading">Analizando...</span></div>
         </div>
       </div>
-
-      <!-- UPSELL SUGERIDO POR IA -->
       <div class="card" style="margin-bottom:0;">
         <div class="card-title">Sugerencias de venta inteligente</div>
-        <div id="upsell-container">
-          <div class="pos-metric-label" style="padding:1rem 0; text-align:center;">Generando sugerencias...</div>
-        </div>
+        <div id="upsell-container"><div class="pos-metric-label" style="padding:1rem 0;text-align:center;">Generando...</div></div>
       </div>
-
     </div>
-
-    <!-- DISTRIBUCIÓN POR HORA -->
-    <div class="card">
-      <div class="card-title">Pedidos por hora del día — patrón de la semana</div>
-      <div id="hora-dist"></div>
-    </div>
-
-    <!-- PREGÚNTALE A LA IA -->
+    <div class="card"><div class="card-title">Pedidos por hora del día</div><div id="hora-dist"></div></div>
     <div class="card">
       <div class="card-title">✦ Pregúntale a Mesio IA</div>
-      <p style="font-size:13px;color:#666;margin-bottom:1rem;line-height:1.6;">Hazle cualquier pregunta sobre tu operación — tendencias, qué platos subir de precio, cuándo necesitas más personal, qué ofrecer en fin de semana.</p>
+      <p style="font-size:13px;color:#666;margin-bottom:1rem;line-height:1.6;">Hazle cualquier pregunta sobre tu operación — tendencias, precios, personal, promociones.</p>
       <div class="ask-ai-wrap">
-        <input class="ask-ai-input" id="ai-question" placeholder="Ej: ¿Qué días de la semana debo tener más personal? ¿Qué plato debo promover este fin de semana?" />
+        <input class="ask-ai-input" id="ai-question" placeholder="Ej: ¿Qué días necesito más personal? ¿Qué promover este fin de semana?" />
         <button class="ask-ai-btn" onclick="askMesioAI()">Preguntar a Mesio IA →</button>
         <div class="ai-response" id="ai-response"></div>
       </div>
     </div>
-
   </div>
 
-
-  <!-- MESAS & QR -->
+  <!-- ══ MESAS & QR ══ -->
   <div id="mesas" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
       <div>
@@ -493,114 +178,72 @@
         <button onclick="createTable()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Agregar mesa</button>
       </div>
     </div>
-
     <div class="card" style="margin-bottom:1rem;">
       <div class="card-title">Panel de cocina en tiempo real</div>
       <div style="display:flex;align-items:center;gap:12px;">
-        <div style="font-size:13px;color:#555;">Abre el dashboard de cocina en una tablet para que el equipo vea los pedidos en tiempo real.</div>
+        <div style="font-size:13px;color:#555;">Abre el dashboard de cocina en una tablet para ver pedidos en tiempo real.</div>
         <a href="/cocina" target="_blank" style="white-space:nowrap;background:#1D9E75;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;text-decoration:none;font-weight:500;">Abrir cocina →</a>
       </div>
     </div>
-
     <div id="tables-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
       <div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;">Cargando mesas...</div>
     </div>
   </div>
 
-
-  <!-- MI EQUIPO -->
+  <!-- ══ MI EQUIPO ══ -->
   <div id="equipo" class="section">
-
-    <!-- SUCURSALES -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
-      <div>
-        <div style="font-size:18px;font-weight:600;">Mi Equipo</div>
-        <div style="font-size:12px;color:#888;margin-top:2px;">Gestiona sucursales y usuarios por rol</div>
-      </div>
-      <button onclick="showCreateBranch()" id="btn-create-branch"
-        style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">
-        + Nueva sucursal
-      </button>
+      <div><div style="font-size:18px;font-weight:600;">Mi Equipo</div><div style="font-size:12px;color:#888;margin-top:2px;">Gestiona sucursales y usuarios por rol</div></div>
+      <button onclick="showCreateBranch()" id="btn-create-branch" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nueva sucursal</button>
     </div>
-
-    <!-- CREAR SUCURSAL FORM -->
+    <!-- Crear sucursal -->
     <div id="create-branch-form" style="display:none;background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;margin-bottom:1.25rem;">
       <div style="font-size:14px;font-weight:600;margin-bottom:1rem;">Nueva sucursal</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
         <input id="branch-name" placeholder="Nombre del restaurante" style="padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;">
         <input id="branch-wa" type="hidden" value="">
         <div style="grid-column:1/-1;display:flex;gap:8px;align-items:flex-start;">
-          <input id="branch-address" placeholder="Dirección (ej: Calle 93 #15-32, Bogotá)" 
-            style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();validateAddress();}">
-          <button onclick="validateAddress()" 
-            style="background:#185FA5;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:500;">
-            📍 Validar
-          </button>
+          <input id="branch-address" placeholder="Dirección (ej: Calle 93 #15-32, Bogotá)" style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;" onkeydown="if(event.key==='Enter'){event.preventDefault();validateAddress();}">
+          <button onclick="validateAddress()" style="background:#185FA5;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:500;">📍 Validar</button>
         </div>
       </div>
-      <!-- MAP PREVIEW -->
       <div id="branch-map-preview" style="display:none;margin-bottom:12px;border:0.5px solid #e0e0d8;border-radius:10px;overflow:hidden;">
         <div style="background:#E6F1FB;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <div>
-            <div style="font-size:11px;font-weight:600;color:#185FA5;">📍 Ubicación encontrada</div>
-            <div id="branch-address-display" style="font-size:11px;color:#444;margin-top:2px;"></div>
-          </div>
-          <a id="branch-maps-link" href="#" target="_blank" 
-            style="font-size:11px;padding:4px 10px;background:#185FA5;color:#fff;border-radius:6px;text-decoration:none;white-space:nowrap;">
-            Ver en Maps ↗
-          </a>
+          <div><div style="font-size:11px;font-weight:600;color:#185FA5;">📍 Ubicación encontrada</div><div id="branch-address-display" style="font-size:11px;color:#444;margin-top:2px;"></div></div>
+          <a id="branch-maps-link" href="#" target="_blank" style="font-size:11px;padding:4px 10px;background:#185FA5;color:#fff;border-radius:6px;text-decoration:none;white-space:nowrap;">Ver en Maps ↗</a>
         </div>
-        <div style="padding:10px 12px;background:#f8f8f5;">
-          <div style="font-size:11px;color:#888;display:flex;gap:16px;">
-            <span>🌐 Lat: <strong id="branch-lat-display">—</strong></span>
-            <span>🌐 Lon: <strong id="branch-lon-display">—</strong></span>
-          </div>
-        </div>
+        <div style="padding:10px 12px;background:#f8f8f5;"><div style="font-size:11px;color:#888;display:flex;gap:16px;"><span>🌐 Lat: <strong id="branch-lat-display">—</strong></span><span>🌐 Lon: <strong id="branch-lon-display">—</strong></span></div></div>
       </div>
       <div id="branch-map-error" style="display:none;background:#FDE8E8;color:#C0392B;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;">
         <div id="branch-error-text"></div>
         <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(192,57,43,.2);">
-          <div style="font-size:11px;margin-bottom:6px;color:#842029;">Ingresa las coordenadas manualmente desde <a href="https://maps.google.com" target="_blank" style="color:#185FA5;">Google Maps</a> → clic derecho → "¿Qué hay aquí?"</div>
+          <div style="font-size:11px;margin-bottom:6px;color:#842029;">Ingresa coordenadas manualmente desde <a href="https://maps.google.com" target="_blank" style="color:#185FA5;">Google Maps</a></div>
           <div style="display:flex;gap:8px;">
-            <input id="branch-lat-manual" placeholder="Latitud (ej: 4.6789)" type="number" step="any"
-              style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;"
-              oninput="applyManualCoords()">
-            <input id="branch-lon-manual" placeholder="Longitud (ej: -74.0567)" type="number" step="any"
-              style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;"
-              oninput="applyManualCoords()">
+            <input id="branch-lat-manual" placeholder="Latitud (ej: 4.6789)" type="number" step="any" style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;" oninput="applyManualCoords()">
+            <input id="branch-lon-manual" placeholder="Longitud (ej: -74.0567)" type="number" step="any" style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;" oninput="applyManualCoords()">
           </div>
         </div>
       </div>
-      <input type="hidden" id="branch-lat" value="">
-      <input type="hidden" id="branch-lon" value="">
+      <input type="hidden" id="branch-lat" value=""><input type="hidden" id="branch-lon" value="">
       <div style="display:flex;gap:8px;">
         <button onclick="createBranch()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear sucursal</button>
         <button onclick="document.getElementById('create-branch-form').style.display='none'" style="background:none;border:1px solid #e0e0d8;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
       </div>
     </div>
-
-    <!-- BUSCAR SUCURSAL -->
     <div style="display:flex;gap:10px;margin-bottom:1.25rem;align-items:center;">
-      <input id="branch-search" placeholder="Buscar sucursal..." oninput="filterBranches()"
-        style="flex:1;padding:9px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;max-width:320px;">
+      <input id="branch-search" placeholder="Buscar sucursal..." oninput="filterBranches()" style="flex:1;padding:9px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;max-width:320px;">
       <span style="font-size:12px;color:#888;" id="branch-count"></span>
     </div>
-
-    <!-- LISTA DE SUCURSALES -->
     <div id="branches-list"></div>
-
-    <!-- MODAL CREAR USUARIO -->
+    <!-- Modal invitar usuario -->
     <div id="modal-invite" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;">
-      <div style="background:#fff;border-radius:16px;padding:2rem;width:420px;max-width:90vw;position:relative;">
+      <div style="background:#fff;border-radius:16px;padding:2rem;width:420px;max-width:90vw;">
         <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar usuario a <span id="modal-branch-name" style="color:#1D9E75;"></span></div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <input id="invite-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           <input id="invite-password" type="password" placeholder="Contraseña" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           <select id="invite-role" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;background:#fff;">
-            <option value="admin">Administrador de sucursal</option>
-            <option value="cook">Cocinero</option>
-            <option value="waiter">Mesero</option>
+            <option value="admin">Administrador</option><option value="cook">Cocinero</option><option value="waiter">Mesero</option>
           </select>
         </div>
         <div style="display:flex;gap:8px;margin-top:1.25rem;">
@@ -611,1132 +254,86 @@
     </div>
   </div>
 
-  <!-- MENÚ -->
-  <div id="menu" class="section">
+  <!-- ══ SESIONES ══ -->
+  <div id="sesiones" class="section">
+    <div class="metrics" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem;">
+      <div class="metric"><div class="metric-label">Sesiones</div><div class="metric-value" id="ses-total">—</div></div>
+      <div class="metric"><div class="metric-label">Por mesero</div><div class="metric-value" id="ses-waiter" style="color:#BA7517;">—</div><div style="font-size:11px;color:#BA7517;margin-top:4px;">revisar errores</div></div>
+      <div class="metric"><div class="metric-label">Por cliente</div><div class="metric-value" id="ses-client">—</div></div>
+      <div class="metric"><div class="metric-label">Por inactividad</div><div class="metric-value" id="ses-inactivity">—</div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
+      <div style="font-size:13px;color:#888;">Mostrar últimas:</div>
+      <div style="display:flex;gap:4px;background:#fff;border:0.5px solid #e0e0d8;border-radius:8px;padding:3px;">
+        <button class="period-btn active" onclick="setSesionPeriod(24,this)">24h</button>
+        <button class="period-btn" onclick="setSesionPeriod(48,this)">48h</button>
+        <button class="period-btn" onclick="setSesionPeriod(168,this)">7 días</button>
+      </div>
+      <button onclick="loadSessions()" style="font-size:12px;padding:5px 12px;border:1px solid #e0e0d8;border-radius:8px;background:none;cursor:pointer;color:#555;">↻ Actualizar</button>
+    </div>
+    <div id="ses-alert-banner" class="ses-alert-banner">
+      <span style="font-size:1.2rem;">⚠️</span>
+      <div><div style="font-size:13px;font-weight:600;color:#7A4F00;">Hay sesiones cerradas manualmente por meseros</div><div style="font-size:12px;color:#8a6000;margin-top:2px;">Revisa la tabla y toma acción.</div></div>
+    </div>
     <div class="card">
-      <div class="card-title">Platos del menú</div>
-      <div class="menu-grid" id="menu-grid"></div>
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Registro de sesiones cerradas</span>
+        <span id="ses-badge" style="font-size:11px;color:#888;"></span>
+      </div>
+      <div id="sessions-container"><div class="empty-state">Cargando sesiones...</div></div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ══ MODAL: CHAT (WhatsApp) ══ -->
+<div class="chat-modal-overlay" id="chat-modal-overlay" onclick="if(event.target===this)closeChatModal()">
+  <div class="chat-modal-box">
+    <div class="chat-modal-head">
+      <div><div class="chat-modal-title" id="chat-modal-phone">+57 300 000 0000</div><div class="chat-modal-sub">Conversación completa</div></div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="chat-pause-btn" class="chat-pause-btn" onclick="toggleBotPause()">⏸ Pausar bot</button>
+        <button onclick="closeChatModal()" style="font-size:18px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
+      </div>
+    </div>
+    <div id="chat-modal-msgs" class="chat-modal-msgs"></div>
+    <div class="chat-modal-input">
+      <input id="chat-reply-input" placeholder="Escribe una respuesta manual..." onkeydown="if(event.key==='Enter')sendManualReply()">
+      <button onclick="sendManualReply()">Enviar</button>
     </div>
   </div>
 </div>
 
-<script>
-const token = localStorage.getItem('rb_token');
-if (!token) window.location.href = '/login';
-const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":"Mi Restaurante"}');
-document.getElementById('sidebar-name').textContent = restaurant.name || 'Mi Restaurante';
-// Show/hide equipo section based on role
-const role = restaurant.role || 'owner';
-const equipoNav = document.getElementById('nav-equipo');
-if (equipoNav) equipoNav.style.display = (role === 'owner' || role === 'admin') ? '' : 'none';
-
-
-let currentPeriod = 'today';
-let revenueChart = null, statusChart = null, tiposChart = null;
-const headers = { 'Authorization': 'Bearer ' + token };
-const fmt = n => '$' + Number(n).toLocaleString('es-CO');
-
-const periodLabels = { today:'Hoy', week:'Últimos 7 días', month:'Este mes', semester:'Este semestre', year:'Este año' };
-const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo' };
-
-function updateTime() {
-  document.getElementById('current-time').textContent = new Date().toLocaleString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-}
-updateTime(); setInterval(updateTime, 60000);
-
-function logout() {
-  localStorage.removeItem('rb_token');
-  localStorage.removeItem('rb_restaurant');
-  window.location.href = '/login';
-}
-
-function showSection(id, btn) {
-  if (id === 'pos') { loadPOSData(); }
-  if (id === 'mesas') { loadTables(); }
-  if (id === 'equipo') { loadBranches(); }
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  btn.classList.add('active');
-  document.getElementById('page-title').textContent = titles[id];
-  const hidePeriod = ['conversaciones','menu'];
-  document.getElementById('period-bar').style.display = hidePeriod.includes(id) ? 'none' : 'flex';
-}
-
-function setPeriod(period, btn) {
-  currentPeriod = period;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  refreshAll();
-}
-
-async function fetchStats() {
-  try {
-    const r = await fetch(`/api/dashboard/stats?period=${currentPeriod}`, { headers });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-    const pendingRev = d.orders.pending_revenue || 0;
-    document.getElementById('m-revenue').textContent = fmt(d.orders.revenue);
-    document.getElementById('m-revenue-sub').innerHTML = d.orders.paid + ' pagados'
-      + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
-    document.getElementById('m-orders').textContent = d.orders.total;
-    document.getElementById('m-orders-sub').textContent = d.orders.pending + ' sin pagar';
-    document.getElementById('m-res').textContent = d.reservations.total;
-    document.getElementById('m-res-sub').textContent = d.reservations.guests + ' personas';
-    document.getElementById('m-convs').textContent = d.conversations.active;
-    document.getElementById('p-total').textContent = d.orders.total;
-    document.getElementById('p-paid').textContent = d.orders.paid;
-    document.getElementById('p-pending').textContent = d.orders.pending;
-    // Show pending revenue hint
-    if (d.orders.pending_revenue > 0) {
-      const pendEl = document.getElementById('p-pending');
-      if (pendEl) pendEl.title = 'Valor pendiente: ' + fmt(d.orders.pending_revenue);
-    }
-    document.getElementById('r-total').textContent = d.reservations.total;
-    document.getElementById('r-guests').textContent = d.reservations.guests;
-    updateStatusChart(d.orders.paid, d.orders.pending);
-  } catch(e) { console.error(e); }
-}
-
-async function fetchChart() {
-  try {
-    const r = await fetch(`/api/dashboard/chart?period=${currentPeriod}`, { headers });
-    const d = await r.json();
-    document.getElementById('chart-title').textContent = `Ingresos por día — ${periodLabels[currentPeriod]}`;
-    if (revenueChart) { revenueChart.destroy(); }
-    revenueChart = new Chart(document.getElementById('chart-revenue'), {
-      type: 'bar',
-      data: {
-        labels: d.labels,
-        datasets: [
-          { label: 'Ingresos', data: d.revenue, backgroundColor: '#1D9E75', borderRadius: 4, yAxisID: 'y' },
-          { label: 'Pedidos', data: d.orders, type: 'line', borderColor: '#378ADD', backgroundColor: 'transparent', tension: 0.3, pointRadius: 3, yAxisID: 'y2' }
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          y: { ticks: { callback: v => '$' + Math.round(v/1000) + 'k', font: { size: 11 } }, grid: { color: '#f0f0e8' } },
-          y2: { position: 'right', ticks: { font: { size: 11 } }, grid: { display: false } },
-          x: { ticks: { font: { size: 10 }, maxRotation: 45 }, grid: { display: false } }
-        }
-      }
-    });
-  } catch(e) { console.error(e); }
-}
-
-async function fetchOrders() {
-  const container = document.getElementById('orders-container');
-  try {
-    const r = await fetch(`/api/dashboard/orders?period=${currentPeriod}`, { headers });
-    if (r.status === 401) { logout(); return; }
-    if (!r.ok) {
-      // Fallback: try fetching all orders without period filter
-      const r2 = await fetch(`/api/orders`, { headers });
-      if (r2.ok) {
-        const d2 = await r2.json();
-        const allOrders = d2.orders || [];
-        if (allOrders.length) {
-          renderOrdersTable(container, allOrders.slice(0,50).map(o => ({
-            id: o.id,
-            items: Array.isArray(o.items) ? o.items.map(i => i.quantity + 'x ' + i.name).join(', ') : (o.items || '—'),
-            type: o.order_type,
-            paid: o.paid,
-            total: o.total,
-            time: (o.created_at || '').slice(11,16) || '—'
-          })));
-          return;
-        }
-      }
-      container.innerHTML = '<div class="empty-state">Error cargando pedidos. Intenta refrescar.</div>';
-      return;
-    }
-    const d = await r.json();
-    if (!d.orders || !d.orders.length) {
-      container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
-      updateTiposChart(0, 0); return;
-    }
-    renderOrdersTable(container, d.orders);
-    updateTiposChart(
-      d.orders.filter(o=>o.type==='domicilio').length,
-      d.orders.filter(o=>o.type==='recoger').length
-    );
-  } catch(e) {
-    console.error('fetchOrders error:', e);
-    container.innerHTML = '<div class="empty-state">Error de conexión al cargar pedidos.</div>';
-  }
-}
-
-function renderOrdersTable(container, orders) {
-  let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
-  orders.forEach(o => {
-    html += `<tr>
-      <td style="font-weight:500;font-size:12px;">${o.id}</td>
-      <td style="color:#555;">${o.items || '—'}</td>
-      <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
-      <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
-      <td style="font-weight:500;">${fmt(o.total)}</td>
-      <td style="color:#888;">${o.time||'—'}</td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-  container.innerHTML = html;
-}
-
-async function fetchReservations() {
-  try {
-    const r = await fetch(`/api/dashboard/reservations?period=${currentPeriod}`, { headers });
-    const d = await r.json();
-    const container = document.getElementById('res-container');
-    if (!d.reservations.length) {
-      container.innerHTML = '<div class="empty-state">Sin reservaciones en este período.</div>';
-      document.getElementById('r-next').textContent = '—'; return;
-    }
-    const today = new Date().toISOString().split('T')[0];
-    const now = new Date().toTimeString().slice(0,5);
-    const next = d.reservations.find(r => r.date === today && r.time >= now);
-    document.getElementById('r-next').textContent = next ? next.time + ' · ' + next.name.split(' ')[0] : '—';
-    let html = '<table><thead><tr><th>Cliente</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
-    d.reservations.forEach(res => {
-      html += `<tr>
-        <td style="font-weight:500;">${res.name}</td>
-        <td style="color:#888;">${res.date}</td>
-        <td>${res.time}</td>
-        <td>${res.guests}</td>
-        <td style="color:#888;">${res.phone||'—'}</td>
-        <td style="color:#888;">${res.notes||'—'}</td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-  } catch(e) { console.error(e); }
-}
-
-async function fetchConversations() {
-  try {
-    const r = await fetch('/api/dashboard/conversations', { headers });
-    const d = await r.json();
-    const container = document.getElementById('convs-container');
-    if (!d.conversations.length) {
-      container.innerHTML = '<div class="empty-state">Sin conversaciones aún. Los chats de WhatsApp aparecen aquí en tiempo real.</div>';
-      document.getElementById('c-avg').textContent = '0'; return;
-    }
-    document.getElementById('c-total').textContent = d.conversations.length;
-    const avg = Math.round(d.conversations.reduce((s,c) => s + c.messages, 0) / d.conversations.length);
-    document.getElementById('c-avg').textContent = avg;
-    let html = '';
-    d.conversations.forEach(c => {
-      html += `<div class="conv-row" onclick="openChat('${c.phone}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
-        <div class="conv-avatar">${c.phone.slice(-4)}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:500;">${c.phone}</div>
-          <div style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">${c.preview}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div style="font-size:11px;color:#aaa;white-space:nowrap;">${c.messages} mensajes</div>
-          <div style="font-size:10px;padding:3px 8px;background:#E1F5EE;color:#0F6E56;border-radius:6px;">Ver chat →</div>
-        </div>
-      </div>`;
-    });
-    container.innerHTML = html;
-  } catch(e) { console.error(e); }
-}
-
-function updateStatusChart(paid, pending) {
-  const ctx = document.getElementById('chart-status');
-  if (!ctx) return;
-  if (statusChart) statusChart.destroy();
-  statusChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels:['Pagados','Pendientes'], datasets:[{data:[paid||0,pending||0],backgroundColor:['#1D9E75','#FAC775'],borderWidth:0}] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'65%' }
-  });
-}
-
-function updateTiposChart(domicilio, recoger) {
-  const ctx = document.getElementById('chart-tipos');
-  if (!ctx) return;
-  if (tiposChart) tiposChart.destroy();
-  tiposChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels:['Domicilio','Recoger'], datasets:[{data:[domicilio||0,recoger||0],backgroundColor:['#1D9E75','#378ADD'],borderWidth:0}] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'65%' }
-  });
-}
-
-let menuAvailability = {};
-let MENU_ITEMS = [];
-
-const CAT_ICONS = {'Entradas':'🥗','Pastas':'🍝','Pizzas':'🍕','Postres':'🍮','Bebidas':'🥤',
-  'Extras':'🫙','Ensaladas':'🥗','Bebidas':'🥤','Postres':'🍮','default':'🍽️'};
-
-async function loadMenu() {
-  try {
-    const [rMenu, rAvail] = await Promise.all([
-      fetch('/api/dashboard/menu', { headers }),
-      fetch('/api/menu/availability', { headers })
-    ]);
-    if (rAvail.ok) {
-      const d = await rAvail.json();
-      menuAvailability = d.availability || {};
-    }
-    if (rMenu.ok) {
-      const d = await rMenu.json();
-      const menu = d.menu || {};
-      MENU_ITEMS = [];
-      Object.entries(menu).forEach(([cat, dishes]) => {
-        if (Array.isArray(dishes)) {
-          dishes.forEach(dish => {
-            MENU_ITEMS.push({
-              name: dish.name || '',
-              cat: cat,
-              price: dish.price ? '$' + dish.price : '$0',
-              description: dish.description || ''
-            });
-          });
-        }
-      });
-    }
-  } catch(e) { console.error('loadMenu:', e); }
-  renderMenu();
-}
-
-function renderMenu() {
-  if (!MENU_ITEMS.length) {
-    document.getElementById('menu-grid').innerHTML = '<div style="padding:2rem;text-align:center;color:#aaa;font-size:13px;">Sin platos en el menu. Configura el menu desde el superadmin.</div>';
-    return;
-  }
-  const cats = [...new Set(MENU_ITEMS.map(m => m.cat))];
-  let html = '';
-  cats.forEach((cat, ci) => {
-    const items = MENU_ITEMS.filter(m => m.cat === cat);
-    const availCount = items.filter(m => menuAvailability[m.name] !== false).length;
-    const icon = CAT_ICONS[cat] || CAT_ICONS['default'];
-    const isOpen = ci === 0;
-    html += '<div class="menu-category">';
-    html += '<div class="menu-cat-header" onclick="toggleCat(this)">';
-    html += '<div class="menu-cat-title"><span>' + icon + '</span><span>' + cat + '</span>';
-    html += '<span class="menu-cat-meta">' + availCount + '/' + items.length + ' disponibles</span></div>';
-    html += '<span class="menu-cat-arrow' + (isOpen ? ' open' : '') + '">▼</span>';
-    html += '</div>';
-    html += '<div class="menu-cat-body' + (isOpen ? ' open' : '') + '">';
-    items.forEach(m => {
-      const avail = menuAvailability[m.name] !== false;
-      const safeName = m.name.replace(/'/g, "\'");
-      html += '<div class="menu-row" style="' + (avail ? '' : 'opacity:.55;') + '">';
-      html += '<div style="flex:1;min-width:0;">';
-      html += '<div class="menu-row-name" style="' + (avail ? '' : 'text-decoration:line-through;color:#bbb;') + '">' + m.name + '</div>';
-      html += '</div>';
-      html += '<div class="menu-row-price">' + m.price + '</div>';
-      html += '<div class="menu-row-status ' + (avail ? 'status-on' : 'status-off') + '">' + (avail ? 'Disponible' : 'No disponible') + '</div>';
-      html += '<label class="toggle-switch"><input type="checkbox" ' + (avail ? 'checked' : '') + ' onchange="toggleDish(\'' + safeName + '\', this.checked)"><span class="toggle-slider"></span></label>';
-      html += '</div>';
-    });
-    html += '</div></div>';
-  });
-  document.getElementById('menu-grid').innerHTML = html;
-}
-
-function toggleCat(header) {
-  const body = header.nextElementSibling;
-  const arrow = header.querySelector('.menu-cat-arrow');
-  body.classList.toggle('open');
-  arrow.classList.toggle('open');
-}
-
-async function toggleDish(name, available) {
-  try {
-    await fetch('/api/menu/availability', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dish_name: name, available })
-    });
-    menuAvailability[name] = available;
-    renderMenu();
-  } catch(e) { console.error('Toggle error:', e); }
-}
-
-async function cleanupConversations() {
-  if (!confirm('¿Eliminar conversaciones de más de 7 días?')) return;
-  try {
-    const r = await fetch('/api/conversations/cleanup', { method: 'DELETE', headers });
-    const d = await r.json();
-    if (d.success) {
-      alert('Conversaciones antiguas eliminadas.');
-      fetchConversations();
-    }
-  } catch(e) { console.error(e); }
-}
-
-async function refreshAll() {
-  document.getElementById('sync-badge').textContent = 'Sincronizando...';
-  await Promise.all([fetchStats(), fetchChart(), fetchOrders(), fetchReservations(), fetchConversations()]);
-  document.getElementById('sync-badge').textContent = 'En vivo · ' + new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-}
-
-loadMenu();
-refreshAll();
-setInterval(refreshAll, 10000);
-
-
-// ── MI EQUIPO ──────────────────────────────────────────
-
-let allBranches = [];
-let currentBranchId = null;
-
-async function loadBranches() {
-  // Show/hide create branch button based on role
-  const btnCreate = document.getElementById('btn-create-branch');
-  if (btnCreate) btnCreate.style.display = (role === 'owner') ? '' : 'none';
-  try {
-    const r = await fetch('/api/team/branches', { headers });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-    allBranches = d.branches || [];
-    document.getElementById('branch-count').textContent = allBranches.length + ' sucursal(es)';
-    renderBranches(allBranches);
-  } catch(e) { console.error('loadBranches:', e); }
-}
-
-function filterBranches() {
-  const q = document.getElementById('branch-search').value.toLowerCase();
-  renderBranches(allBranches.filter(b =>
-    b.name.toLowerCase().includes(q) || (b.whatsapp_number||'').includes(q)
-  ));
-}
-
-function renderBranches(branches) {
-  const container = document.getElementById('branches-list');
-  if (!branches.length) {
-    container.innerHTML = '<div class="empty-state">No hay sucursales. Crea la primera arriba.</div>';
-    return;
-  }
-  container.innerHTML = branches.map(b => {
-    const roleColor = {'owner':'#1D9E75','admin':'#185FA5','cook':'#854F0B','waiter':'#534AB7'};
-    return `<div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;margin-bottom:12px;overflow:hidden;">
-      <div data-branch-id="${b.id}" style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
-        <div>
-          <div style="font-size:15px;font-weight:600;">${b.name}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px;">
-            <span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${b.whatsapp_number||'N/A'}</span>
-            ${b.address ? b.address : ''}
-          </div>
-        </div>
-        <button onclick="openInviteModal(${b.id}, '${b.name.replace(/'/g,"\'")}')"
-          style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">
-          + Agregar usuario
-        </button>
+<!-- ══ MODAL: SESIÓN ══ -->
+<div class="ses-modal-overlay" id="ses-modal-overlay" onclick="if(event.target===this)closeSesModal()">
+  <div class="ses-modal-box">
+    <div class="ses-modal-head">
+      <div><div style="font-size:14px;font-weight:600;" id="ses-modal-title">Sesión</div><div style="font-size:11px;color:#888;" id="ses-modal-sub"></div></div>
+      <button onclick="closeSesModal()" style="font-size:20px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
+    </div>
+    <div class="ses-close-info" id="ses-close-info"></div>
+    <div class="ses-modal-msgs" id="ses-modal-msgs"></div>
+    <div class="ses-modal-actions">
+      <div id="ses-reopen-row" style="display:none;" class="ses-action-row">
+        <span style="font-size:12px;color:#555;flex:1;">¿Fue un cierre por error?</span>
+        <button class="btn-ses-reopen" onclick="reopenFromModal()">♻️ Reabrir sesión</button>
       </div>
-      <div id="users-branch-${b.id}" style="padding:.75rem 1.25rem;">
-        <div style="font-size:11px;color:#aaa;">Cargando usuarios...</div>
+      <div class="ses-action-row">
+        <input id="ses-msg-input" type="text" class="ses-field" placeholder="Mensaje al cliente… (🏠 Restaurante: se añade automáticamente)" onkeydown="if(event.key==='Enter')sendMsgFromModal()">
+        <button class="btn-ses-send" onclick="sendMsgFromModal()">📨 Enviar</button>
       </div>
-    </div>`;
-  }).join('');
-
-  // Load users per branch
-  branches.forEach(b => loadBranchUsers(b.id));
-  // Add delete buttons for owner
-  if (role === 'owner') {
-    branches.forEach(b => {
-      const header = document.querySelector('[data-branch-id="' + b.id + '"]');
-      if (header) {
-        const btn = document.createElement('button');
-        btn.textContent = 'Eliminar sucursal';
-        btn.style.cssText = 'background:#FDE8E8;color:#C0392B;border:none;padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;';
-        btn.onclick = () => deleteBranch(b.id, b.name);
-        header.appendChild(btn);
-      }
-    });
-  }
-}
-
-async function loadBranchUsers(branchId) {
-  try {
-    const r = await fetch('/api/team/users?branch_id=' + branchId, { headers });
-    if (!r.ok) return;
-    const d = await r.json();
-    const users = (d.users || []).filter(u => u.branch_id == branchId);
-    const el = document.getElementById('users-branch-' + branchId);
-    if (!el) return;
-    if (!users.length) {
-      el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0;">Sin usuarios asignados</div>';
-      return;
-    }
-    const roleLabels = {owner:'Dueño',admin:'Administrador',cook:'Cocinero',waiter:'Mesero'};
-    const roleColors = {owner:'#1D9E75',admin:'#185FA5',cook:'#854F0B',waiter:'#534AB7'};
-    const roleBg = {owner:'#E1F5EE',admin:'#E6F1FB',cook:'#FAEEDA',waiter:'#EEEDFE'};
-    el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
-      users.map(u => `<div style="display:flex;align-items:center;gap:8px;background:#f8f8f5;border-radius:8px;padding:6px 12px;">
-        <div style="width:28px;height:28px;border-radius:50%;background:${roleBg[u.role]||'#f0f0e8'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:${roleColors[u.role]||'#555'};">
-          ${(u.username||'?')[0].toUpperCase()}
-        </div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:12px;font-weight:500;">${u.username}</div>
-          <div style="font-size:10px;color:${roleColors[u.role]||'#888'};">${roleLabels[u.role]||u.role}</div>
-        </div>
-        <button onclick="deleteUser('${u.username}')" style="background:none;border:none;color:#C0392B;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;" title="Eliminar usuario">&times;</button>
-      </div>`).join('') +
-    '</div>';
-  } catch(e) {}
-}
-
-function showCreateBranch() {
-  document.getElementById('create-branch-form').style.display = 'block';
-  document.getElementById('branch-name').focus();
-}
-
-async function validateAddress() {
-  const address = document.getElementById('branch-address').value.trim();
-  if (!address) { alert('Ingresa una dirección primero'); return; }
-  const btn = document.querySelector('[onclick="validateAddress()"]');
-  const prevText = btn.textContent;
-  btn.textContent = '...';
-  btn.disabled = true;
-  document.getElementById('branch-map-preview').style.display = 'none';
-  document.getElementById('branch-map-error').style.display = 'none';
-  try {
-    const r = await fetch('/api/geocode?address=' + encodeURIComponent(address), { headers });
-    if (r.ok) {
-      const d = await r.json();
-      document.getElementById('branch-lat').value = d.latitude;
-      document.getElementById('branch-lon').value = d.longitude;
-      document.getElementById('branch-address-display').textContent = d.display_name;
-      document.getElementById('branch-lat-display').textContent = d.latitude.toFixed(6);
-      document.getElementById('branch-lon-display').textContent = d.longitude.toFixed(6);
-      document.getElementById('branch-maps-link').href = d.maps_url;
-      document.getElementById('branch-map-preview').style.display = 'block';
-    } else {
-      const e = await r.json();
-      const errEl = document.getElementById('branch-map-error');
-      errEl.textContent = '❌ ' + (e.detail || 'No se encontró la dirección. Intenta con más detalle.');
-      errEl.style.display = 'block';
-      document.getElementById('branch-lat').value = '';
-      document.getElementById('branch-lon').value = '';
-    }
-  } catch(e) {
-    const errEl = document.getElementById('branch-map-error');
-    document.getElementById('branch-error-text').textContent = '❌ Error de conexion. Ingresa coordenadas manualmente.';
-    errEl.style.display = 'block';
-  } finally {
-    btn.textContent = prevText;
-    btn.disabled = false;
-  }
-}
-
-function applyManualCoords() {
-  const lat = document.getElementById('branch-lat-manual').value;
-  const lon = document.getElementById('branch-lon-manual').value;
-  if (lat && lon) {
-    document.getElementById('branch-lat').value = lat;
-    document.getElementById('branch-lon').value = lon;
-    document.getElementById('branch-lat-display') && (document.getElementById('branch-lat-display').textContent = parseFloat(lat).toFixed(6));
-    document.getElementById('branch-lon-display') && (document.getElementById('branch-lon-display').textContent = parseFloat(lon).toFixed(6));
-    const mapsLink = document.getElementById('branch-maps-link');
-    if (mapsLink) { mapsLink.href = 'https://www.google.com/maps?q=' + lat + ',' + lon; }
-    document.getElementById('branch-address-display') && (document.getElementById('branch-address-display').textContent = 'Coordenadas manuales');
-    document.getElementById('branch-map-preview').style.display = 'block';
-  }
-}
-
-async function createBranch() {
-  const name = document.getElementById('branch-name').value.trim();
-  const wa = document.getElementById('branch-wa').value.trim();
-  const address = document.getElementById('branch-address').value.trim();
-  const lat = document.getElementById('branch-lat').value;
-  const lon = document.getElementById('branch-lon').value;
-  if (!name) { alert('El nombre de la sucursal es obligatorio'); return; }
-  if (!address) { alert('Ingresa la dirección de la sucursal'); return; }
-  try {
-    const body = { name, whatsapp_number: wa, address, menu: {} };
-    if (lat && lon) { body.latitude = parseFloat(lat); body.longitude = parseFloat(lon); }
-    const r = await fetch('/api/team/branches', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (r.ok) {
-      document.getElementById('create-branch-form').style.display = 'none';
-      document.getElementById('branch-name').value = '';
-      document.getElementById('branch-wa').value = '';
-      document.getElementById('branch-address').value = '';
-      document.getElementById('branch-lat').value = '';
-      document.getElementById('branch-lon').value = '';
-      document.getElementById('branch-map-preview').style.display = 'none';
-      loadBranches();
-    } else {
-      const e = await r.json();
-      alert('Error: ' + (e.detail || 'No se pudo crear la sucursal'));
-    }
-  } catch(e) { console.error(e); }
-}
-
-function openInviteModal(branchId, branchName) {
-  currentBranchId = branchId;
-  document.getElementById('modal-branch-name').textContent = branchName;
-  document.getElementById('invite-username').value = '';
-  document.getElementById('invite-password').value = '';
-  document.getElementById('modal-invite').style.display = 'flex';
-}
-
-function closeInviteModal() {
-  document.getElementById('modal-invite').style.display = 'none';
-  currentBranchId = null;
-}
-
-async function sendInvite() {
-  const username = document.getElementById('invite-username').value.trim();
-  const password = document.getElementById('invite-password').value.trim();
-  const role = document.getElementById('invite-role').value;
-  if (!username || !password) { alert('Usuario y contraseña son obligatorios'); return; }
-  try {
-    const r = await fetch('/api/team/invite', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, role, branch_id: currentBranchId })
-    });
-    if (r.ok) {
-      closeInviteModal();
-      loadBranches();
-      alert('Usuario creado correctamente');
-    } else {
-      const e = await r.json();
-      alert('Error: ' + (e.detail || 'No se pudo crear el usuario'));
-    }
-  } catch(e) { console.error(e); }
-}
-
-
-
-// ── MESAS & QR ──────────────────────────────────────────
-
-async function loadTables() {
-  try {
-    const r = await fetch('/api/tables', { headers });
-    if (!r.ok) return;
-    const d = await r.json();
-    const grid = document.getElementById('tables-grid');
-    if (!d.tables.length) {
-      grid.innerHTML = '<div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;grid-column:1/-1;">No hay mesas configuradas. Agrega la primera mesa arriba.</div>';
-      return;
-    }
-    grid.innerHTML = d.tables.map(t => `
-      <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;text-align:center;">
-        <div style="font-size:28px;margin-bottom:6px;">🪑</div>
-        <div style="font-size:15px;font-weight:600;margin-bottom:2px;">${t.name}</div>
-        <div style="font-size:11px;color:#888;margin-bottom:12px;">ID: ${t.id}</div>
-        <div id="qr-${t.id}" style="width:120px;height:120px;margin:0 auto 10px;"></div>
-        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
-          <a href="/api/tables/${t.id}/qr-sheet" target="_blank"
-             style="font-size:11px;padding:5px 10px;background:#E1F5EE;color:#0F6E56;border-radius:6px;text-decoration:none;font-weight:500;">
-            🖨️ Imprimir QR
-          </a>
-          <button onclick="deleteTable('${t.id}')"
-                  style="font-size:11px;padding:5px 10px;background:#FDE8E8;color:#C0392B;border:none;border-radius:6px;cursor:pointer;">
-            Eliminar
-          </button>
-        </div>
+      <div class="ses-action-row">
+        <input id="ses-waiter-msg-input" type="text" class="ses-field" placeholder="Nota para el mesero (opcional)…">
+        <button class="btn-ses-alert" onclick="alertWaiterFromModal()">🔔 Alertar mesero</button>
       </div>
-    `).join('');
-    // Generate QR codes after render
-    if (typeof QRCode !== 'undefined') {
-      d.tables.forEach(t => {
-        const el = document.getElementById('qr-' + t.id);
-        if (el && !el.hasChildNodes()) {
-          const botNum = restaurant.whatsapp_number || '15556293573';
-          const branchKey = t.branch_id ? ' [branch=' + t.branch_id + ']' : '';
-          const waText = 'Hola! Estoy en ' + t.name + branchKey + ' y quiero hacer un pedido';
-          const waUrl = 'https://wa.me/' + botNum + '?text=' + encodeURIComponent(waText);
-          try {
-            new QRCode(el, { text: waUrl, width: 120, height: 120,
-              colorDark: '#0D1412', colorLight: '#ffffff',
-              correctLevel: QRCode.CorrectLevel.M });
-          } catch(e) {}
-        }
-      });
-    }
-  } catch(e) { console.error('loadTables:', e); }
-}
-
-async function createTable() {
-  const num = parseInt(document.getElementById('new-table-num').value);
-  const name = document.getElementById('new-table-name').value.trim();
-  if (!num || num < 1) { alert('Ingresa un número de mesa válido'); return; }
-  try {
-    const r = await fetch('/api/tables', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ number: num, name: name || 'Mesa ' + num })
-    });
-    if (r.ok) {
-      document.getElementById('new-table-num').value = '';
-      document.getElementById('new-table-name').value = '';
-      loadTables();
-    } else {
-      const err = await r.json().catch(() => ({}));
-      alert('Error al agregar mesa: ' + (err.detail || r.status));
-    }
-  } catch(e) { console.error(e); alert('Error de conexion al agregar mesa'); }
-}
-
-async function deleteTable(tableId) {
-  if (!confirm('¿Eliminar esta mesa? Los pedidos históricos se conservan.')) return;
-  try {
-    await fetch('/api/tables/' + tableId, { method: 'DELETE', headers });
-    loadTables();
-  } catch(e) { console.error(e); }
-}
-
-
-
-// ── POS CON IA ──────────────────────────────────────────
-
-// ── POS CACHE — evita llamadas repetidas a Claude ──
-const posCache = { data: null, timestamp: 0, orderCount: 0 };
-const CACHE_TTL = 8 * 60 * 60 * 1000; // 8 horas en ms
-
-async function loadPOSData(forceRefresh = false) {
-  const now = Date.now();
-  const cacheAge = now - posCache.timestamp;
-  const cacheValid = posCache.data && cacheAge < CACHE_TTL;
-
-  // Verificar si hay pedidos nuevos desde el último cache
-  try {
-    const r = await fetch(`/api/dashboard/stats?period=today`, { headers });
-    if (r.ok) {
-      const d = await r.json();
-      const currentOrders = d.orders?.total || 0;
-      if (cacheValid && !forceRefresh && currentOrders === posCache.orderCount) {
-        // Usar cache — no llamar a Claude
-        renderPOSFromCache();
-        return;
-      }
-      posCache.orderCount = currentOrders;
-    }
-  } catch(e) {}
-
-  // Sin cache válido o hay pedidos nuevos — llamar a Claude
-  posCache.timestamp = now;
-  await loadPOSDataFresh();
-}
-
-function renderPOSFromCache() {
-  if (!posCache.data) return;
-  const { mainText, stockText, upsells, horaCounts, avgTicket, topPlato, topHora } = posCache.data;
-  document.getElementById('ai-main-text').innerHTML = mainText + ' <span style="font-size:10px;color:#888;">(caché)</span>';
-  document.getElementById('ai-stock-text').innerHTML = stockText;
-  if (upsells) document.getElementById('upsell-container').innerHTML = upsells;
-  if (topHora) document.getElementById('pos-hora-pico').textContent = topHora[0] + 'h';
-  if (avgTicket) document.getElementById('pos-ticket').textContent = '$' + avgTicket.toLocaleString('es-CO');
-  if (topPlato) {
-    document.getElementById('pos-top-plato').textContent = topPlato[0];
-    document.getElementById('pos-top-sub').textContent = topPlato[1] + ' pedidos esta semana';
-  }
-  renderHoraDist(horaCounts || {});
-  renderDemandBars(horaCounts || {});
-}
-
-async function loadPOSDataFresh() {
-  try {
-    const r = await fetch(`/api/dashboard/orders?period=week`, { headers });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-    const orders = d.orders || [];
-
-    // Ticket promedio
-    const paid = orders.filter(o => o.paid);
-    const avgTicket = paid.length > 0
-      ? Math.round(paid.reduce((s,o) => s + o.total, 0) / paid.length)
-      : 0;
-    document.getElementById('pos-ticket').textContent = avgTicket > 0 ? '$' + avgTicket.toLocaleString('es-CO') : '—';
-    document.getElementById('pos-ticket-trend').textContent = paid.length + ' pedidos pagados esta semana';
-
-    // Plato más pedido
-    const platoCounts = {};
-    orders.forEach(o => {
-      let items = [];
-      if (!o.items) return;
-      // Handle both formats: "3x Diavola, 1x Carbonara" and JSON array
-      if (typeof o.items === 'string' && o.items.trim().startsWith('[')) {
-        try {
-          const parsed = JSON.parse(o.items);
-          items = parsed.map(i => (i.quantity || 1) + 'x ' + (i.name || ''));
-        } catch(e) { items = o.items.split(', '); }
-      } else if (Array.isArray(o.items)) {
-        items = o.items.map(i => (i.quantity || 1) + 'x ' + (i.name || ''));
-      } else {
-        items = o.items.split(', ');
-      }
-      items.forEach(item => {
-        const name = item.replace(/^\d+x\s+/, '').trim();
-        if (name) platoCounts[name] = (platoCounts[name] || 0) + 1;
-      });
-    });
-    const topPlato = Object.entries(platoCounts).sort((a,b) => b[1]-a[1])[0];
-    if (topPlato) {
-      document.getElementById('pos-top-plato').textContent = topPlato[0];
-      document.getElementById('pos-top-sub').textContent = topPlato[1] + ' pedidos esta semana';
-    }
-
-    // Hora pico
-    const horaCounts = {};
-    orders.forEach(o => {
-      if (o.time) {
-        const hora = o.time.split(':')[0] + ':00';
-        horaCounts[hora] = (horaCounts[hora] || 0) + 1;
-      }
-    });
-    const topHora = Object.entries(horaCounts).sort((a,b) => b[1]-a[1])[0];
-    document.getElementById('pos-hora-pico').textContent = topHora ? topHora[0] + 'h' : 'N/D';
-
-    // Distribución por hora
-    renderHoraDist(horaCounts);
-    renderDemandBars(horaCounts);
-    if(posCache.data) posCache.data.horaCounts = horaCounts;
-    if(posCache.data) { posCache.data.avgTicket = avgTicket; posCache.data.topPlato = topPlato; posCache.data.topHora = topHora; }
-
-    // Llamar IA con datos reales
-    await generateAIInsights(orders, avgTicket, topPlato, topHora);
-
-  } catch(e) { console.error('POS error:', e); }
-} // end loadPOSDataFresh
-
-function renderHoraDist(horaCounts) {
-  const horas = ['11:00','12:00','13:00','14:00','18:00','19:00','20:00','21:00','22:00'];
-  const maxVal = Math.max(...Object.values(horaCounts), 1);
-  const container = document.getElementById('hora-dist');
-  container.innerHTML = horas.map(h => {
-    const val = horaCounts[h] || 0;
-    const pct = Math.round(val / maxVal * 100);
-    return `<div class="hora-item">
-      <span class="hora-label">${h}</span>
-      <div class="hora-bar-wrap"><div class="hora-bar" style="width:${pct}%"></div></div>
-      <span class="hora-val">${val} ped</span>
-    </div>`;
-  }).join('');
-}
-
-function renderDemandBars(horaCounts) {
-  const now = new Date().getHours();
-  const proximas = [now+1, now+2, now+3].map(h => h % 24);
-  const dias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const diaSem = dias[new Date().getDay()];
-  const maxVal = Math.max(...Object.values(horaCounts), 1);
-
-  const container = document.getElementById('demand-bars');
-  container.innerHTML = proximas.map(h => {
-    const horaStr = String(h).padStart(2,'0') + ':00';
-    const base = horaCounts[horaStr] || 0;
-    const predicted = Math.max(1, Math.round(base * (0.8 + Math.random() * 0.4)));
-    const pct = Math.min(100, Math.round(predicted / maxVal * 100 + 20));
-    const cls = pct > 70 ? '' : pct > 40 ? 'warn' : 'danger';
-    const nivel = pct > 70 ? 'Alta demanda' : pct > 40 ? 'Demanda media' : 'Baja demanda';
-    return `<div class="predict-bar">
-      <div class="predict-label">
-        <span>${horaStr}h — ${nivel}</span>
-        <span>~${predicted} pedidos esperados</span>
-      </div>
-      <div class="predict-track"><div class="predict-fill ${cls}" style="width:${pct}%"></div></div>
-    </div>`;
-  }).join('');
-}
-
-async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
-  const token = localStorage.getItem('rb_token');
-  const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":"el restaurante"}');
-  const totalRevenue = orders.filter(o=>o.paid).reduce((s,o)=>s+o.total,0);
-  const domicilio = orders.filter(o=>o.type==='domicilio').length;
-  const recoger = orders.filter(o=>o.type==='recoger').length;
-  const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
-  const hoy = dias[new Date().getDay()];
-
-  const context = `Datos de esta semana del restaurante "${restaurant.name || 'el restaurante'}":
-- Total pedidos: ${orders.length} (${domicilio} domicilio, ${recoger} para recoger)
-- Ingresos: $${totalRevenue.toLocaleString('es-CO')} COP
-- Ticket promedio: $${avgTicket.toLocaleString('es-CO')} COP
-- Plato más pedido: ${topPlato ? topPlato[0] + ' (' + topPlato[1] + ' veces)' : 'sin datos'}
-- Hora pico: ${topHora ? topHora[0] : 'sin datos'}
-- Día actual: ${hoy}`;
-
-  // Insight principal
-  document.getElementById('ai-main-text').innerHTML = '<span class="ai-loading">Analizando operación...</span>';
-  
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: 'Eres el asistente de IA de Mesio, especializado en análisis de restaurantes colombianos. Responde siempre en español, de forma directa y accionable. Máximo 3 oraciones. Usa <strong> para resaltar números y recomendaciones clave.',
-        messages: [{
-          role: 'user',
-          content: `${context}
-
-Genera un insight principal accionable para el gerente del restaurante hoy. Menciona algo específico que pueda hacer ahora mismo para mejorar los ingresos o la operación.`
-        }]
-      })
-    });
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || 'Sin datos suficientes para analizar.';
-    document.getElementById('ai-main-text').innerHTML = text;
-    if(posCache.data) posCache.data.mainText = text;
-  } catch(e) {
-    document.getElementById('ai-main-text').innerHTML = 'Conecta más pedidos para que Mesio IA pueda analizar tu operación.';
-  }
-
-  // Stock insight
-  try {
-    const resp2 = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: 'Eres el asistente de IA de Mesio para restaurantes colombianos. Responde en español, máximo 2 oraciones, enfocado en inventario y compras.',
-        messages: [{
-          role: 'user',
-          content: `${context}
-
-Basado en estos datos y que hoy es ${hoy}, ¿qué ingredientes o productos debería asegurarse de tener bien abastecidos? Sé específico con el plato más pedido.`
-        }]
-      })
-    });
-    const data2 = await resp2.json();
-    const stockTxt = data2.content?.[0]?.text || 'Conecta más pedidos para análisis de inventario.';
-    document.getElementById('ai-stock-text').innerHTML = stockTxt;
-    if(posCache.data) posCache.data.stockText = stockTxt;
-  } catch(e) {
-    document.getElementById('ai-stock-text').innerHTML = 'Datos insuficientes para análisis de inventario.';
-  }
-
-  // Upsell sugerencias
-  try {
-    const resp3 = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: 'Eres el asistente de IA de Mesio. Responde SOLO con JSON válido, sin texto adicional ni markdown. El formato debe ser: [{"icon":"emoji","texto":"sugerencia de upsell","ganancia":"impacto estimado"}]. Máximo 3 items.',
-        messages: [{
-          role: 'user',
-          content: `${context}
-
-Genera 3 sugerencias de upsell específicas para el bot de WhatsApp del restaurante. Por ejemplo qué combos sugerir, qué bebida recomendar con el plato más pedido, o qué promoción activar según el día.`
-        }]
-      })
-    });
-    const data3 = await resp3.json();
-    let text3 = data3.content?.[0]?.text || '[]';
-    text3 = text3.replace(/```json|```/g,'').trim();
-    const sugerencias = JSON.parse(text3);
-    const upsellHtml = sugerencias.map(s => `
-      <div class="upsell-card">
-        <span class="upsell-icon">${s.icon}</span>
-        <span class="upsell-text">${s.texto}</span>
-        <span class="upsell-badge">${s.ganancia}</span>
-      </div>
-    `).join('');
-    document.getElementById('upsell-container').innerHTML = upsellHtml;
-    if(posCache.data) posCache.data.upsells = upsellHtml;
-  } catch(e) {
-    document.getElementById('upsell-container').innerHTML = '<div class="empty-state">Conecta más pedidos para sugerencias de upsell.</div>';
-  }
-}
-
-async function askMesioAI() {
-  const question = document.getElementById('ai-question').value.trim();
-  if (!question) return;
-  const btn = document.querySelector('.ask-ai-btn');
-  const responseDiv = document.getElementById('ai-response');
-  btn.textContent = 'Pensando...';
-  btn.disabled = true;
-  responseDiv.style.display = 'block';
-  responseDiv.textContent = '✦ Mesio IA está analizando tu pregunta...';
-
-  const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":"el restaurante"}');
-
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: `Eres Mesio IA, el asistente inteligente de ${restaurant.name || 'este restaurante'}. Eres un experto en operaciones de restaurantes colombianos. Responde en español de forma directa, práctica y accionable. Máximo 150 palabras.`,
-        messages: [{ role: 'user', content: question }]
-      })
-    });
-    const data = await resp.json();
-    responseDiv.innerHTML = '✦ ' + (data.content?.[0]?.text || 'No pude procesar la pregunta.');
-  } catch(e) {
-    responseDiv.textContent = 'Error al conectar con Mesio IA. Intenta de nuevo.';
-  }
-
-  btn.textContent = 'Preguntar a Mesio IA →';
-  btn.disabled = false;
-}
-
-
-
-
-// ── CHAT MODAL — Escalacion humana ─────────────────────────────
-let currentChatPhone = null;
-let botPaused = false;
-
-async function openChat(phone) {
-  currentChatPhone = phone;
-  document.getElementById('chat-modal-phone').textContent = phone;
-  document.getElementById('chat-messages').innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">Cargando...</div>';
-  document.getElementById('chat-modal').style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-  await loadChatHistory(phone);
-}
-
-function closeChatModal() {
-  document.getElementById('chat-modal').style.display = 'none';
-  document.body.style.overflow = '';
-  currentChatPhone = null;
-}
-
-async function loadChatHistory(phone) {
-  try {
-    const r = await fetch('/api/conversations/' + encodeURIComponent(phone), { headers });
-    if (!r.ok) { 
-      document.getElementById('chat-messages').innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">No se pudo cargar el historial.</div>';
-      return;
-    }
-    const d = await r.json();
-    const msgs = d.history || [];
-    botPaused = d.bot_paused || false;
-    const btn = document.getElementById('chat-pause-btn');
-    btn.textContent = botPaused ? '▶ Reanudar bot' : '⏸ Pausar bot';
-    btn.style.background = botPaused ? '#FDE8E8' : '#fff';
-    btn.style.color = botPaused ? '#C0392B' : '#555';
-    
-    const container = document.getElementById('chat-messages');
-    if (!msgs.length) {
-      container.innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">Sin mensajes.</div>';
-      return;
-    }
-    container.innerHTML = msgs.map(m => {
-      const isUser = m.role === 'user';
-      return `<div style="display:flex;justify-content:${isUser?'flex-end':'flex-start'};">
-        <div style="max-width:75%;padding:8px 12px;border-radius:${isUser?'12px 12px 3px 12px':'12px 12px 12px 3px'};
-          background:${isUser?'#DCF8C6':'#fff'};font-size:13px;line-height:1.5;
-          box-shadow:0 1px 2px rgba(0,0,0,.1);white-space:pre-wrap;">
-          ${m.content}
-        </div>
-      </div>`;
-    }).join('');
-    container.scrollTop = container.scrollHeight;
-  } catch(e) { console.error('loadChatHistory:', e); }
-}
-
-async function toggleBotPause() {
-  if (!currentChatPhone) return;
-  botPaused = !botPaused;
-  try {
-    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/pause', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paused: botPaused })
-    });
-    const btn = document.getElementById('chat-pause-btn');
-    btn.textContent = botPaused ? '▶ Reanudar bot' : '⏸ Pausar bot';
-    btn.style.background = botPaused ? '#FDE8E8' : '#fff';
-    btn.style.color = botPaused ? '#C0392B' : '#555';
-  } catch(e) { console.error(e); }
-}
-
-async function sendManualReply() {
-  const input = document.getElementById('chat-reply-input');
-  const msg = input.value.trim();
-  if (!msg || !currentChatPhone) return;
-  input.value = '';
-  try {
-    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg })
-    });
-    await loadChatHistory(currentChatPhone);
-  } catch(e) { console.error(e); }
-}
-
-// ── HAMBURGER MENU ──────────────────────────────────────
-function toggleSidebar() {
-  const s = document.getElementById('sidebar');
-  const o = document.getElementById('mobile-overlay');
-  s.classList.toggle('open');
-  o.classList.toggle('open');
-}
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('mobile-overlay').classList.remove('open');
-}
-// Close sidebar when nav item clicked on mobile
-document.querySelectorAll('.nav-item').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (window.innerWidth <= 768) closeSidebar();
-  });
-});
-// Update mobile title when section changes — patch after load
-document.addEventListener('DOMContentLoaded', function() {
-  const origFn = window.showSection;
-  if (origFn) {
-    window.showSection = function(id, btn) {
-      origFn(id, btn);
-      const titleEl = document.getElementById('mobile-page-title');
-      if (titleEl && window.titles && window.titles[id]) titleEl.textContent = window.titles[id];
-    };
-  }
-});
-
-async function deleteBranch(id, name) {
-  if (!confirm('Eliminar sucursal "' + name + '"? Esta accion no se puede deshacer.')) return;
-  try {
-    const r = await fetch('/api/team/branches/' + id, { method: 'DELETE', headers });
-    if (r.ok) { loadBranches(); }
-    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo eliminar')); }
-  } catch(e) { console.error(e); }
-}
-
-async function deleteUser(username) {
-  if (!confirm('Eliminar usuario "' + username + '"?')) return;
-  try {
-    const r = await fetch('/api/team/users/' + encodeURIComponent(username), { method: 'DELETE', headers });
-    if (r.ok) { loadBranches(); }
-    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo eliminar')); }
-  } catch(e) { console.error(e); }
-}
-</script>
-
-  <!-- CHAT MODAL — Escalacion humana -->
-  <div id="chat-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;">
-    <div style="background:#fff;border-radius:16px;width:520px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.18);">
-      <!-- Header -->
-      <div style="padding:1rem 1.25rem;border-bottom:0.5px solid #e0e0d8;display:flex;align-items:center;justify-content:space-between;background:#f8f8f5;">
-        <div>
-          <div style="font-size:14px;font-weight:600;" id="chat-modal-phone">+57 300 000 0000</div>
-          <div style="font-size:11px;color:#888;margin-top:1px;">Conversación completa</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <button id="chat-pause-btn" onclick="toggleBotPause()" style="font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #e0e0d8;background:#fff;cursor:pointer;color:#555;">⏸ Pausar bot</button>
-          <button onclick="closeChatModal()" style="font-size:18px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
-        </div>
-      </div>
-      <!-- Messages -->
-      <div id="chat-messages" style="flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:8px;background:#ECE5DD;min-height:300px;"></div>
-      <!-- Input — respuesta manual -->
-      <div style="padding:.75rem 1rem;border-top:0.5px solid #e0e0d8;background:#f8f8f5;display:flex;gap:8px;">
-        <input id="chat-reply-input" placeholder="Escribe una respuesta manual..." 
-          style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:20px;font-size:13px;outline:none;"
-          onkeydown="if(event.key==='Enter')sendManualReply()">
-        <button onclick="sendManualReply()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:20px;font-size:13px;cursor:pointer;font-weight:500;">Enviar</button>
-      </div>
+      <div class="ses-feedback" id="ses-action-feedback"></div>
     </div>
   </div>
+</div>
+
+<!-- SCRIPTS -->
+<script src="/static/dashboard-core.js"></script>
+<script src="/static/dashboard-features.js"></script>
+
 </body>
 </html>

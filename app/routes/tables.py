@@ -1,4 +1,5 @@
-import uuid
+import os
+import httpx
 import urllib.parse
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse
@@ -9,10 +10,6 @@ from app.services.auth import verify_token
 router = APIRouter()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AUTH HELPER
-# ─────────────────────────────────────────────────────────────────────────────
-
 async def require_auth(request: Request):
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     if not await verify_token(token):
@@ -20,7 +17,6 @@ async def require_auth(request: Request):
 
 
 async def _get_bot_number(request: Request) -> str:
-    """Devuelve el whatsapp_number del restaurante del usuario autenticado."""
     token      = request.headers.get("Authorization", "").replace("Bearer ", "")
     username   = await verify_token(token)
     user       = await db.db_get_user(username) if username else None
@@ -36,9 +32,28 @@ async def _get_bot_number(request: Request) -> str:
     return bot_number
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MESAS
-# ─────────────────────────────────────────────────────────────────────────────
+async def _send_whatsapp_text(phone: str, message: str) -> bool:
+    token    = os.getenv("META_ACCESS_TOKEN", "")
+    phone_id = os.getenv("META_PHONE_NUMBER_ID", "")
+    if not token or not phone_id:
+        print("⚠️ META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados", flush=True)
+        return False
+    clean_phone = phone.lstrip("+").replace(" ", "")
+    url  = f"https://graph.facebook.com/v19.0/{phone_id}/messages"
+    body = {"messaging_product": "whatsapp", "to": clean_phone, "type": "text", "text": {"body": message}}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=body, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+            if resp.status_code == 200:
+                return True
+            print(f"⚠️ Meta API error {resp.status_code}: {resp.text}", flush=True)
+            return False
+    except Exception as e:
+        print(f"⚠️ Error enviando WhatsApp: {e}", flush=True)
+        return False
+
+
+# ── MESAS ────────────────────────────────────────────────────────────
 
 class TableRequest(BaseModel):
     number: int
@@ -75,27 +90,7 @@ async def delete_table(request: Request, table_id: str):
     return {"success": True}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# QR
-# ─────────────────────────────────────────────────────────────────────────────
-
-def build_qr_html(wa_number: str, table_name: str, table_id: str, width: int = 300, branch_id: int = None) -> str:
-    branch_key = f" [branch={branch_id}]" if branch_id else ""
-    wa_url = (
-        "https://wa.me/" + wa_number + "?text="
-        + urllib.parse.quote("Hola! Estoy en " + table_name + branch_key + " y quiero hacer un pedido")
-    )
-    return (
-        f"<!DOCTYPE html><html><head><meta charset='UTF-8'>"
-        f"<script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>"
-        f"</head><body style='margin:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;'>"
-        f"<div id='qr'></div>"
-        f"<script>window.onload=function(){{new QRCode(document.getElementById('qr'),{{"
-        f"text:decodeURIComponent('{urllib.parse.quote(wa_url)}'),width:{width},height:{width},"
-        f"colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});}};\"</script>"
-        f"</body></html>"
-    )
-
+# ── QR ───────────────────────────────────────────────────────────────
 
 async def get_table_wa_number(table: dict) -> str:
     wa_number = "15556293573"
@@ -115,8 +110,18 @@ async def get_table_qr(request: Request, table_id: str):
     table = await db.db_get_table_by_id(table_id)
     if not table:
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
-    wa_number = await get_table_wa_number(table)
-    return build_qr_html(wa_number, table["name"], table_id, width=300, branch_id=table.get("branch_id"))
+    wa_number  = await get_table_wa_number(table)
+    branch_key = f" [branch={table.get('branch_id')}]" if table.get("branch_id") else ""
+    wa_url     = "https://wa.me/" + wa_number + "?text=" + urllib.parse.quote("Hola! Estoy en " + table["name"] + branch_key + " y quiero hacer un pedido")
+    encoded    = urllib.parse.quote(wa_url)
+    return HTMLResponse(
+        f"<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+        f"<script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>"
+        f"</head><body style='margin:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;'>"
+        f"<div id='qr'></div>"
+        f"<script>window.onload=function(){{new QRCode(document.getElementById('qr'),{{text:decodeURIComponent('{encoded}'),width:300,height:300,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});}}</script>"
+        f"</body></html>"
+    )
 
 
 @router.get("/api/tables/{table_id}/qr-sheet")
@@ -126,10 +131,7 @@ async def get_qr_sheet(request: Request, table_id: str):
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
     wa_number  = await get_table_wa_number(table)
     branch_key = f" [branch={table.get('branch_id')}]" if table.get("branch_id") else ""
-    encoded    = urllib.parse.quote(
-        "https://wa.me/" + wa_number + "?text="
-        + urllib.parse.quote("Hola! Estoy en " + table["name"] + branch_key + " y quiero hacer un pedido")
-    )
+    encoded    = urllib.parse.quote("https://wa.me/" + wa_number + "?text=" + urllib.parse.quote("Hola! Estoy en " + table["name"] + branch_key + " y quiero hacer un pedido"))
     return HTMLResponse(
         f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>"
         f"<style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}"
@@ -139,15 +141,13 @@ async def get_qr_sheet(request: Request, table_id: str):
         f".instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}"
         f".qrbox{{width:200px;height:200px;margin:0 auto 16px;}}"
         f".qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}"
-        f".wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;"
-        f"padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}"
+        f".wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}"
         f".steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}"
-        f".step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}"
-        f".sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style>"
+        f".step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}"
+        f"@media print{{body{{margin:0;}}}}</style>"
         f"<script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>"
         f"</head><body><div class='page'>"
-        f"<div class='logo'>Mesio<span>.</span></div>"
-        f"<div class='tname'>{table['name']}</div>"
+        f"<div class='logo'>Mesio<span>.</span></div><div class='tname'>{table['name']}</div>"
         f"<div class='instr'>Escanea el QR con tu celular<br>y pide por WhatsApp</div>"
         f"<div class='qrbox' id='qrc'></div>"
         f"<div class='wa-badge'>Pedir por WhatsApp</div>"
@@ -157,16 +157,12 @@ async def get_qr_sheet(request: Request, table_id: str):
         f"<div class='step'><span class='sn'>3.</span><span>Se abre WhatsApp automáticamente</span></div>"
         f"<div class='step'><span class='sn'>4.</span><span>Envía el mensaje y haz tu pedido</span></div>"
         f"</div></div>"
-        f"<script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{"
-        f"text:decodeURIComponent('{encoded}'),width:200,height:200,"
-        f"colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}})}}"
-        f";setTimeout(function(){{window.print();}},800);}};</script></body></html>"
+        f"<script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}})}};"
+        f"setTimeout(function(){{window.print();}},800);}}</script></body></html>"
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TABLE ORDERS (cocina)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── TABLE ORDERS ─────────────────────────────────────────────────────
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None):
@@ -177,11 +173,21 @@ async def get_table_orders(request: Request, status: str = None):
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
     await require_auth(request)
-    body = await request.json()
-    if body.get("status") not in ["recibido", "en_preparacion", "listo", "entregado", "cancelado"]:
+    body       = await request.json()
+    new_status = body.get("status")
+    if new_status not in ["recibido", "en_preparacion", "listo", "entregado", "cancelado"]:
         raise HTTPException(status_code=400, detail="Estado inválido")
-    await db.db_update_table_order_status(order_id, body["status"])
-    return {"success": True, "order_id": order_id, "status": body["status"]}
+    await db.db_update_table_order_status(order_id, new_status)
+    if new_status == "entregado":
+        try:
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                order_row = await conn.fetchrow("SELECT phone, bot_number, total FROM table_orders WHERE id=$1", order_id)
+            if order_row:
+                await db.db_session_mark_delivered(order_row["phone"], order_row["bot_number"], order_row["total"] or 0)
+        except Exception as e:
+            print(f"⚠️ db_session_mark_delivered error: {e}", flush=True)
+    return {"success": True, "order_id": order_id, "status": new_status}
 
 
 @router.get("/cocina", response_class=HTMLResponse)
@@ -190,27 +196,118 @@ async def kitchen_display():
     return (Path(__file__).parent.parent / "static" / "kitchen.html").read_text()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# WAITER ALERTS
-# ─────────────────────────────────────────────────────────────────────────────
+# ── WAITER ALERTS ────────────────────────────────────────────────────
 
 @router.get("/api/waiter-alerts")
 async def get_waiter_alerts(request: Request):
-    """
-    Devuelve alertas activas (no descartadas, últimas 2h) para el restaurante
-    del usuario autenticado.
-    Polled cada 5s desde mesero.html.
-    """
     await require_auth(request)
-    await db.db_init_waiter_alerts()          # idempotente — crea la tabla si no existe
+    await db.db_init_waiter_alerts()
     bot_number = await _get_bot_number(request)
-    alerts     = await db.db_get_waiter_alerts(bot_number)
-    return {"alerts": alerts}
+    return {"alerts": await db.db_get_waiter_alerts(bot_number)}
 
 
 @router.post("/api/waiter-alerts/{alert_id}/dismiss")
 async def dismiss_waiter_alert(alert_id: int, request: Request):
-    """Marca una alerta como descartada (el mesero la atendió)."""
     await require_auth(request)
     await db.db_dismiss_waiter_alert(alert_id)
     return {"success": True}
+
+
+# ── TABLE SESSIONS ───────────────────────────────────────────────────
+
+@router.get("/api/table-sessions")
+async def get_active_sessions(request: Request):
+    await require_auth(request)
+    await db.db_init_table_sessions()
+    bot_number = await _get_bot_number(request)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM table_sessions WHERE bot_number=$1 AND status='active' ORDER BY started_at DESC", bot_number)
+    return {"sessions": [db._serialize(dict(r)) for r in rows]}
+
+
+@router.get("/api/table-sessions/closed")
+async def get_closed_sessions(request: Request, hours: int = 24):
+    await require_auth(request)
+    await db.db_init_table_sessions()
+    bot_number = await _get_bot_number(request)
+    return {"sessions": await db.db_get_closed_sessions(bot_number, hours=hours)}
+
+
+@router.post("/api/table-sessions/{session_id}/close")
+async def close_table_session(session_id: int, request: Request):
+    await require_auth(request)
+    token    = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = await verify_token(token) or ""
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT phone, bot_number, table_name FROM table_sessions WHERE id=$1 AND status='active'", session_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Sesión no encontrada o ya cerrada")
+        phone, bot_number, table_name = row["phone"], row["bot_number"], row["table_name"]
+    await db.db_close_session(phone=phone, bot_number=bot_number, reason="waiter_manual", closed_by_username=username)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+    print(f"👋 Mesero '{username}' cerró sesión {session_id} — {table_name} ({phone})", flush=True)
+    return {"success": True, "table_name": table_name, "phone": phone, "closed_by": username}
+
+
+@router.post("/api/table-sessions/{session_id}/reopen")
+async def reopen_table_session(session_id: int, request: Request):
+    await require_auth(request)
+    token    = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = await verify_token(token) or ""
+    session  = await db.db_reopen_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o no está cerrada")
+    print(f"♻️ Admin '{username}' reabrió sesión {session_id} — {session['table_name']}", flush=True)
+    return {"success": True, "session": session}
+
+
+@router.get("/api/table-sessions/{session_id}/history")
+async def get_session_history(session_id: int, request: Request):
+    await require_auth(request)
+    session = await db.db_get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    details = await db.db_get_conversation_details(session["phone"], session["bot_number"])
+    return {"session": session, "history": details.get("history", []), "note": "Historial disponible solo si la sesión no fue limpiada."}
+
+
+@router.post("/api/table-sessions/{session_id}/send-message")
+async def send_message_to_client(session_id: int, request: Request):
+    await require_auth(request)
+    body    = await request.json()
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
+    session = await db.db_get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    full_message = f"🏠 *Restaurante:* {message}"
+    ok = await _send_whatsapp_text(session["phone"], full_message)
+    if not ok:
+        raise HTTPException(status_code=502, detail="No se pudo enviar. Revisa META_ACCESS_TOKEN.")
+    print(f"📨 Admin → {session['phone']} ({session.get('table_name','')}): {message}", flush=True)
+    return {"success": True, "phone": session["phone"], "table_name": session.get("table_name", ""), "message": full_message}
+
+
+@router.post("/api/table-sessions/{session_id}/alert-waiter")
+async def alert_waiter_from_admin(session_id: int, request: Request):
+    await require_auth(request)
+    body           = await request.json()
+    custom_message = (body.get("message") or "").strip()
+    session        = await db.db_get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    alert_message = custom_message or f"El administrador solicita atención en {session.get('table_name','la mesa')}."
+    await db.db_init_waiter_alerts()
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, dismissed)
+            VALUES ($1, $2, $3, $4, 'admin_alert', $5, false) RETURNING id
+        """, session.get("table_id",""), session.get("table_name",""), session.get("phone",""), session.get("bot_number",""), alert_message)
+    print(f"🔔 Admin alertó meseros → {session.get('table_name','')} ({session.get('phone','')}): {alert_message}", flush=True)
+    return {"success": True, "alert_id": row["id"] if row else None, "table_name": session.get("table_name",""), "message": alert_message}
