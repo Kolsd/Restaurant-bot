@@ -1,7 +1,6 @@
 import uuid
 import json
 from anthropic import Anthropic
-from app.data.restaurant import RESTAURANT_INFO, get_top_dishes
 from app.services import orders, database as db
 
 client = Anthropic()
@@ -9,7 +8,7 @@ client = Anthropic()
 TOOLS = [
     {
         "name": "add_to_cart",
-        "description": "Agrega un plato al carrito. Úsalo cuando el cliente pida explícitamente algo del menú.",
+        "description": "Agrega un plato al carrito. Úsalo cuando el cliente pida algo del menú.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -34,14 +33,12 @@ TOOLS = [
     },
     {
         "name": "create_table_order",
-        "description": "Crea una orden para mesa (Dine-in). Envía directo a cocina sin cobrar.",
+        "description": "Crea una orden para mesa (Dine-in). Úsalo SIEMPRE para enviar el pedido a cocina una vez que el cliente confirme. NO necesitas pasar los items, se leen del carrito automáticamente.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "items_summary": {"type": "string", "description": "Resumen de lo pedido. Ej: 2x Pizza, 1x Coca"},
-                "notes": {"type": "string"}
-            },
-            "required": ["items_summary"]
+                "notes": {"type": "string", "description": "Notas para la cocina (opcional)"}
+            }
         }
     },
     {
@@ -99,7 +96,7 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict =
 ## 🪑 MODO MESA — PEDIDO EN RESTAURANTE
 El cliente está físicamente en **{table_context['name']}**.
 - NO pidas dirección de entrega.
-- Usa EXCLUSIVAMENTE la herramienta 'create_table_order' para mandar el pedido a cocina, NO uses 'create_order'.
+- Usa EXCLUSIVAMENTE la herramienta 'create_table_order' para mandar el pedido a cocina. NO uses 'create_order'.
 """
 
     return f"""Eres Mesio, IA de ventas para restaurantes. Eres cálido y directo.
@@ -111,17 +108,16 @@ El cliente está físicamente en **{table_context['name']}**.
 ### ESTADO DEL CARRITO DEL CLIENTE:
 {cart_text}
 
-### REGLAS:
-- Si el cliente pide algo, usa la herramienta `add_to_cart`.
-- Tras agregar al carrito, avisa qué agregaste, diles el TOTAL ACTUAL basándote en el carrito y pregunta si desea algo más.
-- Para cobrar (pedidos externos), usa `create_order`.
-- Para pedidos en la mesa del restaurante, usa `create_table_order`.
+### REGLAS OBLIGATORIAS:
+- Si el cliente pide un plato, usa SIEMPRE la herramienta `add_to_cart`.
+- Tras agregar al carrito, avisa qué agregaste y pregunta si desean algo más o si enviamos a cocina.
+- Cuando el cliente confirme que ya terminó su pedido y quiere enviarlo, DEBES usar la herramienta `create_table_order` para mandarlo a cocina. ¡Es OBLIGATORIO usar la herramienta para que el cocinero lo reciba!
 """
 
 async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number: str, table_context: dict):
     if tool_name == "add_to_cart":
         res = await orders.add_to_cart(phone, tool_input["dish_name"], tool_input["quantity"], bot_number)
-        return "Éxito: Plato agregado" if res["success"] else f"Error: {res.get('error')}"
+        return "Éxito: Plato agregado al carrito." if res["success"] else f"Error: {res.get('error')}"
     
     elif tool_name == "create_order":
         res = await orders.create_order(phone, tool_input["order_type"], tool_input.get("address",""), tool_input.get("notes",""), bot_number)
@@ -132,14 +128,22 @@ async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number:
         return f"Error: {res['error']}"
 
     elif tool_name == "create_table_order" and table_context:
+        cart = await db.db_get_cart(phone, bot_number)
+        if not cart or not cart.get("items"):
+            return "Error: El carrito está vacío. Agrega los platos primero con add_to_cart."
+            
         order_id = f"MESA-{uuid.uuid4().hex[:6].upper()}"
-        items = [{"name": item.strip(), "quantity": 1} for item in tool_input["items_summary"].split(',') if item.strip()]
+        items = cart["items"]
+        total = await orders.get_cart_total(phone, bot_number)
+        
         await db.db_save_table_order({
             "id": order_id, "table_id": table_context['id'], "table_name": table_context['name'],
-            "phone": phone, "items": items, "notes": tool_input.get("notes",""), "total": 0, "status": "recibido"
+            "phone": phone, "items": items, "notes": tool_input.get("notes",""), "total": total, "status": "recibido"
         })
+        
+        # VACIAR EL CARRITO PARA FUTUROS PEDIDOS
         await orders.clear_cart(phone, bot_number)
-        return "Pedido enviado a cocina exitosamente. Carrito vaciado."
+        return "Pedido enviado a cocina exitosamente. El carrito ha sido vaciado para permitir nuevos pedidos."
 
     elif tool_name == "create_reservation":
         await db.db_add_reservation(tool_input["name"], tool_input["date"], tool_input["time"], tool_input["guests"], phone, bot_number, tool_input.get("notes",""))
@@ -155,7 +159,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     sys_prompt = await build_system_prompt(user_phone, bot_number, table_context)
 
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-3-sonnet-20240229",
         max_tokens=1000,
         system=sys_prompt,
         messages=history[-20:],
@@ -163,15 +167,13 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     )
 
     if response.stop_reason == "tool_use":
+        # Evita TypeError: Object of type TextBlock is not JSON serializable
         safe_content = [block.model_dump() if hasattr(block, 'model_dump') else block for block in response.content]
         history.append({"role": "assistant", "content": safe_content})
         
         tool_results = []
-        
         for block in response.content:
-            # Manejo robusto: verificamos si block es un diccionario o un objeto
             block_type = block.get('type') if isinstance(block, dict) else block.type
-            
             if block_type == "tool_use":
                 block_name = block.get('name') if isinstance(block, dict) else block.name
                 block_input = block.get('input') if isinstance(block, dict) else block.input
@@ -187,7 +189,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         history.append({"role": "user", "content": tool_results})
         
         final_response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-3-sonnet-20240229",
             max_tokens=1000,
             system=sys_prompt,
             messages=history[-20:],
@@ -206,7 +208,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
             
         history.append({"role": "assistant", "content": assistant_message})
     else:
-        # Manejo si la respuesta inicial no es tool_use (es un texto directo)
         assistant_message = ""
         for block in response.content:
             block_type = block.get('type') if isinstance(block, dict) else block.type
