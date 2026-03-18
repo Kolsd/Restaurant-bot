@@ -96,10 +96,12 @@ TOOLS = [
         "name": "end_session",
         "description": (
             "Finaliza la sesion del cliente y limpia el historial. "
-            "Usalo SIEMPRE que el cliente se despida o exprese que ya termino: "
-            "'hasta luego', 'ya me voy', 'gracias por todo', 'fue todo', 'chao', 'nos vemos', "
-            "'gracias', 'muchas gracias', 'thank you', 'listo ya', 'eso es todo', "
-            "'que tengas buen dia', 'hasta pronto', 'bye'."
+            "SOLO usar cuando el cliente claramente se despide y YA NO HAY NADA PENDIENTE. "
+            "Ejemplos VÁLIDOS para usarlo: "
+            "'hasta luego', 'ya me voy', 'nos vemos', 'chao', 'bye', 'hasta pronto', "
+            "'que tengas buen dia/noche', 'gracias por todo', 'muchas gracias fue todo'. "
+            "NUNCA usar si el cliente tiene un pedido en cocina que aun no ha sido entregado. "
+            "NUNCA usar si el cliente solo dice 'eso es todo' para terminar de pedir — eso significa que no quiere agregar mas platos, NO que se va."
         ),
         "input_schema": {
             "type": "object",
@@ -147,13 +149,11 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     # Fuente de verdad #2: detectar mesa del mensaje
     import re as _re
 
-    # Intentar extraer branch_id primero
     branch_id = None
     branch_match = _re.search(r'\[branch=(\d+)\]', message)
     if branch_match:
         branch_id = branch_match.group(1)
 
-    # Extraer número de mesa
     m = _re.search(r'Mesa\s+(\d+)', message, _re.IGNORECASE)
     if not m:
         m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', message, _re.IGNORECASE)
@@ -161,7 +161,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     if m:
         number = m.group(1)
 
-        # Intentar con branch primero (más específico)
+        # Intentar con branch primero
         if branch_id:
             table_id = f"b{branch_id}-mesa-{number}"
             table = await db.db_get_table_by_id(table_id)
@@ -169,14 +169,14 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                 return table
 
-        # Intentar sin branch
+        # Sin branch
         table_id = f"mesa-{number}"
         table = await db.db_get_table_by_id(table_id)
         if table:
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             return table
 
-        # Buscar por número en cualquier sucursal (fallback DB)
+        # Fallback: buscar por número en cualquier sucursal
         pool = await db.get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -191,10 +191,23 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     return None
 
 
+async def get_session_state(phone: str, bot_number: str) -> dict:
+    """Retorna el estado actual de la sesión para informar al bot."""
+    session = await db.db_get_active_session(phone, bot_number)
+    if not session:
+        return {"has_order": False, "order_delivered": False, "active": False}
+    return {
+        "active":          True,
+        "has_order":       session.get("has_order", False),
+        "order_delivered": session.get("order_delivered", False),
+    }
+
+
 async def build_system_prompt(phone: str, bot_number: str, table_context: dict | None) -> str:
-    availability = await db.db_get_menu_availability()
-    menu         = await db.db_get_menu(bot_number) or {}
-    cart_text    = await orders.cart_summary(phone, bot_number)
+    availability   = await db.db_get_menu_availability()
+    menu           = await db.db_get_menu(bot_number) or {}
+    cart_text      = await orders.cart_summary(phone, bot_number)
+    session_state  = await get_session_state(phone, bot_number)
 
     menu_text = ""
     for category, dishes in menu.items():
@@ -205,6 +218,34 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict |
         for dish in av_dishes:
             menu_text += f"- **{dish['name']}** — ${dish['price']:,}\n  {dish['description']}\n"
 
+    # ── Sección de estado de sesión ────────────────────────────────
+    session_section = ""
+    if table_context:
+        has_order       = session_state.get("has_order", False)
+        order_delivered = session_state.get("order_delivered", False)
+
+        if has_order and not order_delivered:
+            session_section = """
+## ⚠️ ESTADO DE SESIÓN — PEDIDO EN COCINA
+El cliente tiene un pedido ACTIVO en cocina que AÚN NO ha sido entregado.
+- Si dice "eso es todo", "listo", "ya está", "gracias" → NO cierres la sesión. Solo confirma que su pedido está en camino.
+- SOLO cierra la sesión (end_session) si el cliente dice explícitamente que se va DESPUÉS de recibir su comida, o usa palabras de despedida definitiva como "hasta luego", "ya me voy", "chao", "bye".
+- Si pide la cuenta → usa call_waiter con alert_type="bill".
+"""
+        elif has_order and order_delivered:
+            session_section = """
+## ℹ️ ESTADO DE SESIÓN — PEDIDO ENTREGADO
+El pedido del cliente YA fue entregado.
+- Si dice "gracias", "eso es todo", "listo" → puedes cerrar la sesión con end_session.
+- Si pide la cuenta → usa call_waiter con alert_type="bill".
+"""
+        else:
+            session_section = """
+## ℹ️ ESTADO DE SESIÓN — SIN PEDIDO AÚN
+El cliente aún no ha hecho ningún pedido.
+- Si dice "gracias" o "bye" sin haber pedido nada → cierra la sesión con end_session.
+"""
+
     table_section = ""
     if table_context:
         table_section = f"""
@@ -212,9 +253,9 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict |
 El cliente está en **{table_context['name']}** del restaurante.
 - NO pidas dirección de entrega.
 - Para mandar el pedido a cocina: usa `create_table_order` (NUNCA `create_order`).
-- Si el cliente pide la cuenta, quiere pagar o necesita ayuda física: usa `call_waiter` INMEDIATAMENTE.
-- Si el cliente se despide (gracias, hasta luego, chao, bye, listo, etc.): usa `end_session`.
-"""
+- Si el cliente pide la cuenta o quiere pagar: usa `call_waiter` con alert_type="bill" INMEDIATAMENTE.
+- Si necesita un mesero por otra razón: usa `call_waiter` con alert_type="waiter".
+{session_section}"""
 
     return f"""Eres Mesio, el asistente de IA para restaurantes. Eres cálido, eficiente y directo.
 {table_section}
@@ -225,12 +266,12 @@ El cliente está en **{table_context['name']}** del restaurante.
 ### CARRITO ACTUAL DEL CLIENTE
 {cart_text}
 
-### REGLAS
+### REGLAS GENERALES
 - Cuando el cliente pida platos → usa `add_to_cart` (una llamada por cada plato distinto).
 - Cuando confirme su pedido en mesa → usa `create_table_order`.
 - Cuando confirme pedido domicilio/recoger → usa `create_order`.
 - Cuando pida la cuenta o al mesero → usa `call_waiter`.
-- Cuando se despida (incluso con solo "gracias") → usa `end_session`.
+- `end_session` SOLO cuando el cliente claramente se despide y no tiene pedidos pendientes de entrega.
 - Después de cada herramienta, confirma brevemente al cliente.
 """
 
@@ -317,6 +358,15 @@ async def execute_tool(
             return "OK: Alerta enviada al mesero — viene en camino."
 
         elif tool_name == "end_session":
+            # ── Guardia de seguridad: no cerrar si hay pedido pendiente ──
+            session_state = await get_session_state(phone, bot_number)
+            if session_state.get("has_order") and not session_state.get("order_delivered"):
+                print(f"⚠️ end_session bloqueado — pedido en cocina aún no entregado para {phone}", flush=True)
+                return (
+                    "BLOQUEADO: El cliente tiene un pedido en cocina que aún no ha sido entregado. "
+                    "NO cierres la sesión. Responde al cliente que su pedido está en camino."
+                )
+
             farewell = tool_input.get("farewell_message", "")
             await db.db_close_session(
                 phone=phone, bot_number=bot_number,
@@ -349,7 +399,6 @@ async def execute_tool_blocks(
     other_blocks = [b for b in tool_blocks if _block_attr(b, "name") != "add_to_cart"]
     results_map: dict[str, str] = {}
 
-    # add_to_cart en serie (evita race condition en el carrito)
     for block in cart_blocks:
         bid    = _block_attr(block, "id")    or ""
         inp    = _block_attr(block, "input") or {}
@@ -357,7 +406,6 @@ async def execute_tool_blocks(
         results_map[bid] = result
         print(f"🛒 add_to_cart '{inp.get('dish_name')}' → {result}", flush=True)
 
-    # otras tools en paralelo
     async def run_other(block):
         name   = _block_attr(block, "name")  or ""
         inp    = _block_attr(block, "input") or {}
@@ -402,7 +450,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         safe_content = _serialize_content(response.content)
         history.append({"role": "assistant", "content": safe_content})
 
-        tool_blocks = [b for b in response.content if _block_attr(b, "type") == "tool_use"]
+        tool_blocks  = [b for b in response.content if _block_attr(b, "type") == "tool_use"]
         tool_results = await execute_tool_blocks(tool_blocks, user_phone, bot_number, table_context)
         history.append({"role": "user", "content": tool_results})
 
