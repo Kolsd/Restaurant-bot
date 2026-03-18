@@ -177,16 +177,37 @@ async def update_order_status(request: Request, order_id: str):
     new_status = body.get("status")
     if new_status not in ["recibido", "en_preparacion", "listo", "entregado", "cancelado"]:
         raise HTTPException(status_code=400, detail="Estado inválido")
+
     await db.db_update_table_order_status(order_id, new_status)
+
+    # ── FIX: table_orders no tiene bot_number → lo buscamos en table_sessions ──
     if new_status == "entregado":
         try:
             pool = await db.get_pool()
             async with pool.acquire() as conn:
-                order_row = await conn.fetchrow("SELECT phone, bot_number, total FROM table_orders WHERE id=$1", order_id)
+                order_row = await conn.fetchrow(
+                    "SELECT phone, total FROM table_orders WHERE id=$1", order_id
+                )
             if order_row:
-                await db.db_session_mark_delivered(order_row["phone"], order_row["bot_number"], order_row["total"] or 0)
+                phone = order_row["phone"]
+                total = order_row["total"] or 0
+                # Buscar bot_number desde la sesión activa del cliente
+                async with pool.acquire() as conn2:
+                    session_row = await conn2.fetchrow(
+                        """SELECT bot_number FROM table_sessions
+                           WHERE phone=$1 AND status='active'
+                           ORDER BY started_at DESC LIMIT 1""",
+                        phone
+                    )
+                if session_row and session_row["bot_number"]:
+                    await db.db_session_mark_delivered(phone, session_row["bot_number"], total)
+                    print(f"✅ Pedido {order_id} marcado como entregado → sesión actualizada para {phone}", flush=True)
+                else:
+                    print(f"⚠️ No hay sesión activa para {phone}, no se actualizó table_sessions", flush=True)
         except Exception as e:
-            print(f"⚠️ db_session_mark_delivered error: {e}", flush=True)
+            import traceback
+            print(f"⚠️ update_order_status entregado error: {traceback.format_exc()}", flush=True)
+
     return {"success": True, "order_id": order_id, "status": new_status}
 
 
@@ -222,7 +243,10 @@ async def get_active_sessions(request: Request):
     bot_number = await _get_bot_number(request)
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM table_sessions WHERE bot_number=$1 AND status='active' ORDER BY started_at DESC", bot_number)
+        rows = await conn.fetch(
+            "SELECT * FROM table_sessions WHERE bot_number=$1 AND status='active' ORDER BY started_at DESC",
+            bot_number
+        )
     return {"sessions": [db._serialize(dict(r)) for r in rows]}
 
 
@@ -241,12 +265,14 @@ async def close_table_session(session_id: int, request: Request):
     username = await verify_token(token) or ""
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT phone, bot_number, table_name FROM table_sessions WHERE id=$1 AND status='active'", session_id)
+        row = await conn.fetchrow(
+            "SELECT phone, bot_number, table_name FROM table_sessions WHERE id=$1 AND status='active'",
+            session_id
+        )
         if not row:
             raise HTTPException(status_code=404, detail="Sesión no encontrada o ya cerrada")
         phone, bot_number, table_name = row["phone"], row["bot_number"], row["table_name"]
     await db.db_close_session(phone=phone, bot_number=bot_number, reason="waiter_manual", closed_by_username=username)
-    pool = await db.get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
     print(f"👋 Mesero '{username}' cerró sesión {session_id} — {table_name} ({phone})", flush=True)
@@ -272,7 +298,11 @@ async def get_session_history(session_id: int, request: Request):
     if not session:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     details = await db.db_get_conversation_details(session["phone"], session["bot_number"])
-    return {"session": session, "history": details.get("history", []), "note": "Historial disponible solo si la sesión no fue limpiada."}
+    return {
+        "session": session,
+        "history": details.get("history", []),
+        "note": "Historial disponible solo si la sesión no fue limpiada."
+    }
 
 
 @router.post("/api/table-sessions/{session_id}/send-message")
@@ -308,6 +338,8 @@ async def alert_waiter_from_admin(session_id: int, request: Request):
         row = await conn.fetchrow("""
             INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, dismissed)
             VALUES ($1, $2, $3, $4, 'admin_alert', $5, false) RETURNING id
-        """, session.get("table_id",""), session.get("table_name",""), session.get("phone",""), session.get("bot_number",""), alert_message)
+        """, session.get("table_id",""), session.get("table_name",""),
+            session.get("phone",""), session.get("bot_number",""), alert_message)
     print(f"🔔 Admin alertó meseros → {session.get('table_name','')} ({session.get('phone','')}): {alert_message}", flush=True)
-    return {"success": True, "alert_id": row["id"] if row else None, "table_name": session.get("table_name",""), "message": alert_message}
+    return {"success": True, "alert_id": row["id"] if row else None,
+            "table_name": session.get("table_name",""), "message": alert_message}

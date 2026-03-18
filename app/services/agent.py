@@ -96,8 +96,10 @@ TOOLS = [
         "name": "end_session",
         "description": (
             "Finaliza la sesion del cliente y limpia el historial. "
-            "Usalo SIEMPRE que el cliente se despida: "
-            "'hasta luego', 'ya me voy', 'gracias por todo', 'fue todo', 'chao', 'nos vemos'."
+            "Usalo SIEMPRE que el cliente se despida o exprese que ya termino: "
+            "'hasta luego', 'ya me voy', 'gracias por todo', 'fue todo', 'chao', 'nos vemos', "
+            "'gracias', 'muchas gracias', 'thank you', 'listo ya', 'eso es todo', "
+            "'que tengas buen dia', 'hasta pronto', 'bye'."
         ),
         "input_schema": {
             "type": "object",
@@ -134,7 +136,7 @@ def _serialize_content(content_blocks) -> list:
 
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
-    # Fuente de verdad: sesión activa en DB
+    # Fuente de verdad #1: sesión activa en DB
     session = await db.db_get_active_session(phone, bot_number)
     if session and session.get("table_id"):
         table = await db.db_get_table_by_id(session["table_id"])
@@ -142,22 +144,47 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_touch_session(phone, bot_number)
             return table
 
-    # Detectar por regex en el mensaje
+    # Fuente de verdad #2: detectar mesa del mensaje
     import re as _re
+
+    # Intentar extraer branch_id primero
+    branch_id = None
+    branch_match = _re.search(r'\[branch=(\d+)\]', message)
+    if branch_match:
+        branch_id = branch_match.group(1)
+
+    # Extraer número de mesa
     m = _re.search(r'Mesa\s+(\d+)', message, _re.IGNORECASE)
     if not m:
         m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', message, _re.IGNORECASE)
 
     if m:
         number = m.group(1)
-        branch_match = _re.search(r'\[branch=(\d+)\]', message)
-        if branch_match:
-            table_id = f"b{branch_match.group(1)}-mesa-{number}"
-        else:
-            table_id = f"mesa-{number}"
 
+        # Intentar con branch primero (más específico)
+        if branch_id:
+            table_id = f"b{branch_id}-mesa-{number}"
+            table = await db.db_get_table_by_id(table_id)
+            if table:
+                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                return table
+
+        # Intentar sin branch
+        table_id = f"mesa-{number}"
         table = await db.db_get_table_by_id(table_id)
         if table:
+            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+            return table
+
+        # Buscar por número en cualquier sucursal (fallback DB)
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM restaurant_tables WHERE number=$1 AND active=TRUE LIMIT 1",
+                int(number)
+            )
+        if row:
+            table = db._serialize(dict(row))
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             return table
 
@@ -186,7 +213,7 @@ El cliente está en **{table_context['name']}** del restaurante.
 - NO pidas dirección de entrega.
 - Para mandar el pedido a cocina: usa `create_table_order` (NUNCA `create_order`).
 - Si el cliente pide la cuenta, quiere pagar o necesita ayuda física: usa `call_waiter` INMEDIATAMENTE.
-- Si el cliente se despide: usa `end_session`.
+- Si el cliente se despide (gracias, hasta luego, chao, bye, listo, etc.): usa `end_session`.
 """
 
     return f"""Eres Mesio, el asistente de IA para restaurantes. Eres cálido, eficiente y directo.
@@ -203,7 +230,7 @@ El cliente está en **{table_context['name']}** del restaurante.
 - Cuando confirme su pedido en mesa → usa `create_table_order`.
 - Cuando confirme pedido domicilio/recoger → usa `create_order`.
 - Cuando pida la cuenta o al mesero → usa `call_waiter`.
-- Cuando se despida → usa `end_session`.
+- Cuando se despida (incluso con solo "gracias") → usa `end_session`.
 - Después de cada herramienta, confirma brevemente al cliente.
 """
 
