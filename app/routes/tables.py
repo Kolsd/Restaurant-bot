@@ -180,7 +180,7 @@ async def update_order_status(request: Request, order_id: str):
 
     await db.db_update_table_order_status(order_id, new_status)
 
-    # Cuando se entrega la comida → actualizar sesión (timer 60min)
+    # Cuando se entrega la comida → actualizar sesión + mensaje empático al cliente
     if new_status == "entregado":
         try:
             pool = await db.get_pool()
@@ -202,6 +202,11 @@ async def update_order_status(request: Request, order_id: str):
                 if session_row and session_row["bot_number"]:
                     await db.db_session_mark_delivered(phone, session_row["bot_number"], total)
                     print(f"✅ Pedido {order_id} marcado como entregado → sesión actualizada para {phone}", flush=True)
+                    # Mensaje empático al cliente
+                    await _send_whatsapp_text(
+                        phone,
+                        "¡Que disfruten mucho su comida! 😊🍽️ Estoy aquí por si necesitan algo adicional — más bebidas, otro plato o lo que se les antoje. ¡Buen provecho!"
+                    )
                 else:
                     print(f"⚠️ No hay sesión activa para {phone}, no se actualizó table_sessions", flush=True)
         except Exception as e:
