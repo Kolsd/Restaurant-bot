@@ -26,6 +26,9 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .order-card.recibido{border-left:3px solid #FAC775;}
 .order-card.en_preparacion{border-left:3px solid #378ADD;}
 .order-card.listo{border-left:3px solid #1D9E75;}
+/* Tarjeta de adicional post-entrega: borde naranja pulsante */
+.order-card.adicional-entregado{border-left:3px solid #FF6B35;border-top:1px solid #FF6B35;animation:border-pulse 1.5s ease-in-out infinite;}
+@keyframes border-pulse{0%,100%{border-color:#FF6B35}50%{border-color:#FF9A6B}}
 .order-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;}
 .order-id{font-size:11px;font-weight:700;color:#888;letter-spacing:.05em;}
 .order-table{font-size:14px;font-weight:700;color:#fff;}
@@ -52,6 +55,12 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .additional-banner{background:rgba(250,199,117,.08);border:1px solid rgba(250,199,117,.35);border-radius:8px;padding:8px 10px;margin-bottom:.6rem;}
 .additional-label{font-size:10px;font-weight:700;color:#FAC775;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;}
 .order-item-add{font-size:13px;color:#FAC775;padding:2px 0;display:flex;gap:6px;}
+/* Banner especial para adicional cuando ya fue entregado */
+.additional-banner-urgent{background:rgba(255,107,53,.1);border:1.5px solid rgba(255,107,53,.5);border-radius:8px;padding:8px 10px;margin-bottom:.6rem;}
+.additional-label-urgent{font-size:10px;font-weight:700;color:#FF6B35;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;}
+.order-item-add-urgent{font-size:13px;color:#FF9A6B;padding:2px 0;display:flex;gap:6px;}
+/* Tag "ya entregado" */
+.delivered-tag{display:inline-flex;align-items:center;gap:4px;background:rgba(29,158,117,.12);border:1px solid rgba(29,158,117,.3);color:#1D9E75;font-size:10px;font-weight:600;padding:2px 8px;border-radius:8px;margin-bottom:6px;}
 </style>
 </head>
 <body>
@@ -127,38 +136,66 @@ async function updateStatus(orderId, status) {
 }
 
 function renderCard(o) {
-  // items normales (ya en preparación o listos previamente)
   const additional = Array.isArray(o.items_additional) ? o.items_additional : [];
   const additionalNames = new Set(additional.map(i => i.name));
+  const isDelivered = o.status === 'entregado';
 
   // Items base = todos menos los adicionales actuales
   const baseItems = (Array.isArray(o.items) ? o.items : []).filter(i => !additionalNames.has(i.name));
 
   let itemsHtml = '';
-  if (baseItems.length) {
+  // Para pedidos 'entregado' con adicional: mostrar los items base con tachado (ya preparados)
+  // Para el resto: mostrar normalmente
+  if (baseItems.length && !isDelivered) {
     itemsHtml = baseItems.map(i => {
       const qty  = i.quantity || 1;
       const name = i.name || i;
       return `<div class="order-item"><span class="order-item-qty">${qty}×</span><span>${name}</span></div>`;
+    }).join('');
+  } else if (baseItems.length && isDelivered) {
+    // Items ya entregados — mostrar en gris tachado como referencia
+    itemsHtml = baseItems.map(i => {
+      const qty  = i.quantity || 1;
+      const name = i.name || i;
+      return `<div class="order-item" style="opacity:.4;text-decoration:line-through;"><span class="order-item-qty" style="color:#555;">${qty}×</span><span style="color:#555;">${name}</span></div>`;
     }).join('');
   }
 
   // Banner de adicionales
   let additionalHtml = '';
   if (additional.length) {
-    const addRows = additional.map(i =>
-      `<div class="order-item-add"><span class="order-item-qty" style="color:#FAC775;">+${i.quantity||1}×</span><span>${i.name||i}</span></div>`
-    ).join('');
-    additionalHtml = `<div class="additional-banner">
-      <div class="additional-label">🆕 ADICIONAL</div>
-      ${addRows}
-    </div>`;
+    if (isDelivered) {
+      // Adicional llegó DESPUÉS de que el pedido fue entregado — banner urgente naranja
+      const addRows = additional.map(i =>
+        `<div class="order-item-add-urgent"><span class="order-item-qty" style="color:#FF6B35;">+${i.quantity||1}×</span><span>${i.name||i}</span></div>`
+      ).join('');
+      additionalHtml = `<div class="additional-banner-urgent">
+        <div class="additional-label-urgent">🔥 ADICIONAL POST-ENTREGA</div>
+        ${addRows}
+      </div>`;
+    } else {
+      // Adicional normal (pedido en preparación o listo)
+      const addRows = additional.map(i =>
+        `<div class="order-item-add"><span class="order-item-qty" style="color:#FAC775;">+${i.quantity||1}×</span><span>${i.name||i}</span></div>`
+      ).join('');
+      additionalHtml = `<div class="additional-banner">
+        <div class="additional-label">🆕 ADICIONAL</div>
+        ${addRows}
+      </div>`;
+    }
   }
 
   const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
+  // Para pedido entregado con adicional: tag informativo + botón para marcar el adicional como preparado
   let actions = '';
-  if (o.status === 'recibido') {
+  let deliveredTagHtml = '';
+  if (isDelivered && additional.length) {
+    deliveredTagHtml = `<div class="delivered-tag">✅ Comida ya entregada</div>`;
+    actions = `<button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')" style="background:rgba(255,107,53,.2);color:#FF6B35;border:1px solid rgba(255,107,53,.3);">
+      🔥 Preparar adicional
+    </button>`;
+  } else if (o.status === 'recibido') {
     actions = `<button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
   } else if (o.status === 'en_preparacion') {
     actions = `<button class="btn btn-listo" onclick="updateStatus('${o.id}','listo')">✅ Listo para servir</button>`;
@@ -166,7 +203,12 @@ function renderCard(o) {
     actions = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
   }
 
-  return `<div class="order-card ${o.status.replace('_','-')}">
+  // Clase CSS de la tarjeta
+  const statusClass = isDelivered && additional.length
+    ? 'adicional-entregado'
+    : o.status.replace('_','-');
+
+  return `<div class="order-card ${statusClass}">
     <div class="order-header">
       <div>
         <div class="order-table">${o.table_name}</div>
@@ -174,6 +216,7 @@ function renderCard(o) {
       </div>
       ${elapsed(o.created_at)}
     </div>
+    ${deliveredTagHtml}
     <div class="order-items">${itemsHtml || (additional.length ? '' : '<div class="order-item">Pedido en proceso</div>')}</div>
     ${additionalHtml}
     ${notesHtml}
@@ -197,17 +240,47 @@ async function loadOrders() {
         if (o) notify(`🔔 Nuevo pedido — ${o.table_name}`);
       }
     }
+    // También notificar si un pedido ya conocido recibió adicional post-entrega
+    for (const o of orders) {
+      if (
+        o.status === 'entregado' &&
+        Array.isArray(o.items_additional) &&
+        o.items_additional.length > 0 &&
+        prevOrderIds.has(o.id)
+      ) {
+        // Solo notificar si el set de adicionales cambió (no spammear)
+        const prevCard = document.querySelector(`[data-order-id="${o.id}"]`);
+        if (!prevCard) {
+          notify(`🔥 Adicional post-entrega — ${o.table_name}`);
+        }
+      }
+    }
     prevOrderIds = currentIds;
 
+    // Separar por columnas
+    // 'entregado' con items_additional va a la columna de 'recibido' para mayor visibilidad
     const groups = {recibido: [], en_preparacion: [], listo: []};
-    orders.forEach(o => { if (groups[o.status]) groups[o.status].push(o); });
+    orders.forEach(o => {
+      if (o.status === 'entregado' && Array.isArray(o.items_additional) && o.items_additional.length > 0) {
+        // Adicional post-entrega → columna "Recibidos" para máxima atención
+        groups.recibido.push(o);
+      } else if (groups[o.status]) {
+        groups[o.status].push(o);
+      }
+    });
 
     ['recibido','en_preparacion','listo'].forEach(s => {
       const colId   = s === 'en_preparacion' ? 'col-preparacion' : 'col-' + s;
       const countId = s === 'en_preparacion' ? 'count-preparacion' : 'count-' + s;
       const col   = document.getElementById(colId);
       const count = document.getElementById(countId);
-      if (col)   col.innerHTML   = groups[s].length ? groups[s].map(renderCard).join('') : '<div class="empty">Sin pedidos</div>';
+      if (col) {
+        // Marcar cada tarjeta con data-order-id para detectar cambios
+        const html = groups[s].length
+          ? groups[s].map(o => `<div data-order-id="${o.id}">${renderCard(o)}</div>`).join('')
+          : '<div class="empty">Sin pedidos</div>';
+        col.innerHTML = html;
+      }
       if (count) count.textContent = groups[s].length;
     });
   } catch(e) { console.error(e); }
