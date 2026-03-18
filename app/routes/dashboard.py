@@ -216,9 +216,9 @@ async def list_team_users(request: Request, branch_id: int = None):
     role = user.get("role", "owner")
     user_branch = user.get("branch_id")
     if role == "owner":
-        return {"users": await db.db_get_all_users()}
+        return {"users": await db.db_get_all_users_with_roles(branch_id=branch_id)}
     if role == "admin" and user_branch:
-        return {"users": await db.db_get_all_users()}
+        return {"users": await db.db_get_all_users_with_roles(branch_id=user_branch)}
     raise HTTPException(status_code=403, detail="No autorizado")
 
 @router.post("/api/team/invite")
@@ -235,7 +235,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
             raise HTTPException(status_code=400, detail="branch_id requerido")
         branch = await db.db_get_restaurant_by_id(body.branch_id)
         if not branch: raise HTTPException(status_code=404, detail="Sucursal no encontrada")
-        success = await db.db_create_user_v2(
+        success = await db.db_create_user(
             body.username, hash_password(body.password), branch["name"],
             role=target_role, branch_id=body.branch_id, parent_user=creator_username)
     elif creator_role == "admin":
@@ -245,7 +245,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         if not branch_id: raise HTTPException(status_code=400, detail="Admin sin sucursal")
         branch = await db.db_get_restaurant_by_id(branch_id)
         if not branch: raise HTTPException(status_code=404, detail="Sucursal no encontrada")
-        success = await db.db_create_user_v2(
+        success = await db.db_create_user(
             body.username, hash_password(body.password), branch["name"],
             role=target_role, branch_id=branch_id, parent_user=creator_username)
     else:
@@ -327,11 +327,3 @@ async def fix_conversations_bot_number(request: Request):
             bot_number
         )
     return {"success": True, "result": str(result)}
-
-
-@router.get('/api/geocode')
-async def geocode_endpoint(address: str):
-    lat, lon, display = await geocode_address(address)
-    if lat is None:
-        raise HTTPException(status_code=404, detail='No se encontro la direccion')
-    return {'latitude': lat, 'longitude': lon, 'display_name': display, 'maps_url': f'https://www.google.com/maps?q={lat},{lon}'}
