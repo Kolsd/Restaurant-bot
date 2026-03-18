@@ -1,360 +1,707 @@
 /* ═══════════════════════════════════════════════════
-   Mesio Dashboard — Core (stats, pedidos, reservas, chats, charts)
-   app/static/dashboard-core.js
+   Mesio Dashboard — Features
+   app/static/dashboard-features.js
 ═══════════════════════════════════════════════════ */
 
-const token      = localStorage.getItem('rb_token');
-const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":"Mi Restaurante"}');
-if (!token) window.location.href = '/login';
+// ── MENÚ ─────────────────────────────────────────────────────────────
+let menuAvailability = {};
+let MENU_ITEMS = [];
+const CAT_ICONS = { 'Entradas':'🥗','Pastas':'🍝','Pizzas':'🍕','Postres':'🍮','Bebidas':'🥤','Extras':'🫙','default':'🍽️' };
 
-const headers = { 'Authorization': 'Bearer ' + token };
-const fmt = n => '$' + Number(n).toLocaleString('es-CO');
-
-// Exponer para que otros módulos lo usen
-window._dashHeaders    = headers;
-window._dashRestaurant = restaurant;
-
-document.addEventListener('DOMContentLoaded', () => {
-  const nameEl = document.getElementById('sidebar-name');
-  if (nameEl) nameEl.textContent = restaurant.name || 'Mi Restaurante';
-
-  const role = restaurant.role || 'owner';
-  const equipoNav = document.getElementById('nav-equipo');
-  if (equipoNav) equipoNav.style.display = (role === 'owner' || role === 'admin') ? '' : 'none';
-});
-
-// ── TIEMPO ──────────────────────────────────────────────────────────
-function updateTime() {
-  const el = document.getElementById('current-time');
-  if (el) el.textContent = new Date().toLocaleString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
-}
-updateTime();
-setInterval(updateTime, 60000);
-
-// ── LOGOUT ──────────────────────────────────────────────────────────
-function logout() {
-  localStorage.removeItem('rb_token');
-  localStorage.removeItem('rb_restaurant');
-  window.location.href = '/login';
-}
-
-// ── SECCIÓN ACTIVA ──────────────────────────────────────────────────
-let currentPeriod = 'today';
-const titles = {
-  resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones',
-  conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA',
-  mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones'
-};
-
-function showSection(id, btn) {
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  btn.classList.add('active');
-
-  const titleEl = document.getElementById('page-title');
-  if (titleEl) titleEl.textContent = titles[id] || '';
-  const mobileTitle = document.getElementById('mobile-page-title');
-  if (mobileTitle) mobileTitle.textContent = titles[id] || '';
-
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones'];
-  const periodBar = document.getElementById('period-bar');
-  if (periodBar) periodBar.style.display = hidePeriod.includes(id) ? 'none' : 'flex';
-
-  if (id === 'pos')        loadPOSData();
-  if (id === 'mesas')      loadTables();
-  if (id === 'equipo')     loadBranches();
-  if (id === 'sesiones')   loadSessions();
-  if (id === 'menu')       loadMenu();
-}
-
-function setPeriod(period, btn) {
-  currentPeriod = period;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  refreshAll();
-}
-
-// ── SIDEBAR MOBILE ───────────────────────────────────────────────────
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('mobile-overlay').classList.toggle('open');
-}
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('mobile-overlay').classList.remove('open');
-}
-
-// ── CHARTS ──────────────────────────────────────────────────────────
-let revenueChart = null, statusChart = null, tiposChart = null;
-
-function updateStatusChart(paid, pending) {
-  const ctx = document.getElementById('chart-status');
-  if (!ctx) return;
-  if (statusChart) statusChart.destroy();
-  statusChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels:['Pagados','Pendientes'], datasets:[{ data:[paid||0, pending||0], backgroundColor:['#1D9E75','#FAC775'], borderWidth:0 }] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'65%' }
-  });
-}
-
-function updateTiposChart(domicilio, recoger) {
-  const ctx = document.getElementById('chart-tipos');
-  if (!ctx) return;
-  if (tiposChart) tiposChart.destroy();
-  tiposChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels:['Domicilio','Recoger'], datasets:[{ data:[domicilio||0, recoger||0], backgroundColor:['#1D9E75','#378ADD'], borderWidth:0 }] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'65%' }
-  });
-}
-
-// ── STATS ────────────────────────────────────────────────────────────
-async function fetchStats() {
+async function loadMenu() {
+  const h = window._dashHeaders;
   try {
-    const r = await fetch(`/api/dashboard/stats?period=${currentPeriod}`, { headers });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-    const pendingRev = d.orders.pending_revenue || 0;
-    document.getElementById('m-revenue').textContent = fmt(d.orders.revenue);
-    document.getElementById('m-revenue-sub').innerHTML = d.orders.paid + ' pagados'
-      + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
-    document.getElementById('m-orders').textContent = d.orders.total;
-    document.getElementById('m-orders-sub').textContent = d.orders.pending + ' sin pagar';
-    document.getElementById('m-res').textContent = d.reservations.total;
-    document.getElementById('m-res-sub').textContent = d.reservations.guests + ' personas';
-    document.getElementById('m-convs').textContent = d.conversations.active;
-    document.getElementById('p-total').textContent = d.orders.total;
-    document.getElementById('p-paid').textContent = d.orders.paid;
-    document.getElementById('p-pending').textContent = d.orders.pending;
-    document.getElementById('r-total').textContent = d.reservations.total;
-    document.getElementById('r-guests').textContent = d.reservations.guests;
-    updateStatusChart(d.orders.paid, d.orders.pending);
-  } catch(e) { console.error('fetchStats:', e); }
-}
-
-async function fetchChart() {
-  try {
-    const r = await fetch(`/api/dashboard/chart?period=${currentPeriod}`, { headers });
-    const d = await r.json();
-    const periodLabels = { today:'Hoy', week:'Últimos 7 días', month:'Este mes', semester:'Este semestre', year:'Este año' };
-    const titleEl = document.getElementById('chart-title');
-    if (titleEl) titleEl.textContent = `Ingresos por día — ${periodLabels[currentPeriod]}`;
-    if (revenueChart) revenueChart.destroy();
-    revenueChart = new Chart(document.getElementById('chart-revenue'), {
-      type: 'bar',
-      data: {
-        labels: d.labels,
-        datasets: [
-          { label:'Ingresos', data:d.revenue, backgroundColor:'#1D9E75', borderRadius:4, yAxisID:'y' },
-          { label:'Pedidos',  data:d.orders,  type:'line', borderColor:'#378ADD', backgroundColor:'transparent', tension:.3, pointRadius:3, yAxisID:'y2' }
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{ display:false } },
-        scales: {
-          y:  { ticks:{ callback: v => '$' + Math.round(v/1000) + 'k', font:{size:11} }, grid:{color:'#f0f0e8'} },
-          y2: { position:'right', ticks:{font:{size:11}}, grid:{display:false} },
-          x:  { ticks:{font:{size:10}, maxRotation:45}, grid:{display:false} }
-        }
-      }
-    });
-  } catch(e) { console.error('fetchChart:', e); }
-}
-
-// ── PEDIDOS ──────────────────────────────────────────────────────────
-async function fetchOrders() {
-  const container = document.getElementById('orders-container');
-  try {
-    const r = await fetch(`/api/dashboard/orders?period=${currentPeriod}`, { headers });
-    if (!r.ok) { container.innerHTML = '<div class="empty-state">Error cargando pedidos.</div>'; return; }
-    const d = await r.json();
-    if (!d.orders || !d.orders.length) {
-      container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
-      updateTiposChart(0, 0); return;
+    const [rMenu, rAvail] = await Promise.all([
+      fetch('/api/dashboard/menu', { headers: h }),
+      fetch('/api/menu/availability', { headers: h })
+    ]);
+    if (rAvail.ok) menuAvailability = (await rAvail.json()).availability || {};
+    if (rMenu.ok) {
+      const menu = (await rMenu.json()).menu || {};
+      MENU_ITEMS = [];
+      Object.entries(menu).forEach(([cat, dishes]) => {
+        if (Array.isArray(dishes)) dishes.forEach(d => MENU_ITEMS.push({ name:d.name||'', cat, price:d.price?'$'+d.price:'$0' }));
+      });
     }
-    let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
-    d.orders.forEach(o => {
-      html += `<tr>
-        <td style="font-weight:500;font-size:12px;">${o.id}</td>
-        <td style="color:#555;">${o.items || '—'}</td>
-        <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
-        <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
-        <td style="font-weight:500;">${fmt(o.total)}</td>
-        <td style="color:#888;">${o.time||'—'}</td>
-      </tr>`;
+  } catch(e) { console.error('loadMenu:', e); }
+  renderMenu();
+}
+
+function renderMenu() {
+  const grid = document.getElementById('menu-grid');
+  if (!grid) return;
+  if (!MENU_ITEMS.length) {
+    grid.innerHTML = '<div style="padding:2rem;text-align:center;color:#aaa;font-size:13px;">Sin platos en el menú.</div>';
+    return;
+  }
+  const cats = [...new Set(MENU_ITEMS.map(m => m.cat))];
+  grid.innerHTML = cats.map((cat, ci) => {
+    const items = MENU_ITEMS.filter(m => m.cat === cat);
+    const avail = items.filter(m => menuAvailability[m.name] !== false).length;
+    const icon  = CAT_ICONS[cat] || CAT_ICONS['default'];
+    const isOpen = ci === 0;
+    return `<div class="menu-category">
+      <div class="menu-cat-header" onclick="toggleCat(this)">
+        <div class="menu-cat-title"><span>${icon}</span><span>${cat}</span><span class="menu-cat-meta">${avail}/${items.length} disponibles</span></div>
+        <span class="menu-cat-arrow ${isOpen?'open':''}">▼</span>
+      </div>
+      <div class="menu-cat-body ${isOpen?'open':''}">
+        ${items.map(m => {
+          const av = menuAvailability[m.name] !== false;
+          const safe = m.name.replace(/'/g,"\\'");
+          return `<div class="menu-row" style="${av?'':'opacity:.55;'}">
+            <div style="flex:1;min-width:0;"><div class="menu-row-name" style="${av?'':'text-decoration:line-through;color:#bbb;'}">${m.name}</div></div>
+            <div class="menu-row-price">${m.price}</div>
+            <div class="menu-row-status ${av?'status-on':'status-off'}">${av?'Disponible':'No disponible'}</div>
+            <label class="toggle-switch"><input type="checkbox" ${av?'checked':''} onchange="toggleDish('${safe}',this.checked)"><span class="toggle-slider"></span></label>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleCat(header) {
+  header.nextElementSibling.classList.toggle('open');
+  header.querySelector('.menu-cat-arrow').classList.toggle('open');
+}
+
+async function toggleDish(name, available) {
+  const h = window._dashHeaders;
+  try {
+    await fetch('/api/menu/availability', {
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dish_name: name, available })
     });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-    updateTiposChart(
-      d.orders.filter(o => o.type === 'domicilio').length,
-      d.orders.filter(o => o.type === 'recoger').length
-    );
-  } catch(e) { console.error('fetchOrders:', e); }
-}
-
-// ── RESERVACIONES ────────────────────────────────────────────────────
-async function fetchReservations() {
-  try {
-    const r = await fetch(`/api/dashboard/reservations?period=${currentPeriod}`, { headers });
-    const d = await r.json();
-    const container = document.getElementById('res-container');
-    if (!d.reservations.length) {
-      container.innerHTML = '<div class="empty-state">Sin reservaciones en este período.</div>';
-      document.getElementById('r-next').textContent = '—'; return;
-    }
-    const today = new Date().toISOString().split('T')[0];
-    const now   = new Date().toTimeString().slice(0,5);
-    const next  = d.reservations.find(res => res.date === today && res.time >= now);
-    document.getElementById('r-next').textContent = next ? next.time + ' · ' + next.name.split(' ')[0] : '—';
-    let html = '<table><thead><tr><th>Cliente</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
-    d.reservations.forEach(res => {
-      html += `<tr>
-        <td style="font-weight:500;">${res.name}</td>
-        <td style="color:#888;">${res.date}</td>
-        <td>${res.time}</td><td>${res.guests}</td>
-        <td style="color:#888;">${res.phone||'—'}</td>
-        <td style="color:#888;">${res.notes||'—'}</td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-  } catch(e) { console.error('fetchReservations:', e); }
-}
-
-// ── CONVERSACIONES ───────────────────────────────────────────────────
-async function fetchConversations() {
-  try {
-    const r = await fetch('/api/dashboard/conversations', { headers });
-    const d = await r.json();
-    const container = document.getElementById('convs-container');
-    if (!d.conversations.length) {
-      container.innerHTML = '<div class="empty-state">Sin conversaciones aún.</div>';
-      document.getElementById('c-avg').textContent = '0'; return;
-    }
-    document.getElementById('c-total').textContent = d.conversations.length;
-    const avg = Math.round(d.conversations.reduce((s,c) => s + c.messages, 0) / d.conversations.length);
-    document.getElementById('c-avg').textContent = avg;
-    container.innerHTML = d.conversations.map(c => `
-      <div class="conv-row" onclick="openChat('${c.phone}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
-        <div class="conv-avatar">${c.phone.slice(-4)}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:500;">${c.phone}</div>
-          <div style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">${c.preview}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div style="font-size:11px;color:#aaa;white-space:nowrap;">${c.messages} mensajes</div>
-          <div style="font-size:10px;padding:3px 8px;background:#E1F5EE;color:#0F6E56;border-radius:6px;">Ver chat →</div>
-        </div>
-      </div>`).join('');
-  } catch(e) { console.error('fetchConversations:', e); }
-}
-
-async function cleanupConversations() {
-  if (!confirm('¿Eliminar conversaciones de más de 7 días?')) return;
-  try {
-    await fetch('/api/conversations/cleanup', { method: 'DELETE', headers });
-    fetchConversations();
+    menuAvailability[name] = available;
+    renderMenu();
   } catch(e) {}
 }
 
-// ── CHAT MODAL ───────────────────────────────────────────────────────
-let currentChatPhone = null;
-let botPaused = false;
-
-async function openChat(phone) {
-  currentChatPhone = phone;
-  document.getElementById('chat-modal-phone').textContent = phone;
-  document.getElementById('chat-modal-msgs').innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">Cargando...</div>';
-  document.getElementById('chat-modal-overlay').classList.add('open');
-  document.body.style.overflow = 'hidden';
-  await loadChatHistory(phone);
-}
-
-function closeChatModal() {
-  document.getElementById('chat-modal-overlay').classList.remove('open');
-  document.body.style.overflow = '';
-  currentChatPhone = null;
-}
-
-async function loadChatHistory(phone) {
+// ── MESAS & QR ────────────────────────────────────────────────────────
+async function loadTables() {
+  const h = window._dashHeaders;
+  const rest = window._dashRestaurant;
+  const grid = document.getElementById('tables-grid');
+  if (!grid) return;
   try {
-    const r = await fetch('/api/conversations/' + encodeURIComponent(phone), { headers });
+    const r = await fetch('/api/tables', { headers: h });
     if (!r.ok) return;
-    const d = await r.json();
-    const msgs = d.history || [];
-    botPaused = d.bot_paused || false;
-    const btn = document.getElementById('chat-pause-btn');
-    if (btn) {
-      btn.textContent = botPaused ? '▶ Reanudar bot' : '⏸ Pausar bot';
-      btn.style.background = botPaused ? '#FDE8E8' : '#fff';
-      btn.style.color = botPaused ? '#C0392B' : '#555';
-    }
-    const container = document.getElementById('chat-modal-msgs');
-    if (!msgs.length) {
-      container.innerHTML = '<div style="text-align:center;color:#888;font-size:12px;padding:1rem;">Sin mensajes.</div>';
+    const { tables } = await r.json();
+    if (!tables.length) {
+      grid.innerHTML = '<div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;grid-column:1/-1;">No hay mesas configuradas.</div>';
       return;
     }
-    container.innerHTML = msgs.map(m => {
-      const isUser = m.role === 'user';
-      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      return `<div class="msg-bubble ${isUser ? 'user' : ''}">
-        <div class="bubble ${isUser ? 'user' : 'bot'}">${content}</div>
-      </div>`;
-    }).join('');
-    container.scrollTop = container.scrollHeight;
-  } catch(e) { console.error('loadChatHistory:', e); }
+    grid.innerHTML = tables.map(t => `
+      <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;text-align:center;">
+        <div style="font-size:28px;margin-bottom:6px;">🪑</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:2px;">${t.name}</div>
+        <div style="font-size:11px;color:#888;margin-bottom:12px;">ID: ${t.id}</div>
+        <div id="qr-${t.id}" style="width:120px;height:120px;margin:0 auto 10px;"></div>
+        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
+          <a href="/api/tables/${t.id}/qr-sheet" target="_blank" style="font-size:11px;padding:5px 10px;background:#E1F5EE;color:#0F6E56;border-radius:6px;text-decoration:none;font-weight:500;">🖨️ Imprimir QR</a>
+          <button onclick="deleteTable('${t.id}')" style="font-size:11px;padding:5px 10px;background:#FDE8E8;color:#C0392B;border:none;border-radius:6px;cursor:pointer;">Eliminar</button>
+        </div>
+      </div>`).join('');
+
+    if (typeof QRCode !== 'undefined') {
+      tables.forEach(t => {
+        const el = document.getElementById('qr-' + t.id);
+        if (el && !el.hasChildNodes()) {
+          const botNum = (rest && rest.whatsapp_number) || '15556293573';
+          const branchKey = t.branch_id ? ' [branch=' + t.branch_id + ']' : '';
+          const waUrl = 'https://wa.me/' + botNum + '?text=' + encodeURIComponent('Hola! Estoy en ' + t.name + branchKey + ' y quiero hacer un pedido');
+          try { new QRCode(el, { text:waUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
+        }
+      });
+    }
+  } catch(e) { console.error('loadTables:', e); }
 }
 
-async function toggleBotPause() {
-  if (!currentChatPhone) return;
-  botPaused = !botPaused;
+async function createTable() {
+  const h = window._dashHeaders;
+  const num  = parseInt(document.getElementById('new-table-num').value);
+  const name = document.getElementById('new-table-name').value.trim();
+  if (!num || num < 1) { alert('Ingresa un número de mesa válido'); return; }
   try {
-    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/pause', {
-      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paused: botPaused })
+    const r = await fetch('/api/tables', {
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number: num, name: name || 'Mesa ' + num })
     });
-    const btn = document.getElementById('chat-pause-btn');
-    if (btn) {
-      btn.textContent = botPaused ? '▶ Reanudar bot' : '⏸ Pausar bot';
-      btn.style.background = botPaused ? '#FDE8E8' : '#fff';
-      btn.style.color = botPaused ? '#C0392B' : '#555';
+    if (r.ok) {
+      document.getElementById('new-table-num').value = '';
+      document.getElementById('new-table-name').value = '';
+      loadTables();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert('Error: ' + (err.detail || r.status));
     }
+  } catch(e) { alert('Error de conexión'); }
+}
+
+async function deleteTable(tableId) {
+  if (!confirm('¿Eliminar esta mesa?')) return;
+  try {
+    await fetch('/api/tables/' + tableId, { method: 'DELETE', headers: window._dashHeaders });
+    loadTables();
   } catch(e) {}
 }
 
-async function sendManualReply() {
-  const input = document.getElementById('chat-reply-input');
-  const msg   = (input.value || '').trim();
-  if (!msg || !currentChatPhone) return;
-  input.value = '';
+// ── MI EQUIPO ─────────────────────────────────────────────────────────
+let allBranches = [];
+let currentBranchId = null;
+
+async function loadBranches() {
+  const h = window._dashHeaders;
+  const rest = window._dashRestaurant;
+  const role = (rest && rest.role) || 'owner';
+  const btnCreate = document.getElementById('btn-create-branch');
+  if (btnCreate) btnCreate.style.display = role === 'owner' ? '' : 'none';
   try {
-    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
-      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+    const r = await fetch('/api/team/branches', { headers: h });
+    if (r.status === 401) { logout(); return; }
+    const d = await r.json();
+    allBranches = d.branches || [];
+    const countEl = document.getElementById('branch-count');
+    if (countEl) countEl.textContent = allBranches.length + ' sucursal(es)';
+    renderBranches(allBranches);
+  } catch(e) { console.error('loadBranches:', e); }
+}
+
+function filterBranches() {
+  const q = document.getElementById('branch-search').value.toLowerCase();
+  renderBranches(allBranches.filter(b => b.name.toLowerCase().includes(q) || (b.whatsapp_number||'').includes(q)));
+}
+
+function renderBranches(branches) {
+  const container = document.getElementById('branches-list');
+  if (!container) return;
+  if (!branches.length) { container.innerHTML = '<div class="empty-state">No hay sucursales.</div>'; return; }
+  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cook:'#854F0B', waiter:'#534AB7' };
+  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cook:'#FAEEDA', waiter:'#EEEDFE' };
+  const roleLabels = { owner:'Dueño', admin:'Administrador', cook:'Cocinero', waiter:'Mesero' };
+  container.innerHTML = branches.map(b => `
+    <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;margin-bottom:12px;overflow:hidden;">
+      <div data-branch-id="${b.id}" style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div style="font-size:15px;font-weight:600;">${b.name}</div>
+          <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${b.whatsapp_number||'N/A'}</span>${b.address||''}</div>
+        </div>
+        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')}" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Agregar usuario</button>
+      </div>
+      <div id="users-branch-${b.id}" style="padding:.75rem 1.25rem;"><div style="font-size:11px;color:#aaa;">Cargando...</div></div>
+    </div>`).join('');
+
+  branches.forEach(b => loadBranchUsers(b.id));
+
+  const rest = window._dashRestaurant;
+  const role = (rest && rest.role) || 'owner';
+  if (role === 'owner') {
+    branches.forEach(b => {
+      const header = document.querySelector('[data-branch-id="' + b.id + '"]');
+      if (header) {
+        const btn = document.createElement('button');
+        btn.textContent = 'Eliminar';
+        btn.style.cssText = 'background:#FDE8E8;color:#C0392B;border:none;padding:7px 12px;border-radius:8px;font-size:12px;cursor:pointer;';
+        btn.onclick = () => deleteBranch(b.id, b.name);
+        header.appendChild(btn);
+      }
+    });
+  }
+}
+
+async function loadBranchUsers(branchId) {
+  const h = window._dashHeaders;
+  const roleLabels = { owner:'Dueño', admin:'Administrador', cook:'Cocinero', waiter:'Mesero' };
+  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cook:'#854F0B', waiter:'#534AB7' };
+  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cook:'#FAEEDA', waiter:'#EEEDFE' };
+  try {
+    const r = await fetch('/api/team/users?branch_id=' + branchId, { headers: h });
+    if (!r.ok) return;
+    const users = ((await r.json()).users || []).filter(u => u.branch_id == branchId);
+    const el = document.getElementById('users-branch-' + branchId);
+    if (!el) return;
+    if (!users.length) { el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0;">Sin usuarios asignados</div>'; return; }
+    el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
+      users.map(u => `<div style="display:flex;align-items:center;gap:8px;background:#f8f8f5;border-radius:8px;padding:6px 12px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:${roleBg[u.role]||'#f0f0e8'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:${roleColors[u.role]||'#555'};">${(u.username||'?')[0].toUpperCase()}</div>
+        <div><div style="font-size:12px;font-weight:500;">${u.username}</div><div style="font-size:10px;color:${roleColors[u.role]||'#888'};">${roleLabels[u.role]||u.role}</div></div>
+        <button onclick="deleteUser('${u.username}')" style="background:none;border:none;color:#C0392B;font-size:16px;cursor:pointer;padding:0 4px;">&times;</button>
+      </div>`).join('') + '</div>';
+  } catch(e) {}
+}
+
+function showCreateBranch() {
+  document.getElementById('create-branch-form').style.display = 'block';
+  document.getElementById('branch-name').focus();
+}
+
+async function validateAddress() {
+  const h = window._dashHeaders;
+  const address = document.getElementById('branch-address').value.trim();
+  if (!address) { alert('Ingresa una dirección primero'); return; }
+  const btn = document.querySelector('[onclick="validateAddress()"]');
+  const prev = btn.textContent;
+  btn.textContent = '...'; btn.disabled = true;
+  document.getElementById('branch-map-preview').style.display = 'none';
+  document.getElementById('branch-map-error').style.display = 'none';
+  try {
+    const r = await fetch('/api/geocode?address=' + encodeURIComponent(address), { headers: h });
+    if (r.ok) {
+      const d = await r.json();
+      document.getElementById('branch-lat').value = d.latitude;
+      document.getElementById('branch-lon').value = d.longitude;
+      document.getElementById('branch-address-display').textContent = d.display_name;
+      document.getElementById('branch-lat-display').textContent = d.latitude.toFixed(6);
+      document.getElementById('branch-lon-display').textContent = d.longitude.toFixed(6);
+      document.getElementById('branch-maps-link').href = d.maps_url;
+      document.getElementById('branch-map-preview').style.display = 'block';
+    } else {
+      const e = await r.json();
+      document.getElementById('branch-error-text').textContent = '❌ ' + (e.detail || 'No se encontró la dirección.');
+      document.getElementById('branch-map-error').style.display = 'block';
+      document.getElementById('branch-lat').value = '';
+      document.getElementById('branch-lon').value = '';
+    }
+  } catch(e) {
+    document.getElementById('branch-error-text').textContent = '❌ Error de conexión.';
+    document.getElementById('branch-map-error').style.display = 'block';
+  } finally { btn.textContent = prev; btn.disabled = false; }
+}
+
+function applyManualCoords() {
+  const lat = document.getElementById('branch-lat-manual').value;
+  const lon = document.getElementById('branch-lon-manual').value;
+  if (lat && lon) {
+    document.getElementById('branch-lat').value = lat;
+    document.getElementById('branch-lon').value = lon;
+    document.getElementById('branch-lat-display').textContent = parseFloat(lat).toFixed(6);
+    document.getElementById('branch-lon-display').textContent = parseFloat(lon).toFixed(6);
+    document.getElementById('branch-maps-link').href = 'https://www.google.com/maps?q=' + lat + ',' + lon;
+    document.getElementById('branch-address-display').textContent = 'Coordenadas manuales';
+    document.getElementById('branch-map-preview').style.display = 'block';
+  }
+}
+
+async function createBranch() {
+  const h = window._dashHeaders;
+  const name    = document.getElementById('branch-name').value.trim();
+  const address = document.getElementById('branch-address').value.trim();
+  const lat     = document.getElementById('branch-lat').value;
+  const lon     = document.getElementById('branch-lon').value;
+  if (!name)    { alert('El nombre es obligatorio'); return; }
+  if (!address) { alert('Ingresa la dirección'); return; }
+  try {
+    const body = { name, whatsapp_number:'', address, menu:{} };
+    if (lat && lon) { body.latitude = parseFloat(lat); body.longitude = parseFloat(lon); }
+    const r = await fetch('/api/team/branches', { method:'POST', headers:{ ...h,'Content-Type':'application/json' }, body:JSON.stringify(body) });
+    if (r.ok) {
+      document.getElementById('create-branch-form').style.display = 'none';
+      ['branch-name','branch-address','branch-lat','branch-lon'].forEach(id => { document.getElementById(id).value = ''; });
+      document.getElementById('branch-map-preview').style.display = 'none';
+      loadBranches();
+    } else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo crear')); }
+  } catch(e) {}
+}
+
+function openInviteModal(branchId, branchName) {
+  currentBranchId = branchId;
+  document.getElementById('modal-branch-name').textContent = branchName;
+  document.getElementById('invite-username').value = '';
+  document.getElementById('invite-password').value = '';
+  document.getElementById('modal-invite').style.display = 'flex';
+}
+
+function closeInviteModal() {
+  document.getElementById('modal-invite').style.display = 'none';
+  currentBranchId = null;
+}
+
+async function sendInvite() {
+  const h = window._dashHeaders;
+  const username = document.getElementById('invite-username').value.trim();
+  const password = document.getElementById('invite-password').value.trim();
+  const role     = document.getElementById('invite-role').value;
+  if (!username || !password) { alert('Usuario y contraseña son obligatorios'); return; }
+  try {
+    const r = await fetch('/api/team/invite', {
+      method:'POST', headers:{ ...h,'Content-Type':'application/json' },
+      body: JSON.stringify({ username, password, role, branch_id: currentBranchId })
+    });
+    if (r.ok) { closeInviteModal(); loadBranches(); alert('Usuario creado'); }
+    else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo crear')); }
+  } catch(e) {}
+}
+
+async function deleteBranch(id, name) {
+  if (!confirm('Eliminar sucursal "' + name + '"?')) return;
+  try {
+    const r = await fetch('/api/team/branches/' + id, { method:'DELETE', headers: window._dashHeaders });
+    if (r.ok) loadBranches();
+    else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo eliminar')); }
+  } catch(e) {}
+}
+
+async function deleteUser(username) {
+  if (!confirm('Eliminar usuario "' + username + '"?')) return;
+  try {
+    const r = await fetch('/api/team/users/' + encodeURIComponent(username), { method:'DELETE', headers: window._dashHeaders });
+    if (r.ok) loadBranches();
+    else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo eliminar')); }
+  } catch(e) {}
+}
+
+// ── SESIONES DE MESA ──────────────────────────────────────────────────
+let _sesionHours  = 24;
+let _currentSesId = null;
+
+const CLOSE_REASON = {
+  waiter_manual:      { text:'Mesero',      icon:'👤', color:'#BA7517', bg:'#FFF8E6' },
+  inactivity_timeout: { text:'Inactividad', icon:'⏰', color:'#555',    bg:'#F5F5F0' },
+  client_goodbye:     { text:'Cliente',     icon:'👋', color:'#0F6E56', bg:'#E1F5EE' },
+  superseded:         { text:'Reemplazada', icon:'🔄', color:'#888',    bg:'#F5F5F0' },
+};
+
+function reasonBadge(r) {
+  const d = CLOSE_REASON[r] || { text:r||'—', icon:'❓', color:'#888', bg:'#f0f0f0' };
+  return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:20px;font-weight:500;background:${d.bg};color:${d.color};">${d.icon} ${d.text}</span>`;
+}
+
+function fmtDur(a, b) {
+  if (!a||!b) return '—';
+  const m = Math.round((new Date(b) - new Date(a)) / 60000);
+  return m < 60 ? m + 'min' : Math.floor(m/60) + 'h ' + (m%60) + 'min';
+}
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' });
+}
+
+function setSesionPeriod(h, btn) {
+  _sesionHours = h;
+  document.querySelectorAll('#sesiones .period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadSessions();
+}
+
+async function loadSessions() {
+  const headers = window._dashHeaders;
+  const c = document.getElementById('sessions-container');
+  if (!c) return;
+  c.innerHTML = '<div class="empty-state">Cargando...</div>';
+  try {
+    const r = await fetch('/api/table-sessions/closed?hours=' + _sesionHours, { headers });
+    if (!r.ok) { c.innerHTML = '<div class="empty-state">Error.</div>'; return; }
+    const { sessions = [] } = await r.json();
+
+    const byWaiter = sessions.filter(s => s.closed_by === 'waiter_manual').length;
+    document.getElementById('ses-total').textContent      = sessions.length;
+    document.getElementById('ses-waiter').textContent     = byWaiter;
+    document.getElementById('ses-client').textContent     = sessions.filter(s => s.closed_by === 'client_goodbye').length;
+    document.getElementById('ses-inactivity').textContent = sessions.filter(s => s.closed_by === 'inactivity_timeout').length;
+    document.getElementById('ses-badge').textContent      = sessions.length + ' sesiones';
+
+    const banner = document.getElementById('ses-alert-banner');
+    if (banner) banner.style.display = byWaiter > 0 ? 'flex' : 'none';
+
+    if (!sessions.length) { c.innerHTML = '<div class="empty-state">Sin sesiones cerradas en este período.</div>'; return; }
+
+    let html = `<table><thead><tr>
+      <th>Mesa</th><th>Teléfono</th><th>Inicio</th><th>Cierre</th>
+      <th>Duración</th><th>Cerrada por</th><th>Usuario</th><th>Total</th><th>Acciones</th>
+    </tr></thead><tbody>`;
+    sessions.forEach(s => {
+      const warn = s.closed_by === 'waiter_manual';
+      html += `<tr class="${warn ? 'ses-warn-row' : ''}">
+        <td style="font-weight:500;">${s.table_name||'—'}</td>
+        <td style="color:#888;font-size:11px;">${s.phone}</td>
+        <td style="color:#888;">${fmtTime(s.started_at)}</td>
+        <td style="color:#888;">${fmtTime(s.closed_at)}</td>
+        <td>${fmtDur(s.started_at, s.closed_at)}</td>
+        <td>${reasonBadge(s.closed_by)}</td>
+        <td style="font-size:12px;${warn?'color:#BA7517;font-weight:500;':'color:#888;'}">${s.closed_by_username||'—'}${warn?' ⚠️':''}</td>
+        <td style="font-weight:500;">${s.total_spent?'$'+Number(s.total_spent).toLocaleString('es-CO'):'—'}</td>
+        <td>
+          <button onclick="viewSession(${s.id},'${(s.table_name||'').replace(/'/g,"\\'")}','${s.phone}','${s.closed_by||''}')"
+            style="font-size:11px;padding:4px 9px;border:1px solid #e0e0d8;border-radius:6px;background:#fff;cursor:pointer;">
+            💬 Gestionar
+          </button>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    c.innerHTML = html;
+  } catch(e) { console.error(e); c.innerHTML = '<div class="empty-state">Error de conexión.</div>'; }
+}
+
+async function viewSession(id, tableName, phone, closedBy) {
+  const headers = window._dashHeaders;
+  _currentSesId = id;
+  document.getElementById('ses-modal-title').textContent = 'Sesión — ' + tableName;
+  document.getElementById('ses-modal-sub').textContent   = phone;
+  document.getElementById('ses-modal-msgs').innerHTML    = '<div style="text-align:center;font-size:12px;color:#888;padding:1rem;">Cargando...</div>';
+  document.getElementById('ses-close-info').textContent  = '';
+  document.getElementById('ses-action-feedback').style.display = 'none';
+  document.getElementById('ses-msg-input').value         = '';
+  document.getElementById('ses-waiter-msg-input').value  = '';
+  const reopenRow = document.getElementById('ses-reopen-row');
+  if (reopenRow) reopenRow.style.display = closedBy === 'waiter_manual' ? 'flex' : 'none';
+  document.getElementById('ses-modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  try {
+    const r = await fetch('/api/table-sessions/' + id + '/history', { headers });
+    const d = await r.json();
+    const session = d.session || {};
+    const msgs    = d.history  || [];
+    const reason  = CLOSE_REASON[session.closed_by] || { text:session.closed_by||'?', icon:'❓' };
+    const infoEl  = document.getElementById('ses-close-info');
+    infoEl.innerHTML = `Cerrada por: <strong>${reason.icon} ${reason.text}</strong>`
+      + (session.closed_by_username ? ` · usuario: <strong>${session.closed_by_username}</strong>` : '')
+      + ` · duración: ${fmtDur(session.started_at, session.closed_at)}`
+      + (session.total_spent ? ` · total: <strong>$${Number(session.total_spent).toLocaleString('es-CO')}</strong>` : '');
+    const chatEl = document.getElementById('ses-modal-msgs');
+    if (!msgs.length) {
+      chatEl.innerHTML = '<div style="text-align:center;font-size:12px;color:#888;padding:1rem;">Historial no disponible.</div>';
+      return;
+    }
+    chatEl.innerHTML = msgs.map(m => {
+      const isUser = m.role === 'user';
+      const text   = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      return `<div class="msg-bubble ${isUser?'user':''}"><div class="bubble ${isUser?'user':'bot'}">${text}</div></div>`;
+    }).join('');
+    chatEl.scrollTop = chatEl.scrollHeight;
+  } catch(e) {
+    document.getElementById('ses-modal-msgs').innerHTML = '<div style="text-align:center;font-size:12px;color:#888;padding:1rem;">Error al cargar.</div>';
+  }
+}
+
+function closeSesModal() {
+  document.getElementById('ses-modal-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  _currentSesId = null;
+}
+
+function showSesFeedback(msg, ok = true) {
+  const el = document.getElementById('ses-action-feedback');
+  el.textContent = msg;
+  el.className = 'ses-feedback ' + (ok ? 'ok' : 'err');
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+async function reopenFromModal() {
+  const headers = window._dashHeaders;
+  if (!_currentSesId) return;
+  if (!confirm('¿Reabrir esta sesión?')) return;
+  try {
+    const r = await fetch('/api/table-sessions/' + _currentSesId + '/reopen', { method:'POST', headers });
+    if (r.ok) {
+      showSesFeedback('✅ Sesión reabierta. El cliente puede volver a escribir.');
+      document.getElementById('ses-reopen-row').style.display = 'none';
+      loadSessions();
+    } else { const e = await r.json(); showSesFeedback('Error: ' + (e.detail||'No se pudo reabrir.'), false); }
+  } catch(e) { showSesFeedback('Error de conexión.', false); }
+}
+
+async function sendMsgFromModal() {
+  const headers = window._dashHeaders;
+  if (!_currentSesId) return;
+  const msg = document.getElementById('ses-msg-input').value.trim();
+  if (!msg) { showSesFeedback('Escribe un mensaje primero.', false); return; }
+  try {
+    const r = await fetch('/api/table-sessions/' + _currentSesId + '/send-message', {
+      method:'POST', headers:{ ...headers,'Content-Type':'application/json' },
       body: JSON.stringify({ message: msg })
     });
-    await loadChatHistory(currentChatPhone);
+    if (r.ok) { document.getElementById('ses-msg-input').value = ''; showSesFeedback('✅ Mensaje enviado al cliente.'); }
+    else { const e = await r.json(); showSesFeedback('Error: ' + (e.detail||'No se pudo enviar.'), false); }
+  } catch(e) { showSesFeedback('Error de conexión.', false); }
+}
+
+async function alertWaiterFromModal() {
+  const headers = window._dashHeaders;
+  if (!_currentSesId) return;
+  const nota = document.getElementById('ses-waiter-msg-input').value.trim();
+  try {
+    const r = await fetch('/api/table-sessions/' + _currentSesId + '/alert-waiter', {
+      method:'POST', headers:{ ...headers,'Content-Type':'application/json' },
+      body: JSON.stringify({ message: nota })
+    });
+    if (r.ok) { document.getElementById('ses-waiter-msg-input').value = ''; showSesFeedback('✅ Alerta enviada al panel de meseros.'); }
+    else { const e = await r.json(); showSesFeedback('Error: ' + (e.detail||'No se pudo alertar.'), false); }
+  } catch(e) { showSesFeedback('Error de conexión.', false); }
+}
+
+// ── POS CON IA ───────────────────────────────────────────────────────
+const posCache = { data: null, timestamp: 0, orderCount: 0 };
+const CACHE_TTL = 8 * 60 * 60 * 1000;
+
+async function loadPOSData(forceRefresh = false) {
+  const headers = window._dashHeaders;
+  const now = Date.now();
+  const cacheValid = posCache.data && (now - posCache.timestamp) < CACHE_TTL;
+  try {
+    const r = await fetch('/api/dashboard/stats?period=today', { headers });
+    if (r.ok) {
+      const d = await r.json();
+      const currentOrders = d.orders?.total || 0;
+      if (cacheValid && !forceRefresh && currentOrders === posCache.orderCount) { renderPOSFromCache(); return; }
+      posCache.orderCount = currentOrders;
+    }
   } catch(e) {}
+  posCache.timestamp = now;
+  await loadPOSDataFresh();
 }
 
-// ── REFRESH GLOBAL ───────────────────────────────────────────────────
-async function refreshAll() {
-  const badge = document.getElementById('sync-badge');
-  if (badge) badge.textContent = 'Sincronizando...';
-  await Promise.all([fetchStats(), fetchChart(), fetchOrders(), fetchReservations(), fetchConversations()]);
-  if (badge) badge.textContent = 'En vivo · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+function renderPOSFromCache() {
+  if (!posCache.data) return;
+  const { mainText, stockText, upsells, horaCounts, avgTicket, topPlato, topHora } = posCache.data;
+  document.getElementById('ai-main-text').innerHTML = mainText + ' <span style="font-size:10px;color:#888;">(caché)</span>';
+  document.getElementById('ai-stock-text').innerHTML = stockText;
+  if (upsells) document.getElementById('upsell-container').innerHTML = upsells;
+  if (topHora) document.getElementById('pos-hora-pico').textContent = topHora[0] + 'h';
+  if (avgTicket) document.getElementById('pos-ticket').textContent = '$' + avgTicket.toLocaleString('es-CO');
+  if (topPlato) { document.getElementById('pos-top-plato').textContent = topPlato[0]; document.getElementById('pos-top-sub').textContent = topPlato[1] + ' pedidos'; }
+  renderHoraDist(horaCounts || {});
+  renderDemandBars(horaCounts || {});
 }
 
-// ── INIT ────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  loadMenu();
-  refreshAll();
-  setInterval(refreshAll, 10000);
+async function loadPOSDataFresh() {
+  const headers = window._dashHeaders;
+  const rest    = window._dashRestaurant;
+  try {
+    const r = await fetch('/api/dashboard/orders?period=week', { headers });
+    if (r.status === 401) { logout(); return; }
+    const orders = (await r.json()).orders || [];
+    const paid = orders.filter(o => o.paid);
+    const avgTicket = paid.length > 0 ? Math.round(paid.reduce((s,o) => s+o.total, 0) / paid.length) : 0;
+    document.getElementById('pos-ticket').textContent = avgTicket > 0 ? '$' + avgTicket.toLocaleString('es-CO') : '—';
+    document.getElementById('pos-ticket-trend').textContent = paid.length + ' pedidos pagados esta semana';
 
-  // Cerrar sidebar al hacer click en nav item (mobile)
-  document.querySelectorAll('.nav-item').forEach(btn => {
-    btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
-  });
-});
+    const platoCounts = {};
+    orders.forEach(o => {
+      let items = [];
+      if (!o.items) return;
+      if (typeof o.items === 'string' && o.items.trim().startsWith('[')) {
+        try { items = JSON.parse(o.items).map(i => (i.quantity||1)+'x '+(i.name||'')); } catch(e) { items = o.items.split(', '); }
+      } else if (Array.isArray(o.items)) { items = o.items.map(i => (i.quantity||1)+'x '+(i.name||'')); }
+      else { items = o.items.split(', '); }
+      items.forEach(item => { const name = item.replace(/^\d+x\s+/, '').trim(); if (name) platoCounts[name] = (platoCounts[name]||0) + 1; });
+    });
+    const topPlato = Object.entries(platoCounts).sort((a,b) => b[1]-a[1])[0];
+    if (topPlato) { document.getElementById('pos-top-plato').textContent = topPlato[0]; document.getElementById('pos-top-sub').textContent = topPlato[1] + ' pedidos esta semana'; }
+
+    const horaCounts = {};
+    orders.forEach(o => { if (o.time) { const hora = o.time.split(':')[0]+':00'; horaCounts[hora] = (horaCounts[hora]||0)+1; } });
+    const topHora = Object.entries(horaCounts).sort((a,b) => b[1]-a[1])[0];
+    document.getElementById('pos-hora-pico').textContent = topHora ? topHora[0]+'h' : 'N/D';
+
+    renderHoraDist(horaCounts);
+    renderDemandBars(horaCounts);
+    if (!posCache.data) posCache.data = {};
+    Object.assign(posCache.data, { horaCounts, avgTicket, topPlato, topHora });
+    await generateAIInsights(orders, avgTicket, topPlato, topHora);
+  } catch(e) { console.error('POS error:', e); }
+}
+
+function renderHoraDist(horaCounts) {
+  const horas = ['11:00','12:00','13:00','14:00','18:00','19:00','20:00','21:00','22:00'];
+  const maxVal = Math.max(...Object.values(horaCounts), 1);
+  const container = document.getElementById('hora-dist');
+  if (!container) return;
+  container.innerHTML = horas.map(h => {
+    const val = horaCounts[h] || 0;
+    const pct = Math.round(val / maxVal * 100);
+    return `<div class="hora-item"><span class="hora-label">${h}</span><div class="hora-bar-wrap"><div class="hora-bar" style="width:${pct}%"></div></div><span class="hora-val">${val} ped</span></div>`;
+  }).join('');
+}
+
+function renderDemandBars(horaCounts) {
+  const now = new Date().getHours();
+  const maxVal = Math.max(...Object.values(horaCounts), 1);
+  const container = document.getElementById('demand-bars');
+  if (!container) return;
+  container.innerHTML = [now+1, now+2, now+3].map(h => {
+    const hora = String(h%24).padStart(2,'0') + ':00';
+    const base = horaCounts[hora] || 0;
+    const predicted = Math.max(1, Math.round(base * (0.8 + Math.random() * 0.4)));
+    const pct = Math.min(100, Math.round(predicted / maxVal * 100 + 20));
+    const cls = pct > 70 ? '' : pct > 40 ? 'warn' : 'danger';
+    const nivel = pct > 70 ? 'Alta demanda' : pct > 40 ? 'Demanda media' : 'Baja demanda';
+    return `<div class="predict-bar"><div class="predict-label"><span>${hora}h — ${nivel}</span><span>~${predicted} pedidos esperados</span></div><div class="predict-track"><div class="predict-fill ${cls}" style="width:${pct}%"></div></div></div>`;
+  }).join('');
+}
+
+async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
+  const rest = window._dashRestaurant;
+  const totalRevenue = orders.filter(o => o.paid).reduce((s,o) => s+o.total, 0);
+  const domicilio = orders.filter(o => o.type === 'domicilio').length;
+  const recoger   = orders.filter(o => o.type === 'recoger').length;
+  const dias  = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  const hoy   = dias[new Date().getDay()];
+  const ctx   = `Datos semana "${(rest&&rest.name)||'el restaurante'}":\n- Pedidos: ${orders.length} (${domicilio} dom, ${recoger} recoger)\n- Ingresos: $${totalRevenue.toLocaleString('es-CO')}\n- Ticket prom: $${avgTicket.toLocaleString('es-CO')}\n- Top plato: ${topPlato?topPlato[0]+' ('+topPlato[1]+')':'sin datos'}\n- Hora pico: ${topHora?topHora[0]:'sin datos'}\n- Hoy: ${hoy}`;
+
+  const callAI = async (sys, usr) => {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1000, system:sys, messages:[{ role:'user', content:usr }] })
+    });
+    const d = await resp.json();
+    return d.content?.[0]?.text || '';
+  };
+
+  document.getElementById('ai-main-text').innerHTML = '<span class="ai-loading">Analizando...</span>';
+  try {
+    const mainText = await callAI(
+      'Eres Mesio IA para restaurantes colombianos. Español, directo, máx 3 oraciones. Usa <strong> para resaltar.',
+      ctx + '\n\nGenera un insight accionable para el gerente hoy.'
+    );
+    document.getElementById('ai-main-text').innerHTML = mainText;
+    if (!posCache.data) posCache.data = {};
+    posCache.data.mainText = mainText;
+  } catch(e) { document.getElementById('ai-main-text').innerHTML = 'Conecta más pedidos para análisis.'; }
+
+  try {
+    const stockText = await callAI(
+      'Eres Mesio IA. Español, máx 2 oraciones, enfocado en inventario.',
+      ctx + '\n\nHoy es ' + hoy + '. ¿Qué ingredientes asegurar con base en el plato top?'
+    );
+    document.getElementById('ai-stock-text').innerHTML = stockText;
+    if (posCache.data) posCache.data.stockText = stockText;
+  } catch(e) { document.getElementById('ai-stock-text').innerHTML = 'Datos insuficientes.'; }
+
+  try {
+    const raw = await callAI(
+      'Eres Mesio IA. Responde SOLO JSON válido sin markdown: [{"icon":"emoji","texto":"sugerencia","ganancia":"impacto"}]. Máx 3 items.',
+      ctx + '\n\nGenera 3 sugerencias de upsell para el bot de WhatsApp.'
+    );
+    const sugerencias = JSON.parse(raw.replace(/```json|```/g,'').trim());
+    const upsellHtml = sugerencias.map(s => `
+      <div class="upsell-card"><span class="upsell-icon">${s.icon}</span><span class="upsell-text">${s.texto}</span><span class="upsell-badge">${s.ganancia}</span></div>`).join('');
+    document.getElementById('upsell-container').innerHTML = upsellHtml;
+    if (posCache.data) posCache.data.upsells = upsellHtml;
+  } catch(e) { document.getElementById('upsell-container').innerHTML = '<div class="empty-state">Conecta más pedidos.</div>'; }
+}
+
+async function askMesioAI() {
+  const question = document.getElementById('ai-question').value.trim();
+  if (!question) return;
+  const rest = window._dashRestaurant;
+  const btn = document.querySelector('.ask-ai-btn');
+  const responseDiv = document.getElementById('ai-response');
+  btn.textContent = 'Pensando...'; btn.disabled = true;
+  responseDiv.style.display = 'block';
+  responseDiv.textContent   = '✦ Analizando tu pregunta...';
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1000,
+        system:'Eres Mesio IA, experto en restaurantes colombianos. Español, directo, máx 150 palabras.',
+        messages:[{ role:'user', content:question }] })
+    });
+    const d = await resp.json();
+    responseDiv.innerHTML = '✦ ' + (d.content?.[0]?.text || 'No pude procesar.');
+  } catch(e) { responseDiv.textContent = 'Error al conectar.'; }
+  btn.textContent = 'Preguntar a Mesio IA →'; btn.disabled = false;
+}
