@@ -153,7 +153,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     sys_prompt = await build_system_prompt(user_phone, bot_number, table_context)
 
     response = client.messages.create(
-        model="claude-3-sonnet-20240229",
+        model="claude-3-5-sonnet-latest",
         max_tokens=1000,
         system=sys_prompt,
         messages=history[-20:],
@@ -176,7 +176,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         history.append({"role": "user", "content": tool_results})
         
         final_response = client.messages.create(
-            model="claude-3-sonnet-20240229",
+            model="claude-3-5-sonnet-latest",
             max_tokens=1000,
             system=sys_prompt,
             messages=history[-20:],
