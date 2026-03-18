@@ -66,10 +66,13 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     history = await db.db_get_history(phone, bot_number)
     for msg in reversed(history[-6:]):
         if msg.get('role') == 'user':
-            m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', msg['content'], _re.IGNORECASE)
-            if m:
-                table = await db.db_get_table_by_id(f"mesa-{m.group(1)}")
-                if table: return table
+            content = msg.get('content', '')
+            # Validamos que el contenido sea un string antes de buscar
+            if isinstance(content, str):
+                m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', content, _re.IGNORECASE)
+                if m:
+                    table = await db.db_get_table_by_id(f"mesa-{m.group(1)}")
+                    if table: return table
     
     m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', message, _re.IGNORECASE)
     if m:
@@ -161,7 +164,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
     )
 
     if response.stop_reason == "tool_use":
-        # Convertimos los objetos a formato de diccionario (JSON serializable)
         safe_content = [block.model_dump() if hasattr(block, 'model_dump') else block for block in response.content]
         history.append({"role": "assistant", "content": safe_content})
         
