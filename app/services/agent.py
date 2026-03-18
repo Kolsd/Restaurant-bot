@@ -77,12 +77,11 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
         if table: return table
     return None
 
-# SE INYECTA EL TELÉFONO PARA QUE LA IA LEA EL CARRITO
 async def build_system_prompt(phone: str, bot_number: str, table_context: dict = None) -> str:
     availability = await db.db_get_menu_availability()
     menu = await db.db_get_menu(bot_number) or {}
     
-    # MAGIA: Traemos el carrito exacto desde Postgres
+    # Traemos el carrito exacto desde Postgres
     cart_text = await orders.cart_summary(phone, bot_number)
     
     menu_text = ""
@@ -141,4 +140,56 @@ async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number:
         return "Pedido enviado a cocina exitosamente."
 
     elif tool_name == "create_reservation":
-        await db.
+        await db.db_add_reservation(tool_input["name"], tool_input["date"], tool_input["time"], tool_input["guests"], phone, bot_number, tool_input.get("notes",""))
+        return "Reservación confirmada en sistema."
+        
+    return "Herramienta desconocida o contexto inválido"
+
+async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
+    table_context = await detect_table_context(user_message, user_phone, bot_number)
+    history = await db.db_get_history(user_phone, bot_number)
+    history.append({"role": "user", "content": user_message})
+
+    sys_prompt = await build_system_prompt(user_phone, bot_number, table_context)
+
+    response = client.messages.create(
+        model="claude-3-sonnet-20240229",
+        max_tokens=1000,
+        system=sys_prompt,
+        messages=history[-20:],
+        tools=TOOLS
+    )
+
+    if response.stop_reason == "tool_use":
+        history.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        
+        for block in response.content:
+            if block.type == "tool_use":
+                result_str = await execute_tool(block.name, block.input, user_phone, bot_number, table_context)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result_str
+                })
+        
+        history.append({"role": "user", "content": tool_results})
+        
+        final_response = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=1000,
+            system=sys_prompt,
+            messages=history[-20:],
+            tools=TOOLS
+        )
+        assistant_message = final_response.content[0].text
+        history.append({"role": "assistant", "content": assistant_message})
+    else:
+        assistant_message = response.content[0].text
+        history.append({"role": "assistant", "content": assistant_message})
+
+    await db.db_save_history(user_phone, bot_number, history)
+    return {"message": assistant_message}
+
+async def reset_conversation(user_phone: str):
+    await db.db_delete_conversation(user_phone)
