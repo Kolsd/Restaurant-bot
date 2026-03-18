@@ -61,7 +61,10 @@ TOOLS = [
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict:
     import re as _re
     history = await db.db_get_history(phone, bot_number)
-    for msg in reversed(history[-6:]):
+    
+    # FIX: Buscamos en todo el historial disponible (no solo en los últimos 6)
+    # para evitar que el uso de herramientas empuje la mesa fuera de la memoria
+    for msg in reversed(history):
         if msg.get('role') == 'user':
             content = msg.get('content', '')
             if isinstance(content, str):
@@ -165,7 +168,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         tools=TOOLS
     )
 
-    # CICLO WHILE PARA SOPORTAR MÚLTIPLES ACCIONES CONSECUTIVAS (ej. agregar + enviar a cocina de una)
     while response.stop_reason == "tool_use":
         safe_content = [block.model_dump() if hasattr(block, 'model_dump') else block for block in response.content]
         history.append({"role": "assistant", "content": safe_content})
