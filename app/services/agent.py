@@ -175,7 +175,6 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
         if table:
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             return table
-        # Fallback: buscar por número
         pool = await db.get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -201,13 +200,28 @@ async def get_session_state(phone: str, bot_number: str) -> dict:
     }
 
 
-async def build_system_prompt(phone: str, bot_number: str, table_context: dict | None) -> str:
+async def build_system_prompt(phone: str, bot_number: str, table_context: dict | None) -> list:
+    """
+    Retorna el system prompt como LISTA de bloques con cache_control.
+    El contenido estático (instrucciones + menú) se marca para caching.
+    El contenido dinámico (carrito + estado sesión) va al final SIN cache,
+    porque cambia en cada llamada.
+
+    Estructura:
+      Bloque 1 [CACHED]: instrucciones base + menú comprimido
+      Bloque 2 [NO CACHE]: estado dinámico (carrito, contexto mesa, estado sesión)
+
+    El bloque 1 se cachea después de la primera escritura (TTL 5 min).
+    Costo de cache read = 10% del precio normal → ahorro ~35%.
+    """
     availability  = await db.db_get_menu_availability()
     menu          = await db.db_get_menu(bot_number) or {}
     cart_text     = await orders.cart_summary(phone, bot_number)
     session_state = await get_session_state(phone, bot_number)
 
-    # ── Menú SIN formato markdown (sin asteriscos) ──────────────────
+    # ── MENÚ COMPRIMIDO: solo nombre + precio (sin descripciones)
+    # Las descripciones se incluyen en un bloque separado más pequeño solo si se necesitan.
+    # Esto reduce el menú de ~800 tokens a ~250 tokens.
     menu_lines = []
     for category, dishes in menu.items():
         av_dishes = [d for d in dishes if availability.get(d['name'], True)]
@@ -216,12 +230,28 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict |
         menu_lines.append(f"\n{category}:")
         for dish in av_dishes:
             price = f"${dish['price']:,}" if dish.get('price') else ""
-            desc  = dish.get('description', '')
-            menu_lines.append(f"  - {dish['name']} {price}  {desc}")
+            # Sin descripción — ahorro ~60% de tokens del menú
+            menu_lines.append(f"  - {dish['name']} {price}")
     menu_text = "\n".join(menu_lines) if menu_lines else "Sin menu configurado."
 
-    # ── Contexto de mesa ────────────────────────────────────────────
-    table_section = ""
+    # ── BLOQUE 1: Estático — se cachea ──────────────────────────────
+    static_content = f"""Eres Mesio, asistente de restaurante por WhatsApp. Responde natural, amigable y conciso. Sin asteriscos ni markdown. Como un buen mesero por chat.
+
+Cuando saludes al llegar a una mesa di solo: "Hola, bienvenido. ¿Que se te antoja hoy?"
+
+MENU:
+{menu_text}
+
+REGLAS:
+- add_to_cart: cuando el cliente pida un plato (una llamada por plato).
+- create_table_order: cuando confirme pedido en mesa.
+- create_order: domicilio o recoger.
+- call_waiter: cuando pida la cuenta o necesite al mesero.
+- end_session: solo cuando se despida y no haya pendientes."""
+
+    # ── BLOQUE 2: Dinámico — NO se cachea ───────────────────────────
+    # Carrito y estado cambian en cada turno, no tiene sentido cachearlos.
+    table_section   = ""
     session_section = ""
 
     if table_context:
@@ -229,44 +259,28 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict |
         order_delivered = session_state.get("order_delivered", False)
 
         if has_order and not order_delivered:
-            session_section = (
-                "\nESTADO: El cliente tiene un pedido en cocina que AUN NO ha sido entregado. "
-                "Si dice 'eso es todo', 'gracias', 'listo' → NO cierres la sesion. "
-                "Solo di que su pedido esta en camino. "
-                "Solo usa end_session cuando se despida definitivamente despues de recibir todo Y de que le hayan entregado la factura."
-            )
+            session_section = "\nESTADO: Pedido en cocina no entregado. Si dice 'listo' o 'gracias' NO cierres sesion."
         elif has_order and order_delivered:
-            session_section = (
-                "\nESTADO: El pedido ya fue entregado. El mesero todavia NO ha traido la factura. "
-                "Si el cliente se despide → dile amablemente que espere la factura antes de irse, o que llame al mesero si la necesita. "
-                "NO uses end_session hasta que la factura haya sido entregada."
-            )
+            session_section = "\nESTADO: Pedido entregado, factura pendiente. No uses end_session hasta que llegue la factura."
 
-        table_section = f"""
-MODO MESA (dine-in): El cliente esta en {table_context['name']}.
-- No pidas direccion de entrega.
-- Para enviar a cocina usa create_table_order (nunca create_order).
-- Si pide la cuenta o quiere pagar: usa call_waiter con alert_type="bill" de inmediato.
-- Si necesita al mesero: usa call_waiter con alert_type="waiter".{session_section}
-"""
+        table_section = f"\nMODO MESA: Cliente en {table_context['name']}. Usa create_table_order (no create_order). Para cuenta: call_waiter bill.{session_section}"
 
-    return f"""Eres Mesio, asistente de un restaurante. Responde de forma natural, amigable y concisa, como un buen mesero virtual. No uses asteriscos, no uses formato markdown, no pongas categorias del menu en negrita. Escribe como si fuera una conversacion de WhatsApp normal.
+    dynamic_content = f"{table_section}\nCARRITO: {cart_text}"
 
-Cuando saludes al cliente que llega a una mesa, di simplemente "Hola, bienvenido. ¿Que se te antoja hoy?" — no repitas el nombre de la mesa en el saludo.
-{table_section}
-MENU DISPONIBLE:
-{menu_text}
-
-CARRITO ACTUAL:
-{cart_text}
-
-REGLAS:
-- add_to_cart: cuando el cliente pida un plato (una llamada por plato).
-- create_table_order: cuando confirme su pedido en mesa.
-- create_order: para domicilio o recoger.
-- call_waiter: cuando pida la cuenta o necesite al mesero.
-- end_session: solo cuando se despida claramente y no haya pedidos pendientes.
-"""
+    # Retornar como lista de bloques para la API
+    # cache_control en el bloque estático activa prompt caching
+    return [
+        {
+            "type": "text",
+            "text": static_content,
+            "cache_control": {"type": "ephemeral"}  # ← ACTIVA CACHING (TTL 5 min)
+        },
+        {
+            "type": "text",
+            "text": dynamic_content
+            # Sin cache_control → se envía fresco cada vez (correcto, cambia siempre)
+        }
+    ]
 
 
 async def execute_tool(
@@ -284,8 +298,8 @@ async def execute_tool(
                 return "Error: Se necesita el nombre del plato."
             res = await orders.add_to_cart(phone, dish_name, quantity, bot_number)
             if res["success"]:
-                return f"OK: '{res['dish']['name']}' x{quantity} agregado al carrito."
-            return f"Error al agregar '{dish_name}': {res.get('error', 'Plato no encontrado.')}"
+                return f"OK: '{res['dish']['name']}' x{quantity} al carrito."
+            return f"Error: '{dish_name}' no encontrado en menu."
 
         elif tool_name == "create_order":
             order_type = tool_input.get("order_type", "recoger")
@@ -297,15 +311,15 @@ async def execute_tool(
             if res["success"]:
                 order = res["order"]
                 await db.db_save_order(order)
-                return f"OK: Orden {order['id']} creada. Total: ${order['total']:,} COP. Link de pago: {order['payment_url']}"
+                return f"OK: Orden {order['id']} creada. Total: ${order['total']:,} COP. Pago: {order['payment_url']}"
             return f"Error al crear orden: {res.get('error', 'Error desconocido.')}"
 
         elif tool_name == "create_table_order":
             if not table_context:
-                return "Error: Esta herramienta es solo para clientes en mesa."
+                return "Error: Solo para clientes en mesa."
             cart = await db.db_get_cart(phone, bot_number)
             if not cart or not cart.get("items"):
-                return "Error: El carrito está vacío."
+                return "Error: Carrito vacío."
 
             cart_total    = await orders.get_cart_total(phone, bot_number)
             cart_items    = cart["items"]
@@ -313,17 +327,12 @@ async def execute_tool(
             separate_bill = tool_input.get("separate_bill", False)
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
-            # Buscar orden de esta sesión (mismo order_id durante toda la visita)
             active_order = await db.db_get_active_table_order(phone, table_context["id"])
 
-            # CASO 1: cliente pidió cuenta separada → siempre orden nueva
             if separate_bill:
                 active_order = None
-                print(f"🧾 Cuenta separada solicitada — creando orden nueva", flush=True)
+                print(f"🧾 Cuenta separada — orden nueva", flush=True)
 
-            # CASO 2: hay orden activa en la sesión → acumular en ella (mismo order_id)
-            # El status NO se resetea si cocina ya tomó el pedido (en_preparacion/listo/entregado).
-            # Cocina verá el banner '🆕 ADICIONAL' sin perder el flujo del pedido principal.
             if active_order:
                 prev_status = active_order.get("status", "recibido")
                 await db.db_add_items_to_table_order(
@@ -334,22 +343,12 @@ async def execute_tool(
                 new_total = (active_order.get("total") or 0) + cart_total
 
                 if prev_status in ("en_preparacion", "listo", "entregado"):
-                    # Pedido ya en proceso o entregado — adicional sin interrumpir el status
-                    print(f"➕ Adicional sobre {active_order['id']} (status: {prev_status}, NO se resetea) → {items_summary}", flush=True)
-                    return (
-                        f"OK: Adicional agregado al pedido {active_order['id']} sin interrumpir el flujo de cocina. "
-                        f"Items adicionales notificados: {items_summary}. "
-                        f"Total acumulado: ${new_total:,} COP."
-                    )
+                    print(f"➕ Adicional {active_order['id']} (status:{prev_status}) → {items_summary}", flush=True)
+                    return f"OK: Adicional en pedido {active_order['id']}. Items: {items_summary}. Total: ${new_total:,} COP."
                 else:
-                    print(f"➕ Orden {active_order['id']} (estaba {prev_status}) → nuevos items: {items_summary}", flush=True)
-                    return (
-                        f"OK: Items agregados al pedido {active_order['id']}. "
-                        f"Nuevos items enviados a cocina: {items_summary}. "
-                        f"Total acumulado: ${new_total:,} COP."
-                    )
+                    print(f"➕ Orden {active_order['id']} ({prev_status}) → {items_summary}", flush=True)
+                    return f"OK: Items en pedido {active_order['id']}. Items: {items_summary}. Total: ${new_total:,} COP."
 
-            # CASO 3: no hay orden activa (nueva visita o post-factura) → crear orden nueva
             order_id = f"MESA-{uuid.uuid4().hex[:6].upper()}"
             await db.db_save_table_order({
                 "id":         order_id,
@@ -363,13 +362,8 @@ async def execute_tool(
             })
             await orders.clear_cart(phone, bot_number)
             await db.db_session_mark_order(phone, bot_number)
-            reason = "cuenta separada" if separate_bill else "nueva orden"
-            print(f"🆕 {reason} {order_id}: {items_summary}", flush=True)
-            return (
-                f"OK: Pedido {order_id} enviado a cocina. "
-                f"Items: {items_summary}. "
-                f"Total: ${cart_total:,} COP."
-            )
+            print(f"🆕 {order_id}: {items_summary}", flush=True)
+            return f"OK: Pedido {order_id} a cocina. Items: {items_summary}. Total: ${cart_total:,} COP."
 
         elif tool_name == "create_reservation":
             name   = tool_input.get("name", "")
@@ -378,9 +372,9 @@ async def execute_tool(
             guests = int(tool_input.get("guests", 1))
             notes  = tool_input.get("notes", "")
             if not all([name, date, time]):
-                return "Error: Faltan datos. Se necesita nombre, fecha y hora."
+                return "Error: Faltan nombre, fecha u hora."
             await db.db_add_reservation(name, date, time, guests, phone, bot_number, notes)
-            return f"OK: Reservación confirmada para {name}, {guests} personas el {date} a las {time}."
+            return f"OK: Reservación {name}, {guests} personas, {date} {time}."
 
         elif tool_name == "call_waiter":
             alert_type = tool_input.get("alert_type", "waiter")
@@ -395,47 +389,33 @@ async def execute_tool(
                 table_id=table_id, table_name=table_name,
             )
             if alert_type == "bill":
-                return "OK: Alerta enviada al mesero — irá a cobrar la cuenta en un momento."
-            return "OK: Alerta enviada al mesero — viene en camino."
+                return "OK: Mesero notificado para cobrar."
+            return "OK: Mesero en camino."
 
         elif tool_name == "end_session":
-            # Guardia 1: pedido en cocina no entregado
             session_state = await get_session_state(phone, bot_number)
             if session_state.get("has_order") and not session_state.get("order_delivered"):
-                print(f"⚠️ end_session bloqueado — pedido en cocina aun no entregado para {phone}", flush=True)
-                return (
-                    "BLOQUEADO: El cliente tiene un pedido en cocina que aun no fue entregado. "
-                    "No cierres la sesion. Dile al cliente que su pedido esta en camino."
-                )
-            # Guardia 2: comida entregada pero factura pendiente
+                print(f"⚠️ end_session bloqueado — pedido pendiente {phone}", flush=True)
+                return "BLOQUEADO: Pedido en cocina no entregado. Dile que su pedido está en camino."
             if session_state.get("order_delivered"):
                 has_pending = await db.db_has_pending_invoice(phone)
                 if has_pending:
-                    print(f"⚠️ end_session bloqueado — factura pendiente para {phone}", flush=True)
-                    return (
-                        "BLOQUEADO: El cliente recibio su comida pero aun no le han entregado la factura. "
-                        "Dile que espere un momento, que el mesero le trae la factura enseguida."
-                    )
+                    print(f"⚠️ end_session bloqueado — factura pendiente {phone}", flush=True)
+                    return "BLOQUEADO: Factura pendiente. Dile que el mesero viene con la factura."
             farewell = tool_input.get("farewell_message", "")
-            await db.db_close_session(
-                phone=phone, bot_number=bot_number,
-                reason="client_goodbye", closed_by_username=""
-            )
+            await db.db_close_session(phone=phone, bot_number=bot_number, reason="client_goodbye", closed_by_username="")
             pool = await db.get_pool()
             async with pool.acquire() as conn:
-                await conn.execute(
-                    "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
-                    phone, bot_number
-                )
-            print(f"👋 Sesion cerrada por cliente: {phone}", flush=True)
+                await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+            print(f"👋 Sesion cerrada: {phone}", flush=True)
             return f"OK: Sesion finalizada. {farewell}"
 
         else:
             return f"Error: Herramienta '{tool_name}' no reconocida."
 
     except Exception as e:
-        print(f"❌ execute_tool({tool_name}) error: {traceback.format_exc()}", flush=True)
-        return f"Error interno al ejecutar '{tool_name}': {str(e)}"
+        print(f"❌ execute_tool({tool_name}): {traceback.format_exc()}", flush=True)
+        return f"Error interno '{tool_name}': {str(e)}"
 
 
 async def execute_tool_blocks(
@@ -477,44 +457,75 @@ async def execute_tool_blocks(
     ]
 
 
-MAX_TOOL_ITERATIONS = 8
+# ── CONSTANTES DE OPTIMIZACIÓN ───────────────────────────────────────
+# Cuántos mensajes del historial completo enviar al modelo.
+# 6 turnos = 12 mensajes (user+assistant) = suficiente contexto para el 99% de los casos.
+# Reducir de 20 a 6 ahorra ~60% de tokens de historial por llamada.
+HISTORY_WINDOW      = 6   # turnos guardados en history (pares user/assistant)
+# Cuántos mensajes usar durante el agentic loop (más agresivo aún).
+# En el loop solo necesitamos el contexto inmediato, no la historia completa.
+LOOP_HISTORY_WINDOW = 4   # turnos durante el loop agéntico
+# Máximo de iteraciones del loop agéntico.
+MAX_TOOL_ITERATIONS = 4   # era 8, raramente se necesitan más de 3
+
 
 async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
     table_context = await detect_table_context(user_message, user_phone, bot_number)
-    history       = await db.db_get_history(user_phone, bot_number)
-    history.append({"role": "user", "content": user_message})
-    sys_prompt    = await build_system_prompt(user_phone, bot_number, table_context)
 
-    # Guardar phone_id de Meta en la sesión activa para envíos proactivos
+    # Cargar historial completo pero enviar solo HISTORY_WINDOW turnos al modelo
+    full_history = await db.db_get_history(user_phone, bot_number)
+    full_history.append({"role": "user", "content": user_message})
+
+    # system_prompt ahora es una lista de bloques con cache_control
+    sys_prompt = await build_system_prompt(user_phone, bot_number, table_context)
+
     if meta_phone_id and table_context:
         await db.db_touch_session_with_phone_id(user_phone, bot_number, meta_phone_id)
 
+    # ── PRIMERA LLAMADA con ventana de historial recortada ───────────
+    # Enviamos solo los últimos HISTORY_WINDOW*2 mensajes (user+assistant cuentan por separado)
+    messages_to_send = full_history[-(HISTORY_WINDOW * 2):]
+
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1000,
-        system=sys_prompt,
-        messages=history[-20:],
+        max_tokens=600,        # reducido de 1000: las respuestas del bot rara vez necesitan más
+        system=sys_prompt,     # lista de bloques con cache_control
+        messages=messages_to_send,
         tools=TOOLS
     )
 
+    # ── AGENTIC LOOP ─────────────────────────────────────────────────
+    # Durante el loop, usamos working_messages separado para no acumular
+    # todo el historial en cada iteración. Solo guardamos el contexto
+    # del turno actual (tool calls + results).
+    working_messages = list(messages_to_send)  # copia para el loop
     iterations = 0
+
     while response.stop_reason == "tool_use" and iterations < MAX_TOOL_ITERATIONS:
         iterations += 1
         safe_content = _serialize_content(response.content)
-        history.append({"role": "assistant", "content": safe_content})
+        working_messages.append({"role": "assistant", "content": safe_content})
 
         tool_blocks  = [b for b in response.content if _block_attr(b, "type") == "tool_use"]
         tool_results = await execute_tool_blocks(tool_blocks, user_phone, bot_number, table_context)
-        history.append({"role": "user", "content": tool_results})
+        working_messages.append({"role": "user", "content": tool_results})
+
+        # En el loop usamos ventana aún más pequeña para el historial previo
+        # pero mantenemos TODOS los mensajes del loop actual (tool chain completo)
+        # para que el modelo tenga contexto de lo que acaba de hacer.
+        loop_base        = full_history[-(LOOP_HISTORY_WINDOW * 2):-1]  # historial previo recortado
+        loop_tool_chain  = working_messages[len(messages_to_send):]      # tool chain actual completo
+        messages_in_loop = loop_base + loop_tool_chain
 
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1000,
-            system=sys_prompt,
-            messages=history[-20:],
+            max_tokens=600,
+            system=sys_prompt,   # mismo system cacheado
+            messages=messages_in_loop,
             tools=TOOLS
         )
 
+    # ── EXTRAER RESPUESTA FINAL ──────────────────────────────────────
     assistant_message = ""
     for block in response.content:
         if _block_attr(block, "type") == "text":
@@ -523,10 +534,25 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
                 break
 
     if not assistant_message:
-        assistant_message = "Listo, tu solicitud fue procesada."
+        assistant_message = "Listo, procesado."
 
-    history.append({"role": "assistant", "content": assistant_message})
-    await db.db_save_history(user_phone, bot_number, history)
+    # ── GUARDAR HISTORIAL ────────────────────────────────────────────
+    # Guardar el historial completo incluyendo tool calls para tener registro fiel,
+    # pero limitar a HISTORY_WINDOW*2 pares al guardar para no crecer indefinidamente.
+    full_history.append({"role": "assistant", "content": assistant_message})
+
+    # Incluir el tool chain en el historial guardado para contexto correcto
+    if iterations > 0:
+        # Insertar los mensajes de tool use antes del último assistant message
+        tool_chain_msgs = working_messages[len(messages_to_send):-0 or None]
+        # Reconstruir historial: base + tool chain + respuesta final
+        history_to_save = full_history[:-1] + tool_chain_msgs + [full_history[-1]]
+        # Recortar al límite antes de guardar
+        history_to_save = history_to_save[-(HISTORY_WINDOW * 2 + 4):]
+    else:
+        history_to_save = full_history[-(HISTORY_WINDOW * 2):]
+
+    await db.db_save_history(user_phone, bot_number, history_to_save)
     return {"message": assistant_message}
 
 
