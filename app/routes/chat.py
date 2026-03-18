@@ -76,8 +76,8 @@ async def meta_webhook(request: Request):
             print(f"📝 Texto: {user_text}", flush=True)
 
             print("🧠 Pensando respuesta con IA...", flush=True)
-            # LLAMADA CORRECTA CON LOS 3 ARGUMENTOS
-            result = await chat(user_phone, user_text, bot_number)
+            # Pasar phone_id para guardarlo en sesión (permite envíos proactivos)
+            result = await chat(user_phone, user_text, bot_number, meta_phone_id=phone_id)
             print(f"🤖 Resultado IA: {result}", flush=True)
 
             if result and result.get("message"):
@@ -111,7 +111,6 @@ async def twilio_webhook(request: Request):
     if not user_message or not user_phone:
         return Response(content="", media_type="application/xml")
         
-    # LLAMADA CORRECTA CON LOS 3 ARGUMENTOS
     result = await chat(user_phone, user_message, bot_number)
     
     if result is None: return Response(content="", media_type="application/xml")

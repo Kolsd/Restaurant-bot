@@ -468,11 +468,15 @@ async def execute_tool_blocks(
 
 MAX_TOOL_ITERATIONS = 8
 
-async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
+async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
     table_context = await detect_table_context(user_message, user_phone, bot_number)
     history       = await db.db_get_history(user_phone, bot_number)
     history.append({"role": "user", "content": user_message})
     sys_prompt    = await build_system_prompt(user_phone, bot_number, table_context)
+
+    # Guardar phone_id de Meta en la sesión activa para envíos proactivos
+    if meta_phone_id and table_context:
+        await db.db_touch_session_with_phone_id(user_phone, bot_number, meta_phone_id)
 
     response = client.messages.create(
         model="claude-sonnet-4-6",

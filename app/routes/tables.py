@@ -32,11 +32,11 @@ async def _get_bot_number(request: Request) -> str:
     return bot_number
 
 
-async def _send_whatsapp_text(phone: str, message: str) -> bool:
+async def _send_whatsapp_text(phone: str, message: str, phone_id_override: str = "") -> bool:
     token    = os.getenv("META_ACCESS_TOKEN", "")
-    phone_id = os.getenv("META_PHONE_NUMBER_ID", "")
+    phone_id = phone_id_override or os.getenv("META_PHONE_NUMBER_ID", "")
     if not token or not phone_id:
-        print("⚠️ META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados", flush=True)
+        print(f"⚠️ No se puede enviar WA: token={'ok' if token else 'FALTA'} phone_id={'ok' if phone_id else 'FALTA'}", flush=True)
         return False
     clean_phone = phone.lstrip("+").replace(" ", "")
     url  = f"https://graph.facebook.com/v19.0/{phone_id}/messages"
@@ -191,27 +191,64 @@ async def update_order_status(request: Request, order_id: str):
             if order_row:
                 phone = order_row["phone"]
                 total = order_row["total"] or 0
-                # Buscar bot_number desde la sesión activa del cliente
                 async with pool.acquire() as conn2:
                     session_row = await conn2.fetchrow(
-                        """SELECT bot_number FROM table_sessions
+                        """SELECT bot_number, meta_phone_id FROM table_sessions
                            WHERE phone=$1 AND status='active'
                            ORDER BY started_at DESC LIMIT 1""",
                         phone
                     )
                 if session_row and session_row["bot_number"]:
-                    await db.db_session_mark_delivered(phone, session_row["bot_number"], total)
+                    bot_number   = session_row["bot_number"]
+                    meta_phone_id = session_row["meta_phone_id"] or ""
+                    await db.db_session_mark_delivered(phone, bot_number, total)
                     print(f"✅ Pedido {order_id} marcado como entregado → sesión actualizada para {phone}", flush=True)
-                    # Mensaje empático al cliente
-                    await _send_whatsapp_text(
+                    sent = await _send_whatsapp_text(
                         phone,
-                        "¡Que disfruten mucho su comida! 😊🍽️ Estoy aquí por si necesitan algo adicional — más bebidas, otro plato o lo que se les antoje. ¡Buen provecho!"
+                        "¡Que disfruten mucho su comida! 😊🍽️ Estoy aquí por si necesitan algo adicional — más bebidas, otro plato o lo que se les antoje. ¡Buen provecho!",
+                        phone_id_override=meta_phone_id
                     )
+                    print(f"📨 Mensaje empático enviado: {sent}", flush=True)
                 else:
-                    print(f"⚠️ No hay sesión activa para {phone}, no se actualizó table_sessions", flush=True)
+                    print(f"⚠️ No hay sesión activa para {phone}", flush=True)
         except Exception as e:
             import traceback
             print(f"⚠️ update_order_status entregado error: {traceback.format_exc()}", flush=True)
+
+    # Cuando se entrega la factura → mensaje de despedida + cerrar sesión
+    if new_status == "factura_entregada":
+        try:
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                order_row = await conn.fetchrow(
+                    "SELECT phone FROM table_orders WHERE id=$1", order_id
+                )
+            if order_row:
+                phone = order_row["phone"]
+                async with pool.acquire() as conn2:
+                    session_row = await conn2.fetchrow(
+                        """SELECT bot_number, meta_phone_id FROM table_sessions
+                           WHERE phone=$1 AND status='active'
+                           ORDER BY started_at DESC LIMIT 1""",
+                        phone
+                    )
+                if session_row and session_row["bot_number"]:
+                    bot_number    = session_row["bot_number"]
+                    meta_phone_id = session_row["meta_phone_id"] or ""
+                    # Enviar mensaje de despedida
+                    await _send_whatsapp_text(
+                        phone,
+                        "¡Fue un placer atenderles! 🙏✨ Esperamos verlos pronto. Si en algún momento desean pedir algo más, escaneen el código QR de la mesa y con gusto los atendemos. ¡Hasta pronto! 👋",
+                        phone_id_override=meta_phone_id
+                    )
+                    # Cerrar sesión
+                    await db.db_close_session(phone=phone, bot_number=bot_number, reason="factura_entregada", closed_by_username="mesero")
+                    async with pool.acquire() as conn3:
+                        await conn3.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+                    print(f"👋 Sesión cerrada post-factura para {phone}", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"⚠️ update_order_status factura_entregada error: {traceback.format_exc()}", flush=True)
 
     return {"success": True, "order_id": order_id, "status": new_status}
 
