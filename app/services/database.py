@@ -588,7 +588,8 @@ async def db_get_table_orders(status: str = None):
         if status:
             rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at DESC", status)
         else:
-            rows = await conn.fetch("SELECT * FROM table_orders WHERE status NOT IN ('entregado','factura_entregada','cancelado') ORDER BY created_at ASC")
+            # Incluye 'entregado' para que el mesero pueda marcar factura_entregada
+            rows = await conn.fetch("SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC")
         result = []
         for r in rows:
             d = _serialize(dict(r))
@@ -605,13 +606,14 @@ async def db_update_table_order_status(order_id: str, status: str):
 
 
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
-    """Retorna la orden activa (no entregada/cancelada) de una mesa para un cliente."""
+    """Retorna la orden activa SOLO si está en 'recibido' (se puede acumular).
+    Si está en_preparacion o listo, retorna None para que se cree orden nueva."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT * FROM table_orders
             WHERE phone=$1 AND table_id=$2
-              AND status NOT IN ('entregado','factura_entregada','cancelado')
+              AND status = 'recibido'
             ORDER BY created_at DESC LIMIT 1
         """, phone, table_id)
         if not row:

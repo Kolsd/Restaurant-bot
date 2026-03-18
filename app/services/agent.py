@@ -313,7 +313,7 @@ async def execute_tool(
             separate_bill = tool_input.get("separate_bill", False)
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
-            # Buscar orden activa (no entregada, no cancelada)
+            # Buscar orden en status 'recibido' para acumular
             active_order = await db.db_get_active_table_order(phone, table_context["id"])
 
             # CASO 1: cliente pidió cuenta separada → siempre orden nueva
@@ -321,7 +321,7 @@ async def execute_tool(
                 active_order = None
                 print(f"🧾 Cuenta separada solicitada — creando orden nueva", flush=True)
 
-            # CASO 2: hay orden activa → acumular en ella
+            # CASO 2: hay orden en 'recibido' → acumular en ella
             if active_order:
                 await db.db_add_items_to_table_order(
                     active_order["id"], cart_items, cart_total, extra_notes
@@ -336,7 +336,9 @@ async def execute_tool(
                     f"Total acumulado: ${new_total:,} COP."
                 )
 
-            # CASO 3: no hay orden activa (nueva sesión, post-entrega, o cuenta separada) → crear nueva
+            # CASO 3: no hay orden en 'recibido' → crear orden nueva
+            # (incluye: primera orden, post-entrega, cuenta separada, o pedido adicional
+            #  cuando la orden anterior ya está en_preparacion/listo)
             order_id = f"MESA-{uuid.uuid4().hex[:6].upper()}"
             await db.db_save_table_order({
                 "id":         order_id,
