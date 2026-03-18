@@ -19,7 +19,7 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .board{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem;}
 .col-title{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#555;margin-bottom:.75rem;padding:.5rem .75rem;border-radius:6px;}
 .col-recibido .col-title{color:#FAC775;background:rgba(250,199,117,.08);}
-.col-preparacion .col-title{color:#378ADD;background:rgba(55,138,221,.08);}
+.col-en-preparacion .col-title{color:#378ADD;background:rgba(55,138,221,.08);}
 .col-listo .col-title{color:#1D9E75;background:rgba(29,158,117,.08);}
 .order-card{background:#1A1A1A;border:1px solid #2A2A2A;border-radius:12px;padding:1rem;margin-bottom:.75rem;transition:border-color .2s;}
 .order-card:hover{border-color:#333;}
@@ -71,8 +71,8 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
       <div id="col-recibido"></div>
     </div>
     <div>
-      <div class="col-title col-preparacion">👨‍🍳 En preparación <span class="badge-count" id="count-preparacion">0</span></div>
-      <div id="col-preparacion"></div>
+      <div class="col-title col-en-preparacion">👨‍🍳 En preparación <span class="badge-count" id="count-en-preparacion">0</span></div>
+      <div id="col-en-preparacion"></div>
     </div>
     <div>
       <div class="col-title col-listo">✅ Listos para servir <span class="badge-count" id="count-listo">0</span></div>
@@ -84,7 +84,6 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 <div class="notification" id="notif"></div>
 
 <script>
-// --- Lógica de autenticación añadida aquí ---
 const token = localStorage.getItem('rb_token');
 if (!token) window.location.href = '/login';
 const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
@@ -122,11 +121,28 @@ async function updateStatus(orderId, status) {
 }
 
 function renderCard(o) {
-  const items = (o.items || []).map(i => {
-    const qty = i.quantity || 1;
-    const name = i.name || i;
-    return `<div class="order-item"><span class="order-item-qty">${qty}×</span><span>${name}</span></div>`;
-  }).join('');
+  // Manejo robusto de items por si la IA devuelve un string en vez de un array
+  let itemsHtml = '';
+  
+  if (Array.isArray(o.items)) {
+    itemsHtml = o.items.map(i => {
+      const qty = i.quantity || 1;
+      const name = i.name || i;
+      return `<div class="order-item"><span class="order-item-qty">${qty}×</span><span>${name}</span></div>`;
+    }).join('');
+  } else if (typeof o.items === 'string') {
+    // Si viene como string, intentamos dividirlo por comas
+    itemsHtml = o.items.split(',').map(i => {
+      const parts = i.trim().split('x ');
+      let qty = '1';
+      let name = i.trim();
+      if (parts.length > 1 && !isNaN(parseInt(parts[0]))) {
+         qty = parts[0];
+         name = parts[1];
+      }
+      return `<div class="order-item"><span class="order-item-qty">${qty}×</span><span>${name}</span></div>`;
+    }).join('');
+  }
 
   const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
@@ -147,7 +163,7 @@ function renderCard(o) {
       </div>
       ${elapsed(o.created_at)}
     </div>
-    <div class="order-items">${items || '<div class="order-item">Pedido en proceso</div>'}</div>
+    <div class="order-items">${itemsHtml || '<div class="order-item">Pedido en proceso</div>'}</div>
     ${notesHtml}
     <div class="order-actions">${actions}</div>
   </div>`;
@@ -165,7 +181,6 @@ async function loadOrders() {
     const d = await r.json();
     const orders = d.orders || [];
 
-    // Notificar pedidos nuevos
     const currentIds = new Set(orders.map(o => o.id));
     for (const id of currentIds) {
       if (!prevOrderIds.has(id)) {
@@ -181,17 +196,16 @@ async function loadOrders() {
     });
 
     ['recibido','en_preparacion','listo'].forEach(s => {
-      const colId = 'col-' + s.replace('_','-');
+      // Reemplazamos los guiones bajos por guiones normales para alinear los IDs
+      const colId = 'col-' + s.replace('_','-'); 
+      const countId = 'count-' + s.replace('_','-');
+      
       const col = document.getElementById(colId);
-      const count = document.getElementById('count-' + s.replace('_','-').replace('en-preparacion','preparacion'));
+      const count = document.getElementById(countId);
+      
       if (col) col.innerHTML = groups[s].length ? groups[s].map(renderCard).join('') : '<div class="empty">Sin pedidos</div>';
       if (count) count.textContent = groups[s].length;
     });
-
-    // Count badge
-    document.getElementById('count-recibido').textContent = groups.recibido.length;
-    document.getElementById('count-preparacion').textContent = groups.en_preparacion.length;
-    document.getElementById('count-listo').textContent = groups.listo.length;
 
   } catch(e) { console.error(e); }
 }
