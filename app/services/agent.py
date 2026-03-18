@@ -67,7 +67,6 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     for msg in reversed(history[-6:]):
         if msg.get('role') == 'user':
             content = msg.get('content', '')
-            # Validamos que el contenido sea un string antes de buscar
             if isinstance(content, str):
                 m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', content, _re.IGNORECASE)
                 if m:
@@ -84,7 +83,6 @@ async def build_system_prompt(phone: str, bot_number: str, table_context: dict =
     availability = await db.db_get_menu_availability()
     menu = await db.db_get_menu(bot_number) or {}
     
-    # Traemos el carrito exacto desde Postgres
     cart_text = await orders.cart_summary(phone, bot_number)
     
     menu_text = ""
@@ -140,7 +138,9 @@ async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number:
             "id": order_id, "table_id": table_context['id'], "table_name": table_context['name'],
             "phone": phone, "items": items, "notes": tool_input.get("notes",""), "total": 0, "status": "recibido"
         })
-        return "Pedido enviado a cocina exitosamente."
+        # LIMPIAMOS EL CARRITO AQUÍ para que puedan seguir pidiendo cosas nuevas
+        await orders.clear_cart(phone, bot_number)
+        return "Pedido enviado a cocina exitosamente. Carrito vaciado."
 
     elif tool_name == "create_reservation":
         await db.db_add_reservation(tool_input["name"], tool_input["date"], tool_input["time"], tool_input["guests"], phone, bot_number, tool_input.get("notes",""))
@@ -187,7 +187,18 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
             messages=history[-20:],
             tools=TOOLS
         )
-        assistant_message = final_response.content[0].text
+        
+        # BÚSQUEDA SEGURA DEL TEXTO DE RESPUESTA
+        assistant_message = ""
+        for block in final_response.content:
+            if block.type == "text":
+                assistant_message = block.text
+                break
+        
+        # Fallback por si acaso Claude solo responde con herramientas consecutivas
+        if not assistant_message:
+            assistant_message = "Tu orden ha sido procesada."
+            
         history.append({"role": "assistant", "content": assistant_message})
     else:
         assistant_message = response.content[0].text
