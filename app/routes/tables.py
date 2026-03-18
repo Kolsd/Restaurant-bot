@@ -1,13 +1,16 @@
 import os
 import httpx
 import urllib.parse
+from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from app.services import database as db
 from app.services.auth import verify_token
 
 router = APIRouter()
+
+STATIC = Path(__file__).parent.parent / "static"
 
 
 async def require_auth(request: Request):
@@ -90,6 +93,62 @@ async def delete_table(request: Request, table_id: str):
     return {"success": True}
 
 
+# ── MENÚ PÚBLICO (sin auth) ───────────────────────────────────────────
+
+async def _get_restaurant_for_table(table: dict) -> dict | None:
+    """Retorna el restaurante asociado a una mesa."""
+    if table.get("branch_id"):
+        return await db.db_get_restaurant_by_id(table["branch_id"])
+    all_r = await db.db_get_all_restaurants()
+    return all_r[0] if all_r else None
+
+
+@router.get("/menu/{table_id}", response_class=HTMLResponse)
+async def menu_page(table_id: str):
+    """
+    Página pública del menú. El QR apunta aquí.
+    El cliente ve el menú completo y presiona 'Pedir por WhatsApp'.
+    Sin auth — cualquier teléfono puede acceder al escanear el QR.
+    """
+    p = STATIC / "menu.html"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="menu.html no encontrado en static/")
+    return HTMLResponse(p.read_text(encoding="utf-8"))
+
+
+@router.get("/api/public/menu/{table_id}")
+async def public_menu_api(table_id: str):
+    """
+    API pública para que menu.html cargue los datos del menú.
+    Retorna: menú, disponibilidad, nombre del restaurante, URL de WhatsApp.
+    Sin auth — es información pública del restaurante.
+    """
+    table = await db.db_get_table_by_id(table_id)
+    if not table:
+        raise HTTPException(status_code=404, detail="Mesa no encontrada")
+
+    restaurant = await _get_restaurant_for_table(table)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    wa_number    = restaurant.get("whatsapp_number", "")
+    branch_key   = f" [branch={table.get('branch_id')}]" if table.get("branch_id") else ""
+    wa_msg       = f"Hola! Estoy en {table['name']}{branch_key} y quiero hacer un pedido"
+    wa_url       = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
+
+    menu         = restaurant.get("menu") or {}
+    availability = await db.db_get_menu_availability()
+
+    return {
+        "table_id":        table_id,
+        "table_name":      table["name"],
+        "restaurant_name": restaurant.get("name", ""),
+        "menu":            menu,
+        "availability":    availability,
+        "wa_url":          wa_url,
+    }
+
+
 # ── QR ───────────────────────────────────────────────────────────────
 
 async def get_table_wa_number(table: dict) -> str:
@@ -107,13 +166,16 @@ async def get_table_wa_number(table: dict) -> str:
 
 @router.get("/api/tables/{table_id}/qr", response_class=HTMLResponse)
 async def get_table_qr(request: Request, table_id: str):
+    """QR simple que apunta a la página del menú."""
     table = await db.db_get_table_by_id(table_id)
     if not table:
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
-    wa_number  = await get_table_wa_number(table)
-    branch_key = f" [branch={table.get('branch_id')}]" if table.get("branch_id") else ""
-    wa_url     = "https://wa.me/" + wa_number + "?text=" + urllib.parse.quote("Hola! Estoy en " + table["name"] + branch_key + " y quiero hacer un pedido")
-    encoded    = urllib.parse.quote(wa_url)
+
+    # El QR apunta a /menu/{table_id} en lugar de directo a WhatsApp
+    base_url  = str(request.base_url).rstrip("/")
+    menu_url  = f"{base_url}/menu/{table_id}"
+    encoded   = urllib.parse.quote(menu_url)
+
     return HTMLResponse(
         f"<!DOCTYPE html><html><head><meta charset='UTF-8'>"
         f"<script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>"
@@ -126,39 +188,51 @@ async def get_table_qr(request: Request, table_id: str):
 
 @router.get("/api/tables/{table_id}/qr-sheet")
 async def get_qr_sheet(request: Request, table_id: str):
+    """Hoja imprimible con QR que apunta a la página del menú."""
     table = await db.db_get_table_by_id(table_id)
     if not table:
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
-    wa_number  = await get_table_wa_number(table)
-    branch_key = f" [branch={table.get('branch_id')}]" if table.get("branch_id") else ""
-    encoded    = urllib.parse.quote("https://wa.me/" + wa_number + "?text=" + urllib.parse.quote("Hola! Estoy en " + table["name"] + branch_key + " y quiero hacer un pedido"))
+
+    # QR apunta a /menu/{table_id}
+    base_url = str(request.base_url).rstrip("/")
+    menu_url = f"{base_url}/menu/{table_id}"
+    encoded  = urllib.parse.quote(menu_url)
+
     return HTMLResponse(
         f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>"
-        f"<style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}"
+        f"<style>"
+        f"*{{box-sizing:border-box;margin:0;padding:0;}}"
+        f"body{{font-family:Arial,sans-serif;background:#fff;}}"
         f".page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}"
         f".logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}"
         f".tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}"
         f".instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}"
         f".qrbox{{width:200px;height:200px;margin:0 auto 16px;}}"
         f".qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}"
-        f".wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}"
+        f".cta-badge{{display:inline-flex;align-items:center;gap:6px;background:#1D9E75;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}"
         f".steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}"
         f".step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}"
-        f"@media print{{body{{margin:0;}}}}</style>"
+        f"@media print{{body{{margin:0;}}}}"
+        f"</style>"
         f"<script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script>"
         f"</head><body><div class='page'>"
-        f"<div class='logo'>Mesio<span>.</span></div><div class='tname'>{table['name']}</div>"
-        f"<div class='instr'>Escanea el QR con tu celular<br>y pide por WhatsApp</div>"
+        f"<div class='logo'>Mesio<span>.</span></div>"
+        f"<div class='tname'>{table['name']}</div>"
+        f"<div class='instr'>Escanea para ver el menú<br>y pedir por WhatsApp</div>"
         f"<div class='qrbox' id='qrc'></div>"
-        f"<div class='wa-badge'>Pedir por WhatsApp</div>"
+        f"<div class='cta-badge'>📋 Ver menú y pedir</div>"
         f"<div class='steps'>"
-        f"<div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div>"
-        f"<div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div>"
-        f"<div class='step'><span class='sn'>3.</span><span>Se abre WhatsApp automáticamente</span></div>"
-        f"<div class='step'><span class='sn'>4.</span><span>Envía el mensaje y haz tu pedido</span></div>"
+        f"<div class='step'><span class='sn'>1.</span><span>Abre la cámara y escanea el QR</span></div>"
+        f"<div class='step'><span class='sn'>2.</span><span>Ve el menú completo con precios</span></div>"
+        f"<div class='step'><span class='sn'>3.</span><span>Toca «Pedir por WhatsApp»</span></div>"
+        f"<div class='step'><span class='sn'>4.</span><span>Tu pedido llega directo a cocina</span></div>"
         f"</div></div>"
-        f"<script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}})}};"
-        f"setTimeout(function(){{window.print();}},800);}}</script></body></html>"
+        f"<script>"
+        f"window.onload=function(){{"
+        f"new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});"
+        f"setTimeout(function(){{window.print();}},800);"
+        f"}}"
+        f"</script></body></html>"
     )
 
 
@@ -180,7 +254,6 @@ async def update_order_status(request: Request, order_id: str):
 
     await db.db_update_table_order_status(order_id, new_status)
 
-    # Cuando se entrega la comida → actualizar sesión + mensaje empático al cliente
     if new_status == "entregado":
         try:
             pool = await db.get_pool()
@@ -199,32 +272,32 @@ async def update_order_status(request: Request, order_id: str):
                         phone
                     )
                 if session_row and session_row["bot_number"]:
-                    bot_number   = session_row["bot_number"]
+                    bot_number    = session_row["bot_number"]
                     meta_phone_id = session_row["meta_phone_id"] or ""
                     await db.db_session_mark_delivered(phone, bot_number, total)
-                    print(f"✅ Pedido {order_id} marcado como entregado → sesión actualizada para {phone}", flush=True)
+                    print(f"✅ Pedido {order_id} entregado → sesión actualizada para {phone}", flush=True)
                     sent = await _send_whatsapp_text(
                         phone,
-                        "¡Que disfruten mucho su comida! 😊🍽️ Estoy aquí por si necesitan algo adicional — más bebidas, otro plato o lo que se les antoje. ¡Buen provecho!",
+                        "¡Que disfruten mucho su comida! 😊🍽️ Si necesitan algo más, aquí estamos.",
                         phone_id_override=meta_phone_id
                     )
                     print(f"📨 Mensaje empático enviado: {sent}", flush=True)
-                else:
-                    print(f"⚠️ No hay sesión activa para {phone}", flush=True)
         except Exception as e:
             import traceback
             print(f"⚠️ update_order_status entregado error: {traceback.format_exc()}", flush=True)
 
-    # Cuando se entrega la factura → mensaje de despedida + cerrar sesión
     if new_status == "factura_entregada":
         try:
             pool = await db.get_pool()
             async with pool.acquire() as conn:
                 order_row = await conn.fetchrow(
-                    "SELECT phone FROM table_orders WHERE id=$1", order_id
+                    "SELECT phone, base_order_id FROM table_orders WHERE id=$1", order_id
                 )
             if order_row:
-                phone = order_row["phone"]
+                phone         = order_row["phone"]
+                base_order_id = order_row["base_order_id"] or order_id
+                # Cerrar todas las subórdenes de esta visita
+                await db.db_close_table_bill(base_order_id)
                 async with pool.acquire() as conn2:
                     session_row = await conn2.fetchrow(
                         """SELECT bot_number, meta_phone_id FROM table_sessions
@@ -237,7 +310,7 @@ async def update_order_status(request: Request, order_id: str):
                     meta_phone_id = session_row["meta_phone_id"] or ""
                     await _send_whatsapp_text(
                         phone,
-                        "¡Fue un placer atenderles! 🙏✨ Esperamos verlos pronto. Si en algún momento desean pedir algo más, escaneen el código QR de la mesa y con gusto los atendemos. ¡Hasta pronto! 👋",
+                        "¡Fue un placer atenderles! 🙏✨ Esperamos verlos pronto. ¡Hasta pronto! 👋",
                         phone_id_override=meta_phone_id
                     )
                     await db.db_close_session(phone=phone, bot_number=bot_number, reason="factura_entregada", closed_by_username="mesero")
@@ -251,21 +324,9 @@ async def update_order_status(request: Request, order_id: str):
     return {"success": True, "order_id": order_id, "status": new_status}
 
 
-@router.post("/api/table-orders/{order_id}/clear-additional")
-async def clear_order_additional(request: Request, order_id: str):
-    """Limpia los items_additional de una orden sin cambiar su status.
-    Se usa cuando cocina ya preparó el adicional de un pedido que estaba en 'listo',
-    para quitarlo de la vista sin interrumpir el flujo del pedido principal."""
-    await require_auth(request)
-    await db.db_clear_additional(order_id)
-    print(f"🧹 Adicional limpiado en orden {order_id}", flush=True)
-    return {"success": True, "order_id": order_id}
-
-
 @router.get("/cocina", response_class=HTMLResponse)
 async def kitchen_display():
-    from pathlib import Path
-    return (Path(__file__).parent.parent / "static" / "kitchen.html").read_text()
+    return (STATIC / "kitchen.html").read_text()
 
 
 # ── WAITER ALERTS ────────────────────────────────────────────────────

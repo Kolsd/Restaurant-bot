@@ -187,7 +187,7 @@ async def db_get_all_reservations(bot_number: str = None):
         return [_serialize(dict(r)) for r in rows]
 
 
-# ── ORDENES ──────────────────────────────────────────────────────────
+# ── ORDENES DELIVERY ─────────────────────────────────────────────────
 
 async def db_save_order(order: dict):
     pool = await get_pool()
@@ -530,12 +530,21 @@ async def db_init_tables():
                 updated_at TIMESTAMP DEFAULT NOW()
             );
         """)
+        # Migraciones de columnas
+        for col_sql in [
+            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER",
+            # Sub-orders: base_order_id agrupa todas las subórdenes de una visita
+            # sub_number indica el número de la suborden (1, 2, 3...)
+            "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS base_order_id TEXT DEFAULT NULL",
+            "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS sub_number INTEGER DEFAULT 1",
+        ]:
+            try:
+                await conn.execute(col_sql)
+            except Exception:
+                pass
+        # Índice para buscar subórdenes por base_order_id eficientemente
         try:
-            await conn.execute("ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER")
-        except Exception:
-            pass
-        try:
-            await conn.execute("ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS items_additional JSONB DEFAULT '[]'::jsonb")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_table_orders_base ON table_orders(base_order_id)")
         except Exception:
             pass
 
@@ -576,29 +585,36 @@ async def db_get_table_by_id(table_id: str):
 
 
 async def db_save_table_order(order: dict):
+    """Guarda una suborden. Si tiene base_order_id, es un adicional de una visita existente."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO table_orders (id, table_id, table_name, phone, items, items_additional, status, notes, total)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-            ON CONFLICT (id) DO UPDATE SET items=EXCLUDED.items, items_additional=EXCLUDED.items_additional,
-                status=EXCLUDED.status, notes=EXCLUDED.notes, total=EXCLUDED.total, updated_at=NOW()
+            INSERT INTO table_orders (id, table_id, table_name, phone, items, status, notes, total, base_order_id, sub_number)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (id) DO UPDATE SET
+                items=EXCLUDED.items, status=EXCLUDED.status,
+                notes=EXCLUDED.notes, total=EXCLUDED.total, updated_at=NOW()
         """, order['id'], order['table_id'], order['table_name'], order['phone'],
-            json.dumps(order['items']), json.dumps(order.get('items_additional', [])),
-            order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0))
+            json.dumps(order['items']),
+            order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0),
+            order.get('base_order_id'),   # None para la primera orden de la visita
+            order.get('sub_number', 1))
 
 
 async def db_get_table_orders(status: str = None):
+    """
+    Retorna todas las subórdenes activas para kitchen display.
+    Cada suborden es una tarjeta independiente con su propio flujo.
+    NO se muestran factura_entregada ni cancelado.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         if status:
-            rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at DESC", status)
+            rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at ASC", status)
         else:
-            # Incluir 'entregado' si tiene items_additional pendientes (adicional llegó post-entrega)
             rows = await conn.fetch("""
                 SELECT * FROM table_orders
                 WHERE status NOT IN ('factura_entregada','cancelado')
-                   OR (status = 'entregado' AND items_additional IS NOT NULL AND items_additional != '[]'::jsonb)
                 ORDER BY created_at ASC
             """)
         result = []
@@ -606,10 +622,6 @@ async def db_get_table_orders(status: str = None):
             d = _serialize(dict(r))
             if isinstance(d['items'], str):
                 d['items'] = json.loads(d['items'])
-            if isinstance(d.get('items_additional'), str):
-                d['items_additional'] = json.loads(d['items_additional'])
-            elif d.get('items_additional') is None:
-                d['items_additional'] = []
             result.append(d)
         return result
 
@@ -617,34 +629,114 @@ async def db_get_table_orders(status: str = None):
 async def db_update_table_order_status(order_id: str, status: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Al pasar a en_preparacion, limpiar items_additional (cocina ya tomó el adicional)
-        if status == 'en_preparacion':
-            await conn.execute(
-                "UPDATE table_orders SET status=$2, items_additional='[]'::jsonb, updated_at=NOW() WHERE id=$1",
-                order_id, status
-            )
-        else:
-            await conn.execute(
-                "UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1",
-                order_id, status
-            )
-
-
-async def db_clear_additional(order_id: str):
-    """Limpia items_additional sin tocar el status del pedido.
-    Se usa cuando cocina ya preparó el adicional de un pedido que estaba en 'listo'
-    pero no queremos mover el pedido de vuelta al flujo normal."""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE table_orders SET items_additional='[]'::jsonb, updated_at=NOW() WHERE id=$1",
-            order_id
+            "UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1",
+            order_id, status
         )
 
 
+async def db_get_base_order_id(phone: str, table_id: str) -> str | None:
+    """
+    Retorna el base_order_id activo para esta mesa/cliente.
+    El base_order_id es el ID de la primera orden de la visita y
+    se usa para agrupar todas las subórdenes en la factura final.
+    Retorna None si no hay visita activa (todas las órdenes están cerradas).
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Buscar la primera orden de esta visita que no esté completamente cerrada
+        row = await conn.fetchrow("""
+            SELECT COALESCE(base_order_id, id) as base_id
+            FROM table_orders
+            WHERE phone=$1 AND table_id=$2
+              AND status NOT IN ('factura_entregada', 'cancelado')
+            ORDER BY created_at ASC
+            LIMIT 1
+        """, phone, table_id)
+        return row['base_id'] if row else None
+
+
+async def db_get_next_sub_number(base_order_id: str) -> int:
+    """Retorna el siguiente número de suborden para un base_order_id dado."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT MAX(sub_number) as max_sub
+            FROM table_orders
+            WHERE base_order_id=$1 OR id=$1
+        """, base_order_id)
+        return (row['max_sub'] or 0) + 1
+
+
+async def db_get_table_bill(base_order_id: str) -> dict:
+    """
+    Retorna el resumen completo de la cuenta para una visita.
+    Agrupa todas las subórdenes bajo el mismo base_order_id.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT * FROM table_orders
+            WHERE base_order_id=$1 OR id=$1
+            ORDER BY created_at ASC
+        """, base_order_id)
+        if not rows:
+            return {}
+        sub_orders = []
+        total = 0
+        for r in rows:
+            d = _serialize(dict(r))
+            if isinstance(d['items'], str):
+                d['items'] = json.loads(d['items'])
+            sub_orders.append(d)
+            total += d.get('total', 0)
+        first = sub_orders[0]
+        return {
+            "base_order_id": base_order_id,
+            "table_name":    first.get('table_name', ''),
+            "phone":         first.get('phone', ''),
+            "sub_orders":    sub_orders,
+            "total":         total,
+        }
+
+
+async def db_close_table_bill(base_order_id: str) -> bool:
+    """
+    Marca todas las subórdenes de una visita como factura_entregada.
+    Se llama cuando el mesero entrega la factura.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute("""
+            UPDATE table_orders
+            SET status='factura_entregada', updated_at=NOW()
+            WHERE (base_order_id=$1 OR id=$1)
+              AND status NOT IN ('cancelado')
+        """, base_order_id)
+        return result != "UPDATE 0"
+
+
+async def db_has_pending_invoice(phone: str) -> bool:
+    """
+    True si el cliente tiene subórdenes entregadas pero sin factura.
+    Considera una visita activa si hay al menos una suborden en estado 'entregado'.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id FROM table_orders
+            WHERE phone=$1 AND status='entregado'
+            LIMIT 1
+        """, phone)
+        return row is not None
+
+
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
-    """Retorna la orden activa de la sesión (mismo order_id durante toda la visita).
-    Excluye solo factura_entregada y cancelado — incluye recibido, en_preparacion, listo, entregado."""
+    """
+    DEPRECATED: usar db_get_base_order_id + db_create_sub_order.
+    Mantenido por compatibilidad con dashboard stats.
+    Retorna la suborden más reciente activa.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
@@ -659,69 +751,6 @@ async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
         if isinstance(d['items'], str):
             d['items'] = json.loads(d['items'])
         return d
-
-
-async def db_has_pending_invoice(phone: str) -> bool:
-    """Retorna True si el cliente tiene alguna orden en status 'entregado' (factura no entregada aún)."""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT id FROM table_orders
-            WHERE phone=$1 AND status='entregado'
-            ORDER BY created_at DESC LIMIT 1
-        """, phone)
-        return row is not None
-
-
-async def db_add_items_to_table_order(order_id: str, new_items: list, extra_total: int, extra_notes: str = ""):
-    """Acumula items para la factura final en 'items'.
-    Guarda SOLO los nuevos en 'items_additional' para que cocina los vea claramente.
-
-    REGLA DE STATUS:
-    - Si el pedido estaba en 'recibido' → se mantiene en 'recibido' (cocina aún no tomó nada)
-    - Si el pedido estaba en 'en_preparacion', 'listo' o 'entregado' → NO se resetea el status.
-      Cocina verá el banner '🆕 ADICIONAL' sin interrumpir el flujo del pedido principal.
-      Para el caso 'entregado', la orden re-aparece en cocina gracias al query de db_get_table_orders.
-    """
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT items, total, notes, status FROM table_orders WHERE id=$1", order_id)
-        if not row:
-            return False
-        existing = row['items'] if isinstance(row['items'], list) else json.loads(row['items'])
-        current_status = row['status'] or 'recibido'
-
-        # Acumular en items (para factura total)
-        merged = {item['name']: item.copy() for item in existing}
-        for new_item in new_items:
-            name = new_item['name']
-            if name in merged:
-                merged[name]['quantity'] += new_item['quantity']
-                merged[name]['subtotal']  = merged[name]['price'] * merged[name]['quantity']
-            else:
-                merged[name] = new_item.copy()
-        final_items = list(merged.values())
-        new_total   = (row['total'] or 0) + extra_total
-        old_notes   = row['notes'] or ''
-        new_notes   = (old_notes + ' | ' + extra_notes).strip(' |') if extra_notes else old_notes
-
-        # Determinar el nuevo status:
-        # - Si estaba en 'recibido' → mantener 'recibido' (cocina todavía no lo procesó)
-        # - Si ya fue tomado por cocina ('en_preparacion', 'listo', 'entregado') → NO resetear.
-        #   El banner de items_additional es suficiente señal visual para cocina.
-        if current_status == 'recibido':
-            new_status = 'recibido'
-        else:
-            # Mantener el status actual — NO interrumpir el flujo de cocina
-            new_status = current_status
-
-        # items_additional = SOLO los nuevos (para que cocina los vea diferenciados)
-        await conn.execute("""
-            UPDATE table_orders
-            SET items=$2, items_additional=$3, total=$4, notes=$5, status=$6, updated_at=NOW()
-            WHERE id=$1
-        """, order_id, json.dumps(final_items), json.dumps(new_items), new_total, new_notes, new_status)
-        return True
 
 
 # ── WAITER ALERTS ────────────────────────────────────────────────────
@@ -838,7 +867,6 @@ async def db_touch_session(phone: str, bot_number: str):
 
 
 async def db_touch_session_with_phone_id(phone: str, bot_number: str, meta_phone_id: str):
-    """Actualiza actividad y guarda el phone_id de Meta para poder enviar mensajes proactivos."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
