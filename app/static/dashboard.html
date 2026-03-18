@@ -140,7 +140,119 @@
   input:checked + .toggle-slider:before { transform: translateX(16px); }
   .menu-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
 
-</style>
+
+  /* ── MOBILE RESPONSIVE ─────────────────────────────── */
+  @media (max-width: 768px) {
+    .sidebar {
+      width: 100%;
+      height: auto;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: auto;
+      flex-direction: row;
+      align-items: center;
+      padding: .5rem .75rem;
+      z-index: 200;
+      overflow-x: auto;
+      overflow-y: hidden;
+      border-right: none;
+      border-bottom: 0.5px solid #e0e0d8;
+      gap: 4px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .sidebar::-webkit-scrollbar { display: none; }
+    .sidebar-logo {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+      border-right: 0.5px solid #e0e0d8;
+      padding-right: 10px;
+      margin-right: 4px;
+      flex-shrink: 0;
+    }
+    .logo-sub { display: none; }
+    .logo-text { font-size: 13px; }
+    .logo-icon { width: 28px; height: 28px; font-size: 12px; }
+    .nav-item {
+      white-space: nowrap;
+      padding: 5px 9px;
+      font-size: 11px;
+      margin-bottom: 0;
+      flex-shrink: 0;
+    }
+    .live-badge {
+      margin-top: 0;
+      margin-left: auto;
+      flex-shrink: 0;
+      font-size: 10px;
+      padding: 4px 7px;
+      white-space: nowrap;
+    }
+    .main {
+      margin-left: 0;
+      margin-top: 52px;
+      padding: .75rem;
+    }
+    .topbar {
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: .75rem;
+    }
+    .topbar-left { flex: 1; min-width: 0; }
+    .topbar-right { width: 100%; display: flex; justify-content: space-between; align-items: center; }
+    .page-title { font-size: 16px; }
+    .sync-badge { font-size: 10px; }
+    .logout-btn { font-size: 11px; padding: 5px 9px; }
+    .period-bar {
+      overflow-x: auto;
+      flex-wrap: nowrap;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 2px;
+    }
+    .period-bar::-webkit-scrollbar { display: none; }
+    .period-btn { font-size: 11px; padding: 5px 10px; white-space: nowrap; }
+    .metrics {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .metric { padding: .75rem; }
+    .metric-label { font-size: 11px; }
+    .metric-value { font-size: 20px; }
+    .metric-sub { font-size: 11px; }
+    .grid2 { grid-template-columns: 1fr; gap: 10px; }
+    .card { overflow-x: hidden; }
+    .card-title { font-size: 13px; }
+    table { min-width: 480px; font-size: 12px; }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* AI insight — fix text overflow */
+    .ai-insight-card {
+      font-size: 12px;
+      line-height: 1.5;
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+    .ai-insight-card strong { display: inline; }
+    #ai-main-text { font-size: 12px; line-height: 1.5; }
+    /* POS grid */
+    .pos-grid { grid-template-columns: 1fr !important; }
+    /* Menu */
+    .menu-category { font-size: 12px; }
+    .menu-row { flex-wrap: wrap; gap: 6px; }
+    /* Conv rows */
+    .conv-row { flex-wrap: wrap; gap: 4px; }
+    /* Charts */
+    canvas { max-height: 180px !important; }
+  }
+  @media (max-width: 480px) {
+    .metrics { grid-template-columns: 1fr 1fr; gap: 6px; }
+    .metric { padding: .6rem .75rem; }
+    .metric-value { font-size: 17px; }
+    .main { padding: .6rem; }
+    .topbar-right .sync-badge { display: none; }
+    .section { padding: 0; }
+    canvas { max-height: 160px !important; }
+  }
+
+  </style>
 </head>
 <body>
 
@@ -408,7 +520,20 @@
           </div>
         </div>
       </div>
-      <div id="branch-map-error" style="display:none;background:#FDE8E8;color:#C0392B;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;"></div>
+      <div id="branch-map-error" style="display:none;background:#FDE8E8;color:#C0392B;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;">
+        <div id="branch-error-text"></div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(192,57,43,.2);">
+          <div style="font-size:11px;margin-bottom:6px;color:#842029;">Ingresa las coordenadas manualmente desde <a href="https://maps.google.com" target="_blank" style="color:#185FA5;">Google Maps</a> → clic derecho → "¿Qué hay aquí?"</div>
+          <div style="display:flex;gap:8px;">
+            <input id="branch-lat-manual" placeholder="Latitud (ej: 4.6789)" type="number" step="any"
+              style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;"
+              oninput="applyManualCoords()">
+            <input id="branch-lon-manual" placeholder="Longitud (ej: -74.0567)" type="number" step="any"
+              style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;"
+              oninput="applyManualCoords()">
+          </div>
+        </div>
+      </div>
       <input type="hidden" id="branch-lat" value="">
       <input type="hidden" id="branch-lon" value="">
       <div style="display:flex;gap:8px;">
@@ -939,11 +1064,26 @@ async function validateAddress() {
     }
   } catch(e) {
     const errEl = document.getElementById('branch-map-error');
-    errEl.textContent = '❌ Error de conexión al validar dirección';
+    document.getElementById('branch-error-text').textContent = '❌ Error de conexion. Ingresa coordenadas manualmente.';
     errEl.style.display = 'block';
   } finally {
     btn.textContent = prevText;
     btn.disabled = false;
+  }
+}
+
+function applyManualCoords() {
+  const lat = document.getElementById('branch-lat-manual').value;
+  const lon = document.getElementById('branch-lon-manual').value;
+  if (lat && lon) {
+    document.getElementById('branch-lat').value = lat;
+    document.getElementById('branch-lon').value = lon;
+    document.getElementById('branch-lat-display') && (document.getElementById('branch-lat-display').textContent = parseFloat(lat).toFixed(6));
+    document.getElementById('branch-lon-display') && (document.getElementById('branch-lon-display').textContent = parseFloat(lon).toFixed(6));
+    const mapsLink = document.getElementById('branch-maps-link');
+    if (mapsLink) { mapsLink.href = 'https://www.google.com/maps?q=' + lat + ',' + lon; }
+    document.getElementById('branch-address-display') && (document.getElementById('branch-address-display').textContent = 'Coordenadas manuales');
+    document.getElementById('branch-map-preview').style.display = 'block';
   }
 }
 
