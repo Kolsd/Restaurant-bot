@@ -322,8 +322,8 @@ async def execute_tool(
                 print(f"🧾 Cuenta separada solicitada — creando orden nueva", flush=True)
 
             # CASO 2: hay orden activa en la sesión → acumular en ella (mismo order_id)
-            # Si la orden estaba en_preparacion/listo/entregado, se resetea a 'recibido'
-            # para que cocina procese los nuevos items
+            # El status NO se resetea si cocina ya tomó el pedido (en_preparacion/listo/entregado).
+            # Cocina verá el banner '🆕 ADICIONAL' sin perder el flujo del pedido principal.
             if active_order:
                 prev_status = active_order.get("status", "recibido")
                 await db.db_add_items_to_table_order(
@@ -332,12 +332,22 @@ async def execute_tool(
                 await orders.clear_cart(phone, bot_number)
                 await db.db_session_mark_order(phone, bot_number)
                 new_total = (active_order.get("total") or 0) + cart_total
-                print(f"➕ Orden {active_order['id']} (estaba {prev_status}) → nuevos items: {items_summary}", flush=True)
-                return (
-                    f"OK: Items agregados al pedido {active_order['id']}. "
-                    f"Nuevos items enviados a cocina: {items_summary}. "
-                    f"Total acumulado: ${new_total:,} COP."
-                )
+
+                if prev_status in ("en_preparacion", "listo", "entregado"):
+                    # Pedido ya en proceso o entregado — adicional sin interrumpir el status
+                    print(f"➕ Adicional sobre {active_order['id']} (status: {prev_status}, NO se resetea) → {items_summary}", flush=True)
+                    return (
+                        f"OK: Adicional agregado al pedido {active_order['id']} sin interrumpir el flujo de cocina. "
+                        f"Items adicionales notificados: {items_summary}. "
+                        f"Total acumulado: ${new_total:,} COP."
+                    )
+                else:
+                    print(f"➕ Orden {active_order['id']} (estaba {prev_status}) → nuevos items: {items_summary}", flush=True)
+                    return (
+                        f"OK: Items agregados al pedido {active_order['id']}. "
+                        f"Nuevos items enviados a cocina: {items_summary}. "
+                        f"Total acumulado: ${new_total:,} COP."
+                    )
 
             # CASO 3: no hay orden activa (nueva visita o post-factura) → crear orden nueva
             order_id = f"MESA-{uuid.uuid4().hex[:6].upper()}"

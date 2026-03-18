@@ -594,7 +594,13 @@ async def db_get_table_orders(status: str = None):
         if status:
             rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at DESC", status)
         else:
-            rows = await conn.fetch("SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC")
+            # Incluir 'entregado' si tiene items_additional pendientes (adicional llegó post-entrega)
+            rows = await conn.fetch("""
+                SELECT * FROM table_orders
+                WHERE status NOT IN ('factura_entregada','cancelado')
+                   OR (status = 'entregado' AND items_additional IS NOT NULL AND items_additional != '[]'::jsonb)
+                ORDER BY created_at ASC
+            """)
         result = []
         for r in rows:
             d = _serialize(dict(r))
@@ -658,13 +664,21 @@ async def db_has_pending_invoice(phone: str) -> bool:
 async def db_add_items_to_table_order(order_id: str, new_items: list, extra_total: int, extra_notes: str = ""):
     """Acumula items para la factura final en 'items'.
     Guarda SOLO los nuevos en 'items_additional' para que cocina los vea claramente.
-    Resetea status a 'recibido' para que cocina procese el adicional."""
+
+    REGLA DE STATUS:
+    - Si el pedido estaba en 'recibido' → se mantiene en 'recibido' (cocina aún no tomó nada)
+    - Si el pedido estaba en 'en_preparacion', 'listo' o 'entregado' → NO se resetea el status.
+      Cocina verá el banner '🆕 ADICIONAL' sin interrumpir el flujo del pedido principal.
+      Para el caso 'entregado', la orden re-aparece en cocina gracias al query de db_get_table_orders.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT items, total, notes FROM table_orders WHERE id=$1", order_id)
+        row = await conn.fetchrow("SELECT items, total, notes, status FROM table_orders WHERE id=$1", order_id)
         if not row:
             return False
         existing = row['items'] if isinstance(row['items'], list) else json.loads(row['items'])
+        current_status = row['status'] or 'recibido'
+
         # Acumular en items (para factura total)
         merged = {item['name']: item.copy() for item in existing}
         for new_item in new_items:
@@ -678,12 +692,23 @@ async def db_add_items_to_table_order(order_id: str, new_items: list, extra_tota
         new_total   = (row['total'] or 0) + extra_total
         old_notes   = row['notes'] or ''
         new_notes   = (old_notes + ' | ' + extra_notes).strip(' |') if extra_notes else old_notes
-        # items_additional = SOLO los nuevos (para cocina)
+
+        # Determinar el nuevo status:
+        # - Si estaba en 'recibido' → mantener 'recibido' (cocina todavía no lo procesó)
+        # - Si ya fue tomado por cocina ('en_preparacion', 'listo', 'entregado') → NO resetear.
+        #   El banner de items_additional es suficiente señal visual para cocina.
+        if current_status == 'recibido':
+            new_status = 'recibido'
+        else:
+            # Mantener el status actual — NO interrumpir el flujo de cocina
+            new_status = current_status
+
+        # items_additional = SOLO los nuevos (para que cocina los vea diferenciados)
         await conn.execute("""
             UPDATE table_orders
-            SET items=$2, items_additional=$3, total=$4, notes=$5, status='recibido', updated_at=NOW()
+            SET items=$2, items_additional=$3, total=$4, notes=$5, status=$6, updated_at=NOW()
             WHERE id=$1
-        """, order_id, json.dumps(final_items), json.dumps(new_items), new_total, new_notes)
+        """, order_id, json.dumps(final_items), json.dumps(new_items), new_total, new_notes, new_status)
         return True
 
 
