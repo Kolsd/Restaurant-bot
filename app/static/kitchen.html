@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Cocina</title>
-<link rel="icon" type="image/png" href="/static/logo.png">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0D0D0D;color:#fff;min-height:100vh;}
@@ -15,6 +14,7 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .live-text{font-size:12px;color:#1D9E75;}
 .time{font-size:13px;color:#666;}
+.note-banner{background:#1A1500;border-bottom:1px solid #3A2E00;padding:8px 1.5rem;font-size:12px;color:#FAC775;display:flex;align-items:center;gap:8px;}
 .main{padding:1.5rem;}
 .board{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem;}
 .col-title{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#555;margin-bottom:.75rem;padding:.5rem .75rem;border-radius:6px;}
@@ -29,7 +29,10 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .order-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;}
 .order-id{font-size:11px;font-weight:700;color:#888;letter-spacing:.05em;}
 .order-table{font-size:14px;font-weight:700;color:#fff;}
-.order-time{font-size:11px;color:#555;}
+.elapsed{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:500;}
+.elapsed.ok{background:rgba(29,158,117,.15);color:#1D9E75;}
+.elapsed.warn{background:rgba(250,199,117,.15);color:#FAC775;}
+.elapsed.late{background:rgba(226,75,74,.15);color:#E24B4A;}
 .order-items{margin-bottom:.75rem;}
 .order-item{font-size:13px;color:#ddd;padding:3px 0;display:flex;gap:6px;}
 .order-item-qty{color:#1D9E75;font-weight:600;flex-shrink:0;}
@@ -41,12 +44,7 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 .btn-prep:hover{background:rgba(55,138,221,.35);}
 .btn-listo{background:rgba(29,158,117,.2);color:#1D9E75;border:1px solid rgba(29,158,117,.3);}
 .btn-listo:hover{background:rgba(29,158,117,.35);}
-.btn-entregado{background:rgba(255,255,255,.06);color:#888;border:1px solid #333;}
-.btn-entregado:hover{background:rgba(255,255,255,.1);}
-.elapsed{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:500;}
-.elapsed.ok{background:rgba(29,158,117,.15);color:#1D9E75;}
-.elapsed.warn{background:rgba(250,199,117,.15);color:#FAC775;}
-.elapsed.late{background:rgba(226,75,74,.15);color:#E24B4A;}
+.listo-badge{width:100%;padding:7px;border-radius:8px;font-size:12px;font-weight:600;text-align:center;background:rgba(29,158,117,.08);color:#1D9E75;border:1px solid rgba(29,158,117,.2);cursor:default;}
 .empty{text-align:center;padding:2rem;color:#333;font-size:13px;}
 .badge-count{display:inline-block;background:#1D9E75;color:#000;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;margin-left:6px;}
 .notification{position:fixed;top:1rem;right:1rem;background:#1D9E75;color:#000;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;transform:translateY(-100px);transition:transform .3s;z-index:100;}
@@ -63,6 +61,10 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
     <span class="time" id="clock"></span>
   </div>
 </header>
+
+<div class="note-banner">
+  ⚠️ El mesero marca los pedidos como <strong>Entregado</strong> desde su panel. Aquí solo puedes avanzar hasta <strong>Listo para servir</strong>.
+</div>
 
 <div class="main">
   <div class="board">
@@ -110,12 +112,10 @@ function notify(msg) {
 async function updateStatus(orderId, status) {
   try {
     await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST',
-      headers: headers,
+      method: 'POST', headers,
       body: JSON.stringify({status})
     });
-    if (status === 'listo') notify('✅ Pedido listo para servir!');
-    if (status === 'entregado') notify('🍽️ Pedido entregado');
+    if (status === 'listo') notify('✅ Pedido listo para servir — avisa al mesero');
     loadOrders();
   } catch(e) { console.error(e); }
 }
@@ -124,14 +124,14 @@ function renderCard(o) {
   let itemsHtml = '';
   if (Array.isArray(o.items)) {
     itemsHtml = o.items.map(i => {
-      const qty = i.quantity || 1;
+      const qty  = i.quantity || 1;
       const name = i.name || i;
       return `<div class="order-item"><span class="order-item-qty">${qty}×</span><span>${name}</span></div>`;
     }).join('');
   } else if (typeof o.items === 'string') {
     try {
       const parsed = JSON.parse(o.items);
-      if(Array.isArray(parsed)){
+      if (Array.isArray(parsed)) {
         itemsHtml = parsed.map(i => `<div class="order-item"><span class="order-item-qty">${i.quantity||1}×</span><span>${i.name||i}</span></div>`).join('');
       } else { itemsHtml = o.items; }
     } catch(e) { itemsHtml = o.items; }
@@ -139,13 +139,14 @@ function renderCard(o) {
 
   const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
+  // Cocinero solo puede avanzar hasta "listo" — el mesero marca "entregado"
   let actions = '';
   if (o.status === 'recibido') {
-    actions = `<button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')">En preparación</button>`;
+    actions = `<button class="btn btn-prep" onclick="updateStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
   } else if (o.status === 'en_preparacion') {
-    actions = `<button class="btn btn-listo" onclick="updateStatus('${o.id}','listo')">✅ Listo</button>`;
+    actions = `<button class="btn btn-listo" onclick="updateStatus('${o.id}','listo')">✅ Listo para servir</button>`;
   } else if (o.status === 'listo') {
-    actions = `<button class="btn btn-entregado" onclick="updateStatus('${o.id}','entregado')">Entregado</button>`;
+    actions = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
   }
 
   return `<div class="order-card ${o.status.replace('_','-')}">
@@ -167,10 +168,7 @@ let prevOrderIds = new Set();
 async function loadOrders() {
   try {
     const r = await fetch('/api/table-orders', { headers: { 'Authorization': 'Bearer ' + token } });
-    if (!r.ok) {
-        if(r.status === 401) window.location.href = '/login';
-        return;
-    }
+    if (!r.ok) { if(r.status === 401) window.location.href = '/login'; return; }
     const d = await r.json();
     const orders = d.orders || [];
 
@@ -184,19 +182,16 @@ async function loadOrders() {
     prevOrderIds = currentIds;
 
     const groups = {recibido: [], en_preparacion: [], listo: []};
-    orders.forEach(o => {
-      if (groups[o.status]) groups[o.status].push(o);
-    });
+    orders.forEach(o => { if (groups[o.status]) groups[o.status].push(o); });
 
     ['recibido','en_preparacion','listo'].forEach(s => {
-      const colId = s === 'en_preparacion' ? 'col-preparacion' : 'col-' + s;
+      const colId   = s === 'en_preparacion' ? 'col-preparacion' : 'col-' + s;
       const countId = s === 'en_preparacion' ? 'count-preparacion' : 'count-' + s;
-      const col = document.getElementById(colId);
+      const col   = document.getElementById(colId);
       const count = document.getElementById(countId);
-      if (col) col.innerHTML = groups[s].length ? groups[s].map(renderCard).join('') : '<div class="empty">Sin pedidos</div>';
+      if (col)   col.innerHTML   = groups[s].length ? groups[s].map(renderCard).join('') : '<div class="empty">Sin pedidos</div>';
       if (count) count.textContent = groups[s].length;
     });
-
   } catch(e) { console.error(e); }
 }
 

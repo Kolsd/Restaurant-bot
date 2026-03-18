@@ -705,3 +705,134 @@ async function askMesioAI() {
   } catch(e) { responseDiv.textContent = 'Error al conectar.'; }
   btn.textContent = 'Preguntar a Mesio IA →'; btn.disabled = false;
 }
+
+// ── PEDIDOS MESA (dine-in) en sección Pedidos ────────────────────────
+const STATUS_LABEL = {
+  recibido:'Recibido', en_preparacion:'En preparación',
+  listo:'Listo para servir', entregado:'Entregado', cancelado:'Cancelado'
+};
+const STATUS_COLOR = {
+  recibido:'#FAC775', en_preparacion:'#378ADD',
+  listo:'#1D9E75', entregado:'#888', cancelado:'#E24B4A'
+};
+const STATUS_BG = {
+  recibido:'#FFF8E6', en_preparacion:'#E6F1FB',
+  listo:'#E1F5EE', entregado:'#f0f0e8', cancelado:'#FEE2E2'
+};
+
+async function loadTableOrdersSection() {
+  const h         = window._dashHeaders;
+  const container = document.getElementById('dine-in-container');
+  if (!container) return;
+  container.innerHTML = '<div class="empty-state">Cargando pedidos de mesa...</div>';
+  try {
+    const r = await fetch('/api/table-orders', { headers: h });
+    if (!r.ok) { container.innerHTML = '<div class="empty-state">Error cargando pedidos de mesa.</div>'; return; }
+    const { orders: all = [] } = await r.json();
+
+    // Mostrar todos los de hoy (incluyendo entregados) + los activos de días anteriores
+    const today = new Date().toISOString().split('T')[0];
+    const visible = all.filter(o => {
+      const day = (o.created_at || '').substring(0, 10);
+      return day === today || o.status !== 'entregado';
+    });
+
+    // Métricas rápidas
+    const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
+    const delivered = visible.filter(o => o.status === 'entregado');
+    const revenue   = delivered.reduce((s, o) => s + (o.total || 0), 0);
+
+    const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+
+    let html = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.25rem;">
+        <div class="metric"><div class="metric-label">Pedidos activos</div><div class="metric-value" style="color:#1D9E75;">${active.length}</div></div>
+        <div class="metric"><div class="metric-label">Entregados hoy</div><div class="metric-value">${delivered.length}</div></div>
+        <div class="metric"><div class="metric-label">Total mesas hoy</div><div class="metric-value">${fmt(revenue)}</div></div>
+      </div>`;
+
+    if (!visible.length) {
+      html += '<div class="empty-state">Sin pedidos de mesa hoy.</div>';
+      container.innerHTML = html;
+      return;
+    }
+
+    html += '<table><thead><tr><th>Mesa</th><th>ID</th><th>Platos</th><th>Estado</th><th>Total</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
+    visible.forEach(o => {
+      let items = '';
+      try {
+        const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+        items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${i.name||''}`).join(', ') : String(o.items);
+      } catch(e) { items = String(o.items || '—'); }
+      const hora = (o.created_at || '').substring(11, 16);
+      const st   = o.status || 'recibido';
+      const color = STATUS_COLOR[st] || '#888';
+      const bg    = STATUS_BG[st]    || '#f0f0f0';
+      const label = STATUS_LABEL[st] || st;
+      const canDeliver = st === 'listo';
+      const actionBtn = canDeliver
+        ? `<button onclick="markTableDelivered('${o.id}')" style="font-size:11px;padding:4px 10px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">Marcar entregado</button>`
+        : '<span style="font-size:11px;color:#aaa;">—</span>';
+      html += `<tr>
+        <td style="font-weight:600;">${o.table_name || '—'}</td>
+        <td style="font-size:11px;color:#888;">${o.id}</td>
+        <td style="color:#555;font-size:12px;">${items}</td>
+        <td><span style="font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;background:${bg};color:${color};">${label}</span></td>
+        <td style="font-weight:500;">${fmt(o.total || 0)}</td>
+        <td style="color:#888;">${hora}</td>
+        <td>${actionBtn}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch(e) { console.error('loadTableOrdersSection:', e); container.innerHTML = '<div class="empty-state">Error de conexión.</div>'; }
+}
+
+async function markTableDelivered(orderId) {
+  const h = window._dashHeaders;
+  try {
+    const r = await fetch(`/api/table-orders/${orderId}/status`, {
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'entregado' })
+    });
+    if (r.ok) loadTableOrdersSection();
+  } catch(e) { console.error('markTableDelivered:', e); }
+}
+
+// Hook: cuando se carga la sección de pedidos, también cargar los de mesa
+const _origFetchOrders = window.fetchOrders;
+// Sobrescribir refreshAll para incluir mesa
+const _origRefreshAll = window.refreshAll;
+if (typeof _origRefreshAll === 'function') {
+  window.refreshAll = async function() {
+    await _origRefreshAll();
+    loadTableOrdersSection();
+  };
+}
+// También cargar en showSection cuando se va a pedidos
+document.addEventListener('DOMContentLoaded', () => {
+  loadTableOrdersSection();
+  setInterval(loadTableOrdersSection, 15000);
+});
+
+// ── SWITCH SUBTAB PEDIDOS ────────────────────────────────────────────
+function switchOrderTab(tab, btn) {
+  const waDiv   = document.getElementById('orders-tab-wa');
+  const mesaDiv = document.getElementById('orders-tab-mesa');
+  const waBtn   = document.getElementById('tab-wa');
+  const mesaBtn = document.getElementById('tab-mesa');
+  if (!waDiv || !mesaDiv) return;
+
+  if (tab === 'wa') {
+    waDiv.style.display   = '';
+    mesaDiv.style.display = 'none';
+    waBtn.style.background   = '#1D9E75'; waBtn.style.color   = '#fff';
+    mesaBtn.style.background = 'none';    mesaBtn.style.color = '#555';
+  } else {
+    waDiv.style.display   = 'none';
+    mesaDiv.style.display = '';
+    mesaBtn.style.background = '#1D9E75'; mesaBtn.style.color   = '#fff';
+    waBtn.style.background   = 'none';    waBtn.style.color     = '#555';
+    loadTableOrdersSection();
+  }
+}
