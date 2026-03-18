@@ -709,15 +709,18 @@ async function askMesioAI() {
 // ── PEDIDOS MESA (dine-in) en sección Pedidos ────────────────────────
 const STATUS_LABEL = {
   recibido:'Recibido', en_preparacion:'En preparación',
-  listo:'Listo para servir', entregado:'Entregado', cancelado:'Cancelado'
+  listo:'Listo para servir', entregado:'Entregado',
+  factura_entregada:'Factura entregada', cancelado:'Cancelado'
 };
 const STATUS_COLOR = {
   recibido:'#FAC775', en_preparacion:'#378ADD',
-  listo:'#1D9E75', entregado:'#888', cancelado:'#E24B4A'
+  listo:'#1D9E75', entregado:'#888',
+  factura_entregada:'#6B21A8', cancelado:'#E24B4A'
 };
 const STATUS_BG = {
   recibido:'#FFF8E6', en_preparacion:'#E6F1FB',
-  listo:'#E1F5EE', entregado:'#f0f0e8', cancelado:'#FEE2E2'
+  listo:'#E1F5EE', entregado:'#f0f0e8',
+  factura_entregada:'#F0E6FF', cancelado:'#FEE2E2'
 };
 
 async function loadTableOrdersSection() {
@@ -734,7 +737,8 @@ async function loadTableOrdersSection() {
     const today = new Date().toISOString().split('T')[0];
     const visible = all.filter(o => {
       const day = (o.created_at || '').substring(0, 10);
-      return day === today || o.status !== 'entregado';
+      const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
+      return day === today || (!closed && o.status !== 'entregado');
     });
 
     // Métricas rápidas
@@ -769,10 +773,13 @@ async function loadTableOrdersSection() {
       const color = STATUS_COLOR[st] || '#888';
       const bg    = STATUS_BG[st]    || '#f0f0f0';
       const label = STATUS_LABEL[st] || st;
-      const canDeliver = st === 'listo';
+      const canDeliver  = st === 'listo';
+      const canInvoice  = st === 'entregado';
       const actionBtn = canDeliver
-        ? `<button onclick="markTableDelivered('${o.id}')" style="font-size:11px;padding:4px 10px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">Marcar entregado</button>`
-        : '<span style="font-size:11px;color:#aaa;">—</span>';
+        ? `<button onclick="markTableDelivered('${o.id}')" style="font-size:11px;padding:4px 10px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">🍽️ Marcar entregado</button>`
+        : canInvoice
+          ? `<button onclick="markTableInvoiced('${o.id}')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">🧾 Factura entregada</button>`
+          : '<span style="font-size:11px;color:#aaa;">—</span>';
       html += `<tr>
         <td style="font-weight:600;">${o.table_name || '—'}</td>
         <td style="font-size:11px;color:#888;">${o.id}</td>
@@ -797,6 +804,17 @@ async function markTableDelivered(orderId) {
     });
     if (r.ok) loadTableOrdersSection();
   } catch(e) { console.error('markTableDelivered:', e); }
+}
+
+async function markTableInvoiced(orderId) {
+  const h = window._dashHeaders;
+  try {
+    const r = await fetch(`/api/table-orders/${orderId}/status`, {
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'factura_entregada' })
+    });
+    if (r.ok) loadTableOrdersSection();
+  } catch(e) { console.error('markTableInvoiced:', e); }
 }
 
 // Hook: cuando se carga la sección de pedidos, también cargar los de mesa
