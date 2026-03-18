@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Vista Mesero</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #111; }
+.topbar { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; align-items: center; padding: 0 1rem; gap: 12px; z-index: 100; }
+.topbar-logo { width: 32px; height: 32px; background: #1D9E75; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.topbar-title { font-size: 15px; font-weight: 600; flex: 1; }
+.topbar-role { font-size: 11px; padding: 3px 10px; background: #E1F5EE; color: #0F6E56; border-radius: 20px; font-weight: 500; }
+.logout-btn { font-size: 12px; padding: 5px 10px; border: 0.5px solid #ddd; border-radius: 8px; background: none; cursor: pointer; color: #555; }
+.tabs { position: fixed; top: 56px; left: 0; right: 0; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; z-index: 90; }
+.tab { flex: 1; padding: 12px; text-align: center; font-size: 13px; font-weight: 500; color: #888; cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; }
+.tab.active { color: #1D9E75; border-bottom-color: #1D9E75; }
+.content { margin-top: 104px; padding: 1rem; }
+.section { display: none; }
+.section.active { display: block; }
+/* Orders */
+.order-card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 10px; }
+.order-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.order-id { font-size: 13px; font-weight: 600; }
+.order-time { font-size: 11px; color: #888; }
+.order-items { font-size: 13px; color: #444; margin-bottom: 10px; line-height: 1.6; }
+.order-status { display: inline-block; font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px; margin-bottom: 10px; }
+.st-listo { background: #E1F5EE; color: #0F6E56; }
+.st-recibido { background: #FFF3CD; color: #856404; }
+.st-prep { background: #E6F1FB; color: #185FA5; }
+.st-entregado { background: #f0f0e8; color: #888; }
+.order-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; }
+.btn-green { background: #1D9E75; color: #fff; }
+.btn-blue { background: #185FA5; color: #fff; }
+.btn-gray { background: #f0f0e8; color: #555; }
+.empty { text-align: center; padding: 3rem 1rem; color: #aaa; font-size: 14px; }
+/* Chat */
+.conv-item { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
+.conv-avatar { width: 40px; height: 40px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #0F6E56; flex-shrink: 0; }
+.conv-phone { font-size: 13px; font-weight: 600; }
+.conv-preview { font-size: 12px; color: #888; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-count { font-size: 11px; color: #aaa; flex-shrink: 0; }
+/* Chat modal */
+.chat-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 2000; align-items: center; justify-content: center; }
+.chat-modal.open { display: flex; }
+.chat-box { background: #fff; border-radius: 16px; width: 520px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+.chat-head { padding: 1rem 1.25rem; border-bottom: 0.5px solid #e0e0d8; display: flex; align-items: center; justify-content: space-between; background: #f8f8f5; }
+.chat-phone { font-size: 14px; font-weight: 600; }
+.chat-close { font-size: 20px; background: none; border: none; cursor: pointer; color: #aaa; }
+.chat-msgs { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 8px; background: #ECE5DD; min-height: 250px; }
+.msg { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; max-width: 75%; }
+.msg-user { background: #DCF8C6; align-self: flex-end; border-bottom-right-radius: 3px; }
+.msg-bot { background: #fff; align-self: flex-start; border-bottom-left-radius: 3px; }
+.chat-input { padding: .75rem 1rem; border-top: 0.5px solid #e0e0d8; display: flex; gap: 8px; background: #f8f8f5; }
+.chat-input input { flex: 1; padding: 8px 12px; border: 1px solid #e0e0d8; border-radius: 20px; font-size: 13px; outline: none; }
+.chat-input button { background: #1D9E75; color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: 500; }
+.badge { background: #E24B4A; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 4px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-logo">M</div>
+  <div class="topbar-title" id="rest-name">Mi Restaurante</div>
+  <div class="topbar-role">Mesero</div>
+  <button class="logout-btn" onclick="doLogout()">Salir</button>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('pedidos',this)">Pedidos listos <span class="badge" id="badge-pedidos" style="display:none">0</span></div>
+  <div class="tab" onclick="switchTab('chats',this)">WhatsApp <span class="badge" id="badge-chats" style="display:none">0</span></div>
+</div>
+
+<div class="content">
+  <div id="pedidos" class="section active">
+    <div id="orders-list"><div class="empty">Cargando pedidos...</div></div>
+  </div>
+  <div id="chats" class="section">
+    <div id="chats-list"><div class="empty">Cargando conversaciones...</div></div>
+  </div>
+</div>
+
+<!-- Chat Modal -->
+<div class="chat-modal" id="chat-modal">
+  <div class="chat-box">
+    <div class="chat-head">
+      <div class="chat-phone" id="chat-phone"></div>
+      <button class="chat-close" onclick="closeChat()">&#10005;</button>
+    </div>
+    <div class="chat-msgs" id="chat-msgs"></div>
+    <div class="chat-input">
+      <input id="chat-input-msg" placeholder="Responder manualmente..." onkeydown="if(event.key==='Enter')sendReply()">
+      <button onclick="sendReply()">Enviar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('rb_token');
+const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+if (!token) window.location.href = '/login';
+const headers = { 'Authorization': 'Bearer ' + token };
+document.getElementById('rest-name').textContent = restaurant.name || 'Mi Restaurante';
+
+let currentChatPhone = null;
+
+function doLogout() {
+  localStorage.removeItem('rb_token');
+  localStorage.removeItem('rb_restaurant');
+  window.location.href = '/login';
+}
+
+function switchTab(id, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function statusLabel(s) {
+  const map = { recibido: 'Recibido', en_preparacion: 'En preparacion', listo: 'Listo para servir', entregado: 'Entregado', pendiente_pago: 'Pendiente pago', confirmado: 'Confirmado' };
+  return map[s] || s;
+}
+function statusClass(s) {
+  if (s === 'listo') return 'st-listo';
+  if (s === 'en_preparacion') return 'st-prep';
+  if (s === 'entregado') return 'st-entregado';
+  return 'st-recibido';
+}
+
+async function loadOrders() {
+  try {
+    // Load both table orders (listo) and regular orders
+    const [r1, r2] = await Promise.all([
+      fetch('/api/table-orders?status=listo', { headers }),
+      fetch('/api/dashboard/orders?period=today', { headers })
+    ]);
+    const tableOrders = r1.ok ? (await r1.json()).orders || [] : [];
+    const regularOrders = r2.ok ? (await r2.json()).orders || [] : [];
+
+    const listoTable = tableOrders.filter(o => o.status === 'listo');
+    const pendingRegular = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
+
+    const badge = document.getElementById('badge-pedidos');
+    const total = listoTable.length + pendingRegular.length;
+    badge.textContent = total;
+    badge.style.display = total > 0 ? 'inline' : 'none';
+
+    let html = '';
+
+    if (listoTable.length > 0) {
+      html += '<div style="font-size:11px;font-weight:600;color:#0F6E56;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;margin-top:4px;">LISTOS PARA SERVIR — MESA</div>';
+      listoTable.forEach(o => {
+        const items = Array.isArray(o.items) ? o.items.map(i => (i.quantity||1)+'x '+i.name).join(', ') : o.items || '';
+        html += '<div class="order-card" style="border-left:3px solid #1D9E75;">';
+        html += '<div class="order-header"><div class="order-id">'+o.table_name+'</div><div class="order-time">'+o.created_at.substring(11,16)+'</div></div>';
+        html += '<div class="order-items">'+items+'</div>';
+        html += '<div class="order-actions">';
+        html += '<button class="btn btn-green" onclick="updateTableOrder(\''+o.id+'\',\'entregado\')">Marcar entregado</button>';
+        html += '</div></div>';
+      });
+    }
+
+    if (pendingRegular.length > 0) {
+      html += '<div style="font-size:11px;font-weight:600;color:#185FA5;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;margin-top:12px;">PEDIDOS WHATSAPP HOY</div>';
+      pendingRegular.forEach(o => {
+        html += '<div class="order-card">';
+        html += '<div class="order-header"><div class="order-id">'+o.id.substring(0,12)+'</div><div class="order-time">'+o.time+'</div></div>';
+        html += '<div class="order-items">'+o.items+'</div>';
+        html += '<div><span class="order-status '+statusClass(o.status)+'">'+statusLabel(o.status)+'</span></div>';
+        if (o.address) html += '<div style="font-size:12px;color:#888;margin-bottom:8px;">'+o.address+'</div>';
+        html += '</div>';
+      });
+    }
+
+    if (!html) html = '<div class="empty">Sin pedidos activos ahora mismo</div>';
+    document.getElementById('orders-list').innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+async function updateTableOrder(id, status) {
+  try {
+    await fetch('/api/table-orders/'+id+'/status', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    loadOrders();
+  } catch(e) { console.error(e); }
+}
+
+async function loadChats() {
+  try {
+    const r = await fetch('/api/dashboard/conversations', { headers });
+    if (!r.ok) return;
+    const d = await r.json();
+    const convs = d.conversations || [];
+    document.getElementById('badge-chats').textContent = convs.length;
+    document.getElementById('badge-chats').style.display = convs.length > 0 ? 'inline' : 'none';
+    if (!convs.length) {
+      document.getElementById('chats-list').innerHTML = '<div class="empty">Sin conversaciones activas</div>';
+      return;
+    }
+    document.getElementById('chats-list').innerHTML = convs.map(c => `
+      <div class="conv-item" onclick="openChat('${c.phone}')">
+        <div class="conv-avatar">${c.phone.slice(-4)}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="conv-phone">${c.phone}</div>
+          <div class="conv-preview">${c.preview}</div>
+        </div>
+        <div class="conv-count">${c.messages} msgs</div>
+      </div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function openChat(phone) {
+  currentChatPhone = phone;
+  document.getElementById('chat-phone').textContent = phone;
+  document.getElementById('chat-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  const r = await fetch('/api/conversations/'+encodeURIComponent(phone), { headers });
+  if (!r.ok) return;
+  const d = await r.json();
+  const msgs = d.history || [];
+  const container = document.getElementById('chat-msgs');
+  container.innerHTML = msgs.map(m => `
+    <div class="msg ${m.role==='user'?'msg-user':'msg-bot'}">${m.content}</div>
+  `).join('');
+  container.scrollTop = container.scrollHeight;
+}
+
+function closeChat() {
+  document.getElementById('chat-modal').classList.remove('open');
+  document.body.style.overflow = '';
+  currentChatPhone = null;
+}
+
+async function sendReply() {
+  const input = document.getElementById('chat-input-msg');
+  const msg = input.value.trim();
+  if (!msg || !currentChatPhone) return;
+  input.value = '';
+  await fetch('/api/conversations/'+encodeURIComponent(currentChatPhone)+'/reply', {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: msg })
+  });
+  openChat(currentChatPhone);
+}
+
+// Load data
+loadOrders();
+loadChats();
+setInterval(() => { loadOrders(); loadChats(); }, 15000);
+</script>
+</body>
+</html>
