@@ -216,9 +216,9 @@ async def list_team_users(request: Request, branch_id: int = None):
     role = user.get("role", "owner")
     user_branch = user.get("branch_id")
     if role == "owner":
-        return {"users": await db.db_get_all_users()}
+        return {"users": await db.db_get_all_users_with_roles(branch_id=branch_id)}
     if role == "admin" and user_branch:
-        return {"users": await db.db_get_all_users()}
+        return {"users": await db.db_get_all_users_with_roles(branch_id=user_branch)}
     raise HTTPException(status_code=403, detail="No autorizado")
 
 @router.post("/api/team/invite")
@@ -312,3 +312,18 @@ async def fix_branch_ids(request: Request):
                 fixed.append({"username": user['username'], "branch_id": rest['id'], "restaurant": rest['name']})
     
     return {"success": True, "fixed": fixed}
+
+@router.post("/api/admin/fix-conversations")
+async def fix_conversations_bot_number(request: Request):
+    """Asigna bot_number a conversaciones que tienen bot_number vacio."""
+    body = await request.json()
+    if body.get("admin_key") != os.getenv("ADMIN_KEY", "restaurantbot2024"):
+        raise HTTPException(status_code=403, detail="No autorizado")
+    bot_number = body.get("bot_number", "15556293573")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL",
+            bot_number
+        )
+    return {"success": True, "result": str(result)}
