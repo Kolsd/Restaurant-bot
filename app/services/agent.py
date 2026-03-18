@@ -6,7 +6,6 @@ from app.services import orders, database as db
 
 client = Anthropic()
 
-# Definición formal de herramientas para Claude
 TOOLS = [
     {
         "name": "add_to_cart",
@@ -62,6 +61,27 @@ TOOLS = [
     }
 ]
 
+# --- FIX MESA APLICADO AQUÍ ---
+async def detect_table_context(message: str, phone: str, bot_number: str) -> dict:
+    import re as _re
+    history = await db.db_get_history(phone, bot_number)
+    # Busca en los ultimos mensajes si ya esta en una mesa
+    for msg in reversed(history[-6:]):
+        if msg.get('role') == 'user':
+            m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', msg['content'], _re.IGNORECASE)
+            if m:
+                table_id = f"mesa-{m.group(1)}"
+                table = await db.db_get_table_by_id(table_id)
+                if table: return table
+    
+    # Detecta en el mensaje actual
+    m = _re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', message, _re.IGNORECASE)
+    if m:
+        table_id = f"mesa-{m.group(1)}"
+        table = await db.db_get_table_by_id(table_id)
+        if table: return table
+    return None
+
 async def build_system_prompt(bot_number: str, table_context: dict = None) -> str:
     availability = await db.db_get_menu_availability()
     menu = await db.db_get_menu(bot_number) or {}
@@ -79,8 +99,8 @@ async def build_system_prompt(bot_number: str, table_context: dict = None) -> st
         table_section = f"""
 ## 🪑 MODO MESA — PEDIDO EN RESTAURANTE
 El cliente está físicamente en **{table_context['name']}**.
-- NO pidas dirección. NO uses 'create_order'.
-- Usa EXCLUSIVAMENTE la herramienta 'create_table_order' para mandar el pedido a cocina.
+- NO pidas dirección de entrega.
+- Usa EXCLUSIVAMENTE la herramienta 'create_table_order' para mandar el pedido a cocina, NO uses 'create_order'.
 """
 
     return f"""Eres Mesio, IA de ventas para restaurantes. Eres cálido y directo.
@@ -92,8 +112,8 @@ El cliente está físicamente en **{table_context['name']}**.
 ### REGLAS:
 - Si el cliente pide algo, usa la herramienta `add_to_cart`.
 - Tras agregar al carrito, avisa qué agregaste y pregunta si desea algo más.
-- Para cobrar (no mesa), usa `create_order`.
-- Para mesas, usa `create_table_order`.
+- Para cobrar (pedidos externos), usa `create_order`.
+- Para pedidos en la mesa del restaurante, usa `create_table_order`.
 """
 
 async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number: str, table_context: dict):
@@ -122,16 +142,15 @@ async def execute_tool(tool_name: str, tool_input: dict, phone: str, bot_number:
         await db.db_add_reservation(tool_input["name"], tool_input["date"], tool_input["time"], tool_input["guests"], phone, bot_number, tool_input.get("notes",""))
         return "Reservación confirmada en sistema."
         
-    return "Herramienta desconocida"
+    return "Herramienta desconocida o contexto inválido"
 
 async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
-    table_context = None # Aquí puedes inyectar tu función detect_table_context
+    table_context = await detect_table_context(user_message, user_phone, bot_number)
     history = await db.db_get_history(user_phone, bot_number)
     history.append({"role": "user", "content": user_message})
 
     sys_prompt = await build_system_prompt(bot_number, table_context)
 
-    # 1. Llamada inicial a Claude
     response = client.messages.create(
         model="claude-3-5-sonnet-latest",
         max_tokens=1000,
@@ -140,7 +159,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         tools=TOOLS
     )
 
-    # 2. Procesar Tools (Si Claude decidió usar una herramienta)
     if response.stop_reason == "tool_use":
         history.append({"role": "assistant", "content": response.content})
         tool_results = []
@@ -156,7 +174,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str) -> dict:
         
         history.append({"role": "user", "content": tool_results})
         
-        # 3. Llamada final para que Claude responda al humano
         final_response = client.messages.create(
             model="claude-3-5-sonnet-latest",
             max_tokens=1000,
