@@ -108,7 +108,6 @@ async function loadTables() {
       tables.forEach(t => {
         const el = document.getElementById('qr-' + t.id);
         if (el && !el.hasChildNodes()) {
-          // Ya no apuntamos a WhatsApp directo, sino al menú
           const menuUrl = window.location.origin + '/menu/' + t.id;
           try { new QRCode(el, { text:menuUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
         }
@@ -733,66 +732,108 @@ async function loadTableOrdersSection() {
     if (!r.ok) { container.innerHTML = '<div class="empty-state">Error cargando pedidos de mesa.</div>'; return; }
     const { orders: all = [] } = await r.json();
 
-    // Mostrar todos excepto factura_entregada y cancelado
     const today = new Date().toISOString().split('T')[0];
     const visible = all.filter(o => {
       const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
       const day = (o.created_at || '').substring(0, 10);
-      // Entregados: solo los de hoy (pendientes de factura)
       if (o.status === 'entregado') return day === today;
       return !closed;
     });
 
-    // Métricas rápidas
     const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
     const delivered = visible.filter(o => o.status === 'entregado');
-    const revenue   = delivered.reduce((s, o) => s + (o.total || 0), 0);
+    
+    // Agrupar facturas entregadas
+    const billsMap = {};
+    delivered.forEach(o => {
+        const baseId = o.base_order_id || o.id;
+        if (!billsMap[baseId]) {
+            billsMap[baseId] = {
+                id: baseId,
+                table_name: o.table_name,
+                created_at: o.created_at,
+                items: [],
+                total: 0
+            };
+        }
+        let parsedItems = [];
+        try {
+            const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+            parsedItems = Array.isArray(arr) ? arr : [];
+        } catch(e) {}
+        
+        billsMap[baseId].items.push(...parsedItems);
+        billsMap[baseId].total += (o.total || 0);
+    });
+    const groupedBills = Object.values(billsMap);
 
+    const revenue   = groupedBills.reduce((s, o) => s + (o.total || 0), 0);
     const fmt = n => '$' + Number(n).toLocaleString('es-CO');
 
     let html = `
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.25rem;">
         <div class="metric"><div class="metric-label">Pedidos activos</div><div class="metric-value" style="color:#1D9E75;">${active.length}</div></div>
-        <div class="metric"><div class="metric-label">Entregados hoy</div><div class="metric-value">${delivered.length}</div></div>
+        <div class="metric"><div class="metric-label">Facturas pendientes</div><div class="metric-value">${groupedBills.length}</div></div>
         <div class="metric"><div class="metric-label">Total mesas hoy</div><div class="metric-value">${fmt(revenue)}</div></div>
       </div>`;
 
-    if (!visible.length) {
+    if (!active.length && !groupedBills.length) {
       html += '<div class="empty-state">Sin pedidos de mesa hoy.</div>';
       container.innerHTML = html;
       return;
     }
 
-    html += '<table><thead><tr><th>Mesa</th><th>ID</th><th>Platos</th><th>Estado</th><th>Total</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
-    visible.forEach(o => {
-      let items = '';
-      try {
-        const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-        items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${i.name||''}`).join(', ') : String(o.items);
-      } catch(e) { items = String(o.items || '—'); }
-      const hora = (o.created_at || '').substring(11, 16);
-      const st   = o.status || 'recibido';
-      const color = STATUS_COLOR[st] || '#888';
-      const bg    = STATUS_BG[st]    || '#f0f0f0';
-      const label = STATUS_LABEL[st] || st;
-      const canDeliver  = st === 'listo';
-      const canInvoice  = st === 'entregado';
-      const actionBtn = canDeliver
-        ? `<button onclick="markTableDelivered('${o.id}')" style="font-size:11px;padding:4px 10px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">🍽️ Marcar entregado</button>`
-        : canInvoice
-          ? `<button onclick="markTableInvoiced('${o.id}')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">🧾 Factura entregada</button>`
-          : '<span style="font-size:11px;color:#aaa;">—</span>';
-      html += `<tr>
-        <td style="font-weight:600;">${o.table_name || '—'}</td>
-        <td style="font-size:11px;color:#888;">${o.id}</td>
-        <td style="color:#555;font-size:12px;">${items}</td>
-        <td><span style="font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;background:${bg};color:${color};">${label}</span></td>
-        <td style="font-weight:500;">${fmt(o.total || 0)}</td>
-        <td style="color:#888;">${hora}</td>
-        <td>${actionBtn}</td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
+    // Tabla de facturas primero
+    if(groupedBills.length > 0){
+        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE FACTURA</div>';
+        html += '<table><thead><tr><th>Mesa</th><th>Platos</th><th>Total</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
+        groupedBills.forEach(b => {
+          const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
+          const hora = (b.created_at || '').substring(11, 16);
+          const total_fmt = fmt(b.total);
+          
+          html += `<tr>
+            <td style="font-weight:600;">${b.table_name || '—'}</td>
+            <td style="color:#555;font-size:12px;">${itemsJoined}</td>
+            <td style="font-weight:700; color:#6B21A8;">${total_fmt}</td>
+            <td style="color:#888;">${hora}</td>
+            <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">🧾 Factura entregada</button></td>
+          </tr>`;
+        });
+        html += '</tbody></table><br/>';
+    }
+
+    // Luego los activos
+    if(active.length > 0){
+        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 EN COCINA / LISTOS</div>';
+        html += '<table><thead><tr><th>Mesa</th><th>ID</th><th>Platos</th><th>Estado</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
+        active.forEach(o => {
+          let items = '';
+          try {
+            const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+            items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${i.name||''}`).join(', ') : String(o.items);
+          } catch(e) { items = String(o.items || '—'); }
+          const hora = (o.created_at || '').substring(11, 16);
+          const st   = o.status || 'recibido';
+          const color = STATUS_COLOR[st] || '#888';
+          const bg    = STATUS_BG[st]    || '#f0f0f0';
+          const label = STATUS_LABEL[st] || st;
+          const canDeliver  = st === 'listo';
+          const actionBtn = canDeliver
+            ? `<button onclick="markTableDelivered('${o.id}')" style="font-size:11px;padding:4px 10px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">🍽️ Marcar entregado</button>`
+            : '<span style="font-size:11px;color:#aaa;">—</span>';
+          html += `<tr>
+            <td style="font-weight:600;">${o.table_name || '—'}</td>
+            <td style="font-size:11px;color:#888;">${o.id}</td>
+            <td style="color:#555;font-size:12px;">${items}</td>
+            <td><span style="font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;background:${bg};color:${color};">${label}</span></td>
+            <td style="color:#888;">${hora}</td>
+            <td>${actionBtn}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+    }
+    
     container.innerHTML = html;
   } catch(e) { console.error('loadTableOrdersSection:', e); container.innerHTML = '<div class="empty-state">Error de conexión.</div>'; }
 }
@@ -819,9 +860,7 @@ async function markTableInvoiced(orderId) {
   } catch(e) { console.error('markTableInvoiced:', e); }
 }
 
-// Hook: cuando se carga la sección de pedidos, también cargar los de mesa
 const _origFetchOrders = window.fetchOrders;
-// Sobrescribir refreshAll para incluir mesa
 const _origRefreshAll = window.refreshAll;
 if (typeof _origRefreshAll === 'function') {
   window.refreshAll = async function() {
@@ -829,13 +868,11 @@ if (typeof _origRefreshAll === 'function') {
     loadTableOrdersSection();
   };
 }
-// También cargar en showSection cuando se va a pedidos
 document.addEventListener('DOMContentLoaded', () => {
   loadTableOrdersSection();
   setInterval(loadTableOrdersSection, 15000);
 });
 
-// ── SWITCH SUBTAB PEDIDOS ────────────────────────────────────────────
 function switchOrderTab(tab, btn) {
   const waDiv   = document.getElementById('orders-tab-wa');
   const mesaDiv = document.getElementById('orders-tab-mesa');
