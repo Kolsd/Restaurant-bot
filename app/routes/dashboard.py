@@ -98,6 +98,38 @@ async def geocode_endpoint(address: str):
     if lat is None: raise HTTPException(status_code=404, detail="No se encontró la dirección.")
     return {"latitude": lat, "longitude": lon, "display_name": display, "maps_url": f"https://www.google.com/maps?q={lat},{lon}"}
 
+
+# ── NUEVOS ENDPOINTS SUPER ADMIN GLOBALES ──────────────────────────
+@router.get("/api/admin/stats")
+async def admin_get_stats(admin_key: str):
+    if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): 
+        raise HTTPException(status_code=403, detail="Clave incorrecta")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        total_rest = await conn.fetchval("SELECT COUNT(*) FROM restaurants")
+        active_rest = await conn.fetchval("SELECT COUNT(*) FROM restaurants WHERE subscription_status='active'")
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
+        total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders")
+        
+        # MRR Estimado (Ej: $99 usd por cliente activo)
+        mrr = (active_rest or 0) * 99
+        
+        return {
+            "total_restaurants": total_rest or 0,
+            "active_restaurants": active_rest or 0,
+            "total_users": total_users or 0,
+            "total_orders": total_orders or 0,
+            "mrr": mrr
+        }
+
+@router.get("/api/admin/restaurants")
+async def admin_get_restaurants(admin_key: str):
+    if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): 
+        raise HTTPException(status_code=403, detail="Clave incorrecta")
+    return {"restaurants": await db.db_get_all_restaurants()}
+# ───────────────────────────────────────────────────────────────────
+
+
 @router.post("/api/admin/create-user")
 async def admin_create_user(request: CreateUserRequest):
     if request.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="Clave incorrecta")

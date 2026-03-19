@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — Super Admin Control</title>
+<title>Mesio HQ — Super Dashboard</title>
 <link rel="icon" type="image/png" href="/static/logo.png">
 <style>
   :root {
@@ -14,20 +14,61 @@
     --primary-dim: rgba(57, 255, 106, 0.1);
     --text: #f4f4f5;
     --text-muted: #a1a1aa;
+    --danger: #ef4444;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  body { background: var(--bg); color: var(--text); padding: 2rem; display: flex; justify-content: center; }
-  .container { width: 100%; max-width: 900px; }
+  body { background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
   
-  .header { display: flex; align-items: center; gap: 15px; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; }
-  .header-icon { font-size: 2.5rem; background: var(--primary-dim); padding: 12px; border-radius: 12px; }
-  .header h1 { color: #fff; font-size: 1.8rem; font-weight: 700; letter-spacing: -0.5px; }
-  .header p { color: var(--primary); font-weight: 500; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+  /* --- AUTH SCREEN --- */
+  #auth-screen { position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; }
+  .auth-box { background: var(--surface); padding: 3rem; border-radius: 16px; border: 1px solid var(--border); text-align: center; width: 100%; max-width: 400px; box-shadow: 0 20px 40px rgba(0,0,0,0.8); }
+  .auth-box h1 { color: #fff; margin-bottom: 0.5rem; font-size: 1.5rem; }
+  .auth-box p { color: var(--primary); margin-bottom: 2rem; font-size: 0.85rem; font-weight: 600; letter-spacing: 1px; }
+  
+  /* --- MAIN APP --- */
+  #app-screen { display: none; width: 100%; height: 100%; flex: 1; }
+  
+  /* SIDEBAR */
+  .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 1.5rem; }
+  .logo-area { display: flex; align-items: center; gap: 12px; margin-bottom: 2.5rem; }
+  .logo-icon { background: var(--primary-dim); padding: 8px; border-radius: 8px; font-size: 1.5rem; line-height: 1; }
+  .logo-text { font-size: 1.25rem; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+  
+  .nav-item { padding: 12px 16px; border-radius: 8px; color: var(--text-muted); cursor: pointer; font-weight: 500; font-size: 0.95rem; margin-bottom: 8px; transition: all 0.2s; display: flex; align-items: center; gap: 10px; }
+  .nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+  .nav-item.active { background: var(--primary-dim); color: var(--primary); font-weight: 600; }
+  
+  /* CONTENT AREA */
+  .main-content { flex: 1; padding: 2.5rem; overflow-y: auto; }
+  .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+  .top-bar h2 { font-size: 1.5rem; font-weight: 600; color: #fff; }
+  
+  .section { display: none; animation: fadeIn 0.3s ease; }
+  .section.active { display: block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
 
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; margin-bottom: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-  .card-title { font-size: 1.1rem; font-weight: 600; color: #fff; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 10px; }
-  .card-title span { color: var(--primary); }
+  /* METRICS GRID */
+  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem; }
+  .metric-card { background: var(--surface); border: 1px solid var(--border); padding: 1.5rem; border-radius: 12px; }
+  .metric-title { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric-value { font-size: 2rem; font-weight: 700; color: #fff; }
+  .metric-value.green { color: var(--primary); }
 
+  /* TABLES */
+  .table-container { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; text-align: left; }
+  th { background: rgba(255,255,255,0.03); color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; padding: 14px 20px; font-weight: 600; border-bottom: 1px solid var(--border); }
+  td { padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 0.9rem; color: #e4e4e7; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  
+  .badge { padding: 4px 8px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .badge-active { background: rgba(57,255,106,0.15); color: var(--primary); }
+  .badge-suspend { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .module-tag { display: inline-block; padding: 2px 6px; background: #333; border-radius: 4px; font-size: 0.7rem; margin-right: 4px; margin-bottom: 4px; color: #ccc;}
+
+  /* FORMS */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; margin-bottom: 1.5rem; }
   .form-group { margin-bottom: 1.25rem; }
   label { display: block; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; }
   input[type="text"], input[type="password"], input[type="number"], textarea, select {
@@ -39,17 +80,18 @@
   .btn-primary { background: var(--primary); color: #000; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; width: 100%; transition: transform 0.1s, opacity 0.2s; margin-top: 10px; }
   .btn-primary:hover { opacity: 0.9; }
   .btn-primary:active { transform: scale(0.98); }
+  
+  .btn-sm { padding: 6px 12px; font-size: 0.8rem; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; }
+  .btn-danger { background: rgba(239,68,68,0.15); color: var(--danger); }
+  .btn-success { background: rgba(57,255,106,0.15); color: var(--primary); }
 
   .ai-extract-box { display: flex; background: var(--bg); border: 1px solid var(--border); padding: 8px; border-radius: 8px; align-items: center; gap: 10px; margin-bottom: 12px; }
-  .ai-extract-box input[type="file"] { flex: 1; border: none; padding: 4px; background: transparent; }
-  .btn-ai { background: #3b82f6; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 500; font-size: 0.85rem; cursor: pointer; white-space: nowrap; }
+  .ai-extract-box input[type="file"] { flex: 1; border: none; padding: 4px; background: transparent; color: #fff; }
+  .btn-ai { background: #3b82f6; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 500; font-size: 0.85rem; cursor: pointer; }
 
-  /* Toggles para Módulos */
   .modules-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; background: var(--bg); padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border); }
   .toggle-item { display: flex; align-items: center; justify-content: space-between; }
   .toggle-label { font-size: 0.9rem; font-weight: 500; color: #fff; display: flex; align-items: center; gap: 8px; }
-  .toggle-label span { color: var(--text-muted); font-size: 1.2rem; }
-  
   .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
   .switch input { opacity: 0; width: 0; height: 0; }
   .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .3s; border-radius: 34px; }
@@ -60,126 +102,276 @@
 </head>
 <body>
 
-<div class="container">
-  
-  <div class="header">
-    <div class="header-icon">⚙️</div>
-    <div>
-      <h1>Mesio Control Center</h1>
-      <p>Super Admin Access</p>
-    </div>
+<div id="auth-screen">
+  <div class="auth-box">
+    <h1>Mesio HQ</h1>
+    <p>SUPER ADMIN CONTROL</p>
+    <input type="password" id="key_input" placeholder="Ingresa la ADMIN_KEY secreta..." style="text-align: center; margin-bottom: 15px;" onkeydown="if(event.key==='Enter') loginAdmin()">
+    <button class="btn-primary" onclick="loginAdmin()">Ingresar al Panel</button>
   </div>
+</div>
 
-  <div class="card" style="border-color: var(--primary);">
-    <div class="form-group" style="margin: 0;">
-      <label style="color: var(--primary);">🔑 Llave Maestra (ADMIN_KEY)</label>
-      <input type="password" id="admin_key" placeholder="Ingresa tu clave secreta de Railway..." />
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span>1.</span> Alta de Cliente (Restaurante)</div>
-    
-    <div class="form-group">
-      <label>Nombre del Restaurante</label>
-      <input type="text" id="r_name" placeholder="Ej: Pizzería Don Juan" />
+<div id="app-screen">
+  <div class="sidebar">
+    <div class="logo-area">
+      <div class="logo-icon">⚙️</div>
+      <div class="logo-text">Mesio HQ</div>
     </div>
     
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-      <div class="form-group">
-        <label>WhatsApp (Con código de país, sin '+')</label>
-        <input type="text" id="r_wa" placeholder="Ej: 573168191483" />
-      </div>
-      <div class="form-group">
-        <label>Dirección Física</label>
-        <input type="text" id="r_addr" placeholder="Ej: Calle 123 #45-67, Bogotá" />
-      </div>
-    </div>
-
-    <label style="margin-top: 1rem; margin-bottom: 1rem; color:#fff; font-size:1rem;">⚡ Configuración de Módulos (SaaS)</label>
-    <div class="modules-grid">
-      <div class="toggle-item">
-        <div class="toggle-label"><span>🛵</span> Módulo Pedidos (WA)</div>
-        <label class="switch"><input type="checkbox" id="feat_orders" checked><span class="slider"></span></label>
-      </div>
-      <div class="toggle-item">
-        <div class="toggle-label"><span>🪑</span> Módulo Mesas (Dine-in)</div>
-        <label class="switch"><input type="checkbox" id="feat_tables" checked><span class="slider"></span></label>
-      </div>
-      <div class="toggle-item">
-        <div class="toggle-label"><span>📅</span> Reservaciones</div>
-        <label class="switch"><input type="checkbox" id="feat_reservations" checked><span class="slider"></span></label>
-      </div>
-      <div class="toggle-item">
-        <div class="toggle-label"><span>🧠</span> POS con Inteligencia Art.</div>
-        <label class="switch"><input type="checkbox" id="feat_pos" checked><span class="slider"></span></label>
-      </div>
-      <div class="toggle-item">
-        <div class="toggle-label"><span>💳</span> Pagos Integrados (Wompi)</div>
-        <label class="switch"><input type="checkbox" id="feat_wompi"><span class="slider"></span></label>
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label>Menú JSON Database</label>
-      <div class="ai-extract-box">
-        <input type="file" id="menu_file" accept=".pdf, .png, .jpg, .jpeg" />
-        <button onclick="parseMenuFile()" id="btn_parse" class="btn-ai">✨ Extraer con IA</button>
-      </div>
-      <textarea id="r_menu" placeholder='{"Pizzas": [{"name": "Margarita", "price": 25000}]}'></textarea>
-    </div>
-
-    <button class="btn-primary" onclick="createRestaurant()">Crear e Implementar Restaurante</button>
+    <div class="nav-item active" onclick="switchTab('dashboard', this)">📊 Dashboard Global</div>
+    <div class="nav-item" onclick="switchTab('clients', this)">📋 Directorio Clientes</div>
+    <div class="nav-item" onclick="switchTab('new', this)">➕ Alta de Cliente</div>
+    <div class="nav-item" onclick="switchTab('users', this)">👥 Gestión de Accesos</div>
   </div>
 
-  <div class="card">
-    <div class="card-title"><span>2.</span> Accesos al Dashboard (Dueño)</div>
-    <div class="form-group">
-      <label>Asignar al restaurante (Debe coincidir exacto)</label>
-      <input type="text" id="u_rest" placeholder="Ej: Pizzería Don Juan" />
-    </div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-      <div class="form-group">
-        <label>Correo / Usuario</label>
-        <input type="text" id="u_email" placeholder="ejemplo@restaurante.com" />
+  <div class="main-content">
+    
+    <div id="dashboard" class="section active">
+      <div class="top-bar"><h2>Visión General de la Plataforma</h2></div>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-title">Clientes Totales</div>
+          <div class="metric-value" id="st_total_rest">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Clientes Activos</div>
+          <div class="metric-value green" id="st_active_rest">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">MRR Estimado (SaaS)</div>
+          <div class="metric-value green" id="st_mrr">$0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">Pedidos Globales</div>
+          <div class="metric-value" id="st_orders">0</div>
+        </div>
       </div>
-      <div class="form-group">
-        <label>Contraseña Provisional</label>
-        <input type="text" id="u_pass" placeholder="Contraseña segura" />
-      </div>
     </div>
-    <button class="btn-primary" onclick="createUser()">Generar Acceso</button>
-  </div>
 
-  <div class="card">
-    <div class="card-title"><span style="color:#ef4444;">3.</span> Kill Switch & Suscripción</div>
-    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1rem;">
-      <div class="form-group">
-        <label>ID del Restaurante</label>
-        <input type="number" id="k_id" placeholder="Ej: 1" />
+    <div id="clients" class="section">
+      <div class="top-bar">
+        <h2>Directorio de Restaurantes</h2>
+        <button class="btn-primary" style="width:auto; margin:0;" onclick="loadRestaurants()">🔄 Recargar</button>
       </div>
-      <div class="form-group">
-        <label>Estado de la cuenta</label>
-        <select id="k_status">
-          <option value="active">🟢 ACTIVO (Al día)</option>
-          <option value="past_due">🔴 SUSPENDIDO (Falta de pago)</option>
-        </select>
+      
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Restaurante</th>
+              <th>WhatsApp Bot</th>
+              <th>Módulos Activos</th>
+              <th>Estado</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody id="clients-tbody">
+            <tr><td colspan="6" style="text-align:center; padding: 2rem; color:#888;">Cargando clientes...</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
-    <button class="btn-primary" style="background:#ef4444; color:#fff;" onclick="setKillSwitch()">Ejecutar Acción</button>
-  </div>
 
+    <div id="new" class="section">
+      <div class="top-bar"><h2>Implementar Nuevo Cliente</h2></div>
+      <div class="card">
+        <div class="form-group">
+          <label>Nombre del Restaurante</label>
+          <input type="text" id="r_name" placeholder="Ej: Pizzería Don Juan" />
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div class="form-group">
+            <label>WhatsApp (Con código de país, sin '+')</label>
+            <input type="text" id="r_wa" placeholder="Ej: 573168191483" />
+          </div>
+          <div class="form-group">
+            <label>Dirección Física</label>
+            <input type="text" id="r_addr" placeholder="Ej: Calle 123 #45-67, Bogotá" />
+          </div>
+        </div>
+
+        <label style="margin-top: 1rem; margin-bottom: 1rem; color:#fff; font-size:1rem;">⚡ Configuración de Módulos (SaaS)</label>
+        <div class="modules-grid">
+          <div class="toggle-item">
+            <div class="toggle-label"><span>🛵</span> Módulo Pedidos WA</div>
+            <label class="switch"><input type="checkbox" id="feat_orders" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <div class="toggle-label"><span>🪑</span> Módulo Mesas (QR)</div>
+            <label class="switch"><input type="checkbox" id="feat_tables" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <div class="toggle-label"><span>📅</span> Reservaciones</div>
+            <label class="switch"><input type="checkbox" id="feat_reservations" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <div class="toggle-label"><span>🧠</span> POS IA Analytics</div>
+            <label class="switch"><input type="checkbox" id="feat_pos" checked><span class="slider"></span></label>
+          </div>
+          <div class="toggle-item">
+            <div class="toggle-label"><span>💳</span> Pagos Wompi</div>
+            <label class="switch"><input type="checkbox" id="feat_wompi"><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Menú JSON Database</label>
+          <div class="ai-extract-box">
+            <input type="file" id="menu_file" accept=".pdf, .png, .jpg, .jpeg" />
+            <button onclick="parseMenuFile()" id="btn_parse" class="btn-ai">✨ Extraer con IA</button>
+          </div>
+          <textarea id="r_menu" placeholder='{"Pizzas": [{"name": "Margarita", "price": 25000}]}'></textarea>
+        </div>
+
+        <button class="btn-primary" onclick="createRestaurant()">Crear e Implementar Restaurante</button>
+      </div>
+    </div>
+
+    <div id="users" class="section">
+      <div class="top-bar"><h2>Generar Accesos de Dashboard</h2></div>
+      <div class="card">
+        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1.5rem;">Crea los usuarios administradores (dueños) para que puedan entrar a su panel.</p>
+        <div class="form-group">
+          <label>Asignar al restaurante (Debe coincidir exacto con el nombre creado)</label>
+          <input type="text" id="u_rest" placeholder="Ej: Pizzería Don Juan" />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div class="form-group">
+            <label>Correo / Usuario</label>
+            <input type="text" id="u_email" placeholder="ejemplo@restaurante.com" />
+          </div>
+          <div class="form-group">
+            <label>Contraseña Provisional</label>
+            <input type="text" id="u_pass" placeholder="Contraseña segura" />
+          </div>
+        </div>
+        <button class="btn-primary" onclick="createUser()">Crear Usuario</button>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <script>
-  function getAdminKey() {
-    const key = document.getElementById('admin_key').value;
-    if (!key) alert("⚠️ Debes poner tu Llave Maestra arriba");
-    return key;
+  let GLOBAL_KEY = '';
+
+  // ── AUTH & CARGA INICIAL ──
+  async function loginAdmin() {
+    const key = document.getElementById('key_input').value.trim();
+    if(!key) return;
+    
+    // Probar llave pidiendo stats
+    try {
+      const res = await fetch(`/api/admin/stats?admin_key=${key}`);
+      if(res.ok) {
+        GLOBAL_KEY = key;
+        document.getElementById('auth-screen').style.display = 'none';
+        document.getElementById('app-screen').style.display = 'flex';
+        
+        const data = await res.json();
+        renderStats(data);
+        loadRestaurants();
+      } else {
+        alert("❌ Llave incorrecta o acceso denegado.");
+      }
+    } catch(e) {
+      alert("Error de conexión con el servidor.");
+    }
+  }
+
+  function switchTab(id, btn) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    btn.classList.add('active');
+    
+    if(id === 'dashboard') loadStats();
+    if(id === 'clients') loadRestaurants();
+  }
+
+  // ── FETCH DATOS ──
+  async function loadStats() {
+    try {
+      const res = await fetch(`/api/admin/stats?admin_key=${GLOBAL_KEY}`);
+      if(res.ok) renderStats(await res.json());
+    } catch(e) {}
+  }
+
+  function renderStats(data) {
+    document.getElementById('st_total_rest').textContent = data.total_restaurants;
+    document.getElementById('st_active_rest').textContent = data.active_restaurants;
+    document.getElementById('st_orders').textContent = data.total_orders;
+    document.getElementById('st_mrr').textContent = '$' + data.mrr.toLocaleString('es-CO');
+  }
+
+  async function loadRestaurants() {
+    try {
+      const res = await fetch(`/api/admin/restaurants?admin_key=${GLOBAL_KEY}`);
+      if(res.ok) {
+        const data = await res.json();
+        renderTable(data.restaurants);
+      }
+    } catch(e) {}
+  }
+
+  function renderTable(rests) {
+    const tbody = document.getElementById('clients-tbody');
+    if(!rests || rests.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:2rem; color:#888;">No hay clientes registrados.</td></tr>';
+      return;
+    }
+
+    let html = '';
+    rests.forEach(r => {
+      const isActive = r.subscription_status === 'active';
+      const badgeClass = isActive ? 'badge-active' : 'badge-suspend';
+      const badgeText = isActive ? 'Activo' : 'Suspendido';
+      
+      // Renderizar tags de features
+      let featsHtml = '';
+      try {
+        const feats = typeof r.features === 'string' ? JSON.parse(r.features) : (r.features || {});
+        if(feats.module_orders) featsHtml += '<span class="module-tag">WA Pedidos</span>';
+        if(feats.module_tables) featsHtml += '<span class="module-tag">Mesas QR</span>';
+        if(feats.module_pos) featsHtml += '<span class="module-tag">POS IA</span>';
+        if(feats.wompi_active) featsHtml += '<span class="module-tag">Wompi</span>';
+        if(!featsHtml) featsHtml = '<span style="color:#666; font-size:12px;">Plan Básico</span>';
+      } catch(e) { featsHtml = '<span style="color:#666; font-size:12px;">Plan Básico</span>'; }
+
+      // Botón Kill Switch
+      const actionBtn = isActive 
+        ? `<button class="btn-sm btn-danger" onclick="toggleSubscription(${r.id}, 'past_due')">Suspender</button>`
+        : `<button class="btn-sm btn-success" onclick="toggleSubscription(${r.id}, 'active')">Activar</button>`;
+
+      html += `<tr>
+        <td style="color:#888;">#${r.id}</td>
+        <td style="font-weight:600; color:#fff;">${r.name}</td>
+        <td style="font-family:monospace;">+${r.whatsapp_number}</td>
+        <td>${featsHtml}</td>
+        <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+        <td>${actionBtn}</td>
+      </tr>`;
+    });
+    tbody.innerHTML = html;
+  }
+
+  // ── ACCIONES API ──
+  async function toggleSubscription(id, newStatus) {
+    if(!confirm(`¿Seguro que deseas cambiar el estado a ${newStatus}?`)) return;
+    try {
+      const res = await fetch('/api/admin/set-subscription', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ admin_key: GLOBAL_KEY, restaurant_id: id, status: newStatus })
+      });
+      if(res.ok) { loadRestaurants(); loadStats(); }
+      else alert("Error al actualizar estado.");
+    } catch(e) {}
   }
 
   async function parseMenuFile() {
-    const key = getAdminKey(); if(!key) return;
     const fileInput = document.getElementById('menu_file');
     const btn = document.getElementById('btn_parse');
     
@@ -189,7 +381,7 @@
     const formData = new FormData(); formData.append("file", fileInput.files[0]);
 
     try {
-      const res = await fetch(`/api/admin/parse-menu?admin_key=${key}`, { method: 'POST', body: formData });
+      const res = await fetch(`/api/admin/parse-menu?admin_key=${GLOBAL_KEY}`, { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success) {
         document.getElementById('r_menu').value = JSON.stringify(data.json_menu, null, 2);
@@ -200,8 +392,6 @@
   }
 
   async function createRestaurant() {
-    const key = getAdminKey(); if(!key) return;
-
     let menuJson;
     try {
       let rawText = document.getElementById('r_menu').value || '{}';
@@ -209,7 +399,6 @@
       menuJson = JSON.parse(rawText);
     } catch (e) { alert("❌ El texto aún tiene un error de JSON."); return; }
 
-    // Empaquetar las features seleccionadas
     const featuresConfig = {
       module_orders: document.getElementById('feat_orders').checked,
       module_tables: document.getElementById('feat_tables').checked,
@@ -222,7 +411,7 @@
       const res = await fetch('/api/admin/create-restaurant', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          admin_key: key,
+          admin_key: GLOBAL_KEY,
           name: document.getElementById('r_name').value,
           whatsapp_number: document.getElementById('r_wa').value.replace(/[+\s]/g, ''),
           address: document.getElementById('r_addr').value,
@@ -230,39 +419,38 @@
           features: featuresConfig
         })
       });
-      if (!res.ok) { const errorText = await res.text(); alert(`❌ Error del servidor (${res.status}):\n${errorText}`); return; }
-      const data = await res.json();
-      alert(data.success ? "✅ ¡Restaurante e infraestructura creados con éxito!" : "❌ Error: " + data.detail);
+      if (!res.ok) { const errorText = await res.text(); alert(`❌ Error del servidor: ${errorText}`); return; }
+      
+      alert("✅ ¡Restaurante creado con éxito!");
+      
+      // Limpiar form y recargar lista
+      document.getElementById('r_name').value = '';
+      document.getElementById('r_wa').value = '';
+      document.getElementById('r_addr').value = '';
+      document.getElementById('r_menu').value = '';
+      loadRestaurants(); loadStats();
+      
+      // Pasar a la pestaña de clientes
+      switchTab('clients', document.querySelectorAll('.nav-item')[1]);
     } catch (e) { alert("❌ Error de conexión: " + e.message); }
   }
 
   async function createUser() {
-    const key = getAdminKey(); if(!key) return;
     const res = await fetch('/api/admin/create-user', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        admin_key: key,
+        admin_key: GLOBAL_KEY,
         restaurant_name: document.getElementById('u_rest').value,
         username: document.getElementById('u_email').value,
         password: document.getElementById('u_pass').value
       })
     });
     const data = await res.json();
-    alert(data.success ? "✅ Usuario creado!" : "❌ Error: " + (data.detail || data.error));
-  }
-
-  async function setKillSwitch() {
-    const key = getAdminKey(); if(!key) return;
-    const res = await fetch('/api/admin/set-subscription', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        admin_key: key,
-        restaurant_id: parseInt(document.getElementById('k_id').value),
-        status: document.getElementById('k_status').value
-      })
-    });
-    const data = await res.json();
-    alert(data.success ? "✅ Suscripción actualizada!" : "❌ Error: " + (data.detail || data.error));
+    alert(data.success ? "✅ ¡Usuario creado con éxito!" : "❌ Error: " + (data.detail || data.error));
+    if(data.success) {
+      document.getElementById('u_email').value = '';
+      document.getElementById('u_pass').value = '';
+    }
   }
 </script>
 </body>
