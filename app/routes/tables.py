@@ -203,6 +203,18 @@ async def update_order_status(request: Request, order_id: str):
 
     if status == "factura_entregada":
         base_id = order.get("base_order_id") if order.get("base_order_id") else order_id
+        
+        # ── 1. FACTURACIÓN ELECTRÓNICA EXTERNA (Alegra/Siigo/Loggro) ──
+        if bot_num:
+            try:
+                rest = await db.db_get_restaurant_by_bot_number(bot_num)
+                if rest:
+                    # FIX: Llamamos al nuevo método emit_invoice que consolida y factura
+                    await billing.emit_invoice(base_id, rest["id"])
+            except Exception as e:
+                print(f"❌ Error en la integración contable: {e}", flush=True)
+        # ──────────────────────────────────────────────────────────────
+
         await db.db_close_table_bill(base_id)
         
         if phone:

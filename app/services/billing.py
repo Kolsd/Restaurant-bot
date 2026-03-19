@@ -379,6 +379,7 @@ async def emit_invoice(order_id: str, restaurant_id: int,
     """
     Punto de entrada principal.
     Lee la config del restaurante y emite la factura al proveedor configurado.
+    Soporta consolidación automática de Subórdenes de Mesa.
     """
     config = await get_billing_config(restaurant_id)
     if not config:
@@ -388,21 +389,41 @@ async def emit_invoice(order_id: str, restaurant_id: int,
     if provider not in ("siigo", "alegra", "loggro"):
         return {"success": False, "error": f"Proveedor '{provider}' no soportado"}
 
-    # Cargar la orden
+    # 1. Intentar cargar como pedido normal de delivery
     order = await db.db_get_order(order_id)
+    
+    # 2. Si no existe en 'orders', es un pedido de MESA. Hay que consolidar la factura completa.
     if not order:
-        # Intentar en table_orders
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM table_orders WHERE id=$1", order_id
-            )
-            if row:
-                order = db._serialize(dict(row))
-                order["order_type"] = "mesa"
-                order["total"]      = order.get("total", 0)
-    if not order:
-        return {"success": False, "error": f"Orden {order_id} no encontrada"}
+        full_bill = await db.db_get_table_bill(order_id)
+        if not full_bill or not full_bill.get("sub_orders"):
+            return {"success": False, "error": f"Orden {order_id} no encontrada"}
+
+        # Consolidar (sumar) los items de TODAS las subórdenes de la visita
+        aggregated_items = {}
+        for sub in full_bill.get("sub_orders", []):
+            items_list = sub.get("items", [])
+            if isinstance(items_list, str):
+                try:
+                    items_list = json.loads(items_list)
+                except Exception:
+                    items_list = []
+                    
+            for item in items_list:
+                name = item.get("name", "")
+                qty = int(item.get("quantity", 1))
+                price = float(item.get("price", 0)) 
+                
+                if name in aggregated_items:
+                    aggregated_items[name]["quantity"] += qty
+                else:
+                    aggregated_items[name] = {"name": name, "quantity": qty, "price": price}
+
+        order = {
+            "id": order_id,
+            "order_type": "mesa",
+            "total": full_bill.get("total", 0),
+            "items": list(aggregated_items.values())
+        }
 
     if customer_override:
         order["customer"] = customer_override

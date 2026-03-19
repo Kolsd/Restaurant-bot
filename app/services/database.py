@@ -58,6 +58,20 @@ async def init_db():
                 features JSONB NOT NULL DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW()
             );
+            
+            -- NUEVA TABLA AÑADIDA: Para registro de facturación
+            CREATE TABLE IF NOT EXISTS billing_log (
+                id            SERIAL PRIMARY KEY,
+                restaurant_id INTEGER NOT NULL,
+                order_id      TEXT    NOT NULL DEFAULT '',
+                provider      TEXT    NOT NULL DEFAULT '',
+                status        TEXT    NOT NULL DEFAULT 'pending',
+                external_id   TEXT    NOT NULL DEFAULT '',
+                error_message TEXT    NOT NULL DEFAULT '',
+                created_at    TIMESTAMP DEFAULT NOW()
+            );
+
+            );
             CREATE TABLE IF NOT EXISTS reservations (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -134,6 +148,7 @@ async def init_db():
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb",
             # V-06: añadir expires_at a sessions existentes
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '72 hours'",
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL",
         ]
         for m in migrations:
             try:

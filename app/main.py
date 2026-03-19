@@ -9,7 +9,7 @@ from app.routes.orders import router as orders_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
-from app.routes.billing import router as billing_router   # ← NUEVO
+from app.routes.billing import router as billing_router  
 
 app = FastAPI(
     title="🍽️ Mesio",
@@ -63,14 +63,13 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 async def startup():
     from app.services.database import (
         init_db, db_init_tables, db_init_waiter_alerts,
-        db_init_table_sessions, db_cleanup_expired_sessions,
-        db_init_billing,  
+        db_init_table_sessions, db_cleanup_expired_sessions
+        # Eliminamos db_init_billing porque ya está integrado en init_db()
     )
     await init_db()
     await db_init_tables()
     await db_init_waiter_alerts()
     await db_init_table_sessions()
-    await db_init_billing()           
 
     from app.services.scheduler import start_scheduler
     await start_scheduler()
@@ -85,4 +84,4 @@ app.include_router(stats_router)
 app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
-app.include_router(billing_router)   
+app.include_router(billing_router)
