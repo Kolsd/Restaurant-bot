@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from app.services import database as db
 from app.services.auth import verify_token
+from app.services import billing
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -203,7 +204,7 @@ async def update_order_status(request: Request, order_id: str):
 
     if status == "factura_entregada":
         base_id = order.get("base_order_id") if order.get("base_order_id") else order_id
-        
+        bot_num = session_data.get("bot_number") if session_data else None
         # ── 1. FACTURACIÓN ELECTRÓNICA EXTERNA (Alegra/Siigo/Loggro) ──
         if bot_num:
             try:
