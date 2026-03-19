@@ -108,8 +108,12 @@ async function loadTables() {
       tables.forEach(t => {
         const el = document.getElementById('qr-' + t.id);
         if (el && !el.hasChildNodes()) {
-          const menuUrl = window.location.origin + '/menu/' + t.id;
-          try { new QRCode(el, { text:menuUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
+          const botNum = (rest && rest.whatsapp_number) || '15556293573';
+          
+          // AQUI ELIMINAMOS EL BRANCH KEY PARA EL TEXTO DEL QR
+          const waUrl = 'https://wa.me/' + botNum + '?text=' + encodeURIComponent('Hola! Estoy en ' + t.name + ' y quiero hacer un pedido');
+          
+          try { new QRCode(el, { text:waUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
         }
       });
     }
@@ -743,10 +747,8 @@ async function loadTableOrdersSection() {
     const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
     const delivered = visible.filter(o => o.status === 'entregado');
     
-    // Agrupar facturas entregadas
     const billsMap = {};
     delivered.forEach(o => {
-        // REGEX INFALIBLE para agrupar en Facturación
         const baseId = o.id.replace(/-\d+$/, '');
         if (!billsMap[baseId]) {
             billsMap[baseId] = {
@@ -784,7 +786,6 @@ async function loadTableOrdersSection() {
       return;
     }
 
-    // Tabla de facturas primero
     if(groupedBills.length > 0){
         html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE FACTURA</div>';
         html += '<table><thead><tr><th>Mesa</th><th>Platos</th><th>Total</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
@@ -804,7 +805,6 @@ async function loadTableOrdersSection() {
         html += '</tbody></table><br/>';
     }
 
-    // Luego los activos
     if(active.length > 0){
         html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 EN COCINA / LISTOS</div>';
         html += '<table><thead><tr><th>Mesa</th><th>ID</th><th>Platos</th><th>Estado</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';

@@ -73,8 +73,9 @@ async def public_menu_context(table_id: str):
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
 
     wa_number = await get_table_wa_number(table)
-    branch_key = f" [branch={table.get('branch_id')}]" if table.get("branch_id") else ""
-    wa_msg = f"Hola! Estoy en {table['name']}{branch_key} y quiero hacer un pedido"
+    
+    # AQUI ELIMINAMOS EL [branch=1] PARA QUE EL TEXTO SEA 100% NATURAL
+    wa_msg = f"Hola! Estoy en {table['name']} y quiero hacer un pedido"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
     menu = await db.db_get_menu(wa_number) or {}
@@ -116,7 +117,6 @@ async def get_waiter_alerts(request: Request):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         try:
-            # Eliminado el filtro WHERE status='active' para evitar el Error 500 en la BD
             rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
         except Exception as e:
             print(f"Error leyendo alertas: {e}")
@@ -129,7 +129,6 @@ async def dismiss_waiter_alert(request: Request, alert_id: int):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         try:
-            # En lugar de cambiar el status, se elimina directamente
             await conn.execute("DELETE FROM waiter_alerts WHERE id = $1", alert_id)
         except Exception:
             pass
@@ -197,17 +196,13 @@ async def update_order_status(request: Request, order_id: str):
             msg = "🧾 Tu cuenta ha sido procesada. ¡Muchas gracias por visitarnos, esperamos verte pronto! 👋"
             await send_wa_msg(phone, msg, db_phone_id)
             
-            # ANIQUILACIÓN TOTAL DE LA SESIÓN Y EL HISTORIAL
             try:
                 if session_data and session_data.get("bot_number"):
                     await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", "mesero")
                 
                 async with pool.acquire() as conn:
-                    # Forzamos cierre de sesión en caso de que db_close_session falle
                     await conn.execute("UPDATE table_sessions SET closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
-                    # Borramos memoria de la IA
                     await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
-                    # Borramos carritos huérfanos
                     await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
                 print(f"🧹 CHAT, CARRITO E HISTORIAL BORRADOS DEFINITIVAMENTE PARA: {phone}")
             except Exception as e:

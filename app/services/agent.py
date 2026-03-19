@@ -40,21 +40,24 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             if table:
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                 return table
-        table_id = f"mesa-{number}"
-        table    = await db.db_get_table_by_id(table_id)
-        if table:
-            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-            return table
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM restaurant_tables WHERE number=$1 AND active=TRUE LIMIT 1",
-                int(number)
-            )
-        if row:
-            table = db._serialize(dict(row))
-            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-            return table
+        else:
+            table_id = f"mesa-{number}"
+            table    = await db.db_get_table_by_id(table_id)
+            if table:
+                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                return table
+            
+            # Fallback por si quitaron el branch_id del texto
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM restaurant_tables WHERE number=$1 AND active=TRUE LIMIT 1",
+                    int(number)
+                )
+            if row:
+                table = dict(row)
+                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                return table
     return None
 
 async def get_session_state(phone: str, bot_number: str) -> dict:
@@ -82,7 +85,9 @@ def _build_compact_menu(menu: dict, availability: dict) -> str:
             lines.append(f"{category}: {', '.join(cat_lines)}")
     return "\n".join(lines) if lines else "Sin menú."
 
-_STATIC_SYSTEM = """Eres Mesio, asistente virtual estrella de restaurantes en WhatsApp.
+_STATIC_SYSTEM = """Eres Mesio, asistente virtual estrella del restaurante indicado en [RESTAURANTE].
+REGLA DE ORO: En tu primer saludo, DEBES dar la bienvenida mencionando explícitamente el nombre del restaurante.
+
 El cliente ya vio el menú con fotos y descripciones antes de escribir.
 Usa el [MENÚ] del contexto para validar pedidos, hacer upsell y conocer precios.
 
@@ -113,7 +118,7 @@ Cliente: "Hola, estoy en Mesa 4, quiero 2 hamburguesas clasicas"
 Bot: {
   "items": [{"name": "Hamburguesa Clásica", "qty": 2}],
   "action": "order",
-  "reply": "¡Claro que sí! Ya envié las 2 Hamburguesas Clásicas a cocina. ¿Les gustaría acompañarlas con unas bebidas?"
+  "reply": "¡Hola! Bienvenidos a [RESTAURANTE]. Claro que sí, ya envié las 2 Hamburguesas Clásicas a cocina. ¿Les gustaría acompañarlas con unas bebidas?"
 }
 
 Cliente (agregando extras después): "Sí, agregame dos cocas"
@@ -229,7 +234,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 "sub_number":    sub_number,
             })
             
-            # --- BORRADO FORZOSO DEL CARRITO PARA EVITAR ACUMULACIÓN FANTASMA ---
             try:
                 await orders.clear_cart(phone, bot_number)
                 pool = await db.get_pool()
@@ -307,6 +311,21 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     table_context = await detect_table_context(user_message, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
 
+    # 1. Buscamos el nombre del restaurante para que la IA salude correctamente
+    restaurant_name = "nuestro restaurante"
+    if table_context and table_context.get("branch_id"):
+        r = await db.db_get_restaurant_by_id(table_context["branch_id"])
+        if r: restaurant_name = r.get("name", "nuestro restaurante")
+    else:
+        all_r = await db.db_get_all_restaurants()
+        if all_r:
+            for r in all_r:
+                if r.get("whatsapp_number") == bot_number:
+                    restaurant_name = r.get("name", "nuestro restaurante")
+                    break
+            else:
+                restaurant_name = all_r[0].get("name", "nuestro restaurante")
+
     if meta_phone_id and table_context:
         await db.db_touch_session_with_phone_id(user_phone, bot_number, meta_phone_id)
 
@@ -326,6 +345,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
 
     enriched = (
         f"{user_message}"
+        f"\n[RESTAURANTE: {restaurant_name}]"
         f"\n[MENÚ:\n{compact_menu}]"
         f"\n[CARRITO: {cart_text}]"
         f"{table_note}{session_note}"

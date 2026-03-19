@@ -67,7 +67,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 /* ── CHAT ── */
 .conv-item { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
-.conv-avatar { width: 40px; height: 40px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #0F6E56; flex-shrink: 0; }
+.conv-avatar { width: 40px; height: 40px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #0F6E56; flex-shrink: 0; text-transform: uppercase; }
 .conv-phone { font-size: 13px; font-weight: 600; }
 .conv-preview { font-size: 12px; color: #888; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conv-count { font-size: 11px; color: #aaa; flex-shrink: 0; }
@@ -156,6 +156,12 @@ const headers = { 'Authorization': 'Bearer ' + token };
 document.getElementById('rest-name').textContent = restaurant.name || 'Mi Restaurante';
 
 let currentChatPhone = null;
+let phoneToTableMap = {}; // Mapa para enmascarar números privados
+
+function getDisplayName(phone) {
+  if (phoneToTableMap[phone]) return phoneToTableMap[phone];
+  return "Cliente " + phone.substring(0, 4) + "***" + phone.slice(-2);
+}
 
 function doLogout() {
   localStorage.removeItem('rb_token');
@@ -224,6 +230,8 @@ async function loadAlerts() {
     const { alerts = [] } = await r.json();
 
     alerts.forEach(a => {
+      if (a.phone && a.table_name) phoneToTableMap[a.phone] = a.table_name;
+      
       if (!knownAlertIds.has(a.id)) {
         knownAlertIds.add(a.id);
         playAlertSound(a.alert_type);
@@ -287,28 +295,6 @@ async function dismissAlert(id) {
   }, 250);
 }
 
-async function reopenSessionFromAlert(phone, botNumber, alertId) {
-  if (!confirm('¿Reabrir la sesión de este cliente?')) return;
-  try {
-    const r = await fetch('/api/table-sessions/closed?hours=2', { headers });
-    const { sessions = [] } = await r.json();
-    const session = sessions.find(s => s.phone === phone && s.bot_number === botNumber);
-    if (!session) { alert('No se encontró la sesión. Puede que ya fue reabierta.'); return; }
-    const reopen = await fetch('/api/table-sessions/' + session.id + '/reopen', { method: 'POST', headers });
-    if (reopen.ok) {
-      await fetch('/api/waiter-alerts/' + alertId + '/dismiss', { method: 'POST', headers });
-      knownAlertIds.delete(alertId);
-      const card = document.getElementById('alert-' + alertId);
-      if (card) { card.style.opacity = '0'; setTimeout(() => card.remove(), 300); }
-      showToast('✅ Sesión reabierta. El cliente puede volver a escribir.', 'waiter');
-      loadAlerts();
-    } else {
-      const e = await reopen.json();
-      alert('Error: ' + (e.detail || 'No se pudo reabrir.'));
-    }
-  } catch(e) { console.error(e); alert('Error de conexión.'); }
-}
-
 // ── ORDERS ────────────────────────────────────────────────────────
 function statusLabel(s) {
   return {
@@ -326,7 +312,6 @@ function statusClass(s) {
 
 async function loadOrders() {
   try {
-    // Pedidos de mesa: listos para servir + entregados pendientes de factura
     const [r1, r2] = await Promise.all([
       fetch('/api/table-orders', { headers }),
       fetch('/api/dashboard/orders?period=today', { headers })
@@ -334,25 +319,19 @@ async function loadOrders() {
     const allTableOrders = r1.ok ? (await r1.json()).orders || [] : [];
     const regularOrders  = r2.ok ? (await r2.json()).orders || [] : [];
 
-    // Mostrar: listos para servir + entregados (esperando factura)
+    allTableOrders.forEach(o => {
+      if (o.phone && o.table_name) phoneToTableMap[o.phone] = o.table_name;
+    });
+
     const listoTable    = allTableOrders.filter(o => o.status === 'listo');
     const entregadoTable = allTableOrders.filter(o => o.status === 'entregado');
     const pendingRegular = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
 
-    // AGRUPAR facturas 100% infalible
     const billsMap = {};
     entregadoTable.forEach(o => {
-        // EXPRESIÓN REGULAR: Cortar el "-2", "-3" del ID para asegurar que agrupa. Ej: MESA-A24987-2 -> MESA-A24987
         const baseId = o.id.replace(/-\d+$/, '');
-        
         if (!billsMap[baseId]) {
-            billsMap[baseId] = {
-                id: baseId,
-                table_name: o.table_name,
-                created_at: o.created_at,
-                items: [],
-                total: 0
-            };
+            billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, items: [], total: 0 };
         }
         let parsedItems = [];
         try {
@@ -372,7 +351,6 @@ async function loadOrders() {
 
     let html = '';
 
-    // ── Listos para servir
     if (listoTable.length > 0) {
       html += '<div class="section-header sh-listo">✅ Listos para servir</div>';
       listoTable.forEach(o => {
@@ -390,7 +368,6 @@ async function loadOrders() {
       });
     }
 
-    // ── Entregados — esperando factura
     if (groupedBills.length > 0) {
       html += '<div class="section-header" style="color:#7C3AED;margin-top:12px;">🧾 Pendiente de factura</div>';
       groupedBills.forEach(b => {
@@ -402,13 +379,12 @@ async function loadOrders() {
             <div class="order-time">${(b.created_at||'').substring(11,16)}</div>
           </div>
           <div class="order-items">${itemsJoined}</div>
-          <div style="font-size:13px;font-weight:700;color:#7C3AED;margin-bottom:10px;">Total a Pagar: ${total_fmt}</div>
+          <div style="font-size:13px;font-weight:700;color:#7C3AED;margin-bottom:10px;">Total: ${total_fmt}</div>
           <div><button class="btn btn-purple" onclick="updateTableOrder('${b.id}','factura_entregada')">🧾 Factura entregada</button></div>
         </div>`;
       });
     }
 
-    // ── Pedidos WhatsApp/domicilio
     if (pendingRegular.length > 0) {
       html += '<div class="section-header sh-orders" style="margin-top:12px;color:#185FA5;">📱 Pedidos WhatsApp hoy</div>';
       pendingRegular.forEach(o => {
@@ -449,21 +425,25 @@ async function loadChats() {
       document.getElementById('chats-list').innerHTML = '<div class="empty">Sin conversaciones activas</div>';
       return;
     }
-    document.getElementById('chats-list').innerHTML = conversations.map(c => `
+    
+    document.getElementById('chats-list').innerHTML = conversations.map(c => {
+      const dName = getDisplayName(c.phone);
+      return `
       <div class="conv-item" onclick="openChat('${c.phone}')">
-        <div class="conv-avatar">${c.phone.slice(-4)}</div>
+        <div class="conv-avatar">${dName.slice(0, 2).toUpperCase()}</div>
         <div style="flex:1;min-width:0;">
-          <div class="conv-phone">${c.phone}</div>
+          <div class="conv-phone">${dName}</div>
           <div class="conv-preview">${c.preview}</div>
         </div>
         <div class="conv-count">${c.messages} msgs</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } catch(e) { console.error('loadChats:', e); }
 }
 
 async function openChat(phone) {
   currentChatPhone = phone;
-  document.getElementById('chat-phone').textContent = phone;
+  document.getElementById('chat-phone').textContent = getDisplayName(phone);
   document.getElementById('chat-modal').classList.add('open');
   document.body.style.overflow = 'hidden';
   try {
