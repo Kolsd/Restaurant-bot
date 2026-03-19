@@ -330,7 +330,6 @@
       const badgeClass = isActive ? 'badge-active' : 'badge-suspend';
       const badgeText = isActive ? 'Activo' : 'Suspendido';
       
-      // Renderizar tags de features
       let featsHtml = '';
       try {
         const feats = typeof r.features === 'string' ? JSON.parse(r.features) : (r.features || {});
@@ -341,7 +340,6 @@
         if(!featsHtml) featsHtml = '<span style="color:#666; font-size:12px;">Plan Básico</span>';
       } catch(e) { featsHtml = '<span style="color:#666; font-size:12px;">Plan Básico</span>'; }
 
-      // Botón Kill Switch
       const actionBtn = isActive 
         ? `<button class="btn-sm btn-danger" onclick="toggleSubscription(${r.id}, 'past_due')">Suspender</button>`
         : `<button class="btn-sm btn-success" onclick="toggleSubscription(${r.id}, 'active')">Activar</button>`;
@@ -423,14 +421,12 @@
       
       alert("✅ ¡Restaurante creado con éxito!");
       
-      // Limpiar form y recargar lista
       document.getElementById('r_name').value = '';
       document.getElementById('r_wa').value = '';
       document.getElementById('r_addr').value = '';
       document.getElementById('r_menu').value = '';
       loadRestaurants(); loadStats();
       
-      // Pasar a la pestaña de clientes
       switchTab('clients', document.querySelectorAll('.nav-item')[1]);
     } catch (e) { alert("❌ Error de conexión: " + e.message); }
   }
