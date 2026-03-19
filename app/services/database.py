@@ -123,7 +123,7 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_user TEXT",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active'",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT ''",
-            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb", # NUEVA MIGRACIÓN DE MÓDULOS
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb",
         ]
         for m in migrations:
             try:
@@ -144,7 +144,6 @@ async def init_db():
         except Exception:
             pass
     print("Base de datos inicializada")
-
 
 # ── RESERVACIONES ────────────────────────────────────────────────────
 async def db_add_reservation(name, date_str, time, guests, phone, bot_number: str = "", notes=""):
@@ -345,7 +344,6 @@ async def db_get_all_restaurants():
         rows = await conn.fetch("SELECT * FROM restaurants ORDER BY id ASC")
         return [_serialize(dict(r)) for r in rows]
 
-# ACTUALIZADO: db_create_restaurant AHORA RECIBE FEATURES
 async def db_create_restaurant(name: str, whatsapp_number: str, address: str, menu: dict,
                                 latitude: float = None, longitude: float = None, features: dict = None):
     if features is None: features = {}
@@ -593,6 +591,28 @@ async def db_has_pending_invoice(phone: str) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT id FROM table_orders WHERE phone=$1 AND status='entregado' LIMIT 1", phone)
         return row is not None
+
+# ¡ESTA ES LA FUNCIÓN VITAL RESTAURADA PARA EL DASHBOARD!
+async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
+    """
+    DEPRECATED: usar db_get_base_order_id + db_create_sub_order.
+    Mantenido por compatibilidad con dashboard stats.
+    Retorna la suborden más reciente activa.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT * FROM table_orders
+            WHERE phone=$1 AND table_id=$2
+              AND status NOT IN ('factura_entregada','cancelado')
+            ORDER BY created_at DESC LIMIT 1
+        """, phone, table_id)
+        if not row:
+            return None
+        d = _serialize(dict(row))
+        if isinstance(d['items'], str):
+            d['items'] = json.loads(d['items'])
+        return d
 
 # ── WAITER ALERTS ────────────────────────────────────────────────────
 async def db_init_waiter_alerts():
