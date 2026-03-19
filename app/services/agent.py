@@ -82,12 +82,11 @@ def _build_compact_menu(menu: dict, availability: dict) -> str:
             lines.append(f"{category}: {', '.join(cat_lines)}")
     return "\n".join(lines) if lines else "Sin menú."
 
-_STATIC_SYSTEM = """Eres Mesio, asistente de restaurante por WhatsApp. Español, natural, muy conciso.
-
+_STATIC_SYSTEM = """Eres Mesio, asistente virtual estrella de restaurantes en WhatsApp.
 El cliente ya vio el menú con fotos y descripciones antes de escribir.
-Usa el [MENÚ] del contexto para validar pedidos, sugerir upsell y conocer precios.
+Usa el [MENÚ] del contexto para validar pedidos, hacer upsell y conocer precios.
 
-RESPONDE SIEMPRE con JSON válido, nada más:
+RESPONDE SIEMPRE con JSON válido, nada más (sin backticks ni texto fuera del json):
 {
   "items": [{"name": "nombre exacto del plato", "qty": 1}],
   "action": "chat|order|domicilio|recoger|reserve|bill|waiter|end_session",
@@ -95,43 +94,59 @@ RESPONDE SIEMPRE con JSON válido, nada más:
   "notes": "",
   "separate_bill": false,
   "reservation": {"name":"","date":"YYYY-MM-DD","time":"HH:MM","guests":2,"notes":""},
-  "reply": "respuesta para el cliente (máx 2 oraciones)"
+  "reply": "respuesta concisa para el cliente"
 }
 
-ACCIONES:
-- chat:        respuesta sin ejecutar
-- order:       agregar items y enviar a cocina (modo mesa)
-- domicilio:   agregar items y crear orden delivery con pago
-- recoger:     agregar items y crear orden para recoger con pago
-- reserve:     crear reservación
-- bill:        cliente pide la cuenta
-- waiter:      cliente necesita al mesero
-- end_session: cliente se despide definitivamente
+=========================================
+REGLAS CRÍTICAS DE NEGOCIO Y FLUJO
+=========================================
+1. CRÍTICO PARA ÓRDENES ADICIONALES: En "items", incluye **SOLO LOS NUEVOS PLATOS** que el cliente acaba de pedir en su último mensaje. ¡NUNCA repitas los platos que ya están en el [CARRITO] o que ya se pidieron antes!
+2. Si el plato pedido NO está en [MENÚ] → action=chat, sugiere alternativas.
+3. Si el plato tiene [NO DISPONIBLE] → action=chat, disculpa y sugiere alternativas.
+4. Items + confirmación en mismo mensaje → action=order.
+5. NO uses end_session si hay pedido en cocina no entregado o factura pendiente.
 
-REGLAS DE VALIDACIÓN (usa el [MENÚ] del contexto):
-- Si el plato pedido NO está en [MENÚ] → action=chat, sugiere alternativas
-- Si el plato tiene [NO DISPONIBLE] → action=chat, disculpa y sugiere alternativas
-- Usa los nombres EXACTOS del menú en "items.name"
-- CRÍTICO PARA ÓRDENES ADICIONALES: En "items", incluye **SOLO LOS NUEVOS PLATOS** que el cliente acaba de pedir en su último mensaje. ¡NUNCA repitas los platos que ya están en el [CARRITO] o que ya se pidieron antes!
+=========================================
+EJEMPLOS DE CONVERSACIONES PERFECTAS
+=========================================
+Cliente: "Hola, estoy en Mesa 4, quiero 2 hamburguesas clasicas"
+Bot: {
+  "items": [{"name": "Hamburguesa Clásica", "qty": 2}],
+  "action": "order",
+  "reply": "¡Claro que sí! Ya envié las 2 Hamburguesas Clásicas a cocina. ¿Les gustaría acompañarlas con unas bebidas?"
+}
 
-REGLAS DE FLUJO:
-- Items + confirmación en mismo mensaje → action=order
-- Solo items sin confirmación explícita en mesa → action=order (proceso directo)
-- Saludo o pregunta → action=chat, items=[]
-- NO uses end_session si hay pedido en cocina no entregado
-- NO uses end_session si hay factura pendiente"""
+Cliente (agregando extras después): "Sí, agregame dos cocas"
+Bot: {
+  "items": [{"name": "Coca Cola", "qty": 2}],
+  "action": "order",
+  "reply": "¡Anotado! Las bebidas van en camino."
+}
+
+Cliente: "Me regalas la cuenta porfa"
+Bot: {
+  "items": [],
+  "action": "bill",
+  "notes": "Mesa 4 pide la cuenta",
+  "reply": "¡Con mucho gusto! Nuestro mesero se acerca a tu mesa con la cuenta."
+}
+"""
 
 async def build_system_prompt() -> list:
     return [{"type": "text", "text": _STATIC_SYSTEM, "cache_control": {"type": "ephemeral"}}]
 
 async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> str:
+    # Inyectamos "{" para forzar a que SIEMPRE empiece con JSON y no salude.
+    msgs = messages.copy()
+    msgs.append({"role": "assistant", "content": "{"})
+    
     response = client.messages.create(
-        model=model, max_tokens=350, system=system, messages=messages
+        model=model, max_tokens=350, system=system, messages=msgs
     )
     for block in response.content:
         text = _block_attr(block, "text")
         if text:
-            return text
+            return "{" + text
     return ""
 
 def _parse_bot_response(raw: str) -> dict | None:
@@ -211,7 +226,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 "notes":         extra_notes,
                 "total":         cart_total,
                 "status":        "recibido",
-                "base_order_id": base_order_id if sub_number > 1 else None,
+                "base_order_id": base_order_id, # GUARDADO OBLIGATORIO PARA AGRUPAR
                 "sub_number":    sub_number,
             })
             await orders.clear_cart(phone, bot_number)
@@ -317,12 +332,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     parsed = _parse_bot_response(raw)
 
     if parsed is None:
-        print(f"⚠️ Haiku JSON inválido, fallback Sonnet. Raw: {raw[:120]}", flush=True)
-        raw    = await call_claude(sys_prompt, messages, model=MODEL_PRECISE)
-        parsed = _parse_bot_response(raw)
-
-    if parsed is None:
-        print(f"❌ JSON inválido con Sonnet: {raw[:120]}", flush=True)
+        print(f"❌ JSON inválido con Haiku, forzando error. Raw: {raw[:120]}", flush=True)
         assistant_message = "Lo siento, hubo un problema. ¿Puedes repetir tu pedido?"
     else:
         assistant_message = await execute_action(parsed, user_phone, bot_number, table_context, session_state)

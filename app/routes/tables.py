@@ -109,6 +109,25 @@ async def get_qr_sheet(request: Request, table_id: str):
         f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}.page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}.logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}.tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}.instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}.qrbox{{width:200px;height:200px;margin:0 auto 16px;}}.qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}.wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}.steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}.step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body><div class='page'><div class='logo'>Mesio<span>.</span></div><div class='tname'>{table['name']}</div><div class='instr'>Escanea el QR para ver el menú<br>y pedir por WhatsApp</div><div class='qrbox' id='qrc'></div><div class='wa-badge'>Ver Menú y Pedir</div><div class='steps'><div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div><div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div><div class='step'><span class='sn'>3.</span><span>Revisa nuestro menú</span></div><div class='step'><span class='sn'>4.</span><span>Toca pedir por WhatsApp</span></div></div></div><script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});setTimeout(function(){{window.print();}},800);}};</script></body></html>"
     )
 
+# ── ALERTAS MESERO ──────────────────────────────────────────────────
+@router.get("/api/waiter-alerts")
+async def get_waiter_alerts(request: Request):
+    await require_auth(request)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM waiter_alerts WHERE status = 'active' ORDER BY created_at DESC")
+    return {"alerts": [dict(r) for r in rows]}
+
+@router.post("/api/waiter-alerts/{alert_id}/dismiss")
+async def dismiss_waiter_alert(request: Request, alert_id: int):
+    await require_auth(request)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE waiter_alerts SET status = 'resolved' WHERE id = $1", alert_id)
+    return {"success": True}
+
+# ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
+
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None):
     await require_auth(request)
@@ -136,15 +155,15 @@ async def update_order_status(request: Request, order_id: str):
     
     # Enviar WhatsApp si el pedido ha sido entregado a la mesa
     if status == "entregado" and order:
-        token = os.getenv("META_ACCESS_TOKEN", "")
-        phone_id = os.getenv("META_PHONE_NUMBER_ID", "")
+        token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+        phone_id = os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
         if token and phone_id:
             phone = order["phone"]
             msg = f"🍽️ ¡Tu pedido ha sido entregado en la {order['table_name']}!\n\nDisfruta tu comida. Cuando termines, puedes pedirme la cuenta por aquí mismo."
             try:
                 async with httpx.AsyncClient(timeout=8) as client:
                     await client.post(
-                        f"https://graph.facebook.com/v19.0/{phone_id}/messages",
+                        f"https://graph.facebook.com/v20.0/{phone_id}/messages",
                         headers={"Authorization": f"Bearer {token}"},
                         json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": msg}}
                     )
