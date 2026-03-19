@@ -55,6 +55,7 @@ async def init_db():
                 address TEXT NOT NULL DEFAULT '',
                 menu JSONB NOT NULL DEFAULT '{}'::jsonb,
                 subscription_status TEXT NOT NULL DEFAULT 'active',
+                features JSONB NOT NULL DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW()
             );
             CREATE TABLE IF NOT EXISTS reservations (
@@ -625,7 +626,12 @@ async def db_has_pending_invoice(phone: str) -> bool:
         row = await conn.fetchrow("SELECT id FROM table_orders WHERE phone=$1 AND status='entregado' LIMIT 1", phone)
         return row is not None
 
+# FUNCIÓN INTACTA PARA DASHBOARD STATS
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
+    """
+    DEPRECATED: usar db_get_base_order_id + db_create_sub_order.
+    Mantenido por compatibilidad con dashboard stats.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""

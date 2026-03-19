@@ -115,6 +115,7 @@ async def get_waiter_alerts(request: Request):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         try:
+            # Quitamos status=active para prevenir error 500
             rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
         except Exception as e:
             print(f"Error leyendo alertas: {e}")
@@ -142,15 +143,12 @@ async def force_delete_conversation(request: Request, phone: str):
         try:
             await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
             await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
-            # Opcional: Cerrar sesión de mesa si tuviera una activa
             await conn.execute("UPDATE table_sessions SET closed_at = NOW(), closed_by = 'manual_delete', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
         except Exception as e:
             print(f"Error forzando limpieza de chat: {e}")
     return {"success": True}
 
-
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
-
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None):
     await require_auth(request)

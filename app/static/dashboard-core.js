@@ -26,7 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const feats = restaurant.features || {};
 
   const toggleNav = (id, isEnabled) => {
-    // Busca el botón en el menú lateral que tenga la función showSection con el id correspondiente
     const el = document.querySelector(`[onclick*="'${id}'"]`);
     if (el) el.style.display = isEnabled ? '' : 'none';
   };
@@ -34,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Por defecto (si el restaurante es viejo y no tiene features) dejamos todo activado (retrocompatibilidad)
   toggleNav('pedidos', feats.module_orders !== false);
   toggleNav('mesas', feats.module_tables !== false);
-  toggleNav('sesiones', feats.module_tables !== false); // Sesiones viene ligado al módulo de mesas
+  toggleNav('sesiones', feats.module_tables !== false); 
   toggleNav('reservaciones', feats.module_reservations !== false);
   toggleNav('pos', feats.module_pos !== false);
 });
@@ -365,12 +364,10 @@ async function refreshAll() {
 
 // ── INIT ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // Llama a la lógica de ocultar tabs según los módulos SaaS del cliente
   loadMenu();
   refreshAll();
   setInterval(refreshAll, 10000);
 
-  // Cerrar sidebar al hacer click en nav item (mobile)
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
   });
