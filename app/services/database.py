@@ -1,9 +1,11 @@
 import os
 import asyncpg
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 _pool = None
+
+SESSION_TTL_HOURS = 72  # V-06: tokens expiran en 72 horas
 
 def _normalize_phone(number: str) -> str:
     if not number: return ""
@@ -30,8 +32,12 @@ async def get_pool():
         if not database_url:
             raise RuntimeError("DATABASE_URL no esta configurada")
         database_url = database_url.replace("postgres://", "postgresql://", 1)
+        # V-04 FIX: max_size=5 → 20 para soportar carga real
         _pool = await asyncpg.create_pool(
-            database_url, min_size=1, max_size=5,
+            database_url,
+            min_size=2,
+            max_size=20,
+            command_timeout=30,
             init=lambda conn: conn.set_type_codec(
                 'jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog'
             )
@@ -100,7 +106,8 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '72 hours'
             );
             CREATE TABLE IF NOT EXISTS carts (
                 phone TEXT NOT NULL,
@@ -124,6 +131,8 @@ async def init_db():
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active'",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT ''",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb",
+            # V-06: añadir expires_at a sessions existentes
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '72 hours'",
         ]
         for m in migrations:
             try:
@@ -144,6 +153,7 @@ async def init_db():
         except Exception:
             pass
     print("Base de datos inicializada")
+
 
 # ── RESERVACIONES ────────────────────────────────────────────────────
 async def db_add_reservation(name, date_str, time, guests, phone, bot_number: str = "", notes=""):
@@ -173,6 +183,7 @@ async def db_get_all_reservations(bot_number: str = None):
             rows = await conn.fetch("SELECT * FROM reservations ORDER BY created_at DESC")
         return [_serialize(dict(r)) for r in rows]
 
+
 # ── ORDENES DELIVERY ─────────────────────────────────────────────────
 async def db_save_order(order: dict):
     pool = await get_pool()
@@ -201,7 +212,6 @@ async def db_confirm_payment(order_id: str, transaction_id: str):
 
 async def db_get_orders_range(date_from: str, date_to: str, bot_number: str = None):
     pool = await get_pool()
-    from datetime import timedelta
     d_from = _to_date(date_from)
     d_to_inclusive = _to_date(date_to) + timedelta(days=1)
     async with pool.acquire() as conn:
@@ -225,6 +235,7 @@ async def db_get_all_orders(bot_number: str = None):
         else:
             rows = await conn.fetch("SELECT * FROM orders ORDER BY created_at DESC")
         return [_serialize(dict(r)) for r in rows]
+
 
 # ── CONVERSACIONES ───────────────────────────────────────────────────
 async def db_get_history(phone: str, bot_number: str = "") -> list:
@@ -290,6 +301,7 @@ async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
         else:
             await conn.execute("DELETE FROM conversations WHERE updated_at < NOW() - ($1 || ' days')::INTERVAL", str(days))
 
+
 # ── USUARIOS ─────────────────────────────────────────────────────────
 async def db_get_user(username: str):
     pool = await get_pool()
@@ -315,6 +327,7 @@ async def db_get_all_users():
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT username, restaurant_name, role, branch_id, parent_user FROM users")
         return [dict(r) for r in rows]
+
 
 # ── RESTAURANTES ─────────────────────────────────────────────────────
 async def db_get_restaurant_by_phone(whatsapp_number: str):
@@ -381,6 +394,7 @@ async def db_update_subscription(restaurant_id: int, new_status: str):
     async with pool.acquire() as conn:
         await conn.execute("UPDATE restaurants SET subscription_status=$2 WHERE id=$1", restaurant_id, new_status)
 
+
 # ── MENU AVAILABILITY ────────────────────────────────────────────────
 async def db_get_menu_availability():
     pool = await get_pool()
@@ -404,22 +418,40 @@ async def db_set_dish_availability(dish_name: str, available: bool):
             ON CONFLICT (dish_name) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
         """, dish_name, available)
 
-# ── SESIONES AUTH ────────────────────────────────────────────────────
+
+# ── SESIONES AUTH — V-06 FIX: expiración real ────────────────────────
 async def db_save_session(token: str, username: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("INSERT INTO sessions (token, username) VALUES ($1, $2)", token, username)
+        expires = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+        await conn.execute(
+            "INSERT INTO sessions (token, username, expires_at) VALUES ($1, $2, $3)",
+            token, username, expires
+        )
 
 async def db_get_session(token: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT username FROM sessions WHERE token=$1", token)
+        row = await conn.fetchrow(
+            "SELECT username FROM sessions WHERE token=$1 AND expires_at > NOW()",
+            token
+        )
         return row["username"] if row else None
 
 async def db_delete_session(token: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM sessions WHERE token=$1", token)
+
+async def db_cleanup_expired_sessions():
+    """Limpia tokens expirados. Llamar en startup y periódicamente."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute("DELETE FROM sessions WHERE expires_at < NOW()")
+        count = int(result.split()[-1]) if result else 0
+        if count > 0:
+            print(f"🧹 Sesiones expiradas eliminadas: {count}", flush=True)
+
 
 # ── CARRITOS ─────────────────────────────────────────────────────────
 async def db_get_cart(phone: str, bot_number: str) -> dict:
@@ -443,6 +475,7 @@ async def db_clear_cart(phone: str, bot_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+
 
 # ── MESAS ────────────────────────────────────────────────────────────
 async def db_init_tables():
@@ -592,13 +625,7 @@ async def db_has_pending_invoice(phone: str) -> bool:
         row = await conn.fetchrow("SELECT id FROM table_orders WHERE phone=$1 AND status='entregado' LIMIT 1", phone)
         return row is not None
 
-# ¡ESTA ES LA FUNCIÓN VITAL RESTAURADA PARA EL DASHBOARD!
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
-    """
-    DEPRECATED: usar db_get_base_order_id + db_create_sub_order.
-    Mantenido por compatibilidad con dashboard stats.
-    Retorna la suborden más reciente activa.
-    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
@@ -613,6 +640,7 @@ async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
         if isinstance(d['items'], str):
             d['items'] = json.loads(d['items'])
         return d
+
 
 # ── WAITER ALERTS ────────────────────────────────────────────────────
 async def db_init_waiter_alerts():
@@ -649,6 +677,7 @@ async def db_dismiss_waiter_alert(alert_id: int) -> bool:
     async with pool.acquire() as conn:
         result = await conn.execute("UPDATE waiter_alerts SET dismissed=TRUE WHERE id=$1", alert_id)
         return result == "UPDATE 1"
+
 
 # ── TABLE SESSIONS ───────────────────────────────────────────────────
 async def db_init_table_sessions():

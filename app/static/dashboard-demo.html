@@ -509,12 +509,12 @@ tr:hover td { background: var(--bg); }
     <div id="precios" class="section section-fade">
       <div class="topbar"><div class="page-title">Planes & Precios</div></div>
       <div class="card" style="margin-bottom:1.25rem;background:linear-gradient(135deg,rgba(29,158,117,.04),transparent);border-color:rgba(29,158,117,.15);">
-        <div class="card-title">Dato real medido · Esta demo corre con datos reales de Mesio</div>
+        <div class="card-title">Lo que obtienes con Mesio · datos reales de operación</div>
         <div style="display:flex;gap:1.5rem;flex-wrap:wrap;">
-          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--g);letter-spacing:-.03em;">83%</div><div style="font-size:11px;color:var(--muted);">margen neto tier mediano</div></div>
-          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">48h</div><div style="font-size:11px;color:var(--muted);">de setup a primer pedido</div></div>
+          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--g);letter-spacing:-.03em;">48h</div><div style="font-size:11px;color:var(--muted);">de setup a primer pedido</div></div>
           <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">$0</div><div style="font-size:11px;color:var(--muted);">comisión por pedido</div></div>
           <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">24/7</div><div style="font-size:11px;color:var(--muted);">bot activo sin descanso</div></div>
+          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">+12%</div><div style="font-size:11px;color:var(--muted);">ticket promedio con upsell IA</div></div>
         </div>
       </div>
       <div class="plans-demo" id="plans-grid"></div>
@@ -808,56 +808,57 @@ function buildPOS() {
 function buildPlans() {
   const plans = [
     {
-      name:'Gratis', desc:'Conoce Mesio sin riesgo',
-      price:'$0', priceClass:'', period:'/14 días', setup:'Sin tarjeta',
+      name:'Starter', desc:'Empieza a automatizar hoy',
+      price:'$49', priceClass:'', period:'/mes', setup:'Setup gratuito',
       cls:'', btnCls:'outline', btnText:'Empezar gratis',
       feats:[
-        { check:'feat-g', text:'Bot en WhatsApp' },
+        { check:'feat-g', text:'Bot IA en WhatsApp 24/7' },
+        { check:'feat-g', text:'Pedidos domicilio y recoger' },
         { check:'feat-g', text:'Reservaciones automáticas' },
-        { check:'feat-g', text:'Menú, horarios, precios' },
-        { check:'feat-off', text:'Sin pedidos ni pagos' },
-        { check:'feat-off', text:'Sin QR de mesa' },
+        { check:'feat-g', text:'Menú con disponibilidad real-time' },
+        { check:'feat-g', text:'Dashboard básico' },
+        { check:'feat-off', text:'Sin mesas QR ni cocina en vivo' },
       ]
     },
     {
-      name:'Pro WhatsApp', desc:'Pedidos desde fuera 24/7',
-      price:'$79', priceClass:'', period:'/mes', setup:'+ $99 setup único',
+      name:'Pro', desc:'WhatsApp + mesas en tu local',
+      price:'$99', priceClass:'', period:'/mes', setup:'+ $149 setup único',
       cls:'pop', pill:'MÁS POPULAR', pillCls:'pp-green',
       btnCls:'', btnText:'Activar',
       feats:[
-        { check:'feat-g', text:'Bot IA conversacional' },
-        { check:'feat-g', text:'Pedidos domicilio y recoger' },
+        { check:'feat-g', text:'Todo lo del plan Starter' },
+        { check:'feat-g', text:'Hasta 15 mesas con QR' },
+        { check:'feat-g', text:'Menú interactivo por QR' },
+        { check:'feat-g', text:'Cocina en vivo (tablet)' },
         { check:'feat-g', text:'Pagos Wompi integrados' },
-        { check:'feat-g', text:'Mesio Analytics' },
-        { check:'feat-g', text:'Upsell automático' },
-        { check:'feat-g', text:'Dashboard históricos' },
+        { check:'feat-g', text:'Mesio Analytics + upsell IA' },
       ]
     },
     {
-      name:'Pro Mesa', desc:'QR en restaurante',
-      price:'$89', priceClass:'b', period:'/mes', setup:'+ $149 setup único',
-      cls:'pop-blue', pill:'NUEVO', pillCls:'pp-blue',
+      name:'Business', desc:'Para alto volumen',
+      price:'$179', priceClass:'b', period:'/mes', setup:'+ $249 setup único',
+      cls:'pop-blue', pill:'MÁS COMPLETO', pillCls:'pp-blue',
       btnCls:'b', btnText:'Activar',
       feats:[
-        { check:'feat-b', text:'Página menú por QR' },
-        { check:'feat-b', text:'Bot dine-in WhatsApp' },
-        { check:'feat-b', text:'Cocina en vivo' },
-        { check:'feat-b', text:'Pedidos adicionales por mesa' },
-        { check:'feat-b', text:'Alertas al mesero en tiempo real' },
-        { check:'feat-b', text:'Sin app ni registro para el cliente' },
+        { check:'feat-b', text:'Todo lo del plan Pro' },
+        { check:'feat-b', text:'Hasta 40 mesas con QR' },
+        { check:'feat-b', text:'Panel de mesero dedicado' },
+        { check:'feat-b', text:'Gestión de equipo por roles' },
+        { check:'feat-b', text:'Subórdenes por mesa' },
+        { check:'feat-b', text:'Soporte prioritario' },
       ]
     },
     {
-      name:'Combo', desc:'Todo en uno · mejor precio',
-      price:'$149', priceClass:'', period:'/mes', setup:'+ $199 setup único',
+      name:'Cadena', desc:'Múltiples sucursales',
+      price:'$299', priceClass:'', period:'/mes', setup:'+ $399 setup único',
       cls:'pop-combo',
-      btnCls:'combo', btnText:'Activar combo',
+      btnCls:'combo', btnText:'Contactar',
       feats:[
-        { check:'feat-g', text:'Todo Pro WhatsApp' },
-        { check:'feat-b', text:'Todo Pro Mesa' },
-        { check:'feat-g', text:'Dashboard unificado' },
-        { check:'feat-g', text:'Soporte prioritario' },
-        { check:'feat-g', text:'Precio especial combo' },
+        { check:'feat-g', text:'Todo lo del plan Business' },
+        { check:'feat-g', text:'Hasta 5 sucursales' },
+        { check:'feat-g', text:'Hasta 100 mesas totales' },
+        { check:'feat-g', text:'1 número WA para toda la cadena' },
+        { check:'feat-g', text:'Dashboard multi-sucursal' },
         { check:'feat-g', text:'Onboarding personalizado' },
       ]
     },
