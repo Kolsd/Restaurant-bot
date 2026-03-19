@@ -326,6 +326,7 @@ function statusClass(s) {
 
 async function loadOrders() {
   try {
+    // Pedidos de mesa: listos para servir + entregados pendientes de factura
     const [r1, r2] = await Promise.all([
       fetch('/api/table-orders', { headers }),
       fetch('/api/dashboard/orders?period=today', { headers })
@@ -333,14 +334,17 @@ async function loadOrders() {
     const allTableOrders = r1.ok ? (await r1.json()).orders || [] : [];
     const regularOrders  = r2.ok ? (await r2.json()).orders || [] : [];
 
+    // Mostrar: listos para servir + entregados (esperando factura)
     const listoTable    = allTableOrders.filter(o => o.status === 'listo');
     const entregadoTable = allTableOrders.filter(o => o.status === 'entregado');
     const pendingRegular = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
 
-    // AGRUPAR facturas
+    // AGRUPAR facturas 100% infalible
     const billsMap = {};
     entregadoTable.forEach(o => {
-        const baseId = o.base_order_id || o.id;
+        // EXPRESIÓN REGULAR: Cortar el "-2", "-3" del ID para asegurar que agrupa. Ej: MESA-A24987-2 -> MESA-A24987
+        const baseId = o.id.replace(/-\d+$/, '');
+        
         if (!billsMap[baseId]) {
             billsMap[baseId] = {
                 id: baseId,
@@ -357,7 +361,7 @@ async function loadOrders() {
         } catch(e) {}
         
         billsMap[baseId].items.push(...parsedItems);
-        billsMap[baseId].total += (o.total || 0);
+        billsMap[baseId].total += (Number(o.total) || 0);
     });
     const groupedBills = Object.values(billsMap);
 
@@ -368,6 +372,7 @@ async function loadOrders() {
 
     let html = '';
 
+    // ── Listos para servir
     if (listoTable.length > 0) {
       html += '<div class="section-header sh-listo">✅ Listos para servir</div>';
       listoTable.forEach(o => {
@@ -385,6 +390,7 @@ async function loadOrders() {
       });
     }
 
+    // ── Entregados — esperando factura
     if (groupedBills.length > 0) {
       html += '<div class="section-header" style="color:#7C3AED;margin-top:12px;">🧾 Pendiente de factura</div>';
       groupedBills.forEach(b => {
@@ -402,6 +408,7 @@ async function loadOrders() {
       });
     }
 
+    // ── Pedidos WhatsApp/domicilio
     if (pendingRegular.length > 0) {
       html += '<div class="section-header sh-orders" style="margin-top:12px;color:#185FA5;">📱 Pedidos WhatsApp hoy</div>';
       pendingRegular.forEach(o => {

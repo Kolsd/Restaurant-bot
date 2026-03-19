@@ -746,7 +746,8 @@ async function loadTableOrdersSection() {
     // Agrupar facturas entregadas
     const billsMap = {};
     delivered.forEach(o => {
-        const baseId = o.base_order_id || o.id;
+        // REGEX INFALIBLE para agrupar en Facturación
+        const baseId = o.id.replace(/-\d+$/, '');
         if (!billsMap[baseId]) {
             billsMap[baseId] = {
                 id: baseId,
@@ -763,7 +764,7 @@ async function loadTableOrdersSection() {
         } catch(e) {}
         
         billsMap[baseId].items.push(...parsedItems);
-        billsMap[baseId].total += (o.total || 0);
+        billsMap[baseId].total += (Number(o.total) || 0);
     });
     const groupedBills = Object.values(billsMap);
 
