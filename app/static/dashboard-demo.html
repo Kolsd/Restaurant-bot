@@ -3,483 +3,878 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — Demo</title>
+<title>Mesio — Demo Interactivo</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;0,9..144,900;1,9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #111; }
-  .demo-banner { background: #1D9E75; color: #fff; text-align: center; padding: 10px; font-size: 13px; }
-  .demo-banner a { color: #fff; font-weight: 600; text-decoration: underline; cursor: pointer; }
-  .sidebar { width: 220px; background: #fff; border-right: 0.5px solid #e0e0d8; height: 100vh; position: fixed; top: 0; left: 0; display: flex; flex-direction: column; padding: 1.5rem 1rem; }
-  .sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 0.5px solid #e0e0d8; }
-  .logo-icon { width: 36px; height: 36px; background: #1D9E75; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 14px; flex-shrink: 0; }
-  .logo-text { font-size: 14px; font-weight: 600; }
-  .logo-sub { font-size: 11px; color: #888; }
-  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #555; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; }
-  .nav-item:hover { background: #f5f5f0; color: #111; }
-  .nav-item.active { background: #E1F5EE; color: #0F6E56; font-weight: 500; }
-  .live-badge { margin-top: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #1D9E75; background: #E1F5EE; padding: 8px 12px; border-radius: 8px; }
-  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #1D9E75; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-  .main { margin-left: 220px; padding-top: 40px; padding: 40px 2rem 1.5rem 2rem; min-height: 100vh; }
-  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
-  .page-title { font-size: 20px; font-weight: 600; }
-  .topbar-right { display: flex; align-items: center; gap: 12px; }
-  .time-badge { font-size: 12px; color: #777; }
-  .demo-badge { font-size: 11px; color: #854F0B; background: #FAEEDA; padding: 4px 10px; border-radius: 20px; }
-  .cta-btn { font-size: 12px; padding: 7px 14px; background: #1D9E75; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; }
-  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 1.5rem; }
-  .metric { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem 1.25rem; }
-  .metric-label { font-size: 12px; color: #888; margin-bottom: 6px; }
-  .metric-value { font-size: 26px; font-weight: 600; }
-  .metric-delta { font-size: 11px; margin-top: 4px; }
-  .delta-up { color: #1D9E75; }
-  .delta-warn { color: #BA7517; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
-  .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; }
-  .card-title { font-size: 13px; font-weight: 500; color: #888; margin-bottom: 1rem; }
-  .chart-wrap { position: relative; width: 100%; height: 200px; }
-  .section { display: none; }
-  .section.active { display: block; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; padding: 8px 12px; font-size: 12px; color: #888; border-bottom: 0.5px solid #e0e0d8; font-weight: 500; }
-  td { padding: 10px 12px; border-bottom: 0.5px solid #f0f0e8; vertical-align: middle; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #fafaf8; }
-  .badge { font-size: 11px; padding: 3px 8px; border-radius: 10px; font-weight: 500; }
-  .badge-paid { background: #E1F5EE; color: #0F6E56; }
-  .badge-pending { background: #FAEEDA; color: #854F0B; }
-  .badge-delivery { background: #E6F1FB; color: #185FA5; }
-  .badge-pickup { background: #EEEDFE; color: #534AB7; }
-  .badge-confirmed { background: #E1F5EE; color: #0F6E56; }
-  .conv-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid #f0f0e8; }
-  .conv-row:last-child { border-bottom: none; }
-  .conv-avatar { width: 36px; height: 36px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; color: #0F6E56; flex-shrink: 0; }
-  .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: #1D9E75; flex-shrink: 0; }
-  .legend { display: flex; gap: 16px; margin-bottom: 8px; font-size: 12px; color: #777; }
-  .legend span { display: flex; align-items: center; gap: 4px; }
-  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
-  .menu-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
-  .menu-item { border: 0.5px solid #e0e0d8; border-radius: 10px; padding: 12px; }
-  .menu-name { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
-  .menu-cat { font-size: 11px; color: #888; margin-bottom: 8px; }
-  .menu-footer { display: flex; align-items: center; justify-content: space-between; }
-  .menu-price { font-size: 14px; font-weight: 600; color: #1D9E75; }
-  .edit-btn { font-size: 11px; padding: 3px 8px; border: 1px solid #ddd; border-radius: 6px; background: none; cursor: pointer; color: #555; }
+:root {
+  --g: #1D9E75;
+  --g2: #39FF6A;
+  --blue: #378ADD;
+  --bg: #F2F2EE;
+  --sidebar: #FFFFFF;
+  --card: #FFFFFF;
+  --border: #E5E5DF;
+  --border2: #DEDEDA;
+  --text: #111111;
+  --muted: #777777;
+  --muted2: #999;
+  --ink: #0A0A0A;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Instrument Sans', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
 
-  .hamburger-btn {
-    display: none;
-    position: fixed;
-    top: 50px; left: 12px;
-    z-index: 300;
-    background: #fff;
-    border: 0.5px solid #e0e0d8;
-    border-radius: 10px;
-    width: 38px; height: 38px;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,.1);
-    flex-direction: column;
-    gap: 4px;
-    padding: 0;
-  }
-  .hamburger-btn span { display: block; width: 16px; height: 2px; background: #333; border-radius: 2px; }
-  .mobile-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.4);
-    z-index: 280;
-  }
-  .mobile-overlay.open { display: block; }
+/* ── DEMO BANNER ── */
+.demo-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  background: var(--g); color: #fff;
+  text-align: center; padding: 9px 1rem;
+  font-size: .8rem; font-weight: 500; line-height: 1.4;
+}
+.demo-banner a { color: #fff; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.demo-banner strong { font-weight: 700; }
 
-  @media (max-width: 768px) {
-    .hamburger-btn { display: flex; }
-    .sidebar {
-      position: fixed !important;
-      top: 40px !important; left: -280px !important;
-      width: 260px !important;
-      height: calc(100vh - 40px) !important;
-      flex-direction: column !important;
-      padding: 1.25rem 1rem !important;
-      z-index: 290;
-      transition: left .25s ease;
-      box-shadow: 4px 0 20px rgba(0,0,0,.15);
-      overflow-y: auto;
-      border-right: 0.5px solid #e0e0d8;
-    }
-    .sidebar.open { left: 0 !important; }
-    .sidebar-logo { margin-bottom: 1.5rem !important; padding-bottom: 1rem !important; border-bottom: 0.5px solid #e0e0d8 !important; border-right: none !important; }
-    .logo-sub { display: block !important; }
-    .nav-item {
-      width: 100% !important;
-      text-align: left !important;
-      padding: 10px 12px !important;
-      font-size: 13px !important;
-      margin-bottom: 2px !important;
-      white-space: normal !important;
-      flex-shrink: unset !important;
-    }
-    .live-badge { margin-top: auto !important; margin-left: 0 !important; }
-    .main {
-      margin-left: 0 !important;
-      margin-top: 90px !important;
-      padding: .75rem !important;
-    }
-    .topbar { flex-wrap: wrap; gap: 6px; margin-bottom: .75rem; }
-    .page-title { font-size: 15px; }
-    .topbar-right { flex-wrap: wrap; gap: 6px; }
-    .cta-btn { font-size: 11px; padding: 6px 12px; }
-    .metrics { grid-template-columns: 1fr 1fr !important; gap: 8px; }
-    .metric { padding: .75rem !important; }
-    .metric-value { font-size: 19px !important; }
-    .grid2 { grid-template-columns: 1fr !important; gap: 10px; }
-    .card { overflow-x: hidden; }
-    table { min-width: 460px; font-size: 12px; }
-    canvas { max-height: 180px !important; }
-  }
-  @media (max-width: 480px) {
-    .metrics { grid-template-columns: 1fr 1fr !important; gap: 6px; }
-    .metric-value { font-size: 17px !important; }
-    .main { padding: .5rem !important; margin-top: 95px !important; }
-    body { font-size: 13px; }
-    canvas { max-height: 150px !important; }
-  }
+/* ── LAYOUT ── */
+.layout { display: flex; height: 100vh; margin-top: 38px; }
 
-  </style>
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 230px; background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 1.5rem 1rem; flex-shrink: 0;
+  position: fixed; top: 38px; bottom: 0; left: 0;
+  overflow-y: auto;
+}
+.sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.logo-icon { width: 34px; height: 34px; background: var(--g); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.logo-text { font-size: 14px; font-weight: 600; color: var(--text); }
+.logo-rest { font-size: 11px; color: var(--muted); }
+.nav-section { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted2); padding: 0 12px; margin-bottom: 4px; margin-top: 16px; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 12px; border-radius: 8px;
+  cursor: pointer; font-size: 13px; font-weight: 500;
+  color: var(--muted); margin-bottom: 2px;
+  border: none; background: none; width: 100%;
+  text-align: left; transition: all .15s;
+}
+.nav-item:hover { background: var(--bg); color: var(--text); }
+.nav-item.active { background: #E1F5EE; color: #0F6E56; }
+.nav-item .icon { width: 16px; text-align: center; flex-shrink: 0; font-size: 14px; }
+.nav-badge { margin-left: auto; background: var(--g); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 100px; }
+.live-badge { margin-top: auto; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--g); background: #E1F5EE; padding: 9px 13px; border-radius: 10px; font-weight: 500; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--g); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── MAIN ── */
+.main { margin-left: 230px; flex: 1; padding: 2rem; overflow-y: auto; }
+.topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.75rem; }
+.page-title { font-family: 'Fraunces', serif; font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.live-chip { font-size: 11px; color: var(--g); background: #E1F5EE; padding: 4px 12px; border-radius: 100px; font-weight: 600; }
+.cta-chip { font-size: 12px; background: var(--g); color: #fff; padding: 6px 14px; border-radius: 100px; font-weight: 600; cursor: pointer; border: none; transition: opacity .2s; text-decoration: none; }
+.cta-chip:hover { opacity: .9; }
+
+/* ── SECTIONS ── */
+.section { display: none; }
+.section.active { display: block; }
+.section-fade { animation: fadeIn .25s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+/* ── METRICS ── */
+.metrics-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 1.5rem; }
+.metric {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px; padding: 1.1rem 1.25rem;
+}
+.metric-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.metric-value { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900; letter-spacing: -.03em; color: var(--text); line-height: 1; }
+.metric-value.green { color: var(--g); }
+.metric-value.amber { color: #BA7517; }
+.metric-sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
+.metric-sub.up { color: var(--g); }
+.metric-sub.warn { color: #BA7517; }
+
+/* ── CARDS ── */
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem; }
+.card-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 1rem; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+.grid3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 1.25rem; }
+
+/* ── TABLES ── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); letter-spacing: .04em; text-transform: uppercase; }
+td { padding: 10px 12px; border-bottom: 1px solid #F5F5F1; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--bg); }
+.badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600; }
+.b-paid { background: #E1F5EE; color: #0F6E56; }
+.b-pend { background: #FAEEDA; color: #854F0B; }
+.b-dom { background: #E6F1FB; color: #185FA5; }
+.b-rec { background: #EEEDFE; color: #534AB7; }
+.b-conf { background: #E1F5EE; color: #0F6E56; }
+
+/* ── CHART WRAP ── */
+.chart-wrap { position: relative; width: 100%; }
+
+/* ── CONV ROWS ── */
+.conv-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F5F5F1; }
+.conv-row:last-child { border-bottom: none; }
+.conv-av { width: 36px; height: 36px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0F6E56; flex-shrink: 0; }
+.conv-preview { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* ── MENU GRID ── */
+.menu-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+.menu-item { border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+.menu-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.menu-cat { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.menu-footer { display: flex; align-items: center; justify-content: space-between; }
+.menu-price { font-size: 13px; font-weight: 700; color: var(--g); }
+.avail-toggle { width: 32px; height: 18px; background: var(--g); border-radius: 100px; cursor: pointer; position: relative; transition: background .2s; }
+.avail-toggle::after { content:''; position: absolute; top: 2px; left: 14px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; }
+.avail-toggle.off { background: #e0e0d8; }
+.avail-toggle.off::after { left: 2px; }
+
+/* ── KITCHEN SECTION ── */
+.kitchen-board { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; }
+.kitchen-col-header { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: .75rem; padding: 6px 10px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
+.kh-recibido { color: #BA7517; background: rgba(250,199,117,.1); }
+.kh-prep { color: var(--blue); background: rgba(55,138,221,.08); }
+.kh-listo { color: var(--g); background: rgba(29,158,117,.08); }
+.k-badge { margin-left: auto; background: var(--g); color: #fff; font-size: 10px; padding: 1px 7px; border-radius: 100px; }
+.kitchen-card {
+  background: #1A1A1A; border: 1px solid #2A2A2A;
+  border-radius: 12px; padding: 1rem; margin-bottom: .75rem;
+}
+.kc-recibido { border-left: 3px solid #FAC775; }
+.kc-prep { border-left: 3px solid var(--blue); }
+.kc-listo { border-left: 3px solid var(--g); }
+.kc-table { font-size: 14px; font-weight: 700; color: #fff; }
+.kc-id { font-size: 10px; color: #555; margin-top: 1px; }
+.kc-elapsed { font-size: 10px; padding: 2px 6px; border-radius: 8px; font-weight: 600; }
+.el-ok { background: rgba(29,158,117,.15); color: var(--g); }
+.el-warn { background: rgba(250,199,117,.15); color: #FAC775; }
+.kc-items { font-size: 12px; color: #ccc; margin: 8px 0; line-height: 1.6; }
+.kc-btn { width: 100%; padding: 6px; border: none; border-radius: 7px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.btn-prep-k { background: rgba(55,138,221,.2); color: var(--blue); }
+.btn-listo-k { background: rgba(29,158,117,.2); color: var(--g); }
+.sub-tag-k { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 6px; margin-bottom: 6px; }
+.st-first { background: rgba(29,158,117,.1); color: var(--g); }
+.st-add { background: rgba(250,199,117,.1); color: #BA7517; }
+
+/* ── POS ── */
+.ai-card { background: linear-gradient(135deg, #0A1F16 0%, #0D2A1C 100%); border: 1px solid rgba(29,158,117,.25); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem; }
+.ai-label { font-size: 11px; font-weight: 600; color: var(--g); letter-spacing: .08em; text-transform: uppercase; margin-bottom: .6rem; display: flex; align-items: center; gap: 6px; }
+.ai-text { font-size: 13px; color: #D0F0E0; line-height: 1.65; }
+.ai-text strong { color: #39FF6A; }
+.upsell-row { display: flex; align-items: center; gap: 10px; padding: .75rem 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+.upsell-row:last-child { border-bottom: none; }
+.upsell-icon { font-size: 1.3rem; flex-shrink: 0; }
+.upsell-text { flex: 1; font-size: 13px; color: #D0F0E0; line-height: 1.4; }
+.upsell-badge { font-size: 11px; background: rgba(29,158,117,.15); color: var(--g); padding: 3px 8px; border-radius: 8px; font-weight: 600; white-space: nowrap; }
+.predict-row { margin-bottom: 8px; }
+.predict-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.predict-track { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.predict-fill { height: 100%; border-radius: 4px; transition: width 1s ease; }
+.pf-high { background: var(--g); }
+.pf-mid { background: #FAC775; }
+.pf-low { background: #E24B4A; }
+
+/* ── SESSIONS ── */
+.ses-row { display: flex; align-items: center; gap: 10px; padding: .85rem 0; border-bottom: 1px solid #F5F5F1; }
+.ses-row:last-child { border-bottom: none; }
+.ses-table { font-size: 13px; font-weight: 600; width: 90px; }
+.ses-phone { font-size: 11px; color: var(--muted); flex: 1; }
+.ses-time { font-size: 12px; color: var(--muted); }
+.ses-reason { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 500; }
+.sr-waiter { background: #FFF8E6; color: #7A4F00; }
+.sr-client { background: #E1F5EE; color: #0F6E56; }
+.sr-inactivity { background: #F5F5F1; color: #555; }
+
+/* ── QR MESAS ── */
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.qr-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; text-align: center; }
+.qr-table-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.qr-id { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+.qr-placeholder { width: 100px; height: 100px; background: var(--bg); border-radius: 8px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border2); }
+.qr-placeholder svg { opacity: .3; }
+.qr-actions { display: flex; gap: 6px; justify-content: center; }
+.qr-btn { font-size: 11px; padding: 5px 10px; border-radius: 6px; font-weight: 500; border: none; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
+.qr-btn-print { background: #E1F5EE; color: #0F6E56; }
+.qr-btn-del { background: #FDE8E8; color: #C0392B; }
+
+/* ── PERIOD BAR ── */
+.period-bar { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 3px; width: fit-content; margin-bottom: 1.5rem; }
+.pb-btn { font-size: 12px; padding: 5px 14px; border-radius: 7px; border: none; background: none; cursor: pointer; color: var(--muted); font-weight: 500; transition: all .15s; }
+.pb-btn.active { background: var(--g); color: #fff; font-weight: 600; }
+
+/* ── EMPTY ── */
+.empty { text-align: center; padding: 2.5rem; color: var(--muted); font-size: 13px; }
+
+/* ── MOBILE ── */
+.ham-btn {
+  display: none; position: fixed;
+  top: 50px; left: 12px; z-index: 400;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; width: 38px; height: 38px;
+  align-items: center; justify-content: center;
+  cursor: pointer; flex-direction: column; gap: 4px;
+}
+.ham-btn span { display: block; width: 16px; height: 2px; background: var(--text); border-radius: 2px; }
+.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 350; }
+.overlay.open { display: block; }
+
+@media(max-width: 768px) {
+  .ham-btn { display: flex; }
+  .sidebar { left: -260px; z-index: 390; transition: left .25s ease; }
+  .sidebar.open { left: 0; }
+  .main { margin-left: 0; padding: .75rem; margin-top: 44px; }
+  .metrics-row { grid-template-columns: repeat(2,1fr); gap: 8px; }
+  .grid2 { grid-template-columns: 1fr; }
+  .grid3 { grid-template-columns: repeat(2,1fr); }
+  .menu-grid { grid-template-columns: 1fr 1fr; }
+  .kitchen-board { grid-template-columns: 1fr; }
+  .qr-grid { grid-template-columns: repeat(2,1fr); }
+  .plans-demo { grid-template-columns: 1fr; }
+}
+@media(max-width: 480px) {
+  .metrics-row { grid-template-columns: 1fr 1fr; }
+  .grid3 { grid-template-columns: 1fr; }
+}
+
+/* ── PRICING DEMO ── */
+.plans-demo { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+.plan-demo {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 1.25rem; position: relative;
+}
+.plan-demo.pop { border-color: rgba(29,158,117,.4); }
+.plan-demo.pop-blue { border-color: rgba(55,138,221,.3); }
+.plan-demo.pop-combo { border: 1px solid rgba(29,158,117,.25); background: linear-gradient(135deg, rgba(29,158,117,.02), rgba(55,138,221,.02)); }
+.plan-pill-demo { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-size: .65rem; font-weight: 700; padding: 3px 12px; border-radius: 100px; white-space: nowrap; }
+.pp-green { background: var(--g); color: #fff; }
+.pp-blue { background: var(--blue); color: #fff; }
+.plan-demo-name { font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 700; margin-bottom: 2px; }
+.plan-demo-desc { font-size: .72rem; color: var(--muted); margin-bottom: .85rem; }
+.plan-demo-price { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900; letter-spacing: -.03em; color: var(--g); }
+.plan-demo-price.b { color: var(--blue); }
+.plan-demo-price span { font-size: .8rem; color: var(--muted); font-family: 'Instrument Sans', sans-serif; font-weight: 400; }
+.plan-demo-setup { font-size: .7rem; color: var(--muted); margin-bottom: .85rem; }
+.plan-demo-divider { height: 1px; background: var(--border); margin: .85rem 0; }
+.plan-demo-feat { font-size: .78rem; color: var(--text); margin-bottom: .4rem; display: flex; gap: 6px; }
+.feat-g { color: var(--g); font-weight: 700; }
+.feat-b { color: var(--blue); font-weight: 700; }
+.feat-off { color: #ccc; }
+.plan-demo-btn { display: block; text-align: center; padding: .7rem; border-radius: 100px; font-size: .82rem; font-weight: 600; text-decoration: none; margin-top: 1rem; background: var(--g); color: #fff; }
+.plan-demo-btn.b { background: var(--blue); }
+.plan-demo-btn.combo { background: linear-gradient(90deg, var(--g), var(--blue)); color: #000; }
+.plan-demo-btn.outline { background: none; border: 1px solid var(--border2); color: var(--text); }
+</style>
 </head>
 <body>
 
-<div class="mobile-overlay" id="mobile-overlay" onclick="closeSidebar()"></div>
-<button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()">
-  <span></span><span></span><span></span>
-</button>
-<div class="demo-banner" style="position:fixed;top:0;left:0;right:0;z-index:100;">
-  Vista demo — Así se vería el panel de tu restaurante. <a onclick="window.location.href='/login'">Activar mi cuenta</a>
+<div class="demo-banner">
+  Vista demo — Así se vería el panel de tu restaurante.
+  <strong> ¡Estas son funciones reales!</strong>
+  <a onclick="window.location.href='/'">Ver planes y precios</a>
 </div>
 
-<div class="sidebar" id="sidebar" style="top:40px;height:calc(100vh - 40px);">
-  <div class="sidebar-logo">
-    <div class="logo-icon">LT</div>
-    <div>
-      <div class="logo-text">La Trattoria Italiana</div>
-      <div class="logo-sub">Panel de control</div>
-    </div>
-  </div>
-  <button class="nav-item active" onclick="showSection('resumen',this)">&#9632; Resumen</button>
-  <button class="nav-item" onclick="showSection('pedidos',this)">&#9632; Pedidos</button>
-  <button class="nav-item" onclick="showSection('reservaciones',this)">&#9632; Reservaciones</button>
-  <button class="nav-item" onclick="showSection('conversaciones',this)">&#9632; WhatsApp</button>
-  <button class="nav-item" onclick="showSection('menu',this)">&#9632; Menú</button>
-  <div class="live-badge"><div class="live-dot"></div>Bot activo 24/7</div>
-</div>
+<div class="overlay" id="overlay" onclick="closeSidebar()"></div>
+<button class="ham-btn" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
 
-<div class="main">
-  <div class="topbar">
-    <div class="page-title" id="page-title">Resumen del día</div>
-    <div class="topbar-right">
-      <div class="demo-badge">Modo demo</div>
-      <div class="time-badge" id="current-time"></div>
-      <button class="cta-btn" onclick="window.location.href='/login'">Quiero este panel</button>
-    </div>
-  </div>
-
-  <!-- RESUMEN -->
-  <div id="resumen" class="section active">
-    <div class="metrics">
-      <div class="metric"><div class="metric-label">Ingresos hoy</div><div class="metric-value">$847,500</div><div class="metric-delta delta-up">+12% vs ayer</div></div>
-      <div class="metric"><div class="metric-label">Pedidos hoy</div><div class="metric-value">23</div><div class="metric-delta delta-up">+5 vs ayer</div></div>
-      <div class="metric"><div class="metric-label">Reservaciones</div><div class="metric-value">8</div><div class="metric-delta delta-warn">3 pendientes</div></div>
-      <div class="metric"><div class="metric-label">Conversaciones</div><div class="metric-value">14</div><div class="metric-delta delta-up">activas ahora</div></div>
-    </div>
-    <div class="grid2">
-      <div class="card" style="margin-bottom:0;">
-        <div class="card-title">Ingresos últimos 7 días</div>
-        <div class="chart-wrap"><canvas id="chart-ingresos"></canvas></div>
-      </div>
-      <div class="card" style="margin-bottom:0;">
-        <div class="card-title">Pedidos por tipo</div>
-        <div class="legend">
-          <span><span class="legend-dot" style="background:#1D9E75;"></span>Domicilio 58%</span>
-          <span><span class="legend-dot" style="background:#378ADD;"></span>Recoger 42%</span>
-        </div>
-        <div class="chart-wrap" style="height:170px;"><canvas id="chart-tipos"></canvas></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Platos más pedidos hoy</div>
-      <div class="chart-wrap" style="height:180px;"><canvas id="chart-platos"></canvas></div>
-    </div>
-  </div>
-
-  <!-- PEDIDOS -->
-  <div id="pedidos" class="section">
-    <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
-      <div class="metric"><div class="metric-label">Total hoy</div><div class="metric-value">23</div></div>
-      <div class="metric"><div class="metric-label">Pagados</div><div class="metric-value delta-up">19</div></div>
-      <div class="metric"><div class="metric-label">Pendiente pago</div><div class="metric-value delta-warn">4</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Pedidos de hoy</div>
-      <table>
-        <thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead>
-        <tbody id="orders-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- RESERVACIONES -->
-  <div id="reservaciones" class="section">
-    <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
-      <div class="metric"><div class="metric-label">Hoy</div><div class="metric-value">8</div></div>
-      <div class="metric"><div class="metric-label">Total personas</div><div class="metric-value">34</div></div>
-      <div class="metric"><div class="metric-label">Próxima</div><div class="metric-value" style="font-size:16px;">20:30 · Pedro</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Reservaciones del día</div>
-      <table>
-        <thead><tr><th>Cliente</th><th>Hora</th><th>Personas</th><th>Notas</th><th>Estado</th></tr></thead>
-        <tbody id="res-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- CONVERSACIONES -->
-  <div id="conversaciones" class="section">
-    <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
-      <div class="metric"><div class="metric-label">Chats hoy</div><div class="metric-value">47</div></div>
-      <div class="metric"><div class="metric-label">Resueltos por bot</div><div class="metric-value">43</div><div class="metric-delta delta-up">91% automatizado</div></div>
-      <div class="metric"><div class="metric-label">Escalados a humano</div><div class="metric-value delta-warn">4</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Conversaciones recientes de WhatsApp</div>
-      <div id="convs-list"></div>
-    </div>
-  </div>
-
-  <!-- MENÚ -->
-  <div id="menu" class="section">
-    <div class="card">
-      <div class="card-title">Platos del menú · 20 platos · 5 categorías</div>
-      <div class="menu-grid" id="menu-grid"></div>
-    </div>
-  </div>
-
-  <!-- MESAS DEMO -->
-  <div id="mesas" class="section">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
+<div class="layout">
+  <!-- SIDEBAR -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">LT</div>
       <div>
-        <div style="font-size:16px;font-weight:600;">Mesas del restaurante</div>
-        <div style="font-size:12px;color:#888;margin-top:2px;">QR unico por mesa — el cliente escanea y pide por WhatsApp</div>
-      </div>
-      <a href="/cocina" target="_blank" style="background:#1D9E75;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;text-decoration:none;font-weight:500;">Abrir pantalla cocina</a>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;">
-      <div id="demo-qr-1" style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;text-align:center;"></div>
-      <div id="demo-qr-2" style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;text-align:center;"></div>
-      <div id="demo-qr-3" style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;text-align:center;"></div>
-      <div style="background:#f8f8f5;border:0.5px dashed #ddd;border-radius:12px;padding:1.25rem;text-align:center;display:flex;align-items:center;justify-content:center;">
-        <div style="color:#aaa;font-size:13px;">+ Agregar mesa</div>
+        <div class="logo-text">La Trattoria</div>
+        <div class="logo-rest">Panel de control</div>
       </div>
     </div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script>
-    (function(){
-      var mesas = [{id:"demo-qr-1",name:"Mesa 1"},{id:"demo-qr-2",name:"Mesa 5"},{id:"demo-qr-3",name:"Mesa 8"}];
-      mesas.forEach(function(m){
-        var el = document.getElementById(m.id);
-        if(!el) return;
-        el.innerHTML = '<div style="font-size:22px;margin-bottom:6px;">&#128186;</div><div style="font-size:14px;font-weight:600;margin-bottom:4px;">'+m.name+'</div><div id="qr-'+m.id+'" style="width:100px;height:100px;margin:8px auto;"></div><div style="display:flex;gap:6px;justify-content:center;margin-top:10px;"><a href="#" style="font-size:10px;padding:4px 8px;background:#E1F5EE;color:#0F6E56;border-radius:6px;text-decoration:none;">Imprimir QR</a></div>';
-        setTimeout(function(){
-          try{
-            new QRCode(document.getElementById("qr-"+m.id),{text:"https://wa.me/14155238886?text=Hola!+Estoy+en+"+encodeURIComponent(m.name),width:100,height:100,colorDark:"#0D1412",colorLight:"#fff"});
-          }catch(e){}
-        }, 500);
-      });
-    })();
-    </script>
+
+    <div class="nav-section">Principal</div>
+    <button class="nav-item active" onclick="show('resumen', this)"><span class="icon">◼</span> Resumen</button>
+    <button class="nav-item" onclick="show('pedidos', this)"><span class="icon">◼</span> Pedidos</button>
+    <button class="nav-item" onclick="show('reservaciones', this)"><span class="icon">◼</span> Reservaciones</button>
+    <button class="nav-item" onclick="show('conversaciones', this)"><span class="icon">◼</span> WhatsApp</button>
+
+    <div class="nav-section">Restaurante</div>
+    <button class="nav-item" onclick="show('menu', this)"><span class="icon">◼</span> Menú</button>
+    <button class="nav-item" onclick="show('mesas', this)"><span class="icon">◼</span> Mesas & QR</button>
+    <button class="nav-item" onclick="show('cocina', this)"><span class="icon">◼</span> Cocina en vivo <span class="nav-badge">3</span></button>
+    <button class="nav-item" onclick="show('sesiones', this)"><span class="icon">◼</span> Sesiones</button>
+
+    <div class="nav-section">Inteligencia</div>
+    <button class="nav-item" onclick="show('pos', this)"><span class="icon">◼</span> Mesio Analytics</button>
+    <button class="nav-item" onclick="show('precios', this)"><span class="icon">◼</span> Planes & Precios</button>
+
+    <div class="live-badge"><div class="live-dot"></div> Bot activo 24/7</div>
   </div>
 
-  <!-- COCINA DEMO -->
-  <div id="cocina" class="section">
-    <div style="margin-bottom:1rem;">
-      <div style="font-size:16px;font-weight:600;">Dashboard de cocina en vivo</div>
-      <div style="font-size:12px;color:#888;margin-top:2px;">Vista en tiempo real de los pedidos por mesa — Recibido a Listo</div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
-      <!-- Recibidos -->
-      <div>
-        <div style="font-size:11px;font-weight:600;color:#FAC775;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem;background:rgba(250,199,117,.08);padding:6px 10px;border-radius:6px;">Recibidos (2)</div>
-        <div style="background:#1A1A1A;border:1px solid #2A2A2A;border-left:3px solid #FAC775;border-radius:10px;padding:12px;margin-bottom:8px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-            <div><div style="font-size:14px;font-weight:700;color:#fff;">Mesa 3</div><div style="font-size:11px;color:#555;">MESA-03-AB12</div></div>
-            <span style="background:rgba(29,158,117,.15);color:#1D9E75;font-size:10px;padding:2px 6px;border-radius:8px;">2m 14s</span>
-          </div>
-          <div style="font-size:12px;color:#ccc;margin-bottom:8px;">1x Spaghetti Carbonara<br>2x Margherita Clasica<br>1x Vino de la Casa</div>
-          <button style="width:100%;padding:6px;background:rgba(55,138,221,.2);color:#378ADD;border:1px solid rgba(55,138,221,.3);border-radius:7px;font-size:11px;cursor:pointer;">En preparacion</button>
-        </div>
-        <div style="background:#1A1A1A;border:1px solid #2A2A2A;border-left:3px solid #FAC775;border-radius:10px;padding:12px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-            <div><div style="font-size:14px;font-weight:700;color:#fff;">Mesa 7</div><div style="font-size:11px;color:#555;">MESA-07-CD34</div></div>
-            <span style="background:rgba(250,199,117,.15);color:#FAC775;font-size:10px;padding:2px 6px;border-radius:8px;">7m 02s</span>
-          </div>
-          <div style="font-size:12px;color:#ccc;margin-bottom:8px;">1x Lasagna della Nonna<br>1x Tiramisu Clasico</div>
-          <button style="width:100%;padding:6px;background:rgba(55,138,221,.2);color:#378ADD;border:1px solid rgba(55,138,221,.3);border-radius:7px;font-size:11px;cursor:pointer;">En preparacion</button>
-        </div>
-      </div>
-      <!-- En preparacion -->
-      <div>
-        <div style="font-size:11px;font-weight:600;color:#378ADD;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem;background:rgba(55,138,221,.08);padding:6px 10px;border-radius:6px;">En preparacion (1)</div>
-        <div style="background:#1A1A1A;border:1px solid #2A2A2A;border-left:3px solid #378ADD;border-radius:10px;padding:12px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-            <div><div style="font-size:14px;font-weight:700;color:#fff;">Mesa 1</div><div style="font-size:11px;color:#555;">MESA-01-EF56</div></div>
-            <span style="background:rgba(29,158,117,.15);color:#1D9E75;font-size:10px;padding:2px 6px;border-radius:8px;">4m 30s</span>
-          </div>
-          <div style="font-size:12px;color:#ccc;margin-bottom:8px;">2x Prosciutto e Funghi<br>1x Burrata Fresca<br>2x Limonada Italiana</div>
-          <button style="width:100%;padding:6px;background:rgba(29,158,117,.2);color:#1D9E75;border:1px solid rgba(29,158,117,.3);border-radius:7px;font-size:11px;cursor:pointer;">Listo para servir</button>
-        </div>
-      </div>
-      <!-- Listos -->
-      <div>
-        <div style="font-size:11px;font-weight:600;color:#1D9E75;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.75rem;background:rgba(29,158,117,.08);padding:6px 10px;border-radius:6px;">Listos para servir (1)</div>
-        <div style="background:#1A1A1A;border:1px solid #2A2A2A;border-left:3px solid #1D9E75;border-radius:10px;padding:12px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
-            <div><div style="font-size:14px;font-weight:700;color:#fff;">Mesa 5</div><div style="font-size:11px;color:#555;">MESA-05-GH78</div></div>
-            <span style="background:rgba(29,158,117,.15);color:#1D9E75;font-size:10px;padding:2px 6px;border-radius:8px;">8m 15s</span>
-          </div>
-          <div style="font-size:12px;color:#ccc;margin-bottom:8px;">1x Quattro Formaggi<br>1x Panna Cotta<br>1x Cafe Espresso</div>
-          <button style="width:100%;padding:6px;background:rgba(255,255,255,.06);color:#888;border:1px solid #333;border-radius:7px;font-size:11px;cursor:pointer;">Entregado</button>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- MAIN -->
+  <div class="main">
 
-</div>
+    <!-- ── RESUMEN ── -->
+    <div id="resumen" class="section active section-fade">
+      <div class="topbar">
+        <div class="page-title">Resumen</div>
+        <div class="topbar-right">
+          <div class="period-bar">
+            <button class="pb-btn active">Hoy</button>
+            <button class="pb-btn">7 días</button>
+            <button class="pb-btn">Mes</button>
+          </div>
+          <span class="live-chip">● En vivo</span>
+          <a href="/" class="cta-chip">Ver planes</a>
+        </div>
+      </div>
+      <div class="metrics-row">
+        <div class="metric">
+          <div class="metric-label">Ingresos hoy</div>
+          <div class="metric-value green">$847k</div>
+          <div class="metric-sub up">↑ +12% vs ayer</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Pedidos hoy</div>
+          <div class="metric-value">23</div>
+          <div class="metric-sub">19 pagados · 4 pendientes</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Mesas activas</div>
+          <div class="metric-value green">7</div>
+          <div class="metric-sub up">3 pedidos en cocina</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Reservaciones</div>
+          <div class="metric-value">8</div>
+          <div class="metric-sub warn">Próxima: 20:30 · Pedro</div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-title">Ingresos últimos 7 días</div>
+          <div class="chart-wrap" style="height:190px;"><canvas id="chart-revenue"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Distribución de pedidos</div>
+          <div style="display:flex;gap:1.5rem;margin-top:.5rem;margin-bottom:1rem;">
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:var(--g);"></div>Domicilio 58%</div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:var(--blue);"></div>Recoger 42%</div>
+          </div>
+          <div class="chart-wrap" style="height:150px;"><canvas id="chart-tipos"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Platos más pedidos hoy</div>
+        <div class="chart-wrap" style="height:160px;"><canvas id="chart-platos"></canvas></div>
+      </div>
+    </div>
 
+    <!-- ── PEDIDOS ── -->
+    <div id="pedidos" class="section section-fade">
+      <div class="topbar"><div class="page-title">Pedidos</div></div>
+      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
+        <div class="metric"><div class="metric-label">Total hoy</div><div class="metric-value">23</div></div>
+        <div class="metric"><div class="metric-label">Pagados</div><div class="metric-value green">19</div></div>
+        <div class="metric"><div class="metric-label">Pendiente pago</div><div class="metric-value amber">4</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Pedidos de hoy</div>
+        <table>
+          <thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead>
+          <tbody id="orders-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── RESERVACIONES ── -->
+    <div id="reservaciones" class="section section-fade">
+      <div class="topbar"><div class="page-title">Reservaciones</div></div>
+      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
+        <div class="metric"><div class="metric-label">Hoy</div><div class="metric-value">8</div></div>
+        <div class="metric"><div class="metric-label">Total personas</div><div class="metric-value">34</div></div>
+        <div class="metric"><div class="metric-label">Próxima</div><div class="metric-value" style="font-size:1.2rem;">20:30 · Pedro</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Reservaciones del día</div>
+        <table>
+          <thead><tr><th>Cliente</th><th>Hora</th><th>Personas</th><th>Notas</th><th>Estado</th></tr></thead>
+          <tbody id="res-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── CONVERSACIONES ── -->
+    <div id="conversaciones" class="section section-fade">
+      <div class="topbar"><div class="page-title">WhatsApp</div></div>
+      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
+        <div class="metric"><div class="metric-label">Chats hoy</div><div class="metric-value">47</div></div>
+        <div class="metric"><div class="metric-label">Resueltos por IA</div><div class="metric-value green">43</div><div class="metric-sub up">91% automatizado</div></div>
+        <div class="metric"><div class="metric-label">Escalados</div><div class="metric-value amber">4</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Conversaciones recientes</div>
+        <div id="convs-list"></div>
+      </div>
+    </div>
+
+    <!-- ── MENÚ ── -->
+    <div id="menu" class="section section-fade">
+      <div class="topbar"><div class="page-title">Menú</div></div>
+      <div class="card">
+        <div class="card-title">Disponibilidad en tiempo real — activa/desactiva desde aquí</div>
+        <div class="menu-grid" id="menu-grid"></div>
+      </div>
+    </div>
+
+    <!-- ── MESAS & QR ── -->
+    <div id="mesas" class="section section-fade">
+      <div class="topbar">
+        <div class="page-title">Mesas & QR</div>
+        <a href="/cocina" target="_blank" class="cta-chip">Abrir cocina →</a>
+      </div>
+      <div class="card" style="margin-bottom:1rem;background:linear-gradient(135deg,rgba(29,158,117,.04),rgba(55,138,221,.04));border-color:rgba(29,158,117,.15);">
+        <div class="card-title">Flujo del módulo Mesa</div>
+        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);">
+          <span style="background:#E1F5EE;color:#0F6E56;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">1. Cliente escanea QR</span>
+          <span>→</span>
+          <span style="background:#E6F1FB;color:#185FA5;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">2. Ve menú en el celular</span>
+          <span>→</span>
+          <span style="background:#E1F5EE;color:#0F6E56;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">3. Pide por WhatsApp</span>
+          <span>→</span>
+          <span style="background:#FAEEDA;color:#854F0B;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">4. Llega a cocina</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Mesas configuradas — QR imprimible por mesa</div>
+        <div class="qr-grid" id="qr-grid"></div>
+      </div>
+    </div>
+
+    <!-- ── COCINA EN VIVO ── -->
+    <div id="cocina" class="section section-fade">
+      <div class="topbar">
+        <div class="page-title">Cocina en vivo</div>
+        <div class="topbar-right">
+          <span style="font-size:12px;color:var(--muted);">Actualiza cada 5s en producción</span>
+          <span class="live-chip">● En vivo</span>
+        </div>
+      </div>
+      <div class="kitchen-board" id="kitchen-board"></div>
+    </div>
+
+    <!-- ── SESIONES ── -->
+    <div id="sesiones" class="section section-fade">
+      <div class="topbar"><div class="page-title">Sesiones de mesa</div></div>
+      <div class="metrics-row">
+        <div class="metric"><div class="metric-label">Sesiones hoy</div><div class="metric-value">12</div></div>
+        <div class="metric"><div class="metric-label">Por cliente</div><div class="metric-value green">9</div></div>
+        <div class="metric"><div class="metric-label">Por inactividad</div><div class="metric-value">2</div></div>
+        <div class="metric"><div class="metric-label">Por mesero</div><div class="metric-value amber">1</div><div class="metric-sub warn">revisar</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Registro de sesiones</div>
+        <div id="sessions-list"></div>
+      </div>
+    </div>
+
+    <!-- ── POS CON IA ── -->
+    <div id="pos" class="section section-fade">
+      <div class="topbar"><div class="page-title">Mesio Analytics</div></div>
+      <div class="ai-card">
+        <div class="ai-label">✦ Mesio IA — análisis del día</div>
+        <div class="ai-text">Los viernes de noche generan <strong>38% más ingresos</strong> que el promedio semanal. Con base en la tendencia de esta semana, se proyectan <strong>28–32 pedidos</strong> esta noche. Considera reforzar <strong>Carbonara y Margherita</strong> — son el 45% de la demanda.</div>
+      </div>
+      <div class="grid3">
+        <div class="metric"><div class="metric-label">Ticket promedio</div><div class="metric-value green">$37k</div><div class="metric-sub up">↑ +8% vs semana pasada</div></div>
+        <div class="metric"><div class="metric-label">Hora pico</div><div class="metric-value">20:00h</div><div class="metric-sub">según histórico</div></div>
+        <div class="metric"><div class="metric-label">Top plato</div><div class="metric-value" style="font-size:1rem;padding-top:4px;">Margherita</div><div class="metric-sub">820 pedidos históricas</div></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-title">Predicción demanda — próximas horas</div>
+          <div id="predict-bars"></div>
+        </div>
+        <div class="ai-card" style="margin-bottom:0;">
+          <div class="ai-label">✦ Sugerencias de upsell</div>
+          <div id="upsell-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PLANES ── -->
+    <div id="precios" class="section section-fade">
+      <div class="topbar"><div class="page-title">Planes & Precios</div></div>
+      <div class="card" style="margin-bottom:1.25rem;background:linear-gradient(135deg,rgba(29,158,117,.04),transparent);border-color:rgba(29,158,117,.15);">
+        <div class="card-title">Dato real medido · Esta demo corre con datos reales de Mesio</div>
+        <div style="display:flex;gap:1.5rem;flex-wrap:wrap;">
+          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--g);letter-spacing:-.03em;">83%</div><div style="font-size:11px;color:var(--muted);">margen neto tier mediano</div></div>
+          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">48h</div><div style="font-size:11px;color:var(--muted);">de setup a primer pedido</div></div>
+          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">$0</div><div style="font-size:11px;color:var(--muted);">comisión por pedido</div></div>
+          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">24/7</div><div style="font-size:11px;color:var(--muted);">bot activo sin descanso</div></div>
+        </div>
+      </div>
+      <div class="plans-demo" id="plans-grid"></div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /layout -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-const titles = { resumen:'Resumen del día', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú' };
-function showSection(id, btn) {
+// ── SIDEBAR MOBILE ──
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('open');
+}
+
+// ── NAVEGACIÓN ──
+function show(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   btn.classList.add('active');
-  document.getElementById('page-title').textContent = titles[id];
+  if (window.innerWidth <= 768) closeSidebar();
 }
 
-function updateTime() {
-  document.getElementById('current-time').textContent = new Date().toLocaleString('es-MX',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+// ── CHARTS ──
+window.addEventListener('DOMContentLoaded', () => {
+  // Revenue
+  new Chart(document.getElementById('chart-revenue'), {
+    type: 'bar',
+    data: {
+      labels: ['Lun','Mar','Mié','Jue','Vie','Sáb','Hoy'],
+      datasets: [{
+        data: [620000,540000,710000,480000,890000,1050000,847500],
+        backgroundColor: '#1D9E75', borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: v => '$' + Math.round(v/1000) + 'k', font: { size: 10 } }, grid: { color: '#F0F0EA' } },
+        x: { ticks: { font: { size: 10 } }, grid: { display: false } }
+      }
+    }
+  });
+
+  // Tipos
+  new Chart(document.getElementById('chart-tipos'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Domicilio', 'Recoger'],
+      datasets: [{ data: [58, 42], backgroundColor: ['#1D9E75', '#378ADD'], borderWidth: 0 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, cutout: '65%' }
+  });
+
+  // Platos
+  new Chart(document.getElementById('chart-platos'), {
+    type: 'bar',
+    data: {
+      labels: ['Margherita', 'Carbonara', 'Prosciutto', 'Lasagna', 'Tiramisú'],
+      datasets: [{ data: [18,14,12,11,9], backgroundColor: ['#1D9E75','#5DCAA5','#9FE1CB','#378ADD','#85B7EB'], borderRadius: 4 }]
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 10 } }, grid: { color: '#F0F0EA' } },
+        y: { ticks: { font: { size: 10 } }, grid: { display: false } }
+      }
+    }
+  });
+
+  buildOrders();
+  buildReservations();
+  buildConvs();
+  buildMenu();
+  buildMesas();
+  buildKitchen();
+  buildSessions();
+  buildPOS();
+  buildPlans();
+});
+
+// ── PEDIDOS ──
+function buildOrders() {
+  const orders = [
+    { id:'ORD-A3F1', items:'2x Carbonara, 1x Margherita', type:'domicilio', paid:true, total:'$565k', time:'16:42' },
+    { id:'ORD-B7C2', items:'1x Lasagna, 2x Tiramisú', type:'recoger', paid:true, total:'$440k', time:'16:28' },
+    { id:'ORD-C2D3', items:'3x Margherita, 1x Vino', type:'domicilio', paid:false, total:'$620k', time:'16:15' },
+    { id:'ORD-D9E4', items:'1x Quattro Formaggi', type:'recoger', paid:true, total:'$240k', time:'15:58' },
+    { id:'ORD-E4F5', items:'2x Fettuccine, 1x Panna Cotta', type:'domicilio', paid:true, total:'$455k', time:'15:40' },
+    { id:'ORD-F1G6', items:'1x Diavola, 2x Limonada', type:'recoger', paid:false, total:'$345k', time:'15:22' },
+  ];
+  document.getElementById('orders-tbody').innerHTML = orders.map(o => `<tr>
+    <td style="font-size:12px;color:var(--muted);font-family:monospace;">${o.id}</td>
+    <td style="font-size:12px;">${o.items}</td>
+    <td><span class="badge ${o.type==='domicilio'?'b-dom':'b-rec'}">${o.type}</span></td>
+    <td><span class="badge ${o.paid?'b-paid':'b-pend'}">${o.paid?'pagado':'pendiente'}</span></td>
+    <td style="font-weight:600;">${o.total}</td>
+    <td style="color:var(--muted);">${o.time}</td>
+  </tr>`).join('');
 }
-updateTime(); setInterval(updateTime, 60000);
 
-const orders = [
-  {id:'ORD-A3F1', items:'2x Carbonara, 1x Margherita', type:'domicilio', paid:true, total:'$565,000', time:'16:42'},
-  {id:'ORD-B7C2', items:'1x Lasagna, 2x Tiramisú', type:'recoger', paid:true, total:'$440,000', time:'16:28'},
-  {id:'ORD-C2D3', items:'3x Margherita, 1x Vino', type:'domicilio', paid:false, total:'$620,000', time:'16:15'},
-  {id:'ORD-D9E4', items:'1x Quattro Formaggi, 1x Burrata', type:'recoger', paid:true, total:'$450,000', time:'15:58'},
-  {id:'ORD-E4F5', items:'2x Fettuccine, 1x Panna Cotta', type:'domicilio', paid:true, total:'$455,000', time:'15:40'},
-  {id:'ORD-F1G6', items:'1x Diavola, 2x Limonada', type:'recoger', paid:false, total:'$345,000', time:'15:22'},
-];
-const ot = document.getElementById('orders-tbody');
-orders.forEach(o => {
-  ot.innerHTML += `<tr>
-    <td style="font-weight:500;">${o.id}</td><td style="color:#555;">${o.items}</td>
-    <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type}</span></td>
-    <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
-    <td style="font-weight:500;">${o.total}</td><td style="color:#888;">${o.time}</td>
-  </tr>`;
-});
+// ── RESERVACIONES ──
+function buildReservations() {
+  const res = [
+    { name:'Carlos Mendoza', time:'13:00', guests:4, notes:'Cumpleaños' },
+    { name:'Ana Rodríguez', time:'14:30', guests:2, notes:'Aniversario' },
+    { name:'Grupo Empresarial', time:'15:00', guests:8, notes:'Reunión' },
+    { name:'Laura Jiménez', time:'19:00', guests:3, notes:'—' },
+    { name:'Pedro Sánchez', time:'20:30', guests:6, notes:'Graduación' },
+  ];
+  document.getElementById('res-tbody').innerHTML = res.map(r => `<tr>
+    <td style="font-weight:600;">${r.name}</td>
+    <td>${r.time}</td><td>${r.guests}</td>
+    <td style="color:var(--muted);">${r.notes}</td>
+    <td><span class="badge b-conf">confirmada</span></td>
+  </tr>`).join('');
+}
 
-const reservations = [
-  {name:'Carlos Mendoza', time:'13:00', guests:4, notes:'Cumpleaños'},
-  {name:'Ana Rodríguez', time:'14:30', guests:2, notes:'Aniversario'},
-  {name:'Grupo Empresarial', time:'15:00', guests:8, notes:'Reunión'},
-  {name:'Laura Jiménez', time:'19:00', guests:3, notes:''},
-  {name:'Pedro Sánchez', time:'20:30', guests:6, notes:'Graduación'},
-  {name:'María López', time:'21:00', guests:2, notes:''},
-  {name:'Roberto Díaz', time:'21:30', guests:5, notes:'Cumpleaños'},
-];
-const rt = document.getElementById('res-tbody');
-reservations.forEach(r => {
-  rt.innerHTML += `<tr>
-    <td style="font-weight:500;">${r.name}</td><td>${r.time}</td><td>${r.guests}</td>
-    <td style="color:#888;">${r.notes||'—'}</td>
-    <td><span class="badge badge-confirmed">confirmada</span></td>
-  </tr>`;
-});
-
-const convs = [
-  {name:'Juan P.', phone:'+57 312 xxx xxxx', preview:'Quiero pedir 2 pizzas para domicilio', time:'hace 3 min', unread:true},
-  {name:'Sofía M.', phone:'+57 315 xxx xxxx', preview:'¿Tienen opciones vegetarianas?', time:'hace 12 min', unread:true},
-  {name:'Carlos R.', phone:'+57 320 xxx xxxx', preview:'Perfecto, confirmo la reservación', time:'hace 28 min', unread:false},
-  {name:'Andrea L.', phone:'+57 311 xxx xxxx', preview:'¿A qué hora cierran los viernes?', time:'hace 45 min', unread:false},
-  {name:'Miguel T.', phone:'+57 318 xxx xxxx', preview:'Gracias por la atención', time:'hace 1h', unread:false},
-];
-const cl = document.getElementById('convs-list');
-convs.forEach(c => {
-  const initials = c.name.split(' ').map(w=>w[0]).join('');
-  cl.innerHTML += `<div class="conv-row">
-    <div class="conv-avatar">${initials}</div>
-    <div style="flex:1;min-width:0;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:13px;font-weight:500;">${c.name}</span>
-        <span style="font-size:11px;color:#aaa;">${c.phone}</span>
+// ── CONVERSACIONES ──
+function buildConvs() {
+  const convs = [
+    { init:'JA', name:'Juan Aparicio', msg:'Quiero pedir 2 Margheritas para domicilio', time:'hace 3 min' },
+    { init:'SM', name:'Sofía Muñoz', msg:'¿Tienen opciones vegetarianas sin gluten?', time:'hace 12 min' },
+    { init:'CR', name:'Carlos R.', msg:'Perfecto, confirmo la reservación para el viernes', time:'hace 28 min' },
+    { init:'AL', name:'Andrea L.', msg:'¿A qué hora cierran los sábados?', time:'hace 45 min' },
+    { init:'MT', name:'Miguel T.', msg:'Muchas gracias por la atención tan rápida', time:'hace 1h' },
+  ];
+  document.getElementById('convs-list').innerHTML = convs.map(c => `
+    <div class="conv-row">
+      <div class="conv-av">${c.init}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:600;">${c.name}</div>
+        <div class="conv-preview">${c.msg}</div>
       </div>
-      <div style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px;">${c.preview}</div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-      <span style="font-size:11px;color:#aaa;">${c.time}</span>
-      ${c.unread?'<div class="unread-dot"></div>':''}
-    </div>
-  </div>`;
-});
-
-const menuItems = [
-  {name:'Margherita Clásica',cat:'Pizzas',price:'$175',orders:820},
-  {name:'Spaghetti Carbonara',cat:'Pastas',price:'$195',orders:680},
-  {name:'Prosciutto e Funghi',cat:'Pizzas',price:'$225',orders:645},
-  {name:'Lasagna della Nonna',cat:'Pastas',price:'$220',orders:590},
-  {name:'Tiramisú Clásico',cat:'Postres',price:'$110',orders:560},
-  {name:'Burrata Fresca',cat:'Entradas',price:'$210',orders:520},
-  {name:'Quattro Formaggi',cat:'Pizzas',price:'$240',orders:480},
-  {name:'Fettuccine Alfredo',cat:'Pastas',price:'$180',orders:420},
-  {name:'Gelato Artesanal',cat:'Postres',price:'$85',orders:410},
-];
-const mg = document.getElementById('menu-grid');
-menuItems.forEach(m => {
-  mg.innerHTML += `<div class="menu-item">
-    <div class="menu-name">${m.name}</div><div class="menu-cat">${m.cat} · ${m.orders} pedidos</div>
-    <div class="menu-footer"><div class="menu-price">${m.price} MXN</div><button class="edit-btn">Editar</button></div>
-  </div>`;
-});
-
-new Chart(document.getElementById('chart-ingresos'), {
-  type:'bar',
-  data:{ labels:['Lun','Mar','Mié','Jue','Vie','Sáb','Hoy'], datasets:[{data:[620000,540000,710000,480000,890000,1050000,847500],backgroundColor:'#1D9E75',borderRadius:4}] },
-  options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>'$'+Math.round(v/1000)+'k',font:{size:11}},grid:{color:'#f0f0e8'}}, x:{ticks:{font:{size:11}},grid:{display:false}} } }
-});
-new Chart(document.getElementById('chart-tipos'), {
-  type:'doughnut',
-  data:{ labels:['Domicilio','Recoger'], datasets:[{data:[58,42],backgroundColor:['#1D9E75','#378ADD'],borderWidth:0}] },
-  options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'65%' }
-});
-new Chart(document.getElementById('chart-platos'), {
-  type:'bar',
-  data:{ labels:['Margherita','Carbonara','Prosciutto','Lasagna','Tiramisú'], datasets:[{data:[18,14,12,11,9],backgroundColor:['#1D9E75','#5DCAA5','#9FE1CB','#378ADD','#85B7EB'],borderRadius:4}] },
-  options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{ticks:{font:{size:11}},grid:{color:'#f0f0e8'}}, x:{ticks:{font:{size:11}},grid:{display:false}} } }
-});
-
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('mobile-overlay').classList.toggle('open');
+      <div style="font-size:11px;color:var(--muted);white-space:nowrap;">${c.time}</div>
+    </div>`).join('');
 }
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('mobile-overlay').classList.remove('open');
+
+// ── MENÚ ──
+function buildMenu() {
+  const items = [
+    { name:'Margherita Clásica', cat:'Pizzas', price:'$175k', on:true },
+    { name:'Spaghetti Carbonara', cat:'Pastas', price:'$195k', on:true },
+    { name:'Prosciutto e Funghi', cat:'Pizzas', price:'$225k', on:true },
+    { name:'Lasagna della Nonna', cat:'Pastas', price:'$220k', on:true },
+    { name:'Tiramisú Clásico', cat:'Postres', price:'$110k', on:true },
+    { name:'Burrata Fresca', cat:'Entradas', price:'$210k', on:false },
+    { name:'Quattro Formaggi', cat:'Pizzas', price:'$240k', on:true },
+    { name:'Gelato Artesanal', cat:'Postres', price:'$85k', on:true },
+    { name:'Vino de la Casa', cat:'Bebidas', price:'$95k', on:true },
+  ];
+  document.getElementById('menu-grid').innerHTML = items.map(m => `
+    <div class="menu-item" style="${m.on?'':'opacity:.55;'}">
+      <div class="menu-name">${m.name}</div>
+      <div class="menu-cat">${m.cat}</div>
+      <div class="menu-footer">
+        <div class="menu-price">${m.price}</div>
+        <div class="avail-toggle ${m.on?'':'off'}" onclick="this.classList.toggle('off');this.closest('.menu-item').style.opacity=this.classList.contains('off')?'.55':'1'"></div>
+      </div>
+    </div>`).join('');
 }
-document.querySelectorAll('.nav-item').forEach(btn => {
-  btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
-});
+
+// ── MESAS & QR ──
+function buildMesas() {
+  const mesas = [
+    { name:'Mesa 1', id:'mesa-1' }, { name:'Mesa 2', id:'mesa-2' },
+    { name:'Mesa 3', id:'mesa-3' }, { name:'Mesa 4', id:'mesa-4' },
+    { name:'Mesa 5', id:'mesa-5' }, { name:'Mesa 6', id:'mesa-6' },
+  ];
+  document.getElementById('qr-grid').innerHTML = mesas.map(m => `
+    <div class="qr-card">
+      <div class="qr-table-name">${m.name}</div>
+      <div class="qr-id">${m.id}</div>
+      <div class="qr-placeholder">
+        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
+          <rect x="18" y="14" width="3" height="3"/><rect x="14" y="18" width="3" height="3"/>
+          <rect x="18" y="18" width="3" height="3"/>
+        </svg>
+      </div>
+      <div class="qr-actions">
+        <a class="qr-btn qr-btn-print" href="#">🖨️ Imprimir</a>
+      </div>
+    </div>`).join('');
+}
+
+// ── COCINA EN VIVO ──
+function buildKitchen() {
+  const orders = [
+    { id:'MESA-A24987', table:'Mesa 3', status:'recibido', sub:1, base:null, items:'1x Carbonara · 2x Margherita · 1x Vino', elapsed:'2m 14s', cls:'ok' },
+    { id:'MESA-A24987-2', table:'Mesa 3', status:'recibido', sub:2, base:'MESA-A24987', items:'1x Agua Mineral', elapsed:'0m 45s', cls:'ok' },
+    { id:'MESA-B31CC2', table:'Mesa 7', status:'en_preparacion', sub:1, base:null, items:'1x Lasagna · 1x Tiramisú', elapsed:'7m 02s', cls:'warn' },
+    { id:'MESA-C45DE3', table:'Mesa 1', status:'listo', sub:1, base:null, items:'2x Prosciutto · 1x Burrata · 2x Limonada', elapsed:'4m 30s', cls:'ok' },
+  ];
+
+  const groups = { recibido:[], en_preparacion:[], listo:[] };
+  orders.forEach(o => { if(groups[o.status]) groups[o.status].push(o); });
+
+  const cols = [
+    { status:'recibido', label:'🔔 Recibidos', hcls:'kh-recibido' },
+    { status:'en_preparacion', label:'👨‍🍳 En preparación', hcls:'kh-prep' },
+    { status:'listo', label:'✅ Listos', hcls:'kh-listo' },
+  ];
+
+  document.getElementById('kitchen-board').innerHTML = cols.map(col => {
+    const items = groups[col.status];
+    const cards = items.map(o => {
+      const isAdd = o.base !== null && o.sub > 1;
+      const subTag = isAdd
+        ? `<div class="sub-tag-k st-add">➕ Adicional #${o.sub}</div>`
+        : `<div class="sub-tag-k st-first">🆕 Pedido inicial</div>`;
+      const statusCls = { recibido:'kc-recibido', en_preparacion:'kc-prep', listo:'kc-listo' }[o.status];
+      const btn = o.status === 'recibido'
+        ? `<button class="kc-btn btn-prep-k">👨‍🍳 En preparación</button>`
+        : o.status === 'en_preparacion'
+        ? `<button class="kc-btn btn-listo-k">✅ Listo para servir</button>`
+        : `<div style="text-align:center;font-size:11px;color:var(--g);padding:6px;background:rgba(29,158,117,.08);border-radius:7px;">🛎️ Esperando al mesero</div>`;
+      return `<div class="kitchen-card ${statusCls}">
+        ${subTag}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+          <div><div class="kc-table">${o.table}</div><div class="kc-id">${o.id}</div></div>
+          <span class="kc-elapsed el-${o.cls}">${o.elapsed}</span>
+        </div>
+        <div class="kc-items">${o.items}</div>
+        ${btn}
+      </div>`;
+    }).join('') || `<div style="text-align:center;padding:1.5rem;color:#555;font-size:12px;">Sin pedidos</div>`;
+
+    return `<div>
+      <div class="kitchen-col-header ${col.hcls}">${col.label}<span class="k-badge">${items.length}</span></div>
+      ${cards}
+    </div>`;
+  }).join('');
+}
+
+// ── SESIONES ──
+function buildSessions() {
+  const sessions = [
+    { table:'Mesa 5', phone:'573XX XXX 8876', start:'13:42', end:'15:10', dur:'1h 28m', reason:'client', label:'Cliente', cls:'sr-client' },
+    { table:'Mesa 2', phone:'573XX XXX 4421', start:'14:00', end:'14:48', dur:'48m', reason:'waiter', label:'Mesero ⚠️', cls:'sr-waiter' },
+    { table:'Mesa 8', phone:'573XX XXX 9934', start:'12:30', end:'13:15', dur:'45m', reason:'inactivity', label:'Inactividad', cls:'sr-inactivity' },
+    { table:'Mesa 1', phone:'573XX XXX 6612', start:'11:00', end:'12:44', dur:'1h 44m', reason:'client', label:'Cliente', cls:'sr-client' },
+    { table:'Mesa 4', phone:'573XX XXX 3308', start:'10:15', end:'11:52', dur:'1h 37m', reason:'client', label:'Cliente', cls:'sr-client' },
+  ];
+  document.getElementById('sessions-list').innerHTML = sessions.map(s => `
+    <div class="ses-row">
+      <div class="ses-table">${s.table}</div>
+      <div class="ses-phone">${s.phone}</div>
+      <div class="ses-time">${s.start} → ${s.end}</div>
+      <div class="ses-time">${s.dur}</div>
+      <div class="ses-reason ${s.cls}">${s.label}</div>
+    </div>`).join('');
+}
+
+// ── POS ──
+function buildPOS() {
+  const predicts = [
+    { hour:'21:00h', label:'Alta demanda', pct:85, cls:'pf-high', count:'~26 pedidos esperados' },
+    { hour:'22:00h', label:'Demanda media', pct:55, cls:'pf-mid', count:'~17 pedidos esperados' },
+    { hour:'23:00h', label:'Baja demanda', pct:25, cls:'pf-low', count:'~8 pedidos esperados' },
+  ];
+  document.getElementById('predict-bars').innerHTML = predicts.map(p => `
+    <div class="predict-row">
+      <div class="predict-label"><span>${p.hour} — ${p.label}</span><span style="color:var(--muted);font-size:11px;">${p.count}</span></div>
+      <div class="predict-track"><div class="predict-fill ${p.cls}" style="width:${p.pct}%"></div></div>
+    </div>`).join('');
+
+  const upsells = [
+    { icon:'🍷', text:'Sugerir copa de vino con pastas — ticket +$95k promedio', gain:'+$95k/pedido' },
+    { icon:'🍮', text:'Ofrecer Tiramisú después del plato principal — conversión 34%', gain:'+$110k/mesa' },
+    { icon:'🥗', text:'Burrata al inicio de la visita — +15min permanencia', gain:'+$210k/mesa' },
+  ];
+  document.getElementById('upsell-list').innerHTML = upsells.map(u => `
+    <div class="upsell-row">
+      <div class="upsell-icon">${u.icon}</div>
+      <div class="upsell-text">${u.text}</div>
+      <div class="upsell-badge">${u.gain}</div>
+    </div>`).join('');
+}
+
+// ── PLANES ──
+function buildPlans() {
+  const plans = [
+    {
+      name:'Gratis', desc:'Conoce Mesio sin riesgo',
+      price:'$0', priceClass:'', period:'/14 días', setup:'Sin tarjeta',
+      cls:'', btnCls:'outline', btnText:'Empezar gratis',
+      feats:[
+        { check:'feat-g', text:'Bot en WhatsApp' },
+        { check:'feat-g', text:'Reservaciones automáticas' },
+        { check:'feat-g', text:'Menú, horarios, precios' },
+        { check:'feat-off', text:'Sin pedidos ni pagos' },
+        { check:'feat-off', text:'Sin QR de mesa' },
+      ]
+    },
+    {
+      name:'Pro WhatsApp', desc:'Pedidos desde fuera 24/7',
+      price:'$79', priceClass:'', period:'/mes', setup:'+ $99 setup único',
+      cls:'pop', pill:'MÁS POPULAR', pillCls:'pp-green',
+      btnCls:'', btnText:'Activar',
+      feats:[
+        { check:'feat-g', text:'Bot IA conversacional' },
+        { check:'feat-g', text:'Pedidos domicilio y recoger' },
+        { check:'feat-g', text:'Pagos Wompi integrados' },
+        { check:'feat-g', text:'Mesio Analytics' },
+        { check:'feat-g', text:'Upsell automático' },
+        { check:'feat-g', text:'Dashboard históricos' },
+      ]
+    },
+    {
+      name:'Pro Mesa', desc:'QR en restaurante',
+      price:'$89', priceClass:'b', period:'/mes', setup:'+ $149 setup único',
+      cls:'pop-blue', pill:'NUEVO', pillCls:'pp-blue',
+      btnCls:'b', btnText:'Activar',
+      feats:[
+        { check:'feat-b', text:'Página menú por QR' },
+        { check:'feat-b', text:'Bot dine-in WhatsApp' },
+        { check:'feat-b', text:'Cocina en vivo' },
+        { check:'feat-b', text:'Pedidos adicionales por mesa' },
+        { check:'feat-b', text:'Alertas al mesero en tiempo real' },
+        { check:'feat-b', text:'Sin app ni registro para el cliente' },
+      ]
+    },
+    {
+      name:'Combo', desc:'Todo en uno · mejor precio',
+      price:'$149', priceClass:'', period:'/mes', setup:'+ $199 setup único',
+      cls:'pop-combo',
+      btnCls:'combo', btnText:'Activar combo',
+      feats:[
+        { check:'feat-g', text:'Todo Pro WhatsApp' },
+        { check:'feat-b', text:'Todo Pro Mesa' },
+        { check:'feat-g', text:'Dashboard unificado' },
+        { check:'feat-g', text:'Soporte prioritario' },
+        { check:'feat-g', text:'Precio especial combo' },
+        { check:'feat-g', text:'Onboarding personalizado' },
+      ]
+    },
+  ];
+
+  document.getElementById('plans-grid').innerHTML = plans.map(p => `
+    <div class="plan-demo ${p.cls}">
+      ${p.pill ? `<div class="plan-pill-demo ${p.pillCls}">${p.pill}</div>` : ''}
+      <div class="plan-demo-name">${p.name}</div>
+      <div class="plan-demo-desc">${p.desc}</div>
+      <div class="plan-demo-price ${p.priceClass}">${p.price}<span>${p.period}</span></div>
+      <div class="plan-demo-setup">${p.setup}</div>
+      <div class="plan-demo-divider"></div>
+      ${p.feats.map(f => `<div class="plan-demo-feat"><span class="${f.check}">+</span> ${f.text}</div>`).join('')}
+      <a href="/#contacto" class="plan-demo-btn ${p.btnCls}">${p.btnText}</a>
+    </div>`).join('');
+}
 </script>
 </body>
 </html>
