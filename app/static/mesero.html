@@ -328,16 +328,17 @@ async function loadOrders() {
       if (o.phone && o.table_name) phoneToTableMap[o.phone] = o.table_name;
     });
 
-    const listoTable    = allTableOrders.filter(o => o.status === 'listo');
-    const entregadoTable = allTableOrders.filter(o => o.status === 'entregado');
+    const listoTable     = allTableOrders.filter(o => o.status === 'listo');
+    const entregadoTable = allTableOrders.filter(o => o.status === 'entregado' || o.status === 'factura_generada');
     const pendingRegular = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
 
     const billsMap = {};
     entregadoTable.forEach(o => {
         const baseId = o.id.replace(/-\d+$/, '');
         if (!billsMap[baseId]) {
-            billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, items: [], total: 0 };
+            billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, status: o.status, items: [], total: 0 };
         }
+        if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada';
         let parsedItems = [];
         try {
             const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
@@ -374,10 +375,20 @@ async function loadOrders() {
     }
 
     if (groupedBills.length > 0) {
-      html += '<div class="section-header" style="color:#7C3AED;margin-top:12px;">🧾 Pendiente de factura</div>';
+      html += '<div class="section-header" style="color:#7C3AED;margin-top:12px;">🧾 Pendientes de Cierre</div>';
       groupedBills.forEach(b => {
         const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
         const total_fmt = '$' + Number(b.total||0).toLocaleString('es-CO');
+        const isGenerated = b.status === 'factura_generada';
+        
+        const actionBtns = isGenerated 
+            ? `<div style="font-size:11px; color:#1D9E75; font-weight:600; margin-bottom:6px;">✅ Factura enviada al sistema contable</div>
+               <button class="btn" style="background:#555; color:#fff; width:100%;" onclick="updateTableOrder('${b.id}','cerrar_mesa')">👋 Cerrar Mesa y Despedir</button>`
+            : `<div style="display:flex; gap:6px;">
+                 <button class="btn btn-purple" onclick="updateTableOrder('${b.id}','generar_factura')" style="flex:1;">🧾 Generar Factura</button>
+                 <button class="btn" style="background:#555; color:#fff; flex:1;" onclick="updateTableOrder('${b.id}','cerrar_mesa')">👋 Solo Cerrar</button>
+               </div>`;
+
         html += `<div class="order-card" style="border-left:3px solid #7C3AED;">
           <div class="order-header">
             <div class="order-id">${b.table_name}</div>
@@ -385,7 +396,7 @@ async function loadOrders() {
           </div>
           <div class="order-items">${itemsJoined}</div>
           <div style="font-size:13px;font-weight:700;color:#7C3AED;margin-bottom:10px;">Total: ${total_fmt}</div>
-          <div><button class="btn btn-purple" onclick="updateTableOrder('${b.id}','factura_entregada')">🧾 Factura entregada</button></div>
+          ${actionBtns}
         </div>`;
       });
     }
