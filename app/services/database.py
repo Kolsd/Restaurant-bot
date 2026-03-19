@@ -32,7 +32,6 @@ async def get_pool():
         if not database_url:
             raise RuntimeError("DATABASE_URL no esta configurada")
         database_url = database_url.replace("postgres://", "postgresql://", 1)
-        # V-04 FIX: max_size=5 → 20 para soportar carga real
         _pool = await asyncpg.create_pool(
             database_url,
             min_size=2,
@@ -56,10 +55,10 @@ async def init_db():
                 menu JSONB NOT NULL DEFAULT '{}'::jsonb,
                 subscription_status TEXT NOT NULL DEFAULT 'active',
                 features JSONB NOT NULL DEFAULT '{}'::jsonb,
+                billing_config JSONB DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT NOW()
             );
             
-            -- NUEVA TABLA AÑADIDA: Para registro de facturación
             CREATE TABLE IF NOT EXISTS billing_log (
                 id            SERIAL PRIMARY KEY,
                 restaurant_id INTEGER NOT NULL,
@@ -70,8 +69,7 @@ async def init_db():
                 error_message TEXT    NOT NULL DEFAULT '',
                 created_at    TIMESTAMP DEFAULT NOW()
             );
-
-            );
+            
             CREATE TABLE IF NOT EXISTS reservations (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -83,6 +81,7 @@ async def init_db():
                 notes TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT NOW()
             );
+            
             CREATE TABLE IF NOT EXISTS orders (
                 id TEXT PRIMARY KEY,
                 phone TEXT NOT NULL,
@@ -101,6 +100,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT NOW(),
                 paid_at TIMESTAMP
             );
+            
             CREATE TABLE IF NOT EXISTS conversations (
                 phone TEXT NOT NULL,
                 bot_number TEXT NOT NULL DEFAULT '',
@@ -109,6 +109,7 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (phone, bot_number)
             );
+            
             CREATE TABLE IF NOT EXISTS users (
                 username TEXT PRIMARY KEY,
                 password_hash TEXT NOT NULL,
@@ -118,12 +119,14 @@ async def init_db():
                 parent_user TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             );
+            
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW(),
                 expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '72 hours'
             );
+            
             CREATE TABLE IF NOT EXISTS carts (
                 phone TEXT NOT NULL,
                 bot_number TEXT NOT NULL,
@@ -132,6 +135,7 @@ async def init_db():
                 PRIMARY KEY (phone, bot_number)
             );
         """)
+        
         migrations = [
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_paused BOOLEAN DEFAULT FALSE",
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_number TEXT NOT NULL DEFAULT ''",
@@ -146,15 +150,15 @@ async def init_db():
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active'",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT ''",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb",
-            # V-06: añadir expires_at a sessions existentes
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '72 hours'",
-            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL",
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL"
         ]
+        
         for m in migrations:
             try:
                 await conn.execute(m)
             except Exception as e:
-                print(f"Migration skip: {e}")
+                pass
         try:
             await conn.execute("ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_pkey")
             await conn.execute("ALTER TABLE conversations ADD CONSTRAINT conversations_pkey PRIMARY KEY (phone, bot_number)")
@@ -435,7 +439,7 @@ async def db_set_dish_availability(dish_name: str, available: bool):
         """, dish_name, available)
 
 
-# ── SESIONES AUTH — V-06 FIX: expiración real ────────────────────────
+# ── SESIONES AUTH ────────────────────────────────────────────────────
 async def db_save_session(token: str, username: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -460,7 +464,6 @@ async def db_delete_session(token: str):
         await conn.execute("DELETE FROM sessions WHERE token=$1", token)
 
 async def db_cleanup_expired_sessions():
-    """Limpia tokens expirados. Llamar en startup y periódicamente."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute("DELETE FROM sessions WHERE expires_at < NOW()")
@@ -641,12 +644,7 @@ async def db_has_pending_invoice(phone: str) -> bool:
         row = await conn.fetchrow("SELECT id FROM table_orders WHERE phone=$1 AND status='entregado' LIMIT 1", phone)
         return row is not None
 
-# FUNCIÓN INTACTA PARA DASHBOARD STATS
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
-    """
-    DEPRECATED: usar db_get_base_order_id + db_create_sub_order.
-    Mantenido por compatibilidad con dashboard stats.
-    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
@@ -824,47 +822,3 @@ async def db_reopen_session(session_id: int) -> dict | None:
 async def db_get_restaurant_settings() -> dict:
     all_r = await db_get_all_restaurants()
     return all_r[0] if all_r else {}
-
-async def db_init_billing():
-    """Crea las tablas/columnas necesarias para el módulo de Billing."""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        # Columna billing_config en la tabla restaurants
-        try:
-            await conn.execute(
-                "ALTER TABLE restaurants "
-                "ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL"
-            )
-        except Exception:
-            pass  # Ya existe — OK
- 
-        # Tabla de log de facturación
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS billing_log (
-                id            SERIAL PRIMARY KEY,
-                restaurant_id INTEGER   NOT NULL,
-                order_id      TEXT      NOT NULL DEFAULT '',
-                provider      TEXT      NOT NULL DEFAULT '',
-                status        TEXT      NOT NULL DEFAULT 'pending',
-                external_id   TEXT      NOT NULL DEFAULT '',
-                error_message TEXT      NOT NULL DEFAULT '',
-                created_at    TIMESTAMP DEFAULT NOW()
-            );
-        """)
- 
-        # Índices para consultas rápidas
-        for idx_sql in [
-            "CREATE INDEX IF NOT EXISTS idx_billing_log_restaurant "
-            "ON billing_log(restaurant_id)",
-            "CREATE INDEX IF NOT EXISTS idx_billing_log_order "
-            "ON billing_log(order_id)",
-            "CREATE INDEX IF NOT EXISTS idx_billing_log_created "
-            "ON billing_log(created_at DESC)",
-        ]:
-            try:
-                await conn.execute(idx_sql)
-            except Exception:
-                pass
- 
-    print("✅ Billing DB inicializado", flush=True)
- 
