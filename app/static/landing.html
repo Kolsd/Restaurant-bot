@@ -283,28 +283,36 @@ nav {
 .combo-banner {
   background: var(--ink3);
   border: 1px solid rgba(57,255,106,.2);
-  border-radius: 16px; padding: 1.75rem 2rem;
+  border-radius: 16px; padding: 2rem 2.5rem;
   max-width: 1100px; margin: 1.5rem auto 0;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 1.5rem; flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2rem;
+}
+@media(max-width: 640px) {
+  .combo-banner { grid-template-columns: 1fr; gap: 1.5rem; }
+  .combo-price-block { justify-content: flex-start; }
 }
 .combo-banner h4 {
   font-family: 'Fraunces', serif;
   font-size: 1.3rem; font-weight: 700;
-  color: var(--white); margin-bottom: .2rem;
+  color: var(--white); margin-bottom: .3rem;
 }
-.combo-banner p { font-size: .85rem; color: var(--muted); }
-.combo-price-block { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+.combo-banner p { font-size: .85rem; color: var(--muted); line-height: 1.5; }
+.combo-price-block { display: flex; align-items: center; gap: 1.5rem; flex-wrap: nowrap; }
 .combo-price {
   font-family: 'Fraunces', serif;
   font-size: 2.8rem; font-weight: 900;
   color: var(--g); letter-spacing: -.04em;
+  white-space: nowrap;
 }
 .combo-save {
   background: rgba(57,255,106,.12);
   border: 1px solid rgba(57,255,106,.2);
   color: var(--g); font-size: .75rem; font-weight: 600;
   padding: 4px 12px; border-radius: 100px;
+  white-space: nowrap;
 }
 
 /* ── FLUJO QR ── */
@@ -721,21 +729,23 @@ footer p { font-size: .73rem; color: #333; }
 
     </div>
 
+
     <!-- Combo Banner -->
     <div class="combo-banner rv d2">
       <div>
         <h4>Todo incluido — Plan Business</h4>
-        <p>WhatsApp + Mesas + Domicilio + Reservas + Mesio Analytics. Un solo bot, dashboard unificado.</p>
+        <p>WhatsApp + Mesas + Domicilio + Reservas + Mesio Analytics.<br>Un solo bot, dashboard unificado, soporte prioritario.</p>
       </div>
       <div class="combo-price-block">
         <div>
           <div class="combo-price">$179</div>
-          <div style="font-size:.82rem;color:var(--muted);">/mes · setup $249</div>
+          <div style="font-size:.82rem;color:var(--muted);white-space:nowrap;">/mes · setup $249</div>
         </div>
         <div class="combo-save">Más completo</div>
         <a href="#precios" class="btn-primary" style="white-space:nowrap;">Ver planes</a>
       </div>
     </div>
+
   </div>
 </section>
 
