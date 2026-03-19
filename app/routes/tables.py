@@ -174,12 +174,16 @@ async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
         print(f"⚠️ No se envió WA a {phone} -> Faltan variables (Token: {bool(token)}, PhoneID: {final_phone_id})")
 
 @router.post("/api/table-orders/{order_id}/status")
+@router.post("/api/table-orders/{order_id}/status")
+
 async def update_order_status(request: Request, order_id: str):
     await require_auth(request)
     body = await request.json()
     status = body.get("status")
     
-    if status not in ['recibido', 'en_preparacion', 'listo', 'entregado', 'factura_entregada', 'cancelado']:
+    # 1. Validar el estado actualizado
+    valid_statuses = ['recibido', 'en_preparacion', 'listo', 'entregado', 'generar_factura', 'cerrar_mesa', 'factura_entregada', 'cancelado']
+    if status not in valid_statuses:
         raise HTTPException(status_code=400, detail="Estado inválido")
     
     pool = await db.get_pool()
@@ -202,24 +206,35 @@ async def update_order_status(request: Request, order_id: str):
                     db_phone_id = session_data.get("meta_phone_id")
             except Exception: pass
 
-    if status == "factura_entregada":
+    # ── A. GENERAR FACTURA (Llama a Alegra/Siigo, NO cierra mesa) ──
+    if status == "generar_factura":
         base_id = order.get("base_order_id") if order.get("base_order_id") else order_id
         bot_num = session_data.get("bot_number") if session_data else None
-        # ── 1. FACTURACIÓN ELECTRÓNICA EXTERNA (Alegra/Siigo/Loggro) ──
+        
         if bot_num:
             try:
                 rest = await db.db_get_restaurant_by_bot_number(bot_num)
                 if rest:
-                    # FIX: Llamamos al nuevo método emit_invoice que consolida y factura
                     await billing.emit_invoice(base_id, rest["id"])
             except Exception as e:
                 print(f"❌ Error en la integración contable: {e}", flush=True)
-        # ──────────────────────────────────────────────────────────────
 
-        await db.db_close_table_bill(base_id)
+        await db.db_update_table_order_status(base_id, "factura_generada")
         
         if phone:
-            msg = "🧾 Tu cuenta ha sido procesada. ¡Muchas gracias por visitarnos, esperamos verte pronto! 👋"
+            msg = "🧾 Estamos generando tu cuenta. En un momento el mesero te la entregará en la mesa."
+            await send_wa_msg(phone, msg, db_phone_id)
+
+        return {"success": True, "order_id": order_id, "status": "factura_generada"}
+
+    # ── B. CERRAR MESA (Limpia BD, despide, NO emite factura) ──
+    elif status in ("cerrar_mesa", "factura_entregada"):
+        base_id = order.get("base_order_id") if order.get("base_order_id") else order_id
+        
+        await db.db_close_table_bill(base_id) # status en BD = factura_entregada
+        
+        if phone:
+            msg = "👋 Tu mesa ha sido cerrada. ¡Muchas gracias por visitarnos, esperamos verte de nuevo pronto!"
             await send_wa_msg(phone, msg, db_phone_id)
             
             try:
@@ -232,8 +247,11 @@ async def update_order_status(request: Request, order_id: str):
                     await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
                 print(f"🧹 CHAT, CARRITO E HISTORIAL BORRADOS DEFINITIVAMENTE PARA: {phone}")
             except Exception as e:
-                print(f"Error limpiando BD tras facturar: {e}")
+                print(f"Error limpiando BD tras cerrar mesa: {e}")
                     
+        return {"success": True, "order_id": order_id, "status": "factura_entregada"}
+
+    # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
     else:
         await db.db_update_table_order_status(order_id, status)
         if status == "entregado" and phone:
@@ -241,7 +259,6 @@ async def update_order_status(request: Request, order_id: str):
             await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}
-
-@router.get("/cocina", response_class=HTMLResponse)
+    
 async def kitchen_display():
     return (STATIC / "kitchen.html").read_text()
