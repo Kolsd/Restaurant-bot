@@ -8,66 +8,35 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;0,9..144,900;1,9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --g: #1D9E75;
-  --g2: #39FF6A;
-  --blue: #378ADD;
-  --bg: #F2F2EE;
-  --sidebar: #FFFFFF;
-  --card: #FFFFFF;
-  --border: #E5E5DF;
-  --border2: #DEDEDA;
-  --text: #111111;
-  --muted: #777777;
-  --muted2: #999;
+  --g: #1D9E75; --g2: #39FF6A; --blue: #378ADD; --amber: #F59E0B;
+  --bg: #F2F2EE; --sidebar: #FFFFFF; --card: #FFFFFF;
+  --border: #E5E5DF; --border2: #DEDEDA;
+  --text: #111111; --muted: #777777; --muted2: #999;
   --ink: #0A0A0A;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Instrument Sans', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
 
-/* ── DEMO BANNER ── */
-.demo-banner {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-  background: var(--g); color: #fff;
-  text-align: center; padding: 9px 1rem;
-  font-size: .8rem; font-weight: 500; line-height: 1.4;
-}
+.demo-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: var(--g); color: #fff; text-align: center; padding: 9px 1rem; font-size: .8rem; font-weight: 500; line-height: 1.4; }
 .demo-banner a { color: #fff; font-weight: 700; text-decoration: underline; cursor: pointer; }
-.demo-banner strong { font-weight: 700; }
 
-/* ── LAYOUT ── */
 .layout { display: flex; height: 100vh; margin-top: 38px; }
-
-/* ── SIDEBAR ── */
-.sidebar {
-  width: 230px; background: var(--sidebar);
-  border-right: 1px solid var(--border);
-  display: flex; flex-direction: column;
-  padding: 1.5rem 1rem; flex-shrink: 0;
-  position: fixed; top: 38px; bottom: 0; left: 0;
-  overflow-y: auto;
-}
+.sidebar { width: 230px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 1.5rem 1rem; flex-shrink: 0; position: fixed; top: 38px; bottom: 0; left: 0; overflow-y: auto; }
 .sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
 .logo-icon { width: 34px; height: 34px; background: var(--g); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
-.logo-text { font-size: 14px; font-weight: 600; color: var(--text); }
+.logo-text { font-size: 14px; font-weight: 600; }
 .logo-rest { font-size: 11px; color: var(--muted); }
 .nav-section { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted2); padding: 0 12px; margin-bottom: 4px; margin-top: 16px; }
-.nav-item {
-  display: flex; align-items: center; gap: 9px;
-  padding: 8px 12px; border-radius: 8px;
-  cursor: pointer; font-size: 13px; font-weight: 500;
-  color: var(--muted); margin-bottom: 2px;
-  border: none; background: none; width: 100%;
-  text-align: left; transition: all .15s;
-}
+.nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; transition: all .15s; }
 .nav-item:hover { background: var(--bg); color: var(--text); }
 .nav-item.active { background: #E1F5EE; color: #0F6E56; }
 .nav-item .icon { width: 16px; text-align: center; flex-shrink: 0; font-size: 14px; }
 .nav-badge { margin-left: auto; background: var(--g); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 100px; }
+.nav-badge-amber { background: var(--amber); }
 .live-badge { margin-top: auto; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--g); background: #E1F5EE; padding: 9px 13px; border-radius: 10px; font-weight: 500; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--g); animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-/* ── MAIN ── */
 .main { margin-left: 230px; flex: 1; padding: 2rem; overflow-y: auto; }
 .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.75rem; }
 .page-title { font-family: 'Fraunces', serif; font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em; }
@@ -76,34 +45,26 @@ body { font-family: 'Instrument Sans', sans-serif; background: var(--bg); color:
 .cta-chip { font-size: 12px; background: var(--g); color: #fff; padding: 6px 14px; border-radius: 100px; font-weight: 600; cursor: pointer; border: none; transition: opacity .2s; text-decoration: none; }
 .cta-chip:hover { opacity: .9; }
 
-/* ── SECTIONS ── */
 .section { display: none; }
 .section.active { display: block; }
 .section-fade { animation: fadeIn .25s ease; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 
-/* ── METRICS ── */
 .metrics-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 1.5rem; }
-.metric {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px; padding: 1.1rem 1.25rem;
-}
+.metric { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.25rem; }
 .metric-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
 .metric-value { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900; letter-spacing: -.03em; color: var(--text); line-height: 1; }
 .metric-value.green { color: var(--g); }
 .metric-value.amber { color: #BA7517; }
 .metric-sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
-.metric-sub.up { color: var(--g); }
+.metric-sub.up   { color: var(--g); }
 .metric-sub.warn { color: #BA7517; }
 
-/* ── CARDS ── */
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem; }
 .card-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 1rem; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
 .grid3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 1.25rem; }
 
-/* ── TABLES ── */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); letter-spacing: .04em; text-transform: uppercase; }
 td { padding: 10px 12px; border-bottom: 1px solid #F5F5F1; vertical-align: middle; }
@@ -112,24 +73,98 @@ tr:hover td { background: var(--bg); }
 .badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600; }
 .b-paid { background: #E1F5EE; color: #0F6E56; }
 .b-pend { background: #FAEEDA; color: #854F0B; }
-.b-dom { background: #E6F1FB; color: #185FA5; }
-.b-rec { background: #EEEDFE; color: #534AB7; }
+.b-dom  { background: #E6F1FB; color: #185FA5; }
+.b-rec  { background: #EEEDFE; color: #534AB7; }
 .b-conf { background: #E1F5EE; color: #0F6E56; }
+.b-ok   { background: #E1F5EE; color: #0F6E56; }
+.b-err  { background: #FDE8E8; color: #C0392B; }
 
-/* ── CHART WRAP ── */
 .chart-wrap { position: relative; width: 100%; }
+.empty { text-align: center; padding: 2.5rem; color: var(--muted); font-size: 13px; }
 
-/* ── CONV ROWS ── */
-.conv-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F5F5F1; }
-.conv-row:last-child { border-bottom: none; }
-.conv-av { width: 36px; height: 36px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0F6E56; flex-shrink: 0; }
-.conv-preview { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* ── BILLING SECTION ── */
+.billing-status-card {
+  background: linear-gradient(135deg, rgba(245,158,11,.06), rgba(245,158,11,.02));
+  border: 1px solid rgba(245,158,11,.25);
+  border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.billing-status-icon { font-size: 2rem; flex-shrink: 0; }
+.billing-status-body { flex: 1; }
+.billing-status-title { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+.billing-status-sub   { font-size: 12px; color: var(--muted); }
+.billing-status-pill  { display: inline-flex; align-items: center; gap: 5px; background: #E1F5EE; color: #0F6E56; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
+.billing-status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--g); }
 
-/* ── MENU GRID ── */
+.connector-flow { display: flex; align-items: center; gap: 10px; padding: 1rem; background: rgba(0,0,0,.03); border-radius: 10px; margin-bottom: 1rem; flex-wrap: wrap; }
+.cf-node { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.cf-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: .75rem; font-weight: 800; }
+.cf-mesio  { background: #E1F5EE; color: #0F6E56; border: 1px solid #B2E8D4; }
+.cf-siigo  { background: #EBF4FF; color: #185FA5; border: 1px solid #BFDBFE; }
+.cf-label  { font-size: 10px; color: var(--muted); text-align: center; }
+.cf-arrow  { font-size: 16px; color: var(--muted); flex-shrink: 0; }
+.cf-note   { flex: 1; font-size: 11px; color: var(--muted); line-height: 1.5; min-width: 120px; }
+
+.billing-log-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #F5F5F1; }
+.billing-log-row:last-child { border-bottom: none; }
+.bl-order { font-size: 12px; font-weight: 600; font-family: monospace; width: 130px; flex-shrink: 0; }
+.bl-prov  { font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 700; flex-shrink: 0; }
+.prov-siigo  { background: #EBF4FF; color: #185FA5; }
+.prov-alegra { background: #E0F7FA; color: #006064; }
+.prov-loggro { background: #F3E8FF; color: #6D28D9; }
+.bl-amount { font-size: 12px; font-weight: 600; color: var(--g); }
+.bl-time   { font-size: 11px; color: var(--muted); margin-left: auto; }
+.bl-status { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 700; flex-shrink: 0; }
+
+/* ── PRICING SECTION ── */
+.plans-demo { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+.plan-demo { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; position: relative; }
+.plan-demo.pop      { border-color: rgba(29,158,117,.4); }
+.plan-demo.pop-blue { border-color: rgba(55,138,221,.3); }
+.plan-demo.pop-combo { border: 1px solid rgba(29,158,117,.25); background: linear-gradient(135deg, rgba(29,158,117,.02), rgba(55,138,221,.02)); }
+.plan-pill-demo { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-size: .65rem; font-weight: 700; padding: 3px 12px; border-radius: 100px; white-space: nowrap; }
+.pp-green { background: var(--g); color: #fff; }
+.pp-blue  { background: var(--blue); color: #fff; }
+.plan-demo-name { font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 700; margin-bottom: 2px; }
+.plan-demo-desc { font-size: .72rem; color: var(--muted); margin-bottom: .85rem; }
+.plan-demo-price { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900; letter-spacing: -.03em; color: var(--g); }
+.plan-demo-price.b { color: var(--blue); }
+.plan-demo-price span { font-size: .8rem; color: var(--muted); font-family: 'Instrument Sans', sans-serif; font-weight: 400; }
+.plan-demo-setup  { font-size: .7rem; color: var(--muted); margin-bottom: .85rem; }
+.plan-demo-divider { height: 1px; background: var(--border); margin: .85rem 0; }
+.plan-demo-feat { font-size: .78rem; color: var(--text); margin-bottom: .4rem; display: flex; gap: 6px; }
+.feat-g   { color: var(--g); font-weight: 700; }
+.feat-b   { color: var(--blue); font-weight: 700; }
+.feat-off { color: #ccc; }
+
+/* Billing chip inside plan demo cards */
+.billing-chip-addon {
+  margin-top: 10px; display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px; background: rgba(245,158,11,.08);
+  border: 1px solid rgba(245,158,11,.2); border-radius: 8px;
+  font-size: .7rem;
+}
+.billing-chip-addon .bc-label { flex: 1; color: #9A6E10; line-height: 1.3; }
+.billing-chip-addon .bc-label strong { color: var(--amber); display: block; }
+.billing-chip-addon .bc-price { font-weight: 700; color: var(--amber); white-space: nowrap; font-size: .75rem; }
+.billing-chip-inc {
+  margin-top: 10px; display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px; background: rgba(29,158,117,.06);
+  border: 1px solid rgba(29,158,117,.2); border-radius: 8px;
+  font-size: .7rem; color: #0F6E56;
+}
+.billing-chip-inc strong { color: var(--g); }
+
+.plan-demo-btn { display: block; text-align: center; padding: .7rem; border-radius: 100px; font-size: .82rem; font-weight: 600; text-decoration: none; margin-top: 1rem; background: var(--g); color: #fff; }
+.plan-demo-btn.b { background: var(--blue); }
+.plan-demo-btn.combo { background: linear-gradient(90deg, var(--g), var(--blue)); color: #000; }
+.plan-demo-btn.outline { background: none; border: 1px solid var(--border2); color: var(--text); }
+
+/* ── MISC ── */
 .menu-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
 .menu-item { border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
 .menu-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
-.menu-cat { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.menu-cat  { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 .menu-footer { display: flex; align-items: center; justify-content: space-between; }
 .menu-price { font-size: 13px; font-weight: 700; color: var(--g); }
 .avail-toggle { width: 32px; height: 18px; background: var(--g); border-radius: 100px; cursor: pointer; position: relative; transition: background .2s; }
@@ -137,95 +172,26 @@ tr:hover td { background: var(--bg); }
 .avail-toggle.off { background: #e0e0d8; }
 .avail-toggle.off::after { left: 2px; }
 
-/* ── KITCHEN SECTION ── */
-.kitchen-board { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; }
-.kitchen-col-header { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: .75rem; padding: 6px 10px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
-.kh-recibido { color: #BA7517; background: rgba(250,199,117,.1); }
-.kh-prep { color: var(--blue); background: rgba(55,138,221,.08); }
-.kh-listo { color: var(--g); background: rgba(29,158,117,.08); }
-.k-badge { margin-left: auto; background: var(--g); color: #fff; font-size: 10px; padding: 1px 7px; border-radius: 100px; }
-.kitchen-card {
-  background: #1A1A1A; border: 1px solid #2A2A2A;
-  border-radius: 12px; padding: 1rem; margin-bottom: .75rem;
-}
-.kc-recibido { border-left: 3px solid #FAC775; }
-.kc-prep { border-left: 3px solid var(--blue); }
-.kc-listo { border-left: 3px solid var(--g); }
-.kc-table { font-size: 14px; font-weight: 700; color: #fff; }
-.kc-id { font-size: 10px; color: #555; margin-top: 1px; }
-.kc-elapsed { font-size: 10px; padding: 2px 6px; border-radius: 8px; font-weight: 600; }
-.el-ok { background: rgba(29,158,117,.15); color: var(--g); }
-.el-warn { background: rgba(250,199,117,.15); color: #FAC775; }
-.kc-items { font-size: 12px; color: #ccc; margin: 8px 0; line-height: 1.6; }
-.kc-btn { width: 100%; padding: 6px; border: none; border-radius: 7px; font-size: 11px; font-weight: 600; cursor: pointer; }
-.btn-prep-k { background: rgba(55,138,221,.2); color: var(--blue); }
-.btn-listo-k { background: rgba(29,158,117,.2); color: var(--g); }
-.sub-tag-k { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 6px; margin-bottom: 6px; }
-.st-first { background: rgba(29,158,117,.1); color: var(--g); }
-.st-add { background: rgba(250,199,117,.1); color: #BA7517; }
-
-/* ── POS ── */
-.ai-card { background: linear-gradient(135deg, #0A1F16 0%, #0D2A1C 100%); border: 1px solid rgba(29,158,117,.25); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem; }
-.ai-label { font-size: 11px; font-weight: 600; color: var(--g); letter-spacing: .08em; text-transform: uppercase; margin-bottom: .6rem; display: flex; align-items: center; gap: 6px; }
-.ai-text { font-size: 13px; color: #D0F0E0; line-height: 1.65; }
-.ai-text strong { color: #39FF6A; }
-.upsell-row { display: flex; align-items: center; gap: 10px; padding: .75rem 0; border-bottom: 1px solid rgba(255,255,255,.04); }
-.upsell-row:last-child { border-bottom: none; }
-.upsell-icon { font-size: 1.3rem; flex-shrink: 0; }
-.upsell-text { flex: 1; font-size: 13px; color: #D0F0E0; line-height: 1.4; }
-.upsell-badge { font-size: 11px; background: rgba(29,158,117,.15); color: var(--g); padding: 3px 8px; border-radius: 8px; font-weight: 600; white-space: nowrap; }
-.predict-row { margin-bottom: 8px; }
-.predict-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.predict-track { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
-.predict-fill { height: 100%; border-radius: 4px; transition: width 1s ease; }
-.pf-high { background: var(--g); }
-.pf-mid { background: #FAC775; }
-.pf-low { background: #E24B4A; }
-
-/* ── SESSIONS ── */
-.ses-row { display: flex; align-items: center; gap: 10px; padding: .85rem 0; border-bottom: 1px solid #F5F5F1; }
-.ses-row:last-child { border-bottom: none; }
-.ses-table { font-size: 13px; font-weight: 600; width: 90px; }
-.ses-phone { font-size: 11px; color: var(--muted); flex: 1; }
-.ses-time { font-size: 12px; color: var(--muted); }
-.ses-reason { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 500; }
-.sr-waiter { background: #FFF8E6; color: #7A4F00; }
-.sr-client { background: #E1F5EE; color: #0F6E56; }
-.sr-inactivity { background: #F5F5F1; color: #555; }
-
-/* ── QR MESAS ── */
 .qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .qr-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; text-align: center; }
 .qr-table-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
 .qr-id { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
 .qr-placeholder { width: 100px; height: 100px; background: var(--bg); border-radius: 8px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border2); }
-.qr-placeholder svg { opacity: .3; }
-.qr-actions { display: flex; gap: 6px; justify-content: center; }
 .qr-btn { font-size: 11px; padding: 5px 10px; border-radius: 6px; font-weight: 500; border: none; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
 .qr-btn-print { background: #E1F5EE; color: #0F6E56; }
-.qr-btn-del { background: #FDE8E8; color: #C0392B; }
 
-/* ── PERIOD BAR ── */
 .period-bar { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 3px; width: fit-content; margin-bottom: 1.5rem; }
 .pb-btn { font-size: 12px; padding: 5px 14px; border-radius: 7px; border: none; background: none; cursor: pointer; color: var(--muted); font-weight: 500; transition: all .15s; }
 .pb-btn.active { background: var(--g); color: #fff; font-weight: 600; }
 
-/* ── EMPTY ── */
-.empty { text-align: center; padding: 2.5rem; color: var(--muted); font-size: 13px; }
+.conv-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F5F5F1; }
+.conv-row:last-child { border-bottom: none; }
+.conv-av { width: 36px; height: 36px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0F6E56; flex-shrink: 0; }
 
-/* ── MOBILE ── */
-.ham-btn {
-  display: none; position: fixed;
-  top: 50px; left: 12px; z-index: 400;
-  background: var(--card); border: 1px solid var(--border);
-  border-radius: 10px; width: 38px; height: 38px;
-  align-items: center; justify-content: center;
-  cursor: pointer; flex-direction: column; gap: 4px;
-}
+.ham-btn { display: none; position: fixed; top: 50px; left: 12px; z-index: 400; background: var(--card); border: 1px solid var(--border); border-radius: 10px; width: 38px; height: 38px; align-items: center; justify-content: center; cursor: pointer; flex-direction: column; gap: 4px; }
 .ham-btn span { display: block; width: 16px; height: 2px; background: var(--text); border-radius: 2px; }
 .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 350; }
 .overlay.open { display: block; }
-
 @media(max-width: 768px) {
   .ham-btn { display: flex; }
   .sidebar { left: -260px; z-index: 390; transition: left .25s ease; }
@@ -235,49 +201,16 @@ tr:hover td { background: var(--bg); }
   .grid2 { grid-template-columns: 1fr; }
   .grid3 { grid-template-columns: repeat(2,1fr); }
   .menu-grid { grid-template-columns: 1fr 1fr; }
-  .kitchen-board { grid-template-columns: 1fr; }
   .qr-grid { grid-template-columns: repeat(2,1fr); }
   .plans-demo { grid-template-columns: 1fr; }
 }
-@media(max-width: 480px) {
-  .metrics-row { grid-template-columns: 1fr 1fr; }
-  .grid3 { grid-template-columns: 1fr; }
-}
-
-/* ── PRICING DEMO ── */
-.plans-demo { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
-.plan-demo {
-  background: var(--card); border: 1px solid var(--border);
-  border-radius: 14px; padding: 1.25rem; position: relative;
-}
-.plan-demo.pop { border-color: rgba(29,158,117,.4); }
-.plan-demo.pop-blue { border-color: rgba(55,138,221,.3); }
-.plan-demo.pop-combo { border: 1px solid rgba(29,158,117,.25); background: linear-gradient(135deg, rgba(29,158,117,.02), rgba(55,138,221,.02)); }
-.plan-pill-demo { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-size: .65rem; font-weight: 700; padding: 3px 12px; border-radius: 100px; white-space: nowrap; }
-.pp-green { background: var(--g); color: #fff; }
-.pp-blue { background: var(--blue); color: #fff; }
-.plan-demo-name { font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 700; margin-bottom: 2px; }
-.plan-demo-desc { font-size: .72rem; color: var(--muted); margin-bottom: .85rem; }
-.plan-demo-price { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900; letter-spacing: -.03em; color: var(--g); }
-.plan-demo-price.b { color: var(--blue); }
-.plan-demo-price span { font-size: .8rem; color: var(--muted); font-family: 'Instrument Sans', sans-serif; font-weight: 400; }
-.plan-demo-setup { font-size: .7rem; color: var(--muted); margin-bottom: .85rem; }
-.plan-demo-divider { height: 1px; background: var(--border); margin: .85rem 0; }
-.plan-demo-feat { font-size: .78rem; color: var(--text); margin-bottom: .4rem; display: flex; gap: 6px; }
-.feat-g { color: var(--g); font-weight: 700; }
-.feat-b { color: var(--blue); font-weight: 700; }
-.feat-off { color: #ccc; }
-.plan-demo-btn { display: block; text-align: center; padding: .7rem; border-radius: 100px; font-size: .82rem; font-weight: 600; text-decoration: none; margin-top: 1rem; background: var(--g); color: #fff; }
-.plan-demo-btn.b { background: var(--blue); }
-.plan-demo-btn.combo { background: linear-gradient(90deg, var(--g), var(--blue)); color: #000; }
-.plan-demo-btn.outline { background: none; border: 1px solid var(--border2); color: var(--text); }
 </style>
 </head>
 <body>
 
 <div class="demo-banner">
   Vista demo — Así se vería el panel de tu restaurante.
-  <strong> ¡Estas son funciones reales!</strong>
+  <strong>¡Estas son funciones reales!</strong>
   <a onclick="window.location.href='/'">Ver planes y precios</a>
 </div>
 
@@ -285,36 +218,27 @@ tr:hover td { background: var(--bg); }
 <button class="ham-btn" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
 
 <div class="layout">
-  <!-- SIDEBAR -->
   <div class="sidebar" id="sidebar">
     <div class="sidebar-logo">
       <div class="logo-icon">LT</div>
-      <div>
-        <div class="logo-text">La Trattoria</div>
-        <div class="logo-rest">Panel de control</div>
-      </div>
+      <div><div class="logo-text">La Trattoria</div><div class="logo-rest">Panel de control</div></div>
     </div>
-
     <div class="nav-section">Principal</div>
     <button class="nav-item active" onclick="show('resumen', this)"><span class="icon">◼</span> Resumen</button>
     <button class="nav-item" onclick="show('pedidos', this)"><span class="icon">◼</span> Pedidos</button>
     <button class="nav-item" onclick="show('reservaciones', this)"><span class="icon">◼</span> Reservaciones</button>
     <button class="nav-item" onclick="show('conversaciones', this)"><span class="icon">◼</span> WhatsApp</button>
-
     <div class="nav-section">Restaurante</div>
     <button class="nav-item" onclick="show('menu', this)"><span class="icon">◼</span> Menú</button>
     <button class="nav-item" onclick="show('mesas', this)"><span class="icon">◼</span> Mesas & QR</button>
     <button class="nav-item" onclick="show('cocina', this)"><span class="icon">◼</span> Cocina en vivo <span class="nav-badge">3</span></button>
-    <button class="nav-item" onclick="show('sesiones', this)"><span class="icon">◼</span> Sesiones</button>
-
-    <div class="nav-section">Inteligencia</div>
+    <div class="nav-section">Finanzas & IA</div>
+    <button class="nav-item" onclick="show('billing', this)"><span class="icon">◼</span> Conector Contable <span class="nav-badge nav-badge-amber">✓</span></button>
     <button class="nav-item" onclick="show('pos', this)"><span class="icon">◼</span> Mesio Analytics</button>
     <button class="nav-item" onclick="show('precios', this)"><span class="icon">◼</span> Planes & Precios</button>
-
     <div class="live-badge"><div class="live-dot"></div> Bot activo 24/7</div>
   </div>
 
-  <!-- MAIN -->
   <div class="main">
 
     <!-- ── RESUMEN ── -->
@@ -322,42 +246,19 @@ tr:hover td { background: var(--bg); }
       <div class="topbar">
         <div class="page-title">Resumen</div>
         <div class="topbar-right">
-          <div class="period-bar">
-            <button class="pb-btn active">Hoy</button>
-            <button class="pb-btn">7 días</button>
-            <button class="pb-btn">Mes</button>
-          </div>
+          <div class="period-bar"><button class="pb-btn active">Hoy</button><button class="pb-btn">7 días</button><button class="pb-btn">Mes</button></div>
           <span class="live-chip">● En vivo</span>
           <a href="/" class="cta-chip">Ver planes</a>
         </div>
       </div>
       <div class="metrics-row">
-        <div class="metric">
-          <div class="metric-label">Ingresos hoy</div>
-          <div class="metric-value green">$847k</div>
-          <div class="metric-sub up">↑ +12% vs ayer</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Pedidos hoy</div>
-          <div class="metric-value">23</div>
-          <div class="metric-sub">19 pagados · 4 pendientes</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Mesas activas</div>
-          <div class="metric-value green">7</div>
-          <div class="metric-sub up">3 pedidos en cocina</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Reservaciones</div>
-          <div class="metric-value">8</div>
-          <div class="metric-sub warn">Próxima: 20:30 · Pedro</div>
-        </div>
+        <div class="metric"><div class="metric-label">Ingresos hoy</div><div class="metric-value green">$847k</div><div class="metric-sub up">↑ +12% vs ayer</div></div>
+        <div class="metric"><div class="metric-label">Pedidos hoy</div><div class="metric-value">23</div><div class="metric-sub">19 pagados · 4 pendientes</div></div>
+        <div class="metric"><div class="metric-label">Mesas activas</div><div class="metric-value green">7</div><div class="metric-sub up">3 pedidos en cocina</div></div>
+        <div class="metric"><div class="metric-label">Facturas enviadas</div><div class="metric-value green">19</div><div class="metric-sub up">→ Siigo · automático</div></div>
       </div>
       <div class="grid2">
-        <div class="card">
-          <div class="card-title">Ingresos últimos 7 días</div>
-          <div class="chart-wrap" style="height:190px;"><canvas id="chart-revenue"></canvas></div>
-        </div>
+        <div class="card"><div class="card-title">Ingresos últimos 7 días</div><div class="chart-wrap" style="height:190px;"><canvas id="chart-revenue"></canvas></div></div>
         <div class="card">
           <div class="card-title">Distribución de pedidos</div>
           <div style="display:flex;gap:1.5rem;margin-top:.5rem;margin-bottom:1rem;">
@@ -367,10 +268,7 @@ tr:hover td { background: var(--bg); }
           <div class="chart-wrap" style="height:150px;"><canvas id="chart-tipos"></canvas></div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">Platos más pedidos hoy</div>
-        <div class="chart-wrap" style="height:160px;"><canvas id="chart-platos"></canvas></div>
-      </div>
+      <div class="card"><div class="card-title">Platos más pedidos hoy</div><div class="chart-wrap" style="height:160px;"><canvas id="chart-platos"></canvas></div></div>
     </div>
 
     <!-- ── PEDIDOS ── -->
@@ -381,13 +279,7 @@ tr:hover td { background: var(--bg); }
         <div class="metric"><div class="metric-label">Pagados</div><div class="metric-value green">19</div></div>
         <div class="metric"><div class="metric-label">Pendiente pago</div><div class="metric-value amber">4</div></div>
       </div>
-      <div class="card">
-        <div class="card-title">Pedidos de hoy</div>
-        <table>
-          <thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead>
-          <tbody id="orders-tbody"></tbody>
-        </table>
-      </div>
+      <div class="card"><div class="card-title">Pedidos de hoy</div><table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody id="orders-tbody"></tbody></table></div>
     </div>
 
     <!-- ── RESERVACIONES ── -->
@@ -398,13 +290,7 @@ tr:hover td { background: var(--bg); }
         <div class="metric"><div class="metric-label">Total personas</div><div class="metric-value">34</div></div>
         <div class="metric"><div class="metric-label">Próxima</div><div class="metric-value" style="font-size:1.2rem;">20:30 · Pedro</div></div>
       </div>
-      <div class="card">
-        <div class="card-title">Reservaciones del día</div>
-        <table>
-          <thead><tr><th>Cliente</th><th>Hora</th><th>Personas</th><th>Notas</th><th>Estado</th></tr></thead>
-          <tbody id="res-tbody"></tbody>
-        </table>
-      </div>
+      <div class="card"><div class="card-title">Reservaciones del día</div><table><thead><tr><th>Cliente</th><th>Hora</th><th>Personas</th><th>Notas</th><th>Estado</th></tr></thead><tbody id="res-tbody"></tbody></table></div>
     </div>
 
     <!-- ── CONVERSACIONES ── -->
@@ -415,466 +301,246 @@ tr:hover td { background: var(--bg); }
         <div class="metric"><div class="metric-label">Resueltos por IA</div><div class="metric-value green">43</div><div class="metric-sub up">91% automatizado</div></div>
         <div class="metric"><div class="metric-label">Escalados</div><div class="metric-value amber">4</div></div>
       </div>
-      <div class="card">
-        <div class="card-title">Conversaciones recientes</div>
-        <div id="convs-list"></div>
-      </div>
+      <div class="card"><div class="card-title">Conversaciones recientes</div><div id="convs-list"></div></div>
     </div>
 
     <!-- ── MENÚ ── -->
     <div id="menu" class="section section-fade">
       <div class="topbar"><div class="page-title">Menú</div></div>
-      <div class="card">
-        <div class="card-title">Disponibilidad en tiempo real — activa/desactiva desde aquí</div>
-        <div class="menu-grid" id="menu-grid"></div>
-      </div>
+      <div class="card"><div class="card-title">Disponibilidad en tiempo real</div><div class="menu-grid" id="menu-grid"></div></div>
     </div>
 
-    <!-- ── MESAS & QR ── -->
+    <!-- ── MESAS ── -->
     <div id="mesas" class="section section-fade">
-      <div class="topbar">
-        <div class="page-title">Mesas & QR</div>
-        <a href="/cocina" target="_blank" class="cta-chip">Abrir cocina →</a>
-      </div>
+      <div class="topbar"><div class="page-title">Mesas & QR</div><a href="/cocina" target="_blank" class="cta-chip">Abrir cocina →</a></div>
       <div class="card" style="margin-bottom:1rem;background:linear-gradient(135deg,rgba(29,158,117,.04),rgba(55,138,221,.04));border-color:rgba(29,158,117,.15);">
         <div class="card-title">Flujo del módulo Mesa</div>
         <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);">
           <span style="background:#E1F5EE;color:#0F6E56;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">1. Cliente escanea QR</span>
-          <span>→</span>
-          <span style="background:#E6F1FB;color:#185FA5;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">2. Ve menú en el celular</span>
-          <span>→</span>
-          <span style="background:#E1F5EE;color:#0F6E56;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">3. Pide por WhatsApp</span>
-          <span>→</span>
-          <span style="background:#FAEEDA;color:#854F0B;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">4. Llega a cocina</span>
+          <span>→</span><span style="background:#E6F1FB;color:#185FA5;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">2. Ve menú en el celular</span>
+          <span>→</span><span style="background:#E1F5EE;color:#0F6E56;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">3. Pide por WhatsApp</span>
+          <span>→</span><span style="background:#FAEEDA;color:#854F0B;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">4. Llega a cocina</span>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">Mesas configuradas — QR imprimible por mesa</div>
-        <div class="qr-grid" id="qr-grid"></div>
-      </div>
+      <div class="card"><div class="card-title">Mesas configuradas — QR imprimible por mesa</div><div class="qr-grid" id="qr-grid"></div></div>
     </div>
 
-    <!-- ── COCINA EN VIVO ── -->
+    <!-- ── COCINA ── -->
     <div id="cocina" class="section section-fade">
-      <div class="topbar">
-        <div class="page-title">Cocina en vivo</div>
-        <div class="topbar-right">
-          <span style="font-size:12px;color:var(--muted);">Actualiza cada 5s en producción</span>
-          <span class="live-chip">● En vivo</span>
+      <div class="topbar"><div class="page-title">Cocina en vivo</div><span class="live-chip">● En vivo</span></div>
+      <div class="card"><div class="card-title">Pedidos activos en cocina</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;" id="kitchen-board-demo"></div>
+      </div>
+    </div>
+
+    <!-- ── BILLING ── -->
+    <div id="billing" class="section section-fade">
+      <div class="topbar"><div class="page-title">Conector Contable</div><span class="live-chip">● Conectado a Siigo</span></div>
+
+      <!-- Status -->
+      <div class="billing-status-card">
+        <div class="billing-status-icon">🔗</div>
+        <div class="billing-status-body">
+          <div class="billing-status-title">Siigo conectado · Auto-envío activo</div>
+          <div class="billing-status-sub">Cada pedido pagado se envía automáticamente a tu Siigo. La factura electrónica la genera tu sistema con tu resolución DIAN.</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+          <div class="billing-status-pill"><span class="dot"></span> Activo</div>
+          <div style="font-size:11px;color:var(--muted);">Proveedor: Siigo</div>
         </div>
       </div>
-      <div class="kitchen-board" id="kitchen-board"></div>
-    </div>
 
-    <!-- ── SESIONES ── -->
-    <div id="sesiones" class="section section-fade">
-      <div class="topbar"><div class="page-title">Sesiones de mesa</div></div>
-      <div class="metrics-row">
-        <div class="metric"><div class="metric-label">Sesiones hoy</div><div class="metric-value">12</div></div>
-        <div class="metric"><div class="metric-label">Por cliente</div><div class="metric-value green">9</div></div>
-        <div class="metric"><div class="metric-label">Por inactividad</div><div class="metric-value">2</div></div>
-        <div class="metric"><div class="metric-label">Por mesero</div><div class="metric-value amber">1</div><div class="metric-sub warn">revisar</div></div>
-      </div>
+      <!-- Cómo funciona -->
       <div class="card">
-        <div class="card-title">Registro de sesiones</div>
-        <div id="sessions-list"></div>
+        <div class="card-title">Cómo fluye la información</div>
+        <div class="connector-flow">
+          <div class="cf-node">
+            <div class="cf-icon cf-mesio">Mesio</div>
+            <div class="cf-label">Pedido<br>pagado</div>
+          </div>
+          <div class="cf-arrow">→</div>
+          <div class="cf-node">
+            <div class="cf-icon cf-siigo">S</div>
+            <div class="cf-label">Siigo<br>API</div>
+          </div>
+          <div class="cf-arrow">→</div>
+          <div class="cf-node">
+            <div class="cf-icon" style="background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;font-size:.65rem;width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;">DIAN</div>
+            <div class="cf-label">Factura<br>electrónica</div>
+          </div>
+          <div class="cf-note">
+            Mesio solo transfiere los datos del pedido. La factura electrónica la genera Siigo con tu resolución DIAN y tu configuración contable. Cero trabajo manual.
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);padding:.75rem;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.15);border-radius:8px;">
+          💡 <strong>¿Ya tienes Siigo, Alegra o Loggro?</strong> Solo necesitas ingresar tus credenciales API una vez. Mesio se conecta a tu cuenta existente — no necesitas cambiar nada de tu contabilidad.
+        </div>
+      </div>
+
+      <!-- Métricas -->
+      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
+        <div class="metric"><div class="metric-label">Enviados hoy</div><div class="metric-value green">19</div><div class="metric-sub">100% exitosos</div></div>
+        <div class="metric"><div class="metric-label">Este mes</div><div class="metric-value">347</div><div class="metric-sub">344 ok · 3 con error</div></div>
+        <div class="metric"><div class="metric-label">Errores</div><div class="metric-value amber">3</div><div class="metric-sub warn">Reenviar manualmente</div></div>
+      </div>
+
+      <!-- Log -->
+      <div class="card">
+        <div class="card-title">Historial de envíos recientes</div>
+        <div id="billing-log-list"></div>
       </div>
     </div>
 
-    <!-- ── POS CON IA ── -->
+    <!-- ── POS ── -->
     <div id="pos" class="section section-fade">
       <div class="topbar"><div class="page-title">Mesio Analytics</div></div>
-      <div class="ai-card">
-        <div class="ai-label">✦ Mesio IA — análisis del día</div>
-        <div class="ai-text">Los viernes de noche generan <strong>38% más ingresos</strong> que el promedio semanal. Con base en la tendencia de esta semana, se proyectan <strong>28–32 pedidos</strong> esta noche. Considera reforzar <strong>Carbonara y Margherita</strong> — son el 45% de la demanda.</div>
+      <div style="background:linear-gradient(135deg,#0A1F16,#0D2A1C);border:1px solid rgba(29,158,117,.25);border-radius:14px;padding:1.25rem;margin-bottom:1.25rem;">
+        <div style="font-size:11px;font-weight:600;color:var(--g);letter-spacing:.08em;text-transform:uppercase;margin-bottom:.6rem;">✦ Mesio IA — análisis del día</div>
+        <div style="font-size:13px;color:#D0F0E0;line-height:1.65;">Los viernes de noche generan <strong style="color:#39FF6A;">38% más ingresos</strong> que el promedio semanal. Se proyectan <strong style="color:#39FF6A;">28–32 pedidos</strong> esta noche. Considera reforzar <strong style="color:#39FF6A;">Carbonara y Margherita</strong> — son el 45% de la demanda.</div>
       </div>
       <div class="grid3">
         <div class="metric"><div class="metric-label">Ticket promedio</div><div class="metric-value green">$37k</div><div class="metric-sub up">↑ +8% vs semana pasada</div></div>
         <div class="metric"><div class="metric-label">Hora pico</div><div class="metric-value">20:00h</div><div class="metric-sub">según histórico</div></div>
-        <div class="metric"><div class="metric-label">Top plato</div><div class="metric-value" style="font-size:1rem;padding-top:4px;">Margherita</div><div class="metric-sub">820 pedidos históricas</div></div>
-      </div>
-      <div class="grid2">
-        <div class="card">
-          <div class="card-title">Predicción demanda — próximas horas</div>
-          <div id="predict-bars"></div>
-        </div>
-        <div class="ai-card" style="margin-bottom:0;">
-          <div class="ai-label">✦ Sugerencias de upsell</div>
-          <div id="upsell-list"></div>
-        </div>
+        <div class="metric"><div class="metric-label">Top plato</div><div class="metric-value" style="font-size:1rem;padding-top:4px;">Margherita</div><div class="metric-sub">820 pedidos históricos</div></div>
       </div>
     </div>
 
-    <!-- ── PLANES ── -->
+    <!-- ── PRECIOS ── -->
     <div id="precios" class="section section-fade">
       <div class="topbar"><div class="page-title">Planes & Precios</div></div>
-      <div class="card" style="margin-bottom:1.25rem;background:linear-gradient(135deg,rgba(29,158,117,.04),transparent);border-color:rgba(29,158,117,.15);">
-        <div class="card-title">Lo que obtienes con Mesio · datos reales de operación</div>
-        <div style="display:flex;gap:1.5rem;flex-wrap:wrap;">
-          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--g);letter-spacing:-.03em;">48h</div><div style="font-size:11px;color:var(--muted);">de setup a primer pedido</div></div>
-          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">$0</div><div style="font-size:11px;color:var(--muted);">comisión por pedido</div></div>
-          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">24/7</div><div style="font-size:11px;color:var(--muted);">bot activo sin descanso</div></div>
-          <div><div style="font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900;color:var(--text);letter-spacing:-.03em;">+12%</div><div style="font-size:11px;color:var(--muted);">ticket promedio con upsell IA</div></div>
-        </div>
-      </div>
       <div class="plans-demo" id="plans-grid"></div>
+      <p style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center;">El Conector Contable requiere que el restaurante ya tenga Siigo, Alegra o Loggro contratado. Mesio conecta tu operación con tu sistema existente.</p>
     </div>
 
-  </div><!-- /main -->
-</div><!-- /layout -->
+  </div>
+</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-// ── SIDEBAR MOBILE ──
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('overlay').classList.toggle('open');
-}
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('overlay').classList.remove('open');
-}
-
-// ── NAVEGACIÓN ──
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('overlay').classList.toggle('open'); }
+function closeSidebar()  { document.getElementById('sidebar').classList.remove('open'); document.getElementById('overlay').classList.remove('open'); }
 function show(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  btn.classList.add('active');
+  document.getElementById(id).classList.add('active'); btn.classList.add('active');
   if (window.innerWidth <= 768) closeSidebar();
 }
 
-// ── CHARTS ──
 window.addEventListener('DOMContentLoaded', () => {
-  // Revenue
+  // Charts
   new Chart(document.getElementById('chart-revenue'), {
-    type: 'bar',
-    data: {
-      labels: ['Lun','Mar','Mié','Jue','Vie','Sáb','Hoy'],
-      datasets: [{
-        data: [620000,540000,710000,480000,890000,1050000,847500],
-        backgroundColor: '#1D9E75', borderRadius: 4
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { ticks: { callback: v => '$' + Math.round(v/1000) + 'k', font: { size: 10 } }, grid: { color: '#F0F0EA' } },
-        x: { ticks: { font: { size: 10 } }, grid: { display: false } }
-      }
-    }
+    type:'bar', data:{ labels:['Lun','Mar','Mié','Jue','Vie','Sáb','Hoy'], datasets:[{data:[620000,540000,710000,480000,890000,1050000,847500], backgroundColor:'#1D9E75', borderRadius:4}] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>'$'+Math.round(v/1000)+'k',font:{size:10}},grid:{color:'#F0F0EA'}}, x:{ticks:{font:{size:10}},grid:{display:false}} } }
   });
-
-  // Tipos
   new Chart(document.getElementById('chart-tipos'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Domicilio', 'Recoger'],
-      datasets: [{ data: [58, 42], backgroundColor: ['#1D9E75', '#378ADD'], borderWidth: 0 }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, cutout: '65%' }
+    type:'doughnut', data:{labels:['Domicilio','Recoger'],datasets:[{data:[58,42],backgroundColor:['#1D9E75','#378ADD'],borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'65%'}
   });
-
-  // Platos
   new Chart(document.getElementById('chart-platos'), {
-    type: 'bar',
-    data: {
-      labels: ['Margherita', 'Carbonara', 'Prosciutto', 'Lasagna', 'Tiramisú'],
-      datasets: [{ data: [18,14,12,11,9], backgroundColor: ['#1D9E75','#5DCAA5','#9FE1CB','#378ADD','#85B7EB'], borderRadius: 4 }]
-    },
-    options: {
-      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { font: { size: 10 } }, grid: { color: '#F0F0EA' } },
-        y: { ticks: { font: { size: 10 } }, grid: { display: false } }
-      }
-    }
+    type:'bar', data:{labels:['Margherita','Carbonara','Prosciutto','Lasagna','Tiramisú'],datasets:[{data:[18,14,12,11,9],backgroundColor:['#1D9E75','#5DCAA5','#9FE1CB','#378ADD','#85B7EB'],borderRadius:4}]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:10}},grid:{color:'#F0F0EA'}},y:{ticks:{font:{size:10}},grid:{display:false}}}}
   });
 
-  buildOrders();
-  buildReservations();
-  buildConvs();
-  buildMenu();
-  buildMesas();
-  buildKitchen();
-  buildSessions();
-  buildPOS();
-  buildPlans();
+  buildOrders(); buildRes(); buildConvs(); buildMenu(); buildMesas(); buildKitchen(); buildBillingLog(); buildPlans();
 });
 
-// ── PEDIDOS ──
 function buildOrders() {
-  const orders = [
-    { id:'ORD-A3F1', items:'2x Carbonara, 1x Margherita', type:'domicilio', paid:true, total:'$565k', time:'16:42' },
-    { id:'ORD-B7C2', items:'1x Lasagna, 2x Tiramisú', type:'recoger', paid:true, total:'$440k', time:'16:28' },
-    { id:'ORD-C2D3', items:'3x Margherita, 1x Vino', type:'domicilio', paid:false, total:'$620k', time:'16:15' },
-    { id:'ORD-D9E4', items:'1x Quattro Formaggi', type:'recoger', paid:true, total:'$240k', time:'15:58' },
-    { id:'ORD-E4F5', items:'2x Fettuccine, 1x Panna Cotta', type:'domicilio', paid:true, total:'$455k', time:'15:40' },
-    { id:'ORD-F1G6', items:'1x Diavola, 2x Limonada', type:'recoger', paid:false, total:'$345k', time:'15:22' },
+  const rows = [
+    {id:'ORD-A3F1',items:'2x Carbonara, 1x Margherita',type:'domicilio',paid:true,total:'$565k',time:'16:42'},
+    {id:'ORD-B7C2',items:'1x Lasagna, 2x Tiramisú',type:'recoger',paid:true,total:'$440k',time:'16:28'},
+    {id:'ORD-C2D3',items:'3x Margherita, 1x Vino',type:'domicilio',paid:false,total:'$620k',time:'16:15'},
+    {id:'ORD-D9E4',items:'1x Quattro Formaggi',type:'recoger',paid:true,total:'$240k',time:'15:58'},
   ];
-  document.getElementById('orders-tbody').innerHTML = orders.map(o => `<tr>
-    <td style="font-size:12px;color:var(--muted);font-family:monospace;">${o.id}</td>
-    <td style="font-size:12px;">${o.items}</td>
-    <td><span class="badge ${o.type==='domicilio'?'b-dom':'b-rec'}">${o.type}</span></td>
-    <td><span class="badge ${o.paid?'b-paid':'b-pend'}">${o.paid?'pagado':'pendiente'}</span></td>
-    <td style="font-weight:600;">${o.total}</td>
-    <td style="color:var(--muted);">${o.time}</td>
-  </tr>`).join('');
+  document.getElementById('orders-tbody').innerHTML = rows.map(o=>`<tr><td style="font-size:12px;color:var(--muted);font-family:monospace;">${o.id}</td><td style="font-size:12px;">${o.items}</td><td><span class="badge ${o.type==='domicilio'?'b-dom':'b-rec'}">${o.type}</span></td><td><span class="badge ${o.paid?'b-paid':'b-pend'}">${o.paid?'pagado':'pendiente'}</span></td><td style="font-weight:600;">${o.total}</td><td style="color:var(--muted);">${o.time}</td></tr>`).join('');
 }
-
-// ── RESERVACIONES ──
-function buildReservations() {
-  const res = [
-    { name:'Carlos Mendoza', time:'13:00', guests:4, notes:'Cumpleaños' },
-    { name:'Ana Rodríguez', time:'14:30', guests:2, notes:'Aniversario' },
-    { name:'Grupo Empresarial', time:'15:00', guests:8, notes:'Reunión' },
-    { name:'Laura Jiménez', time:'19:00', guests:3, notes:'—' },
-    { name:'Pedro Sánchez', time:'20:30', guests:6, notes:'Graduación' },
-  ];
-  document.getElementById('res-tbody').innerHTML = res.map(r => `<tr>
-    <td style="font-weight:600;">${r.name}</td>
-    <td>${r.time}</td><td>${r.guests}</td>
-    <td style="color:var(--muted);">${r.notes}</td>
-    <td><span class="badge b-conf">confirmada</span></td>
-  </tr>`).join('');
+function buildRes() {
+  const rows = [{name:'Carlos Mendoza',time:'13:00',guests:4,notes:'Cumpleaños'},{name:'Ana Rodríguez',time:'14:30',guests:2,notes:'Aniversario'},{name:'Pedro Sánchez',time:'20:30',guests:6,notes:'Graduación'}];
+  document.getElementById('res-tbody').innerHTML = rows.map(r=>`<tr><td style="font-weight:600;">${r.name}</td><td>${r.time}</td><td>${r.guests}</td><td style="color:var(--muted);">${r.notes}</td><td><span class="badge b-conf">confirmada</span></td></tr>`).join('');
 }
-
-// ── CONVERSACIONES ──
 function buildConvs() {
-  const convs = [
-    { init:'JA', name:'Juan Aparicio', msg:'Quiero pedir 2 Margheritas para domicilio', time:'hace 3 min' },
-    { init:'SM', name:'Sofía Muñoz', msg:'¿Tienen opciones vegetarianas sin gluten?', time:'hace 12 min' },
-    { init:'CR', name:'Carlos R.', msg:'Perfecto, confirmo la reservación para el viernes', time:'hace 28 min' },
-    { init:'AL', name:'Andrea L.', msg:'¿A qué hora cierran los sábados?', time:'hace 45 min' },
-    { init:'MT', name:'Miguel T.', msg:'Muchas gracias por la atención tan rápida', time:'hace 1h' },
-  ];
-  document.getElementById('convs-list').innerHTML = convs.map(c => `
-    <div class="conv-row">
-      <div class="conv-av">${c.init}</div>
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:600;">${c.name}</div>
-        <div class="conv-preview">${c.msg}</div>
-      </div>
-      <div style="font-size:11px;color:var(--muted);white-space:nowrap;">${c.time}</div>
-    </div>`).join('');
+  const convs = [{init:'JA',name:'Juan Aparicio',msg:'Quiero pedir 2 Margheritas para domicilio',time:'hace 3 min'},{init:'SM',name:'Sofía Muñoz',msg:'¿Tienen opciones vegetarianas sin gluten?',time:'hace 12 min'},{init:'CR',name:'Carlos R.',msg:'Confirmo la reservación para el viernes',time:'hace 28 min'}];
+  document.getElementById('convs-list').innerHTML = convs.map(c=>`<div class="conv-row"><div class="conv-av">${c.init}</div><div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;">${c.name}</div><div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.msg}</div></div><div style="font-size:11px;color:var(--muted);white-space:nowrap;">${c.time}</div></div>`).join('');
 }
-
-// ── MENÚ ──
 function buildMenu() {
-  const items = [
-    { name:'Margherita Clásica', cat:'Pizzas', price:'$175k', on:true },
-    { name:'Spaghetti Carbonara', cat:'Pastas', price:'$195k', on:true },
-    { name:'Prosciutto e Funghi', cat:'Pizzas', price:'$225k', on:true },
-    { name:'Lasagna della Nonna', cat:'Pastas', price:'$220k', on:true },
-    { name:'Tiramisú Clásico', cat:'Postres', price:'$110k', on:true },
-    { name:'Burrata Fresca', cat:'Entradas', price:'$210k', on:false },
-    { name:'Quattro Formaggi', cat:'Pizzas', price:'$240k', on:true },
-    { name:'Gelato Artesanal', cat:'Postres', price:'$85k', on:true },
-    { name:'Vino de la Casa', cat:'Bebidas', price:'$95k', on:true },
-  ];
-  document.getElementById('menu-grid').innerHTML = items.map(m => `
-    <div class="menu-item" style="${m.on?'':'opacity:.55;'}">
-      <div class="menu-name">${m.name}</div>
-      <div class="menu-cat">${m.cat}</div>
-      <div class="menu-footer">
-        <div class="menu-price">${m.price}</div>
-        <div class="avail-toggle ${m.on?'':'off'}" onclick="this.classList.toggle('off');this.closest('.menu-item').style.opacity=this.classList.contains('off')?'.55':'1'"></div>
-      </div>
-    </div>`).join('');
+  const items = [{name:'Margherita Clásica',cat:'Pizzas',price:'$175k',on:true},{name:'Spaghetti Carbonara',cat:'Pastas',price:'$195k',on:true},{name:'Prosciutto e Funghi',cat:'Pizzas',price:'$225k',on:true},{name:'Lasagna della Nonna',cat:'Pastas',price:'$220k',on:true},{name:'Tiramisú Clásico',cat:'Postres',price:'$110k',on:true},{name:'Burrata Fresca',cat:'Entradas',price:'$210k',on:false}];
+  document.getElementById('menu-grid').innerHTML = items.map(m=>`<div class="menu-item" style="${m.on?'':'opacity:.55;'}"><div class="menu-name">${m.name}</div><div class="menu-cat">${m.cat}</div><div class="menu-footer"><div class="menu-price">${m.price}</div><div class="avail-toggle ${m.on?'':'off'}" onclick="this.classList.toggle('off');this.closest('.menu-item').style.opacity=this.classList.contains('off')?'.55':'1'"></div></div></div>`).join('');
 }
-
-// ── MESAS & QR ──
 function buildMesas() {
-  const mesas = [
-    { name:'Mesa 1', id:'mesa-1' }, { name:'Mesa 2', id:'mesa-2' },
-    { name:'Mesa 3', id:'mesa-3' }, { name:'Mesa 4', id:'mesa-4' },
-    { name:'Mesa 5', id:'mesa-5' }, { name:'Mesa 6', id:'mesa-6' },
-  ];
-  document.getElementById('qr-grid').innerHTML = mesas.map(m => `
-    <div class="qr-card">
-      <div class="qr-table-name">${m.name}</div>
-      <div class="qr-id">${m.id}</div>
-      <div class="qr-placeholder">
-        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5">
-          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
-          <rect x="18" y="14" width="3" height="3"/><rect x="14" y="18" width="3" height="3"/>
-          <rect x="18" y="18" width="3" height="3"/>
-        </svg>
-      </div>
-      <div class="qr-actions">
-        <a class="qr-btn qr-btn-print" href="#">🖨️ Imprimir</a>
-      </div>
-    </div>`).join('');
+  const mesas = ['Mesa 1','Mesa 2','Mesa 3','Mesa 4','Mesa 5','Mesa 6'];
+  document.getElementById('qr-grid').innerHTML = mesas.map(m=>`<div class="qr-card"><div class="qr-table-name">${m}</div><div class="qr-id">${m.toLowerCase().replace(' ','-')}</div><div class="qr-placeholder"><svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg></div><div><a class="qr-btn qr-btn-print" href="#">🖨️ Imprimir</a></div></div>`).join('');
 }
-
-// ── COCINA EN VIVO ──
 function buildKitchen() {
   const orders = [
-    { id:'MESA-A24987', table:'Mesa 3', status:'recibido', sub:1, base:null, items:'1x Carbonara · 2x Margherita · 1x Vino', elapsed:'2m 14s', cls:'ok' },
-    { id:'MESA-A24987-2', table:'Mesa 3', status:'recibido', sub:2, base:'MESA-A24987', items:'1x Agua Mineral', elapsed:'0m 45s', cls:'ok' },
-    { id:'MESA-B31CC2', table:'Mesa 7', status:'en_preparacion', sub:1, base:null, items:'1x Lasagna · 1x Tiramisú', elapsed:'7m 02s', cls:'warn' },
-    { id:'MESA-C45DE3', table:'Mesa 1', status:'listo', sub:1, base:null, items:'2x Prosciutto · 1x Burrata · 2x Limonada', elapsed:'4m 30s', cls:'ok' },
+    {id:'MESA-A24',table:'Mesa 3',status:'recibido',items:'1x Carbonara · 2x Margherita',elapsed:'2m 14s'},
+    {id:'MESA-B31',table:'Mesa 7',status:'en_preparacion',items:'1x Lasagna · 1x Tiramisú',elapsed:'7m 02s'},
+    {id:'MESA-C45',table:'Mesa 1',status:'listo',items:'2x Prosciutto · 1x Burrata',elapsed:'4m 30s'},
   ];
-
-  const groups = { recibido:[], en_preparacion:[], listo:[] };
-  orders.forEach(o => { if(groups[o.status]) groups[o.status].push(o); });
-
-  const cols = [
-    { status:'recibido', label:'🔔 Recibidos', hcls:'kh-recibido' },
-    { status:'en_preparacion', label:'👨‍🍳 En preparación', hcls:'kh-prep' },
-    { status:'listo', label:'✅ Listos', hcls:'kh-listo' },
-  ];
-
-  document.getElementById('kitchen-board').innerHTML = cols.map(col => {
-    const items = groups[col.status];
-    const cards = items.map(o => {
-      const isAdd = o.base !== null && o.sub > 1;
-      const subTag = isAdd
-        ? `<div class="sub-tag-k st-add">➕ Adicional #${o.sub}</div>`
-        : `<div class="sub-tag-k st-first">🆕 Pedido inicial</div>`;
-      const statusCls = { recibido:'kc-recibido', en_preparacion:'kc-prep', listo:'kc-listo' }[o.status];
-      const btn = o.status === 'recibido'
-        ? `<button class="kc-btn btn-prep-k">👨‍🍳 En preparación</button>`
-        : o.status === 'en_preparacion'
-        ? `<button class="kc-btn btn-listo-k">✅ Listo para servir</button>`
-        : `<div style="text-align:center;font-size:11px;color:var(--g);padding:6px;background:rgba(29,158,117,.08);border-radius:7px;">🛎️ Esperando al mesero</div>`;
-      return `<div class="kitchen-card ${statusCls}">
-        ${subTag}
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
-          <div><div class="kc-table">${o.table}</div><div class="kc-id">${o.id}</div></div>
-          <span class="kc-elapsed el-${o.cls}">${o.elapsed}</span>
-        </div>
-        <div class="kc-items">${o.items}</div>
-        ${btn}
-      </div>`;
-    }).join('') || `<div style="text-align:center;padding:1.5rem;color:#555;font-size:12px;">Sin pedidos</div>`;
-
-    return `<div>
-      <div class="kitchen-col-header ${col.hcls}">${col.label}<span class="k-badge">${items.length}</span></div>
-      ${cards}
-    </div>`;
-  }).join('');
-}
-
-// ── SESIONES ──
-function buildSessions() {
-  const sessions = [
-    { table:'Mesa 5', phone:'573XX XXX 8876', start:'13:42', end:'15:10', dur:'1h 28m', reason:'client', label:'Cliente', cls:'sr-client' },
-    { table:'Mesa 2', phone:'573XX XXX 4421', start:'14:00', end:'14:48', dur:'48m', reason:'waiter', label:'Mesero ⚠️', cls:'sr-waiter' },
-    { table:'Mesa 8', phone:'573XX XXX 9934', start:'12:30', end:'13:15', dur:'45m', reason:'inactivity', label:'Inactividad', cls:'sr-inactivity' },
-    { table:'Mesa 1', phone:'573XX XXX 6612', start:'11:00', end:'12:44', dur:'1h 44m', reason:'client', label:'Cliente', cls:'sr-client' },
-    { table:'Mesa 4', phone:'573XX XXX 3308', start:'10:15', end:'11:52', dur:'1h 37m', reason:'client', label:'Cliente', cls:'sr-client' },
-  ];
-  document.getElementById('sessions-list').innerHTML = sessions.map(s => `
-    <div class="ses-row">
-      <div class="ses-table">${s.table}</div>
-      <div class="ses-phone">${s.phone}</div>
-      <div class="ses-time">${s.start} → ${s.end}</div>
-      <div class="ses-time">${s.dur}</div>
-      <div class="ses-reason ${s.cls}">${s.label}</div>
+  const colMap = {recibido:'#FAC775',en_preparacion:'#378ADD',listo:'#1D9E75'};
+  const labelMap = {recibido:'🔔 Recibido',en_preparacion:'👨‍🍳 En preparación',listo:'✅ Listo'};
+  document.getElementById('kitchen-board-demo').innerHTML = orders.map(o=>`
+    <div style="background:#1A1A1A;border:1px solid #2A2A2A;border-left:3px solid ${colMap[o.status]};border-radius:12px;padding:1rem;">
+      <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:3px;">${o.table}</div>
+      <div style="font-size:10px;color:#555;margin-bottom:8px;">${o.id}</div>
+      <div style="font-size:12px;color:#ccc;margin-bottom:10px;">${o.items}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:10px;padding:2px 7px;background:rgba(29,158,117,.12);color:#1D9E75;border-radius:8px;font-weight:600;">${labelMap[o.status]}</span>
+        <span style="font-size:10px;color:#888;">${o.elapsed}</span>
+      </div>
     </div>`).join('');
 }
-
-// ── POS ──
-function buildPOS() {
-  const predicts = [
-    { hour:'21:00h', label:'Alta demanda', pct:85, cls:'pf-high', count:'~26 pedidos esperados' },
-    { hour:'22:00h', label:'Demanda media', pct:55, cls:'pf-mid', count:'~17 pedidos esperados' },
-    { hour:'23:00h', label:'Baja demanda', pct:25, cls:'pf-low', count:'~8 pedidos esperados' },
+function buildBillingLog() {
+  const logs = [
+    {order:'ORD-A3F1', prov:'siigo', amount:'$565k', time:'16:42', ok:true},
+    {order:'ORD-B7C2', prov:'siigo', amount:'$440k', time:'16:28', ok:true},
+    {order:'MESA-A24', prov:'siigo', amount:'$370k', time:'16:10', ok:true},
+    {order:'ORD-C2D3', prov:'siigo', amount:'$620k', time:'15:58', ok:false},
+    {order:'MESA-B31', prov:'siigo', amount:'$305k', time:'15:40', ok:true},
   ];
-  document.getElementById('predict-bars').innerHTML = predicts.map(p => `
-    <div class="predict-row">
-      <div class="predict-label"><span>${p.hour} — ${p.label}</span><span style="color:var(--muted);font-size:11px;">${p.count}</span></div>
-      <div class="predict-track"><div class="predict-fill ${p.cls}" style="width:${p.pct}%"></div></div>
-    </div>`).join('');
-
-  const upsells = [
-    { icon:'🍷', text:'Sugerir copa de vino con pastas — ticket +$95k promedio', gain:'+$95k/pedido' },
-    { icon:'🍮', text:'Ofrecer Tiramisú después del plato principal — conversión 34%', gain:'+$110k/mesa' },
-    { icon:'🥗', text:'Burrata al inicio de la visita — +15min permanencia', gain:'+$210k/mesa' },
-  ];
-  document.getElementById('upsell-list').innerHTML = upsells.map(u => `
-    <div class="upsell-row">
-      <div class="upsell-icon">${u.icon}</div>
-      <div class="upsell-text">${u.text}</div>
-      <div class="upsell-badge">${u.gain}</div>
+  document.getElementById('billing-log-list').innerHTML = logs.map(l=>`
+    <div class="billing-log-row">
+      <div class="bl-order">${l.order}</div>
+      <span class="bl-prov prov-${l.prov}">${l.prov.charAt(0).toUpperCase()+l.prov.slice(1)}</span>
+      <div class="bl-amount">${l.amount}</div>
+      <span class="bl-status ${l.ok?'b-ok b-paid':'b-err'}">${l.ok?'✓ Enviado':'✗ Error'}</span>
+      <div class="bl-time">${l.time}</div>
     </div>`).join('');
 }
-
-// ── PLANES ──
 function buildPlans() {
   const plans = [
-    {
-      name:'Starter', desc:'Empieza a automatizar hoy',
-      price:'$49', priceClass:'', period:'/mes', setup:'Setup gratuito',
-      cls:'', btnCls:'outline', btnText:'Empezar gratis',
-      feats:[
-        { check:'feat-g', text:'Bot IA en WhatsApp 24/7' },
-        { check:'feat-g', text:'Pedidos domicilio y recoger' },
-        { check:'feat-g', text:'Reservaciones automáticas' },
-        { check:'feat-g', text:'Menú con disponibilidad real-time' },
-        { check:'feat-g', text:'Dashboard básico' },
-        { check:'feat-off', text:'Sin mesas QR ni cocina en vivo' },
-      ]
+    { name:'Starter', desc:'Empieza a automatizar', price:'$49', period:'/mes', setup:'Setup gratuito', cls:'', btnCls:'outline', btnText:'Empezar gratis',
+      feats:[{c:'feat-g',t:'Bot IA WhatsApp 24/7'},{c:'feat-g',t:'Pedidos domicilio/recoger'},{c:'feat-g',t:'Reservaciones auto'},{c:'feat-g',t:'Dashboard básico'},{c:'feat-off',t:'Sin mesas QR'},{c:'feat-off',t:'Sin conector contable'}],
+      billing: null
     },
-    {
-      name:'Pro', desc:'WhatsApp + mesas en tu local',
-      price:'$99', priceClass:'', period:'/mes', setup:'+ $149 setup único',
-      cls:'pop', pill:'MÁS POPULAR', pillCls:'pp-green',
-      btnCls:'', btnText:'Activar',
-      feats:[
-        { check:'feat-g', text:'Todo lo del plan Starter' },
-        { check:'feat-g', text:'Hasta 15 mesas con QR' },
-        { check:'feat-g', text:'Menú interactivo por QR' },
-        { check:'feat-g', text:'Cocina en vivo (tablet)' },
-        { check:'feat-g', text:'Pagos Wompi integrados' },
-        { check:'feat-g', text:'Mesio Analytics + upsell IA' },
-      ]
+    { name:'Pro', desc:'WhatsApp + mesas', price:'$99', period:'/mes', setup:'+ $149 setup único', cls:'pop', pill:'MÁS POPULAR', pillCls:'pp-green', btnCls:'', btnText:'Activar',
+      feats:[{c:'feat-g',t:'Todo lo del Starter'},{c:'feat-g',t:'Hasta 15 mesas con QR'},{c:'feat-g',t:'Cocina en vivo (tablet)'},{c:'feat-g',t:'Pagos Wompi'},{c:'feat-g',t:'Mesio Analytics'}],
+      billing: { type:'addon', text:'Conector Contable', sub:'Siigo, Alegra o Loggro', price:'+$19/mes' }
     },
-    {
-      name:'Business', desc:'Para alto volumen',
-      price:'$179', priceClass:'b', period:'/mes', setup:'+ $249 setup único',
-      cls:'pop-blue', pill:'MÁS COMPLETO', pillCls:'pp-blue',
-      btnCls:'b', btnText:'Activar',
-      feats:[
-        { check:'feat-b', text:'Todo lo del plan Pro' },
-        { check:'feat-b', text:'Hasta 40 mesas con QR' },
-        { check:'feat-b', text:'Panel de mesero dedicado' },
-        { check:'feat-b', text:'Gestión de equipo por roles' },
-        { check:'feat-b', text:'Subórdenes por mesa' },
-        { check:'feat-b', text:'Soporte prioritario' },
-      ]
+    { name:'Business', desc:'Alto volumen', price:'$179', period:'/mes', setup:'+ $249 setup único', cls:'pop-blue', pill:'MÁS COMPLETO', pillCls:'pp-blue', btnCls:'b', btnText:'Activar',
+      feats:[{c:'feat-b',t:'Todo lo del Pro'},{c:'feat-b',t:'Hasta 40 mesas con QR'},{c:'feat-b',t:'Panel de mesero'},{c:'feat-b',t:'Gestión de equipo'},{c:'feat-b',t:'Soporte prioritario'}],
+      billing: { type:'addon', text:'Conector Contable', sub:'Siigo, Alegra o Loggro', price:'+$19/mes' }
     },
-    {
-      name:'Cadena', desc:'Múltiples sucursales',
-      price:'$299', priceClass:'', period:'/mes', setup:'+ $399 setup único',
-      cls:'pop-combo',
-      btnCls:'combo', btnText:'Contactar',
-      feats:[
-        { check:'feat-g', text:'Todo lo del plan Business' },
-        { check:'feat-g', text:'Hasta 5 sucursales' },
-        { check:'feat-g', text:'Hasta 100 mesas totales' },
-        { check:'feat-g', text:'1 número WA para toda la cadena' },
-        { check:'feat-g', text:'Dashboard multi-sucursal' },
-        { check:'feat-g', text:'Onboarding personalizado' },
-      ]
+    { name:'Cadena', desc:'Múltiples sucursales', price:'$299', period:'/mes', setup:'+ $399 setup único', cls:'pop-combo', btnCls:'combo', btnText:'Contactar',
+      feats:[{c:'feat-g',t:'Todo lo del Business'},{c:'feat-g',t:'Hasta 5 sucursales'},{c:'feat-g',t:'Hasta 100 mesas'},{c:'feat-g',t:'Dashboard multi-sucursal'},{c:'feat-g',t:'Onboarding personalizado'}],
+      billing: { type:'included', text:'Conector Contable incluido', sub:'Siigo, Alegra o Loggro' }
     },
   ];
 
-  document.getElementById('plans-grid').innerHTML = plans.map(p => `
-    <div class="plan-demo ${p.cls}">
+  document.getElementById('plans-grid').innerHTML = plans.map(p => {
+    const billingHtml = !p.billing ? '' :
+      p.billing.type === 'addon'
+        ? `<div class="billing-chip-addon"><div class="bc-label"><strong>🔗 ${p.billing.text}</strong>${p.billing.sub}</div><span class="bc-price">${p.billing.price}</span></div>`
+        : `<div class="billing-chip-inc">🔗 <strong>${p.billing.text}</strong> — ${p.billing.sub} · <strong style="margin-left:4px;">Incluido</strong></div>`;
+    return `<div class="plan-demo ${p.cls}">
       ${p.pill ? `<div class="plan-pill-demo ${p.pillCls}">${p.pill}</div>` : ''}
       <div class="plan-demo-name">${p.name}</div>
       <div class="plan-demo-desc">${p.desc}</div>
-      <div class="plan-demo-price ${p.priceClass}">${p.price}<span>${p.period}</span></div>
+      <div class="plan-demo-price ${p.cls==='pop-blue'?'b':''}">${p.price}<span>${p.period}</span></div>
       <div class="plan-demo-setup">${p.setup}</div>
       <div class="plan-demo-divider"></div>
-      ${p.feats.map(f => `<div class="plan-demo-feat"><span class="${f.check}">+</span> ${f.text}</div>`).join('')}
+      ${p.feats.map(f=>`<div class="plan-demo-feat"><span class="${f.c}">+</span> ${f.t}</div>`).join('')}
+      ${billingHtml}
       <a href="/#contacto" class="plan-demo-btn ${p.btnCls}">${p.btnText}</a>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 </script>
 </body>
