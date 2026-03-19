@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Demo Interactivo</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;0,9..144,900;1,9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -15,7 +16,7 @@
   --ink: #0A0A0A;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Instrument Sans', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+body { font-family: 'Instrument Sans', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; max-width: 100%; }
 
 .demo-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: var(--g); color: #fff; text-align: center; padding: 9px 1rem; font-size: .8rem; font-weight: 500; line-height: 1.4; }
 .demo-banner a { color: #fff; font-weight: 700; text-decoration: underline; cursor: pointer; }
@@ -37,7 +38,7 @@ body { font-family: 'Instrument Sans', sans-serif; background: var(--bg); color:
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--g); animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-.main { margin-left: 230px; flex: 1; padding: 2rem; overflow-y: auto; }
+.main { margin-left: 230px; flex: 1; padding: 2rem; overflow-y: auto; min-width: 0; max-width: 100%; }
 .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.75rem; }
 .page-title { font-family: 'Fraunces', serif; font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
@@ -196,13 +197,45 @@ tr:hover td { background: var(--bg); }
   .ham-btn { display: flex; }
   .sidebar { left: -260px; z-index: 390; transition: left .25s ease; }
   .sidebar.open { left: 0; }
-  .main { margin-left: 0; padding: .75rem; margin-top: 44px; }
-  .metrics-row { grid-template-columns: repeat(2,1fr); gap: 8px; }
+  .main { margin-left: 0; padding: .75rem; margin-top: 44px; max-width: 100%; overflow-x: hidden; }
+  .metrics-row { grid-template-columns: repeat(2,1fr) !important; gap: 8px; }
+  .metric-value { font-size: 1.5rem; }
   .grid2 { grid-template-columns: 1fr; }
   .grid3 { grid-template-columns: repeat(2,1fr); }
   .menu-grid { grid-template-columns: 1fr 1fr; }
   .qr-grid { grid-template-columns: repeat(2,1fr); }
   .plans-demo { grid-template-columns: 1fr; }
+
+  /* topbar — stack vertically on mobile */
+  .topbar { flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 1rem; }
+  .topbar-right { flex-wrap: wrap; gap: 6px; width: 100%; }
+  .period-bar { width: 100%; }
+  .pb-btn { flex: 1; text-align: center; }
+
+  /* tables — scroll horizontally */
+  .card { overflow-x: auto; }
+  table { min-width: 480px; font-size: 12px; }
+  th, td { padding: 7px 8px; }
+
+  /* billing log — fix fixed width on mobile */
+  .billing-log-row { flex-wrap: wrap; gap: 6px; }
+  .bl-order { width: auto; font-size: 11px; }
+  .bl-time { margin-left: 0; }
+
+  /* connector flow — stack on mobile */
+  .connector-flow { flex-direction: column; align-items: flex-start; }
+  .cf-note { min-width: unset; width: 100%; }
+  .cf-arrow { transform: rotate(90deg); align-self: center; }
+
+  /* billing status card */
+  .billing-status-card { flex-direction: column; }
+
+  /* kitchen board — 1 col on mobile */
+  #kitchen-board-demo { grid-template-columns: 1fr !important; }
+
+  /* QR grid — 2 col, smaller cards */
+  .qr-card { padding: .85rem; }
+  .qr-table-name { font-size: 13px; }
 }
 </style>
 </head>
@@ -466,7 +499,34 @@ function buildMenu() {
 }
 function buildMesas() {
   const mesas = ['Mesa 1','Mesa 2','Mesa 3','Mesa 4','Mesa 5','Mesa 6'];
-  document.getElementById('qr-grid').innerHTML = mesas.map(m=>`<div class="qr-card"><div class="qr-table-name">${m}</div><div class="qr-id">${m.toLowerCase().replace(' ','-')}</div><div class="qr-placeholder"><svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg></div><div><a class="qr-btn qr-btn-print" href="#">🖨️ Imprimir</a></div></div>`).join('');
+  document.getElementById('qr-grid').innerHTML = mesas.map((m, i) => {
+    const tableId = m.toLowerCase().replace(' ', '-');
+    return `<div class="qr-card">
+      <div class="qr-table-name">${m}</div>
+      <div class="qr-id">${tableId}</div>
+      <div id="qr-${i}" style="width:100px;height:100px;margin:0 auto 12px;"></div>
+      <div><a class="qr-btn qr-btn-print" href="#">🖨️ Imprimir</a></div>
+    </div>`;
+  }).join('');
+
+  // Generate real QR codes after DOM is ready
+  mesas.forEach((m, i) => {
+    const tableId = m.toLowerCase().replace(' ', '-');
+    const url = `https://mesioai.com/menu/${tableId}`;
+    try {
+      new QRCode(document.getElementById(`qr-${i}`), {
+        text: url,
+        width: 100,
+        height: 100,
+        colorDark: '#0D1412',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    } catch(e) {
+      // fallback SVG if QRCode fails
+      document.getElementById(`qr-${i}`).innerHTML = `<svg width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>`;
+    }
+  });
 }
 function buildKitchen() {
   const orders = [
