@@ -9,12 +9,12 @@ from app.routes.orders import router as orders_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
+from app.routes.billing import router as billing_router   # ← NUEVO
 
 app = FastAPI(
     title="🍽️ Mesio",
     description="IA colombiana para restaurantes",
-    version="5.8.0",
-    # Ocultar docs en producción (V-14)
+    version="5.9.0",
     docs_url=None,
     redoc_url=None,
 )
@@ -28,7 +28,7 @@ async def force_domain_middleware(request: Request, call_next):
         return RedirectResponse(url, status_code=301)
     return await call_next(request)
 
-# ── SECURITY HEADERS MIDDLEWARE (V-07 parcial, V-14) ─────────────────
+# ── SECURITY HEADERS MIDDLEWARE ───────────────────────────────────────
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -39,13 +39,10 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     return response
 
-# ── CORS RESTRICTIVO (V-07) ───────────────────────────────────────────
-# Solo permitir orígenes conocidos. El webhook de Meta viene de Meta,
-# no del browser, por lo que no necesita CORS.
+# ── CORS RESTRICTIVO ──────────────────────────────────────────────────
 ALLOWED_ORIGINS = [
     "https://mesioai.com",
     "https://www.mesioai.com",
-    # Durante desarrollo (eliminar en producción real):
     "http://localhost:3000",
     "http://localhost:8000",
 ]
@@ -64,20 +61,23 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 async def startup():
-    from app.services.database import init_db, db_init_tables, db_init_waiter_alerts, db_init_table_sessions
+    from app.services.database import (
+        init_db, db_init_tables, db_init_waiter_alerts,
+        db_init_table_sessions, db_cleanup_expired_sessions,
+        db_init_billing,  
+    )
     await init_db()
     await db_init_tables()
     await db_init_waiter_alerts()
     await db_init_table_sessions()
+    await db_init_billing()           
 
     from app.services.scheduler import start_scheduler
     await start_scheduler()
 
-    # Limpiar tokens expirados al arrancar (V-06)
-    from app.services.database import db_cleanup_expired_sessions
     await db_cleanup_expired_sessions()
 
-    print("🚀 Mesio v5.8 iniciado", flush=True)
+    print("🚀 Mesio v5.9 iniciado con módulo Billing", flush=True)
 
 
 app.include_router(dashboard_router)
@@ -85,3 +85,4 @@ app.include_router(stats_router)
 app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
+app.include_router(billing_router)   

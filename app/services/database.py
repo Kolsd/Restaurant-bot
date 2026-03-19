@@ -809,3 +809,47 @@ async def db_reopen_session(session_id: int) -> dict | None:
 async def db_get_restaurant_settings() -> dict:
     all_r = await db_get_all_restaurants()
     return all_r[0] if all_r else {}
+
+async def db_init_billing():
+    """Crea las tablas/columnas necesarias para el módulo de Billing."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Columna billing_config en la tabla restaurants
+        try:
+            await conn.execute(
+                "ALTER TABLE restaurants "
+                "ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL"
+            )
+        except Exception:
+            pass  # Ya existe — OK
+ 
+        # Tabla de log de facturación
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS billing_log (
+                id            SERIAL PRIMARY KEY,
+                restaurant_id INTEGER   NOT NULL,
+                order_id      TEXT      NOT NULL DEFAULT '',
+                provider      TEXT      NOT NULL DEFAULT '',
+                status        TEXT      NOT NULL DEFAULT 'pending',
+                external_id   TEXT      NOT NULL DEFAULT '',
+                error_message TEXT      NOT NULL DEFAULT '',
+                created_at    TIMESTAMP DEFAULT NOW()
+            );
+        """)
+ 
+        # Índices para consultas rápidas
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_billing_log_restaurant "
+            "ON billing_log(restaurant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_billing_log_order "
+            "ON billing_log(order_id)",
+            "CREATE INDEX IF NOT EXISTS idx_billing_log_created "
+            "ON billing_log(created_at DESC)",
+        ]:
+            try:
+                await conn.execute(idx_sql)
+            except Exception:
+                pass
+ 
+    print("✅ Billing DB inicializado", flush=True)
+ 

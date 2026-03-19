@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Facturación</title>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --g:     #1D9E75;
+  --g2:    #E1F5EE;
+  --blue:  #378ADD;
+  --amber: #F59E0B;
+  --red:   #EF4444;
+  --bg:    #F5F5F0;
+  --card:  #FFFFFF;
+  --border:#E0E0D8;
+  --text:  #111111;
+  --muted: #777777;
+  --ink:   #0A0A0A;
+  --siigo-color:  #00529B;
+  --alegra-color: #00B4D8;
+  --loggro-color: #6D28D9;
+}
+
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* ── NAV ── */
+.topnav {
+  position: fixed; top:0; left:0; right:0; z-index:200;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap:16px;
+  padding: 0 2rem; height: 58px;
+}
+.nav-logo { font-weight:700; font-size:1.1rem; color:var(--text); text-decoration:none; }
+.nav-logo span { color:var(--g); }
+.nav-back {
+  font-size:.82rem; color:var(--muted); text-decoration:none;
+  display:flex; align-items:center; gap:5px;
+  padding:6px 12px; border-radius:8px; border:1px solid var(--border);
+  transition:all .15s;
+}
+.nav-back:hover { background:var(--bg); color:var(--text); }
+.nav-rest { margin-left:auto; font-size:.82rem; color:var(--muted); }
+.nav-rest strong { color:var(--text); }
+
+/* ── LAYOUT ── */
+.page { max-width:1100px; margin:0 auto; padding:80px 1.5rem 3rem; }
+
+/* ── HEADINGS ── */
+.page-header { margin-bottom:2rem; }
+.page-title  { font-size:1.75rem; font-weight:700; letter-spacing:-.02em; margin-bottom:.3rem; }
+.page-sub    { font-size:.88rem; color:var(--muted); }
+
+/* ── ALERT / BADGE ── */
+.status-pill {
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:.75rem; font-weight:600; padding:4px 12px;
+  border-radius:100px; letter-spacing:.04em;
+}
+.pill-ok     { background:#DCFCE7; color:#166534; }
+.pill-error  { background:#FEE2E2; color:#991B1B; }
+.pill-idle   { background:#F3F4F6; color:#6B7280; }
+.pill-dot    { width:6px; height:6px; border-radius:50%; background:currentColor; }
+
+/* ── CARDS ── */
+.card {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:16px; padding:1.5rem;
+  margin-bottom:1.25rem;
+}
+.card-title {
+  font-size:.72rem; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--muted); margin-bottom:1.25rem;
+}
+
+/* ── PROVIDER PICKER ── */
+.provider-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+@media(max-width:600px){ .provider-grid { grid-template-columns:1fr; } }
+
+.provider-card {
+  border:2px solid var(--border); border-radius:14px;
+  padding:1.25rem; cursor:pointer; transition:all .2s;
+  display:flex; flex-direction:column; align-items:flex-start; gap:8px;
+  background:var(--card); position:relative;
+}
+.provider-card:hover { border-color:var(--g); transform:translateY(-2px); }
+.provider-card.selected { border-color:var(--g); box-shadow:0 0 0 3px var(--g2); }
+.provider-card.selected::after {
+  content:'✓'; position:absolute; top:10px; right:12px;
+  width:20px; height:20px; background:var(--g); color:#fff;
+  border-radius:50%; font-size:11px; display:flex;
+  align-items:center; justify-content:center; font-weight:700;
+}
+.provider-logo {
+  width:40px; height:40px; border-radius:10px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.2rem; font-weight:800; color:#fff;
+}
+.logo-siigo  { background:var(--siigo-color); }
+.logo-alegra { background:var(--alegra-color); }
+.logo-loggro { background:var(--loggro-color); }
+.provider-name { font-weight:700; font-size:.95rem; }
+.provider-desc { font-size:.78rem; color:var(--muted); line-height:1.4; }
+.provider-link { font-size:.72rem; color:var(--blue); text-decoration:none; margin-top:auto; }
+.provider-link:hover { text-decoration:underline; }
+
+/* ── FORM ── */
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media(max-width:600px){ .form-grid { grid-template-columns:1fr; } }
+
+.form-group { display:flex; flex-direction:column; gap:5px; }
+.form-group.full { grid-column:1/-1; }
+.form-label { font-size:.78rem; font-weight:600; color:var(--muted); }
+.form-label .req { color:var(--red); margin-left:2px; }
+.form-input {
+  padding:9px 12px; border:1px solid var(--border); border-radius:9px;
+  font-size:.88rem; font-family:inherit; background:var(--bg); color:var(--text);
+  outline:none; transition:border-color .15s;
+}
+.form-input:focus { border-color:var(--g); background:var(--card); }
+.form-select {
+  padding:9px 12px; border:1px solid var(--border); border-radius:9px;
+  font-size:.88rem; font-family:inherit; background:var(--bg); color:var(--text);
+  outline:none; cursor:pointer;
+}
+.form-hint { font-size:.72rem; color:var(--muted); margin-top:2px; }
+.input-secret { font-family:'DM Mono', monospace; letter-spacing:.05em; }
+
+/* ── TOGGLE ── */
+.toggle-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:.75rem 0; border-bottom:1px solid var(--border);
+}
+.toggle-row:last-child { border-bottom:none; }
+.toggle-label { font-size:.88rem; font-weight:500; }
+.toggle-sub   { font-size:.75rem; color:var(--muted); margin-top:2px; }
+.switch { position:relative; display:inline-block; width:40px; height:22px; }
+.switch input { opacity:0; width:0; height:0; }
+.slider { position:absolute; cursor:pointer; inset:0; background:#E5E7EB; border-radius:22px; transition:.2s; }
+.slider::before { position:absolute; content:''; height:16px; width:16px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+input:checked + .slider { background:var(--g); }
+input:checked + .slider::before { transform:translateX(18px); }
+
+/* ── BUTTONS ── */
+.btn {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:9px 18px; border-radius:9px; font-size:.875rem;
+  font-weight:600; font-family:inherit; cursor:pointer; border:none;
+  transition:all .15s;
+}
+.btn-primary   { background:var(--g); color:#fff; }
+.btn-primary:hover { background:#179063; }
+.btn-outline   { background:var(--card); color:var(--text); border:1px solid var(--border); }
+.btn-outline:hover { background:var(--bg); }
+.btn-red       { background:#FEE2E2; color:var(--red); }
+.btn-red:hover { background:#FECACA; }
+.btn-sm        { padding:6px 12px; font-size:.8rem; }
+.btn-loading   { opacity:.6; pointer-events:none; }
+.btns-row      { display:flex; gap:10px; flex-wrap:wrap; margin-top:1.25rem; }
+
+/* ── LOG TABLE ── */
+.log-table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:.82rem; }
+th { text-align:left; padding:8px 12px; font-size:.72rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--border); white-space:nowrap; }
+td { padding:10px 12px; border-bottom:1px solid #F5F5F0; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+tr:hover td { background:#FAFAF8; }
+.mono { font-family:'DM Mono', monospace; font-size:.78rem; }
+.badge-success { background:#DCFCE7; color:#166534; font-size:.7rem; padding:2px 8px; border-radius:20px; font-weight:600; }
+.badge-error   { background:#FEE2E2; color:#991B1B; font-size:.7rem; padding:2px 8px; border-radius:20px; font-weight:600; }
+.badge-pending { background:#FEF3C7; color:#92400E; font-size:.7rem; padding:2px 8px; border-radius:20px; font-weight:600; }
+.empty-state { text-align:center; padding:3rem 1rem; color:var(--muted); font-size:.88rem; }
+
+/* ── EMIT MODAL ── */
+.modal-overlay {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.4);
+  z-index:1000; align-items:center; justify-content:center;
+}
+.modal-overlay.open { display:flex; }
+.modal-box {
+  background:var(--card); border-radius:18px; padding:2rem;
+  width:500px; max-width:95vw; max-height:90vh; overflow-y:auto;
+  box-shadow:0 24px 60px rgba(0,0,0,.18);
+}
+.modal-title { font-size:1.1rem; font-weight:700; margin-bottom:1rem; }
+.modal-close { float:right; background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--muted); }
+
+/* ── SECTION TABS ── */
+.tabs { display:flex; gap:4px; background:var(--card); border:1px solid var(--border); border-radius:11px; padding:4px; width:fit-content; margin-bottom:1.5rem; }
+.tab-btn { padding:7px 18px; border-radius:8px; border:none; font-size:.84rem; font-weight:600; cursor:pointer; color:var(--muted); background:none; font-family:inherit; transition:all .15s; }
+.tab-btn.active { background:var(--g); color:#fff; }
+
+/* ── TOAST ── */
+.toast {
+  position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999;
+  background:var(--ink); color:#fff; padding:12px 20px; border-radius:12px;
+  font-size:.85rem; font-weight:500; max-width:360px;
+  transform:translateY(80px); opacity:0; transition:all .3s;
+  display:flex; align-items:center; gap:10px;
+}
+.toast.show { transform:translateY(0); opacity:1; }
+.toast.ok   { border-left:4px solid var(--g); }
+.toast.err  { border-left:4px solid var(--red); }
+
+/* ── METRICS MINI ── */
+.metrics-mini { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:1.25rem; }
+.metric-mini { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:1rem; }
+.metric-mini-label { font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:4px; }
+.metric-mini-val { font-size:1.5rem; font-weight:700; }
+.metric-mini-val.green { color:var(--g); }
+.metric-mini-val.red   { color:var(--red); }
+
+@media(max-width:600px){ .metrics-mini { grid-template-columns:1fr 1fr; } }
+
+/* ── PROVIDER BADGE IN STATUS ── */
+.prov-badge {
+  display:inline-flex; align-items:center; gap:5px;
+  font-size:.72rem; font-weight:700; padding:2px 8px; border-radius:6px;
+}
+.prov-siigo  { background:#EBF4FF; color:var(--siigo-color); }
+.prov-alegra { background:#E0F7FA; color:#006064; }
+.prov-loggro { background:#F3E8FF; color:var(--loggro-color); }
+
+/* ── SECTION VISIBILITY ── */
+.tab-section { display:none; }
+.tab-section.active { display:block; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="topnav">
+  <a class="nav-logo" href="/dashboard">Mesio<span>.</span></a>
+  <a class="nav-back" href="/dashboard">← Volver al dashboard</a>
+  <div class="nav-rest" id="nav-rest-name"></div>
+</nav>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="page-header">
+    <h1 class="page-title">💳 Facturación Contable</h1>
+    <p class="page-sub">Conecta Mesio con tu sistema contable. Cada pedido pagado puede emitirse automáticamente como factura electrónica.</p>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('config',this)">⚙️ Configuración</button>
+    <button class="tab-btn" onclick="switchTab('emit',this)">📄 Emitir Factura</button>
+    <button class="tab-btn" onclick="switchTab('log',this)">📋 Historial</button>
+  </div>
+
+  <!-- ══ TAB: CONFIGURACIÓN ══ -->
+  <div id="tab-config" class="tab-section active">
+
+    <!-- Status card -->
+    <div class="card" id="status-card" style="display:none;">
+      <div class="card-title">Estado actual</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div id="status-pill"></div>
+        <div style="font-size:.85rem;" id="status-provider-text"></div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <button class="btn btn-outline btn-sm" onclick="testConnection()" id="btn-test">🔌 Probar conexión</button>
+          <button class="btn btn-red btn-sm" onclick="clearConfig()">✕ Desconectar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="metrics-mini" id="metrics-mini" style="display:none;">
+      <div class="metric-mini"><div class="metric-mini-label">Facturas emitidas</div><div class="metric-mini-val green" id="m-ok">—</div></div>
+      <div class="metric-mini"><div class="metric-mini-label">Con errores</div><div class="metric-mini-val red" id="m-err">—</div></div>
+      <div class="metric-mini"><div class="metric-mini-label">Auto-emisión</div><div class="metric-mini-val" id="m-auto">—</div></div>
+    </div>
+
+    <!-- Step 1: Provider -->
+    <div class="card">
+      <div class="card-title">1 · Selecciona tu sistema contable</div>
+      <div class="provider-grid">
+        <div class="provider-card" id="card-siigo" onclick="selectProvider('siigo')">
+          <div class="provider-logo logo-siigo">S</div>
+          <div class="provider-name">Siigo</div>
+          <div class="provider-desc">El sistema contable #1 en Colombia. Facturación electrónica DIAN.</div>
+          <a class="provider-link" href="https://siigonube.siigo.com/docs/" target="_blank" onclick="event.stopPropagation()">Ver documentación →</a>
+        </div>
+        <div class="provider-card" id="card-alegra" onclick="selectProvider('alegra')">
+          <div class="provider-logo logo-alegra">A</div>
+          <div class="provider-name">Alegra</div>
+          <div class="provider-desc">Facturación y contabilidad para pymes. API REST sencilla.</div>
+          <a class="provider-link" href="https://developer.alegra.com/docs" target="_blank" onclick="event.stopPropagation()">Ver documentación →</a>
+        </div>
+        <div class="provider-card" id="card-loggro" onclick="selectProvider('loggro')">
+          <div class="provider-logo logo-loggro">L</div>
+          <div class="provider-name">Loggro</div>
+          <div class="provider-desc">ERP y facturación electrónica para restaurantes y retail.</div>
+          <a class="provider-link" href="https://desarrolladores.loggro.com" target="_blank" onclick="event.stopPropagation()">Ver documentación →</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Fields (rendered dynamically) -->
+    <div class="card" id="fields-card" style="display:none;">
+      <div class="card-title" id="fields-card-title">2 · Credenciales y configuración</div>
+      <div class="form-grid" id="fields-container"></div>
+
+      <!-- Auto-emit toggle -->
+      <div style="margin-top:1.25rem;border-top:1px solid var(--border);padding-top:1.25rem;">
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Emisión automática</div>
+            <div class="toggle-sub">Emite la factura automáticamente cuando se marca una orden como pagada o se entrega la factura de mesa.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="toggle-auto-emit"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="btns-row">
+        <button class="btn btn-primary" id="btn-save" onclick="saveConfig()">💾 Guardar configuración</button>
+        <button class="btn btn-outline" onclick="testConnection()" id="btn-test2">🔌 Probar conexión</button>
+      </div>
+    </div>
+
+  </div><!-- /tab-config -->
+
+  <!-- ══ TAB: EMITIR ══ -->
+  <div id="tab-emit" class="tab-section">
+    <div class="card">
+      <div class="card-title">Emitir factura manual</div>
+      <p style="font-size:.85rem;color:var(--muted);margin-bottom:1.25rem;line-height:1.65;">
+        Ingresa el ID de un pedido (WhatsApp o mesa) para emitirlo manualmente al sistema contable configurado.
+        Útil para pedidos del pasado o para reemitir en caso de error.
+      </p>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">ID del Pedido <span class="req">*</span></label>
+          <input class="form-input mono" id="emit-order-id" placeholder="ORD-XXXXXXXX o MESA-XXXXXX">
+        </div>
+        <div class="form-group">
+          <label class="form-label">NIT / CC del Cliente (opcional)</label>
+          <input class="form-input" id="emit-customer-nit" placeholder="Dejar vacío = cliente genérico">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nombre del Cliente (opcional)</label>
+          <input class="form-input" id="emit-customer-name" placeholder="Consumidor Final">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email del Cliente (opcional)</label>
+          <input class="form-input" id="emit-customer-email" placeholder="cliente@email.com">
+        </div>
+      </div>
+      <div class="btns-row">
+        <button class="btn btn-primary" onclick="emitInvoice()" id="btn-emit">📤 Emitir Factura</button>
+      </div>
+      <div id="emit-result" style="margin-top:1rem;display:none;"></div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: LOG ══ -->
+  <div id="tab-log" class="tab-section">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
+        <div class="card-title" style="margin-bottom:0;">Historial de facturas emitidas</div>
+        <button class="btn btn-outline btn-sm" onclick="loadLog()">↻ Actualizar</button>
+      </div>
+      <div class="log-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Pedido</th>
+              <th>Proveedor</th>
+              <th>Estado</th>
+              <th>ID Externo</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody id="log-tbody">
+            <tr><td colspan="6"><div class="empty-state">Cargando historial...</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+const token      = localStorage.getItem('rb_token');
+const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+if (!token) window.location.href = '/login';
+
+const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+// Nombre restaurante en nav
+const navName = document.getElementById('nav-rest-name');
+if (navName && restaurant.name) navName.innerHTML = '<strong>' + restaurant.name + '</strong> · Facturación';
+
+// ── PROVIDERS METADATA ──────────────────────────────────────────────
+let PROVIDERS = {};
+let currentProvider = null;
+let existingConfig  = null;
+
+// ── TOAST ───────────────────────────────────────────────────────────
+let _toastTimer = null;
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = (type==='ok' ? '✅ ' : '❌ ') + msg;
+  el.className = 'toast show ' + type;
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+// ── TABS ─────────────────────────────────────────────────────────────
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  btn.classList.add('active');
+  if (id === 'log') loadLog();
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────
+async function init() {
+  await Promise.all([loadProviders(), loadCurrentConfig()]);
+}
+
+async function loadProviders() {
+  try {
+    const r = await fetch('/api/billing/providers', { headers: hdr });
+    const d = await r.json();
+    d.providers.forEach(p => { PROVIDERS[p.id] = p; });
+  } catch(e) { console.error(e); }
+}
+
+async function loadCurrentConfig() {
+  try {
+    const r = await fetch('/api/billing/config', { headers: hdr });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.configured && d.config) {
+      existingConfig = d.config;
+      const prov = d.config.provider;
+      currentProvider = prov;
+      selectProvider(prov, true);
+      showStatusCard(prov, d.config.auto_emit);
+      loadMetrics();
+    }
+  } catch(e) { console.error(e); }
+}
+
+function showStatusCard(prov, autoEmit) {
+  const card = document.getElementById('status-card');
+  const pill = document.getElementById('status-pill');
+  const text = document.getElementById('status-provider-text');
+  card.style.display = 'block';
+  pill.innerHTML = '<span class="status-pill pill-ok"><span class="pill-dot"></span> Conectado</span>';
+  const names = { siigo:'Siigo', alegra:'Alegra', loggro:'Loggro' };
+  text.innerHTML = 'Sistema: <strong>' + (names[prov]||prov) + '</strong> · Auto-emisión: <strong>' + (autoEmit?'Activada':'Desactivada') + '</strong>';
+
+  // Mostrar métricas
+  document.getElementById('metrics-mini').style.display = 'grid';
+}
+
+async function loadMetrics() {
+  try {
+    const r = await fetch('/api/billing/log?limit=200', { headers: hdr });
+    if (!r.ok) return;
+    const { log = [] } = await r.json();
+    const ok  = log.filter(l => l.status === 'success').length;
+    const err = log.filter(l => l.status === 'error').length;
+    document.getElementById('m-ok').textContent  = ok;
+    document.getElementById('m-err').textContent  = err;
+    document.getElementById('m-auto').textContent = existingConfig?.auto_emit ? 'Activa' : 'Inactiva';
+  } catch(e) {}
+}
+
+// ── PROVIDER SELECTION ────────────────────────────────────────────────
+function selectProvider(provId, skipHighlight=false) {
+  currentProvider = provId;
+  if (!skipHighlight) {
+    document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
+    const el = document.getElementById('card-' + provId);
+    if (el) el.classList.add('selected');
+  } else {
+    document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
+    const el = document.getElementById('card-' + provId);
+    if (el) el.classList.add('selected');
+  }
+  renderFields(provId);
+}
+
+function renderFields(provId) {
+  const prov = PROVIDERS[provId];
+  if (!prov) return;
+
+  const card  = document.getElementById('fields-card');
+  const title = document.getElementById('fields-card-title');
+  const cont  = document.getElementById('fields-container');
+  title.textContent = '2 · Credenciales ' + prov.name;
+  card.style.display = 'block';
+
+  let html = '';
+  prov.fields.forEach(f => {
+    const val    = existingConfig?.[f.key] ?? '';
+    const isFull = f.key.includes('description') || f.key.includes('notes') ? 'full' : '';
+    const isSec  = f.type === 'password' ? 'input-secret' : '';
+    const isPass = f.type === 'password' ? 'type="password"' : f.type === 'email' ? 'type="email"' : f.type === 'number' ? 'type="number" step="0.01"' : 'type="text"';
+    const req    = f.required ? '<span class="req">*</span>' : '';
+
+    if (f.type === 'select' && f.options) {
+      html += `<div class="form-group ${isFull}">
+        <label class="form-label">${f.label} ${req}</label>
+        <select class="form-select" id="field-${f.key}">
+          ${f.options.map(o => `<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select>
+      </div>`;
+    } else {
+      const dispVal = f.type === 'password' && val === '***' ? '' : val;
+      html += `<div class="form-group ${isFull}">
+        <label class="form-label">${f.label} ${req}</label>
+        <input class="form-input ${isSec}" id="field-${f.key}" ${isPass} value="${dispVal}" placeholder="${f.type==='password'?'••••••••':''}">
+      </div>`;
+    }
+  });
+  cont.innerHTML = html;
+
+  // Restore auto-emit
+  if (existingConfig?.auto_emit !== undefined) {
+    document.getElementById('toggle-auto-emit').checked = existingConfig.auto_emit;
+  }
+}
+
+// ── SAVE CONFIG ───────────────────────────────────────────────────────
+async function saveConfig() {
+  if (!currentProvider) { toast('Selecciona un proveedor primero', 'err'); return; }
+  const prov   = PROVIDERS[currentProvider];
+  const payload = { provider: currentProvider };
+
+  // Recoger campos
+  let valid = true;
+  prov.fields.forEach(f => {
+    const el = document.getElementById('field-' + f.key);
+    if (!el) return;
+    const val = el.value.trim();
+    if (f.required && !val) { el.style.borderColor = 'var(--red)'; valid = false; }
+    else { el.style.borderColor = ''; if (val) payload[f.key] = f.type==='number' ? parseFloat(val) : val; }
+  });
+  if (!valid) { toast('Completa los campos obligatorios', 'err'); return; }
+
+  payload.auto_emit = document.getElementById('toggle-auto-emit').checked;
+
+  const btn = document.getElementById('btn-save');
+  btn.classList.add('btn-loading'); btn.textContent = 'Guardando...';
+
+  try {
+    const r = await fetch('/api/billing/config', { method:'POST', headers:hdr, body:JSON.stringify(payload) });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Error'); }
+    existingConfig = payload;
+    showStatusCard(currentProvider, payload.auto_emit);
+    toast('Configuración guardada correctamente');
+  } catch(e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.classList.remove('btn-loading'); btn.textContent = '💾 Guardar configuración';
+  }
+}
+
+// ── TEST CONNECTION ────────────────────────────────────────────────────
+async function testConnection() {
+  const btn1 = document.getElementById('btn-test');
+  const btn2 = document.getElementById('btn-test2');
+  [btn1, btn2].forEach(b => { if(b) { b.classList.add('btn-loading'); b.textContent='Probando...'; }});
+
+  try {
+    const r = await fetch('/api/billing/test-connection', { method:'POST', headers:hdr });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Error de conexión');
+    toast('Conexión exitosa con ' + (d.provider||'el proveedor'));
+  } catch(e) {
+    toast(e.message, 'err');
+  } finally {
+    if(btn1) { btn1.classList.remove('btn-loading'); btn1.textContent='🔌 Probar conexión'; }
+    if(btn2) { btn2.classList.remove('btn-loading'); btn2.textContent='🔌 Probar conexión'; }
+  }
+}
+
+// ── CLEAR CONFIG ──────────────────────────────────────────────────────
+async function clearConfig() {
+  if (!confirm('¿Desconectar el sistema contable? Se perderá la configuración actual.')) return;
+  try {
+    await fetch('/api/billing/config', {
+      method:'POST', headers:hdr,
+      body: JSON.stringify({ provider:'siigo', auto_emit:false, _clear:true })
+    });
+    existingConfig = null;
+    currentProvider = null;
+    document.getElementById('status-card').style.display = 'none';
+    document.getElementById('metrics-mini').style.display = 'none';
+    document.getElementById('fields-card').style.display = 'none';
+    document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
+    toast('Sistema contable desconectado');
+  } catch(e) { toast('Error al desconectar', 'err'); }
+}
+
+// ── EMIT INVOICE ──────────────────────────────────────────────────────
+async function emitInvoice() {
+  const orderId = document.getElementById('emit-order-id').value.trim();
+  if (!orderId) { toast('Ingresa el ID del pedido', 'err'); return; }
+
+  const customer = {};
+  const nit   = document.getElementById('emit-customer-nit').value.trim();
+  const name  = document.getElementById('emit-customer-name').value.trim();
+  const email = document.getElementById('emit-customer-email').value.trim();
+  if (nit)   customer.nit   = nit;
+  if (name)  customer.name  = name;
+  if (email) customer.email = email;
+
+  const btn = document.getElementById('btn-emit');
+  btn.classList.add('btn-loading'); btn.textContent='Emitiendo...';
+  const resultDiv = document.getElementById('emit-result');
+  resultDiv.style.display = 'none';
+
+  try {
+    const body = { order_id: orderId };
+    if (Object.keys(customer).length) body.customer = customer;
+    const r = await fetch('/api/billing/emit', { method:'POST', headers:hdr, body:JSON.stringify(body) });
+    const d = await r.json();
+
+    if (!r.ok) throw new Error(d.detail || 'Error al emitir');
+
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `
+      <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:12px;padding:1rem;font-size:.84rem;">
+        <div style="font-weight:700;color:#166534;margin-bottom:8px;">✅ Factura emitida exitosamente</div>
+        <div><strong>Proveedor:</strong> ${d.provider}</div>
+        <div><strong>ID Externo:</strong> <span class="mono">${d.external_id || '—'}</span></div>
+        <pre style="margin-top:8px;font-size:.72rem;background:#E7F5EA;border-radius:8px;padding:.75rem;overflow:auto;max-height:200px;">${JSON.stringify(d.data, null, 2)}</pre>
+      </div>`;
+    toast('Factura emitida: ' + (d.external_id || ''));
+    document.getElementById('emit-order-id').value = '';
+  } catch(e) {
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:1rem;font-size:.84rem;color:#991B1B;"><strong>❌ Error:</strong> ${e.message}</div>`;
+    toast(e.message, 'err');
+  } finally {
+    btn.classList.remove('btn-loading'); btn.textContent='📤 Emitir Factura';
+  }
+}
+
+// ── LOG ───────────────────────────────────────────────────────────────
+async function loadLog() {
+  const tbody = document.getElementById('log-tbody');
+  tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">Cargando...</div></td></tr>';
+  try {
+    const r = await fetch('/api/billing/log?limit=100', { headers: hdr });
+    if (!r.ok) throw new Error('Error');
+    const { log = [] } = await r.json();
+    if (!log.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">Sin facturas emitidas aún. Configura tu sistema contable y emite la primera.</div></td></tr>';
+      return;
+    }
+    const provClass = { siigo:'prov-siigo', alegra:'prov-alegra', loggro:'prov-loggro' };
+    const provLabel = { siigo:'Siigo', alegra:'Alegra', loggro:'Loggro' };
+    tbody.innerHTML = log.map(l => `<tr>
+      <td style="color:var(--muted);font-size:.78rem;white-space:nowrap;">${(l.created_at||'').substring(0,16).replace('T',' ')}</td>
+      <td class="mono">${l.order_id||'—'}</td>
+      <td><span class="prov-badge ${provClass[l.provider]||''}">${provLabel[l.provider]||l.provider}</span></td>
+      <td>${l.status==='success'?'<span class="badge-success">Exitosa</span>':l.status==='error'?'<span class="badge-error">Error</span>':'<span class="badge-pending">Pendiente</span>'}</td>
+      <td class="mono">${l.external_id||'—'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.75rem;color:var(--muted);" title="${l.error_message||''}">${l.error_message||'—'}</td>
+    </tr>`).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">Error cargando historial</div></td></tr>';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

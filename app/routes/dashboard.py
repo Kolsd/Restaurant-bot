@@ -60,6 +60,7 @@ class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; sta
 class TeamInviteRequest(BaseModel): username: str; password: str; role: str; branch_id: int = None
 class CreateBranchRequest(BaseModel): name: str; whatsapp_number: str = ""; address: str; menu: dict = {}
 
+# ── PÁGINAS PÚBLICAS / AUTENTICADAS ──────────────────────────────────
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(): return (STATIC / "login.html").read_text(encoding="utf-8")
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -77,6 +78,13 @@ async def superadmin_page():
 @router.get("/mesero", response_class=HTMLResponse)
 async def mesero_page(): return (STATIC / "mesero.html").read_text(encoding="utf-8")
 
+# ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
+@router.get("/billing", response_class=HTMLResponse)
+async def billing_page():
+    p = STATIC / "billing.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
+
+# ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
 async def auth_login(request: LoginRequest):
     result = await login(request.username, request.password)
@@ -95,14 +103,14 @@ async def geocode_endpoint(address: str):
     if lat is None: raise HTTPException(status_code=404, detail="No se encontró la dirección.")
     return {"latitude": lat, "longitude": lon, "display_name": display, "maps_url": f"https://www.google.com/maps?q={lat},{lon}"}
 
-# ── NUEVOS ENDPOINTS PARA EL SUPER DASHBOARD (HQ) ──
+# ── SUPER DASHBOARD (HQ) ─────────────────────────────────────────────
 @router.get("/api/admin/stats")
 async def admin_get_stats(admin_key: str):
     if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): 
         raise HTTPException(status_code=403, detail="Clave incorrecta")
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        total_rest = await conn.fetchval("SELECT COUNT(*) FROM restaurants")
+        total_rest  = await conn.fetchval("SELECT COUNT(*) FROM restaurants")
         active_rest = await conn.fetchval("SELECT COUNT(*) FROM restaurants WHERE subscription_status='active'")
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
         total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders")
@@ -118,7 +126,6 @@ async def admin_get_stats(admin_key: str):
 async def admin_get_restaurants(admin_key: str):
     if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403)
     return {"restaurants": await db.db_get_all_restaurants()}
-# ───────────────────────────────────────────────────
 
 @router.post("/api/admin/create-user")
 async def admin_create_user(request: CreateUserRequest):
@@ -147,6 +154,7 @@ async def admin_set_subscription(request: SetSubscriptionRequest):
     await db.db_update_subscription(request.restaurant_id, request.status)
     return {"success": True}
 
+# ── TEAM / BRANCHES ───────────────────────────────────────────────────
 @router.get("/api/team/branches")
 async def list_team_branches(request: Request):
     user = await get_current_user(request)
@@ -193,7 +201,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
 @router.delete("/api/team/users/{username}")
 async def delete_user(username: str, request: Request):
     creator = await get_current_user(request)
-    target = await db.db_get_user(username)
+    target  = await db.db_get_user(username)
     if not target: raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if creator.get("role", "owner") == "admin" and target.get("branch_id") != creator.get("branch_id"):
         raise HTTPException(status_code=403, detail="No autorizado")
@@ -214,9 +222,9 @@ async def delete_branch(branch_id: int, request: Request):
 @router.post("/api/admin/parse-menu")
 async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
     if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="Clave incorrecta")
-    content = await file.read()
+    content  = await file.read()
     filename = file.filename.lower()
-    client = Anthropic()
+    client   = Anthropic()
     messages_content = []
     try:
         if filename.endswith(".pdf"):
@@ -237,12 +245,12 @@ async def fix_branch_ids(request: Request):
     body = await request.json()
     if body.get("admin_key") != os.getenv("ADMIN_KEY", "restaurantbot2024"):
         raise HTTPException(status_code=403, detail="No autorizado")
-    pool = await db.get_pool()
+    pool  = await db.get_pool()
     fixed = []
     async with pool.acquire() as conn:
         restaurants = await conn.fetch("SELECT id, name, whatsapp_number FROM restaurants")
-        rest_map = {r['name'].lower().strip(): dict(r) for r in restaurants}
-        users = await conn.fetch("SELECT username, restaurant_name, role FROM users WHERE branch_id IS NULL")
+        rest_map    = {r['name'].lower().strip(): dict(r) for r in restaurants}
+        users       = await conn.fetch("SELECT username, restaurant_name, role FROM users WHERE branch_id IS NULL")
         for user in users:
             rname = user['restaurant_name'].lower().strip()
             if rname in rest_map:
