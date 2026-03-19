@@ -21,6 +21,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const role = restaurant.role || 'owner';
   const equipoNav = document.getElementById('nav-equipo');
   if (equipoNav) equipoNav.style.display = (role === 'owner' || role === 'admin') ? '' : 'none';
+
+  // ── MAGIA DE MÓDULOS SAAS (Ocultar/Mostrar según compra) ──
+  const feats = restaurant.features || {};
+
+  const toggleNav = (id, isEnabled) => {
+    const el = document.querySelector(`[onclick*="'${id}'"]`);
+    if (el) el.style.display = isEnabled ? '' : 'none';
+  };
+
+  // Por defecto (si el restaurante es viejo y no tiene features) dejamos todo activado (retrocompatibilidad)
+  toggleNav('pedidos', feats.module_orders !== false);
+  toggleNav('mesas', feats.module_tables !== false);
+  toggleNav('sesiones', feats.module_tables !== false); // Sesiones viene con el módulo de mesas
+  toggleNav('reservaciones', feats.module_reservations !== false);
+  toggleNav('pos', feats.module_pos !== false);
 });
 
 // ── TIEMPO ──────────────────────────────────────────────────────────

@@ -10,7 +10,6 @@ from pathlib import Path
 from anthropic import Anthropic
 import httpx
 
-# Se importa hash_password para crear usuarios de forma segura
 from app.services.auth import login, logout, verify_token, create_user, get_users, hash_password
 from app.services import database as db
 
@@ -40,7 +39,6 @@ async def geocode_address(address: str) -> tuple:
         print(f"Photon error: {e}")
     return None, None, None
 
-
 async def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = await verify_token(token)
@@ -58,7 +56,7 @@ async def get_current_user(request: Request) -> dict:
 
 class LoginRequest(BaseModel): username: str; password: str
 class CreateUserRequest(BaseModel): username: str; password: str; restaurant_name: str; admin_key: str
-class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str
+class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}
 class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; status: str
 class TeamInviteRequest(BaseModel): username: str; password: str; role: str; branch_id: int = None
 class CreateBranchRequest(BaseModel): name: str; whatsapp_number: str = ""; address: str; menu: dict = {}
@@ -94,13 +92,11 @@ async def auth_logout(request: Request):
     await logout(token)
     return {"success": True}
 
-
 @router.get("/api/geocode")
 async def geocode_endpoint(address: str):
     lat, lon, display = await geocode_address(address)
     if lat is None: raise HTTPException(status_code=404, detail="No se encontró la dirección.")
     return {"latitude": lat, "longitude": lon, "display_name": display, "maps_url": f"https://www.google.com/maps?q={lat},{lon}"}
-
 
 @router.post("/api/admin/create-user")
 async def admin_create_user(request: CreateUserRequest):
@@ -120,7 +116,7 @@ async def admin_create_restaurant(request: CreateRestaurantRequest):
     try: menu_dict = json.loads(request.menu)
     except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
     lat, lon, _ = await geocode_address(request.address)
-    await db.db_create_restaurant(request.name, request.whatsapp_number, request.address, menu_dict, lat, lon)
+    await db.db_create_restaurant(request.name, request.whatsapp_number, request.address, menu_dict, lat, lon, request.features)
     return {"success": True}
 
 @router.post("/api/admin/set-subscription")
@@ -128,7 +124,6 @@ async def admin_set_subscription(request: SetSubscriptionRequest):
     if request.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="Clave incorrecta")
     await db.db_update_subscription(request.restaurant_id, request.status)
     return {"success": True}
-
 
 @router.get("/api/team/branches")
 async def list_team_branches(request: Request):
@@ -169,9 +164,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
     branch_id = body.branch_id if creator.get("role", "owner") == "owner" else creator.get("branch_id")
     if not branch_id: raise HTTPException(status_code=400, detail="Sucursal requerida")
     branch = await db.db_get_restaurant_by_id(branch_id)
-    
     success = await db.db_create_user(body.username, hash_password(body.password), branch["name"], role=body.role, branch_id=branch_id, parent_user=creator["username"])
-    
     if not success: raise HTTPException(status_code=400, detail="Usuario ya existe")
     return {"success": True}
 

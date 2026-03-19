@@ -5,16 +5,12 @@ from datetime import date, datetime
 
 _pool = None
 
-
 def _normalize_phone(number: str) -> str:
-    if not number:
-        return ""
+    if not number: return ""
     return number.replace(" ", "").replace("+", "")
-
 
 def _to_date(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
-
 
 def _serialize(d: dict) -> dict:
     result = {}
@@ -26,7 +22,6 @@ def _serialize(d: dict) -> dict:
         else:
             result[k] = v
     return result
-
 
 async def get_pool():
     global _pool
@@ -42,7 +37,6 @@ async def get_pool():
             )
         )
     return _pool
-
 
 async def init_db():
     pool = await get_pool()
@@ -129,6 +123,7 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_user TEXT",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active'",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT ''",
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb", # NUEVA MIGRACIÓN DE MÓDULOS
         ]
         for m in migrations:
             try:
@@ -152,7 +147,6 @@ async def init_db():
 
 
 # ── RESERVACIONES ────────────────────────────────────────────────────
-
 async def db_add_reservation(name, date_str, time, guests, phone, bot_number: str = "", notes=""):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -162,20 +156,14 @@ async def db_add_reservation(name, date_str, time, guests, phone, bot_number: st
         """, name, date_str, time, int(guests), phone, bot_number, notes)
         return _serialize(dict(row))
 
-
 async def db_get_reservations_range(date_from: str, date_to: str, bot_number: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
         if bot_number:
-            rows = await conn.fetch("""
-                SELECT * FROM reservations WHERE date >= $1 AND date <= $2 AND bot_number=$3 ORDER BY date, time
-            """, date_from, date_to, bot_number)
+            rows = await conn.fetch("SELECT * FROM reservations WHERE date >= $1 AND date <= $2 AND bot_number=$3 ORDER BY date, time", date_from, date_to, bot_number)
         else:
-            rows = await conn.fetch("""
-                SELECT * FROM reservations WHERE date >= $1 AND date <= $2 ORDER BY date, time
-            """, date_from, date_to)
+            rows = await conn.fetch("SELECT * FROM reservations WHERE date >= $1 AND date <= $2 ORDER BY date, time", date_from, date_to)
         return [_serialize(dict(r)) for r in rows]
-
 
 async def db_get_all_reservations(bot_number: str = None):
     pool = await get_pool()
@@ -186,9 +174,7 @@ async def db_get_all_reservations(bot_number: str = None):
             rows = await conn.fetch("SELECT * FROM reservations ORDER BY created_at DESC")
         return [_serialize(dict(r)) for r in rows]
 
-
 # ── ORDENES DELIVERY ─────────────────────────────────────────────────
-
 async def db_save_order(order: dict):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -205,7 +191,6 @@ async def db_save_order(order: dict):
         order["status"], order["paid"], order.get("payment_url", ""),
         order.get("bot_number", ""))
 
-
 async def db_confirm_payment(order_id: str, transaction_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -215,7 +200,6 @@ async def db_confirm_payment(order_id: str, transaction_id: str):
         """, order_id, transaction_id)
         return _serialize(dict(row)) if row else None
 
-
 async def db_get_orders_range(date_from: str, date_to: str, bot_number: str = None):
     pool = await get_pool()
     from datetime import timedelta
@@ -223,22 +207,16 @@ async def db_get_orders_range(date_from: str, date_to: str, bot_number: str = No
     d_to_inclusive = _to_date(date_to) + timedelta(days=1)
     async with pool.acquire() as conn:
         if bot_number:
-            rows = await conn.fetch("""
-                SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 AND bot_number=$3 ORDER BY created_at DESC
-            """, d_from, d_to_inclusive, bot_number)
+            rows = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 AND bot_number=$3 ORDER BY created_at DESC", d_from, d_to_inclusive, bot_number)
         else:
-            rows = await conn.fetch("""
-                SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at DESC
-            """, d_from, d_to_inclusive)
+            rows = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at DESC", d_from, d_to_inclusive)
         return [_serialize(dict(r)) for r in rows]
-
 
 async def db_get_order(order_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
         return _serialize(dict(row)) if row else None
-
 
 async def db_get_all_orders(bot_number: str = None):
     pool = await get_pool()
@@ -249,9 +227,7 @@ async def db_get_all_orders(bot_number: str = None):
             rows = await conn.fetch("SELECT * FROM orders ORDER BY created_at DESC")
         return [_serialize(dict(r)) for r in rows]
 
-
 # ── CONVERSACIONES ───────────────────────────────────────────────────
-
 async def db_get_history(phone: str, bot_number: str = "") -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -260,7 +236,6 @@ async def db_get_history(phone: str, bot_number: str = "") -> list:
             h = row["history"]
             return h if isinstance(h, list) else json.loads(h)
         return []
-
 
 async def db_save_history(phone: str, bot_number: str, history: list):
     pool = await get_pool()
@@ -271,15 +246,11 @@ async def db_save_history(phone: str, bot_number: str, history: list):
             ON CONFLICT (phone, bot_number) DO UPDATE SET history=EXCLUDED.history, updated_at=NOW()
         """, phone, bot_number, json.dumps(history[-20:]))
 
-
 async def db_get_all_conversations(bot_number: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
         if bot_number:
-            rows = await conn.fetch("""
-                SELECT phone, bot_number, history, updated_at FROM conversations
-                WHERE bot_number=$1 OR bot_number='' ORDER BY updated_at DESC
-            """, bot_number)
+            rows = await conn.fetch("SELECT phone, bot_number, history, updated_at FROM conversations WHERE bot_number=$1 OR bot_number='' ORDER BY updated_at DESC", bot_number)
         else:
             rows = await conn.fetch("SELECT phone, bot_number, history, updated_at FROM conversations ORDER BY updated_at DESC")
         result = []
@@ -289,12 +260,10 @@ async def db_get_all_conversations(bot_number: str = None):
             result.append({"phone": r["phone"], "messages": len(history), "preview": last_user[:60] if last_user else "...", "updated_at": r["updated_at"].isoformat()[:19]})
         return result
 
-
 async def db_delete_conversation(phone: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM conversations WHERE phone=$1", phone)
-
 
 async def db_get_conversation_details(phone: str, bot_number: str = ""):
     pool = await get_pool()
@@ -305,7 +274,6 @@ async def db_get_conversation_details(phone: str, bot_number: str = ""):
             return {"history": history, "bot_paused": row["bot_paused"] or False}
     return {"history": [], "bot_paused": False}
 
-
 async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -315,7 +283,6 @@ async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
             ON CONFLICT (phone, bot_number) DO UPDATE SET bot_paused=EXCLUDED.bot_paused, updated_at=NOW()
         """, phone, bot_number, pause)
 
-
 async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -324,15 +291,12 @@ async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
         else:
             await conn.execute("DELETE FROM conversations WHERE updated_at < NOW() - ($1 || ' days')::INTERVAL", str(days))
 
-
 # ── USUARIOS ─────────────────────────────────────────────────────────
-
 async def db_get_user(username: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE username=$1", username.lower().strip())
         return dict(row) if row else None
-
 
 async def db_create_user(username: str, password_hash: str, restaurant_name: str,
                           role: str = "owner", branch_id: int = None, parent_user: str = None):
@@ -347,26 +311,21 @@ async def db_create_user(username: str, password_hash: str, restaurant_name: str
         except asyncpg.UniqueViolationError:
             return False
 
-
 async def db_get_all_users():
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT username, restaurant_name, role, branch_id, parent_user FROM users")
         return [dict(r) for r in rows]
 
-
 # ── RESTAURANTES ─────────────────────────────────────────────────────
-
 async def db_get_restaurant_by_phone(whatsapp_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM restaurants WHERE whatsapp_number=$1", _normalize_phone(whatsapp_number.strip()))
         return _serialize(dict(row)) if row else None
 
-
 async def db_get_restaurant_by_bot_number(whatsapp_number: str):
     return await db_get_restaurant_by_phone(whatsapp_number)
-
 
 async def db_get_restaurant_by_name(name: str):
     pool = await get_pool()
@@ -374,13 +333,11 @@ async def db_get_restaurant_by_name(name: str):
         row = await conn.fetchrow("SELECT * FROM restaurants WHERE name=$1", name)
         return _serialize(dict(row)) if row else None
 
-
 async def db_get_restaurant_by_id(restaurant_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM restaurants WHERE id=$1", restaurant_id)
         return _serialize(dict(row)) if row else None
-
 
 async def db_get_all_restaurants():
     pool = await get_pool()
@@ -388,19 +345,19 @@ async def db_get_all_restaurants():
         rows = await conn.fetch("SELECT * FROM restaurants ORDER BY id ASC")
         return [_serialize(dict(r)) for r in rows]
 
-
+# ACTUALIZADO: db_create_restaurant AHORA RECIBE FEATURES
 async def db_create_restaurant(name: str, whatsapp_number: str, address: str, menu: dict,
-                                latitude: float = None, longitude: float = None):
+                                latitude: float = None, longitude: float = None, features: dict = None):
+    if features is None: features = {}
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO restaurants (name, whatsapp_number, address, menu, latitude, longitude)
-            VALUES ($1,$2,$3,$4,$5,$6)
+            INSERT INTO restaurants (name, whatsapp_number, address, menu, latitude, longitude, features)
+            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
             ON CONFLICT (whatsapp_number) DO UPDATE
             SET name=EXCLUDED.name, address=EXCLUDED.address, menu=EXCLUDED.menu,
-                latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude
-        """, name, whatsapp_number, address, json.dumps(menu), latitude, longitude)
-
+                latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, features=EXCLUDED.features
+        """, name, whatsapp_number, address, json.dumps(menu), latitude, longitude, json.dumps(features))
 
 async def db_get_menu(whatsapp_number: str):
     pool = await get_pool()
@@ -409,7 +366,6 @@ async def db_get_menu(whatsapp_number: str):
         if row and row['menu']:
             return row['menu'] if isinstance(row['menu'], dict) else json.loads(row['menu'])
         return None
-
 
 async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
     menu = await db_get_menu(whatsapp_number)
@@ -422,15 +378,12 @@ async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
                 all_dishes.extend(dishes)
     return all_dishes[:top_n]
 
-
 async def db_update_subscription(restaurant_id: int, new_status: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE restaurants SET subscription_status=$2 WHERE id=$1", restaurant_id, new_status)
 
-
 # ── MENU AVAILABILITY ────────────────────────────────────────────────
-
 async def db_get_menu_availability():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -444,7 +397,6 @@ async def db_get_menu_availability():
         rows = await conn.fetch("SELECT dish_name, available FROM menu_availability")
         return {r['dish_name']: r['available'] for r in rows}
 
-
 async def db_set_dish_availability(dish_name: str, available: bool):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -454,14 +406,11 @@ async def db_set_dish_availability(dish_name: str, available: bool):
             ON CONFLICT (dish_name) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
         """, dish_name, available)
 
-
 # ── SESIONES AUTH ────────────────────────────────────────────────────
-
 async def db_save_session(token: str, username: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO sessions (token, username) VALUES ($1, $2)", token, username)
-
 
 async def db_get_session(token: str):
     pool = await get_pool()
@@ -469,15 +418,12 @@ async def db_get_session(token: str):
         row = await conn.fetchrow("SELECT username FROM sessions WHERE token=$1", token)
         return row["username"] if row else None
 
-
 async def db_delete_session(token: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM sessions WHERE token=$1", token)
 
-
 # ── CARRITOS ─────────────────────────────────────────────────────────
-
 async def db_get_cart(phone: str, bot_number: str) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -485,7 +431,6 @@ async def db_get_cart(phone: str, bot_number: str) -> dict:
         if row:
             return json.loads(row["cart_data"]) if isinstance(row["cart_data"], str) else row["cart_data"]
         return {"items": [], "order_type": None, "address": None, "notes": ""}
-
 
 async def db_save_cart(phone: str, bot_number: str, cart_data: dict):
     pool = await get_pool()
@@ -496,15 +441,12 @@ async def db_save_cart(phone: str, bot_number: str, cart_data: dict):
             ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
         """, phone, bot_number, json.dumps(cart_data))
 
-
 async def db_clear_cart(phone: str, bot_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
 
-
 # ── MESAS ────────────────────────────────────────────────────────────
-
 async def db_init_tables():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -530,24 +472,15 @@ async def db_init_tables():
                 updated_at TIMESTAMP DEFAULT NOW()
             );
         """)
-        # Migraciones de columnas
         for col_sql in [
             "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER",
-            # Sub-orders: base_order_id agrupa todas las subórdenes de una visita
-            # sub_number indica el número de la suborden (1, 2, 3...)
             "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS base_order_id TEXT DEFAULT NULL",
             "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS sub_number INTEGER DEFAULT 1",
         ]:
-            try:
-                await conn.execute(col_sql)
-            except Exception:
-                pass
-        # Índice para buscar subórdenes por base_order_id eficientemente
-        try:
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_table_orders_base ON table_orders(base_order_id)")
-        except Exception:
-            pass
-
+            try: await conn.execute(col_sql)
+            except Exception: pass
+        try: await conn.execute("CREATE INDEX IF NOT EXISTS idx_table_orders_base ON table_orders(base_order_id)")
+        except Exception: pass
 
 async def db_get_tables(branch_id: int = None):
     pool = await get_pool()
@@ -559,7 +492,6 @@ async def db_get_tables(branch_id: int = None):
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE ORDER BY number")
         return [_serialize(dict(r)) for r in rows]
 
-
 async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -570,12 +502,10 @@ async def db_create_table(table_id: str, number: int, name: str, branch_id: int 
             ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, name=EXCLUDED.name, branch_id=EXCLUDED.branch_id, active=TRUE
         """, table_id, number, name, branch_id)
 
-
 async def db_delete_table(table_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE restaurant_tables SET active=FALSE WHERE id=$1", table_id)
-
 
 async def db_get_table_by_id(table_id: str):
     pool = await get_pool()
@@ -583,9 +513,7 @@ async def db_get_table_by_id(table_id: str):
         row = await conn.fetchrow("SELECT * FROM restaurant_tables WHERE id=$1", table_id)
         return _serialize(dict(row)) if row else None
 
-
 async def db_save_table_order(order: dict):
-    """Guarda una suborden. Si tiene base_order_id, es un adicional de una visita existente."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -597,164 +525,76 @@ async def db_save_table_order(order: dict):
         """, order['id'], order['table_id'], order['table_name'], order['phone'],
             json.dumps(order['items']),
             order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0),
-            order.get('base_order_id'),   # None para la primera orden de la visita
+            order.get('base_order_id'),
             order.get('sub_number', 1))
 
-
 async def db_get_table_orders(status: str = None):
-    """
-    Retorna todas las subórdenes activas para kitchen display.
-    Cada suborden es una tarjeta independiente con su propio flujo.
-    NO se muestran factura_entregada ni cancelado.
-    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         if status:
             rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at ASC", status)
         else:
-            rows = await conn.fetch("""
-                SELECT * FROM table_orders
-                WHERE status NOT IN ('factura_entregada','cancelado')
-                ORDER BY created_at ASC
-            """)
+            rows = await conn.fetch("SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC")
         result = []
         for r in rows:
             d = _serialize(dict(r))
-            if isinstance(d['items'], str):
-                d['items'] = json.loads(d['items'])
+            if isinstance(d['items'], str): d['items'] = json.loads(d['items'])
             result.append(d)
         return result
-
 
 async def db_update_table_order_status(order_id: str, status: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1",
-            order_id, status
-        )
-
+        await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
 
 async def db_get_base_order_id(phone: str, table_id: str) -> str | None:
-    """
-    Retorna el base_order_id activo para esta mesa/cliente.
-    El base_order_id es el ID de la primera orden de la visita y
-    se usa para agrupar todas las subórdenes en la factura final.
-    Retorna None si no hay visita activa (todas las órdenes están cerradas).
-    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Buscar la primera orden de esta visita que no esté completamente cerrada
         row = await conn.fetchrow("""
             SELECT COALESCE(base_order_id, id) as base_id
             FROM table_orders
-            WHERE phone=$1 AND table_id=$2
-              AND status NOT IN ('factura_entregada', 'cancelado')
-            ORDER BY created_at ASC
-            LIMIT 1
+            WHERE phone=$1 AND table_id=$2 AND status NOT IN ('factura_entregada', 'cancelado')
+            ORDER BY created_at ASC LIMIT 1
         """, phone, table_id)
         return row['base_id'] if row else None
 
-
 async def db_get_next_sub_number(base_order_id: str) -> int:
-    """Retorna el siguiente número de suborden para un base_order_id dado."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT MAX(sub_number) as max_sub
-            FROM table_orders
-            WHERE base_order_id=$1 OR id=$1
-        """, base_order_id)
+        row = await conn.fetchrow("SELECT MAX(sub_number) as max_sub FROM table_orders WHERE base_order_id=$1 OR id=$1", base_order_id)
         return (row['max_sub'] or 0) + 1
 
-
 async def db_get_table_bill(base_order_id: str) -> dict:
-    """
-    Retorna el resumen completo de la cuenta para una visita.
-    Agrupa todas las subórdenes bajo el mismo base_order_id.
-    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM table_orders
-            WHERE base_order_id=$1 OR id=$1
-            ORDER BY created_at ASC
-        """, base_order_id)
-        if not rows:
-            return {}
+        rows = await conn.fetch("SELECT * FROM table_orders WHERE base_order_id=$1 OR id=$1 ORDER BY created_at ASC", base_order_id)
+        if not rows: return {}
         sub_orders = []
         total = 0
         for r in rows:
             d = _serialize(dict(r))
-            if isinstance(d['items'], str):
-                d['items'] = json.loads(d['items'])
+            if isinstance(d['items'], str): d['items'] = json.loads(d['items'])
             sub_orders.append(d)
             total += d.get('total', 0)
         first = sub_orders[0]
         return {
-            "base_order_id": base_order_id,
-            "table_name":    first.get('table_name', ''),
-            "phone":         first.get('phone', ''),
-            "sub_orders":    sub_orders,
-            "total":         total,
+            "base_order_id": base_order_id, "table_name": first.get('table_name', ''),
+            "phone": first.get('phone', ''), "sub_orders": sub_orders, "total": total,
         }
 
-
 async def db_close_table_bill(base_order_id: str) -> bool:
-    """
-    Marca todas las subórdenes de una visita como factura_entregada.
-    Se llama cuando el mesero entrega la factura.
-    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        result = await conn.execute("""
-            UPDATE table_orders
-            SET status='factura_entregada', updated_at=NOW()
-            WHERE (base_order_id=$1 OR id=$1)
-              AND status NOT IN ('cancelado')
-        """, base_order_id)
+        result = await conn.execute("UPDATE table_orders SET status='factura_entregada', updated_at=NOW() WHERE (base_order_id=$1 OR id=$1) AND status NOT IN ('cancelado')", base_order_id)
         return result != "UPDATE 0"
 
-
 async def db_has_pending_invoice(phone: str) -> bool:
-    """
-    True si el cliente tiene subórdenes entregadas pero sin factura.
-    Considera una visita activa si hay al menos una suborden en estado 'entregado'.
-    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT id FROM table_orders
-            WHERE phone=$1 AND status='entregado'
-            LIMIT 1
-        """, phone)
+        row = await conn.fetchrow("SELECT id FROM table_orders WHERE phone=$1 AND status='entregado' LIMIT 1", phone)
         return row is not None
 
-
-async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
-    """
-    DEPRECATED: usar db_get_base_order_id + db_create_sub_order.
-    Mantenido por compatibilidad con dashboard stats.
-    Retorna la suborden más reciente activa.
-    """
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT * FROM table_orders
-            WHERE phone=$1 AND table_id=$2
-              AND status NOT IN ('factura_entregada','cancelado')
-            ORDER BY created_at DESC LIMIT 1
-        """, phone, table_id)
-        if not row:
-            return None
-        d = _serialize(dict(row))
-        if isinstance(d['items'], str):
-            d['items'] = json.loads(d['items'])
-        return d
-
-
 # ── WAITER ALERTS ────────────────────────────────────────────────────
-
 async def db_init_waiter_alerts():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -772,28 +612,17 @@ async def db_init_waiter_alerts():
             );
         """)
 
-
-async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, message: str,
-                                  table_id: str = "", table_name: str = "") -> dict:
+async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, message: str, table_id: str = "", table_name: str = "") -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
-        """, table_id, table_name, phone, bot_number, alert_type, message)
+        row = await conn.fetchrow("INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *", table_id, table_name, phone, bot_number, alert_type, message)
         return _serialize(dict(row))
-
 
 async def db_get_waiter_alerts(bot_number: str) -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM waiter_alerts
-            WHERE bot_number=$1 AND dismissed=FALSE AND created_at > NOW() - INTERVAL '2 hours'
-            ORDER BY created_at DESC
-        """, bot_number)
+        rows = await conn.fetch("SELECT * FROM waiter_alerts WHERE bot_number=$1 AND dismissed=FALSE AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC", bot_number)
         return [_serialize(dict(r)) for r in rows]
-
 
 async def db_dismiss_waiter_alert(alert_id: int) -> bool:
     pool = await get_pool()
@@ -801,9 +630,7 @@ async def db_dismiss_waiter_alert(alert_id: int) -> bool:
         result = await conn.execute("UPDATE waiter_alerts SET dismissed=TRUE WHERE id=$1", alert_id)
         return result == "UPDATE 1"
 
-
 # ── TABLE SESSIONS ───────────────────────────────────────────────────
-
 async def db_init_table_sessions():
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -834,58 +661,40 @@ async def db_init_table_sessions():
             "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS closed_by_username TEXT DEFAULT ''",
             "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS meta_phone_id TEXT DEFAULT ''",
         ]:
-            try:
-                await conn.execute(col_sql)
-            except Exception:
-                pass
-
+            try: await conn.execute(col_sql)
+            except Exception: pass
 
 async def db_get_active_session(phone: str, bot_number: str) -> dict | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT * FROM table_sessions WHERE phone=$1 AND bot_number=$2 AND status='active'
-            ORDER BY started_at DESC LIMIT 1
-        """, phone, bot_number)
+        row = await conn.fetchrow("SELECT * FROM table_sessions WHERE phone=$1 AND bot_number=$2 AND status='active' ORDER BY started_at DESC LIMIT 1", phone, bot_number)
         return _serialize(dict(row)) if row else None
-
 
 async def db_create_table_session(phone: str, bot_number: str, table_id: str, table_name: str) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            INSERT INTO table_sessions (phone, bot_number, table_id, table_name, status, last_activity)
-            VALUES ($1, $2, $3, $4, 'active', NOW()) RETURNING *
-        """, phone, bot_number, table_id, table_name)
+        row = await conn.fetchrow("INSERT INTO table_sessions (phone, bot_number, table_id, table_name, status, last_activity) VALUES ($1, $2, $3, $4, 'active', NOW()) RETURNING *", phone, bot_number, table_id, table_name)
         return _serialize(dict(row))
-
 
 async def db_touch_session(phone: str, bot_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_sessions SET last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
 
-
 async def db_touch_session_with_phone_id(phone: str, bot_number: str, meta_phone_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE table_sessions SET last_activity=NOW(), meta_phone_id=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'",
-            phone, bot_number, meta_phone_id
-        )
-
+        await conn.execute("UPDATE table_sessions SET last_activity=NOW(), meta_phone_id=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number, meta_phone_id)
 
 async def db_session_mark_order(phone: str, bot_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_sessions SET has_order=TRUE, last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
 
-
 async def db_session_mark_delivered(phone: str, bot_number: str, total: int = 0):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_sessions SET order_delivered=TRUE, last_activity=NOW(), total_spent=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number, total)
-
 
 async def db_close_session(phone: str, bot_number: str, reason: str = "manual", closed_by_username: str = "") -> dict | None:
     pool = await get_pool()
@@ -898,12 +707,10 @@ async def db_close_session(phone: str, bot_number: str, reason: str = "manual", 
         """, phone, bot_number, reason, closed_by_username)
         return _serialize(dict(row)) if row else None
 
-
 async def db_mark_session_warned(session_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_sessions SET inactivity_warned=TRUE WHERE id=$1", session_id)
-
 
 async def db_get_stale_sessions() -> list:
     pool = await get_pool()
@@ -915,26 +722,17 @@ async def db_get_stale_sessions() -> list:
         """)
         return [_serialize(dict(r)) for r in rows]
 
-
 async def db_get_closeable_sessions() -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM table_sessions WHERE status='active' AND inactivity_warned=TRUE
-            AND last_activity < NOW() - INTERVAL '5 minutes'
-        """)
+        rows = await conn.fetch("SELECT * FROM table_sessions WHERE status='active' AND inactivity_warned=TRUE AND last_activity < NOW() - INTERVAL '5 minutes'")
         return [_serialize(dict(r)) for r in rows]
-
 
 async def db_get_closed_sessions(bot_number: str, hours: int = 24) -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM table_sessions WHERE bot_number=$1 AND status='closed'
-            AND closed_at > NOW() - ($2 || ' hours')::INTERVAL ORDER BY closed_at DESC
-        """, bot_number, str(hours))
+        rows = await conn.fetch("SELECT * FROM table_sessions WHERE bot_number=$1 AND status='closed' AND closed_at > NOW() - ($2 || ' hours')::INTERVAL ORDER BY closed_at DESC", bot_number, str(hours))
         return [_serialize(dict(r)) for r in rows]
-
 
 async def db_get_session_by_id(session_id: int) -> dict | None:
     pool = await get_pool()
@@ -942,26 +740,16 @@ async def db_get_session_by_id(session_id: int) -> dict | None:
         row = await conn.fetchrow("SELECT * FROM table_sessions WHERE id=$1", session_id)
         return _serialize(dict(row)) if row else None
 
-
 async def db_reopen_session(session_id: int) -> dict | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         target = await conn.fetchrow("SELECT * FROM table_sessions WHERE id=$1 AND status='closed'", session_id)
-        if not target:
-            return None
-        phone      = target["phone"]
+        if not target: return None
+        phone = target["phone"]
         bot_number = target["bot_number"]
-        await conn.execute("""
-            UPDATE table_sessions SET status='closed', closed_at=NOW(), closed_by='superseded', closed_by_username=''
-            WHERE phone=$1 AND bot_number=$2 AND status='active'
-        """, phone, bot_number)
-        row = await conn.fetchrow("""
-            UPDATE table_sessions SET status='active', closed_at=NULL, closed_by='', closed_by_username='',
-                inactivity_warned=FALSE, last_activity=NOW(), summary=jsonb_build_object('reopened',true)
-            WHERE id=$1 RETURNING *
-        """, session_id)
+        await conn.execute("UPDATE table_sessions SET status='closed', closed_at=NOW(), closed_by='superseded', closed_by_username='' WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
+        row = await conn.fetchrow("UPDATE table_sessions SET status='active', closed_at=NULL, closed_by='', closed_by_username='', inactivity_warned=FALSE, last_activity=NOW(), summary=jsonb_build_object('reopened',true) WHERE id=$1 RETURNING *", session_id)
         return _serialize(dict(row)) if row else None
-
 
 async def db_get_restaurant_settings() -> dict:
     all_r = await db_get_all_restaurants()
