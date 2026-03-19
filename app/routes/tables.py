@@ -106,7 +106,7 @@ async def get_qr_sheet(request: Request, table_id: str):
     menu_url = f"{base_url}/menu/{table_id}"
     encoded = urllib.parse.quote(menu_url)
     return HTMLResponse(
-        f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}.page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}.logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}.tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}.instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}.qrbox{{width:200px;height:200px;margin:0 auto 16px;}}.qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}.wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}.steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}.step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body><div class='page'><div class='logo'>Mesio<span>.</span></div><div class='tname'>{table['name']}</div><div class='instr'>Escanea el QR para ver el menú<br>y pedir por WhatsApp</div><div class='qrbox' id='qrc'></div><div class='wa-badge'>Ver Menú y Pedir</div><div class='steps'><div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div><div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div><div class='step'><span class='sn'>3.</span><span>Revisa el menú en PDF</span></div><div class='step'><span class='sn'>4.</span><span>Toca pedir por WhatsApp</span></div></div></div><script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});setTimeout(function(){{window.print();}},800);}};</script></body></html>"
+        f"<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><style>*{{box-sizing:border-box;margin:0;padding:0;}}body{{font-family:Arial,sans-serif;background:#fff;}}.page{{width:10cm;margin:1cm auto;text-align:center;padding:1.5cm;border:2px solid #0D1412;border-radius:16px;}}.logo{{font-size:28px;font-weight:900;color:#0D1412;margin-bottom:4px;}}.logo span{{color:#1D9E75;}}.tname{{font-size:20px;font-weight:700;color:#0D1412;margin:12px 0 4px;}}.instr{{font-size:13px;color:#666;margin-bottom:16px;line-height:1.5;}}.qrbox{{width:200px;height:200px;margin:0 auto 16px;}}.qrbox canvas,.qrbox img{{width:200px !important;height:200px !important;border-radius:8px;}}.wa-badge{{display:inline-flex;align-items:center;gap:6px;background:#25D366;color:white;padding:8px 16px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:16px;}}.steps{{text-align:left;background:#f8f8f5;border-radius:10px;padding:12px 16px;margin-top:8px;}}.step{{font-size:12px;color:#444;padding:3px 0;display:flex;gap:8px;}}.sn{{color:#1D9E75;font-weight:700;}}@media print{{body{{margin:0;}}}}</style><script src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'></script></head><body><div class='page'><div class='logo'>Mesio<span>.</span></div><div class='tname'>{table['name']}</div><div class='instr'>Escanea el QR para ver el menú<br>y pedir por WhatsApp</div><div class='qrbox' id='qrc'></div><div class='wa-badge'>Ver Menú y Pedir</div><div class='steps'><div class='step'><span class='sn'>1.</span><span>Abre la cámara de tu celular</span></div><div class='step'><span class='sn'>2.</span><span>Apunta al código QR</span></div><div class='step'><span class='sn'>3.</span><span>Revisa el menú interactivo</span></div><div class='step'><span class='sn'>4.</span><span>Toca pedir por WhatsApp</span></div></div></div><script>window.onload=function(){{new QRCode(document.getElementById('qrc'),{{text:decodeURIComponent('{encoded}'),width:200,height:200,colorDark:'#0D1412',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}});setTimeout(function(){{window.print();}},800);}};</script></body></html>"
     )
 
 # ── ALERTAS MESERO ──────────────────────────────────────────────────
@@ -115,8 +115,12 @@ async def get_waiter_alerts(request: Request):
     await require_auth(request)
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # Se elimina el filtro status='active' para evitar el error 500 de la BD
-        rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
+        try:
+            # Eliminado el filtro WHERE status='active' para evitar el Error 500 en la BD
+            rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
+        except Exception as e:
+            print(f"Error leyendo alertas: {e}")
+            rows = []
     return {"alerts": [dict(r) for r in rows]}
 
 @router.post("/api/waiter-alerts/{alert_id}/dismiss")
@@ -124,8 +128,11 @@ async def dismiss_waiter_alert(request: Request, alert_id: int):
     await require_auth(request)
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # En lugar de cambiar un estado inexistente, eliminamos la alerta de la tabla
-        await conn.execute("DELETE FROM waiter_alerts WHERE id = $1", alert_id)
+        try:
+            # En lugar de cambiar el status, se elimina directamente
+            await conn.execute("DELETE FROM waiter_alerts WHERE id = $1", alert_id)
+        except Exception:
+            pass
     return {"success": True}
 
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
@@ -135,20 +142,23 @@ async def get_table_orders(request: Request, status: str = None):
     await require_auth(request)
     return {"orders": await db.db_get_table_orders(status)}
 
-async def send_wa_msg(phone: str, text: str):
+async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
     token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-    phone_id = os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
-    if token and phone_id:
+    final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
+    
+    if token and final_phone_id:
         try:
             async with httpx.AsyncClient(timeout=8) as client:
                 resp = await client.post(
-                    f"https://graph.facebook.com/v19.0/{phone_id}/messages",
+                    f"https://graph.facebook.com/v20.0/{final_phone_id}/messages",
                     headers={"Authorization": f"Bearer {token}"},
                     json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": text}}
                 )
                 print(f"✅ WA Notificación a {phone}: {resp.status_code}")
         except Exception as e:
             print(f"❌ Error enviando WhatsApp: {e}")
+    else:
+        print(f"⚠️ No se envió WA a {phone} -> Faltan variables (Token: {bool(token)}, PhoneID: {final_phone_id})")
 
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
@@ -160,36 +170,54 @@ async def update_order_status(request: Request, order_id: str):
         raise HTTPException(status_code=400, detail="Estado inválido")
     
     pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        order = await conn.fetchrow("SELECT phone, table_name, base_order_id FROM table_orders WHERE id=$1", order_id)
     
-    # Manejar cierre de la factura completa
-    if status == "factura_entregada":
-        base_id = order["base_order_id"] if order and order["base_order_id"] else order_id
-        await db.db_close_table_bill(base_id)
-        if order and order.get("phone"):
-            phone = order["phone"]
-            msg = "🧾 Tu cuenta ha sido procesada. ¡Muchas gracias por visitarnos, esperamos verte pronto! 👋"
-            await send_wa_msg(phone, msg)
-            
-            # Cerrar sesión en WhatsApp y limpiar el chat activo
+    async with pool.acquire() as conn:
+        order_record = await conn.fetchrow("SELECT phone, table_name, base_order_id FROM table_orders WHERE id=$1", order_id)
+        
+    order = dict(order_record) if order_record else {}
+    phone = order.get("phone")
+    table_name = order.get("table_name", "tu mesa")
+    
+    db_phone_id = None
+    session_data = None
+    if phone:
+        async with pool.acquire() as conn:
             try:
+                session = await conn.fetchrow("SELECT * FROM table_sessions WHERE phone=$1 AND closed_at IS NULL", phone)
+                if session:
+                    session_data = dict(session)
+                    db_phone_id = session_data.get("meta_phone_id")
+            except Exception: pass
+
+    if status == "factura_entregada":
+        base_id = order.get("base_order_id") if order.get("base_order_id") else order_id
+        await db.db_close_table_bill(base_id)
+        
+        if phone:
+            msg = "🧾 Tu cuenta ha sido procesada. ¡Muchas gracias por visitarnos, esperamos verte pronto! 👋"
+            await send_wa_msg(phone, msg, db_phone_id)
+            
+            # ANIQUILACIÓN TOTAL DE LA SESIÓN Y EL HISTORIAL
+            try:
+                if session_data and session_data.get("bot_number"):
+                    await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", "mesero")
+                
                 async with pool.acquire() as conn:
-                    session = await conn.fetchrow("SELECT id, bot_number FROM table_sessions WHERE phone=$1 AND closed_at IS NULL", phone)
-                    if session:
-                        await db.db_close_session(phone, session["bot_number"], "factura_entregada", "mesero")
-                        await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2", phone, session["bot_number"])
-                        print(f"🧹 Sesión de mesa cerrada para: {phone}")
+                    # Forzamos cierre de sesión en caso de que db_close_session falle
+                    await conn.execute("UPDATE table_sessions SET closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
+                    # Borramos memoria de la IA
+                    await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
+                    # Borramos carritos huérfanos
+                    await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
+                print(f"🧹 CHAT, CARRITO E HISTORIAL BORRADOS DEFINITIVAMENTE PARA: {phone}")
             except Exception as e:
-                print(f"Error cerrando chat de WhatsApp tras facturar: {e}")
+                print(f"Error limpiando BD tras facturar: {e}")
+                    
     else:
         await db.db_update_table_order_status(order_id, status)
-        
-        # Enviar WhatsApp si el pedido ha sido entregado a la mesa
-        if status == "entregado" and order and order.get("phone"):
-            phone = order["phone"]
-            msg = f"🍽️ ¡Tu pedido ha sido entregado en la {order['table_name']}!\n\nDisfruta tu comida. Cuando termines, puedes pedirme la cuenta por aquí mismo."
-            await send_wa_msg(phone, msg)
+        if status == "entregado" and phone:
+            msg = f"🍽️ ¡Tu pedido ha sido entregado en la {table_name}!\n\nDisfruta tu comida. Cuando termines, puedes pedirme la cuenta por aquí mismo."
+            await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}
 

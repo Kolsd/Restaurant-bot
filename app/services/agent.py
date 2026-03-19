@@ -228,14 +228,23 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 "base_order_id": base_order_id, 
                 "sub_number":    sub_number,
             })
-            await orders.clear_cart(phone, bot_number)
+            
+            # --- BORRADO FORZOSO DEL CARRITO PARA EVITAR ACUMULACIÓN FANTASMA ---
+            try:
+                await orders.clear_cart(phone, bot_number)
+                pool = await db.get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
+            except Exception as e:
+                print(f"Error limpiando carrito forzoso: {e}")
+                
             await db.db_session_mark_order(phone, bot_number)
             tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
             print(f"🆕 {order_id} ({tag}): {items_summary}", flush=True)
 
             if cart_errors:
                 failed = ", ".join(cart_errors)
-                reply += f" (Nota: No pude agregar '{failed}' porque no aparece en el menú exacto)"
+                reply += f" (Nota: No pude agregar '{failed}' porque no aparece exacto en el menú)"
 
         elif action in ("domicilio", "recoger"):
             address = parsed.get("address", "")
