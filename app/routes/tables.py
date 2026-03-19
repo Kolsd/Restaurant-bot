@@ -73,8 +73,6 @@ async def public_menu_context(table_id: str):
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
 
     wa_number = await get_table_wa_number(table)
-    
-    # AQUI ELIMINAMOS EL [branch=1] PARA QUE EL TEXTO SEA 100% NATURAL
     wa_msg = f"Hola! Estoy en {table['name']} y quiero hacer un pedido"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
@@ -133,6 +131,23 @@ async def dismiss_waiter_alert(request: Request, alert_id: int):
         except Exception:
             pass
     return {"success": True}
+
+# ── ELIMINAR CONVERSACIONES (MANUAL) ─────────────────────────────────
+@router.delete("/api/conversations/{phone}")
+async def force_delete_conversation(request: Request, phone: str):
+    """Permite al mesero limpiar un chat manualmente (ej. pruebas atascadas)"""
+    await require_auth(request)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
+            await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
+            # Opcional: Cerrar sesión de mesa si tuviera una activa
+            await conn.execute("UPDATE table_sessions SET closed_at = NOW(), closed_by = 'manual_delete', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
+        except Exception as e:
+            print(f"Error forzando limpieza de chat: {e}")
+    return {"success": True}
+
 
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 

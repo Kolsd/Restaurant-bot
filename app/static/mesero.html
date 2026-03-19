@@ -91,6 +91,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .section-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; margin-top: 4px; }
 .sh-listo  { color: #0F6E56; }
 .sh-orders { color: #185FA5; }
+
+/* Botón de limpiar chat */
+.btn-delete-chat { background: none; border: none; color: #E24B4A; cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+.btn-delete-chat:hover { opacity: 0.7; }
 </style>
 </head>
 <body>
@@ -138,7 +142,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <div class="chat-box">
     <div class="chat-head">
       <div class="chat-phone" id="chat-phone"></div>
-      <button class="chat-close" onclick="closeChat()">&#10005;</button>
+      <div style="display:flex; gap:12px; align-items:center;">
+        <button class="btn-delete-chat" onclick="deleteCurrentChat()">🗑️ Limpiar</button>
+        <button class="chat-close" onclick="closeChat()">✕</button>
+      </div>
     </div>
     <div class="chat-msgs" id="chat-msgs"></div>
     <div class="chat-input-row">
@@ -462,6 +469,29 @@ function closeChat() {
   document.getElementById('chat-modal').classList.remove('open');
   document.body.style.overflow = '';
   currentChatPhone = null;
+}
+
+// BOTÓN PARA LIMPIAR CONVERSACIONES ATASCADAS (MANUAL)
+async function deleteCurrentChat() {
+  if (!currentChatPhone) return;
+  if (!confirm('¿Seguro que deseas eliminar esta conversación? Esto limpiará la memoria del bot y cancelará cualquier pedido en curso para esta mesa.')) return;
+  
+  try {
+    const r = await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone), {
+      method: 'DELETE',
+      headers: headers
+    });
+    if (r.ok) {
+      closeChat();
+      loadChats();
+      showToast('Conversación eliminada correctamente.', 'admin_alert');
+    } else {
+      alert('Error al intentar limpiar el chat.');
+    }
+  } catch (e) {
+    console.error(e);
+    alert('Error de conexión.');
+  }
 }
 
 async function sendReply() {
