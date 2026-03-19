@@ -100,8 +100,8 @@ RESPONDE SIEMPRE con JSON válido, nada más (sin backticks ni texto fuera del j
 =========================================
 REGLAS CRÍTICAS DE NEGOCIO Y FLUJO
 =========================================
-1. CRÍTICO PARA ÓRDENES ADICIONALES: En "items", incluye **SOLO LOS NUEVOS PLATOS** que el cliente acaba de pedir en su último mensaje. ¡NUNCA repitas los platos que ya están en el [CARRITO] o que ya se pidieron antes!
-2. Si el plato pedido NO está en [MENÚ] → action=chat, sugiere alternativas.
+1. EXTREMA PRECISIÓN EN EL MENÚ: Solo puedes agregar a "items" platos que existan EXACTAMENTE con ese nombre en el [MENÚ]. NO inventes, NO asumas y NO busques similitudes. Si el cliente pide "soda lima" y solo tienes "soda de lata", NO PONGAS "soda de lata". Responde con action=chat y pregúntale al cliente para aclarar.
+2. CRÍTICO PARA ÓRDENES ADICIONALES: En "items", incluye **SOLO LOS NUEVOS PLATOS** que el cliente acaba de pedir en su último mensaje. ¡NUNCA repitas los platos que ya están en el [CARRITO] o que ya se pidieron antes!
 3. Si el plato tiene [NO DISPONIBLE] → action=chat, disculpa y sugiere alternativas.
 4. Items + confirmación en mismo mensaje → action=order.
 5. NO uses end_session si hay pedido en cocina no entregado o factura pendiente.
@@ -136,7 +136,6 @@ async def build_system_prompt() -> list:
     return [{"type": "text", "text": _STATIC_SYSTEM, "cache_control": {"type": "ephemeral"}}]
 
 async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> str:
-    # Inyectamos "{" para forzar a que SIEMPRE empiece con JSON y no salude.
     msgs = messages.copy()
     msgs.append({"role": "assistant", "content": "{"})
     
@@ -187,7 +186,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
             if cart_errors and len(cart_errors) == len([i for i in items if i.get("name")]):
                 names = ", ".join(cart_errors)
-                return f"No encontré '{names}' en el menú. ¿Puedes verificar el nombre?"
+                return f"No encontré '{names}' en el menú. ¿Puedes verificar el nombre exacto de la carta?"
 
         if action == "chat":
             pass
@@ -226,7 +225,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 "notes":         extra_notes,
                 "total":         cart_total,
                 "status":        "recibido",
-                "base_order_id": base_order_id, # GUARDADO OBLIGATORIO PARA AGRUPAR
+                "base_order_id": base_order_id, 
                 "sub_number":    sub_number,
             })
             await orders.clear_cart(phone, bot_number)
@@ -236,7 +235,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
             if cart_errors:
                 failed = ", ".join(cart_errors)
-                reply += f" (No pude agregar: {failed} — no está en el menú)"
+                reply += f" (Nota: No pude agregar '{failed}' porque no aparece en el menú exacto)"
 
         elif action in ("domicilio", "recoger"):
             address = parsed.get("address", "")
@@ -250,7 +249,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 print(f"🆕 {order['id']} {action}", flush=True)
             if cart_errors:
                 failed = ", ".join(cart_errors)
-                reply += f" (No pude agregar: {failed})"
+                reply += f" (Nota: No pude agregar '{failed}')"
 
         elif action == "reserve":
             rv = parsed.get("reservation", {})

@@ -37,7 +37,11 @@ async def verify_meta_webhook(request: Request):
     mode = params.get("hub.mode")
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
-    if mode == "subscribe" and token == os.getenv("META_VERIFY_TOKEN", "mesio_secret_2024"):
+    
+    # Fallback para el token de verificación
+    verify_token = os.getenv("META_VERIFY_TOKEN") or os.getenv("WHATSAPP_VERIFY_TOKEN", "mesio_secret_2024")
+    
+    if mode == "subscribe" and token == verify_token:
         return Response(content=challenge)
     return Response(content="Error de verificacion", status_code=403)
 
@@ -81,9 +85,13 @@ async def meta_webhook(request: Request):
             print(f"🤖 Resultado IA: {result}", flush=True)
 
             if result and result.get("message"):
+                # Fallback robusto para el token de acceso (Token de "vuelta")
+                access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+                
                 async with httpx.AsyncClient(timeout=10) as client:
-                    url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
-                    headers = {"Authorization": f"Bearer {os.getenv('META_ACCESS_TOKEN', '')}"}
+                    # Actualizado a Graph API v20.0
+                    url = f"https://graph.facebook.com/v20.0/{phone_id}/messages"
+                    headers = {"Authorization": f"Bearer {access_token}"}
                     res = await client.post(url, headers=headers, json={
                         "messaging_product": "whatsapp",
                         "to": user_phone,
