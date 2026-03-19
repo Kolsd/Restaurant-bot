@@ -740,25 +740,23 @@ async function loadTableOrdersSection() {
     const visible = all.filter(o => {
       const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
       const day = (o.created_at || '').substring(0, 10);
-      if (o.status === 'entregado') return day === today;
+      if (o.status === 'entregado' || o.status === 'factura_generada') return day === today;
       return !closed;
     });
 
-    const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
-    const delivered = visible.filter(o => o.status === 'entregado');
+    const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado' && o.status !== 'factura_generada');
+    const delivered = visible.filter(o => o.status === 'entregado' || o.status === 'factura_generada');
     
     const billsMap = {};
     delivered.forEach(o => {
         const baseId = o.id.replace(/-\d+$/, '');
         if (!billsMap[baseId]) {
             billsMap[baseId] = {
-                id: baseId,
-                table_name: o.table_name,
-                created_at: o.created_at,
-                items: [],
-                total: 0
+                id: baseId, table_name: o.table_name, created_at: o.created_at, status: o.status, items: [], total: 0
             };
         }
+        if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada';
+        
         let parsedItems = [];
         try {
             const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
@@ -787,19 +785,26 @@ async function loadTableOrdersSection() {
     }
 
     if(groupedBills.length > 0){
-        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE FACTURA</div>';
+        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE CIERRE</div>';
         html += '<table><thead><tr><th>Mesa</th><th>Platos</th><th>Total</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
         groupedBills.forEach(b => {
           const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
           const hora = (b.created_at || '').substring(11, 16);
           const total_fmt = fmt(b.total);
+          const isGenerated = b.status === 'factura_generada';
+          
+          const actionBtns = isGenerated
+            ? `<span style="font-size:11px;color:#1D9E75;font-weight:600;margin-right:8px;">✅ Emitida</span>
+               <button onclick="markTableOrder('${b.id}', 'cerrar_mesa')" style="font-size:11px;padding:4px 10px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer;">👋 Cerrar</button>`
+            : `<button onclick="markTableOrder('${b.id}', 'generar_factura')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-right:4px;">🧾 Generar Factura</button>
+               <button onclick="markTableOrder('${b.id}', 'cerrar_mesa')" style="font-size:11px;padding:4px 10px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer;">👋 Cerrar</button>`;
           
           html += `<tr>
             <td style="font-weight:600;">${b.table_name || '—'}</td>
             <td style="color:#555;font-size:12px;">${itemsJoined}</td>
             <td style="font-weight:700; color:#6B21A8;">${total_fmt}</td>
             <td style="color:#888;">${hora}</td>
-            <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">🧾 Factura entregada</button></td>
+            <td style="white-space:nowrap;">${actionBtns}</td>
           </tr>`;
         });
         html += '</tbody></table><br/>';
@@ -850,29 +855,16 @@ async function markTableDelivered(orderId) {
   } catch(e) { console.error('markTableDelivered:', e); }
 }
 
-async function markTableInvoiced(orderId) {
+async function markTableOrder(orderId, status) {
   const h = window._dashHeaders;
   try {
     const r = await fetch(`/api/table-orders/${orderId}/status`, {
       method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'factura_entregada' })
+      body: JSON.stringify({ status: status })
     });
     if (r.ok) loadTableOrdersSection();
-  } catch(e) { console.error('markTableInvoiced:', e); }
+  } catch(e) { console.error('markTableOrder:', e); }
 }
-
-const _origFetchOrders = window.fetchOrders;
-const _origRefreshAll = window.refreshAll;
-if (typeof _origRefreshAll === 'function') {
-  window.refreshAll = async function() {
-    await _origRefreshAll();
-    loadTableOrdersSection();
-  };
-}
-document.addEventListener('DOMContentLoaded', () => {
-  loadTableOrdersSection();
-  setInterval(loadTableOrdersSection, 15000);
-});
 
 function switchOrderTab(tab, btn) {
   const waDiv   = document.getElementById('orders-tab-wa');
