@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Módulo de Caja</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F4F4F5; color: #18181B; min-height: 100vh; }
+
+/* ── HEADER & NAVEGACIÓN DE ROLES ── */
+header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.logo { font-size: 1.25rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px; }
+.logo span { color: #39FF6A; }
+.role-nav { display: flex; gap: 8px; background: #27272A; padding: 4px; border-radius: 10px; }
+.role-btn { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; color: #A1A1AA; text-decoration: none; transition: all 0.2s; }
+.role-btn.active { background: #39FF6A; color: #000; }
+.role-btn:hover:not(.active) { color: #fff; background: #3F3F46; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.live-badge { display: flex; align-items: center; gap: 6px; background: rgba(57,255,106,0.15); color: #39FF6A; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: #39FF6A; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* ── MAIN GRID ── */
+.main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+.section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+.board { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
+
+/* ── TICKET DE CAJA ── */
+.ticket-card { background: #fff; border: 1px solid #E4E4E7; border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.02); display: flex; flex-direction: column; transition: transform 0.2s; border-top: 4px solid #7C3AED; }
+.ticket-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px rgba(0,0,0,0.05); }
+.t-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px dashed #E4E4E7; padding-bottom: 1rem; margin-bottom: 1rem; }
+.t-table { font-size: 1.25rem; font-weight: 800; color: #18181B; }
+.t-time { font-size: 11px; color: #71717A; background: #F4F4F5; padding: 4px 8px; border-radius: 6px; font-weight: 600; }
+.t-items { flex: 1; margin-bottom: 1rem; }
+.t-item { display: flex; justify-content: space-between; font-size: 13px; color: #3F3F46; padding: 4px 0; }
+.t-qty { font-weight: 700; color: #18181B; margin-right: 6px; width: 20px; display: inline-block; }
+.t-total-row { display: flex; justify-content: space-between; align-items: center; background: #F4F4F5; padding: 1rem; border-radius: 10px; margin-bottom: 1rem; }
+.t-total-label { font-size: 13px; font-weight: 600; color: #71717A; text-transform: uppercase; letter-spacing: 1px; }
+.t-total-val { font-size: 1.8rem; font-weight: 900; color: #7C3AED; }
+
+/* ── STATUS & BUTTONS ── */
+.t-status-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; padding: 6px 10px; border-radius: 8px; background: #F3E8FF; color: #6D28D9; margin-bottom: 1rem; width: 100%; justify-content: center; }
+.btn-pay { width: 100%; background: #18181B; color: #fff; border: none; padding: 14px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.btn-pay:hover { background: #27272A; }
+.btn-pay:active { transform: scale(0.98); }
+
+.empty-state { grid-column: 1 / -1; text-align: center; padding: 4rem 2rem; background: #fff; border: 2px dashed #E4E4E7; border-radius: 16px; color: #A1A1AA; }
+.empty-state h3 { font-size: 1.25rem; color: #71717A; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#A1A1AA;font-weight:500;margin-left:8px;">Módulo de Caja</span></div>
+  
+  <div class="role-nav">
+    <a href="/mesero" class="role-btn">Mesero</a>
+    <a href="/cocina" class="role-btn">Cocina</a>
+    <a href="/caja" class="role-btn active">Caja</a>
+    <a href="/dashboard" class="role-btn">Admin</a>
+  </div>
+
+  <div class="header-right">
+    <div class="live-badge"><div class="live-dot"></div> Sincronizado</div>
+    <div id="clock" style="color:#A1A1AA; font-size:13px; font-weight:600;"></div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="section-title">
+    Cuentas por Cobrar
+    <span style="font-size:14px; color:#71717A; font-weight:500;" id="total-pending">0 cuentas pendientes</span>
+  </div>
+  <div class="board" id="board">
+    <div class="empty-state">Cargando caja...</div>
+  </div>
+</div>
+
+<script>
+const token = localStorage.getItem('rb_token');
+if (!token) window.location.href = '/login';
+const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+// Reloj en tiempo real
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}, 1000);
+
+const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+
+async function loadCajaOrders() {
+  try {
+    const r = await fetch('/api/table-orders', { headers });
+    if (!r.ok) {
+      if(r.status === 401) window.location.href = '/login';
+      return;
+    }
+    const { orders = [] } = await r.json();
+
+    // Agrupar cuentas pendientes de pago (estado: factura_generada)
+    const billsMap = {};
+    orders.forEach(o => {
+      // Filtrar solo las que el mesero ya marcó para "Generar Factura"
+      if (o.status === 'factura_generada') {
+        const baseId = o.id.replace(/-\d+$/, '');
+        if (!billsMap[baseId]) {
+          billsMap[baseId] = {
+            id: baseId,
+            table_name: o.table_name,
+            created_at: o.created_at,
+            items: [],
+            total: 0
+          };
+        }
+        let parsedItems = [];
+        try {
+          const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+          parsedItems = Array.isArray(arr) ? arr : [];
+        } catch(e) {}
+        
+        billsMap[baseId].items.push(...parsedItems);
+        billsMap[baseId].total += (Number(o.total) || 0);
+      }
+    });
+
+    const pendingBills = Object.values(billsMap);
+    document.getElementById('total-pending').textContent = `${pendingBills.length} cuenta${pendingBills.length !== 1 ? 's' : ''} pendiente${pendingBills.length !== 1 ? 's' : ''}`;
+
+    const board = document.getElementById('board');
+    
+    if (pendingBills.length === 0) {
+      board.innerHTML = `
+        <div class="empty-state">
+          <h3>💸 Todo al día</h3>
+          <p>No hay cuentas pendientes de cobro en este momento.</p>
+        </div>`;
+      return;
+    }
+
+    board.innerHTML = pendingBills.map(b => {
+      const time = (b.created_at || '').substring(11, 16);
+      
+      // Renderizar items agrupados
+      const itemsHtml = b.items.map(i => `
+        <div class="t-item">
+          <div><span class="t-qty">${i.quantity||1}</span> ${i.name}</div>
+          <div style="font-weight:600;">${fmt((i.price || 0) * (i.quantity || 1))}</div>
+        </div>
+      `).join('');
+
+      return `
+        <div class="ticket-card">
+          <div class="t-header">
+            <div>
+              <div class="t-table">${b.table_name}</div>
+              <div style="font-size:11px; color:#A1A1AA; margin-top:4px;">ID: ${b.id}</div>
+            </div>
+            <div class="t-time">⏱ ${time}</div>
+          </div>
+          
+          <div class="t-items">
+            ${itemsHtml}
+          </div>
+
+          <div class="t-status-badge">
+            ✅ Registrada (Enviada a Sist. Contable si aplica)
+          </div>
+
+          <div class="t-total-row">
+            <span class="t-total-label">Total a Cobrar</span>
+            <span class="t-total-val">${fmt(b.total)}</span>
+          </div>
+
+          <button class="btn-pay" onclick="cobrarYcerrar('${b.id}')">
+            💰 Confirmar Pago y Cerrar Mesa
+          </button>
+        </div>
+      `;
+    }).join('');
+
+  } catch(e) {
+    console.error('Error cargando caja:', e);
+  }
+}
+
+async function cobrarYcerrar(orderId) {
+  // Confirmación de seguridad para el cajero
+  if(!confirm(`¿Confirmas que recibiste el pago para la cuenta ${orderId}? Esta acción cerrará la mesa definitivamente.`)) return;
+
+  try {
+    // Al mandar el estado 'cerrar_mesa', el backend ejecuta db_close_table_bill y limpia el chat
+    const r = await fetch(`/api/table-orders/${orderId}/status`, {
+      method: 'POST', 
+      headers,
+      body: JSON.stringify({ status: 'cerrar_mesa' })
+    });
+    
+    if (r.ok) {
+      loadCajaOrders();
+    } else {
+      alert("Hubo un error al cerrar la mesa.");
+    }
+  } catch(e) {
+    console.error(e);
+    alert("Error de red.");
+  }
+}
+
+// Iniciar polling
+loadCajaOrders();
+setInterval(loadCajaOrders, 5000); // Refrescar cada 5 segundos
+</script>
+</body>
+</html>
