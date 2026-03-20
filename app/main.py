@@ -9,7 +9,8 @@ from app.routes.orders import router as orders_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
-from app.routes.billing import router as billing_router  
+from app.routes.billing import router as billing_router
+from app.routes.crm import router as crm_router  
 
 app = FastAPI(
     title="🍽️ Mesio",
@@ -85,3 +86,4 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
 app.include_router(billing_router)
+app.include_router(crm_router)

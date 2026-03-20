@@ -54,13 +54,12 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 <header>
   <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#A1A1AA;font-weight:500;margin-left:8px;">Módulo de Caja</span></div>
   
-  <div class="role-nav">
-    <a href="/mesero" class="role-btn">Mesero</a>
-    <a href="/cocina" class="role-btn">Cocina</a>
-    <a href="/caja" class="role-btn active">Caja</a>
-    <a href="/dashboard" class="role-btn">Admin</a>
-  </div>
+  <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
 
+  <div class="header-right">
+    <button class="logout-btn" onclick="doLogout()">Salir</button>
+  </div>
+  
   <div class="header-right">
     <div class="live-badge"><div class="live-dot"></div> Sincronizado</div>
     <div id="clock" style="color:#A1A1AA; font-size:13px; font-weight:600;"></div>
