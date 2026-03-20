@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Cocina</title>
 <style>
+  /* NUEVO: ESTILOS DE LA BARRA DE ROLES EN COCINA OSCURA */
+.role-nav { display: flex; gap: 8px; background: #222; padding: 4px; border-radius: 10px; margin-left: 20px; }
+.role-btn { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #888; text-decoration: none; transition: all 0.2s; }
+.role-btn.active { background: #1D9E75; color: #fff; }
+.role-btn:hover:not(.active) { color: #fff; background: #333; }
+
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0D0D0D;color:#fff;min-height:100vh;}
 header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;}
@@ -93,14 +99,18 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 </head>
 <body>
 
-<header>
-  <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#555;font-weight:400;">Cocina</span></div>
-  <div class="header-right">
-    <div class="live-dot"></div>
-    <span class="live-text">En vivo</span>
-    <span class="time" id="clock"></span>
-  </div>
-</header>
+  <header>
+    <div style="display:flex; align-items:center;">
+      <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#555;font-weight:400;">Cocina</span></div>
+      <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
+    </div>
+    <div class="header-right">
+      <div class="live-dot"></div>
+      <span class="live-text">En vivo</span>
+      <span class="time" id="clock"></span>
+      <button class="btn" style="width:auto; padding:5px 12px; background:none; border:1px solid #333; color:#aaa; margin-left:15px; cursor:pointer;" onclick="localStorage.removeItem('rb_token'); window.location.href='/login';">Salir</button>
+    </div>
+  </header>
 
 <div class="main">
   <div class="board">
@@ -260,5 +270,6 @@ async function loadOrders() {
 loadOrders();
 setInterval(loadOrders, 5000);
 </script>
+<script src="/static/roles.js"></script>
 </body>
 </html>
