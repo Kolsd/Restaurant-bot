@@ -16,13 +16,23 @@ async def require_auth(request: Request) -> str:
 async def get_current_restaurant(request: Request) -> dict:
     username = await require_auth(request)
     user = await db.db_get_user(username)
-    if user and user.get("branch_id"):
+    
+    # ── FIX: Verificar que el usuario existe antes de intentar acceder a sus campos ──
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado en la base de datos")
+
+    if user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
         if r: return r
+        
     all_restaurants = await db.db_get_all_restaurants()
     for r in all_restaurants:
-        if r["name"].lower().strip() == user["restaurant_name"].lower().strip(): return r
-    if all_restaurants: return all_restaurants[0]
+        if r["name"].lower().strip() == user.get("restaurant_name", "").lower().strip(): 
+            return r
+            
+    if all_restaurants: 
+        return all_restaurants[0]
+        
     raise HTTPException(status_code=403, detail="Restaurante no encontrado")
 
 def get_date_range(period: str):
