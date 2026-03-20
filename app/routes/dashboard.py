@@ -77,6 +77,10 @@ async def superadmin_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>")
 @router.get("/mesero", response_class=HTMLResponse)
 async def mesero_page(): return (STATIC / "mesero.html").read_text(encoding="utf-8")
+@router.get("/caja", response_class=HTMLResponse)
+async def caja_page(): 
+    p = STATIC / "caja.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
 
 # ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
 @router.get("/billing", response_class=HTMLResponse)
