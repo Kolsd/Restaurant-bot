@@ -81,6 +81,9 @@ async def mesero_page(): return (STATIC / "mesero.html").read_text(encoding="utf
 async def caja_page(): 
     p = STATIC / "caja.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
+@router.get("/crm", response_class=HTMLResponse)
+async def crm_page():
+    return (STATIC / "crm.html").read_text(encoding="utf-8")    
 
 # ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
 @router.get("/billing", response_class=HTMLResponse)
