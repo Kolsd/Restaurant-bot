@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Si no tiene acceso, lo pateamos a su vista principal o al login
-    if (!hasAccess) {
+    if (!hasAccess && !path.includes('/dashboard')) {
         alert('🔒 No tienes permisos para acceder a esta vista.');
         if (userRoles.includes('cashier')) window.location.href = '/caja';
         else if (userRoles.includes('waiter')) window.location.href = '/mesero';

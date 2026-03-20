@@ -34,43 +34,48 @@
   <div class="footer">Mesio v2.0 · Powered by Claude AI</div>
 </div>
 <script>
-async function doLogin() {
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value.trim();
-  const errorEl = document.getElementById('error-msg');
-  errorEl.style.display = 'none';
-  if (!username || !password) {
-    errorEl.textContent = 'Por favor completa todos los campos';
-    errorEl.style.display = 'block';
-    return;
-  }
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    const data = await res.json();
-    if (data.success) {
-      localStorage.setItem('rb_token', data.token);
-      localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
-      const role = data.restaurant.role || 'owner';
-      if (role === 'cook') {
-        window.location.href = '/cocina';
-      } else if (role === 'waiter') {
-        window.location.href = '/mesero';
+  async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const errorEl = document.getElementById('error-msg');
+    errorEl.style.display = 'none';
+    if (!username || !password) {
+      errorEl.textContent = 'Por favor completa todos los campos';
+      errorEl.style.display = 'block';
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem('rb_token', data.token);
+        localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
+        
+        const role = (data.restaurant.role || 'owner').toLowerCase();
+        if (role.includes('owner') || role.includes('admin')) {
+          window.location.href = '/dashboard';
+        } else if (role.includes('cashier')) {
+          window.location.href = '/caja';
+        } else if (role.includes('waiter')) {
+          window.location.href = '/mesero';
+        } else if (role.includes('cook')) {
+          window.location.href = '/cocina';
+        } else {
+          window.location.href = '/dashboard';
+        }
       } else {
-        window.location.href = '/dashboard';
+        errorEl.textContent = data.error || 'Credenciales incorrectas';
+        errorEl.style.display = 'block';
       }
-    } else {
-      errorEl.textContent = data.error || 'Credenciales incorrectas';
+    } catch(e) {
+      errorEl.textContent = 'Error de conexion. Intenta de nuevo.';
       errorEl.style.display = 'block';
     }
-  } catch(e) {
-    errorEl.textContent = 'Error de conexion. Intenta de nuevo.';
-    errorEl.style.display = 'block';
   }
-}
-</script>
+  </script>
 </body>
 </html>
