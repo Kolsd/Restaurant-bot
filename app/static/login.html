@@ -39,11 +39,13 @@
     const password = document.getElementById('password').value.trim();
     const errorEl = document.getElementById('error-msg');
     errorEl.style.display = 'none';
+    
     if (!username || !password) {
       errorEl.textContent = 'Por favor completa todos los campos';
       errorEl.style.display = 'block';
       return;
     }
+    
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -51,18 +53,22 @@
         body: JSON.stringify({ username, password })
       });
       const data = await res.json();
+      
       if (data.success) {
         localStorage.setItem('rb_token', data.token);
         localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
         
-        const role = (data.restaurant.role || 'owner').toLowerCase();
-        if (role.includes('owner') || role.includes('admin')) {
+        // FIX: Guardar correctamente el rb_role para que dashboard-core.js no se rompa
+        const userRole = data.role ? data.role.toLowerCase() : 'owner';
+        localStorage.setItem('rb_role', userRole);
+        
+        if (userRole.includes('owner') || userRole.includes('admin')) {
           window.location.href = '/dashboard';
-        } else if (role.includes('cashier')) {
+        } else if (userRole.includes('cashier')) {
           window.location.href = '/caja';
-        } else if (role.includes('waiter')) {
+        } else if (userRole.includes('waiter')) {
           window.location.href = '/mesero';
-        } else if (role.includes('cook')) {
+        } else if (userRole.includes('cook')) {
           window.location.href = '/cocina';
         } else {
           window.location.href = '/dashboard';
