@@ -15,15 +15,16 @@ from app.services import database as db
 router = APIRouter(prefix="/api/crm", tags=["crm"])
 
 # ── AUTH HELPER ───────────────────────────────────────────────────────
+ADMIN_KEY = os.getenv("ADMIN_KEY", "restaurantbot2024")
+
 async def _require_auth(request: Request) -> dict:
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    if not username:
-        raise HTTPException(status_code=401, detail="No autorizado")
-    user = await db.db_get_user(username)
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    return user
+    key = (
+        request.headers.get("X-Admin-Key", "")
+        or request.headers.get("Authorization", "").replace("Bearer ", "")
+    )
+    if not key or key != ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Acceso exclusivo para el equipo Mesio")
+    return {"username": "mesio_admin", "role": "superadmin"}
 
 
 # ── MODELOS ───────────────────────────────────────────────────────────

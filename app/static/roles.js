@@ -2,14 +2,15 @@
 document.addEventListener('DOMContentLoaded', () => {
     const token = localStorage.getItem('rb_token');
     const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+    // FIX: Leer el rol de la variable global rb_role
+    const storedRole = localStorage.getItem('rb_role') || ''; 
     
     if (!token || !restaurant) {
         window.location.href = '/login';
         return;
     }
 
-    // Los roles vienen del backend (ej: "owner", "admin", "waiter", "waiter,cashier")
-    const userRoles = (restaurant.role || '').toLowerCase();
+    const userRoles = storedRole.toLowerCase();
     const isAdmin = userRoles.includes('owner') || userRoles.includes('admin');
     
     const path = window.location.pathname;
@@ -54,12 +55,11 @@ document.addEventListener('DOMContentLoaded', () => {
             navHtml += `<a href="/dashboard" class="role-btn">Admin</a>`;
         }
 
-        // Solo mostramos la barra si el usuario tiene más de 1 vista disponible (o es admin)
         if (navHtml.split('</a>').length > 2 || isAdmin) {
             navContainer.innerHTML = navHtml;
             navContainer.style.display = 'flex';
         } else {
-            navContainer.style.display = 'none'; // Ocultar si solo tiene 1 rol
+            navContainer.style.display = 'none'; 
         }
     }
 });

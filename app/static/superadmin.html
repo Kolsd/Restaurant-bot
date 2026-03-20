@@ -122,6 +122,10 @@
     <div class="nav-item" onclick="switchTab('clients', this)">📋 Directorio Clientes</div>
     <div class="nav-item" onclick="switchTab('new', this)">➕ Alta de Cliente</div>
     <div class="nav-item" onclick="switchTab('users', this)">👥 Gestión de Accesos</div>
+    <div class="nav-item" id="btn-crm" onclick="window.location.href='/crm'"
+     style="display:none; margin-top:auto; background:rgba(57,255,106,.1); color:#39FF6A;">
+  🎯 CRM Prospectos
+</div>
   </div>
 
   <div class="main-content">
@@ -270,6 +274,8 @@
         GLOBAL_KEY = key;
         document.getElementById('auth-screen').style.display = 'none';
         document.getElementById('app-screen').style.display = 'flex';
+        localStorage.setItem('mesio_admin_key', key);
+        document.getElementById('btn-crm').style.display = 'flex';
         
         const data = await res.json();
         renderStats(data);

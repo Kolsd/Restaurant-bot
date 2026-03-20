@@ -707,11 +707,11 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
 // ═══════════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════════
-const token      = localStorage.getItem('rb_token');
-const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-if (!token) window.location.href = '/login';
+// CRM usa ADMIN_KEY del superadmin — no acepta tokens de restaurantes
+const ADMIN_KEY = localStorage.getItem('mesio_admin_key');
+if (!ADMIN_KEY) window.location.href = '/superadmin?redirect=crm';
 
-const H = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+const H = { 'Authorization': 'Bearer ' + ADMIN_KEY, 'Content-Type': 'application/json' };
 const STAGES = ['prospecto','contactado','respondio','demo','negociacion','cerrado','perdido'];
 const STAGE_LABELS = {
   prospecto:'Prospecto', contactado:'Contactado', respondio:'Respondió',
@@ -732,9 +732,8 @@ let _toastTimer   = null;
 // INIT
 // ═══════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-  const u = restaurant.username || 'miguel';
-  document.getElementById('user-av').textContent   = u[0].toUpperCase();
-  document.getElementById('user-name').textContent = u;
+  document.getElementById('user-av').textContent   = 'M';
+  document.getElementById('user-name').textContent = 'Mesio Admin';
   loadStats();
   loadProspects();
   loadTemplates();
