@@ -412,44 +412,52 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
 # Build template components
         components = []
-
-        # 1. Header de imagen (OBLIGATORIO para tu plantilla específica)
-        if tpl["wa_name"] == "mesio_contacto_staff_v1":
-            components.append({
-                "type": "header",
-                "parameters": [{
-                    "type": "image",
-                    # Cambia este link por la URL pública donde tengas la foto de tu equipo
-                    "image": {"link": "https://mesioai.com/static/logo.png"} 
-                }]
-            })
-
-        # 2. Body con manejo inteligente de parámetros
+        
+        # Solo enviamos el cuerpo si hay parámetros
         if params:
-            body_params = []
-            for i, p in enumerate(params):
-                if tpl["wa_name"] == "mesio_contacto_staff_v1" and i == 0:
-                    # Meta exige el nombre exacto de la variable que usaste
-                    body_params.append({
-                        "type": "text", 
-                        "parameter_name": "restaurante", 
-                        "text": str(p)
-                    })
-                else:
-                    # Formato estándar para futuras plantillas que usen {{1}}, {{2}}
-                    body_params.append({
-                        "type": "text", 
-                        "text": str(p)
-                    })
-            
             components.append({
                 "type": "body",
-                "parameters": body_params
+                "parameters": [{"type": "text", "text": str(p)} for p in params]
             })
 
         wa_msg_id = ""
         status    = "sent"
         error_msg = ""
+
+        if token and phone_id:
+            try:
+                # 👇 NUEVO: LOGS DETALLADOS PARA DEBUGGEAR META
+                meta_payload = {
+                    "messaging_product": "whatsapp",
+                    "to": phone,
+                    "type": "template",
+                    "template": {
+                        "name": tpl["wa_name"],
+                        "language": {"code": "es_MX"}, # Si en Meta elegiste Español genérico, cambia esto a "es"
+                        "components": components
+                    }
+                }
+                print(f"\n🚀 [ENVIANDO TEMPLATE a {phone}] Payload:\n{json.dumps(meta_payload, indent=2)}", flush=True)
+
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(
+                        f"https://graph.facebook.com/v20.0/{phone_id}/messages",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json=meta_payload
+                    )
+                    data = resp.json()
+                    print(f"📥 [RESPUESTA META]:\n{json.dumps(data, indent=2)}\n", flush=True)
+
+                    if resp.status_code == 200:
+                        wa_msg_id = data.get("messages", [{}])[0].get("id", "")
+                    else:
+                        status    = "error"
+                        error_msg = data.get("error", {}).get("message", str(resp.text[:200]))
+            except Exception as e:
+                status    = "error"
+                error_msg = str(e)[:200]
+                print(f"❌ [ERROR INTERNO]: {error_msg}", flush=True)
+
 
         if token and phone_id:
             try:
