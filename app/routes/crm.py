@@ -83,7 +83,7 @@ def _ser(row: dict) -> dict:
     result = {}
     for k, v in row.items():
         if hasattr(v, 'isoformat'):
-            result[k] = v.isoformat()[:19]
+            result[k] = v.isoformat()[:19] + "Z"
         elif isinstance(v, list):
             result[k] = list(v)
         elif v is None:
