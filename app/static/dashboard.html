@@ -246,34 +246,39 @@
           <input id="invite-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           
-          <div style="font-size:13px; color:#555; margin-top:4px; font-weight:600;">Selecciona roles (puedes marcar varios):</div>
+          <div style="font-size:13px; color:#555; margin-top:4px; font-weight:600;">Nivel de acceso:</div>
           <input type="hidden" id="invite-role" value="waiter">
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom: 4px;">
-            <div class="role-card active" data-role="waiter" onclick="toggleRole('waiter', this)">
-              <div style="font-size:24px;margin-bottom:4px;">🍽️</div>
-              <div style="font-weight:600;font-size:13px;color:#111;">Mesero</div>
-              <div style="font-size:11px;color:#888;margin-top:2px;">Pedidos y mesas</div>
+          
+          <div class="role-card" data-role="admin" onclick="toggleRole('admin', this)" style="margin-bottom:8px; padding:10px;">
+            <div style="font-size:22px;margin-bottom:2px;">🛡️</div>
+            <div style="font-weight:600;font-size:13px;color:#111;">Administrador</div>
+            <div style="font-size:11px;color:#888;margin-top:2px;">Control total de la sucursal</div>
+          </div>
+
+          <div style="display:flex; align-items:center; margin:8px 0;">
+            <div style="flex:1; height:1px; background:#e0e0d8;"></div>
+            <div style="font-size:10px; color:#888; padding:0 10px; font-weight:600;">O ROLES OPERATIVOS (MULTIROL)</div>
+            <div style="flex:1; height:1px; background:#e0e0d8;"></div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom: 4px;">
+            <div class="role-card active" data-role="waiter" onclick="toggleRole('waiter', this)" style="padding:10px 4px;">
+              <div style="font-size:22px;margin-bottom:2px;">🍽️</div>
+              <div style="font-weight:600;font-size:12px;color:#111;">Mesero</div>
             </div>
-            <div class="role-card" data-role="cashier" onclick="toggleRole('cashier', this)">
-              <div style="font-size:24px;margin-bottom:4px;">💰</div>
-              <div style="font-weight:600;font-size:13px;color:#111;">Cajero</div>
-              <div style="font-size:11px;color:#888;margin-top:2px;">Facturas y pagos</div>
+            <div class="role-card" data-role="cashier" onclick="toggleRole('cashier', this)" style="padding:10px 4px;">
+              <div style="font-size:22px;margin-bottom:2px;">💰</div>
+              <div style="font-weight:600;font-size:12px;color:#111;">Cajero</div>
             </div>
-            <div class="role-card" data-role="cook" onclick="toggleRole('cook', this)">
-              <div style="font-size:24px;margin-bottom:4px;">👨‍🍳</div>
-              <div style="font-weight:600;font-size:13px;color:#111;">Cocinero</div>
-              <div style="font-size:11px;color:#888;margin-top:2px;">Panel de cocina</div>
-            </div>
-            <div class="role-card" data-role="admin" onclick="toggleRole('admin', this)">
-              <div style="font-size:24px;margin-bottom:4px;">🛡️</div>
-              <div style="font-weight:600;font-size:13px;color:#111;">Admin</div>
-              <div style="font-size:11px;color:#888;margin-top:2px;">Control de sucursal</div>
+            <div class="role-card" data-role="cook" onclick="toggleRole('cook', this)" style="padding:10px 4px;">
+              <div style="font-size:22px;margin-bottom:2px;">👨‍🍳</div>
+              <div style="font-weight:600;font-size:12px;color:#111;">Cocina</div>
             </div>
           </div>
 
         </div>
         <div style="display:flex;gap:8px;margin-top:1.25rem;">
-          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear usuario multirol</button>
+          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear usuario</button>
           <button onclick="closeInviteModal()" style="padding:10px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
         </div>
       </div>

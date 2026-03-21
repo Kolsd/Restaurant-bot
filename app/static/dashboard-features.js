@@ -321,18 +321,33 @@ async function createBranch() {
   } catch(e) {}
 }
 
-// ── LÓGICA MULTIROL ──
+// ── LÓGICA MULTIROL MEJORADA ──
 function toggleRole(role, el) {
-  if (selectedRoles.has(role)) {
-    // Evita que el usuario desmarque todo (siempre debe tener al menos un rol)
-    if (selectedRoles.size === 1) return; 
-    selectedRoles.delete(role);
-    el.classList.remove('active');
-  } else {
-    selectedRoles.add(role);
+  if (role === 'admin') {
+    // Si elige Admin, se limpia el resto y solo queda Admin
+    selectedRoles = new Set(['admin']);
+    document.querySelectorAll('#modal-invite .role-card').forEach(c => c.classList.remove('active'));
     el.classList.add('active');
+  } else {
+    // Si elige cualquier otro, y Admin estaba seleccionado, se desmarca Admin
+    if (selectedRoles.has('admin')) {
+      selectedRoles.delete('admin');
+      const adminCard = document.querySelector('#modal-invite .role-card[data-role="admin"]');
+      if (adminCard) adminCard.classList.remove('active');
+    }
+    
+    // Toggle normal para los roles operativos
+    if (selectedRoles.has(role)) {
+      if (selectedRoles.size === 1) return; // Evita dejar al usuario sin roles
+      selectedRoles.delete(role);
+      el.classList.remove('active');
+    } else {
+      selectedRoles.add(role);
+      el.classList.add('active');
+    }
   }
-  // Convertimos el "Set" de roles a una lista separada por comas "waiter,cook,cashier"
+  
+  // Guardamos en el input oculto para enviarlo a la API
   document.getElementById('invite-role').value = Array.from(selectedRoles).join(',');
 }
 
@@ -342,7 +357,7 @@ function openInviteModal(branchId, branchName) {
   document.getElementById('invite-username').value = '';
   document.getElementById('invite-password').value = '';
   
-  // Reiniciar a "Mesero" por defecto
+  // Reiniciar a "Mesero" por defecto al abrir el modal
   selectedRoles = new Set(['waiter']);
   document.getElementById('invite-role').value = 'waiter';
   
@@ -371,7 +386,7 @@ async function sendInvite() {
       method:'POST', headers:{ ...h,'Content-Type':'application/json' },
       body: JSON.stringify({ username, password, role, branch_id: currentBranchId })
     });
-    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Usuario multirol creado!'); }
+    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Usuario creado exitosamente!'); }
     else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo crear')); }
   } catch(e) {}
 }
