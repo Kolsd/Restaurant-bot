@@ -150,22 +150,24 @@ async def _ensure_crm_tables():
                 created_at  TIMESTAMP DEFAULT NOW()
             );
         """)
-        # Seed default templates
-        await conn.execute("""
-            INSERT INTO crm_templates (name, wa_name, category, body, params)
-            VALUES
-              ('Prospección inicial', 'mesio_prospeccion_v1', 'MARKETING',
-               'Hola {{1}}, vi que tienen {{2}} y quería hacerles una pregunta rápida — ¿reciben pedidos por WhatsApp o solo por Rappi? Tenemos algo que podría ahorrarles la comisión. 🙋',
-               ARRAY['nombre del dueño','nombre del restaurante']),
-              ('Follow-up demo', 'mesio_followup_demo_v1', 'MARKETING',
-               'Hola {{1}}! Les comparto el demo de Mesio para que vean cómo funcionaría para {{2}}: mesioai.com/demo — ¿tienen 15 minutos esta semana para una llamada rápida?',
-               ARRAY['nombre','restaurante']),
-              ('Cierre', 'mesio_cierre_v1', 'MARKETING',
-               'Hola {{1}}, quería saber si pudieron ver el demo de Mesio. Tenemos el plan Starter desde $49 USD/mes y podemos tenerlo configurado en 48h. ¿Arrancamos esta semana?',
-               ARRAY['nombre'])
-            ON CONFLICT (name) DO NOTHING;
-        """)
-
+        
+        # 👇 NUEVO: Sembrar templates por defecto SOLO si la tabla está completamente vacía
+        count = await conn.fetchval("SELECT COUNT(*) FROM crm_templates")
+        if count == 0:
+            await conn.execute("""
+                INSERT INTO crm_templates (name, wa_name, category, body, params)
+                VALUES
+                  ('Prospección inicial', 'mesio_prospeccion_v1', 'MARKETING',
+                   'Hola {{1}}, vi que tienen {{2}} y quería hacerles una pregunta rápida — ¿reciben pedidos por WhatsApp o solo por Rappi? Tenemos algo que podría ahorrarles la comisión. 🙋',
+                   ARRAY['nombre del dueño','nombre del restaurante']),
+                  ('Follow-up demo', 'mesio_followup_demo_v1', 'MARKETING',
+                   'Hola {{1}}! Les comparto el demo de Mesio para que vean cómo funcionaría para {{2}}: mesioai.com/demo — ¿tienen 15 minutos esta semana para una llamada rápida?',
+                   ARRAY['nombre','restaurante']),
+                  ('Cierre', 'mesio_cierre_v1', 'MARKETING',
+                   'Hola {{1}}, quería saber si pudieron ver el demo de Mesio. Tenemos el plan Starter desde $49 USD/mes y podemos tenerlo configurado en 48h. ¿Arrancamos esta semana?',
+                   ARRAY['nombre'])
+                ON CONFLICT (name) DO NOTHING;
+            """)
 
 # ── PROSPECTS CRUD ────────────────────────────────────────────────────
 @router.get("/prospects")
