@@ -21,7 +21,7 @@
 html,body { height:100%; overflow:hidden; }
 body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); }
 
-/* ══ LAYOUT ═════════════════════════════════════════════════════════ */
+/* ══ LAYOUT GENERAL ═════════════════════════════════════════════════ */
 .app    { display:flex; height:100vh; height:100dvh; }
 .sidebar { width:220px; background:var(--bg2); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:1.25rem 1rem; flex-shrink:0; }
 .main   { flex:1; display:flex; flex-direction:column; min-width:0; overflow:hidden; }
@@ -69,6 +69,23 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 .stat-val { font-family:'Syne',sans-serif; font-size:1.75rem; font-weight:800; color:var(--text); line-height:1; }
 .stat-val.g { color:var(--g); } .stat-val.a { color:var(--amber); }
 
+/* ══ INBOX DESKTOP ══════════════════════════════════════════════════ */
+.inbox-layout { display: flex; gap: 1rem; height: calc(100vh - 140px); }
+.inbox-list-container { width: 340px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+.inbox-list-header { padding: 1rem; border-bottom: 1px solid var(--border); background: var(--bg2); }
+.inbox-list-body { flex: 1; overflow-y: auto; padding: 0.5rem; background: var(--bg2); }
+.inbox-chat-container { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+.inbox-chat-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--bg2); display: flex; justify-content: space-between; align-items: center; gap: 5px; }
+.btn-volver-movil { display: none; background: none; border: none; color: var(--g); font-size: 1.5rem; cursor: pointer; padding: 0 10px 0 0; flex-shrink: 0; }
+.inbox-rest-name { font-size: 1.1rem; font-weight: 700; color: var(--white); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inbox-rest-phone { font-size: 0.8rem; color: var(--muted); margin-top: 2px; font-family: monospace; }
+.inbox-actions { display: none; gap: 8px; align-items: center; flex-shrink: 0; }
+.inbox-stage-select { width: auto; }
+.inbox-chat-messages { flex: 1; overflow-y: auto; padding: 1.5rem; background: var(--bg); display: flex; flex-direction: column; gap: 12px; }
+.inbox-chat-input-area { padding: 1rem; border-top: 1px solid var(--border); background: var(--bg2); display: none; }
+.inbox-textarea { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 10px 14px; outline: none; resize: none; font-family: inherit; font-size: 0.85rem; }
+.inbox-send-btn { height: 40px; padding: 0 20px; }
+
 /* ══ KANBAN & TABLA ═════════════════════════════════════════════════ */
 .kanban { display:flex; gap:14px; overflow-x:auto; padding-bottom:1rem; min-height:calc(100vh - 260px); }
 .k-col { flex:0 0 280px; display:flex; flex-direction:column; }
@@ -82,8 +99,36 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 .k-card-owner { font-size:.73rem; color:var(--muted2); margin-bottom:8px; }
 .k-checkbox { position:absolute; top:8px; right:8px; accent-color:var(--g); }
 .stage-badge { display:inline-flex; align-items:center; gap:5px; font-size:.68rem; font-weight:700; padding:3px 9px; border-radius:100px; }
+.tbl-wrap { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.tbl-toolbar { display:flex; align-items:center; gap:10px; padding:.85rem 1.1rem; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+table { width:100%; border-collapse:collapse; font-size:.8rem; }
+thead th { text-align:left; padding:.7rem 1rem; font-size:.65rem; font-weight:700; text-transform:uppercase; color:var(--muted); border-bottom:1px solid var(--border); }
+tbody td { padding:.8rem 1rem; border-bottom:1px solid rgba(255,255,255,.03); }
 
-/* ══ PANEL LATERAL (detalle/chat) ═══════════════════════════════════ */
+/* Stage colors */
+.stage-prospecto   { --sc: #888; }
+.stage-contactado  { --sc: #378ADD; }
+.stage-respondio   { --sc: #8B5CF6; }
+.stage-demo        { --sc: #F59E0B; }
+.stage-negociacion { --sc: #FB923C; }
+.stage-cerrado     { --sc: #39FF6A; }
+.stage-perdido     { --sc: #EF4444; }
+.k-header .k-dot.prospecto   { background:#888; }
+.k-header .k-dot.contactado  { background:#378ADD; }
+.k-header .k-dot.respondio   { background:#8B5CF6; }
+.k-header .k-dot.demo        { background:#F59E0B; }
+.k-header .k-dot.negociacion { background:#FB923C; }
+.k-header .k-dot.cerrado     { background:#39FF6A; }
+.k-header .k-dot.perdido     { background:#EF4444; }
+.sb-prospecto   { background:rgba(136,136,136,.12); color:#888; }
+.sb-contactado  { background:rgba(55,138,221,.12);  color:#60A5FA; }
+.sb-respondio   { background:rgba(139,92,246,.12);  color:#A78BFA; }
+.sb-demo        { background:rgba(245,158,11,.12);  color:var(--amber); }
+.sb-negociacion { background:rgba(251,146,60,.12);  color:#FB923C; }
+.sb-cerrado     { background:rgba(57,255,106,.12);  color:var(--g); }
+.sb-perdido     { background:rgba(239,68,68,.12);   color:var(--red); }
+
+/* ══ PANEL LATERAL (detalle Kanban/Tabla) ═══════════════════════════ */
 .detail-panel { width:0; background:var(--bg2); border-left:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; transition:width .25s ease; flex-shrink:0; }
 .detail-panel.open { width:380px; }
 .dp-head { padding:1.1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
@@ -93,7 +138,7 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 .dp-tab.active { color:var(--g); border-bottom:2px solid var(--g); }
 .dp-body { flex:1; overflow-y:auto; padding:1rem 1.1rem; }
 
-/* ── Chat en Panel ── */
+/* ── Chat en Panel Kanban ── */
 .chat-msgs { display:flex; flex-direction:column; gap:8px; padding:.5rem 0; }
 .msg-row { display:flex; }
 .msg-row.out { justify-content:flex-end; }
@@ -109,20 +154,21 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 .modal { background:var(--bg2); border:1px solid var(--border); border-radius:18px; width:100%; max-width:560px; max-height:90vh; display:flex; flex-direction:column; }
 .modal-head { padding:1.25rem 1.5rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; }
 .modal-body { padding:1.5rem; overflow-y:auto; }
-.form-input, .form-select, .form-textarea { background:var(--bg3); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:8px 12px; width: 100%; outline:none; }
+.modal-footer { padding:1rem 1.5rem; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; flex-shrink:0; }
+.form-group { display:flex; flex-direction:column; gap:5px; margin-bottom:1rem; }
+.form-label { font-size:.72rem; font-weight:600; color:var(--muted2); }
+.form-input, .form-select, .form-textarea { background:var(--bg3); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:8px 12px; width: 100%; outline:none; font-family: inherit; }
 .toast { position:fixed; bottom:1.5rem; right:1.5rem; z-index:9999; background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:10px 18px; border-radius:10px; font-size:.8rem; transform:translateY(80px); opacity:0; transition:all .3s; display:flex; align-items:center; gap:8px; }
 .toast.show { transform:translateY(0); opacity:1; }
-
-/* ── INBOX DESKTOP ── */
-.inbox-chat-container { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+.empty-col { text-align:center; padding:2rem; color:var(--muted); font-size:.8rem; }
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,.2); border-top-color:var(--g); border-radius:50%; animation:spin .6s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
 
 /* =========================================================
-   📱 MODO MÓVIL ESTILO APP NATIVA (Z-INDEX Y TAMAÑOS CORREGIDOS)
+   📱 MODO MÓVIL ESTILO APP NATIVA
    ========================================================= */
 .ham-btn { display: none; background: none; border: none; cursor: pointer; flex-direction: column; gap: 5px; padding: 5px; margin-right: 10px; }
 .ham-btn span { display: block; width: 22px; height: 2px; background: var(--white); border-radius: 2px; }
-
-/* Overlay para el menú lateral */
 .mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 9000; backdrop-filter: blur(2px); }
 .mobile-overlay.open { display: block; }
 
@@ -137,7 +183,7 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
   .view-tabs { width: 100%; display: flex; }
   .vt { flex: 1; text-align: center; }
 
-  /* Sidebar */
+  /* Sidebar Drawer */
   .sidebar {
     position: fixed; top: 0; left: -280px; width: 260px; height: 100dvh;
     z-index: 9999; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -151,62 +197,44 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
   .k-col { min-width: 85vw; scroll-snap-align: center; flex-shrink: 0; }
   .tbl-wrap { overflow-x: auto; }
 
-  /* 💬 INBOX / CHAT A PANTALLA COMPLETA */
-  #view-inbox { flex-direction: column; height: calc(100dvh - 180px) !important; gap: 0; border: none; }
-  #view-inbox > div:first-child { width: 100% !important; border-radius: 0; border: none; flex: 1; display: flex; }
-  
-  /* 🚀 FIX MÁXIMO: Arrancamos el chat de su contenedor y lo forzamos a pantalla completa */
-  #view-inbox > div:last-child { 
-    display: none !important; 
-    position: fixed !important; 
-    top: 0 !important;
-    left: 0 !important;
-    width: 100vw !important;
-    height: 100dvh !important; 
-    z-index: 8000 !important; 
-    background: var(--bg) !important; 
+  /* ── INBOX MÓVIL ── */
+  .inbox-layout { flex-direction: column; height: calc(100dvh - 180px); gap: 0; border: none; }
+  .inbox-list-container { width: 100%; border-radius: 0; border: none; flex: 1; }
+  .inbox-chat-container { display: none; }
+
+  /* 🚀 MAGIA: OCULTAR TODO CUANDO EL CHAT ESTÁ ABIERTO 🚀 */
+  body.mobile-chat-open .topbar,
+  body.mobile-chat-open #stats-row,
+  body.mobile-chat-open .inbox-list-container {
+    display: none !important;
+  }
+
+  body.mobile-chat-open .content { padding: 0 !important; }
+  body.mobile-chat-open .inbox-layout { height: 100dvh !important; }
+  body.mobile-chat-open .inbox-chat-container {
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
     border-radius: 0 !important;
     border: none !important;
   }
-  
-  #view-inbox.chat-abierto > div:first-child { display: none !important; }
-  #view-inbox.chat-abierto > div:last-child { display: flex !important; flex-direction: column !important; }
-  
-  /* Header más compacto */
-  .btn-volver-movil { display: block !important; margin-right: 5px; font-size: 1.3rem !important; }
-  #inbox-header { padding: 10px !important; border-radius: 0 !important; background: var(--bg2) !important; flex-wrap: nowrap !important; gap: 5px !important; flex-shrink: 0 !important; }
-  
-  /* Evitar que el nombre empuje los botones */
-  #inbox-rest-name { font-size: 0.95rem !important; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #inbox-rest-phone { font-size: 0.7rem !important; }
-  
-  /* Achicar los botones del header */
-  #inbox-actions { gap: 5px !important; }
-  #inbox-stage-select { padding: 4px !important; font-size: 0.7rem !important; width: auto !important; max-width: 90px; }
+
+  /* Ajustes finos del chat móvil */
+  .btn-volver-movil { display: block !important; }
+  .inbox-chat-header { padding: 10px !important; flex-wrap: nowrap !important; }
+  .inbox-rest-name { font-size: 0.95rem !important; max-width: 130px; }
+  .inbox-actions { gap: 5px !important; }
+  .inbox-stage-select { padding: 4px 6px !important; font-size: 0.7rem !important; max-width: 90px; }
   #btn-tpl-text { display: none; }
-  #inbox-actions button { padding: 4px 8px !important; font-size: 0.9rem !important; }
+  .inbox-chat-messages { padding: 10px !important; background: #0C0C0C !important; }
+  .inbox-chat-messages > div > div:first-child { padding: 8px 10px !important; font-size: 0.8rem !important; max-width: 92% !important; }
+  .inbox-chat-input-area { padding: 8px !important; padding-bottom: max(8px, env(safe-area-inset-bottom)) !important; }
+  .inbox-textarea { min-height: 40px !important; max-height: 80px !important; padding: 8px 12px !important; font-size: 0.85rem !important; border-radius: 20px !important; }
+  .inbox-send-btn { height: 40px !important; padding: 0 16px !important; border-radius: 20px !important; }
 
-  /* Burbujas tipo WhatsApp */
-  #inbox-messages { flex: 1 !important; padding: 10px !important; background: #0C0C0C !important; overflow-y: auto !important; }
-  #inbox-messages > div > div:first-child { 
-    padding: 8px 10px !important; 
-    font-size: 0.8rem !important; 
-    max-width: 92% !important; 
-    line-height: 1.35 !important;
-  }
-  
-  /* Input Area (Caja de texto pegada abajo sin que la tape el teclado) */
-  #inbox-input-area { 
-    flex-shrink: 0 !important;
-    padding: 8px !important; 
-    background: var(--bg2) !important; 
-    border-top: 1px solid var(--border) !important; 
-    padding-bottom: max(8px, env(safe-area-inset-bottom)) !important; 
-  }
-  #inbox-input { min-height: 40px !important; max-height: 80px !important; padding: 8px 12px !important; font-size: 0.85rem !important; border-radius: 20px !important; }
-  #inbox-input-area button { height: 40px !important; padding: 0 16px !important; font-size: 0.85rem !important; border-radius: 20px !important; }
-
-  /* Modales a Pantalla Completa */
+  /* Ajuste de paneles extra */
+  .detail-panel { position: fixed; top: 0; right: -100%; width: 100% !important; height: 100dvh; z-index: 500; transition: right 0.3s ease; border-left: none; }
+  .detail-panel.open { right: 0; }
   .modal { max-width: 100%; height: 100dvh; border-radius: 0; }
   .modal-body { padding: 1rem; }
   .form-group.half { display: flex; flex-direction: column; gap: 10px; }

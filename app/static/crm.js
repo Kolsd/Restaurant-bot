@@ -40,6 +40,9 @@ function closeSidebar() {
 
 // ── VISTAS ──
 function setView(v, btn) {
+  // Asegurarnos de limpiar la vista móvil del chat si cambiamos de vista
+  document.body.classList.remove('mobile-chat-open');
+
   currentView = v;
   document.getElementById('view-kanban').style.display = v === 'kanban' ? 'block' : 'none';
   document.getElementById('view-tabla').style.display  = v === 'tabla'  ? 'block' : 'none';
@@ -216,12 +219,16 @@ async function openInboxChat(pid) {
     </div>`;
   }).join('');
   c.scrollTop = c.scrollHeight;
-  document.getElementById('view-inbox').classList.add('chat-abierto');
+  
+  // 🚀 MAGIA: Agrega la clase al BODY para ocultar todo lo demas en móviles
+  document.body.classList.add('mobile-chat-open');
 }
 
 function cerrarChatMovil() {
-  document.getElementById('view-inbox').classList.remove('chat-abierto');
-  currentInboxPid = null; renderInbox();
+  // 🚀 MAGIA: Remueve la clase del BODY para restaurar la vista original
+  document.body.classList.remove('mobile-chat-open');
+  currentInboxPid = null; 
+  renderInbox();
 }
 
 async function sendInboxMessage() {
