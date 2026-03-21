@@ -412,12 +412,39 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
 # Build template components
         components = []
-        
-        # Solo enviamos el cuerpo si hay parámetros
+
+        # 1. Header de imagen (OBLIGATORIO para tu plantilla específica)
+        if tpl["wa_name"] == "mesio_contacto_staff_v1":
+            components.append({
+                "type": "header",
+                "parameters": [{
+                    "type": "image",
+                    # Cambia este link por la URL pública donde tengas la foto de tu equipo
+                    "image": {"link": "https://mesioai.com/static/logo.png"} 
+                }]
+            })
+
+        # 2. Body con manejo inteligente de parámetros
         if params:
+            body_params = []
+            for i, p in enumerate(params):
+                if tpl["wa_name"] == "mesio_contacto_staff_v1" and i == 0:
+                    # Meta exige el nombre exacto de la variable que usaste
+                    body_params.append({
+                        "type": "text", 
+                        "parameter_name": "restaurante", 
+                        "text": str(p)
+                    })
+                else:
+                    # Formato estándar para futuras plantillas que usen {{1}}, {{2}}
+                    body_params.append({
+                        "type": "text", 
+                        "text": str(p)
+                    })
+            
             components.append({
                 "type": "body",
-                "parameters": [{"type": "text", "text": str(p)} for p in params]
+                "parameters": body_params
             })
 
         wa_msg_id = ""
@@ -436,12 +463,14 @@ async def send_template(request: Request, body: SendTemplatePayload):
                             "type": "template",
                             "template": {
                                 "name": tpl["wa_name"],
-                                # Mantenemos el idioma en Español México
-                                "language": {"code": "es_MX"}, 
+                                # Forzamos el idioma correcto solo para esta plantilla
+                                "language": {
+                                    "code": "es_MX" if tpl["wa_name"] == "mesio_contacto_staff_v1" else tpl.get("language", "es")
+                                },
                                 "components": components
                             }
                         }
-                              )
+                    )
                     data = resp.json()
                     if resp.status_code == 200:
                         wa_msg_id = data.get("messages", [{}])[0].get("id", "")
