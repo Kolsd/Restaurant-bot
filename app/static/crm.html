@@ -342,7 +342,10 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   <div class="logo">Mesio<span>.</span><div class="logo-sub">CRM · Prospectos</div></div>
 
   <div class="nav-section">Vistas</div>
-  <button class="nav-btn active" onclick="setView('kanban',this)" id="btn-kanban">
+  <button class="nav-btn active" onclick="setView('inbox',this)" id="btn-inbox">
+    <span>💬</span> Inbox (Chats)
+  </button>
+  <button class="nav-btn" onclick="setView('kanban',this)" id="btn-kanban">
     <span>⬜</span> Pipeline Kanban
   </button>
   <button class="nav-btn" onclick="setView('tabla',this)" id="btn-tabla">
@@ -353,6 +356,10 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   <button class="nav-btn" onclick="openAddModal()">
     <span>＋</span> Nuevo prospecto
   </button>
+  <button class="nav-btn" onclick="document.getElementById('csv-file-input').click()">
+    <span>📁</span> Subir Base CSV
+  </button>
+  <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCSVUpload(event)">
   <button class="nav-btn" onclick="openTemplateModal()">
     <span>📤</span> Enviar Template
     <span class="nbadge" id="selected-count-badge" style="display:none">0</span>
@@ -360,8 +367,6 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   <button class="nav-btn" onclick="openTemplatesListModal()">
     <span>📝</span> Mis Templates
   </button>
-
-  <div class="nav-section">Filtros rápidos</div>
   <button class="nav-btn" onclick="filterStage('')"    id="filter-all">Todos</button>
   <button class="nav-btn" onclick="filterStage('prospecto')">Prospecto</button>
   <button class="nav-btn" onclick="filterStage('contactado')">Contactado</button>
@@ -410,6 +415,52 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
       <div class="stat-card"><div class="stat-label">Respondieron</div><div class="stat-val a" id="s-responded">—</div><div class="stat-sub">activos ahora</div></div>
       <div class="stat-card"><div class="stat-label">Cerrados</div><div class="stat-val g" id="s-converted">—</div></div>
       <div class="stat-card"><div class="stat-label">Conversión</div><div class="stat-val" id="s-rate">—%</div></div>
+    </div>
+
+    <div id="view-inbox" style="height: calc(100vh - 200px); gap: 1rem;">
+      
+      <div style="width: 340px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;">
+        <div style="padding: 1rem; border-bottom: 1px solid var(--border); background: var(--bg2);">
+          <h3 style="font-size: 1rem; font-weight: 700; color: var(--white);">Conversaciones</h3>
+          <input type="text" id="inbox-search" placeholder="Buscar chat..." oninput="filterInbox()" style="width: 100%; margin-top: 10px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg3); color: var(--text); font-size: 0.8rem; outline: none;">
+        </div>
+        <div id="inbox-list" style="flex: 1; overflow-y: auto; padding: 0.5rem; background: var(--bg2);">
+          </div>
+      </div>
+
+      <div style="flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; position: relative;">
+        
+        <div id="inbox-header" style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--bg2); display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div id="inbox-rest-name" style="font-size: 1.1rem; font-weight: 700; color: var(--white);">Selecciona una conversación</div>
+            <div id="inbox-rest-phone" style="font-size: 0.8rem; color: var(--muted); margin-top: 2px; font-family: monospace;">---</div>
+          </div>
+          <div id="inbox-actions" style="display: none; gap: 8px; align-items: center;">
+            <select id="inbox-stage-select" class="form-select" style="padding: 6px 10px; font-size: 0.8rem; background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 6px;" onchange="updateInboxStage()">
+               <option value="prospecto">🔘 Prospecto</option>
+               <option value="contactado">🔵 Contactado</option>
+               <option value="respondio">🟣 Respondió</option>
+               <option value="demo">🟡 En Demo</option>
+               <option value="negociacion">🟠 Negociación</option>
+               <option value="cerrado">🟢 Cerrado</option>
+               <option value="perdido">🔴 Perdido</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="sendSingleTemplateFromInbox()">📤 Enviar Template</button>
+          </div>
+        </div>
+
+        <div id="inbox-messages" style="flex: 1; overflow-y: auto; padding: 1.5rem; background: var(--bg); display: flex; flex-direction: column; gap: 12px;">
+          <div class="empty-state" style="margin: auto;">Selecciona un prospecto en la lista de la izquierda para comenzar a chatear.</div>
+        </div>
+
+        <div id="inbox-input-area" style="padding: 1rem; border-top: 1px solid var(--border); background: var(--bg2); display: none;">
+          <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <textarea id="inbox-input" placeholder="Escribe tu mensaje libre aquí... (Presiona Enter para enviar)" rows="2" style="flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 10px 14px; font-family: inherit; font-size: 0.85rem; outline: none; resize: none;" onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendInboxMessage(); }"></textarea>
+            <button class="btn btn-primary" style="height: 40px; padding: 0 20px;" onclick="sendInboxMessage()">Enviar</button>
+          </div>
+        </div>
+
+      </div>
     </div>
 
     <!-- KANBAN VIEW -->
@@ -734,6 +785,7 @@ let _toastTimer   = null;
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('user-av').textContent   = 'M';
   document.getElementById('user-name').textContent = 'Mesio Admin';
+  currentView = 'inbox'; // Iniciar en Inbox
   loadStats();
   loadProspects();
   loadTemplates();
@@ -803,12 +855,24 @@ function setView(v, btn) {
   currentView = v;
   document.getElementById('view-kanban').style.display = v === 'kanban' ? 'block' : 'none';
   document.getElementById('view-tabla').style.display  = v === 'tabla'  ? 'block' : 'none';
+  
+  const inboxView = document.getElementById('view-inbox');
+  if (inboxView) {
+    inboxView.style.display = v === 'inbox' ? 'flex' : 'none';
+    if (v === 'inbox') renderInbox();
+  }
+
   document.querySelectorAll('.vt').forEach(b => b.classList.remove('active'));
-  document.getElementById('vt-'+v).classList.add('active');
+  const topBtn = document.getElementById('vt-'+v);
+  if(topBtn) topBtn.classList.add('active');
+
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
-  document.getElementById('page-title').textContent = v === 'kanban' ? 'Pipeline' : 'Tabla';
-  renderView();
+  
+  const titles = { 'kanban': 'Pipeline', 'tabla': 'Tabla Base', 'inbox': 'Bandeja de Entrada' };
+  document.getElementById('page-title').textContent = titles[v] || 'CRM';
+  
+  if (v !== 'inbox') renderView();
 }
 
 function filterStage(stage) {
@@ -1343,6 +1407,148 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(el => closeModal(el.id));
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// INBOX ZENDESK & CSV UPLOAD
+// ═══════════════════════════════════════════════════════════════════
+let currentInboxPid = null;
+
+function renderInbox() {
+  const listEl = document.getElementById('inbox-list');
+  const query = (document.getElementById('inbox-search')?.value || '').toLowerCase();
+  
+  let inboxProspects = prospects.filter(p => 
+    p.stage !== 'cerrado' && p.stage !== 'perdido' &&
+    (p.restaurant_name.toLowerCase().includes(query) || p.phone.includes(query))
+  );
+
+  inboxProspects.sort((a, b) => new Date(b.last_contact_at || 0) - new Date(a.last_contact_at || 0));
+
+  if (!inboxProspects.length) {
+    listEl.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--muted); font-size: 0.8rem;">No hay chats que coincidan.</div>';
+    return;
+  }
+
+  listEl.innerHTML = inboxProspects.map(p => {
+    const isSelected = p.id === currentInboxPid;
+    const time = p.last_contact_at ? new Date(p.last_contact_at).toLocaleDateString('es-CO', {month:'short', day:'numeric'}) : 'Nuevo';
+    return `
+      <div onclick="openInboxChat(${p.id})" style="padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; transition: all 0.2s; background: ${isSelected ? 'var(--bg3)' : 'transparent'}; border-left: 3px solid ${isSelected ? 'var(--g)' : 'transparent'};">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+          <div style="font-weight: 700; font-size: 0.85rem; color: ${isSelected ? 'var(--white)' : 'var(--text)'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.restaurant_name}</div>
+          <div style="font-size: 0.65rem; color: var(--muted);">${time}</div>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--muted2); font-family: 'DM Mono', monospace;">${p.phone}</div>
+        <div style="margin-top: 6px;"><span class="stage-badge sb-${p.stage}" style="font-size: 0.6rem;">${STAGE_LABELS[p.stage] || p.stage}</span></div>
+      </div>
+    `;
+  }).join('');
+}
+
+function filterInbox() { renderInbox(); }
+
+async function openInboxChat(pid) {
+  currentInboxPid = pid;
+  renderInbox();
+  
+  const p = prospects.find(x => x.id === pid);
+  if (!p) return;
+
+  document.getElementById('inbox-rest-name').textContent = p.restaurant_name;
+  document.getElementById('inbox-rest-phone').textContent = p.phone + (p.owner_name ? ' · ' + p.owner_name : '');
+  document.getElementById('inbox-stage-select').value = p.stage;
+  
+  document.getElementById('inbox-actions').style.display = 'flex';
+  document.getElementById('inbox-input-area').style.display = 'block';
+
+  const d = await api('GET', `/prospects/${pid}/interactions`);
+  const container = document.getElementById('inbox-messages');
+  
+  if (!d || !d.interactions || !d.interactions.length) {
+    container.innerHTML = '<div class="empty-col" style="margin:auto;"><div class="ei" style="font-size:2rem;">💬</div>No hay mensajes.<br>Envía un Template para iniciar la conversación.</div>';
+    return;
+  }
+
+  container.innerHTML = d.interactions.map(i => {
+    const out = i.direction === 'outbound';
+    const time = new Date(i.created_at).toLocaleString('es-CO',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const statusIcon = i.status === 'sent' ? '✓' : i.status === 'received' ? '' : '⚠';
+    return `
+      <div style="display: flex; flex-direction: column; align-items: ${out ? 'flex-end' : 'flex-start'};">
+        <div style="max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 0.85rem; line-height: 1.5; background: ${out ? '#005C4B' : 'var(--card)'}; color: ${out ? '#E9EDF0' : 'var(--text)'}; border: 1px solid ${out ? 'transparent' : 'var(--border)'}; border-bottom-${out ? 'right' : 'left'}-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); white-space: pre-wrap;">${i.content}</div>
+        <div style="font-size: 0.65rem; color: var(--muted); margin-top: 4px;">${time} ${out ? statusIcon : ''}</div>
+      </div>
+    `;
+  }).join('');
+  
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendInboxMessage() {
+  if (!currentInboxPid) return;
+  const input = document.getElementById('inbox-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  
+  input.value = '';
+  input.disabled = true;
+  
+  const d = await api('POST', '/send-message', { prospect_id: currentInboxPid, message: msg });
+  input.disabled = false;
+  input.focus();
+
+  if (d && d.success) {
+    openInboxChat(currentInboxPid);
+    loadProspects(); // Para actualizar la lista de la izquierda
+  } else { toast(d?.detail || 'Error al enviar', 'err'); }
+}
+
+async function updateInboxStage() {
+  if (!currentInboxPid) return;
+  const stage = document.getElementById('inbox-stage-select').value;
+  await api('PATCH', `/prospects/${currentInboxPid}/stage`, { stage });
+  const p = prospects.find(x => x.id === currentInboxPid);
+  if (p) p.stage = stage;
+  toast('Etapa actualizada');
+  renderInbox();
+  loadStats();
+}
+
+function sendSingleTemplateFromInbox() {
+  if (!currentInboxPid) return;
+  selectedIds.clear();
+  selectedIds.add(currentInboxPid);
+  openTemplateModal();
+}
+
+async function handleCSVUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  toast('Subiendo CSV...', 'info');
+
+  try {
+    const res = await fetch('/api/crm/upload-csv', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + ADMIN_KEY },
+      body: formData
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      toast(`¡Importado! ${data.inserted} agregados, ${data.errors} errores.`, 'ok');
+      loadProspects();
+      setView('tabla', document.getElementById('btn-tabla')); // Llevamos a la tabla para ver los nuevos
+    } else {
+      toast(data.detail || 'Error al importar CSV', 'err');
+    }
+  } catch (e) { toast('Error de conexión al subir CSV', 'err'); }
+  
+  event.target.value = '';
+}
+
 </script>
 </body>
 </html>

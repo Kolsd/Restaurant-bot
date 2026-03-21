@@ -1,13 +1,11 @@
-"""
-Mesio — CRM de Prospectos
-Rutas: /api/crm/*
-"""
 import os
 import json
 import httpx
+import csv
+import io
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, File, UploadFile
 from pydantic import BaseModel
 from app.services.auth import verify_token
 from app.services import database as db
@@ -525,7 +523,46 @@ async def delete_template(request: Request, tid: int):
         await conn.execute("DELETE FROM crm_templates WHERE id=$1", tid)
     return {"success": True}
 
+# ── IMPORTACIÓN CSV ───────────────────────────────────────────────────
+@router.post("/upload-csv")
+async def upload_csv(request: Request, file: UploadFile = File(...)):
+    await _require_auth(request)
+    
+    content = await file.read()
+    try:
+        text = content.decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(text))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error leyendo el CSV: {str(e)}")
 
+    pool = await db.get_pool()
+    inserted = 0
+    errors = 0
+
+    async with pool.acquire() as conn:
+        for row in reader:
+            name = row.get('Restaurante', row.get('restaurante', row.get('name', ''))).strip()
+            phone = row.get('Telefono', row.get('telefono', row.get('phone', ''))).strip()
+            owner = row.get('Dueño', row.get('owner', '')).strip()
+            city = row.get('Ciudad', row.get('city', '')).strip()
+
+            if not name or not phone:
+                errors += 1
+                continue
+
+            phone = phone.replace(" ", "").replace("+", "").replace("-", "")
+
+            try:
+                await conn.execute("""
+                    INSERT INTO prospects (restaurant_name, owner_name, phone, city, source)
+                    VALUES ($1, $2, $3, $4, 'csv_import')
+                """, name, owner, phone, city)
+                inserted += 1
+            except Exception as e:
+                errors += 1
+
+    return {"success": True, "inserted": inserted, "errors": errors}
+    
 # ── STATS / KANBAN COUNTS ─────────────────────────────────────────────
 @router.get("/stats")
 async def crm_stats(request: Request):
