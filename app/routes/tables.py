@@ -174,7 +174,6 @@ async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
         print(f"⚠️ No se envió WA a {phone} -> Faltan variables (Token: {bool(token)}, PhoneID: {final_phone_id})")
 
 @router.post("/api/table-orders/{order_id}/status")
-@router.post("/api/table-orders/{order_id}/status")
 
 async def update_order_status(request: Request, order_id: str):
     await require_auth(request)
@@ -259,6 +258,7 @@ async def update_order_status(request: Request, order_id: str):
             await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}
-    
+
+@router.get("/cocina", response_class=HTMLResponse)
 async def kitchen_display():
-    return (STATIC / "kitchen.html").read_text()
+    return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
