@@ -149,13 +149,14 @@ async function deleteTable(tableId) {
 // ── MI EQUIPO ─────────────────────────────────────────────────────────
 let allBranches = [];
 let currentBranchId = null;
+let selectedRoles = new Set(['waiter']); // Set para guardar los multiroles
 
 async function loadBranches() {
   const h = window._dashHeaders;
   const rest = window._dashRestaurant;
   const role = (rest && rest.role) || 'owner';
   const btnCreate = document.getElementById('btn-create-branch');
-  if (btnCreate) btnCreate.style.display = role === 'owner' ? '' : 'none';
+  if (btnCreate) btnCreate.style.display = role.includes('owner') ? '' : 'none';
   try {
     const r = await fetch('/api/team/branches', { headers: h });
     if (r.status === 401) { logout(); return; }
@@ -177,11 +178,6 @@ function renderBranches(branches) {
   if (!container) return;
   if (!branches.length) { container.innerHTML = '<div class="empty-state">No hay sucursales.</div>'; return; }
   
-  // FIX: Agregado el rol "cashier" a las paletas de color
-  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cashier:'#BA7517', cook:'#854F0B', waiter:'#534AB7' };
-  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cashier:'#FFF8E6', cook:'#FAEEDA', waiter:'#EEEDFE' };
-  const roleLabels = { owner:'Dueño', admin:'Administrador', cashier:'Cajero', cook:'Cocinero', waiter:'Mesero' };
-  
   container.innerHTML = branches.map(b => `
     <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;margin-bottom:12px;overflow:hidden;">
       <div data-branch-id="${b.id}" style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
@@ -198,7 +194,7 @@ function renderBranches(branches) {
 
   const rest = window._dashRestaurant;
   const role = (rest && rest.role) || 'owner';
-  if (role === 'owner') {
+  if (role.includes('owner')) {
     branches.forEach(b => {
       const header = document.querySelector('[data-branch-id="' + b.id + '"]');
       if (header) {
@@ -212,13 +208,23 @@ function renderBranches(branches) {
   }
 }
 
-async function loadBranchUsers(branchId) {
-  const h = window._dashHeaders;
-  // FIX: Se incluye al "Cajero" aquí también
+// Función de renderizado para multi-rol
+function formatRoles(roleStr) {
+  if (!roleStr) return '';
   const roleColors = { owner:'#1D9E75', admin:'#185FA5', cashier:'#BA7517', cook:'#854F0B', waiter:'#534AB7' };
   const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cashier:'#FFF8E6', cook:'#FAEEDA', waiter:'#EEEDFE' };
-  const roleLabels = { owner:'Dueño', admin:'Administrador', cashier:'Cajero', cook:'Cocinero', waiter:'Mesero' };
+  const roleLabels = { owner:'Dueño', admin:'Admin', cashier:'Cajero', cook:'Cocinero', waiter:'Mesero' };
   
+  return roleStr.split(',').map(r => {
+      const c = roleColors[r] || '#555';
+      const b = roleBg[r] || '#f0f0e8';
+      const l = roleLabels[r] || r;
+      return `<span style="background:${b}; color:${c}; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:600; margin-right:4px; display:inline-block; margin-top:4px;">${l}</span>`;
+  }).join('');
+}
+
+async function loadBranchUsers(branchId) {
+  const h = window._dashHeaders;
   try {
     const r = await fetch('/api/team/users?branch_id=' + branchId, { headers: h });
     if (!r.ok) return;
@@ -226,12 +232,19 @@ async function loadBranchUsers(branchId) {
     const el = document.getElementById('users-branch-' + branchId);
     if (!el) return;
     if (!users.length) { el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0;">Sin usuarios asignados</div>'; return; }
-    el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
-      users.map(u => `<div style="display:flex;align-items:center;gap:8px;background:#f8f8f5;border-radius:8px;padding:6px 12px;">
-        <div style="width:28px;height:28px;border-radius:50%;background:${roleBg[u.role]||'#f0f0e8'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:${roleColors[u.role]||'#555'};">${(u.username||'?')[0].toUpperCase()}</div>
-        <div><div style="font-size:12px;font-weight:500;">${u.username}</div><div style="font-size:10px;color:${roleColors[u.role]||'#888'};">${roleLabels[u.role]||u.role}</div></div>
-        <button onclick="deleteUser('${u.username}')" style="background:none;border:none;color:#C0392B;font-size:16px;cursor:pointer;padding:0 4px;">×</button>
-      </div>`).join('') + '</div>';
+    
+    el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:12px;">' +
+      users.map(u => `
+        <div style="display:flex;align-items:center;gap:12px;background:#f8f8f5;border-radius:8px;padding:8px 12px; width:100%; max-width:320px; justify-content:space-between; border: 1px solid #f0f0e8;">
+          <div style="display:flex; align-items:center; gap:10px;">
+              <div style="width:34px;height:34px;border-radius:50%;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#555;">${(u.username||'?')[0].toUpperCase()}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:#333;">${u.username}</div>
+                <div>${formatRoles(u.role)}</div>
+              </div>
+          </div>
+          <button onclick="deleteUser('${u.username}')" style="background:#FDE8E8; border:none; color:#C0392B; border-radius:6px; font-size:16px; cursor:pointer; width:28px; height:28px; display:flex; align-items:center; justify-content:center;">×</button>
+        </div>`).join('') + '</div>';
   } catch(e) {}
 }
 
@@ -308,11 +321,19 @@ async function createBranch() {
   } catch(e) {}
 }
 
-// FIX: Función para el nuevo selector de tarjetas
-function selectRole(role, el) {
-  document.getElementById('invite-role').value = role;
-  document.querySelectorAll('#modal-invite .role-card').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
+// ── LÓGICA MULTIROL ──
+function toggleRole(role, el) {
+  if (selectedRoles.has(role)) {
+    // Evita que el usuario desmarque todo (siempre debe tener al menos un rol)
+    if (selectedRoles.size === 1) return; 
+    selectedRoles.delete(role);
+    el.classList.remove('active');
+  } else {
+    selectedRoles.add(role);
+    el.classList.add('active');
+  }
+  // Convertimos el "Set" de roles a una lista separada por comas "waiter,cook,cashier"
+  document.getElementById('invite-role').value = Array.from(selectedRoles).join(',');
 }
 
 function openInviteModal(branchId, branchName) {
@@ -321,11 +342,14 @@ function openInviteModal(branchId, branchName) {
   document.getElementById('invite-username').value = '';
   document.getElementById('invite-password').value = '';
   
-  // FIX: Reiniciar las tarjetas visuales de rol a "Mesero" por defecto
+  // Reiniciar a "Mesero" por defecto
+  selectedRoles = new Set(['waiter']);
   document.getElementById('invite-role').value = 'waiter';
-  document.querySelectorAll('#modal-invite .role-card').forEach(c => c.classList.remove('active'));
-  const firstCard = document.querySelector('#modal-invite .role-card');
-  if (firstCard) firstCard.classList.add('active');
+  
+  document.querySelectorAll('#modal-invite .role-card').forEach(c => {
+    if (c.getAttribute('data-role') === 'waiter') c.classList.add('active');
+    else c.classList.remove('active');
+  });
 
   document.getElementById('modal-invite').style.display = 'flex';
 }
@@ -339,14 +363,15 @@ async function sendInvite() {
   const h = window._dashHeaders;
   const username = document.getElementById('invite-username').value.trim();
   const password = document.getElementById('invite-password').value.trim();
-  const role     = document.getElementById('invite-role').value;
+  const role     = document.getElementById('invite-role').value; // Ej: "waiter,cashier"
+  
   if (!username || !password) { alert('Usuario y contraseña son obligatorios'); return; }
   try {
     const r = await fetch('/api/team/invite', {
       method:'POST', headers:{ ...h,'Content-Type':'application/json' },
       body: JSON.stringify({ username, password, role, branch_id: currentBranchId })
     });
-    if (r.ok) { closeInviteModal(); loadBranches(); alert('Usuario creado exitosamente'); }
+    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Usuario multirol creado!'); }
     else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo crear')); }
   } catch(e) {}
 }

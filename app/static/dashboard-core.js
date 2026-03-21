@@ -18,10 +18,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const nameEl = document.getElementById('sidebar-name');
   if (nameEl) nameEl.textContent = restaurant.name || 'Mi Restaurante';
 
-  const role = restaurant.role || 'owner';
+  const roleStr = restaurant.role || 'owner';
   const equipoNav = document.getElementById('nav-equipo');
-  if (equipoNav) equipoNav.style.display = (role === 'owner' || role === 'admin') ? '' : 'none';
-
+  if (equipoNav) equipoNav.style.display = (roleStr.includes('owner') || roleStr.includes('admin')) ? '' : 'none';
+  
   // ── MAGIA DE MÓDULOS SAAS (Ocultar/Mostrar según compra) ──
   const feats = restaurant.features || {};
 
