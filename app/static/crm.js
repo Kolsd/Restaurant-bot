@@ -14,6 +14,7 @@ const NOTE_ICONS = { note:'📝', call:'📞', whatsapp:'💬', email:'📧', me
 let prospects = [], selectedIds = new Set(), currentPid = null;
 let currentView = 'inbox', activeFilter = '', searchQuery = '', templates = [];
 let _toastTimer = null, currentInboxPid = null;
+let globalLastUpdate = null; 
 
 document.addEventListener('DOMContentLoaded', () => {
   loadStats(); loadProspects(); loadTemplates();
@@ -239,34 +240,30 @@ async function sendInboxMessage() {
   openInboxChat(currentInboxPid); loadProspects();
 }
 
-// ── AUTO-REFRESH (POLLING) MEJORADO ──
+// ── AUTO-REFRESH (POLLING OPTIMIZADO) ──
 setInterval(async () => {
     if (currentView === 'inbox') {
        
-       // 1. Recargar la lista de prospectos en background para que el chat salte arriba si hay nuevos mensajes
-       const stage = activeFilter || '';
-       let url = `/prospects?archived=false`;
-       if (stage) url += `&stage=${stage}`;
-       if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
+       // 1. Preguntamos al servidor si ALGO ha cambiado (Ultra ligero)
+       const res = await api('GET', '/check-updates');
        
-       const dp = await api('GET', url);
-       if (dp && dp.prospects) {
-           // Solo actualiza si hubo un cambio real en el último contacto para no interrumpir el scroll
-           const latestCurrent = prospects[0]?.last_contact_at;
-           const latestNew = dp.prospects[0]?.last_contact_at;
-           
-           prospects = dp.prospects;
-           if (latestCurrent !== latestNew) {
-               renderInbox(); 
-           }
-       }
-  
-       // 2. Si estás dentro de un chat, revisar si tiene mensajes nuevos para pintarlos
-       if (currentInboxPid) {
-           const d = await api('GET', `/prospects/${currentInboxPid}/interactions`);
-           if (d && d.interactions && d.interactions.length > document.getElementById('inbox-messages').childElementCount) {
-              document.getElementById('notifSound')?.play().catch(()=>{});
-              openInboxChat(currentInboxPid); 
+       if (res && res.latest) {
+           // Si es la primera vez que chequeamos, guardamos la fecha y ya
+           if (!globalLastUpdate) {
+               globalLastUpdate = res.latest;
+           } 
+           // Si la fecha que nos dio la BD es diferente a la que teníamos... ¡Hay mensajes o cambios nuevos!
+           else if (res.latest !== globalLastUpdate) {
+               globalLastUpdate = res.latest;
+               
+               // Solo ahora le pedimos a la BD que nos mande toda la data pesada
+               await loadProspects(); 
+               
+               // Si el usuario tiene un chat abierto, lo refrescamos para que suene y aparezca el mensaje
+               if (currentInboxPid) {
+                   document.getElementById('notifSound')?.play().catch(()=>{});
+                   openInboxChat(currentInboxPid);
+               }
            }
        }
     }

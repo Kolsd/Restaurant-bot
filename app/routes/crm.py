@@ -219,6 +219,16 @@ async def create_prospect(request: Request, body: ProspectCreate):
              body.source, body.stage, body.priority, body.revenue_est, body.tags)
         return {"success": True, "prospect": _ser(dict(row))}
 
+@router.get("/check-updates")
+async def check_updates(request: Request):
+    """Devuelve únicamente la fecha del último cambio en toda la tabla."""
+    await _require_auth(request)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        latest = await conn.fetchval("SELECT MAX(updated_at) FROM prospects")
+        if latest:
+            return {"latest": latest.isoformat()[:19] + "Z"}
+        return {"latest": None}
 
 @router.patch("/prospects/{pid}")
 async def update_prospect(request: Request, pid: int, body: ProspectUpdate):
