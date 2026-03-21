@@ -432,7 +432,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
                     "type": "template",
                     "template": {
                         "name": tpl["wa_name"],
-                        "language": {"code": "es"}, # Idioma en Español (es)
+                        "language": {"code": "es_MX"}, # Idioma en Español (es)
                         "components": components
                     }
                 }
