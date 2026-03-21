@@ -333,72 +333,79 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
 .loading-overlay { display:flex; align-items:center; justify-content:center; padding:3rem; color:var(--muted); gap:10px; font-size:.85rem; }
 
 /* =========================================================
-   📱 MODO MÓVIL ESTILO ZENDESK / APP NATIVA
+  /* =========================================================
+   📱 MODO MÓVIL ESTILO APP NATIVA (Z-INDEX Y TAMAÑOS CORREGIDOS)
    ========================================================= */
-   .ham-btn { display: none; background: none; border: none; cursor: pointer; flex-direction: column; gap: 5px; padding: 5px; margin-right: 10px; }
+.ham-btn { display: none; background: none; border: none; cursor: pointer; flex-direction: column; gap: 5px; padding: 5px; margin-right: 10px; }
 .ham-btn span { display: block; width: 22px; height: 2px; background: var(--white); border-radius: 2px; }
-.mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 390; backdrop-filter: blur(2px); }
+
+/* Overlay para el menú lateral - ¡Z-INDEX SUPER ALTO! */
+.mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 9000; backdrop-filter: blur(2px); }
 .mobile-overlay.open { display: block; }
 
 @media (max-width: 800px) {
-  /* Estructura Base */
   .app { flex-direction: column; }
   .ham-btn { display: flex; }
   
-  /* Topbar Responsivo */
-  .topbar { height: auto; padding: 12px 1rem; flex-wrap: wrap; gap: 12px; }
-  .page-title { flex: 1; font-size: 1.2rem; }
-  .topbar-search { max-width: 100%; order: 3; width: 100%; }
+  .topbar { height: auto; padding: 10px 1rem; flex-wrap: wrap; gap: 10px; }
+  .page-title { flex: 1; font-size: 1.1rem; }
+  .topbar-search { order: 3; width: 100%; max-width: 100%; }
   .topbar-actions { order: 4; width: 100%; justify-content: space-between; }
   .view-tabs { width: 100%; display: flex; }
   .vt { flex: 1; text-align: center; }
 
-  /* Sidebar Drawer (Menú Lateral Deslizable) */
+  /* 🚀 SIDEBAR: Siempre por encima del chat (z-index: 9999) */
   .sidebar {
     position: fixed; top: 0; left: -280px; width: 260px; height: 100vh;
-    z-index: 400; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    z-index: 9999; transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.8);
   }
   .sidebar.open { left: 0; }
 
-  /* Tarjetas de Estadísticas (Scroll Horizontal Suave) */
   .stats-row { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 10px; margin-bottom: 1rem; }
   .stat-card { min-width: 140px; scroll-snap-align: start; flex-shrink: 0; padding: 1rem; }
-
-  /* Kanban Board (Scroll Horizontal tipo Trello) */
   .kanban { overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 1rem; gap: 16px; flex-wrap: nowrap; }
   .k-col { min-width: 85vw; scroll-snap-align: center; flex-shrink: 0; }
-
-  /* Tabla (Scroll Horizontal) */
   .tbl-wrap { overflow-x: auto; }
   .tbl-toolbar { flex-direction: column; align-items: stretch; }
-  
-  /* Detail Panel (Pantalla Completa Deslizable) */
-  .detail-panel { 
-    position: fixed; top: 0; right: -100%; width: 100% !important; height: 100vh; 
-    z-index: 500; transition: right 0.3s ease; border-left: none; 
-  }
-  .detail-panel.open { right: 0; }
 
-  /* Inbox / Chat WhatsApp (Vista App Nativa) */
-  #view-inbox { flex-direction: column; height: calc(100vh - 140px) !important; gap: 0; }
-  #view-inbox > div:first-child { width: 100% !important; border-radius: 12px; border: 1px solid var(--border); flex: 1; display: flex; }
-  #view-inbox > div:last-child { display: none !important; position: fixed; inset: 0; z-index: 600; background: var(--bg); border-radius: 0; }
+  /* 💬 INBOX / CHAT A PANTALLA COMPLETA */
+  #view-inbox { flex-direction: column; height: calc(100vh - 120px) !important; gap: 0; border: none; }
+  #view-inbox > div:first-child { width: 100% !important; border-radius: 0; border: none; flex: 1; display: flex; }
   
-  /* Transición del Chat Abierto */
+  /* 🚀 Contenedor del Chat (Z-index menor que el sidebar: 8000) */
+  #view-inbox > div:last-child { display: none !important; position: fixed; inset: 0; z-index: 8000; background: var(--bg); border-radius: 0; }
+  
   #view-inbox.chat-abierto > div:first-child { display: none !important; }
   #view-inbox.chat-abierto > div:last-child { display: flex !important; flex-direction: column; }
   
-  .btn-volver-movil { display: block !important; margin-right: 10px; }
-  #inbox-header { padding: 15px 10px !important; border-radius: 0 !important; background: var(--bg2) !important; }
-  #inbox-messages { flex: 1; padding: 1rem; background: #0C0C0C; }
-  #inbox-input-area { padding: 10px; background: var(--bg2); border-radius: 0; padding-bottom: 20px; }
+  /* Header más compacto */
+  .btn-volver-movil { display: block !important; margin-right: 5px; font-size: 1.3rem !important; }
+  #inbox-header { padding: 10px !important; border-radius: 0 !important; background: var(--bg2) !important; flex-wrap: nowrap !important; gap: 5px !important; }
   
-  /* Modales a Pantalla Completa */
-  .modal { max-width: 100%; height: 100vh; border-radius: 0; }
-  .modal-body { padding: 1rem; }
-  .form-group.half { display: flex; flex-direction: column; gap: 10px; }
-  .bulk-bar { width: 90vw; padding: 0.5rem 1rem; bottom: 20px; flex-wrap: wrap; justify-content: center; border-radius: 12px; }
+  /* Evitar que el nombre empuje los botones */
+  #inbox-rest-name { font-size: 0.95rem !important; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #inbox-rest-phone { font-size: 0.7rem !important; }
+  
+  /* Achicar los botones del header */
+  #inbox-actions { gap: 5px !important; }
+  #inbox-stage-select { padding: 4px !important; font-size: 0.7rem !important; width: auto !important; max-width: 90px; }
+  #btn-tpl-text { display: none; } /* Ocultar la palabra "Template" en móvil, dejar solo el ícono */
+  #inbox-actions button { padding: 4px 8px !important; font-size: 0.9rem !important; }
+
+  /* Burbujas tipo WhatsApp (Achicar padding e interlineado) */
+  #inbox-messages { flex: 1; padding: 10px !important; background: #0C0C0C; }
+  #inbox-messages > div > div:first-child { 
+    padding: 8px 10px !important; 
+    font-size: 0.8rem !important; 
+    max-width: 92% !important; 
+    line-height: 1.35 !important;
+  }
+  
+  /* Input Area (Caja de texto pegada abajo) */
+  #inbox-input-area { padding: 8px !important; background: var(--bg2) !important; border-top: 1px solid var(--border) !important; padding-bottom: max(8px, env(safe-area-inset-bottom)) !important; }
+  #inbox-input { min-height: 40px !important; max-height: 80px !important; padding: 8px 12px !important; font-size: 0.85rem !important; border-radius: 20px !important; }
+  #inbox-input-area button { height: 40px !important; padding: 0 16px !important; font-size: 0.85rem !important; border-radius: 20px !important; }
 }
 
 </style>
@@ -498,17 +505,17 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
 
       <div style="flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; position: relative;">
         
-        <div id="inbox-header" style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--bg2); display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <button class="btn-volver-movil" onclick="cerrarChatMovil()" style="display: none; background: none; border: none; color: var(--g); font-size: 1.5rem; cursor: pointer; padding: 0 5px;">
+        <div id="inbox-header" style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--bg2); display: flex; justify-content: space-between; align-items: center; gap: 5px;">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
+            <button class="btn-volver-movil" onclick="cerrarChatMovil()" style="display: none; background: none; border: none; color: var(--g); font-size: 1.5rem; cursor: pointer; padding: 0; flex-shrink: 0;">
               ←
             </button>
-            <div>
-              <div id="inbox-rest-name" style="font-size: 1.1rem; font-weight: 700; color: var(--white);">Selecciona una conversación</div>
+            <div style="min-width: 0; flex: 1;">
+              <div id="inbox-rest-name" style="font-size: 1.1rem; font-weight: 700; color: var(--white); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Selecciona una conversación</div>
               <div id="inbox-rest-phone" style="font-size: 0.8rem; color: var(--muted); margin-top: 2px; font-family: monospace;">---</div>
             </div>
           </div>
-          <div id="inbox-actions" style="display: none; gap: 8px; align-items: center;">
+          <div id="inbox-actions" style="display: none; gap: 8px; align-items: center; flex-shrink: 0;">
             <select id="inbox-stage-select" class="form-select" style="padding: 6px 10px; font-size: 0.8rem; background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 6px;" onchange="updateInboxStage()">
                <option value="prospecto">🔘 Prospecto</option>
                <option value="contactado">🔵 Contactado</option>
@@ -518,7 +525,7 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
                <option value="cerrado">🟢 Cerrado</option>
                <option value="perdido">🔴 Perdido</option>
             </select>
-            <button class="btn btn-outline btn-sm" onclick="sendSingleTemplateFromInbox()">📤 Template</button>
+            <button class="btn btn-outline btn-sm" onclick="sendSingleTemplateFromInbox()">📤<span id="btn-tpl-text"> Template</span></button>
           </div>
         </div>
         <div id="inbox-messages" style="flex: 1; overflow-y: auto; padding: 1.5rem; background: var(--bg); display: flex; flex-direction: column; gap: 12px;">
