@@ -332,89 +332,47 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
 @keyframes spin { to { transform:rotate(360deg); } }
 .loading-overlay { display:flex; align-items:center; justify-content:center; padding:3rem; color:var(--muted); gap:10px; font-size:.85rem; }
 
+/* 🔥 INBOX MÓVIL ESTILO WHATSAPP NATIVO 🔥 */
+  
+  /* Hacemos visible el botón de volver solo en celulares */
+  .btn-volver-movil { display: flex !important; }
 
-/* =========================================================
-   📱 MODO MÓVIL (Responsivo)
-   ========================================================= */
-@media (max-width: 768px) {
-  /* Hacemos que el layout principal fluya en columna */
-  .app { flex-direction: column !important; }
-  
-  /* Sidebar horizontal y scrolleable */
-  .sidebar {
-    width: 100% !important;
-    height: auto !important;
-    flex-direction: row !important;
-    overflow-x: auto !important;
-    padding: 10px !important;
-    border-right: none !important;
-    border-bottom: 1px solid var(--border);
-    align-items: center;
-    -webkit-overflow-scrolling: touch;
-  }
-  .sidebar .logo { margin: 0 15px 0 0 !important; padding: 0 !important; border: none !important; font-size: 1.1rem; }
-  .sidebar .logo-sub { display: none; }
-  .nav-section { display: none; }
-  .sidebar-bottom { display: none; }
-  .nav-btn { width: auto !important; white-space: nowrap !important; margin: 0 5px 0 0 !important; padding: 6px 10px !important; }
-  
-  /* Topbar apilado */
-  .topbar { height: auto !important; flex-wrap: wrap !important; padding: 10px !important; gap: 10px !important; }
-  .page-title { width: 100%; font-size: 1.2rem; }
-  .topbar-search { max-width: 100% !important; width: 100%; order: 3; }
-  .topbar-actions { margin-left: 0 !important; width: 100%; justify-content: space-between; order: 2; }
-  
-  /* Stats (2 columnas) */
-  .stats-row { grid-template-columns: 1fr 1fr !important; }
-  
-/* Inbox adaptado (Fusionado, sin raya en medio) */
-#view-inbox { 
-    flex-direction: column !important; 
-    height: calc(100vh - 145px) !important; 
-    gap: 0 !important; /* 👈 Eliminamos el espacio que rompía la pantalla */
-    border: 1px solid var(--border) !important;
-    border-radius: 12px !important;
-    overflow: hidden !important;
+  #view-inbox { 
+    height: calc(100vh - 130px) !important; 
+    gap: 0 !important; 
+    background: transparent !important;
   }
   
-  /* Bloque Superior: Lista de chats */
+  /* ESTADO 1: Lista de Chats (Pantalla completa) */
   #view-inbox > div:first-child { 
     width: 100% !important; 
-    flex: 0 0 170px !important; /* Le damos 170px fijos, ideal para deslizar 2-3 chats a la vez */
-    height: auto !important;
-    margin: 0 !important;
-    border: none !important; /* Quitamos los bordes cuadrados feos */
-    border-bottom: 1px solid var(--border) !important; /* Solo dejamos una línea sutil separadora */
-    border-radius: 0 !important;
+    height: 100% !important; 
+    flex: 1 !important; 
+    border-radius: 12px !important;
   }
   
-  /* Bloque Inferior: Conversación activa */
+  /* Ocultamos el chat mientras vemos la lista */
   #view-inbox > div:last-child { 
-    width: 100% !important; 
-    flex: 1 !important; /* Se roba todo el espacio restante */
-    border: none !important; /* Quitamos los bordes */
-    border-radius: 0 !important;
-  }  
-  /* Kanban apilado hacia abajo */
-  .kanban { flex-direction: column !important; height: auto !important; }
-  .k-col { flex: none !important; width: 100% !important; margin-bottom: 15px; }
-  .k-body { max-height: none !important; min-height: 100px !important; }
-  
-  /* Tablas responsivas */
-  .tbl-wrap { overflow-x: auto; }
-  
-  /* Panel de detalle/Chat toma TODA la pantalla en móvil */
-  .detail-panel.open {
-    position: fixed !important;
-    top: 0 !important; left: 0 !important;
-    width: 100% !important; height: 100% !important;
-    z-index: 9999 !important;
+    display: none !important; 
+  }
+
+  /* ESTADO 2: Chat Activo (Pantalla completa) */
+  #view-inbox.chat-abierto > div:first-child { 
+    display: none !important; /* Oculta la lista */
   }
   
-  /* Ajuste a modales para que no se salgan de pantalla */
-  .modal { max-height: 95vh !important; margin: 10px !important; }
-  .form-group.half { grid-template-columns: 1fr !important; }
-}
+  #view-inbox.chat-abierto > div:last-child { 
+    display: flex !important; /* Muestra el chat */
+    width: 100% !important; 
+    height: 100% !important; 
+    flex: 1 !important;
+    border-radius: 12px !important;
+  }
+  
+  /* Ajustes del header del chat para que quepa el botón de volver */
+  #inbox-header { padding: 12px 10px !important; }
+  #inbox-actions { flex-wrap: wrap; justify-content: flex-end; }
+
 </style>
 </head>
 <body>
@@ -510,9 +468,14 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
       <div style="flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; position: relative;">
         
         <div id="inbox-header" style="padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--bg2); display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <div id="inbox-rest-name" style="font-size: 1.1rem; font-weight: 700; color: var(--white);">Selecciona una conversación</div>
-            <div id="inbox-rest-phone" style="font-size: 0.8rem; color: var(--muted); margin-top: 2px; font-family: monospace;">---</div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button class="btn-volver-movil" onclick="cerrarChatMovil()" style="display: none; background: none; border: none; color: var(--g); font-size: 1.5rem; cursor: pointer; padding: 0 5px;">
+              ←
+            </button>
+            <div>
+              <div id="inbox-rest-name" style="font-size: 1.1rem; font-weight: 700; color: var(--white);">Selecciona una conversación</div>
+              <div id="inbox-rest-phone" style="font-size: 0.8rem; color: var(--muted); margin-top: 2px; font-family: monospace;">---</div>
+            </div>
           </div>
           <div id="inbox-actions" style="display: none; gap: 8px; align-items: center;">
             <select id="inbox-stage-select" class="form-select" style="padding: 6px 10px; font-size: 0.8rem; background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 6px;" onchange="updateInboxStage()">
@@ -524,10 +487,9 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
                <option value="cerrado">🟢 Cerrado</option>
                <option value="perdido">🔴 Perdido</option>
             </select>
-            <button class="btn btn-outline btn-sm" onclick="sendSingleTemplateFromInbox()">📤 Enviar Template</button>
+            <button class="btn btn-outline btn-sm" onclick="sendSingleTemplateFromInbox()">📤 Template</button>
           </div>
         </div>
-
         <div id="inbox-messages" style="flex: 1; overflow-y: auto; padding: 1.5rem; background: var(--bg); display: flex; flex-direction: column; gap: 12px;">
           <div class="empty-state" style="margin: auto; color:var(--muted);">Selecciona un prospecto en la lista de la izquierda para comenzar a chatear.</div>
         </div>
@@ -1569,6 +1531,15 @@ async function openInboxChat(pid) {
   }).join('');
   
   container.scrollTop = container.scrollHeight;
+  // Forzar que el móvil pase a la vista de chat
+  document.getElementById('view-inbox').classList.add('chat-abierto');
+}
+
+// Función para volver a la lista en móviles
+function cerrarChatMovil() {
+  document.getElementById('view-inbox').classList.remove('chat-abierto');
+  currentInboxPid = null;
+  renderInbox(); // Recarga la lista
 }
 
 async function sendInboxMessage() {
