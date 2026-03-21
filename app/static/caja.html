@@ -1,11 +1,120 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Mesio — Módulo de Caja</title>
 <link rel="icon" type="image/png" href="/static/logo.png">
 <style>
+
+  /* =========================================================
+   📱 MODO MÓVIL (Se activa en pantallas de celular)
+   ========================================================= */
+@media (max-width: 768px) {
+  /* 1. Ajuste general para evitar scroll roto */
+  body {
+    flex-direction: column !important;
+    height: 100vh;
+    height: 100dvh; /* Soporte moderno para Safari móvil */
+    overflow: hidden;
+  }
+  
+  /* 2. El menú lateral se convierte en barra superior scrolleable */
+  .sidebar {
+    width: 100% !important;
+    height: auto !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    padding: 10px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar h2 { 
+    display: none; /* Ocultamos el título grande para dar espacio a los botones */
+  }
+  .sidebar a {
+    padding: 8px 14px !important;
+    margin-bottom: 0 !important;
+    margin-right: 8px !important;
+    white-space: nowrap !important;
+  }
+
+  /* 3. El contenido principal */
+  .main-content {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    padding: 10px !important;
+  }
+
+  /* 4. Adaptar columnas Kanban (se apilan verticalmente) */
+  .kanban-board {
+    flex-direction: column !important;
+    overflow-y: auto !important;
+  }
+  .kanban-col {
+    width: 100% !important;
+    min-width: 100% !important;
+    margin-bottom: 20px !important;
+  }
+
+  /* 5. Tablas con scroll horizontal suave */
+  .table-wrapper {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 🔥 6. EL CHAT / INBOX (Pantalla Completa estilo WhatsApp) 🔥 */
+  /* Busca el contenedor del Inbox y lo hace flotar sobre todo */
+  #inbox-modal, .modal-content, [style*="display: flex"][style*="max-width: 800px"] {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important; /* Salva el espacio del teclado en iOS */
+    margin: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* Fondo del chat para que resalten los mensajes */
+  #inbox-messages {
+    flex: 1 !important;
+    height: auto !important;
+    max-height: none !important;
+    background-color: #efeae2 !important; /* Fondo clásico de WA */
+    padding: 15px !important;
+  }
+
+  /* Área para escribir pegada abajo */
+  #inbox-input-area {
+    position: sticky !important;
+    bottom: 0 !important;
+    background: var(--card) !important;
+    padding: 12px !important;
+    border-top: 1px solid var(--border) !important;
+    margin-top: auto;
+    z-index: 10000;
+  }
+
+  #inbox-input-area textarea {
+    min-height: 45px !important;
+    border-radius: 20px !important;
+    font-size: 16px !important; /* Previene el zoom automático en iPhone */
+  }
+
+  /* Botones más grandes y amigables con los dedos */
+  button {
+    min-height: 44px !important;
+  }
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F4F4F5; color: #18181B; min-height: 100vh; }
 
