@@ -652,8 +652,10 @@ async def register_inbound_from_prospect(phone: str, message: str, wa_message_id
         pool = await db.get_pool()
         clean = phone.lstrip("+").replace(" ", "")
         async with pool.acquire() as conn:
+            # 1. Quitamos la restricción "archived=FALSE" para que encuentre el prospecto 
+            # incluso si lo habías archivado o marcado como perdido hace meses.
             row = await conn.fetchrow(
-                "SELECT id, stage FROM prospects WHERE phone ILIKE $1 AND archived=FALSE LIMIT 1",
+                "SELECT id, stage FROM prospects WHERE phone ILIKE $1 ORDER BY id DESC LIMIT 1",
                 f"%{clean[-9:]}"   # match by last 9 digits for country code tolerance
             )
             
@@ -676,15 +678,18 @@ async def register_inbound_from_prospect(phone: str, message: str, wa_message_id
                 VALUES ($1,'inbound','whatsapp',$2,'received',$3)
             """, pid, message, wa_message_id)
 
-            # Actualizamos la etapa a 'respondio' si es un prospecto frío
-            new_stage = "respondio" if stage in ("prospecto", "contactado") else stage
+            # 2. 🔥 FIX: Actualizamos la etapa a 'respondio' si es un prospecto frío, 
+            # o si estaba en PERDIDO / CERRADO (el cliente se arrepintió o volvió)
+            new_stage = "respondio" if stage in ("prospecto", "contactado", "perdido", "cerrado") else stage
+            
+            # 3. Forzamos archived=FALSE por si el prospecto estaba en la papelera
             await conn.execute("""
                 UPDATE prospects
-                SET last_contact_at=NOW(), updated_at=NOW(), stage=$2
+                SET last_contact_at=NOW(), updated_at=NOW(), stage=$2, archived=FALSE
                 WHERE id=$1
             """, pid, new_stage)
             
-            print(f"✅ CRM: Mensaje guardado en el prospecto ID {pid}", flush=True)
+            print(f"✅ CRM: Mensaje guardado en el prospecto ID {pid}, etapa movida a {new_stage}", flush=True)
 
     except Exception as e:
         print(f"⚠️ CRM inbound hook error: {e}", flush=True)
