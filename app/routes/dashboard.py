@@ -235,7 +235,11 @@ async def delete_branch(branch_id: int, request: Request):
     user = await get_current_user(request)
     if "owner" not in user.get("role", "owner"): raise HTTPException(status_code=403, detail="Solo el dueño puede eliminar sucursales")
     pool = await db.get_pool()
-    async with pool.acquire() as conn: await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
+    async with pool.acquire() as conn: 
+        # FIX: Eliminamos primero a todos los usuarios que pertenecen a esta sucursal
+        await conn.execute("DELETE FROM users WHERE branch_id=$1", branch_id)
+        # Luego eliminamos la sucursal
+        await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
     return {"success": True}
 
 @router.post("/api/admin/parse-menu")
