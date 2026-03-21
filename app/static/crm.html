@@ -367,10 +367,23 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   /* Stats (2 columnas) */
   .stats-row { grid-template-columns: 1fr 1fr !important; }
   
-  /* Inbox adaptado */
-  #view-inbox { flex-direction: column !important; height: auto !important; }
-  #view-inbox > div:first-child { width: 100% !important; height: 250px !important; flex: none !important; margin-bottom: 10px; }
-  #view-inbox > div:last-child { width: 100% !important; height: 60vh !important; flex: none !important; }
+/* Inbox adaptado */
+#view-inbox { 
+    flex-direction: column !important; 
+    height: calc(100vh - 140px) !important; /* Altura perfecta ajustada a la pantalla */
+    gap: 10px !important; 
+  }
+  #view-inbox > div:first-child { 
+    width: 100% !important; 
+    flex: 0 0 35% !important; /* La lista de clientes toma el 35% superior */
+    height: auto !important;
+    margin-bottom: 0 !important;
+  }
+  #view-inbox > div:last-child { 
+    width: 100% !important; 
+    flex: 1 !important; /* El chat toma todo el resto del espacio abajo */
+    height: auto !important;
+  }
   
   /* Kanban apilado hacia abajo */
   .kanban { flex-direction: column !important; height: auto !important; }
