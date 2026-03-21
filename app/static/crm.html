@@ -367,24 +367,34 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   /* Stats (2 columnas) */
   .stats-row { grid-template-columns: 1fr 1fr !important; }
   
-/* Inbox adaptado */
+/* Inbox adaptado (Fusionado, sin raya en medio) */
 #view-inbox { 
     flex-direction: column !important; 
-    height: calc(100vh - 140px) !important; /* Altura perfecta ajustada a la pantalla */
-    gap: 10px !important; 
-  }
-  #view-inbox > div:first-child { 
-    width: 100% !important; 
-    flex: 0 0 35% !important; /* La lista de clientes toma el 35% superior */
-    height: auto !important;
-    margin-bottom: 0 !important;
-  }
-  #view-inbox > div:last-child { 
-    width: 100% !important; 
-    flex: 1 !important; /* El chat toma todo el resto del espacio abajo */
-    height: auto !important;
+    height: calc(100vh - 145px) !important; 
+    gap: 0 !important; /* 👈 Eliminamos el espacio que rompía la pantalla */
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
   }
   
+  /* Bloque Superior: Lista de chats */
+  #view-inbox > div:first-child { 
+    width: 100% !important; 
+    flex: 0 0 170px !important; /* Le damos 170px fijos, ideal para deslizar 2-3 chats a la vez */
+    height: auto !important;
+    margin: 0 !important;
+    border: none !important; /* Quitamos los bordes cuadrados feos */
+    border-bottom: 1px solid var(--border) !important; /* Solo dejamos una línea sutil separadora */
+    border-radius: 0 !important;
+  }
+  
+  /* Bloque Inferior: Conversación activa */
+  #view-inbox > div:last-child { 
+    width: 100% !important; 
+    flex: 1 !important; /* Se roba todo el espacio restante */
+    border: none !important; /* Quitamos los bordes */
+    border-radius: 0 !important;
+  }  
   /* Kanban apilado hacia abajo */
   .kanban { flex-direction: column !important; height: auto !important; }
   .k-col { flex: none !important; width: 100% !important; margin-bottom: 15px; }
