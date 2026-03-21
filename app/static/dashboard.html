@@ -8,10 +8,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="stylesheet" href="/static/dashboard.css">
 <style>
-  /* Estilos para las tarjetas de selección de rol */
-  .role-card { border: 1.5px solid #e0e0d8; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fff; user-select: none; }
+  /* Estilos para las tarjetas de selección de rol multirol */
+  .role-card { border: 1.5px solid #e0e0d8; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fff; user-select: none; position: relative; overflow: hidden; }
   .role-card:hover { border-color: #1D9E75; background: #f9fdfb; }
   .role-card.active { border-color: #1D9E75; background: #E1F5EE; box-shadow: 0 4px 12px rgba(29,158,117,0.15); }
+  .role-card.active::after { content: '✓'; position: absolute; top: 6px; right: 8px; font-size: 14px; color: #0F6E56; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -196,7 +197,7 @@
 
   <div id="equipo" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
-      <div><div style="font-size:18px;font-weight:600;">Mi Equipo</div><div style="font-size:12px;color:#888;margin-top:2px;">Gestiona sucursales y usuarios por rol</div></div>
+      <div><div style="font-size:18px;font-weight:600;">Mi Equipo</div><div style="font-size:12px;color:#888;margin-top:2px;">Gestiona sucursales y usuarios (Soporte Multirol)</div></div>
       <button onclick="showCreateBranch()" id="btn-create-branch" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nueva sucursal</button>
     </div>
     <div id="create-branch-form" style="display:none;background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;margin-bottom:1.25rem;">
@@ -245,34 +246,34 @@
           <input id="invite-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           
-          <div style="font-size:13px; color:#555; margin-top:4px; font-weight:600;">Selecciona el rol:</div>
+          <div style="font-size:13px; color:#555; margin-top:4px; font-weight:600;">Selecciona roles (puedes marcar varios):</div>
           <input type="hidden" id="invite-role" value="waiter">
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom: 4px;">
-            <div class="role-card active" onclick="selectRole('waiter', this)">
+            <div class="role-card active" data-role="waiter" onclick="toggleRole('waiter', this)">
               <div style="font-size:24px;margin-bottom:4px;">🍽️</div>
               <div style="font-weight:600;font-size:13px;color:#111;">Mesero</div>
               <div style="font-size:11px;color:#888;margin-top:2px;">Pedidos y mesas</div>
             </div>
-            <div class="role-card" onclick="selectRole('cashier', this)">
+            <div class="role-card" data-role="cashier" onclick="toggleRole('cashier', this)">
               <div style="font-size:24px;margin-bottom:4px;">💰</div>
               <div style="font-weight:600;font-size:13px;color:#111;">Cajero</div>
               <div style="font-size:11px;color:#888;margin-top:2px;">Facturas y pagos</div>
             </div>
-            <div class="role-card" onclick="selectRole('cook', this)">
+            <div class="role-card" data-role="cook" onclick="toggleRole('cook', this)">
               <div style="font-size:24px;margin-bottom:4px;">👨‍🍳</div>
               <div style="font-weight:600;font-size:13px;color:#111;">Cocinero</div>
               <div style="font-size:11px;color:#888;margin-top:2px;">Panel de cocina</div>
             </div>
-            <div class="role-card" onclick="selectRole('admin', this)">
+            <div class="role-card" data-role="admin" onclick="toggleRole('admin', this)">
               <div style="font-size:24px;margin-bottom:4px;">🛡️</div>
               <div style="font-weight:600;font-size:13px;color:#111;">Admin</div>
-              <div style="font-size:11px;color:#888;margin-top:2px;">Control total</div>
+              <div style="font-size:11px;color:#888;margin-top:2px;">Control de sucursal</div>
             </div>
           </div>
 
         </div>
         <div style="display:flex;gap:8px;margin-top:1.25rem;">
-          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear usuario</button>
+          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear usuario multirol</button>
           <button onclick="closeInviteModal()" style="padding:10px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
         </div>
       </div>
