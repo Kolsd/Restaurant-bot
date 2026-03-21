@@ -189,7 +189,7 @@ function renderBranches(branches) {
           <div style="font-size:15px;font-weight:600;">${b.name}</div>
           <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${b.whatsapp_number||'N/A'}</span>${b.address||''}</div>
         </div>
-        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')}" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Agregar usuario</button>
+        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Agregar usuario</button>
       </div>
       <div id="users-branch-${b.id}" style="padding:.75rem 1.25rem;"><div style="font-size:11px;color:#aaa;">Cargando...</div></div>
     </div>`).join('');
@@ -740,23 +740,25 @@ async function loadTableOrdersSection() {
     const visible = all.filter(o => {
       const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
       const day = (o.created_at || '').substring(0, 10);
-      if (o.status === 'entregado' || o.status === 'factura_generada') return day === today;
+      if (o.status === 'entregado') return day === today;
       return !closed;
     });
 
-    const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado' && o.status !== 'factura_generada');
-    const delivered = visible.filter(o => o.status === 'entregado' || o.status === 'factura_generada');
+    const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
+    const delivered = visible.filter(o => o.status === 'entregado');
     
     const billsMap = {};
     delivered.forEach(o => {
         const baseId = o.id.replace(/-\d+$/, '');
         if (!billsMap[baseId]) {
             billsMap[baseId] = {
-                id: baseId, table_name: o.table_name, created_at: o.created_at, status: o.status, items: [], total: 0
+                id: baseId,
+                table_name: o.table_name,
+                created_at: o.created_at,
+                items: [],
+                total: 0
             };
         }
-        if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada';
-        
         let parsedItems = [];
         try {
             const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
@@ -785,26 +787,19 @@ async function loadTableOrdersSection() {
     }
 
     if(groupedBills.length > 0){
-        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE CIERRE</div>';
+        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE FACTURA</div>';
         html += '<table><thead><tr><th>Mesa</th><th>Platos</th><th>Total</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
         groupedBills.forEach(b => {
           const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
           const hora = (b.created_at || '').substring(11, 16);
           const total_fmt = fmt(b.total);
-          const isGenerated = b.status === 'factura_generada';
-          
-          const actionBtns = isGenerated
-            ? `<span style="font-size:11px;color:#1D9E75;font-weight:600;margin-right:8px;">✅ Emitida</span>
-               <button onclick="markTableOrder('${b.id}', 'cerrar_mesa')" style="font-size:11px;padding:4px 10px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer;">👋 Cerrar</button>`
-            : `<button onclick="markTableOrder('${b.id}', 'generar_factura')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-right:4px;">🧾 Generar Factura</button>
-               <button onclick="markTableOrder('${b.id}', 'cerrar_mesa')" style="font-size:11px;padding:4px 10px;background:#555;color:#fff;border:none;border-radius:6px;cursor:pointer;">👋 Cerrar</button>`;
           
           html += `<tr>
             <td style="font-weight:600;">${b.table_name || '—'}</td>
             <td style="color:#555;font-size:12px;">${itemsJoined}</td>
             <td style="font-weight:700; color:#6B21A8;">${total_fmt}</td>
             <td style="color:#888;">${hora}</td>
-            <td style="white-space:nowrap;">${actionBtns}</td>
+            <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">🧾 Factura entregada</button></td>
           </tr>`;
         });
         html += '</tbody></table><br/>';
@@ -855,16 +850,29 @@ async function markTableDelivered(orderId) {
   } catch(e) { console.error('markTableDelivered:', e); }
 }
 
-async function markTableOrder(orderId, status) {
+async function markTableInvoiced(orderId) {
   const h = window._dashHeaders;
   try {
     const r = await fetch(`/api/table-orders/${orderId}/status`, {
       method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: status })
+      body: JSON.stringify({ status: 'factura_entregada' })
     });
     if (r.ok) loadTableOrdersSection();
-  } catch(e) { console.error('markTableOrder:', e); }
+  } catch(e) { console.error('markTableInvoiced:', e); }
 }
+
+const _origFetchOrders = window.fetchOrders;
+const _origRefreshAll = window.refreshAll;
+if (typeof _origRefreshAll === 'function') {
+  window.refreshAll = async function() {
+    await _origRefreshAll();
+    loadTableOrdersSection();
+  };
+}
+document.addEventListener('DOMContentLoaded', () => {
+  loadTableOrdersSection();
+  setInterval(loadTableOrdersSection, 15000);
+});
 
 function switchOrderTab(tab, btn) {
   const waDiv   = document.getElementById('orders-tab-wa');
