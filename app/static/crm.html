@@ -1357,10 +1357,27 @@ async function doSendTemplate() {
 
   if (!pids.length) { toast('Selecciona al menos un prospecto', 'err'); return; }
 
-  // Build global params from inputs
-  const paramValues = (tpl.params || []).map((_, i) => document.getElementById(`tpl-param-${i}`)?.value || '');
+// Build global params from inputs
+const paramValues = (tpl.params || []).map((_, i) => document.getElementById(`tpl-param-${i}`)?.value || '');
   const paramsMap   = {};
-  pids.forEach(pid => { paramsMap[pid] = paramValues; });
+  
+  pids.forEach(pid => { 
+    const prospect = prospects.find(p => p.id === pid);
+    if (prospect) {
+      // Reemplazo dinámico de variables
+      const personalizedParams = paramValues.map(val => {
+        let text = val;
+        // Reemplaza {restaurante} por el nombre del restaurante
+        text = text.replace(/{restaurante}/gi, prospect.restaurant_name);
+        // Reemplaza {dueño} por el nombre del dueño (o deja "equipo" si está vacío)
+        text = text.replace(/{dueño}/gi, prospect.owner_name || 'equipo');
+        return text;
+      });
+      paramsMap[pid] = personalizedParams;
+    } else {
+      paramsMap[pid] = paramValues;
+    }
+  });
 
   const btn = document.getElementById('btn-send-tpl');
   btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Enviando…';
