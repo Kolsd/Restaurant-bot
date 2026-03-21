@@ -382,7 +382,6 @@ async def send_manual_message(request: Request, body: SendMessagePayload):
 
     return {"success": True, "status": status, "wa_message_id": wa_msg_id}
 
-
 # ── SEND TEMPLATE (masivo) ────────────────────────────────────────────
 @router.post("/send-template")
 async def send_template(request: Request, body: SendTemplatePayload):
@@ -396,7 +395,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
     tpl      = dict(tpl)
     token    = os.getenv("META_ACCESS_TOKEN", "")
-    phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")  # CRM usa número de prospectos
+    phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")
 
     results = []
     for pid in body.prospect_ids:
@@ -410,7 +409,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
         phone    = prospect["phone"].lstrip("+").replace(" ", "")
         params   = body.params_map.get(str(pid), [])
 
-# Build template components
+        # Build template components
         components = []
         
         # Solo enviamos el cuerpo si hay parámetros
@@ -426,14 +425,14 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
         if token and phone_id:
             try:
-                # 👇 NUEVO: LOGS DETALLADOS PARA DEBUGGEAR META
+                # 👇 LOGS DETALLADOS PARA DEBUGGEAR META
                 meta_payload = {
                     "messaging_product": "whatsapp",
                     "to": phone,
                     "type": "template",
                     "template": {
                         "name": tpl["wa_name"],
-                        "language": {"code": "es_MX"}, # Si en Meta elegiste Español genérico, cambia esto a "es"
+                        "language": {"code": "es"}, # Idioma en Español (es)
                         "components": components
                     }
                 }
@@ -457,37 +456,6 @@ async def send_template(request: Request, body: SendTemplatePayload):
                 status    = "error"
                 error_msg = str(e)[:200]
                 print(f"❌ [ERROR INTERNO]: {error_msg}", flush=True)
-
-
-        if token and phone_id:
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(
-                        f"https://graph.facebook.com/v20.0/{phone_id}/messages",
-                        headers={"Authorization": f"Bearer {token}"},
-                        json={
-                            "messaging_product": "whatsapp",
-                            "to": phone,
-                            "type": "template",
-                            "template": {
-                                "name": tpl["wa_name"],
-                                # Forzamos el idioma correcto solo para esta plantilla
-                                "language": {
-                                    "code": "es_MX" if tpl["wa_name"] == "mesio_contacto_staff_v1" else tpl.get("language", "es")
-                                },
-                                "components": components
-                            }
-                        }
-                    )
-                    data = resp.json()
-                    if resp.status_code == 200:
-                        wa_msg_id = data.get("messages", [{}])[0].get("id", "")
-                    else:
-                        status    = "error"
-                        error_msg = data.get("error", {}).get("message", str(resp.text[:200]))
-            except Exception as e:
-                status    = "error"
-                error_msg = str(e)[:200]
         else:
             status    = "no_credentials"
             error_msg = "Credenciales Meta no configuradas"
