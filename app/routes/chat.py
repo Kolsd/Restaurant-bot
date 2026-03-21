@@ -176,8 +176,8 @@ async def meta_webhook(request: Request):
             from app.routes.crm import register_inbound_from_prospect
             wa_msg_id = message.get("id", "")
             # Registra la interacción en el CRM de prospectos
-            asyncio.create_task(register_inbound_from_prospect(user_phone, user_text, wa_msg_id))
-            print("👤 Mensaje enrutado al CRM (no se activa IA)", flush=True)
+            await register_inbound_from_prospect(user_phone, user_text, wa_msg_id)
+            print("👤 Mensaje del CRM guardado en BD exitosamente", flush=True)
             return {"status": "ok"}
 
         # 5. Disparar background task (V-03 fix: no bloqueamos el handler)

@@ -562,7 +562,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
                 errors += 1
 
     return {"success": True, "inserted": inserted, "errors": errors}
-    
+
 # ── STATS / KANBAN COUNTS ─────────────────────────────────────────────
 @router.get("/stats")
 async def crm_stats(request: Request):
@@ -609,13 +609,11 @@ async def crm_page():
         return HTMLResponse(p.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>crm.html no encontrado en static/</h1>", status_code=404)
 
-
 # ── INBOUND WEBHOOK HOOK — registra respuestas de prospectos ─────────
 async def register_inbound_from_prospect(phone: str, message: str, wa_message_id: str = ""):
     """
     Llamado desde chat.py cuando llega un mensaje de WhatsApp.
-    Si el número pertenece a un prospecto, registra la interacción
-    y lo mueve a 'respondio' si venía de 'contactado'.
+    Si el número no existe, lo crea. Si existe, registra la interacción.
     """
     try:
         pool = await db.get_pool()
@@ -625,24 +623,35 @@ async def register_inbound_from_prospect(phone: str, message: str, wa_message_id
                 "SELECT id, stage FROM prospects WHERE phone ILIKE $1 AND archived=FALSE LIMIT 1",
                 f"%{clean[-9:]}"   # match by last 9 digits for country code tolerance
             )
+            
+            # 👇 Si no existe, creamos un prospecto entrante
             if not row:
-                return
-
+                print(f"👤 Prospecto no encontrado para {phone}. Creando uno nuevo...", flush=True)
+                row = await conn.fetchrow("""
+                    INSERT INTO prospects (restaurant_name, phone, source, stage)
+                    VALUES ($1, $2, 'inbound_whatsapp', 'respondio')
+                    RETURNING id, stage
+                """, f"Nuevo Inbound (+{clean[-4:]})", clean)
+            
             pid   = row["id"]
             stage = row["stage"]
 
+            # Guardamos el mensaje en el historial
             await conn.execute("""
                 INSERT INTO prospect_interactions
                   (prospect_id, direction, channel, content, status, wa_message_id)
                 VALUES ($1,'inbound','whatsapp',$2,'received',$3)
             """, pid, message, wa_message_id)
 
-            new_stage = "respondio" if stage in ("contactado",) else stage
+            # Actualizamos la etapa a 'respondio' si es un prospecto frío
+            new_stage = "respondio" if stage in ("prospecto", "contactado") else stage
             await conn.execute("""
                 UPDATE prospects
                 SET last_contact_at=NOW(), updated_at=NOW(), stage=$2
                 WHERE id=$1
             """, pid, new_stage)
+            
+            print(f"✅ CRM: Mensaje guardado en el prospecto ID {pid}", flush=True)
 
     except Exception as e:
         print(f"⚠️ CRM inbound hook error: {e}", flush=True)

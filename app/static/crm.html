@@ -334,7 +334,7 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
 </style>
 </head>
 <body>
-
+  <audio id="notifSound" src="https://cdn.pixabay.com/audio/2023/11/08/audio_821da10ff4.mp3" preload="auto"></audio>
 <div class="app">
 
 <!-- ══ SIDEBAR ══════════════════════════════════════════════════════ -->
@@ -1548,6 +1548,37 @@ async function handleCSVUpload(event) {
   
   event.target.value = '';
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// AUTO-REFRESH DEL INBOX (POLLING) + SONIDO "RING"
+// ═══════════════════════════════════════════════════════════════════
+setInterval(async () => {
+  // Solo consultamos si estamos en la vista de Inbox y hay un chat abierto
+  if (currentView === 'inbox' && currentInboxPid) {
+     const d = await api('GET', `/prospects/${currentInboxPid}/interactions`);
+     if (d && d.interactions) {
+        const msgsContainer = document.getElementById('inbox-messages');
+        
+        // Si la cantidad de mensajes que trae la API es mayor a los mostrados en pantalla
+        if (d.interactions.length > msgsContainer.childElementCount) {
+            // 👇 ── NUEVO: REPRODUCIR SONIDO ── 👇
+            const sound = document.getElementById('notifSound');
+            if (sound) {
+                sound.play().catch(e => {
+                    // Nota: Los navegadores modernos bloquean la reproducción automática 
+                    // si el usuario no ha interactuado primero con la página (un clic).
+                    // Esto está bien, ya que el usuario estará interactuando con el CRM.
+                    console.log("El navegador bloqueó la reproducción automática. El usuario debe interactuar primero.", e);
+                });
+            }
+            // 👆 ───────────────────────────── 👆
+            
+            openInboxChat(currentInboxPid); // Recarga el chat
+            loadProspects(); // Actualiza la lista lateral (para mover el chat arriba si es necesario)
+        }
+     }
+  }
+}, 4000);
 
 </script>
 </body>
