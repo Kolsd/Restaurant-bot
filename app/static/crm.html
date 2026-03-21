@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Mesio CRM — Prospectos</title>
 <link rel="icon" type="image/png" href="/static/logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -331,13 +331,73 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
 .spinner { display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,.2); border-top-color:var(--g); border-radius:50%; animation:spin .6s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 .loading-overlay { display:flex; align-items:center; justify-content:center; padding:3rem; color:var(--muted); gap:10px; font-size:.85rem; }
+
+
+/* =========================================================
+   📱 MODO MÓVIL (Responsivo)
+   ========================================================= */
+@media (max-width: 768px) {
+  /* Hacemos que el layout principal fluya en columna */
+  .app { flex-direction: column !important; }
+  
+  /* Sidebar horizontal y scrolleable */
+  .sidebar {
+    width: 100% !important;
+    height: auto !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    padding: 10px !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar .logo { margin: 0 15px 0 0 !important; padding: 0 !important; border: none !important; font-size: 1.1rem; }
+  .sidebar .logo-sub { display: none; }
+  .nav-section { display: none; }
+  .sidebar-bottom { display: none; }
+  .nav-btn { width: auto !important; white-space: nowrap !important; margin: 0 5px 0 0 !important; padding: 6px 10px !important; }
+  
+  /* Topbar apilado */
+  .topbar { height: auto !important; flex-wrap: wrap !important; padding: 10px !important; gap: 10px !important; }
+  .page-title { width: 100%; font-size: 1.2rem; }
+  .topbar-search { max-width: 100% !important; width: 100%; order: 3; }
+  .topbar-actions { margin-left: 0 !important; width: 100%; justify-content: space-between; order: 2; }
+  
+  /* Stats (2 columnas) */
+  .stats-row { grid-template-columns: 1fr 1fr !important; }
+  
+  /* Inbox adaptado */
+  #view-inbox { flex-direction: column !important; height: auto !important; }
+  #view-inbox > div:first-child { width: 100% !important; height: 250px !important; flex: none !important; margin-bottom: 10px; }
+  #view-inbox > div:last-child { width: 100% !important; height: 60vh !important; flex: none !important; }
+  
+  /* Kanban apilado hacia abajo */
+  .kanban { flex-direction: column !important; height: auto !important; }
+  .k-col { flex: none !important; width: 100% !important; margin-bottom: 15px; }
+  .k-body { max-height: none !important; min-height: 100px !important; }
+  
+  /* Tablas responsivas */
+  .tbl-wrap { overflow-x: auto; }
+  
+  /* Panel de detalle/Chat toma TODA la pantalla en móvil */
+  .detail-panel.open {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important;
+    width: 100% !important; height: 100% !important;
+    z-index: 9999 !important;
+  }
+  
+  /* Ajuste a modales para que no se salgan de pantalla */
+  .modal { max-height: 95vh !important; margin: 10px !important; }
+  .form-group.half { grid-template-columns: 1fr !important; }
+}
 </style>
 </head>
 <body>
   <audio id="notifSound" src="https://cdn.pixabay.com/audio/2023/11/08/audio_821da10ff4.mp3" preload="auto"></audio>
 <div class="app">
 
-<!-- ══ SIDEBAR ══════════════════════════════════════════════════════ -->
 <div class="sidebar">
   <div class="logo">Mesio<span>.</span><div class="logo-sub">CRM · Prospectos</div></div>
 
@@ -386,10 +446,8 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   </div>
 </div>
 
-<!-- ══ MAIN ═════════════════════════════════════════════════════════ -->
 <div class="main">
 
-  <!-- Topbar -->
   <div class="topbar">
     <div class="page-title" id="page-title">Pipeline</div>
     <div class="topbar-search">
@@ -405,10 +463,8 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
     </div>
   </div>
 
-  <!-- Content -->
   <div class="content" id="content-area">
 
-    <!-- Stats -->
     <div class="stats-row" id="stats-row">
       <div class="stat-card"><div class="stat-label">Total</div><div class="stat-val" id="s-total">—</div></div>
       <div class="stat-card"><div class="stat-label">Contactados</div><div class="stat-val g" id="s-contacted">—</div></div>
@@ -417,7 +473,7 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
       <div class="stat-card"><div class="stat-label">Conversión</div><div class="stat-val" id="s-rate">—%</div></div>
     </div>
 
-    <div id="view-inbox" style="height: calc(100vh - 200px); gap: 1rem;">
+    <div id="view-inbox" style="display:none; gap: 1rem;">
       
       <div style="width: 340px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;">
         <div style="padding: 1rem; border-bottom: 1px solid var(--border); background: var(--bg2);">
@@ -450,7 +506,7 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
         </div>
 
         <div id="inbox-messages" style="flex: 1; overflow-y: auto; padding: 1.5rem; background: var(--bg); display: flex; flex-direction: column; gap: 12px;">
-          <div class="empty-state" style="margin: auto;">Selecciona un prospecto en la lista de la izquierda para comenzar a chatear.</div>
+          <div class="empty-state" style="margin: auto; color:var(--muted);">Selecciona un prospecto en la lista de la izquierda para comenzar a chatear.</div>
         </div>
 
         <div id="inbox-input-area" style="padding: 1rem; border-top: 1px solid var(--border); background: var(--bg2); display: none;">
@@ -463,12 +519,10 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
       </div>
     </div>
 
-    <!-- KANBAN VIEW -->
     <div id="view-kanban">
       <div class="kanban" id="kanban-board"></div>
     </div>
 
-    <!-- TABLE VIEW -->
     <div id="view-tabla" style="display:none;">
       <div class="tbl-wrap">
         <div class="tbl-toolbar">
@@ -520,7 +574,6 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   </div>
 </div>
 
-<!-- ══ DETAIL PANEL ══════════════════════════════════════════════════ -->
 <div class="detail-panel" id="detail-panel">
   <div class="dp-head">
     <div>
@@ -535,7 +588,6 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
     <button class="dp-tab" onclick="dpTab('notas',this)">Notas</button>
   </div>
 
-  <!-- INFO TAB -->
   <div id="dp-info" class="dp-body">
     <div class="dp-section">
       <div class="dp-section-title">Etapa</div>
@@ -559,8 +611,7 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
     </div>
   </div>
 
-  <!-- CHAT TAB -->
-  <div id="dp-chat" style="display:none;flex:1;display:none;flex-direction:column;">
+  <div id="dp-chat" style="display:none;flex:1;flex-direction:column;">
     <div class="dp-body" style="flex:1;padding:.75rem 1rem;" id="chat-msgs-container">
       <div class="chat-msgs" id="chat-msgs"></div>
     </div>
@@ -570,7 +621,6 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
     </div>
   </div>
 
-  <!-- NOTAS TAB -->
   <div id="dp-notas" class="dp-body" style="display:none;">
     <div style="margin-bottom:1rem;">
       <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
@@ -589,16 +639,12 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   </div>
 </div>
 
-</div><!-- /app -->
-
-<!-- ══ BULK BAR ══════════════════════════════════════════════════════ -->
-<div class="bulk-bar" id="bulk-bar">
+</div><div class="bulk-bar" id="bulk-bar">
   <span class="bulk-count" id="bulk-bar-count">0 seleccionados</span>
   <button class="btn btn-purple btn-sm" onclick="openTemplateModal()">📤 Enviar Template</button>
   <button class="btn btn-outline btn-sm" onclick="clearSelection()">Cancelar</button>
 </div>
 
-<!-- ══ MODAL: AGREGAR PROSPECTO ══════════════════════════════════════ -->
 <div class="modal-overlay" id="modal-add">
   <div class="modal">
     <div class="modal-head"><h3>Nuevo Prospecto</h3><button class="modal-close" onclick="closeModal('modal-add')">✕</button></div>
@@ -684,7 +730,6 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   </div>
 </div>
 
-<!-- ══ MODAL: ENVIAR TEMPLATE ════════════════════════════════════════ -->
 <div class="modal-overlay" id="modal-template-send">
   <div class="modal" style="max-width:600px;">
     <div class="modal-head"><h3>📤 Enviar Template de WhatsApp</h3><button class="modal-close" onclick="closeModal('modal-template-send')">✕</button></div>
@@ -722,7 +767,6 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   </div>
 </div>
 
-<!-- ══ MODAL: GESTIONAR TEMPLATES ═══════════════════════════════════ -->
 <div class="modal-overlay" id="modal-templates-list">
   <div class="modal" style="max-width:640px;">
     <div class="modal-head"><h3>📝 Mis Templates</h3><button class="modal-close" onclick="closeModal('modal-templates-list')">✕</button></div>
@@ -751,14 +795,12 @@ tbody tr.selected td { background:rgba(57,255,106,.04); }
   </div>
 </div>
 
-<!-- TOAST -->
 <div class="toast" id="toast"></div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════════
-// CRM usa ADMIN_KEY del superadmin — no acepta tokens de restaurantes
 const ADMIN_KEY = localStorage.getItem('mesio_admin_key');
 if (!ADMIN_KEY) window.location.href = '/superadmin?redirect=crm';
 
@@ -773,7 +815,7 @@ const NOTE_ICONS = { note:'📝', call:'📞', whatsapp:'💬', email:'📧', me
 let prospects     = [];
 let selectedIds   = new Set();
 let currentPid    = null;
-let currentView   = 'kanban';
+let currentView   = 'inbox';
 let activeFilter  = '';
 let searchQuery   = '';
 let templates     = [];
@@ -785,10 +827,12 @@ let _toastTimer   = null;
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('user-av').textContent   = 'M';
   document.getElementById('user-name').textContent = 'Mesio Admin';
-  currentView = 'inbox'; // Iniciar en Inbox
+  currentView = 'inbox'; 
   loadStats();
   loadProspects();
   loadTemplates();
+  // Al cargar, forzamos que se muestre la vista de Inbox correctamente
+  setView('inbox', document.getElementById('btn-inbox'));
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -887,7 +931,8 @@ function onSearch() {
 
 function renderView() {
   if (currentView === 'kanban') renderKanban();
-  else renderTable();
+  else if (currentView === 'tabla') renderTable();
+  else if (currentView === 'inbox') renderInbox();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1020,7 +1065,6 @@ function openPanel(pid, tab='info') {
   document.getElementById('dp-phone-sub').textContent = p.phone + (p.owner_name ? ' · ' + p.owner_name : '');
   document.getElementById('dp-stage').value           = p.stage;
 
-  // Fields
   const fields = [
     ['Teléfono', p.phone],
     ['Dueño', p.owner_name || '—'],
@@ -1037,9 +1081,6 @@ function openPanel(pid, tab='info') {
 
   document.getElementById('detail-panel').classList.add('open');
   dpTab(tab, null);
-
-  if (tab === 'chat')  loadInteractions(pid);
-  if (tab === 'notas') loadNotes(pid);
 }
 
 function closePanel() {
@@ -1057,7 +1098,7 @@ function dpTab(tab, btn) {
   else document.querySelectorAll('.dp-tab').forEach((b,i) => {
     if (['info','chat','notas'][i] === tab) b.classList.add('active');
   });
-  if (tab === 'chat'  && currentPid) loadInteractions(currentPid);
+  if (tab === 'chat'  && currentPid) loadPanelInteractions(currentPid);
   if (tab === 'notas' && currentPid) loadNotes(currentPid);
 }
 
@@ -1084,29 +1125,34 @@ async function archiveProspect() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// CHAT
+// CHAT DEL PANEL (NO EL INBOX PRINCIPAL)
 // ═══════════════════════════════════════════════════════════════════
-async function loadInteractions(pid) {
+async function loadPanelInteractions(pid) {
   const d = await api('GET', `/prospects/${pid}/interactions`);
   if (!d) return;
   const container = document.getElementById('chat-msgs');
   const items = d.interactions || [];
   if (!items.length) {
-    container.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--muted);font-size:.78rem;">Sin mensajes aún.<br>Envía un template o escribe un mensaje libre.</div>';
+    container.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--muted);font-size:.78rem;">Sin mensajes aún.</div>';
     return;
   }
   container.innerHTML = items.map(i => {
     const out  = i.direction === 'outbound';
+    const isErr = i.status === 'error';
     const time = new Date(i.created_at).toLocaleString('es-CO',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-    const statusIcon = i.status === 'sent' ? '✓' : i.status === 'received' ? '' : '⚠';
+    const statusIcon = i.status === 'sent' ? '✓' : i.status === 'received' ? '' : (isErr ? '❌ Error' : '⚠');
+    
+    const bg = isErr ? 'rgba(239,68,68,0.1)' : (out ? '#005C4B' : 'var(--card)');
+    const text = isErr ? 'var(--red)' : (out ? '#E9EDF0' : 'var(--text)');
+    const border = isErr ? 'rgba(239,68,68,0.3)' : (out ? 'transparent' : 'var(--border)');
+
     return `<div class="msg-row ${out?'out':''}">
-      <div>
-        <div class="msg-bubble ${out?'msg-out':'msg-in'}">${i.content}</div>
+      <div style="display:flex; flex-direction:column; align-items:${out?'flex-end':'flex-start'}">
+        <div class="msg-bubble" style="background:${bg}; color:${text}; border:1px solid ${border}; white-space:pre-wrap;">${i.content}</div>
         <div class="msg-time" style="text-align:${out?'right':'left'}">${time} ${out?statusIcon:''}</div>
       </div>
     </div>`;
   }).join('');
-  // scroll to bottom
   const wrap = document.getElementById('chat-msgs-container');
   if (wrap) wrap.scrollTop = wrap.scrollHeight;
 }
@@ -1124,7 +1170,7 @@ async function sendMessage() {
   const d = await api('POST', '/send-message', { prospect_id: currentPid, message: msg });
   if (d && d.success) {
     toast('Mensaje enviado');
-    loadInteractions(currentPid);
+    loadPanelInteractions(currentPid);
   } else {
     toast(d?.detail || 'Error al enviar', 'err');
   }
@@ -1274,11 +1320,9 @@ async function deleteTemplate(tid) {
 // SEND TEMPLATE
 // ═══════════════════════════════════════════════════════════════════
 function openTemplateModal() {
-  // populate template selector
   const sel = document.getElementById('tpl-select');
   sel.innerHTML = templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
 
-  // populate prospects
   const pids = selectedIds.size > 0
     ? [...selectedIds]
     : (currentPid ? [currentPid] : prospects.filter(p=>p.stage!=='cerrado'&&p.stage!=='perdido').slice(0,20).map(p=>p.id));
@@ -1357,19 +1401,15 @@ async function doSendTemplate() {
 
   if (!pids.length) { toast('Selecciona al menos un prospecto', 'err'); return; }
 
-// Build global params from inputs
-const paramValues = (tpl.params || []).map((_, i) => document.getElementById(`tpl-param-${i}`)?.value || '');
+  const paramValues = (tpl.params || []).map((_, i) => document.getElementById(`tpl-param-${i}`)?.value || '');
   const paramsMap   = {};
   
   pids.forEach(pid => { 
     const prospect = prospects.find(p => p.id === pid);
     if (prospect) {
-      // Reemplazo dinámico de variables
       const personalizedParams = paramValues.map(val => {
         let text = val;
-        // Reemplaza {restaurante} por el nombre del restaurante
         text = text.replace(/{restaurante}/gi, prospect.restaurant_name);
-        // Reemplaza {dueño} por el nombre del dueño (o deja "equipo" si está vacío)
         text = text.replace(/{dueño}/gi, prospect.owner_name || 'equipo');
         return text;
       });
@@ -1426,7 +1466,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// INBOX ZENDESK & CSV UPLOAD
+// INBOX CHAT & CSV UPLOAD
 // ═══════════════════════════════════════════════════════════════════
 let currentInboxPid = null;
 
@@ -1442,7 +1482,7 @@ function renderInbox() {
   inboxProspects.sort((a, b) => new Date(b.last_contact_at || 0) - new Date(a.last_contact_at || 0));
 
   if (!inboxProspects.length) {
-    listEl.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--muted); font-size: 0.8rem;">No hay chats que coincidan.</div>';
+    listEl.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--muted); font-size: 0.8rem;">No hay chats.</div>';
     return;
   }
 
@@ -1498,7 +1538,7 @@ async function openInboxChat(pid) {
     const border = isErr ? 'rgba(239,68,68,0.3)' : (out ? 'transparent' : 'var(--border)');
 
     return `
-      <div style="display: flex; flex-direction: column; align-items: ${out ? 'flex-end' : 'flex-start'};">
+      <div style="display: flex; flex-direction: column; align-items: ${out ? 'flex-end' : 'flex-start'}; margin-bottom: 5px;">
         <div style="max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 0.85rem; line-height: 1.5; background: ${bg}; color: ${text}; border: 1px solid ${border}; border-bottom-${out ? 'right' : 'left'}-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); white-space: pre-wrap;">${i.content}</div>
         <div style="font-size: 0.65rem; color: var(--muted); margin-top: 4px;">${time} ${out ? statusIcon : ''}</div>
       </div>
@@ -1523,7 +1563,7 @@ async function sendInboxMessage() {
 
   if (d && d.success) {
     openInboxChat(currentInboxPid);
-    loadProspects(); // Para actualizar la lista de la izquierda
+    loadProspects(); 
   } else { toast(d?.detail || 'Error al enviar', 'err'); }
 }
 
@@ -1564,7 +1604,7 @@ async function handleCSVUpload(event) {
     if (res.ok && data.success) {
       toast(`¡Importado! ${data.inserted} agregados, ${data.errors} errores.`, 'ok');
       loadProspects();
-      setView('tabla', document.getElementById('btn-tabla')); // Llevamos a la tabla para ver los nuevos
+      setView('tabla', document.getElementById('btn-tabla')); 
     } else {
       toast(data.detail || 'Error al importar CSV', 'err');
     }
@@ -1577,28 +1617,17 @@ async function handleCSVUpload(event) {
 // AUTO-REFRESH DEL INBOX (POLLING) + SONIDO "RING"
 // ═══════════════════════════════════════════════════════════════════
 setInterval(async () => {
-  // Solo consultamos si estamos en la vista de Inbox y hay un chat abierto
   if (currentView === 'inbox' && currentInboxPid) {
      const d = await api('GET', `/prospects/${currentInboxPid}/interactions`);
      if (d && d.interactions) {
         const msgsContainer = document.getElementById('inbox-messages');
-        
-        // Si la cantidad de mensajes que trae la API es mayor a los mostrados en pantalla
-        if (d.interactions.length > msgsContainer.childElementCount) {
-            // 👇 ── NUEVO: REPRODUCIR SONIDO ── 👇
+        if (d.interactions.length > msgsContainer.childElementCount - 1) { // -1 by empty state
             const sound = document.getElementById('notifSound');
             if (sound) {
-                sound.play().catch(e => {
-                    // Nota: Los navegadores modernos bloquean la reproducción automática 
-                    // si el usuario no ha interactuado primero con la página (un clic).
-                    // Esto está bien, ya que el usuario estará interactuando con el CRM.
-                    console.log("El navegador bloqueó la reproducción automática. El usuario debe interactuar primero.", e);
-                });
+                sound.play().catch(e => console.log("Auto-play blocked"));
             }
-            // 👆 ───────────────────────────── 👆
-            
-            openInboxChat(currentInboxPid); // Recarga el chat
-            loadProspects(); // Actualiza la lista lateral (para mover el chat arriba si es necesario)
+            openInboxChat(currentInboxPid);
+            loadProspects(); 
         }
      }
   }
