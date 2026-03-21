@@ -432,7 +432,10 @@ async def send_template(request: Request, body: SendTemplatePayload):
                     "type": "template",
                     "template": {
                         "name": tpl["wa_name"],
-                        "language": {"code": "es_MX"}, # Idioma en Español (es)
+                        "language": {
+                            "policy": "deterministic", # 👈 Obliga a Meta a buscar exacto
+                            "code": "es_MX"
+                        },
                         "components": components
                     }
                 }
