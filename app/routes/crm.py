@@ -365,17 +365,18 @@ async def send_manual_message(request: Request, body: SendMessagePayload):
         status    = "no_credentials"
         error_msg = "Configura CRM_PHONE_NUMBER_ID en Railway con el ID del número de prospectos"
 
-    # Log interaction regardless
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO prospect_interactions
-              (prospect_id, direction, channel, content, status, wa_message_id)
-            VALUES ($1,'outbound','whatsapp',$2,$3,$4)
-        """, body.prospect_id, body.message, status, wa_msg_id)
-        await conn.execute(
-            "UPDATE prospects SET last_contact_at=NOW(), updated_at=NOW() WHERE id=$1",
-            body.prospect_id
-        )
+    # Registrar la interacción SOLO si se envió con éxito
+    if status == "sent":
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO prospect_interactions
+                  (prospect_id, direction, channel, content, status, wa_message_id)
+                VALUES ($1,'outbound','whatsapp',$2,$3,$4)
+            """, body.prospect_id, body.message, status, wa_msg_id)
+            await conn.execute(
+                "UPDATE prospects SET last_contact_at=NOW(), updated_at=NOW() WHERE id=$1",
+                body.prospect_id
+            )
 
     if status == "error":
         raise HTTPException(status_code=422, detail=error_msg)
@@ -468,14 +469,15 @@ async def send_template(request: Request, body: SendTemplatePayload):
         for i, p in enumerate(params):
             preview = preview.replace(f"{{{{{i+1}}}}}", str(p))
 
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO prospect_interactions
-                  (prospect_id, direction, channel, content, template_name, status, wa_message_id)
-                VALUES ($1,'outbound','whatsapp',$2,$3,$4,$5)
-            """, pid, preview, tpl["wa_name"], status, wa_msg_id)
+        # Registrar en la base de datos SOLO si se envió con éxito
+        if status == "sent":
+            async with pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO prospect_interactions
+                      (prospect_id, direction, channel, content, template_name, status, wa_message_id)
+                    VALUES ($1,'outbound','whatsapp',$2,$3,$4,$5)
+                """, pid, preview, tpl["wa_name"], status, wa_msg_id)
 
-            if status == "sent":
                 # Auto-advance stage from prospecto → contactado
                 await conn.execute("""
                     UPDATE prospects
@@ -589,7 +591,17 @@ async def crm_stats(request: Request):
         stage_counts = {r["stage"]: r["cnt"] for r in rows}
 
         total       = await conn.fetchval("SELECT COUNT(*) FROM prospects WHERE archived=FALSE")
-        contacted   = await conn.fetchval("SELECT COUNT(*) FROM prospect_interactions WHERE direction='outbound'")
+        
+        # 👇 NUEVO: Cuenta prospectos únicos, no archivados, que recibieron al menos 1 mensaje exitoso
+        contacted   = await conn.fetchval("""
+            SELECT COUNT(DISTINCT p.id) 
+            FROM prospects p
+            JOIN prospect_interactions pi ON p.id = pi.prospect_id
+            WHERE p.archived=FALSE 
+              AND pi.direction='outbound' 
+              AND pi.status='sent'
+        """)
+        
         converted   = stage_counts.get("cerrado", 0)
         follow_ups  = await conn.fetchval("""
             SELECT COUNT(*) FROM prospects
@@ -606,7 +618,6 @@ async def crm_stats(request: Request):
         "follow_ups":   follow_ups or 0,
         "conversion_rate": round((converted / total * 100) if total else 0, 1)
     }
-
 
 # ── PAGE ROUTE ────────────────────────────────────────────────────────
 from fastapi import Response as FResponse
