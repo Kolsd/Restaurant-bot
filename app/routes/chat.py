@@ -10,25 +10,50 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from app.services.agent import chat, reset_conversation
+from app.services import database as db
 
 router = APIRouter()
 
-# ── RATE LIMITING (V-05) ─────────────────────────────────────────────
-# In-memory rate limiter por número de teléfono
-# {phone: [timestamp, ...]}  (ventana deslizante de 60s)
-_rate_store: dict[str, list[float]] = defaultdict(list)
+# ── RATE LIMITING BACKED BY POSTGRES (Workers Safe) ──────────────────
 RATE_LIMIT_MESSAGES = 20   # max mensajes por ventana
 RATE_LIMIT_WINDOW   = 60   # segundos
+_rate_table_checked = False
 
-def _is_rate_limited(phone: str) -> bool:
-    now = time()
-    window_start = now - RATE_LIMIT_WINDOW
-    # Limpiar timestamps viejos
-    _rate_store[phone] = [t for t in _rate_store[phone] if t > window_start]
-    if len(_rate_store[phone]) >= RATE_LIMIT_MESSAGES:
-        return True
-    _rate_store[phone].append(now)
-    return False
+async def _is_rate_limited(phone: str) -> bool:
+    global _rate_table_checked
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        # 1. Crear la tabla si es la primera vez que la app arranca
+        if not _rate_table_checked:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS meta_rate_limits (
+                    id SERIAL PRIMARY KEY,
+                    phone TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_rate_phone ON meta_rate_limits(phone);
+            """)
+            _rate_table_checked = True
+
+        # 2. Borrar el historial viejo de este número (Mantiene la tabla ultra ligera)
+        await conn.execute(
+            f"DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - INTERVAL '{RATE_LIMIT_WINDOW} seconds'", 
+            phone
+        )
+
+        # 3. Contar cuántos mensajes ha enviado en los últimos 60 segundos
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM meta_rate_limits WHERE phone = $1", 
+            phone
+        )
+
+        # 4. Bloquear o permitir
+        if count >= RATE_LIMIT_MESSAGES:
+            return True
+
+        # Si todo está bien, registramos este mensaje
+        await conn.execute("INSERT INTO meta_rate_limits (phone) VALUES ($1)", phone)
+        return False
 
 # ── META SIGNATURE VERIFICATION (V-02) ──────────────────────────────
 def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
@@ -153,7 +178,7 @@ async def meta_webhook(request: Request):
         access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
 
         # 4. Rate limiting (V-05)
-        if user_phone and _is_rate_limited(user_phone):
+        if user_phone and await _is_rate_limited(user_phone):
             print(f"🚫 Rate limit: {user_phone}", flush=True)
             return {"status": "ok"}
 
