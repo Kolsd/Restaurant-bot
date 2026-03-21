@@ -109,10 +109,7 @@ async function loadTables() {
         const el = document.getElementById('qr-' + t.id);
         if (el && !el.hasChildNodes()) {
           const botNum = (rest && rest.whatsapp_number) || '15556293573';
-          
-          // AQUI ELIMINAMOS EL BRANCH KEY PARA EL TEXTO DEL QR
           const waUrl = 'https://wa.me/' + botNum + '?text=' + encodeURIComponent('Hola! Estoy en ' + t.name + ' y quiero hacer un pedido');
-          
           try { new QRCode(el, { text:waUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
         }
       });
@@ -179,9 +176,12 @@ function renderBranches(branches) {
   const container = document.getElementById('branches-list');
   if (!container) return;
   if (!branches.length) { container.innerHTML = '<div class="empty-state">No hay sucursales.</div>'; return; }
-  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cook:'#854F0B', waiter:'#534AB7' };
-  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cook:'#FAEEDA', waiter:'#EEEDFE' };
-  const roleLabels = { owner:'Dueño', admin:'Administrador', cook:'Cocinero', waiter:'Mesero' };
+  
+  // FIX: Agregado el rol "cashier" a las paletas de color
+  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cashier:'#BA7517', cook:'#854F0B', waiter:'#534AB7' };
+  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cashier:'#FFF8E6', cook:'#FAEEDA', waiter:'#EEEDFE' };
+  const roleLabels = { owner:'Dueño', admin:'Administrador', cashier:'Cajero', cook:'Cocinero', waiter:'Mesero' };
+  
   container.innerHTML = branches.map(b => `
     <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;margin-bottom:12px;overflow:hidden;">
       <div data-branch-id="${b.id}" style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
@@ -214,9 +214,11 @@ function renderBranches(branches) {
 
 async function loadBranchUsers(branchId) {
   const h = window._dashHeaders;
-  const roleLabels = { owner:'Dueño', admin:'Administrador', cook:'Cocinero', waiter:'Mesero' };
-  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cook:'#854F0B', waiter:'#534AB7' };
-  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cook:'#FAEEDA', waiter:'#EEEDFE' };
+  // FIX: Se incluye al "Cajero" aquí también
+  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cashier:'#BA7517', cook:'#854F0B', waiter:'#534AB7' };
+  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cashier:'#FFF8E6', cook:'#FAEEDA', waiter:'#EEEDFE' };
+  const roleLabels = { owner:'Dueño', admin:'Administrador', cashier:'Cajero', cook:'Cocinero', waiter:'Mesero' };
+  
   try {
     const r = await fetch('/api/team/users?branch_id=' + branchId, { headers: h });
     if (!r.ok) return;
@@ -306,11 +308,25 @@ async function createBranch() {
   } catch(e) {}
 }
 
+// FIX: Función para el nuevo selector de tarjetas
+function selectRole(role, el) {
+  document.getElementById('invite-role').value = role;
+  document.querySelectorAll('#modal-invite .role-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
 function openInviteModal(branchId, branchName) {
   currentBranchId = branchId;
   document.getElementById('modal-branch-name').textContent = branchName;
   document.getElementById('invite-username').value = '';
   document.getElementById('invite-password').value = '';
+  
+  // FIX: Reiniciar las tarjetas visuales de rol a "Mesero" por defecto
+  document.getElementById('invite-role').value = 'waiter';
+  document.querySelectorAll('#modal-invite .role-card').forEach(c => c.classList.remove('active'));
+  const firstCard = document.querySelector('#modal-invite .role-card');
+  if (firstCard) firstCard.classList.add('active');
+
   document.getElementById('modal-invite').style.display = 'flex';
 }
 
@@ -330,7 +346,7 @@ async function sendInvite() {
       method:'POST', headers:{ ...h,'Content-Type':'application/json' },
       body: JSON.stringify({ username, password, role, branch_id: currentBranchId })
     });
-    if (r.ok) { closeInviteModal(); loadBranches(); alert('Usuario creado'); }
+    if (r.ok) { closeInviteModal(); loadBranches(); alert('Usuario creado exitosamente'); }
     else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo crear')); }
   } catch(e) {}
 }
