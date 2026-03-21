@@ -410,19 +410,10 @@ async def send_template(request: Request, body: SendTemplatePayload):
         phone    = prospect["phone"].lstrip("+").replace(" ", "")
         params   = body.params_map.get(str(pid), [])
 
-        # Build template components
+# Build template components
         components = []
-
-        components.append({
-            "type": "header",
-            "parameters": [{
-                "type": "image",
-                # Coloca aquí una URL pública de la imagen de tu equipo.
-                # Puedes usar el logo de Mesio por ahora para probar:
-                "image": {"link": "https://mesioai.com/static/logo.png"} 
-            }]
-        })
-
+        
+        # Solo enviamos el cuerpo si hay parámetros
         if params:
             components.append({
                 "type": "body",
@@ -445,11 +436,12 @@ async def send_template(request: Request, body: SendTemplatePayload):
                             "type": "template",
                             "template": {
                                 "name": tpl["wa_name"],
+                                # Mantenemos el idioma en Español México
                                 "language": {"code": "es_MX"}, 
                                 "components": components
                             }
                         }
-                    )
+                              )
                     data = resp.json()
                     if resp.status_code == 200:
                         wa_msg_id = data.get("messages", [{}])[0].get("id", "")
