@@ -361,7 +361,9 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
                     restaurant_name = r.get("name", "nuestro restaurante")
                     break
             else:
-                restaurant_name = all_r[0].get("name", "nuestro restaurante")
+                # Si el número no pertenece a ningún restaurante, no respondemos
+                print(f"⚠️ Bot number {bot_number} no está asociado a ningún restaurante.", flush=True)
+                return {"message": ""}
 
     if meta_phone_id and table_context:
         await db.db_touch_session_with_phone_id(user_phone, bot_number, meta_phone_id)
