@@ -412,6 +412,17 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
         # Build template components
         components = []
+
+        components.append({
+            "type": "header",
+            "parameters": [{
+                "type": "image",
+                # Coloca aquí una URL pública de la imagen de tu equipo.
+                # Puedes usar el logo de Mesio por ahora para probar:
+                "image": {"link": "https://mesioai.com/static/logo.png"} 
+            }]
+        })
+
         if params:
             components.append({
                 "type": "body",
@@ -434,7 +445,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
                             "type": "template",
                             "template": {
                                 "name": tpl["wa_name"],
-                                "language": {"code": tpl.get("language", "es")},
+                                "language": {"code": "es_MX"}, 
                                 "components": components
                             }
                         }
