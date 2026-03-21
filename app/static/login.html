@@ -81,35 +81,40 @@ async function doLogin() {
       localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
       
       const roleStr = data.restaurant.role || 'owner';
-      const roles = roleStr.split(','); // Convertimos "waiter,cook" a arreglo
+      const userRole = data.role ? data.role.toLowerCase() : roleStr;
+      
+      // Guardar el rol explícitamente para que la barra de navegación lo lea
+      localStorage.setItem('rb_role', userRole);
+      
+      const roles = userRole.split(','); 
 
-      // 1. Si es Administrador o Dueño, va directo al HQ/Dashboard
+      // 1. Administrador/Owner
       if (roles.includes('owner') || roles.includes('admin')) {
         window.location.href = '/dashboard';
         return;
       }
 
-      // 2. Si solo tiene 1 rol asignado, lo mandamos directo a su pantalla
+      // 2. Si solo tiene 1 rol
       if (roles.length === 1) {
         if (roles[0] === 'cook') window.location.href = '/cocina';
         else if (roles[0] === 'waiter') window.location.href = '/mesero';
-        else if (roles[0] === 'cashier') window.location.href = '/billing';
-        else window.location.href = '/dashboard'; // fallback de seguridad
+        else if (roles[0] === 'cashier') window.location.href = '/caja'; // FIX: Aquí iba a /billing
+        else window.location.href = '/dashboard'; 
         return;
       }
 
-      // 3. Si tiene múltiples roles (Multirol Operativo), le mostramos los botones
+      // 3. Multirol
       document.getElementById('login-form').style.display = 'none';
       document.getElementById('role-selector').style.display = 'block';
       
       const selector = document.getElementById('role-buttons');
-      selector.innerHTML = ''; // Limpiar botones
+      selector.innerHTML = '';
 
       if (roles.includes('waiter')) {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/mesero'" style="background:#E1F5EE; color:#0F6E56;">🍽️ Entrar como Mesero</button>`;
       }
       if (roles.includes('cashier')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/billing'" style="background:#FFF8E6; color:#BA7517;">💰 Entrar a Caja / Facturas</button>`;
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/caja'" style="background:#FFF8E6; color:#BA7517;">💰 Entrar a Caja</button>`; // FIX: Aquí iba a /billing
       }
       if (roles.includes('cook')) {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/cocina'" style="background:#FAEEDA; color:#854F0B;">👨‍🍳 Entrar a Cocina</button>`;

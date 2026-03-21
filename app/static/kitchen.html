@@ -5,110 +5,88 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Cocina</title>
 <style>
-  /* NUEVO: ESTILOS DE LA BARRA DE ROLES EN COCINA OSCURA */
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#0D0D0D; color:#fff; min-height:100vh; }
+
+/* ── HEADER Y NAVEGACIÓN ── */
+header { background:#111; border-bottom:1px solid #222; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; }
+.logo { font-size:1.2rem; font-weight:700; color:#fff; display:flex; align-items:center; }
+.logo span { color:#1D9E75; }
+
+/* Barra dinámica insertada por roles.js */
 .role-nav { display: flex; gap: 8px; background: #222; padding: 4px; border-radius: 10px; margin-left: 20px; }
 .role-btn { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #888; text-decoration: none; transition: all 0.2s; }
 .role-btn.active { background: #1D9E75; color: #fff; }
 .role-btn:hover:not(.active) { color: #fff; background: #333; }
 
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0D0D0D;color:#fff;min-height:100vh;}
-header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;}
-.logo{font-size:1.2rem;font-weight:700;color:#fff;}.logo span{color:#1D9E75;}
-.header-right{display:flex;align-items:center;gap:12px;}
-.live-dot{width:8px;height:8px;border-radius:50%;background:#1D9E75;animation:pulse 2s infinite;}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.live-text{font-size:12px;color:#1D9E75;}
-.time{font-size:13px;color:#666;}
-.main{padding:1.5rem;}
-.board{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;}
-@media(max-width:900px){.board{grid-template-columns:1fr;}}
+.header-right { display:flex; align-items:center; gap:12px; }
+.live-dot { width:8px; height:8px; border-radius:50%; background:#1D9E75; animation:pulse 2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+.live-text { font-size:12px; color:#1D9E75; }
+.time { font-size:13px; color:#666; }
+.btn-logout { width:auto; padding:5px 12px; background:none; border:1px solid #333; border-radius:8px; color:#aaa; margin-left:15px; cursor:pointer; font-size:12px; font-weight:600; transition:all .15s;}
+.btn-logout:hover { color:#fff; border-color:#555; }
 
-/* ── COLUMNAS ── */
-.col-header{
-  font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-  margin-bottom:.75rem;padding:.5rem .75rem;border-radius:6px;
-  display:flex;align-items:center;gap:8px;
-}
-.col-recibido    .col-header{color:#FAC775;background:rgba(250,199,117,.08);}
-.col-preparacion .col-header{color:#378ADD;background:rgba(55,138,221,.08);}
-.col-listo       .col-header{color:#1D9E75;background:rgba(29,158,117,.08);}
-.badge{background:#1D9E75;color:#000;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:auto;}
+/* ── MAIN BOARD ── */
+.main { padding:1.5rem; }
+.board { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+@media(max-width:900px){ .board{grid-template-columns:1fr;} }
+
+.col-header { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin-bottom:.75rem; padding:.5rem .75rem; border-radius:6px; display:flex; align-items:center; gap:8px; }
+.col-recibido    .col-header { color:#FAC775; background:rgba(250,199,117,.08); }
+.col-preparacion .col-header { color:#378ADD; background:rgba(55,138,221,.08); }
+.col-listo       .col-header { color:#1D9E75; background:rgba(29,158,117,.08); }
+.badge { background:#1D9E75; color:#000; font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; margin-left:auto; }
 
 /* ── TARJETAS ── */
-.order-card{
-  background:#1A1A1A;border:1px solid #2A2A2A;border-radius:12px;
-  padding:1rem;margin-bottom:.75rem;transition:border-color .2s;
-}
-.order-card:hover{border-color:#333;}
-.order-card.recibido     {border-left:3px solid #FAC775;}
-.order-card.en_preparacion{border-left:3px solid #378ADD;}
-.order-card.listo        {border-left:3px solid #1D9E75;}
+.order-card { background:#1A1A1A; border:1px solid #2A2A2A; border-radius:12px; padding:1rem; margin-bottom:.75rem; transition:border-color .2s; }
+.order-card:hover { border-color:#333; }
+.order-card.recibido      { border-left:3px solid #FAC775; }
+.order-card.en_preparacion{ border-left:3px solid #378ADD; }
+.order-card.listo         { border-left:3px solid #1D9E75; }
 
-/* Etiqueta de suborden */
-.sub-tag{
-  display:inline-flex;align-items:center;gap:4px;
-  font-size:10px;font-weight:600;padding:2px 8px;
-  border-radius:8px;margin-bottom:6px;
-}
-.sub-tag.first{background:rgba(29,158,117,.12);color:#1D9E75;}
-.sub-tag.add  {background:rgba(250,199,117,.12);color:#FAC775;}
+.sub-tag { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600; padding:2px 8px; border-radius:8px; margin-bottom:6px; }
+.sub-tag.first { background:rgba(29,158,117,.12); color:#1D9E75; }
+.sub-tag.add   { background:rgba(250,199,117,.12); color:#FAC775; }
 
-.order-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.5rem;}
-.order-table{font-size:15px;font-weight:700;color:#fff;}
-.order-id{font-size:10px;color:#555;margin-top:2px;}
+.order-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:.5rem; }
+.order-table { font-size:15px; font-weight:700; color:#fff; }
+.order-id { font-size:10px; color:#555; margin-top:2px; }
 
-.elapsed{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:500;flex-shrink:0;}
-.elapsed.ok  {background:rgba(29,158,117,.15);color:#1D9E75;}
-.elapsed.warn{background:rgba(250,199,117,.15);color:#FAC775;}
-.elapsed.late{background:rgba(226,75,74,.15);color:#E24B4A;}
+.elapsed { font-size:10px; padding:2px 6px; border-radius:8px; font-weight:500; flex-shrink:0; }
+.elapsed.ok   { background:rgba(29,158,117,.15); color:#1D9E75; }
+.elapsed.warn { background:rgba(250,199,117,.15); color:#FAC775; }
+.elapsed.late { background:rgba(226,75,74,.15); color:#E24B4A; }
 
-.order-items{margin-bottom:.75rem;}
-.order-item{font-size:13px;color:#ddd;padding:3px 0;display:flex;gap:6px;}
-.order-item-qty{color:#1D9E75;font-weight:600;flex-shrink:0;}
+.order-items { margin-bottom:.75rem; }
+.order-item { font-size:13px; color:#ddd; padding:3px 0; display:flex; gap:6px; }
+.order-item-qty { color:#1D9E75; font-weight:600; flex-shrink:0; }
+.order-notes { font-size:11px; color:#666; background:#111; border-radius:6px; padding:5px 8px; margin-bottom:.75rem; font-style:italic; }
 
-.order-notes{
-  font-size:11px;color:#666;background:#111;
-  border-radius:6px;padding:5px 8px;margin-bottom:.75rem;font-style:italic;
-}
+.btn { width:100%; padding:8px; border:none; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; transition:all .15s; }
+.btn:active { transform:scale(.97); }
+.btn-prep { background:rgba(55,138,221,.2); color:#378ADD; border:1px solid rgba(55,138,221,.3); }
+.btn-prep:hover { background:rgba(55,138,221,.35); }
+.btn-listo { background:rgba(29,158,117,.2); color:#1D9E75; border:1px solid rgba(29,158,117,.3); }
+.btn-listo:hover { background:rgba(29,158,117,.35); }
+.listo-badge { width:100%; padding:8px; border-radius:8px; font-size:12px; font-weight:600; text-align:center; background:rgba(29,158,117,.08); color:#1D9E75; border:1px solid rgba(29,158,117,.2); }
 
-.btn{
-  width:100%;padding:8px;border:none;border-radius:8px;
-  font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;
-}
-.btn:active{transform:scale(.97);}
-.btn-prep {background:rgba(55,138,221,.2);color:#378ADD;border:1px solid rgba(55,138,221,.3);}
-.btn-prep:hover{background:rgba(55,138,221,.35);}
-.btn-listo{background:rgba(29,158,117,.2);color:#1D9E75;border:1px solid rgba(29,158,117,.3);}
-.btn-listo:hover{background:rgba(29,158,117,.35);}
-.listo-badge{
-  width:100%;padding:8px;border-radius:8px;font-size:12px;font-weight:600;
-  text-align:center;background:rgba(29,158,117,.08);color:#1D9E75;
-  border:1px solid rgba(29,158,117,.2);
-}
-
-.empty{text-align:center;padding:2rem;color:#333;font-size:13px;}
-
-.notification{
-  position:fixed;top:1rem;right:1rem;background:#1D9E75;color:#000;
-  padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;
-  transform:translateY(-100px);transition:transform .3s;z-index:100;max-width:300px;
-}
-.notification.show{transform:translateY(0);}
+.empty { text-align:center; padding:2rem; color:#333; font-size:13px; }
+.notification { position:fixed; top:1rem; right:1rem; background:#1D9E75; color:#000; padding:12px 20px; border-radius:10px; font-size:13px; font-weight:600; transform:translateY(-100px); transition:transform .3s; z-index:100; max-width:300px; }
+.notification.show { transform:translateY(0); }
 </style>
 </head>
 <body>
 
   <header>
-    <div style="display:flex; align-items:center;">
-      <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#555;font-weight:400;">Cocina</span></div>
+    <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#555;font-weight:400;margin-left:8px;">Cocina</span>
       <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
     </div>
     <div class="header-right">
       <div class="live-dot"></div>
       <span class="live-text">En vivo</span>
       <span class="time" id="clock"></span>
-      <button class="btn" style="width:auto; padding:5px 12px; background:none; border:1px solid #333; color:#aaa; margin-left:15px; cursor:pointer;" onclick="localStorage.removeItem('rb_token'); window.location.href='/login';">Salir</button>
+      <button class="btn-logout" onclick="localStorage.removeItem('rb_token'); window.location.href='/login';">Salir</button>
     </div>
   </header>
 
@@ -131,14 +109,14 @@ header{background:#111;border-bottom:1px solid #222;padding:1rem 1.5rem;display:
 
 <div class="notification" id="notif"></div>
 
+<script src="/static/roles.js"></script>
 <script>
 const token = localStorage.getItem('rb_token');
 if (!token) window.location.href = '/login';
 const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
 function clock() {
-  document.getElementById('clock').textContent =
-    new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }
 clock(); setInterval(clock, 1000);
 
@@ -188,19 +166,13 @@ function renderCard(o) {
         </div>`).join('')
     : '<div class="order-item" style="color:#555;">Sin items</div>';
 
-  const notesHtml = o.notes
-    ? `<div class="order-notes">📝 ${o.notes}</div>`
-    : '';
+  const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
   let actionHtml = '';
   if (o.status === 'recibido') {
-    actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">
-      👨‍🍳 En preparación
-    </button>`;
+    actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
   } else if (o.status === 'en_preparacion') {
-    actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">
-      ✅ Listo para servir
-    </button>`;
+    actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">✅ Listo para servir</button>`;
   } else if (o.status === 'listo') {
     actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
   }
@@ -210,10 +182,7 @@ function renderCard(o) {
   return `<div class="order-card ${cardClass}" data-id="${o.id}">
     ${subTag}
     <div class="order-header">
-      <div>
-        <div class="order-table">${o.table_name}</div>
-        <div class="order-id">${o.id}</div>
-      </div>
+      <div><div class="order-table">${o.table_name}</div><div class="order-id">${o.id}</div></div>
       ${elapsed(o.created_at)}
     </div>
     <div class="order-items">${itemsHtml}</div>
@@ -226,41 +195,32 @@ let prevIds = new Set();
 
 async function loadOrders() {
   try {
-    const r = await fetch('/api/table-orders', { headers: {'Authorization': 'Bearer ' + token} });
+    const r = await fetch('/api/table-orders', { headers: hdr });
     if (!r.ok) { if (r.status === 401) window.location.href = '/login'; return; }
     const { orders = [] } = await r.json();
 
     const curIds = new Set(orders.map(o => o.id));
-
     for (const id of curIds) {
       if (!prevIds.has(id)) {
         const o = orders.find(x => x.id === id);
         if (o) {
           const sub   = o.sub_number || 1;
           const isAdd = o.base_order_id && sub > 1;
-          notify(isAdd
-            ? `➕ Adicional #${sub} — ${o.table_name}`
-            : `🔔 Nuevo pedido — ${o.table_name}`);
+          notify(isAdd ? `➕ Adicional #${sub} — ${o.table_name}` : `🔔 Nuevo pedido — ${o.table_name}`);
         }
       }
     }
     prevIds = curIds;
 
     const groups = { recibido: [], en_preparacion: [], listo: [] };
-    orders.forEach(o => {
-      if (groups[o.status]) groups[o.status].push(o);
-    });
+    orders.forEach(o => { if (groups[o.status]) groups[o.status].push(o); });
 
-    [
-      ['recibido',      'col-recibido',    'cnt-recibido'],
-      ['en_preparacion','col-preparacion', 'cnt-preparacion'],
-      ['listo',         'col-listo',       'cnt-listo'],
-    ].forEach(([status, colId, cntId]) => {
+    [['recibido', 'col-recibido', 'cnt-recibido'],
+     ['en_preparacion', 'col-preparacion', 'cnt-preparacion'],
+     ['listo', 'col-listo', 'cnt-listo']].forEach(([status, colId, cntId]) => {
       const col = document.getElementById(colId);
       const cnt = document.getElementById(cntId);
-      if (col) col.innerHTML = groups[status].length
-        ? groups[status].map(renderCard).join('')
-        : '<div class="empty">Sin pedidos</div>';
+      if (col) col.innerHTML = groups[status].length ? groups[status].map(renderCard).join('') : '<div class="empty">Sin pedidos</div>';
       if (cnt) cnt.textContent = groups[status].length;
     });
 
@@ -270,6 +230,5 @@ async function loadOrders() {
 loadOrders();
 setInterval(loadOrders, 5000);
 </script>
-<script src="/static/roles.js"></script>
 </body>
 </html>

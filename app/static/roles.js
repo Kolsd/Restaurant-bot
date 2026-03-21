@@ -1,65 +1,44 @@
-/* app/static/roles.js */
+/* ═══════════════════════════════════════════════════
+   Mesio — Barra de Navegación Dinámica Multirol
+   app/static/roles.js
+═══════════════════════════════════════════════════ */
+
 document.addEventListener('DOMContentLoaded', () => {
-    const token = localStorage.getItem('rb_token');
-    const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-    // FIX: Leer el rol de la variable global rb_role
-    const storedRole = localStorage.getItem('rb_role') || ''; 
+    const roleNavContainer = document.getElementById('dynamic-role-nav');
+    if (!roleNavContainer) return;
+  
+    // Leer el rol guardado durante el login
+    const rawRole = localStorage.getItem('rb_role') || 'owner';
+    const roles = rawRole.toLowerCase().split(',');
     
-    if (!token || !restaurant) {
-        window.location.href = '/login';
-        return;
-    }
-
-    const userRoles = storedRole.toLowerCase();
-    const isAdmin = userRoles.includes('owner') || userRoles.includes('admin');
+    // Saber en qué página estamos actualmente
+    const currentPath = window.location.pathname;
     
-    const path = window.location.pathname;
-    let hasAccess = false;
-
-    // 1. VERIFICAR ACCESO
-    if (isAdmin) {
-        hasAccess = true;
-    } else if (path.includes('/mesero') && userRoles.includes('waiter')) {
-        hasAccess = true;
-    } else if (path.includes('/cocina') && userRoles.includes('cook')) {
-        hasAccess = true;
-    } else if (path.includes('/caja') && userRoles.includes('cashier')) {
-        hasAccess = true;
-    }
-
-    // Si no tiene acceso, lo pateamos a su vista principal o al login
-    if (!hasAccess && !path.includes('/dashboard')) {
-        alert('🔒 No tienes permisos para acceder a esta vista.');
-        if (userRoles.includes('cashier')) window.location.href = '/caja';
-        else if (userRoles.includes('waiter')) window.location.href = '/mesero';
-        else if (userRoles.includes('cook')) window.location.href = '/cocina';
-        else window.location.href = '/login';
-        return;
-    }
-
-    // 2. RENDERIZAR BARRA DE NAVEGACIÓN DINÁMICA
-    const navContainer = document.getElementById('dynamic-role-nav');
-    if (navContainer) {
-        let navHtml = '';
-        
-        if (isAdmin || userRoles.includes('waiter')) {
-            navHtml += `<a href="/mesero" class="role-btn ${path.includes('/mesero') ? 'active' : ''}">Mesero</a>`;
+    let html = '';
+  
+    // Si es Dueño/Admin, mostrarle todo por defecto
+    if (roles.includes('owner') || roles.includes('admin')) {
+        html += `<a href="/dashboard" class="role-btn ${currentPath === '/dashboard' ? 'active' : ''}">📊 Dashboard</a>`;
+        html += `<a href="/mesero" class="role-btn ${currentPath === '/mesero' ? 'active' : ''}">🍽️ Mesero</a>`;
+        html += `<a href="/caja" class="role-btn ${currentPath === '/caja' ? 'active' : ''}">💰 Caja</a>`;
+        html += `<a href="/cocina" class="role-btn ${currentPath === '/cocina' ? 'active' : ''}">👨‍🍳 Cocina</a>`;
+    } 
+    else {
+        // Dibujar solo los botones a los que tiene acceso
+        if (roles.includes('waiter')) {
+            html += `<a href="/mesero" class="role-btn ${currentPath === '/mesero' ? 'active' : ''}">🍽️ Mesero</a>`;
         }
-        if (isAdmin || userRoles.includes('cook')) {
-            navHtml += `<a href="/cocina" class="role-btn ${path.includes('/cocina') ? 'active' : ''}">Cocina</a>`;
+        if (roles.includes('cashier')) {
+            html += `<a href="/caja" class="role-btn ${currentPath === '/caja' ? 'active' : ''}">💰 Caja</a>`;
         }
-        if (isAdmin || userRoles.includes('cashier')) {
-            navHtml += `<a href="/caja" class="role-btn ${path.includes('/caja') ? 'active' : ''}">Caja</a>`;
-        }
-        if (isAdmin) {
-            navHtml += `<a href="/dashboard" class="role-btn">Admin</a>`;
-        }
-
-        if (navHtml.split('</a>').length > 2 || isAdmin) {
-            navContainer.innerHTML = navHtml;
-            navContainer.style.display = 'flex';
-        } else {
-            navContainer.style.display = 'none'; 
+        if (roles.includes('cook')) {
+            html += `<a href="/cocina" class="role-btn ${currentPath === '/cocina' ? 'active' : ''}">👨‍🍳 Cocina</a>`;
         }
     }
-});
+  
+    // Si se generó al menos un botón, mostrar la barra
+    if (html !== '') {
+        roleNavContainer.innerHTML = html;
+        roleNavContainer.style.display = 'flex';
+    }
+  });
