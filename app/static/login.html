@@ -7,81 +7,127 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 16px; padding: 2rem; width: 100%; max-width: 380px; }
+  .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 16px; padding: 2rem; width: 100%; max-width: 380px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
   .logo { width: 44px; height: 44px; background: #1D9E75; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 18px; margin-bottom: 1.5rem; }
   h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; color: #111; }
   .sub { font-size: 14px; color: #777; margin-bottom: 1.5rem; }
-  label { font-size: 13px; color: #555; display: block; margin-bottom: 4px; }
-  input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; margin-bottom: 1rem; }
+  label { font-size: 13px; color: #555; display: block; margin-bottom: 4px; font-weight: 500; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; margin-bottom: 1rem; transition: border-color 0.2s; }
   input:focus { border-color: #1D9E75; }
-  button { width: 100%; padding: 11px; background: #1D9E75; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; }
-  button:hover { background: #179063; }
+  button { width: 100%; padding: 12px; background: #1D9E75; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+  button:hover { opacity: 0.9; }
   .error { font-size: 13px; color: #c0392b; background: #fdf0ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 1rem; display: none; }
   .footer { text-align: center; font-size: 12px; color: #aaa; margin-top: 1.5rem; }
+  
+  /* Estilos para el Hub Multirol */
+  .role-btn { margin-bottom: 10px; border: 1px solid transparent; }
+  .role-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.05); opacity: 1; }
 </style>
 </head>
 <body>
+
 <div class="card">
-  <div class="logo">M</div>
-  <h1>Bienvenido</h1>
-  <p class="sub">Ingresa a tu panel de control</p>
-  <div class="error" id="error-msg"></div>
-  <label>Usuario</label>
-  <input type="text" id="username" placeholder="restaurante@email.com" />
-  <label>Contrasena</label>
-  <input type="password" id="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" />
-  <button onclick="doLogin()">Ingresar</button>
+  <div id="login-form">
+    <div class="logo">M</div>
+    <h1>Bienvenido</h1>
+    <p class="sub">Ingresa a tu panel de control</p>
+    <div class="error" id="error-msg"></div>
+    <label>Usuario / Correo</label>
+    <input type="text" id="username" placeholder="usuario@restaurante.com" />
+    <label>Contraseña</label>
+    <input type="password" id="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" />
+    <button onclick="doLogin()">Ingresar</button>
+  </div>
+
+  <div id="role-selector" style="display:none; text-align:center;">
+    <div class="logo" style="margin: 0 auto 1.5rem;">M</div>
+    <h1>Selecciona tu Panel</h1>
+    <p class="sub">Tienes acceso a múltiples áreas operativas</p>
+    <div id="role-buttons" style="display:flex; flex-direction:column;"></div>
+    <button onclick="location.reload()" style="background:none; color:#555; border:1px solid #ddd; margin-top:1rem; padding: 8px;">Cerrar sesión</button>
+  </div>
+
   <div class="footer">Mesio v2.0 · Powered by Claude AI</div>
 </div>
+
 <script>
-  async function doLogin() {
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value.trim();
-    const errorEl = document.getElementById('error-msg');
-    errorEl.style.display = 'none';
-    
-    if (!username || !password) {
-      errorEl.textContent = 'Por favor completa todos los campos';
-      errorEl.style.display = 'block';
-      return;
-    }
-    
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      
-      if (data.success) {
-        localStorage.setItem('rb_token', data.token);
-        localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
-        
-        // FIX: Guardar correctamente el rb_role para que dashboard-core.js no se rompa
-        const userRole = data.role ? data.role.toLowerCase() : 'owner';
-        localStorage.setItem('rb_role', userRole);
-        
-        if (userRole.includes('owner') || userRole.includes('admin')) {
-          window.location.href = '/dashboard';
-        } else if (userRole.includes('cashier')) {
-          window.location.href = '/caja';
-        } else if (userRole.includes('waiter')) {
-          window.location.href = '/mesero';
-        } else if (userRole.includes('cook')) {
-          window.location.href = '/cocina';
-        } else {
-          window.location.href = '/dashboard';
-        }
-      } else {
-        errorEl.textContent = data.error || 'Credenciales incorrectas';
-        errorEl.style.display = 'block';
-      }
-    } catch(e) {
-      errorEl.textContent = 'Error de conexion. Intenta de nuevo.';
-      errorEl.style.display = 'block';
-    }
+async function doLogin() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value.trim();
+  const errorEl = document.getElementById('error-msg');
+  errorEl.style.display = 'none';
+  
+  if (!username || !password) {
+    errorEl.textContent = 'Por favor completa todos los campos';
+    errorEl.style.display = 'block';
+    return;
   }
-  </script>
+  
+  const loginBtn = document.querySelector('#login-form button');
+  const prevText = loginBtn.textContent;
+  loginBtn.textContent = 'Verificando...';
+  loginBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    
+    if (data.success) {
+      localStorage.setItem('rb_token', data.token);
+      localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
+      
+      const roleStr = data.restaurant.role || 'owner';
+      const roles = roleStr.split(','); // Convertimos "waiter,cook" a arreglo
+
+      // 1. Si es Administrador o Dueño, va directo al HQ/Dashboard
+      if (roles.includes('owner') || roles.includes('admin')) {
+        window.location.href = '/dashboard';
+        return;
+      }
+
+      // 2. Si solo tiene 1 rol asignado, lo mandamos directo a su pantalla
+      if (roles.length === 1) {
+        if (roles[0] === 'cook') window.location.href = '/cocina';
+        else if (roles[0] === 'waiter') window.location.href = '/mesero';
+        else if (roles[0] === 'cashier') window.location.href = '/billing';
+        else window.location.href = '/dashboard'; // fallback de seguridad
+        return;
+      }
+
+      // 3. Si tiene múltiples roles (Multirol Operativo), le mostramos los botones
+      document.getElementById('login-form').style.display = 'none';
+      document.getElementById('role-selector').style.display = 'block';
+      
+      const selector = document.getElementById('role-buttons');
+      selector.innerHTML = ''; // Limpiar botones
+
+      if (roles.includes('waiter')) {
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/mesero'" style="background:#E1F5EE; color:#0F6E56;">🍽️ Entrar como Mesero</button>`;
+      }
+      if (roles.includes('cashier')) {
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/billing'" style="background:#FFF8E6; color:#BA7517;">💰 Entrar a Caja / Facturas</button>`;
+      }
+      if (roles.includes('cook')) {
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/cocina'" style="background:#FAEEDA; color:#854F0B;">👨‍🍳 Entrar a Cocina</button>`;
+      }
+
+    } else {
+      errorEl.textContent = data.error || 'Credenciales incorrectas';
+      errorEl.style.display = 'block';
+      loginBtn.textContent = prevText;
+      loginBtn.disabled = false;
+    }
+  } catch(e) {
+    errorEl.textContent = 'Error de conexión. Intenta de nuevo.';
+    errorEl.style.display = 'block';
+    loginBtn.textContent = prevText;
+    loginBtn.disabled = false;
+  }
+}
+</script>
 </body>
 </html>
