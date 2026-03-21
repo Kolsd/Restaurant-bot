@@ -175,7 +175,7 @@ async def get_prospects(
     priority: str = None,
     search: str = None,
     archived: bool = False,
-    limit: int = 200
+    limit: int = 10000  # 👈 Límite aumentado a 10,000 para evitar que desaparezcan
 ):
     await _require_auth(request)
     await _ensure_crm_tables()
@@ -199,7 +199,6 @@ async def get_prospects(
             *params
         )
         return {"prospects": [_ser(dict(r)) for r in rows]}
-
 
 @router.post("/prospects")
 async def create_prospect(request: Request, body: ProspectCreate):
@@ -566,16 +565,26 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
             phone = phone.replace(" ", "").replace("+", "").replace("-", "")
 
             try:
-                await conn.execute("""
-                    INSERT INTO prospects (restaurant_name, owner_name, phone, city, source)
-                    VALUES ($1, $2, $3, $4, 'csv_import')
-                """, name, owner, phone, city)
-                inserted += 1
+                # 👇 Verificamos si el teléfono (los últimos 10 dígitos) ya existe
+                existing = await conn.fetchval(
+                    "SELECT id FROM prospects WHERE phone ILIKE $1", 
+                    f"%{phone[-10:]}%"
+                )
+                
+                # Solo inserta si no existe previamente
+                if not existing:
+                    await conn.execute("""
+                        INSERT INTO prospects (restaurant_name, owner_name, phone, city, source)
+                        VALUES ($1, $2, $3, $4, 'csv_import')
+                    """, name, owner, phone, city)
+                    inserted += 1
+                else:
+                    # Si ya existe, lo cuenta como error/omitido para no duplicar
+                    errors += 1 
             except Exception as e:
                 errors += 1
 
     return {"success": True, "inserted": inserted, "errors": errors}
-
 # ── STATS / KANBAN COUNTS ─────────────────────────────────────────────
 @router.get("/stats")
 async def crm_stats(request: Request):
