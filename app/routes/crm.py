@@ -445,7 +445,27 @@ async def send_template(request: Request, body: SendTemplatePayload):
                 "type": "body",
                 "parameters": parameters_list
             })
-                            print(f"\n🚀 [ENVIANDO TEMPLATE a {phone}] Payload:\n{json.dumps(meta_payload, indent=2)}", flush=True)
+
+        wa_msg_id = ""
+        status    = "sent"
+        error_msg = ""
+
+        if token and phone_id:
+            try:
+                meta_payload = {
+                    "messaging_product": "whatsapp",
+                    "to": phone,
+                    "type": "template",
+                    "template": {
+                        "name": tpl["wa_name"],
+                        "language": {
+                            "policy": "deterministic",
+                            "code": "es_MX"
+                        },
+                        "components": components
+                    }
+                }
+                print(f"\n🚀 [ENVIANDO TEMPLATE a {phone}] Payload:\n{json.dumps(meta_payload, indent=2)}", flush=True)
 
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.post(
