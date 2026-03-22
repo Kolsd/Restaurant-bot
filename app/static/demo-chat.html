@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Mesio Bot</title>
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #ece5dd; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #phone-wrapper { width: 100%; max-width: 400px; height: 100vh; max-height: 850px; background: #e5ddd5; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.2); position: relative; }
+        @media (min-width: 450px) { #phone-wrapper { height: 90vh; border-radius: 20px; overflow: hidden; border: 8px solid #333; } }
+        #header { background: #075e54; color: white; padding: 15px; display: flex; align-items: center; justify-content: space-between; }
+        #scenario-bar { background: #128C7E; padding: 8px; text-align: center; color: white; font-size: 0.85em; display: flex; justify-content: center; gap: 10px; }
+        #scenario-bar button { background: white; border: none; padding: 6px 12px; border-radius: 15px; cursor: pointer; font-size: 0.9em; font-weight: bold; color: #128C7E; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
+        #scenario-bar button:active { transform: scale(0.95); }
+        #chat-window { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); background-size: cover; }
+        .msg { padding: 10px 14px; border-radius: 10px; max-width: 80%; word-wrap: break-word; font-size: 0.95em; line-height: 1.4; position: relative; box-shadow: 0 1px 1px rgba(0,0,0,0.1); white-space: pre-wrap; }
+        .bot { background: #fff; align-self: flex-start; border-top-left-radius: 0; }
+        .user { background: #dcf8c6; align-self: flex-end; border-top-right-radius: 0; }
+        #typing { font-size: 0.8em; color: #666; font-style: italic; display: none; margin: 0 20px 10px 20px; background: rgba(255,255,255,0.8); padding: 5px 10px; border-radius: 10px; align-self: flex-start; }
+        #input-area { display: flex; padding: 10px; background: #f0f0f0; gap: 10px; align-items: center; }
+        #msg-input { flex: 1; padding: 12px 15px; border: none; border-radius: 20px; outline: none; font-size: 1em; }
+        #send-btn { background: #128C7E; color: white; border: none; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <div id="phone-wrapper">
+        <div id="header">
+            <div>
+                <b style="font-size: 1.1em;">Mesio Bot 🤖</b><br>
+                <span style="font-size: 0.8em;">en línea</span>
+            </div>
+            <button onclick="startScenario('idle')" style="background: none; border: none; color: white; cursor: pointer; text-decoration: underline;">Limpiar</button>
+        </div>
+        <div id="scenario-bar">
+            <button onclick="startScenario('delivery')">🛵 Domicilio</button>
+            <button onclick="startScenario('mesa')">🍽️ En Mesa</button>
+        </div>
+        <div id="chat-window">
+            <div class="msg bot">¡Hola! Soy la demo interactiva de Mesio. Para ver cómo funciono, toca uno de los botones de arriba ("Domicilio" o "En Mesa") y sígueme la corriente. 👇</div>
+        </div>
+        <div id="typing">Mesio está escribiendo...</div>
+        <div id="input-area">
+            <input type="text" id="msg-input" placeholder="Escribe un mensaje..." onkeypress="if(event.key === 'Enter') sendMsg()">
+            <button id="send-btn" onclick="sendMsg()">➤</button>
+        </div>
+    </div>
+
+    <script>
+        const chatWindow = document.getElementById('chat-window');
+        const msgInput = document.getElementById('msg-input');
+        const typingIndicator = document.getElementById('typing');
+
+        // Variables de estado simuladas
+        let currentScenario = 'idle';
+        let step = 0;
+        let isTyping = false;
+
+        function appendMsg(text, sender) {
+            const div = document.createElement('div');
+            div.className = 'msg ' + sender;
+            div.innerText = text;
+            chatWindow.appendChild(div);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function sendMsg(overrideText = null) {
+            if (isTyping) return; // Evita que el usuario envíe mensajes mientras el bot "escribe"
+            
+            const text = overrideText || msgInput.value.trim();
+            if (!text) return;
+            
+            if (!overrideText) msgInput.value = '';
+            appendMsg(text, 'user');
+            
+            isTyping = true;
+            typingIndicator.style.display = 'block';
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+
+            // Tiempo de espera aleatorio entre 1 y 2.5 segundos (simula escritura humana/IA)
+            const delay = Math.floor(Math.random() * 1500) + 1000;
+
+            setTimeout(() => {
+                typingIndicator.style.display = 'none';
+                isTyping = false;
+                const botResponse = getBotResponse(text);
+                appendMsg(botResponse, 'bot');
+            }, delay);
+        }
+
+        // CEREBRO HARDCODEADO DEL BOT
+        function getBotResponse(text) {
+            const lowerText = text.toLowerCase();
+
+            // ─── FLUJO: DOMICILIO ───
+            if (currentScenario === 'delivery') {
+                if (step === 0) {
+                    step++;
+                    return "¡Hola! Claro que sí, con gusto tomo tu pedido para domicilio a esa dirección. 🛵\n\n¿Qué te gustaría ordenar hoy? Te cuento que la especialidad de la casa es la Hamburguesa Doble Queso. 🍔";
+                } else if (step === 1) {
+                    step++;
+                    return "¡Excelente elección! 🤤 Lo anoto por aquí.\n\n¿Deseas agregarle alguna bebida o unas papas fritas para acompañar tu orden?";
+                } else if (step === 2) {
+                    step++;
+                    return "Perfecto, todo anotado. 📝 El total de tu pedido con el envío incluido sería de $38,500 COP.\n\n¿Te genero el link de pago seguro de Wompi para confirmar tu orden?";
+                } else if (step === 3) {
+                    step = 0; // Termina el flujo
+                    currentScenario = 'idle';
+                    return "¡Genial! Aquí tienes tu enlace de pago: https://wompi.co/demo-link 💳\n\nApenas recibamos la confirmación, la cocina pondrá manos a la obra.\n\n*(Fin de la demo. Toca otro botón arriba para ver más flujos)*";
+                }
+            } 
+            
+            // ─── FLUJO: EN MESA ───
+            else if (currentScenario === 'mesa') {
+                if (step === 0) {
+                    step++;
+                    return "¡Hola! Qué gusto tenerte aquí en la Mesa 3. 🍽️\n\nAquí tienes nuestro menú digital interactivo: mesioai.com/menu\n\n¿Ya sabes qué vas a pedir o te gustaría que te dé una recomendación según lo que más piden?";
+                } else if (step === 1) {
+                    step++;
+                    return "¡Marchando! 👨‍🍳 Ya envié la orden directamente a la pantalla de la cocina.\n\nTe avisaré por aquí mismo cuando tu pedido esté en camino. ¿Te pido algo de tomar mientras esperas?";
+                } else if (step === 2) {
+                    step++;
+                    return "¡Claro que sí! Enseguida le digo a uno de nuestros meseros que te lo lleve a la mesa. 🏃‍♂️💨";
+                } else if (step === 3) {
+                    step = 0; // Termina el flujo
+                    currentScenario = 'idle';
+                    return "Por cierto, cuando termines de comer, puedes pedirme la cuenta por aquí mismo y si quieres te la divido entre tus amigos. 😉\n\n*(Fin de la demo. Toca otro botón arriba para ver más flujos)*";
+                }
+            }
+            
+            // ─── FLUJO: GENÉRICO / FUERA DE ESCENARIO ───
+            else {
+                if (lowerText.includes("hola") || lowerText.includes("buenas")) {
+                    return "¡Hola! Soy la versión de demostración comercial de Mesio. 🤖\n\nPara vivir la mejor experiencia de esta demo, por favor selecciona uno de los botones arriba ('🛵 Domicilio' o '🍽️ En Mesa').";
+                } else if (lowerText.includes("gracias")) {
+                    return "¡Con todo gusto! ¿Te puedo ayudar con algo más?";
+                }
+                
+                // Respuesta por si el prospecto intenta romper el bot
+                return "Entiendo. Como esta es una versión de demostración y no estoy conectado a mi cerebro principal de Inteligencia Artificial, mis respuestas son limitadas por ahora.\n\nTe invito a probar mis flujos guiados tocando los botones de arriba. 👆";
+            }
+        }
+
+        // Inicia el flujo simulando que el usuario envió el primer mensaje
+        function startScenario(type) {
+            chatWindow.innerHTML = ''; // Limpia el chat
+            currentScenario = type;
+            step = 0;
+            
+            if (type === 'delivery') {
+                sendMsg("Hola, quiero pedir un domicilio a la Calle 100 #15-20");
+            } else if (type === 'mesa') {
+                sendMsg("Hola, estoy en la Mesa 3 y quiero ver el menú");
+            } else {
+                appendMsg('¡Memoria borrada! Toca un botón para iniciar una demo.', 'bot');
+            }
+        }
+    </script>
+</body>
+</html>
