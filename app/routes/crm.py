@@ -666,6 +666,10 @@ async def crm_page():
 
 # ── INBOUND WEBHOOK HOOK — registra respuestas de prospectos ─────────
 async def register_inbound_from_prospect(phone: str, message: str, wa_message_id: str = ""):
+    """
+    Llamado desde chat.py cuando llega un mensaje de WhatsApp.
+    Si el número no existe, lo crea. Si existe, registra la interacción.
+    """
     try:
         pool = await db.get_pool()
         # Limpiamos el número de Meta (que ya viene con código de país)
@@ -685,7 +689,8 @@ async def register_inbound_from_prospect(phone: str, message: str, wa_message_id
                     INSERT INTO prospects (restaurant_name, phone, source, stage)
                     VALUES ($1, $2, 'inbound_whatsapp', 'respondio')
                     RETURNING id, stage
-                """, f"Nuevo Inbound (+{clean[-4:]})", clean)            
+                """, f"Nuevo Inbound (+{clean[-4:]})", clean)
+            
             pid   = row["id"]
             stage = row["stage"]
 
@@ -696,11 +701,11 @@ async def register_inbound_from_prospect(phone: str, message: str, wa_message_id
                 VALUES ($1,'inbound','whatsapp',$2,'received',$3)
             """, pid, message, wa_message_id)
 
-            # 2. 🔥 FIX: Actualizamos la etapa a 'respondio' si es un prospecto frío, 
+            # 🔥 FIX: Actualizamos la etapa a 'respondio' si es un prospecto frío, 
             # o si estaba en PERDIDO / CERRADO (el cliente se arrepintió o volvió)
             new_stage = "respondio" if stage in ("prospecto", "contactado", "perdido", "cerrado") else stage
             
-            # 3. Forzamos archived=FALSE por si el prospecto estaba en la papelera
+            # Forzamos archived=FALSE por si el prospecto estaba en la papelera
             await conn.execute("""
                 UPDATE prospects
                 SET last_contact_at=NOW(), updated_at=NOW(), stage=$2, archived=FALSE
