@@ -3,6 +3,11 @@
    app/static/roles.js
 ═══════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════
+   Mesio — Barra de Navegación Dinámica Multirol
+   app/static/roles.js
+═══════════════════════════════════════════════════ */
+
 document.addEventListener('DOMContentLoaded', () => {
     const roleNavContainer = document.getElementById('dynamic-role-nav');
     if (!roleNavContainer) return;
@@ -36,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
             html += `<a href="/cocina" class="role-btn ${currentPath === '/cocina' ? 'active' : ''}">👨‍🍳 Cocina</a>`;
         }
         if (roles.includes('delivery') || roles.includes('domiciliario')) {
-            html += `<a href="/domiciliario" class=\"role-btn ${currentPath === '/domiciliario' ? 'active' : ''}\">🛵 Domicilios</a>`;
+            html += `<a href="/domiciliario" class="role-btn ${currentPath === '/domiciliario' ? 'active' : ''}">🛵 Domicilios</a>`;
         }
     }
   
@@ -45,4 +50,4 @@ document.addEventListener('DOMContentLoaded', () => {
         roleNavContainer.innerHTML = html;
         roleNavContainer.style.display = 'flex';
     }
-  });
+});

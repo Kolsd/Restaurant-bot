@@ -8,6 +8,7 @@ from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
+from app.services.auth import verify_token
 
 router = APIRouter()
 
@@ -106,7 +107,7 @@ async def payment_confirm(request: Request):
 class UpdateOrderStatusRequest(BaseModel):
     status: str
 
-@router.get("/api/delivery/orders")
+@router.get("/delivery/orders")
 async def get_delivery_orders():
     # Traemos los pedidos que el domiciliario necesita ver
     orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'entregado'])
@@ -152,8 +153,11 @@ async def send_delivery_notification(phone: str, status: str):
         print(f"❌ Error enviando notificación de delivery: {e}")
 
 
-@router.get("/api/delivery/check-updates")
-async def check_delivery_updates():
+@router.get("/delivery/check-updates")
+async def check_delivery_updates(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not await verify_token(token): raise HTTPException(status_code=401, detail="No autorizado")
+
     """Consulta ultra-ligera para saber si hay cambios en los pedidos del domiciliario"""
     pool = await db.get_pool()
     async with pool.acquire() as conn:
@@ -167,14 +171,20 @@ async def check_delivery_updates():
         return {"hash": current_state_hash}
 
 
-@router.get("/api/delivery/orders")
-async def get_delivery_orders():
+@router.get("/delivery/orders")
+async def get_delivery_orders(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not await verify_token(token): raise HTTPException(status_code=401, detail="No autorizado")
+
     orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'entregado'])
     return {"orders": orders}
 
 
-@router.patch("/api/delivery/orders/{order_id}/status")
-async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest):
+@router.patch("/delivery/orders/{order_id}/status")
+async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not await verify_token(token): raise HTTPException(status_code=401, detail="No autorizado")
+
     # 1. Buscamos el pedido original en la base de datos para obtener el número del cliente
     order = await db.db_get_order(order_id)
     if not order:
@@ -184,7 +194,6 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest):
     await db.db_update_order_status(order_id, req.status)
     
     # 3. Disparamos el mensaje de WhatsApp en SEGUNDO PLANO
-    # Solo si el estado es 'en_camino' o 'entregado'
     if req.status in ['en_camino', 'entregado']:
         asyncio.create_task(send_delivery_notification(order["phone"], req.status))
         

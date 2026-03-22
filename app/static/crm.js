@@ -268,3 +268,280 @@ setInterval(async () => {
        }
     }
   }, 4000);
+
+  // ════════════════════════════════════════════════════════════
+// ── FUNCIONES FALTANTES (MODALES, TEMPLATES, NOTAS Y CSV) ──
+// ════════════════════════════════════════════════════════════
+
+// ── MODALES BÁSICOS ──
+function openAddModal() { document.getElementById('modal-add').style.display = 'flex'; }
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+// ── PROSPECTOS Y CSV ──
+async function saveProspect() {
+  const name = document.getElementById('f-name').value.trim();
+  const owner = document.getElementById('f-owner').value.trim();
+  const phone = document.getElementById('f-phone').value.trim();
+  const city = document.getElementById('f-city').value.trim();
+  
+  if (!name || !phone) return alert('El nombre del restaurante y el teléfono son obligatorios.');
+
+  const btn = document.getElementById('btn-save-prospect');
+  btn.disabled = true; btn.textContent = 'Guardando...';
+
+  const res = await api('POST', '/prospects', { restaurant_name: name, owner_name: owner, phone: phone, city: city, stage: 'prospecto' });
+  
+  btn.disabled = false; btn.textContent = 'Guardar';
+  if (res && res.success) {
+    closeModal('modal-add');
+    document.getElementById('f-name').value = ''; document.getElementById('f-owner').value = '';
+    document.getElementById('f-phone').value = ''; document.getElementById('f-city').value = '';
+    toast('Prospecto creado exitosamente');
+    loadProspects(); loadStats();
+  }
+}
+
+async function handleCSVUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  toast('Subiendo y procesando CSV...', 'info');
+  const r = await fetch('/api/crm/upload-csv', { method: 'POST', headers: { 'Authorization': 'Bearer ' + ADMIN_KEY }, body: formData });
+  if (r.ok) {
+    const data = await r.json();
+    toast(`CSV Listo: ${data.inserted} guardados, ${data.errors} omitidos.`);
+    loadProspects(); loadStats();
+  } else {
+    toast('Error al procesar el archivo CSV', 'err');
+  }
+  e.target.value = ''; // Limpiar input para permitir subir el mismo archivo otra vez
+}
+
+// ── NOTAS Y ESTADOS (INBOX) ──
+async function loadNotes(pid) {
+  const res = await api('GET', `/prospects/${pid}/notes`);
+  const list = document.getElementById('notes-list');
+  list.innerHTML = (res?.notes||[]).map(n => `
+    <div style="background:var(--bg); border:1px solid var(--border); padding:10px; border-radius:8px; margin-bottom:8px;">
+      <div style="font-size:0.75rem; color:var(--muted); margin-bottom:5px;">${NOTE_ICONS[n.note_type] || '📝'} ${new Date(n.created_at).toLocaleString()} por ${n.author}</div>
+      <div style="font-size:0.85rem; white-space: pre-wrap;">${n.content}</div>
+    </div>
+  `).join('');
+}
+
+async function addNote() {
+  const type = document.getElementById('note-type').value;
+  const content = document.getElementById('note-input').value.trim();
+  if(!content) return;
+  await api('POST', `/prospects/${currentPid}/notes`, { content, note_type: type });
+  document.getElementById('note-input').value = '';
+  loadNotes(currentPid);
+  toast('Nota guardada');
+}
+
+async function updateInboxStage() {
+  const stage = document.getElementById('inbox-stage-select').value;
+  await api('PATCH', `/prospects/${currentInboxPid}/stage`, { stage });
+  loadProspects(); loadStats(); toast('Etapa actualizada');
+}
+
+// ── GESTIÓN DE TEMPLATES (CREAR Y ELIMINAR) ──
+function openTemplatesListModal() {
+  renderTemplatesList();
+  document.getElementById('modal-templates-list').style.display = 'flex';
+}
+
+function renderTemplatesList() {
+  const c = document.getElementById('templates-list-content');
+  if (!templates.length) { c.innerHTML = '<p style="color:var(--muted);font-size:0.8rem;">No hay templates creados aún.</p>'; return; }
+  
+  c.innerHTML = templates.map(t => `
+    <div style="background:var(--bg3); border:1px solid var(--border); padding:10px; border-radius:8px; margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <b style="font-size:0.9rem;">${t.name}</b>
+        <button class="btn btn-red btn-xs" onclick="deleteTemplate(${t.id})" style="padding:4px 8px; font-size:10px;">🗑 Eliminar</button>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted); margin-bottom:5px;">ID Meta: ${t.wa_name}</div>
+      <div style="font-size:0.8rem; background:var(--bg); padding:8px; border-radius:4px;">${t.body}</div>
+    </div>
+  `).join('');
+}
+
+async function saveTemplate() {
+  const name = document.getElementById('nt-name').value.trim();
+  const wa_name = document.getElementById('nt-wa-name').value.trim();
+  const body = document.getElementById('nt-body').value.trim();
+  const pStr = document.getElementById('nt-params').value.trim();
+  
+  if (!name || !wa_name || !body) return alert('Los campos Nombre, ID y Cuerpo son obligatorios.');
+  
+  const params = pStr ? pStr.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  const res = await api('POST', '/templates', { name, wa_name, body, params, category: 'MARKETING' });
+  if (res && res.success) {
+    toast('Template guardado en base de datos');
+    document.getElementById('nt-name').value = ''; document.getElementById('nt-wa-name').value = '';
+    document.getElementById('nt-body').value = ''; document.getElementById('nt-params').value = '';
+    await loadTemplates();
+    renderTemplatesList();
+  }
+}
+
+async function deleteTemplate(tid) {
+  if (!confirm('¿Seguro que deseas eliminar este template permanentemente?')) return;
+  await api('DELETE', `/templates/${tid}`);
+  toast('Template eliminado');
+  await loadTemplates();
+  renderTemplatesList();
+}
+
+// ── ENVÍO DE TEMPLATES MASIVOS O INDIVIDUALES ──
+function openTemplateModal() {
+  if (!templates.length) return alert('No tienes templates guardados. Créalos primero en "Mis Templates".');
+  
+  const sel = document.getElementById('tpl-select');
+  sel.innerHTML = '<option value="">-- Selecciona un template --</option>' + templates.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+  
+  const plist = document.getElementById('tpl-prospect-list');
+  if (selectedIds.size === 0) {
+     plist.innerHTML = '<div style="padding:10px; color:var(--amber); font-size:0.8rem;">⚠️ No has seleccionado prospectos. Seleccionalos en la "Tabla Base" primero, o envíalo directo desde un chat abierto.</div>';
+     document.getElementById('btn-send-tpl').disabled = true;
+  } else {
+     const selectedP = prospects.filter(p => selectedIds.has(p.id));
+     plist.innerHTML = selectedP.map(p => `<div style="padding:5px 10px; border-bottom:1px solid var(--border); font-size:0.8rem;">${p.restaurant_name} (${p.phone})</div>`).join('');
+     document.getElementById('btn-send-tpl').disabled = false;
+  }
+  
+  document.getElementById('tpl-params-section').style.display = 'none';
+  document.getElementById('send-results').style.display = 'none';
+  document.getElementById('modal-template-send').style.display = 'flex';
+}
+
+function onTemplateSelect() {
+  const tid = parseInt(document.getElementById('tpl-select').value);
+  const tpl = templates.find(t => t.id === tid);
+  if (!tpl) {
+    document.getElementById('tpl-preview-text').textContent = '';
+    document.getElementById('tpl-params-section').style.display = 'none';
+    return;
+  }
+  document.getElementById('tpl-preview-text').textContent = tpl.body;
+  
+  const psec = document.getElementById('tpl-params-section');
+  const pinputs = document.getElementById('tpl-params-inputs');
+  if (tpl.params && tpl.params.length > 0) {
+    psec.style.display = 'block';
+    pinputs.innerHTML = tpl.params.map((p, i) => `
+      <div style="margin-bottom:8px;">
+        <label style="font-size:0.75rem; color:var(--muted);">${p} ({{${i+1}}})</label>
+        <input type="text" class="form-input tpl-param-val" placeholder="Pista de auto-rellenado: {nombre_restaurante} o {nombre_dueño}">
+      </div>
+    `).join('');
+  } else {
+    psec.style.display = 'none';
+    pinputs.innerHTML = '';
+  }
+}
+
+async function doSendTemplate() {
+  const tid = parseInt(document.getElementById('tpl-select').value);
+  if (!tid) return alert('Por favor, selecciona un template.');
+  
+  const inputs = document.querySelectorAll('.tpl-param-val');
+  const paramValues = Array.from(inputs).map(i => i.value.trim());
+  if (paramValues.some(v => !v)) return alert('Debes llenar todas las variables del template.');
+
+  const idsToSend = Array.from(selectedIds);
+  if (!idsToSend.length) return alert('No hay prospectos seleccionados.');
+
+  const params_map = {};
+  idsToSend.forEach(id => {
+    const prospect = prospects.find(x => x.id === id);
+    // Reemplazo inteligente de variables (Auto-rellenado)
+    const finalParams = paramValues.map(v => {
+      if (v.includes('{nombre_restaurante}')) return prospect.restaurant_name;
+      if (v.includes('{nombre_dueño}')) return prospect.owner_name || 'Dueño';
+      return v;
+    });
+    params_map[id] = finalParams;
+  });
+
+  const btn = document.getElementById('btn-send-tpl');
+  btn.disabled = true; btn.textContent = 'Enviando a Meta... ⏳';
+
+  const res = await api('POST', '/send-template', { template_id: tid, prospect_ids: idsToSend, params_map });
+  
+  btn.disabled = false; btn.textContent = '📤 Enviar a seleccionados';
+
+  if (res && res.success) {
+    document.getElementById('send-results').style.display = 'block';
+    document.getElementById('send-results-list').innerHTML = res.results.map(r => `
+      <div style="font-size:0.8rem; color:${r.status==='sent'?'var(--g)':'var(--red)'}; border-bottom:1px solid var(--border); padding:4px 0;">
+        ${r.phone}: ${r.status === 'sent' ? 'Enviado ✅' : 'Error ❌ ('+r.error+')'}
+      </div>
+    `).join('');
+    toast(`Envíos exitosos: ${res.sent} | Errores: ${res.errors}`);
+    loadProspects();
+  }
+}
+
+function sendSingleTemplateFromInbox() {
+  if (!currentInboxPid) return;
+  selectedIds.clear();
+  selectedIds.add(currentInboxPid);
+  openTemplateModal();
+}
+
+// ── LÓGICA DE SELECCIÓN EN TABLA BASE ──
+// Reescribimos renderTable para enlazar correctamente los checkboxes
+function renderTable() {
+  const tbody = document.getElementById('prospects-tbody');
+  tbody.innerHTML = prospects.map(p => `
+    <tr onclick="openPanel(${p.id},'info')" style="cursor:pointer;">
+      <td onclick="event.stopPropagation()">
+         <input type="checkbox" class="row-check" value="${p.id}" ${selectedIds.has(p.id) ? 'checked' : ''} onchange="toggleCheck(${p.id})">
+      </td>
+      <td>${p.restaurant_name}</td>
+      <td>${p.phone}</td>
+      <td><span class="stage-badge">${p.stage}</span></td>
+      <td><button class="btn btn-outline btn-xs" onclick="event.stopPropagation(); openPanel(${p.id},'chat')">💬</button></td>
+    </tr>`).join('');
+}
+
+function toggleAllCheck() {
+  const isChecked = document.getElementById('check-all').checked;
+  const checkboxes = document.querySelectorAll('.row-check');
+  checkboxes.forEach(c => {
+    c.checked = isChecked;
+    const id = parseInt(c.value);
+    if(isChecked) selectedIds.add(id); else selectedIds.delete(id);
+  });
+  updateBulkBar();
+}
+
+function toggleCheck(id) {
+  if(selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+  updateBulkBar();
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.querySelectorAll('.row-check, #check-all').forEach(c => c.checked = false);
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  const count = document.getElementById('bulk-bar-count');
+  const badge = document.getElementById('selected-count-badge');
+  
+  if (selectedIds.size > 0) {
+    if(bar) bar.style.display = 'flex';
+    if(count) count.textContent = `${selectedIds.size} seleccionados`;
+    if(badge) { badge.style.display = 'inline-block'; badge.textContent = selectedIds.size; }
+  } else {
+    if(bar) bar.style.display = 'none';
+    if(badge) badge.style.display = 'none';
+  }
+}
