@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         html += `<a href="/mesero" class="role-btn ${currentPath === '/mesero' ? 'active' : ''}">🍽️ Mesero</a>`;
         html += `<a href="/caja" class="role-btn ${currentPath === '/caja' ? 'active' : ''}">💰 Caja</a>`;
         html += `<a href="/cocina" class="role-btn ${currentPath === '/cocina' ? 'active' : ''}">👨‍🍳 Cocina</a>`;
+        html += `<a href="/domiciliario" class="role-btn ${currentPath === '/domiciliario' ? 'active' : ''}">🛵 Domicilios</a>`;
     } 
     else {
         // Dibujar solo los botones a los que tiene acceso
@@ -33,6 +34,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (roles.includes('cook')) {
             html += `<a href="/cocina" class="role-btn ${currentPath === '/cocina' ? 'active' : ''}">👨‍🍳 Cocina</a>`;
+        }
+        if (roles.includes('delivery') || roles.includes('domiciliario')) {
+            html += `<a href="/domiciliario" class=\"role-btn ${currentPath === '/domiciliario' ? 'active' : ''}\">🛵 Domicilios</a>`;
         }
     }
   
