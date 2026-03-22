@@ -6,6 +6,8 @@ from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
 
 router = APIRouter()
+
+# Sin contraseñas por defecto por seguridad
 WOMPI_EVENTS_SECRET = os.getenv("WOMPI_EVENTS_SECRET")
 
 class ClearCartRequest(BaseModel):
@@ -45,14 +47,16 @@ async def view_cart(phone: str, bot_number: str):
     return {"summary": summary}
 
 @router.post("/payment/wompi-webhook")
-# 🚨 FIX DE SEGURIDAD: Si no hay secreto configurado, rechazamos cualquier intento de pago
-    if not WOMPI_EVENTS_SECRET:
-        print("🚨 ALERTA: Intento de webhook de Wompi, pero WOMPI_EVENTS_SECRET no está configurado en el servidor.", flush=True)
-        raise HTTPException(status_code=500, detail="Configuración de pasarela de pagos incompleta")
 async def wompi_webhook(request: Request):
+    # 🚨 FIX DE SEGURIDAD CON INDENTACIÓN CORRECTA
+    if not WOMPI_EVENTS_SECRET:
+        print("🚨 ALERTA: Intento de webhook de Wompi, pero WOMPI_EVENTS_SECRET no está configurado.", flush=True)
+        raise HTTPException(status_code=500, detail="Configuración de pasarela de pagos incompleta")
+
     body = await request.json()
     body_bytes = await request.body()
     signature_header = request.headers.get("x-event-checksum", "")
+    
     expected_sig = hashlib.sha256(
         (body_bytes.decode() + WOMPI_EVENTS_SECRET).encode()
     ).hexdigest()
