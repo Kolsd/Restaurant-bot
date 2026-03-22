@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesio — Domiciliario</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        body { background: #f0f2f5; color: #333; padding-bottom: 70px; }
+        
+        /* Topbar estilo Mesio */
+        .topbar { position: sticky; top: 0; background: #fff; border-bottom: 1px solid #ddd; padding: 15px; display: flex; align-items: center; justify-content: space-between; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .topbar h2 { font-size: 18px; color: #1D9E75; }
+        
+        /* Contenedor principal */
+        .container { padding: 15px; }
+
+        /* Tarjetas de Pedido */
+        .order-card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #eee; }
+        .order-header { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; }
+        .order-id { font-weight: bold; font-size: 16px; color: #555; }
+        
+        /* Etiquetas de Pago */
+        .badge { padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 14px; }
+        .badge.pagado { background: #E1F5EE; color: #1D9E75; }
+        .badge.cobrar { background: #ffebee; color: #c62828; font-size: 16px; border: 2px solid #c62828; }
+
+        .address { font-size: 18px; font-weight: bold; margin: 10px 0; color: #111; }
+        .notes { font-size: 14px; color: #666; background: #fff9c4; padding: 8px; border-radius: 6px; margin-bottom: 15px; }
+        
+        /* Botones de Acción Gigantes */
+        .action-btns { display: flex; gap: 10px; margin-bottom: 15px; }
+        .btn { flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; text-decoration: none; }
+        .btn-waze { background: #e3f2fd; color: #1565c0; }
+        .btn-wa { background: #e8f5e9; color: #2e7d32; }
+        
+        .btn-main { width: 100%; padding: 16px; font-size: 18px; color: white; border-radius: 10px; margin-top: 10px; }
+        .btn-start { background: #1976d2; }
+        .btn-deliver { background: #1D9E75; }
+
+        /* Navegación Inferior (Tabs móviles) */
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; display: flex; border-top: 1px solid #ddd; padding-bottom: env(safe-area-inset-bottom); z-index: 100; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
+        .nav-item { flex: 1; text-align: center; padding: 15px 0; font-size: 14px; color: #666; font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent; }
+        .nav-item.active { color: #1D9E75; border-bottom: 3px solid #1D9E75; background: #f9fbf9; }
+
+        /* Esconder secciones no activas */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body>
+
+    <div class="topbar">
+        <h2>🛵 Domicilios</h2>
+        <div id="dynamic-role-nav" style="display:none;"></div> <button onclick="logout()" style="border:none; background:none; color:red; font-weight:bold;">Salir</button>
+    </div>
+
+    <div class="container">
+        <div id="tab-recoger" class="tab-content active">
+            <h3 style="margin-bottom: 15px; color: #555;">Esperando en Cocina 🧑‍🍳</h3>
+            <div id="list-recoger">Cargando...</div>
+        </div>
+
+        <div id="tab-ruta" class="tab-content">
+            <h3 style="margin-bottom: 15px; color: #555;">En mi maleta 🛵</h3>
+            <div id="list-ruta">Cargando...</div>
+        </div>
+
+        <div id="tab-entregados" class="tab-content">
+            <h3 style="margin-bottom: 15px; color: #555;">Completados hoy ✅</h3>
+            <div id="list-entregados">Cargando...</div>
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <div class="nav-item active" onclick="switchTab('recoger', this)">📦 Por Recoger</div>
+        <div class="nav-item" onclick="switchTab('ruta', this)">🛵 En Ruta</div>
+        <div class="nav-item" onclick="switchTab('entregados', this)">✅ Entregados</div>
+    </div>
+
+    <script src="/static/roles.js"></script>
+    <script>
+        // --- 1. Autenticación Básica ---
+        const token = localStorage.getItem('rb_token');
+        if (!token) window.location.href = '/login';
+
+        const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+        function logout() {
+            localStorage.clear();
+            window.location.href = '/login';
+        }
+
+        // --- 2. Lógica de Pestañas ---
+        function switchTab(tabId, element) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            document.getElementById('tab-' + tabId).classList.add('active');
+            fetchOrders();
+        }
+
+        // --- 3. Cargar Pedidos ---
+        async function fetchOrders() {
+            try {
+                const res = await fetch('/api/delivery/orders', { headers });
+                if (!res.ok) {
+                    if(res.status === 401) logout();
+                    return;
+                }
+                const data = await res.json();
+                renderOrders(data.orders || []);
+            } catch (err) {
+                console.error("Error al cargar pedidos:", err);
+            }
+        }
+
+        function renderOrders(orders) {
+            const listRecoger = document.getElementById('list-recoger');
+            const listRuta = document.getElementById('list-ruta');
+            const listEntregados = document.getElementById('list-entregados');
+
+            listRecoger.innerHTML = ''; listRuta.innerHTML = ''; listEntregados.innerHTML = '';
+
+            let recogerCount = 0, rutaCount = 0, entregadoCount = 0;
+
+            orders.forEach(order => {
+                const isPaid = order.paid;
+                const paymentBadge = isPaid 
+                    ? `<span class="badge pagado">✅ PAGADO</span>`
+                    : `<span class="badge cobrar">💰 COBRAR: $${order.total.toLocaleString('es-CO')}</span>`;
+                
+                // Limpiar teléfono para el link de WhatsApp
+                const cleanPhone = order.phone.replace(/\D/g, '');
+                const wazeLink = `https://waze.com/ul?q=${encodeURIComponent(order.address || '')}`;
+                const waLink = `https://wa.me/${cleanPhone}`;
+
+                const cardHtml = `
+                    <div class="order-card">
+                        <div class="order-header">
+                            <span class="order-id">#${order.id.slice(0,6)}</span>
+                            ${paymentBadge}
+                        </div>
+                        <div class="address">📍 ${order.address || 'Sin dirección'}</div>
+                        ${order.notes ? `<div class="notes">📝 <b>Nota:</b> ${order.notes}</div>` : ''}
+                        
+                        <div class="action-btns">
+                            <a href="${wazeLink}" target="_blank" class="btn btn-waze">🗺️ Waze</a>
+                            <a href="${waLink}" target="_blank" class="btn btn-wa">💬 Llama/WA</a>
+                        </div>
+                        
+                        ${order.status === 'listo' ? `<button class="btn btn-main btn-start" onclick="updateStatus('${order.id}', 'en_camino')">🚀 Iniciar Ruta</button>` : ''}
+                        ${order.status === 'en_camino' ? `<button class="btn btn-main btn-deliver" onclick="updateStatus('${order.id}', 'entregado')">✅ Marcar Entregado</button>` : ''}
+                        ${order.status === 'entregado' ? `<p style="text-align:center; color:#1D9E75; font-weight:bold;">Entregado correctamente</p>` : ''}
+                    </div>
+                `;
+
+                if (order.status === 'listo') { listRecoger.innerHTML += cardHtml; recogerCount++; }
+                else if (order.status === 'en_camino') { listRuta.innerHTML += cardHtml; rutaCount++; }
+                else if (order.status === 'entregado') { listEntregados.innerHTML += cardHtml; entregadoCount++; }
+            });
+
+            if(recogerCount === 0) listRecoger.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">No hay pedidos por recoger</p>';
+            if(rutaCount === 0) listRuta.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">No llevas pedidos en ruta</p>';
+            if(entregadoCount === 0) listEntregados.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">No has entregado pedidos aún</p>';
+        }
+
+        // --- 4. Actualizar Estado ---
+        async function updateStatus(orderId, newStatus) {
+            // Animación de carga en el botón
+            try {
+                const res = await fetch(`/api/delivery/orders/${orderId}/status`, {
+                    method: 'PATCH',
+                    headers: headers,
+                    body: JSON.stringify({ status: newStatus })
+                });
+                if (res.ok) {
+                    fetchOrders(); // Recarga las listas para mover la tarjeta de pestaña
+                } else {
+                    alert('Error al actualizar el pedido');
+                }
+            } catch (err) {
+                alert('Error de conexión');
+            }
+        }
+
+    // --- 5. Polling Optimizado (Check Updates) ---
+    let currentOrdersHash = null;
+
+async function checkUpdates() {
+    try {
+        const res = await fetch('/api/delivery/check-updates', { headers });
+        if (res.ok) {
+            const data = await res.json();
+            // Si el hash que llega es diferente al que tenemos guardado, hubo un cambio
+            if (data.hash !== currentOrdersHash) {
+                currentOrdersHash = data.hash;
+                fetchOrders(); // Solo aquí descargamos la data pesada y redibujamos
+            }
+        }
+    } catch (err) {
+        // Si falla en silencio (pérdida de red del domiciliario), no hacemos nada
+    }
+}
+
+// --- Iniciar ---
+checkUpdates(); // Llama la primera vez
+// Ahora podemos revisar cada 5 segundos sin saturar la base de datos!
+setInterval(checkUpdates, 5000);
+
+</script>
+</body>
+</html>

@@ -98,6 +98,11 @@ async def billing_page():
     p = STATIC / "billing.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
 
+@router.get("/domiciliario", response_class=HTMLResponse)
+async def domiciliario_page():
+    p = STATIC / "domiciliario.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)    
+
 # ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
 async def auth_login(request: LoginRequest):

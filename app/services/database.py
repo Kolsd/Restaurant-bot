@@ -256,6 +256,21 @@ async def db_get_all_orders(bot_number: str = None):
             rows = await conn.fetch("SELECT * FROM orders ORDER BY created_at DESC")
         return [_serialize(dict(r)) for r in rows]
 
+async def db_get_delivery_orders(status_list: list):
+    """Obtiene los pedidos de domicilio filtrados por una lista de estados"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM orders WHERE order_type='delivery' AND status = ANY($1) ORDER BY created_at ASC", 
+            status_list
+        )
+        return [_serialize(dict(r)) for r in rows]
+
+async def db_update_order_status(order_id: str, new_status: str):
+    """Actualiza el estado de un pedido (ej. listo -> en_camino -> entregado)"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
 
 # ── CONVERSACIONES ───────────────────────────────────────────────────
 async def db_get_history(phone: str, bot_number: str = "") -> list:

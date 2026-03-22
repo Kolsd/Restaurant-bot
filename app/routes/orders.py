@@ -1,9 +1,13 @@
 import hashlib
 import os
+import httpx   
+import asyncio
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -98,3 +102,90 @@ async def payment_confirm(request: Request):
         "order_id": order_id,
         "status": status
     }
+
+    class UpdateOrderStatusRequest(BaseModel):
+    status: str
+
+@router.get("/api/delivery/orders")
+async def get_delivery_orders():
+    # Traemos los pedidos que el domiciliario necesita ver
+    orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'entregado'])
+    return {"orders": orders}
+
+# --- FUNCIONES Y ENDPOINTS DEL DOMICILIARIO ---
+
+class UpdateOrderStatusRequest(BaseModel):
+    status: str
+
+async def send_delivery_notification(phone: str, status: str):
+    """Envía un mensaje automático de WhatsApp según el estado del pedido"""
+    token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+    phone_id = os.getenv("META_PHONE_NUMBER_ID", "") 
+    
+    if not token or not phone_id:
+        print("⚠️ No hay credenciales de Meta para enviar la notificación.")
+        return 
+        
+    if status == 'en_camino':
+        msg = "🛵 *¡Buenas noticias!*\n\nNuestro domiciliario acaba de salir del restaurante con tu pedido. ¡Ve preparando la mesa! 🍔"
+    elif status == 'entregado':
+        msg = "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
+    else:
+        return # No enviamos mensajes para otros estados
+
+    clean_phone = phone.replace("+", "").replace(" ", "")
+    
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"https://graph.facebook.com/v20.0/{phone_id}/messages",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": clean_phone,
+                    "type": "text",
+                    "text": {"body": msg}
+                }
+            )
+            print(f"📤 Notificación de delivery enviada a {clean_phone}")
+    except Exception as e:
+        print(f"❌ Error enviando notificación de delivery: {e}")
+
+
+@router.get("/api/delivery/check-updates")
+async def check_delivery_updates():
+    """Consulta ultra-ligera para saber si hay cambios en los pedidos del domiciliario"""
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, status 
+            FROM orders 
+            WHERE order_type='delivery' AND status IN ('listo', 'en_camino') 
+            ORDER BY id
+        """)
+        current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
+        return {"hash": current_state_hash}
+
+
+@router.get("/api/delivery/orders")
+async def get_delivery_orders():
+    orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'entregado'])
+    return {"orders": orders}
+
+
+@router.patch("/api/delivery/orders/{order_id}/status")
+async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest):
+    # 1. Buscamos el pedido original en la base de datos para obtener el número del cliente
+    order = await db.db_get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+        
+    # 2. Actualizamos el estado
+    await db.db_update_order_status(order_id, req.status)
+    
+    # 3. Disparamos el mensaje de WhatsApp en SEGUNDO PLANO
+    # Solo si el estado es 'en_camino' o 'entregado'
+    if req.status in ['en_camino', 'entregado']:
+        asyncio.create_task(send_delivery_notification(order["phone"], req.status))
+        
+    return {"success": True, "new_status": req.status}
