@@ -83,7 +83,14 @@ async def caja_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page():
-    return (STATIC / "crm.html").read_text(encoding="utf-8")    
+    return (STATIC / "crm.html").read_text(encoding="utf-8")  
+
+@router.get("/demo-chat", response_class=HTMLResponse)
+async def demo_chat_bot_page(): 
+    p = STATIC / "demo-chat.html"
+    if p.exists():
+        return HTMLResponse(p.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Falta el archivo demo-chat.html en la carpeta static</h1>", status_code=404)      
 
 # ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
 @router.get("/billing", response_class=HTMLResponse)
