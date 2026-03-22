@@ -103,7 +103,7 @@ async def payment_confirm(request: Request):
         "status": status
     }
 
-    class UpdateOrderStatusRequest(BaseModel):
+class UpdateOrderStatusRequest(BaseModel):
     status: str
 
 @router.get("/api/delivery/orders")
