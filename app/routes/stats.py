@@ -3,8 +3,10 @@ from fastapi import APIRouter, Request, HTTPException, Query
 from datetime import datetime, timedelta
 from app.services.auth import verify_token
 from app.services import database as db
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter()
+COT = timezone(timedelta(hours=-5))
 
 # --- FIX ASYNC APLICADO AQUÍ ---
 async def require_auth(request: Request) -> str:
@@ -36,13 +38,87 @@ async def get_current_restaurant(request: Request) -> dict:
     raise HTTPException(status_code=403, detail="Restaurante no encontrado")
 
 def get_date_range(period: str):
-    today = datetime.now().date()
+    today = datetime.now(COT).date() # <--- Ahora siempre será la fecha correcta
     if period == "today": return str(today), str(today)
     elif period == "week": return str(today - timedelta(days=6)), str(today)
     elif period == "month": return str(today.replace(day=1)), str(today)
     elif period == "semester": return str(today.replace(month=1 if today.month <= 6 else 7, day=1)), str(today)
     elif period == "year": return str(today.replace(month=1, day=1)), str(today)
     return str(today), str(today)
+
+    ── NUEVO ENDPOINT MAESTRO ──
+@router.get("/api/dashboard/sync")
+async def dashboard_sync(request: Request, period: str = Query("today")):
+    """Endpoint Maestro: Trae todos los datos del dashboard en 1 sola llamada"""
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    date_from, date_to = get_date_range(period)
+
+    # 1. Traer datos de DB (solo 3 consultas combinadas)
+    orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
+    reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
+    conversations = await db.db_get_all_conversations(bot_number=bot_number)
+
+    paid = [o for o in orders if o["paid"]]
+    pending = [o for o in orders if not o["paid"]]
+
+    # 2. Formatear órdenes para la tabla
+    formatted_orders = []
+    for o in orders:
+        try:
+            items = o.get("items", [])
+            if isinstance(items, str):
+                items = json.loads(items)
+            items_summary = ", ".join(f"{i.get('quantity',1)}x {i.get('name','')}" for i in items) if isinstance(items, list) else str(items)
+        except: 
+            items_summary = str(o.get("items", ""))
+            
+        created = datetime.fromisoformat(o["created_at"])
+        formatted_orders.append({
+            "id": o["id"], "items": items_summary or "-", "type": o["order_type"], 
+            "paid": o["paid"], "total": o["total"], "address": o.get("address", ""), 
+            "status": o["status"], "phone": o.get("phone", ""),
+            "time": created.strftime("%d/%m %H:%M") if period != "today" else created.strftime("%H:%M")
+        })
+
+    # 3. Formatear datos para la Gráfica
+    by_date = {}
+    current = datetime.strptime(date_from, "%Y-%m-%d").date()
+    end = datetime.strptime(date_to, "%Y-%m-%d").date()
+    while current <= end:
+        by_date[str(current)] = {"revenue": 0, "orders": 0, "paid": 0}
+        current += timedelta(days=1)
+        
+    for o in orders:
+        day = o["created_at"][:10]
+        if day in by_date:
+            by_date[day]["orders"] += 1
+            if o["paid"]:
+                by_date[day]["revenue"] += o["total"]
+                by_date[day]["paid"] += 1
+
+    labels, revenue_data, orders_data = [], [], []
+    for date_str, data in sorted(by_date.items()):
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        labels.append(d.strftime("%a %d") if period in ("today", "week") else d.strftime("%d/%m"))
+        revenue_data.append(data["revenue"])
+        orders_data.append(data["orders"])
+
+    # 4. Devolver todo en un MEGA JSON
+    return {
+        "stats": {
+            "orders": {
+                "total": len(orders), "paid": len(paid), "pending": len(pending), 
+                "revenue": sum(o["total"] for o in paid), "pending_revenue": sum(o["total"] for o in pending)
+            },
+            "reservations": {"total": len(reservations), "guests": sum(r.get("guests", 0) for r in reservations)},
+            "conversations": {"active": len(conversations)}
+        },
+        "chart": {"labels": labels, "revenue": revenue_data, "orders": orders_data},
+        "orders": formatted_orders,
+        "reservations": reservations,
+        "conversations": conversations
+    }
 
 @router.get("/api/dashboard/stats")
 async def dashboard_stats(request: Request, period: str = Query("today")):

@@ -83,12 +83,6 @@ function showSection(id, btn) {
   if (id === 'menu')       loadMenu();
 }
 
-function setPeriod(period, btn) {
-  currentPeriod = period;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  refreshAll();
-}
 
 // ── SIDEBAR MOBILE ───────────────────────────────────────────────────
 function toggleSidebar() {
@@ -125,120 +119,134 @@ function updateTiposChart(domicilio, recoger) {
   });
 }
 
-// ── STATS ────────────────────────────────────────────────────────────
-async function fetchStats() {
+// ── SYNC MAESTRO (1 Sola petición) ──────────────────────────────────
+async function refreshAll() {
+  const badge = document.getElementById('sync-badge');
+  if (badge) badge.textContent = 'Sincronizando...';
+
   try {
-    const r = await fetch(`/api/dashboard/stats?period=${currentPeriod}`, { headers });
+    const r = await fetch(`/api/dashboard/sync?period=${currentPeriod}`, { headers });
     if (r.status === 401) { logout(); return; }
     const d = await r.json();
-    const pendingRev = d.orders.pending_revenue || 0;
-    document.getElementById('m-revenue').textContent = fmt(d.orders.revenue);
-    document.getElementById('m-revenue-sub').innerHTML = d.orders.paid + ' pagados'
-      + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
-    document.getElementById('m-orders').textContent = d.orders.total;
-    document.getElementById('m-orders-sub').textContent = d.orders.pending + ' sin pagar';
-    document.getElementById('m-res').textContent = d.reservations.total;
-    document.getElementById('m-res-sub').textContent = d.reservations.guests + ' personas';
-    document.getElementById('m-convs').textContent = d.conversations.active;
-    document.getElementById('p-total').textContent = d.orders.total;
-    document.getElementById('p-paid').textContent = d.orders.paid;
-    document.getElementById('p-pending').textContent = d.orders.pending;
-    document.getElementById('r-total').textContent = d.reservations.total;
-    document.getElementById('r-guests').textContent = d.reservations.guests;
-    updateStatusChart(d.orders.paid, d.orders.pending);
-  } catch(e) { console.error('fetchStats:', e); }
+
+    renderStats(d.stats);
+    renderChart(d.chart);
+    renderOrders(d.orders);
+    renderReservations(d.reservations);
+    renderConversations(d.conversations);
+
+  } catch(e) { console.error('Sync Error:', e); }
+
+  if (badge) badge.textContent = 'En vivo · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
 
-async function fetchChart() {
-  try {
-    const r = await fetch(`/api/dashboard/chart?period=${currentPeriod}`, { headers });
-    const d = await r.json();
-    const periodLabels = { today:'Hoy', week:'Últimos 7 días', month:'Este mes', semester:'Este semestre', year:'Este año' };
-    const titleEl = document.getElementById('chart-title');
-    if (titleEl) titleEl.textContent = `Ingresos por día — ${periodLabels[currentPeriod]}`;
-    if (revenueChart) revenueChart.destroy();
-    revenueChart = new Chart(document.getElementById('chart-revenue'), {
-      type: 'bar',
-      data: {
-        labels: d.labels,
-        datasets: [
-          { label:'Ingresos', data:d.revenue, backgroundColor:'#1D9E75', borderRadius:4, yAxisID:'y' },
-          { label:'Pedidos',  data:d.orders,  type:'line', borderColor:'#378ADD', backgroundColor:'transparent', tension:.3, pointRadius:3, yAxisID:'y2' }
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{ display:false } },
-        scales: {
-          y:  { ticks:{ callback: v => '$' + Math.round(v/1000) + 'k', font:{size:11} }, grid:{color:'#f0f0e8'} },
-          y2: { position:'right', ticks:{font:{size:11}}, grid:{display:false} },
-          x:  { ticks:{font:{size:10}, maxRotation:45}, grid:{display:false} }
-        }
+function renderStats(stats) {
+  const pendingRev = stats.orders.pending_revenue || 0;
+  document.getElementById('m-revenue').textContent = fmt(stats.orders.revenue);
+  document.getElementById('m-revenue-sub').innerHTML = stats.orders.paid + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
+  document.getElementById('m-orders').textContent = stats.orders.total;
+  document.getElementById('m-orders-sub').textContent = stats.orders.pending + ' sin pagar';
+  document.getElementById('m-res').textContent = stats.reservations.total;
+  document.getElementById('m-res-sub').textContent = stats.reservations.guests + ' personas';
+  document.getElementById('m-convs').textContent = stats.conversations.active;
+  document.getElementById('p-total').textContent = stats.orders.total;
+  document.getElementById('p-paid').textContent = stats.orders.paid;
+  document.getElementById('p-pending').textContent = stats.orders.pending;
+  document.getElementById('r-total').textContent = stats.reservations.total;
+  document.getElementById('r-guests').textContent = stats.reservations.guests;
+  updateStatusChart(stats.orders.paid, stats.orders.pending);
+}
+
+function renderChart(chartData) {
+  const periodLabels = { today:'Hoy', week:'Últimos 7 días', month:'Este mes', semester:'Este semestre', year:'Este año' };
+  const titleEl = document.getElementById('chart-title');
+  if (titleEl) titleEl.textContent = `Ingresos por día — ${periodLabels[currentPeriod]}`;
+  if (revenueChart) revenueChart.destroy();
+  revenueChart = new Chart(document.getElementById('chart-revenue'), {
+    type: 'bar',
+    data: {
+      labels: chartData.labels,
+      datasets: [
+        { label:'Ingresos', data:chartData.revenue, backgroundColor:'#1D9E75', borderRadius:4, yAxisID:'y' },
+        { label:'Pedidos',  data:chartData.orders,  type:'line', borderColor:'#378ADD', backgroundColor:'transparent', tension:.3, pointRadius:3, yAxisID:'y2' }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } },
+      scales: {
+        y:  { ticks:{ callback: v => '$' + Math.round(v/1000) + 'k', font:{size:11} }, grid:{color:'#f0f0e8'} },
+        y2: { position:'right', ticks:{font:{size:11}}, grid:{display:false} },
+        x:  { ticks:{font:{size:10}, maxRotation:45}, grid:{display:false} }
       }
-    });
-  } catch(e) { console.error('fetchChart:', e); }
+    }
+  });
 }
 
-// ── PEDIDOS ──────────────────────────────────────────────────────────
-async function fetchOrders() {
+function renderOrders(orders) {
   const container = document.getElementById('orders-container');
-  try {
-    const r = await fetch(`/api/dashboard/orders?period=${currentPeriod}`, { headers });
-    if (!r.ok) { container.innerHTML = '<div class="empty-state">Error cargando pedidos.</div>'; return; }
-    const d = await r.json();
-    if (!d.orders || !d.orders.length) {
-      container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
-      updateTiposChart(0, 0); return;
-    }
-    let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
-    d.orders.forEach(o => {
-      html += `<tr>
-        <td style="font-weight:500;font-size:12px;">${o.id}</td>
-        <td style="color:#555;">${o.items || '—'}</td>
-        <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
-        <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
-        <td style="font-weight:500;">${fmt(o.total)}</td>
-        <td style="color:#888;">${o.time||'—'}</td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-    updateTiposChart(
-      d.orders.filter(o => o.type === 'domicilio').length,
-      d.orders.filter(o => o.type === 'recoger').length
-    );
-  } catch(e) { console.error('fetchOrders:', e); }
+  if (!orders || !orders.length) {
+    container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
+    updateTiposChart(0, 0); return;
+  }
+  let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
+  orders.forEach(o => {
+    html += `<tr>
+      <td style="font-weight:500;font-size:12px;">${o.id}</td>
+      <td style="color:#555;">${o.items || '—'}</td>
+      <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
+      <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
+      <td style="font-weight:500;">${fmt(o.total)}</td>
+      <td style="color:#888;">${o.time||'—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  updateTiposChart(orders.filter(o => o.type === 'domicilio').length, orders.filter(o => o.type === 'recoger').length);
 }
 
-// ── RESERVACIONES ────────────────────────────────────────────────────
-async function fetchReservations() {
-  try {
-    const r = await fetch(`/api/dashboard/reservations?period=${currentPeriod}`, { headers });
-    const d = await r.json();
-    const container = document.getElementById('res-container');
-    if (!d.reservations.length) {
-      container.innerHTML = '<div class="empty-state">Sin reservaciones en este período.</div>';
-      document.getElementById('r-next').textContent = '—'; return;
-    }
-    const today = new Date().toISOString().split('T')[0];
-    const now   = new Date().toTimeString().slice(0,5);
-    const next  = d.reservations.find(res => res.date === today && res.time >= now);
-    document.getElementById('r-next').textContent = next ? next.time + ' · ' + next.name.split(' ')[0] : '—';
-    let html = '<table><thead><tr><th>Cliente</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
-    d.reservations.forEach(res => {
-      html += `<tr>
-        <td style="font-weight:500;">${res.name}</td>
-        <td style="color:#888;">${res.date}</td>
-        <td>${res.time}</td><td>${res.guests}</td>
-        <td style="color:#888;">${res.phone||'—'}</td>
-        <td style="color:#888;">${res.notes||'—'}</td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-  } catch(e) { console.error('fetchReservations:', e); }
+function renderReservations(reservations) {
+  const container = document.getElementById('res-container');
+  if (!reservations.length) {
+    container.innerHTML = '<div class="empty-state">Sin reservaciones en este período.</div>';
+    document.getElementById('r-next').textContent = '—'; return;
+  }
+  const today = new Date().toISOString().split('T')[0];
+  const now   = new Date().toTimeString().slice(0,5);
+  const next  = reservations.find(res => res.date === today && res.time >= now);
+  document.getElementById('r-next').textContent = next ? next.time + ' · ' + next.name.split(' ')[0] : '—';
+  let html = '<table><thead><tr><th>Cliente</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
+  reservations.forEach(res => {
+    html += `<tr>
+      <td style="font-weight:500;">${res.name}</td><td style="color:#888;">${res.date}</td>
+      <td>${res.time}</td><td>${res.guests}</td><td style="color:#888;">${res.phone||'—'}</td><td style="color:#888;">${res.notes||'—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
 }
 
+function renderConversations(conversations) {
+  const container = document.getElementById('convs-container');
+  if (!conversations.length) {
+    container.innerHTML = '<div class="empty-state">Sin conversaciones aún.</div>';
+    document.getElementById('c-avg').textContent = '0'; return;
+  }
+  document.getElementById('c-total').textContent = conversations.length;
+  const avg = Math.round(conversations.reduce((s,c) => s + c.messages, 0) / conversations.length);
+  document.getElementById('c-avg').textContent = avg;
+  container.innerHTML = conversations.map(c => `
+    <div class="conv-row" onclick="openChat('${c.phone}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
+      <div class="conv-avatar">${c.phone.slice(-4)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:500;">${c.phone}</div>
+        <div style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">${c.preview}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="font-size:11px;color:#aaa;white-space:nowrap;">${c.messages} mensajes</div>
+        <div style="font-size:10px;padding:3px 8px;background:#E1F5EE;color:#0F6E56;border-radius:6px;">Ver chat →</div>
+      </div>
+    </div>`).join('');
+}
 // ── CONVERSACIONES ───────────────────────────────────────────────────
 async function fetchConversations() {
   try {
@@ -366,7 +374,7 @@ async function refreshAll() {
 document.addEventListener('DOMContentLoaded', () => {
   loadMenu();
   refreshAll();
-  setInterval(refreshAll, 10000);
+  setInterval(refreshAll, 30000);
 
   document.querySelectorAll('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
