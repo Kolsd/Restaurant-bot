@@ -529,12 +529,16 @@ async def create_template(request: Request, body: TemplateCreate):
     await _require_auth(request)
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            INSERT INTO crm_templates (name, wa_name, category, body, params)
-            VALUES ($1,$2,$3,$4,$5) RETURNING *
-        """, body.name, body.wa_name, body.category, body.body, body.params)
-        return {"success": True, "template": _ser(dict(row))}
-
+        try:
+            # 👇 Agregamos ::TEXT[] al parámetro $5 para que la BD no se confunda con listas vacías
+            row = await conn.fetchrow("""
+                INSERT INTO crm_templates (name, wa_name, category, body, params)
+                VALUES ($1,$2,$3,$4,$5::TEXT[]) RETURNING *
+            """, body.name, body.wa_name, body.category, body.body, body.params)
+            return {"success": True, "template": _ser(dict(row))}
+        except Exception as e:
+            # Si hay un error (ej. nombre duplicado), ahora sí se lo diremos al CRM
+            raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/templates/{tid}")
 async def delete_template(request: Request, tid: int):

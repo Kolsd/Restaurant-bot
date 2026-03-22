@@ -80,9 +80,28 @@
 
     <script src="/static/roles.js"></script>
     <script>
-        // --- 1. Autenticación Básica ---
-        const token = localStorage.getItem('rb_token');
-        if (!token) window.location.href = '/login';
+// --- 1. Autenticación y Permisos (Candado Multi-Rol) ---
+const token = localStorage.getItem('rb_token');
+        const rawRole = localStorage.getItem('rb_role') || '';
+        const roles = rawRole.toLowerCase().split(','); // Soporta multi-rol (ej. "waiter,delivery")
+
+        if (!token) {
+            window.location.href = '/login';
+        } else {
+            // Verificar si tiene alguno de los roles permitidos para esta pantalla
+            const canAccess = roles.includes('owner') || 
+                              roles.includes('admin') || 
+                              roles.includes('delivery') || 
+                              roles.includes('domiciliario');
+            
+            if (!canAccess) {
+                // Si no tiene permiso, lo expulsamos a la pantalla que le corresponde
+                if (roles.includes('waiter')) window.location.href = '/mesero';
+                else if (roles.includes('cook')) window.location.href = '/cocina';
+                else if (roles.includes('cashier')) window.location.href = '/caja';
+                else window.location.href = '/dashboard';
+            }
+        }
 
         const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
