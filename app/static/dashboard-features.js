@@ -793,77 +793,75 @@ async function loadTableOrdersSection() {
     const { orders: all = [] } = await r.json();
 
     const today = new Date().toISOString().split('T')[0];
-    const visible = all.filter(o => {
-      const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
-      const day = (o.created_at || '').substring(0, 10);
-      if (o.status === 'entregado') return day === today;
-      return !closed;
+    
+    // Filtrar todo lo que no esté cancelado ni facturado previamente
+    const visible = all.filter(o => o.status !== 'factura_entregada' && o.status !== 'cancelado');
+
+    const active = visible.filter(o => o.status === 'recibido' || o.status === 'en_preparacion' || o.status === 'listo');
+    
+    // Agrupación inteligente (Misma lógica de la Caja)
+    const mesasParaCobrar = new Set();
+    visible.forEach(o => {
+        if (o.status === 'entregado' || o.status === 'factura_generada') {
+            mesasParaCobrar.add(o.base_order_id || o.id.replace(/-\d+$/, ''));
+        }
     });
 
-    const active    = visible.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
-    const delivered = visible.filter(o => o.status === 'entregado');
-    
     const billsMap = {};
-    delivered.forEach(o => {
-        const baseId = o.id.replace(/-\d+$/, '');
-        if (!billsMap[baseId]) {
-            billsMap[baseId] = {
-                id: baseId,
-                table_name: o.table_name,
-                created_at: o.created_at,
-                items: [],
-                total: 0
-            };
+    visible.forEach(o => {
+        const baseId = o.base_order_id || o.id.replace(/-\d+$/, '');
+        if (mesasParaCobrar.has(baseId)) {
+            if (!billsMap[baseId]) {
+                billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, items: [], total: 0, status: o.status };
+            }
+            if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada'; // Prioridad al status más avanzado
+            
+            let parsedItems = [];
+            try { const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items; parsedItems = Array.isArray(arr) ? arr : []; } catch(e) {}
+            billsMap[baseId].items.push(...parsedItems);
+            billsMap[baseId].total += (Number(o.total) || 0);
         }
-        let parsedItems = [];
-        try {
-            const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-            parsedItems = Array.isArray(arr) ? arr : [];
-        } catch(e) {}
-        
-        billsMap[baseId].items.push(...parsedItems);
-        billsMap[baseId].total += (Number(o.total) || 0);
     });
     const groupedBills = Object.values(billsMap);
 
-    const revenue   = groupedBills.reduce((s, o) => s + (o.total || 0), 0);
     const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+    const totalMesasActive = [...new Set(active.map(o => o.table_id))].length; // Contar mesas únicas
+    const totalMesasCobrar = groupedBills.length;
+    const revenue = groupedBills.reduce((s, o) => s + (o.total || 0), 0);
 
     let html = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1.25rem;">
-        <div class="metric"><div class="metric-label">Pedidos activos</div><div class="metric-value" style="color:#1D9E75;">${active.length}</div></div>
-        <div class="metric"><div class="metric-label">Facturas pendientes</div><div class="metric-value">${groupedBills.length}</div></div>
-        <div class="metric"><div class="metric-label">Total mesas hoy</div><div class="metric-value">${fmt(revenue)}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.25rem;">
+        <div class="metric"><div class="metric-label">Mesas Atendidas</div><div class="metric-value">${totalMesasActive + totalMesasCobrar}</div></div>
+        <div class="metric"><div class="metric-label">Pedidos en Cocina</div><div class="metric-value" style="color:#1D9E75;">${active.length}</div></div>
+        <div class="metric"><div class="metric-label">Facturas pendientes</div><div class="metric-value" style="color:#BA7517;">${totalMesasCobrar}</div></div>
+        <div class="metric"><div class="metric-label">Ventas en Salón</div><div class="metric-value" style="color:#1D9E75;">${fmt(revenue)}</div></div>
       </div>`;
 
     if (!active.length && !groupedBills.length) {
-      html += '<div class="empty-state">Sin pedidos de mesa hoy.</div>';
+      html += '<div class="empty-state">No hay mesas con pedidos activos en este momento.</div>';
       container.innerHTML = html;
       return;
     }
 
     if(groupedBills.length > 0){
-        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE FACTURA</div>';
-        html += '<table><thead><tr><th>Mesa</th><th>Platos</th><th>Total</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
+        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE FACTURA / PAGO</div>';
+        html += '<table><thead><tr><th>Mesa</th><th>Platos Consolidados</th><th>Total</th><th>Acción Rápida</th></tr></thead><tbody>';
         groupedBills.forEach(b => {
           const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
-          const hora = (b.created_at || '').substring(11, 16);
           const total_fmt = fmt(b.total);
-          
           html += `<tr>
             <td style="font-weight:600;">${b.table_name || '—'}</td>
-            <td style="color:#555;font-size:12px;">${itemsJoined}</td>
+            <td style="color:#555;font-size:12px;max-width:300px;">${itemsJoined}</td>
             <td style="font-weight:700; color:#6B21A8;">${total_fmt}</td>
-            <td style="color:#888;">${hora}</td>
-            <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">🧾 Factura entregada</button></td>
+            <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:5px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">Facturar</button></td>
           </tr>`;
         });
         html += '</tbody></table><br/>';
     }
 
     if(active.length > 0){
-        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 EN COCINA / LISTOS</div>';
-        html += '<table><thead><tr><th>Mesa</th><th>ID</th><th>Platos</th><th>Estado</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
+        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 ACTIVOS EN COCINA</div>';
+        html += '<table><thead><tr><th>Mesa</th><th>Platos del viaje</th><th>Estado</th><th>Hora</th></tr></thead><tbody>';
         active.forEach(o => {
           let items = '';
           try {
@@ -875,17 +873,12 @@ async function loadTableOrdersSection() {
           const color = STATUS_COLOR[st] || '#888';
           const bg    = STATUS_BG[st]    || '#f0f0f0';
           const label = STATUS_LABEL[st] || st;
-          const canDeliver  = st === 'listo';
-          const actionBtn = canDeliver
-            ? `<button onclick="markTableDelivered('${o.id}')" style="font-size:11px;padding:4px 10px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">🍽️ Marcar entregado</button>`
-            : '<span style="font-size:11px;color:#aaa;">—</span>';
+          
           html += `<tr>
             <td style="font-weight:600;">${o.table_name || '—'}</td>
-            <td style="font-size:11px;color:#888;">${o.id}</td>
-            <td style="color:#555;font-size:12px;">${items}</td>
+            <td style="color:#555;font-size:12px;max-width:300px;">${items}</td>
             <td><span style="font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;background:${bg};color:${color};">${label}</span></td>
             <td style="color:#888;">${hora}</td>
-            <td>${actionBtn}</td>
           </tr>`;
         });
         html += '</tbody></table>';

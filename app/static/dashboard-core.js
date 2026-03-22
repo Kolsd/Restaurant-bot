@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════
-   Mesio Dashboard — Core (stats, pedidos, reservas, chats, charts)
+   Mesio Dashboard — Core (Métricas en Tiempo Real)
    app/static/dashboard-core.js
 ═══════════════════════════════════════════════════ */
 
@@ -10,7 +10,6 @@ if (!token) window.location.href = '/login';
 const headers = { 'Authorization': 'Bearer ' + token };
 const fmt = n => '$' + Number(n).toLocaleString('es-CO');
 
-// Exponer para que otros módulos lo usen
 window._dashHeaders    = headers;
 window._dashRestaurant = restaurant;
 
@@ -22,44 +21,43 @@ document.addEventListener('DOMContentLoaded', () => {
   const equipoNav = document.getElementById('nav-equipo');
   if (equipoNav) equipoNav.style.display = (roleStr.includes('owner') || roleStr.includes('admin')) ? '' : 'none';
   
-  // ── MAGIA DE MÓDULOS SAAS (Ocultar/Mostrar según compra) ──
+  // Ocultar/Mostrar módulos según suscripción
   const feats = restaurant.features || {};
-
   const toggleNav = (id, isEnabled) => {
     const el = document.querySelector(`[onclick*="'${id}'"]`);
     if (el) el.style.display = isEnabled ? '' : 'none';
   };
-
-  // Por defecto (si el restaurante es viejo y no tiene features) dejamos todo activado (retrocompatibilidad)
   toggleNav('pedidos', feats.module_orders !== false);
   toggleNav('mesas', feats.module_tables !== false);
   toggleNav('sesiones', feats.module_tables !== false); 
   toggleNav('reservaciones', feats.module_reservations !== false);
   toggleNav('pos', feats.module_pos !== false);
+
+  // Iniciar dashboard
+  loadMenu();
+  refreshAll();
+  setInterval(refreshAll, 30000); // Auto-refresh cada 30 seg
 });
 
-// ── TIEMPO ──────────────────────────────────────────────────────────
 function updateTime() {
   const el = document.getElementById('current-time');
   if (el) el.textContent = new Date().toLocaleString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
 }
-updateTime();
-setInterval(updateTime, 60000);
+updateTime(); setInterval(updateTime, 60000);
 
-// ── LOGOUT ──────────────────────────────────────────────────────────
 function logout() {
-  localStorage.removeItem('rb_token');
-  localStorage.removeItem('rb_restaurant');
-  window.location.href = '/login';
+  localStorage.clear(); window.location.href = '/login';
 }
 
-// ── SECCIÓN ACTIVA ──────────────────────────────────────────────────
 let currentPeriod = 'today';
-const titles = {
-  resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones',
-  conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA',
-  mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones'
-};
+const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones' };
+
+function setPeriod(p, btn) {
+  currentPeriod = p;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  refreshAll();
+}
 
 function showSection(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -69,10 +67,8 @@ function showSection(id, btn) {
 
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[id] || '';
-  const mobileTitle = document.getElementById('mobile-page-title');
-  if (mobileTitle) mobileTitle.textContent = titles[id] || '';
 
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones'];
+  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas'];
   const periodBar = document.getElementById('period-bar');
   if (periodBar) periodBar.style.display = hidePeriod.includes(id) ? 'none' : 'flex';
 
@@ -81,20 +77,13 @@ function showSection(id, btn) {
   if (id === 'equipo')     loadBranches();
   if (id === 'sesiones')   loadSessions();
   if (id === 'menu')       loadMenu();
+  if (window.innerWidth <= 768) closeSidebar();
 }
 
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('mobile-overlay').classList.toggle('open'); }
+function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('mobile-overlay').classList.remove('open'); }
 
-// ── SIDEBAR MOBILE ───────────────────────────────────────────────────
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('mobile-overlay').classList.toggle('open');
-}
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('mobile-overlay').classList.remove('open');
-}
-
-// ── CHARTS ──────────────────────────────────────────────────────────
+// ── CHARTS ──
 let revenueChart = null, statusChart = null, tiposChart = null;
 
 function updateStatusChart(paid, pending) {
@@ -102,8 +91,7 @@ function updateStatusChart(paid, pending) {
   if (!ctx) return;
   if (statusChart) statusChart.destroy();
   statusChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels:['Pagados','Pendientes'], datasets:[{ data:[paid||0, pending||0], backgroundColor:['#1D9E75','#FAC775'], borderWidth:0 }] },
+    type: 'doughnut', data: { labels:['Pagados','Pendientes'], datasets:[{ data:[paid||0, pending||0], backgroundColor:['#1D9E75','#FAC775'], borderWidth:0 }] },
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'65%' }
   });
 }
@@ -113,62 +101,39 @@ function updateTiposChart(domicilio, recoger) {
   if (!ctx) return;
   if (tiposChart) tiposChart.destroy();
   tiposChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: { labels:['Domicilio','Recoger'], datasets:[{ data:[domicilio||0, recoger||0], backgroundColor:['#1D9E75','#378ADD'], borderWidth:0 }] },
+    type: 'doughnut', data: { labels:['Domicilio','Recoger'], datasets:[{ data:[domicilio||0, recoger||0], backgroundColor:['#1D9E75','#378ADD'], borderWidth:0 }] },
     options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, cutout:'65%' }
   });
 }
 
-// ── SYNC MAESTRO (1 Sola petición) ──────────────────────────────────
-async function refreshAll() {
-  const badge = document.getElementById('sync-badge');
-  if (badge) badge.textContent = 'Sincronizando...';
-
-  try {
-    const r = await fetch(`/api/dashboard/sync?period=${currentPeriod}`, { headers });
-    if (r.status === 401) { logout(); return; }
-    const d = await r.json();
-
-    renderStats(d.stats);
-    renderChart(d.chart);
-    renderOrders(d.orders);
-    renderReservations(d.reservations);
-    renderConversations(d.conversations);
-
-  } catch(e) { console.error('Sync Error:', e); }
-
-  if (badge) badge.textContent = 'En vivo · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-}
-
-function renderStats(stats) {
-  const pendingRev = stats.orders.pending_revenue || 0;
-  document.getElementById('m-revenue').textContent = fmt(stats.orders.revenue);
-  document.getElementById('m-revenue-sub').innerHTML = stats.orders.paid + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
-  document.getElementById('m-orders').textContent = stats.orders.total;
-  document.getElementById('m-orders-sub').textContent = stats.orders.pending + ' sin pagar';
-  document.getElementById('m-res').textContent = stats.reservations.total;
-  document.getElementById('m-res-sub').textContent = stats.reservations.guests + ' personas';
-  document.getElementById('m-convs').textContent = stats.conversations.active;
-  document.getElementById('p-total').textContent = stats.orders.total;
-  document.getElementById('p-paid').textContent = stats.orders.paid;
-  document.getElementById('p-pending').textContent = stats.orders.pending;
-  document.getElementById('r-total').textContent = stats.reservations.total;
-  document.getElementById('r-guests').textContent = stats.reservations.guests;
-  updateStatusChart(stats.orders.paid, stats.orders.pending);
-}
-
-function renderChart(chartData) {
+function renderChart(orders) {
   const periodLabels = { today:'Hoy', week:'Últimos 7 días', month:'Este mes', semester:'Este semestre', year:'Este año' };
   const titleEl = document.getElementById('chart-title');
   if (titleEl) titleEl.textContent = `Ingresos por día — ${periodLabels[currentPeriod]}`;
+  
+  // Agrupar ingresos por fecha
+  const dataMap = {};
+  orders.forEach(o => {
+      if(o.paid) {
+          const date = (o.created_at || '').substring(0, 10);
+          if(!dataMap[date]) dataMap[date] = { rev: 0, count: 0 };
+          dataMap[date].rev += o.total;
+          dataMap[date].count += 1;
+      }
+  });
+
+  const labels = Object.keys(dataMap).sort();
+  const revData = labels.map(l => dataMap[l].rev);
+  const countData = labels.map(l => dataMap[l].count);
+
   if (revenueChart) revenueChart.destroy();
   revenueChart = new Chart(document.getElementById('chart-revenue'), {
     type: 'bar',
     data: {
-      labels: chartData.labels,
+      labels: labels,
       datasets: [
-        { label:'Ingresos', data:chartData.revenue, backgroundColor:'#1D9E75', borderRadius:4, yAxisID:'y' },
-        { label:'Pedidos',  data:chartData.orders,  type:'line', borderColor:'#378ADD', backgroundColor:'transparent', tension:.3, pointRadius:3, yAxisID:'y2' }
+        { label:'Ingresos', data:revData, backgroundColor:'#1D9E75', borderRadius:4, yAxisID:'y' },
+        { label:'Pedidos',  data:countData, type:'line', borderColor:'#378ADD', backgroundColor:'transparent', tension:.3, pointRadius:3, yAxisID:'y2' }
       ]
     },
     options: {
@@ -182,6 +147,60 @@ function renderChart(chartData) {
   });
 }
 
+// ── SYNC MAESTRO (Modularizado) ──
+async function refreshAll() {
+  const badge = document.getElementById('sync-badge');
+  if (badge) badge.textContent = 'Sincronizando...';
+
+  try {
+    // 1. Cargar Pedidos WA/Domi
+    const rOrders = await fetch(`/api/dashboard/orders?period=${currentPeriod}`, { headers });
+    if (rOrders.status === 401) { logout(); return; }
+    const orders = (await rOrders.json()).orders || [];
+    
+    // 2. Cargar Reservas
+    const rRes = await fetch(`/api/dashboard/reservations?period=${currentPeriod}`, { headers });
+    const reservations = rRes.ok ? ((await rRes.json()).reservations || []) : [];
+
+    // 3. Cargar Conversaciones
+    const rChats = await fetch(`/api/dashboard/conversations`, { headers });
+    const conversations = rChats.ok ? ((await rChats.json()).conversations || []) : [];
+
+    // Calcular Métricas
+    const paidOrders = orders.filter(o => o.paid);
+    const pendingOrders = orders.filter(o => !o.paid);
+    const totalRev = paidOrders.reduce((s,o) => s + o.total, 0);
+    const pendingRev = pendingOrders.reduce((s,o) => s + o.total, 0);
+    
+    // Renderizar
+    document.getElementById('m-revenue').textContent = fmt(totalRev);
+    document.getElementById('m-revenue-sub').innerHTML = paidOrders.length + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
+    document.getElementById('m-orders').textContent = orders.length;
+    document.getElementById('m-orders-sub').textContent = pendingOrders.length + ' sin pagar';
+    
+    document.getElementById('m-res').textContent = reservations.length;
+    document.getElementById('m-res-sub').textContent = reservations.reduce((s,r) => s + (r.guests||0), 0) + ' personas';
+    
+    document.getElementById('m-convs').textContent = conversations.length;
+    
+    document.getElementById('p-total').textContent = orders.length;
+    document.getElementById('p-paid').textContent = paidOrders.length;
+    document.getElementById('p-pending').textContent = pendingOrders.length;
+    
+    updateStatusChart(paidOrders.length, pendingOrders.length);
+    renderChart(orders);
+    renderOrders(orders);
+    renderReservations(reservations);
+    renderConversations(conversations);
+    
+    // Y finalmente, actualizar la sección de mesas
+    if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
+
+  } catch(e) { console.error('Sync Error:', e); }
+
+  if (badge) badge.textContent = 'En vivo · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
 function renderOrders(orders) {
   const container = document.getElementById('orders-container');
   if (!orders || !orders.length) {
@@ -191,7 +210,7 @@ function renderOrders(orders) {
   let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
   orders.forEach(o => {
     html += `<tr>
-      <td style="font-weight:500;font-size:12px;">${o.id}</td>
+      <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
       <td style="color:#555;">${o.items || '—'}</td>
       <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
       <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
@@ -206,6 +225,9 @@ function renderOrders(orders) {
 
 function renderReservations(reservations) {
   const container = document.getElementById('res-container');
+  document.getElementById('r-total').textContent = reservations.length;
+  document.getElementById('r-guests').textContent = reservations.reduce((s,r) => s + (r.guests||0), 0);
+  
   if (!reservations.length) {
     container.innerHTML = '<div class="empty-state">Sin reservaciones en este período.</div>';
     document.getElementById('r-next').textContent = '—'; return;
@@ -214,6 +236,7 @@ function renderReservations(reservations) {
   const now   = new Date().toTimeString().slice(0,5);
   const next  = reservations.find(res => res.date === today && res.time >= now);
   document.getElementById('r-next').textContent = next ? next.time + ' · ' + next.name.split(' ')[0] : '—';
+  
   let html = '<table><thead><tr><th>Cliente</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
   reservations.forEach(res => {
     html += `<tr>
@@ -228,10 +251,9 @@ function renderReservations(reservations) {
 function renderConversations(conversations) {
   const container = document.getElementById('convs-container');
   if (!conversations.length) {
-    container.innerHTML = '<div class="empty-state">Sin conversaciones aún.</div>';
+    container.innerHTML = '<div class="empty-state">Sin conversaciones activas.</div>';
     document.getElementById('c-avg').textContent = '0'; return;
   }
-  document.getElementById('c-total').textContent = conversations.length;
   const avg = Math.round(conversations.reduce((s,c) => s + c.messages, 0) / conversations.length);
   document.getElementById('c-avg').textContent = avg;
   container.innerHTML = conversations.map(c => `
@@ -247,43 +269,16 @@ function renderConversations(conversations) {
       </div>
     </div>`).join('');
 }
-// ── CONVERSACIONES ───────────────────────────────────────────────────
-async function fetchConversations() {
-  try {
-    const r = await fetch('/api/dashboard/conversations', { headers });
-    const d = await r.json();
-    const container = document.getElementById('convs-container');
-    if (!d.conversations.length) {
-      container.innerHTML = '<div class="empty-state">Sin conversaciones aún.</div>';
-      document.getElementById('c-avg').textContent = '0'; return;
-    }
-    document.getElementById('c-total').textContent = d.conversations.length;
-    const avg = Math.round(d.conversations.reduce((s,c) => s + c.messages, 0) / d.conversations.length);
-    document.getElementById('c-avg').textContent = avg;
-    container.innerHTML = d.conversations.map(c => `
-      <div class="conv-row" onclick="openChat('${c.phone}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
-        <div class="conv-avatar">${c.phone.slice(-4)}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:500;">${c.phone}</div>
-          <div style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">${c.preview}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div style="font-size:11px;color:#aaa;white-space:nowrap;">${c.messages} mensajes</div>
-          <div style="font-size:10px;padding:3px 8px;background:#E1F5EE;color:#0F6E56;border-radius:6px;">Ver chat →</div>
-        </div>
-      </div>`).join('');
-  } catch(e) { console.error('fetchConversations:', e); }
-}
 
 async function cleanupConversations() {
-  if (!confirm('¿Eliminar conversaciones de más de 7 días?')) return;
+  if (!confirm('¿Eliminar conversaciones de más de 7 días? Esto limpiará la memoria de la IA para esos números.')) return;
   try {
     await fetch('/api/conversations/cleanup', { method: 'DELETE', headers });
-    fetchConversations();
+    refreshAll();
   } catch(e) {}
 }
 
-// ── CHAT MODAL ───────────────────────────────────────────────────────
+// ── CHAT MODAL ──
 let currentChatPhone = null;
 let botPaused = false;
 
@@ -323,9 +318,7 @@ async function loadChatHistory(phone) {
     container.innerHTML = msgs.map(m => {
       const isUser = m.role === 'user';
       const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      return `<div class="msg-bubble ${isUser ? 'user' : ''}">
-        <div class="bubble ${isUser ? 'user' : 'bot'}">${content}</div>
-      </div>`;
+      return `<div class="msg-bubble ${isUser ? 'user' : ''}"><div class="bubble ${isUser ? 'user' : 'bot'}">${content}</div></div>`;
     }).join('');
     container.scrollTop = container.scrollHeight;
   } catch(e) { console.error('loadChatHistory:', e); }
@@ -339,12 +332,7 @@ async function toggleBotPause() {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ paused: botPaused })
     });
-    const btn = document.getElementById('chat-pause-btn');
-    if (btn) {
-      btn.textContent = botPaused ? '▶ Reanudar bot' : '⏸ Pausar bot';
-      btn.style.background = botPaused ? '#FDE8E8' : '#fff';
-      btn.style.color = botPaused ? '#C0392B' : '#555';
-    }
+    loadChatHistory(currentChatPhone);
   } catch(e) {}
 }
 
@@ -361,22 +349,3 @@ async function sendManualReply() {
     await loadChatHistory(currentChatPhone);
   } catch(e) {}
 }
-
-// ── REFRESH GLOBAL ───────────────────────────────────────────────────
-async function refreshAll() {
-  const badge = document.getElementById('sync-badge');
-  if (badge) badge.textContent = 'Sincronizando...';
-  await Promise.all([fetchStats(), fetchChart(), fetchOrders(), fetchReservations(), fetchConversations()]);
-  if (badge) badge.textContent = 'En vivo · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-}
-
-// ── INIT ────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  loadMenu();
-  refreshAll();
-  setInterval(refreshAll, 30000);
-
-  document.querySelectorAll('.nav-item').forEach(btn => {
-    btn.addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
-  });
-});
