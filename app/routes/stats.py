@@ -1,14 +1,15 @@
 import os
+import json
 from fastapi import APIRouter, Request, HTTPException, Query
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.services.auth import verify_token
 from app.services import database as db
-from datetime import datetime, timedelta, timezone
 
 router = APIRouter()
+
+# Zona Horaria de Colombia (UTC -5)
 COT = timezone(timedelta(hours=-5))
 
-# --- FIX ASYNC APLICADO AQUÍ ---
 async def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = await verify_token(token)
@@ -19,7 +20,6 @@ async def get_current_restaurant(request: Request) -> dict:
     username = await require_auth(request)
     user = await db.db_get_user(username)
     
-    # ── FIX: Verificar que el usuario existe antes de intentar acceder a sus campos ──
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado en la base de datos")
 
@@ -38,7 +38,7 @@ async def get_current_restaurant(request: Request) -> dict:
     raise HTTPException(status_code=403, detail="Restaurante no encontrado")
 
 def get_date_range(period: str):
-    today = datetime.now(COT).date() # <--- Ahora siempre será la fecha correcta
+    today = datetime.now(COT).date()
     if period == "today": return str(today), str(today)
     elif period == "week": return str(today - timedelta(days=6)), str(today)
     elif period == "month": return str(today.replace(day=1)), str(today)
@@ -46,15 +46,15 @@ def get_date_range(period: str):
     elif period == "year": return str(today.replace(month=1, day=1)), str(today)
     return str(today), str(today)
 
-    ── NUEVO ENDPOINT MAESTRO ──
+# =====================================================================
+# NUEVO ENDPOINT MAESTRO (SYNC)
+# =====================================================================
 @router.get("/api/dashboard/sync")
 async def dashboard_sync(request: Request, period: str = Query("today")):
-    """Endpoint Maestro: Trae todos los datos del dashboard en 1 sola llamada"""
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period)
 
-    # 1. Traer datos de DB (solo 3 consultas combinadas)
     orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
     conversations = await db.db_get_all_conversations(bot_number=bot_number)
@@ -62,7 +62,6 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
     paid = [o for o in orders if o["paid"]]
     pending = [o for o in orders if not o["paid"]]
 
-    # 2. Formatear órdenes para la tabla
     formatted_orders = []
     for o in orders:
         try:
@@ -81,7 +80,6 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
             "time": created.strftime("%d/%m %H:%M") if period != "today" else created.strftime("%H:%M")
         })
 
-    # 3. Formatear datos para la Gráfica
     by_date = {}
     current = datetime.strptime(date_from, "%Y-%m-%d").date()
     end = datetime.strptime(date_to, "%Y-%m-%d").date()
@@ -104,7 +102,6 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
         revenue_data.append(data["revenue"])
         orders_data.append(data["orders"])
 
-    # 4. Devolver todo en un MEGA JSON
     return {
         "stats": {
             "orders": {
@@ -119,6 +116,11 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
         "reservations": reservations,
         "conversations": conversations
     }
+
+
+# =====================================================================
+# ENDPOINTS ANTIGUOS (MANTENIDOS PARA COMPATIBILIDAD)
+# =====================================================================
 
 @router.get("/api/dashboard/stats")
 async def dashboard_stats(request: Request, period: str = Query("today")):
