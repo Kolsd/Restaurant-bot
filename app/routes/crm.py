@@ -13,17 +13,17 @@ from app.services import database as db
 router = APIRouter(prefix="/api/crm", tags=["crm"])
 
 # ── AUTH HELPER ───────────────────────────────────────────────────────
-ADMIN_KEY = os.getenv("ADMIN_KEY", "restaurantbot2024")
+ADMIN_KEY = os.getenv("ADMIN_KEY") # <-- Sin contraseña por defecto
 
 async def _require_auth(request: Request) -> dict:
     key = (
         request.headers.get("X-Admin-Key", "")
         or request.headers.get("Authorization", "").replace("Bearer ", "")
     )
-    if not key or key != ADMIN_KEY:
+    # Bloqueamos si el servidor no tiene llave o si la llave es incorrecta
+    if not ADMIN_KEY or not key or key != ADMIN_KEY:
         raise HTTPException(status_code=401, detail="Acceso exclusivo para el equipo Mesio")
     return {"username": "mesio_admin", "role": "superadmin"}
-
 
 # ── MODELOS ───────────────────────────────────────────────────────────
 class ProspectCreate(BaseModel):
@@ -554,11 +554,23 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
     
     content = await file.read()
     try:
-        text = content.decode('utf-8-sig')
-        reader = csv.DictReader(io.StringIO(text))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error leyendo el CSV: {str(e)}")
-
+                # 🔥 FIX: Búsqueda exacta indexada en lugar de ILIKE
+                existing = await conn.fetchval(
+                    "SELECT id FROM prospects WHERE phone = $1", 
+                    phone
+                )
+                
+                # Solo inserta si no existe previamente
+                if not existing:
+                    await conn.execute("""
+                        INSERT INTO prospects (restaurant_name, owner_name, phone, city, source)
+                        VALUES ($1, $2, $3, $4, 'csv_import')
+                    """, name, owner, phone, city)
+                    inserted += 1
+                else:
+                    errors += 1 
+            except Exception as e:
+                errors += 1
     pool = await db.get_pool()
     inserted = 0
     errors = 0
@@ -654,30 +666,26 @@ async def crm_page():
 
 # ── INBOUND WEBHOOK HOOK — registra respuestas de prospectos ─────────
 async def register_inbound_from_prospect(phone: str, message: str, wa_message_id: str = ""):
-    """
-    Llamado desde chat.py cuando llega un mensaje de WhatsApp.
-    Si el número no existe, lo crea. Si existe, registra la interacción.
-    """
     try:
         pool = await db.get_pool()
+        # Limpiamos el número de Meta (que ya viene con código de país)
         clean = phone.lstrip("+").replace(" ", "")
+        
         async with pool.acquire() as conn:
-            # 1. Quitamos la restricción "archived=FALSE" para que encuentre el prospecto 
-            # incluso si lo habías archivado o marcado como perdido hace meses.
+            # 🔥 FIX: Búsqueda exacta y rápida usando el índice de la BD
             row = await conn.fetchrow(
-                "SELECT id, stage FROM prospects WHERE phone ILIKE $1 ORDER BY id DESC LIMIT 1",
-                f"%{clean[-9:]}"   # match by last 9 digits for country code tolerance
+                "SELECT id, stage FROM prospects WHERE phone = $1 ORDER BY id DESC LIMIT 1",
+                clean
             )
             
             # 👇 Si no existe, creamos un prospecto entrante
             if not row:
-                print(f"👤 Prospecto no encontrado para {phone}. Creando uno nuevo...", flush=True)
+                print(f"👤 Prospecto no encontrado para {clean}. Creando uno nuevo...", flush=True)
                 row = await conn.fetchrow("""
                     INSERT INTO prospects (restaurant_name, phone, source, stage)
                     VALUES ($1, $2, 'inbound_whatsapp', 'respondio')
                     RETURNING id, stage
-                """, f"Nuevo Inbound (+{clean[-4:]})", clean)
-            
+                """, f"Nuevo Inbound (+{clean[-4:]})", clean)            
             pid   = row["id"]
             stage = row["stage"]
 
