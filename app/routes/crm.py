@@ -437,7 +437,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
                     p_name = str(tpl["params"][i]).strip()
                     # Si el nombre no es un simple número (como "1" o "2"), lo incluimos
                     if p_name and not p_name.isdigit():
-                        param_obj["parameter_name"] = p_name
+                        param_obj["parameter_name"] = p_name[:20]
                         
                 parameters_list.append(param_obj)
                 
