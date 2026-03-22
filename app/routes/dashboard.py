@@ -113,7 +113,7 @@ async def geocode_endpoint(address: str):
 # ── SUPER DASHBOARD (HQ) ─────────────────────────────────────────────
 @router.get("/api/admin/stats")
 async def admin_get_stats(admin_key: str):
-    if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): 
+    if admin_key != os.getenv("ADMIN_KEY"): 
         raise HTTPException(status_code=403, detail="Clave incorrecta")
     pool = await db.get_pool()
     async with pool.acquire() as conn:
@@ -131,24 +131,24 @@ async def admin_get_stats(admin_key: str):
 
 @router.get("/api/admin/restaurants")
 async def admin_get_restaurants(admin_key: str):
-    if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403)
+    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
     return {"restaurants": await db.db_get_all_restaurants()}
 
 @router.post("/api/admin/create-user")
 async def admin_create_user(request: CreateUserRequest):
-    if request.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="Clave incorrecta")
+    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
     result = await create_user(request.username, request.password, request.restaurant_name)
     if not result["success"]: raise HTTPException(status_code=400, detail=result["error"])
     return result
 
 @router.get("/api/admin/users")
 async def admin_list_users(admin_key: str = ""):
-    if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="No autorizado")
+    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="No autorizado")
     return {"users": await get_users()}
 
 @router.post("/api/admin/create-restaurant")
 async def admin_create_restaurant(request: CreateRestaurantRequest):
-    if request.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="Clave incorrecta")
+    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
     try: menu_dict = json.loads(request.menu)
     except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
     lat, lon, _ = await geocode_address(request.address)
@@ -157,7 +157,7 @@ async def admin_create_restaurant(request: CreateRestaurantRequest):
 
 @router.post("/api/admin/set-subscription")
 async def admin_set_subscription(request: SetSubscriptionRequest):
-    if request.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="Clave incorrecta")
+    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
     await db.db_update_subscription(request.restaurant_id, request.status)
     return {"success": True}
 
@@ -244,7 +244,7 @@ async def delete_branch(branch_id: int, request: Request):
 
 @router.post("/api/admin/parse-menu")
 async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
-    if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403, detail="Clave incorrecta")
+    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
     content  = await file.read()
     filename = file.filename.lower()
     client   = Anthropic()
@@ -266,7 +266,7 @@ async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
 @router.post("/api/admin/fix-branch-ids")
 async def fix_branch_ids(request: Request):
     body = await request.json()
-    if body.get("admin_key") != os.getenv("ADMIN_KEY", "restaurantbot2024"):
+    if body.get("admin_key") != os.getenv("ADMIN_KEY"):
         raise HTTPException(status_code=403, detail="No autorizado")
     pool  = await db.get_pool()
     fixed = []
@@ -285,7 +285,7 @@ async def fix_branch_ids(request: Request):
 @router.post("/api/admin/fix-conversations")
 async def fix_conversations_bot_number(request: Request):
     body = await request.json()
-    if body.get("admin_key") != os.getenv("ADMIN_KEY", "restaurantbot2024"): raise HTTPException(status_code=403)
+    if body.get("admin_key") != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
     pool = await db.get_pool()
     async with pool.acquire() as conn: await conn.execute("UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL", body.get("bot_number", "15556293573"))
     return {"success": True}

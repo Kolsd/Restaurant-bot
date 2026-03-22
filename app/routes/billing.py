@@ -234,7 +234,7 @@ async def list_providers():
 
 @router.post("/admin/config")
 async def admin_set_config(payload: AdminConfigPayload):
-    if payload.admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"):
+    if payload.admin_key != os.getenv("ADMIN_KEY"):
         raise HTTPException(status_code=403, detail="No autorizado")
     await save_billing_config(payload.restaurant_id, payload.config)
     return {"success": True}
@@ -242,7 +242,7 @@ async def admin_set_config(payload: AdminConfigPayload):
 
 @router.get("/admin/logs")
 async def admin_logs(admin_key: str, restaurant_id: int, limit: int = 100):
-    if admin_key != os.getenv("ADMIN_KEY", "restaurantbot2024"):
+    if admin_key != os.getenv("ADMIN_KEY"):
         raise HTTPException(status_code=403, detail="No autorizado")
     log = await get_billing_log(restaurant_id, limit)
     return {"log": log}
