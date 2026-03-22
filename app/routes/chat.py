@@ -178,8 +178,30 @@ async def meta_webhook(request: Request):
         access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
 
         # 4. Rate limiting (V-05)
-        if user_phone and await _is_rate_limited(user_phone):
-            print(f"🚫 Rate limit: {user_phone}", flush=True)
+        crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
+        
+        if crm_phone_id and phone_id == crm_phone_id:
+            from app.routes.crm import register_inbound_from_prospect
+            wa_msg_id = message.get("id", "")
+            
+            if msg_type == "location":
+                loc = message.get("location", {})
+                lat = loc.get("latitude")
+                lon = loc.get("longitude")
+                user_text = f"📍 Ubicación compartida: lat:{lat} lon:{lon}"
+            else:
+                user_text = message.get("text", {}).get("body", "")
+            
+            if user_text and user_phone:
+                print(f"💬 [CRM Inbound] De: {user_phone} | ID: {phone_id}", flush=True)
+                # Registra la interacción en el CRM de prospectos (incluso los retrasados)
+                await register_inbound_from_prospect(user_phone, user_text, wa_msg_id)
+                print("👤 Mensaje del CRM guardado en BD exitosamente", flush=True)
+            return {"status": "ok"}
+
+
+        if user_phone and _is_rate_limited(user_phone):
+            print(f"🚫 Rate limit activado para bot: {user_phone}", flush=True)
             return {"status": "ok"}
 
         if msg_type == "location":
@@ -193,19 +215,10 @@ async def meta_webhook(request: Request):
         if not user_text or not user_phone:
             return {"status": "ok"}
 
-        print(f"💬 De: {user_phone} | Para Bot: {bot_number} | ID: {phone_id}", flush=True)
-        print(f"📝 Texto: {user_text[:200]}", flush=True)  # Limitar log a 200 chars
+        print(f"💬 [Bot Inbound] De: {user_phone} | Para Bot: {bot_number} | ID: {phone_id}", flush=True)
+        print(f"📝 Texto: {user_text[:200]}", flush=True)
 
-        crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
-        if crm_phone_id and phone_id == crm_phone_id:
-            from app.routes.crm import register_inbound_from_prospect
-            wa_msg_id = message.get("id", "")
-            # Registra la interacción en el CRM de prospectos
-            await register_inbound_from_prospect(user_phone, user_text, wa_msg_id)
-            print("👤 Mensaje del CRM guardado en BD exitosamente", flush=True)
-            return {"status": "ok"}
-
-        # 5. Disparar background task (V-03 fix: no bloqueamos el handler)
+        # 6. Disparar background task (V-03 fix: no bloqueamos el handler)
         asyncio.create_task(
             _process_message(user_phone, user_text, bot_number, phone_id, access_token)
         )
@@ -213,10 +226,9 @@ async def meta_webhook(request: Request):
     except Exception:
         print(f"❌ ERROR CRÍTICO EN WEBHOOK:\n{traceback.format_exc()}", flush=True)
 
-    # 6. Retornar 200 inmediatamente — Meta no reintenta
+    # 7. Retornar 200 inmediatamente — Meta no reintenta
     print("--------------------------------\n", flush=True)
     return {"status": "ok"}
-
 
 @router.post("/webhook/twilio")
 async def twilio_webhook(request: Request):
