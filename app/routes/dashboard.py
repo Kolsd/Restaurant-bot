@@ -301,3 +301,133 @@ async def fix_conversations_bot_number(request: Request):
     pool = await db.get_pool()
     async with pool.acquire() as conn: await conn.execute("UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL", body.get("bot_number", "15556293573"))
     return {"success": True}
+# ════════════════════════════════════════════════════════════════
+# ── MÓDULOS DE DATOS PARA EL DASHBOARD (FRONTEND JAVASCRIPT) ──
+# ════════════════════════════════════════════════════════════════
+from datetime import datetime, timedelta
+
+async def get_dashboard_filters(request: Request, period: str):
+    """Ayudante para filtrar por sucursal y fechas"""
+    username = await require_auth(request)
+    user = await db.db_get_user(username)
+    
+    branch_id = user.get("branch_id")
+    bot_number = None
+    if branch_id:
+        r = await db.db_get_restaurant_by_id(branch_id)
+        if r: bot_number = r.get("whatsapp_number")
+    
+    # Lógica de fechas
+    now = datetime.now()
+    if period == "week": start_date = now - timedelta(days=7)
+    elif period == "month": start_date = now.replace(day=1)
+    elif period == "semester": start_date = now - timedelta(days=180)
+    elif period == "year": start_date = now.replace(month=1, day=1)
+    else: start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) # 'today'
+    
+    return branch_id, bot_number, start_date
+
+@router.get("/api/dashboard/orders")
+async def get_dashboard_orders(request: Request, period: str = "today"):
+    branch_id, _, start_date = await get_dashboard_filters(request, period)
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        query = "SELECT * FROM orders WHERE created_at >= $1"
+        params = [start_date]
+        
+        if branch_id:
+            query += " AND branch_id = $2"
+            params.append(branch_id)
+            
+        query += " ORDER BY created_at DESC"
+        rows = await conn.fetch(query, *params)
+        
+    orders = []
+    for r in rows:
+        orders.append({
+            "id": r["id"],
+            "items": r["items"],
+            "type": r["order_type"],
+            "paid": r["payment_status"] == "paid",
+            "total": float(r["total"]),
+            "time": r["created_at"].strftime("%H:%M"),
+            "created_at": r["created_at"].isoformat()
+        })
+    return {"orders": orders}
+
+@router.get("/api/dashboard/reservations")
+async def get_dashboard_reservations(request: Request, period: str = "today"):
+    branch_id, _, start_date = await get_dashboard_filters(request, period)
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        query = "SELECT * FROM reservations WHERE created_at >= $1"
+        params = [start_date]
+        if branch_id:
+            query += " AND branch_id = $2"
+            params.append(branch_id)
+        query += " ORDER BY date ASC, time ASC"
+        rows = await conn.fetch(query, *params)
+        
+    reservations = []
+    for r in rows:
+        reservations.append({
+            "id": r["id"],
+            "name": r["customer_name"],
+            "date": str(r["date"]),
+            "time": str(r["time"])[:5],
+            "guests": r["guests"],
+            "phone": r["phone"],
+            "notes": r["notes"]
+        })
+    return {"reservations": reservations}
+
+@router.get("/api/dashboard/conversations")
+async def get_dashboard_conversations(request: Request):
+    _, bot_number, _ = await get_dashboard_filters(request, "today")
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        query = "SELECT * FROM conversations"
+        params = []
+        if bot_number:
+            query += " WHERE bot_number = $1"
+            params.append(bot_number)
+            
+        query += " ORDER BY last_updated DESC"
+        rows = await conn.fetch(query, *params)
+        
+    convs = []
+    for r in rows:
+        try:
+            history = json.loads(r["history"]) if isinstance(r["history"], str) else r["history"]
+            preview = history[-1]["content"] if history else "Conversación iniciada..."
+            if isinstance(preview, dict): preview = "Multimedia/Sistema"
+        except:
+            history = []
+            preview = "Error leyendo historial"
+            
+        convs.append({
+            "phone": r["phone"],
+            "messages": len(history),
+            "preview": preview[:60] + "..." if len(preview) > 60 else preview,
+            "last_updated": r["last_updated"].isoformat()
+        })
+    return {"conversations": convs}
+
+@router.get("/api/dashboard/menu")
+async def get_dashboard_menu(request: Request):
+    username = await require_auth(request)
+    user = await db.db_get_user(username)
+    
+    wa_number = "15556293573" # Fallback
+    if user and user.get("branch_id"):
+        r = await db.db_get_restaurant_by_id(user["branch_id"])
+        if r: wa_number = r.get("whatsapp_number", wa_number)
+    else:
+        all_r = await db.db_get_all_restaurants()
+        if all_r: wa_number = all_r[0].get("whatsapp_number", wa_number)
+        
+    menu = await db.db_get_menu(wa_number) or {}
+    return {"menu": menu}    
