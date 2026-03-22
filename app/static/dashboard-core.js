@@ -153,7 +153,7 @@ async function refreshAll() {
   if (badge) badge.textContent = 'Sincronizando...';
 
   try {
-    // 1. Cargar Pedidos WA/Domi
+    // 1. Cargar Pedidos
     const rOrders = await fetch(`/api/dashboard/orders?period=${currentPeriod}`, { headers });
     if (rOrders.status === 401) { logout(); return; }
     const orders = (await rOrders.json()).orders || [];
@@ -166,26 +166,34 @@ async function refreshAll() {
     const rChats = await fetch(`/api/dashboard/conversations`, { headers });
     const conversations = rChats.ok ? ((await rChats.json()).conversations || []) : [];
 
-    // Calcular Métricas
+    // Calcular Métricas Globales (Resumen)
     const paidOrders = orders.filter(o => o.paid);
     const pendingOrders = orders.filter(o => !o.paid);
     const totalRev = paidOrders.reduce((s,o) => s + o.total, 0);
     const pendingRev = pendingOrders.reduce((s,o) => s + o.total, 0);
     
-    // Renderizar
+    // Renderizar Resumen
     document.getElementById('m-revenue').textContent = fmt(totalRev);
     document.getElementById('m-revenue-sub').innerHTML = paidOrders.length + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
     document.getElementById('m-orders').textContent = orders.length;
     document.getElementById('m-orders-sub').textContent = pendingOrders.length + ' sin pagar';
-    
     document.getElementById('m-res').textContent = reservations.length;
     document.getElementById('m-res-sub').textContent = reservations.reduce((s,r) => s + (r.guests||0), 0) + ' personas';
-    
     document.getElementById('m-convs').textContent = conversations.length;
     
-    document.getElementById('p-total').textContent = orders.length;
-    document.getElementById('p-paid').textContent = paidOrders.length;
-    document.getElementById('p-pending').textContent = pendingOrders.length;
+    // 👇 SOLUCIÓN PEDIDOS: Filtrar solo domicilios para las tarjetas verdes de la pestaña Pedidos
+    const extOrders = orders.filter(o => o.type !== 'mesa');
+    const extPaid = extOrders.filter(o => o.paid);
+    const extPending = extOrders.filter(o => !o.paid);
+
+    const pTotal = document.getElementById('p-total');
+    if (pTotal) pTotal.textContent = extOrders.length;
+    
+    const pPaid = document.getElementById('p-paid');
+    if (pPaid) pPaid.textContent = extPaid.length;
+    
+    const pPending = document.getElementById('p-pending');
+    if (pPending) pPending.textContent = extPending.length;
     
     updateStatusChart(paidOrders.length, pendingOrders.length);
     renderChart(orders);
@@ -193,7 +201,6 @@ async function refreshAll() {
     renderReservations(reservations);
     renderConversations(conversations);
     
-    // Y finalmente, actualizar la sección de mesas
     if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
 
   } catch(e) { console.error('Sync Error:', e); }

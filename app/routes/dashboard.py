@@ -329,33 +329,125 @@ async def get_dashboard_filters(request: Request, period: str):
 
 @router.get("/api/dashboard/orders")
 async def get_dashboard_orders(request: Request, period: str = "today"):
-    branch_id, _, start_date = await get_dashboard_filters(request, period)
+    branch_id, bot_number, start_date = await get_dashboard_filters(request, period)
     
     pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        query = "SELECT * FROM orders WHERE created_at >= $1"
-        params = [start_date]
-        
-        if branch_id:
-            query += " AND branch_id = $2"
-            params.append(branch_id)
-            
-        query += " ORDER BY created_at DESC"
-        rows = await conn.fetch(query, *params)
-        
     orders = []
-    for r in rows:
-        orders.append({
-            "id": r["id"],
-            "items": r["items"],
-            "type": r["order_type"],
-            "paid": r["payment_status"] == "paid",
-            "total": float(r["total"]),
-            "time": r["created_at"].strftime("%H:%M"),
-            "created_at": r["created_at"].isoformat()
-        })
+    async with pool.acquire() as conn:
+        # 1. Órdenes de WhatsApp (Delivery / Pickup)
+        try:
+            # Usamos bot_number en lugar de branch_id, ya que las órdenes externas van atadas al bot
+            q_wa = "SELECT * FROM orders WHERE created_at >= $1"
+            p_wa = [start_date]
+            if bot_number:
+                q_wa += " AND bot_number = $2"
+                p_wa.append(bot_number)
+            q_wa += " ORDER BY created_at DESC"
+            
+            rows_wa = await conn.fetch(q_wa, *p_wa)
+            for r in rows_wa:
+                orders.append({
+                    "id": r["id"],
+                    "items": r["items"],
+                    "type": r.get("order_type", "domicilio"),
+                    "paid": r.get("payment_status") == "paid",
+                    "total": float(r["total"]),
+                    "time": r["created_at"].strftime("%H:%M"),
+                    "created_at": r["created_at"].isoformat()
+                })
+        except Exception as e:
+            print(f"Aviso - Error filtrando orders WA (intentando modo seguro): {e}")
+            try:
+                # Camino seguro por si la columna no existe
+                rows_wa = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 ORDER BY created_at DESC", start_date)
+                for r in rows_wa:
+                    orders.append({
+                        "id": r["id"],
+                        "items": r["items"],
+                        "type": r.get("order_type", "domicilio"),
+                        "paid": r.get("payment_status") == "paid",
+                        "total": float(r["total"]),
+                        "time": r["created_at"].strftime("%H:%M"),
+                        "created_at": r["created_at"].isoformat()
+                    })
+            except Exception as e2: pass
+
+        # 2. Órdenes de Mesa (POS / Dine-in)
+        try:
+            q_mesa = """
+                SELECT o.* FROM table_orders o
+                LEFT JOIN tables t ON o.table_id = t.id
+                WHERE o.created_at >= $1
+            """
+            p_mesa = [start_date]
+            if branch_id:
+                q_mesa += " AND t.branch_id = $2"
+                p_mesa.append(branch_id)
+            
+            rows_mesa = await conn.fetch(q_mesa, *p_mesa)
+            
+            mesa_groups = {}
+            for r in rows_mesa:
+                base_id = r["base_order_id"] if r.get("base_order_id") else r["id"]
+                if base_id not in mesa_groups:
+                    mesa_groups[base_id] = {
+                        "id": base_id,
+                        "items": "Pedido en Salón (POS)",
+                        "total": 0.0,
+                        "is_paid": False,
+                        "time": r["created_at"].strftime("%H:%M"),
+                        "created_at": r["created_at"].isoformat()
+                    }
+                
+                mesa_groups[base_id]["total"] += float(r["total"])
+                
+                # Si la mesa ya fue cobrada, marca la cuenta como pagada
+                if r["status"] in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
+                    mesa_groups[base_id]["is_paid"] = True
+
+            for base_id, g in mesa_groups.items():
+                orders.append({
+                    "id": g["id"],
+                    "items": g["items"],
+                    "type": "mesa",
+                    "paid": g["is_paid"],
+                    "total": g["total"],
+                    "time": g["time"],
+                    "created_at": g["created_at"]
+                })
+        except Exception as e:
+            print(f"Error cargando table_orders en dashboard: {e}")
+
+    orders.sort(key=lambda x: x["created_at"], reverse=True)
     return {"orders": orders}
 
+@router.get("/api/table-sessions/closed")
+async def get_closed_sessions(request: Request, hours: int = 24):
+    _, bot_number, _ = await get_dashboard_filters(request, "today")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        try:
+            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours'"
+            params = []
+            if bot_number:
+                query += " AND bot_number = $1"
+                params.append(bot_number)
+            query += " ORDER BY closed_at DESC"
+            rows = await conn.fetch(query, *params)
+        except Exception as e:
+            print(f"Aviso - Error en table_sessions (intentando modo seguro): {e}")
+            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours' ORDER BY closed_at DESC"
+            rows = await conn.fetch(query)
+            
+    sessions = []
+    for r in rows:
+        s = dict(r)
+        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat()
+        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat()
+        sessions.append(s)
+        
+    return {"sessions": sessions}
+    
 @router.get("/api/dashboard/reservations")
 async def get_dashboard_reservations(request: Request, period: str = "today"):
     branch_id, _, start_date = await get_dashboard_filters(request, period)
@@ -431,3 +523,69 @@ async def get_dashboard_menu(request: Request):
         
     menu = await db.db_get_menu(wa_number) or {}
     return {"menu": menu}    
+
+# ── ENDPOINTS DE SESIONES (PARA PESTAÑA AUDITORÍA) ──
+
+@router.get("/api/table-sessions/closed")
+async def get_closed_sessions(request: Request, hours: int = 24):
+    branch_id, _, _ = await get_dashboard_filters(request, "today")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours'"
+        if branch_id:
+            query += f" AND branch_id = {branch_id}"
+        query += " ORDER BY closed_at DESC"
+        rows = await conn.fetch(query)
+        
+    sessions = []
+    for r in rows:
+        s = dict(r)
+        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat()
+        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat()
+        sessions.append(s)
+        
+    return {"sessions": sessions}
+
+@router.get("/api/table-sessions/{session_id}/history")
+async def get_session_history(request: Request, session_id: int):
+    await require_auth(request)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
+        if not session: 
+            raise HTTPException(404, "Sesión no encontrada")
+        
+        conv = await conn.fetchrow("SELECT history FROM conversations WHERE phone = $1", session["phone"])
+        history = []
+        if conv and conv["history"]:
+            try: 
+                history = json.loads(conv["history"]) if isinstance(conv["history"], str) else conv["history"]
+            except: 
+                pass
+            
+    s_dict = dict(session)
+    if s_dict.get("started_at"): s_dict["started_at"] = s_dict["started_at"].isoformat()
+    if s_dict.get("closed_at"): s_dict["closed_at"] = s_dict["closed_at"].isoformat()
+    
+    return {"session": s_dict, "history": history}
+
+@router.post("/api/table-sessions/{session_id}/reopen")
+async def reopen_session(request: Request, session_id: int):
+    await require_auth(request)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE table_sessions SET closed_at = NULL, closed_by = NULL, closed_by_username = NULL WHERE id = $1", session_id)
+    return {"success": True}
+
+@router.post("/api/table-sessions/{session_id}/alert-waiter")
+async def session_alert_waiter(request: Request, session_id: int):
+    body = await request.json()
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
+        if session:
+            await conn.execute(
+                "INSERT INTO waiter_alerts (table_id, table_name, message, status) VALUES ($1, $2, $3, 'active')",
+                session["table_id"], session["table_name"], body.get("message", "Alerta de dashboard")
+            )
+    return {"success": True}
