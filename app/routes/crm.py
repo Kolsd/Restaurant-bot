@@ -421,36 +421,31 @@ async def send_template(request: Request, body: SendTemplatePayload):
         phone    = prospect["phone"].lstrip("+").replace(" ", "")
         params   = body.params_map.get(str(pid), [])
 
-        # Build template components
+# Build template components
         components = []
         
         # Solo enviamos el cuerpo si hay parámetros
         if params:
+            parameters_list = []
+            for i, p_val in enumerate(params):
+                # 1. Limpiamos llaves {} porque Meta rechaza el mensaje por considerarlo variable vacía
+                clean_text = str(p_val).replace("{", "").replace("}", "")
+                param_obj = {"type": "text", "text": clean_text}
+                
+                # 2. FIX META API: Si el template usa variables con nombre, Meta exige 'parameter_name'
+                if tpl.get("params") and i < len(tpl["params"]):
+                    p_name = str(tpl["params"][i]).strip()
+                    # Si el nombre no es un simple número (como "1" o "2"), lo incluimos
+                    if p_name and not p_name.isdigit():
+                        param_obj["parameter_name"] = p_name
+                        
+                parameters_list.append(param_obj)
+                
             components.append({
                 "type": "body",
-                "parameters": [{"type": "text", "text": str(p)} for p in params]
+                "parameters": parameters_list
             })
-
-        wa_msg_id = ""
-        status    = "sent"
-        error_msg = ""
-
-        if token and phone_id:
-            try:
-                meta_payload = {
-                    "messaging_product": "whatsapp",
-                    "to": phone,
-                    "type": "template",
-                    "template": {
-                        "name": tpl["wa_name"],
-                        "language": {
-                            "policy": "deterministic",
-                            "code": "es_MX"
-                        },
-                        "components": components
-                    }
-                }
-                print(f"\n🚀 [ENVIANDO TEMPLATE a {phone}] Payload:\n{json.dumps(meta_payload, indent=2)}", flush=True)
+                            print(f"\n🚀 [ENVIANDO TEMPLATE a {phone}] Payload:\n{json.dumps(meta_payload, indent=2)}", flush=True)
 
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.post(
