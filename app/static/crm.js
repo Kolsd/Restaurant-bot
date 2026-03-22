@@ -41,7 +41,6 @@ function closeSidebar() {
 
 // ── VISTAS ──
 function setView(v, btn) {
-  // Asegurarnos de limpiar la vista móvil del chat si cambiamos de vista
   document.body.classList.remove('mobile-chat-open');
 
   currentView = v;
@@ -129,8 +128,10 @@ function renderKanban() {
 function renderTable() {
   const tbody = document.getElementById('prospects-tbody');
   tbody.innerHTML = prospects.map(p => `
-    <tr onclick="openPanel(${p.id},'info')">
-      <td><input type="checkbox"></td>
+    <tr onclick="openPanel(${p.id},'info')" style="cursor:pointer;">
+      <td onclick="event.stopPropagation()">
+         <input type="checkbox" class="row-check" value="${p.id}" ${selectedIds.has(p.id) ? 'checked' : ''} onchange="toggleCheck(${p.id})">
+      </td>
       <td>${p.restaurant_name}</td>
       <td>${p.phone}</td>
       <td><span class="stage-badge">${p.stage}</span></td>
@@ -221,12 +222,10 @@ async function openInboxChat(pid) {
   }).join('');
   c.scrollTop = c.scrollHeight;
   
-  // 🚀 MAGIA: Agrega la clase al BODY para ocultar todo lo demas en móviles
   document.body.classList.add('mobile-chat-open');
 }
 
 function cerrarChatMovil() {
-  // 🚀 MAGIA: Remueve la clase del BODY para restaurar la vista original
   document.body.classList.remove('mobile-chat-open');
   currentInboxPid = null; 
   renderInbox();
@@ -243,23 +242,14 @@ async function sendInboxMessage() {
 // ── AUTO-REFRESH (POLLING OPTIMIZADO) ──
 setInterval(async () => {
     if (currentView === 'inbox') {
-       
-       // 1. Preguntamos al servidor si ALGO ha cambiado (Ultra ligero)
        const res = await api('GET', '/check-updates');
-       
        if (res && res.latest) {
-           // Si es la primera vez que chequeamos, guardamos la fecha y ya
            if (!globalLastUpdate) {
                globalLastUpdate = res.latest;
            } 
-           // Si la fecha que nos dio la BD es diferente a la que teníamos... ¡Hay mensajes o cambios nuevos!
            else if (res.latest !== globalLastUpdate) {
                globalLastUpdate = res.latest;
-               
-               // Solo ahora le pedimos a la BD que nos mande toda la data pesada
                await loadProspects(); 
-               
-               // Si el usuario tiene un chat abierto, lo refrescamos para que suene y aparezca el mensaje
                if (currentInboxPid) {
                    document.getElementById('notifSound')?.play().catch(()=>{});
                    openInboxChat(currentInboxPid);
@@ -267,9 +257,10 @@ setInterval(async () => {
            }
        }
     }
-  }, 4000);
+}, 4000); 
+// FIJATE EN ESTA LINEA DE ARRIBA: En tu archivo original habia un `}` extra aqui. Ya lo borré.
 
-  // ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
 // ── FUNCIONES FALTANTES (MODALES, TEMPLATES, NOTAS Y CSV) ──
 // ════════════════════════════════════════════════════════════
 
@@ -316,7 +307,7 @@ async function handleCSVUpload(e) {
   } else {
     toast('Error al procesar el archivo CSV', 'err');
   }
-  e.target.value = ''; // Limpiar input para permitir subir el mismo archivo otra vez
+  e.target.value = ''; 
 }
 
 // ── NOTAS Y ESTADOS (INBOX) ──
@@ -435,7 +426,7 @@ function onTemplateSelect() {
     pinputs.innerHTML = tpl.params.map((p, i) => `
       <div style="margin-bottom:8px;">
         <label style="font-size:0.75rem; color:var(--muted);">${p} ({{${i+1}}})</label>
-        <input type="text" class="form-input tpl-param-val" placeholder="Pista de auto-rellenado: {nombre_restaurante} o {nombre_dueño}">
+        <input type="text" class="form-input tpl-param-val" placeholder="Pista: usa {nombre_restaurante}">
       </div>
     `).join('');
   } else {
@@ -458,7 +449,6 @@ async function doSendTemplate() {
   const params_map = {};
   idsToSend.forEach(id => {
     const prospect = prospects.find(x => x.id === id);
-    // Reemplazo inteligente de variables (Auto-rellenado)
     const finalParams = paramValues.map(v => {
       if (v.includes('{nombre_restaurante}')) return prospect.restaurant_name;
       if (v.includes('{nombre_dueño}')) return prospect.owner_name || 'Dueño';
@@ -494,21 +484,6 @@ function sendSingleTemplateFromInbox() {
 }
 
 // ── LÓGICA DE SELECCIÓN EN TABLA BASE ──
-// Reescribimos renderTable para enlazar correctamente los checkboxes
-function renderTable() {
-  const tbody = document.getElementById('prospects-tbody');
-  tbody.innerHTML = prospects.map(p => `
-    <tr onclick="openPanel(${p.id},'info')" style="cursor:pointer;">
-      <td onclick="event.stopPropagation()">
-         <input type="checkbox" class="row-check" value="${p.id}" ${selectedIds.has(p.id) ? 'checked' : ''} onchange="toggleCheck(${p.id})">
-      </td>
-      <td>${p.restaurant_name}</td>
-      <td>${p.phone}</td>
-      <td><span class="stage-badge">${p.stage}</span></td>
-      <td><button class="btn btn-outline btn-xs" onclick="event.stopPropagation(); openPanel(${p.id},'chat')">💬</button></td>
-    </tr>`).join('');
-}
-
 function toggleAllCheck() {
   const isChecked = document.getElementById('check-all').checked;
   const checkboxes = document.querySelectorAll('.row-check');

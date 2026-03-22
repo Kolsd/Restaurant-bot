@@ -15,164 +15,260 @@
 
 <div class="app">
 
-<div class="sidebar">
-  <div class="logo">Mesio<span>.</span><div class="logo-sub">CRM · Prospectos</div></div>
+  <div class="sidebar">
+    <div class="logo">Mesio<span>.</span><div class="logo-sub">CRM · Prospectos</div></div>
 
-  <div class="nav-section">Vistas</div>
-  <button class="nav-btn active" onclick="setView('inbox',this)" id="btn-inbox">
-    <span>💬</span> Inbox (Chats)
-  </button>
-  <button class="nav-btn" onclick="setView('kanban',this)" id="btn-kanban">
-    <span>⬜</span> Pipeline Kanban
-  </button>
-  <button class="nav-btn" onclick="setView('tabla',this)" id="btn-tabla">
-    <span>☰</span> Tabla
-  </button>
-
-  <div class="nav-section">Acciones</div>
-  <button class="nav-btn" onclick="openAddModal()"><span>＋</span> Nuevo prospecto</button>
-  <button class="nav-btn" onclick="document.getElementById('csv-file-input').click()"><span>📁</span> Subir Base CSV</button>
-  <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCSVUpload(event)">
-  <button class="nav-btn" onclick="openTemplateModal()"><span>📤</span> Enviar Template <span class="nbadge" id="selected-count-badge" style="display:none">0</span></button>
-  <button class="nav-btn" onclick="openTemplatesListModal()"><span>📝</span> Mis Templates</button>
-  
-  <div class="nav-section">Filtros</div>
-  <button class="nav-btn" onclick="filterStage('')" id="filter-all">Todos</button>
-  <button class="nav-btn" onclick="filterStage('prospecto')">Prospecto</button>
-  <button class="nav-btn" onclick="filterStage('contactado')">Contactado</button>
-  <button class="nav-btn" onclick="filterStage('respondio')">Respondió <span class="nbadge nbadge-amber" id="badge-respondio" style="display:none">!</span></button>
-  <button class="nav-btn" onclick="filterStage('demo')">En Demo</button>
-  <button class="nav-btn" onclick="filterStage('cerrado')">Cerrados <span class="nbadge" id="badge-cerrado">0</span></button>
-
-  <div class="sidebar-bottom">
-    <div class="user-chip">
-      <div class="user-av" id="user-av">M</div>
-      <div><div class="user-name" id="user-name">Miguel</div><div class="user-role">Admin Mesio</div></div>
-    </div>
-  </div>
-</div>
-
-<div class="main">
-
-  <div class="topbar">
-    <button class="ham-btn" onclick="toggleSidebar()">
-      <span></span><span></span><span></span>
+    <div class="nav-section">Vistas</div>
+    <button class="nav-btn active" onclick="setView('inbox',this)" id="btn-inbox">
+      <span>💬</span> Inbox (Chats)
     </button>
-    <div class="page-title" id="page-title">Pipeline</div>
-    <div class="topbar-search">
-      <span style="color:var(--muted);font-size:.9rem;">🔍</span>
-      <input type="text" placeholder="Buscar restaurante, dueño..." id="search-input" oninput="onSearch()">
-    </div>
-    <div class="topbar-actions">
-      <div class="view-tabs">
-        <button class="vt active" onclick="setView('kanban',null)" id="vt-kanban">Kanban</button>
-        <button class="vt" onclick="setView('tabla',null)" id="vt-tabla">Tabla</button>
+    <button class="nav-btn" onclick="setView('kanban',this)" id="btn-kanban">
+      <span>⬜</span> Pipeline Kanban
+    </button>
+    <button class="nav-btn" onclick="setView('tabla',this)" id="btn-tabla">
+      <span>☰</span> Tabla Base
+    </button>
+
+    <div class="nav-section">Acciones</div>
+    <button class="nav-btn" onclick="openAddModal()"><span>＋</span> Nuevo prospecto</button>
+    <button class="nav-btn" onclick="document.getElementById('csv-file-input').click()"><span>📁</span> Subir Base CSV</button>
+    <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCSVUpload(event)">
+    <button class="nav-btn" onclick="openTemplateModal()"><span>📤</span> Enviar Template <span class="nbadge" id="selected-count-badge" style="display:none">0</span></button>
+    <button class="nav-btn" onclick="openTemplatesListModal()"><span>📝</span> Mis Templates</button>
+    
+    <div class="nav-section">Filtros</div>
+    <button class="nav-btn" onclick="filterStage('')" id="filter-all">Todos</button>
+    <button class="nav-btn" onclick="filterStage('prospecto')">Prospecto</button>
+    <button class="nav-btn" onclick="filterStage('contactado')">Contactado</button>
+    <button class="nav-btn" onclick="filterStage('respondio')">Respondió <span class="nbadge nbadge-amber" id="badge-respondio" style="display:none">!</span></button>
+    <button class="nav-btn" onclick="filterStage('demo')">En Demo</button>
+    <button class="nav-btn" onclick="filterStage('cerrado')">Cerrados <span class="nbadge" id="badge-cerrado">0</span></button>
+
+    <div class="sidebar-bottom">
+      <div class="user-chip">
+        <div class="user-av" id="user-av">M</div>
+        <div><div class="user-name" id="user-name">Miguel</div><div class="user-role">Admin Mesio</div></div>
       </div>
-      <button class="btn btn-primary" onclick="openAddModal()">＋ Prospecto</button>
     </div>
   </div>
 
-  <div class="content" id="content-area">
-    <div class="stats-row" id="stats-row">
-      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-val" id="s-total">—</div></div>
-      <div class="stat-card"><div class="stat-label">Contactados</div><div class="stat-val g" id="s-contacted">—</div></div>
-      <div class="stat-card"><div class="stat-label">Respondieron</div><div class="stat-val a" id="s-responded">—</div></div>
-      <div class="stat-card"><div class="stat-label">Cerrados</div><div class="stat-val g" id="s-converted">—</div></div>
-      <div class="stat-card"><div class="stat-label">Conversión</div><div class="stat-val" id="s-rate">—%</div></div>
+  <div class="main">
+    <div class="topbar">
+      <button class="ham-btn" onclick="toggleSidebar()">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="page-title" id="page-title">Inbox</div>
+      <div class="topbar-search">
+        <span style="color:var(--muted);font-size:.9rem;">🔍</span>
+        <input type="text" placeholder="Buscar restaurante, dueño..." id="search-input" oninput="onSearch()">
+      </div>
+      <div class="topbar-actions">
+        <div class="view-tabs">
+          <button class="vt active" onclick="setView('kanban',null)" id="vt-kanban">Kanban</button>
+          <button class="vt" onclick="setView('tabla',null)" id="vt-tabla">Tabla</button>
+        </div>
+        <button class="btn btn-primary" onclick="openAddModal()">＋ Prospecto</button>
+      </div>
     </div>
 
-    <div id="view-inbox" class="inbox-layout" style="display:none;">
-      <div id="inbox-list-container" class="inbox-list-container">
-        <div class="inbox-list-header">
-          <h3 style="font-size: 1rem; font-weight: 700; color: var(--white);">Conversaciones</h3>
-          <input type="text" id="inbox-search" placeholder="Buscar chat..." oninput="filterInbox()" class="form-input" style="margin-top: 10px;">
-        </div>
-        <div id="inbox-list" class="inbox-list-body"></div>
+    <div class="content" id="content-area">
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card"><div class="stat-label">Total</div><div class="stat-val" id="s-total">—</div></div>
+        <div class="stat-card"><div class="stat-label">Contactados</div><div class="stat-val g" id="s-contacted">—</div></div>
+        <div class="stat-card"><div class="stat-label">Respondieron</div><div class="stat-val a" id="s-responded">—</div></div>
+        <div class="stat-card"><div class="stat-label">Cerrados</div><div class="stat-val g" id="s-converted">—</div></div>
+        <div class="stat-card"><div class="stat-label">Conversión</div><div class="stat-val" id="s-rate">—%</div></div>
       </div>
 
-      <div id="inbox-chat-container" class="inbox-chat-container">
-        <div class="inbox-chat-header">
-          <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
-            <button class="btn-volver-movil" onclick="cerrarChatMovil()">←</button>
-            <div style="min-width: 0; flex: 1;">
-              <div id="inbox-rest-name" class="inbox-rest-name">Selecciona una conversación</div>
-              <div id="inbox-rest-phone" class="inbox-rest-phone">---</div>
+      <div id="view-inbox" class="inbox-layout" style="display:none;">
+        <div id="inbox-list-container" class="inbox-list-container">
+          <div class="inbox-list-header">
+            <h3 style="font-size: 1rem; font-weight: 700; color: var(--white);">Conversaciones</h3>
+            <input type="text" id="inbox-search" placeholder="Buscar chat..." oninput="filterInbox()" class="form-input" style="margin-top: 10px;">
+          </div>
+          <div id="inbox-list" class="inbox-list-body"></div>
+        </div>
+
+        <div id="inbox-chat-container" class="inbox-chat-container">
+          <div class="inbox-chat-header">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
+              <button class="btn-volver-movil" onclick="cerrarChatMovil()">←</button>
+              <div style="min-width: 0; flex: 1;">
+                <div id="inbox-rest-name" class="inbox-rest-name">Selecciona una conversación</div>
+                <div id="inbox-rest-phone" class="inbox-rest-phone">---</div>
+              </div>
+            </div>
+            <div id="inbox-actions" class="inbox-actions">
+              <select id="inbox-stage-select" class="form-select inbox-stage-select" onchange="updateInboxStage()">
+                 <option value="prospecto">🔘 Prospecto</option><option value="contactado">🔵 Contactado</option><option value="respondio">🟣 Respondió</option>
+                 <option value="demo">🟡 En Demo</option><option value="negociacion">🟠 Negociación</option><option value="cerrado">🟢 Cerrado</option><option value="perdido">🔴 Perdido</option>
+              </select>
+              <button class="btn btn-outline btn-sm" onclick="sendSingleTemplateFromInbox()">📤<span id="btn-tpl-text"> Template</span></button>
             </div>
           </div>
-          <div id="inbox-actions" class="inbox-actions">
-            <select id="inbox-stage-select" class="form-select inbox-stage-select" onchange="updateInboxStage()">
-               <option value="prospecto">🔘 Prospecto</option><option value="contactado">🔵 Contactado</option><option value="respondio">🟣 Respondió</option>
-               <option value="demo">🟡 En Demo</option><option value="negociacion">🟠 Negociación</option><option value="cerrado">🟢 Cerrado</option><option value="perdido">🔴 Perdido</option>
-            </select>
-            <button class="btn btn-outline btn-sm" onclick="sendSingleTemplateFromInbox()">📤<span id="btn-tpl-text"> Template</span></button>
+          <div id="inbox-messages" class="inbox-chat-messages">
+            <div style="margin: auto; color:var(--muted);">Selecciona un prospecto para chatear.</div>
           </div>
-        </div>
-        <div id="inbox-messages" class="inbox-chat-messages">
-          <div style="margin: auto; color:var(--muted);">Selecciona un prospecto para chatear.</div>
-        </div>
-        <div id="inbox-input-area" class="inbox-chat-input-area">
-          <div style="display: flex; gap: 10px; align-items: flex-end;">
-            <textarea id="inbox-input" placeholder="Escribe tu mensaje..." rows="2" class="inbox-textarea" onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendInboxMessage(); }"></textarea>
-            <button class="btn btn-primary inbox-send-btn" onclick="sendInboxMessage()">Enviar</button>
+          <div id="inbox-input-area" class="inbox-chat-input-area">
+            <div style="display: flex; gap: 10px; align-items: flex-end;">
+              <textarea id="inbox-input" placeholder="Escribe tu mensaje..." rows="2" class="inbox-textarea" onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendInboxMessage(); }"></textarea>
+              <button class="btn btn-primary inbox-send-btn" onclick="sendInboxMessage()">Enviar</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div id="view-kanban">
-      <div class="kanban" id="kanban-board"></div>
-    </div>
+      <div id="view-kanban">
+        <div class="kanban" id="kanban-board"></div>
+      </div>
 
-    <div id="view-tabla" style="display:none;">
-      <div class="tbl-wrap">
-        <div class="tbl-toolbar">
-          <div style="display:flex; gap:6px;">
-            <select id="filter-stage-sel" class="form-select" onchange="loadProspects()"><option value="">Todas las etapas</option><option value="prospecto">Prospecto</option></select>
+      <div id="view-tabla" style="display:none;">
+        <div class="tbl-wrap">
+          <div class="tbl-toolbar">
+            <div style="display:flex; gap:6px;">
+              <select id="filter-stage-sel" class="form-select" onchange="loadProspects()">
+                <option value="">Todas las etapas</option><option value="prospecto">Prospecto</option><option value="contactado">Contactado</option><option value="respondio">Respondió</option><option value="demo">Demo</option><option value="negociacion">Negociación</option><option value="cerrado">Cerrado</option><option value="perdido">Perdido</option>
+              </select>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead><tr><th><input type="checkbox" id="check-all" onchange="toggleAllCheck()"></th><th>Restaurante</th><th>Teléfono</th><th>Etapa</th><th>Acciones</th></tr></thead>
+              <tbody id="prospects-tbody"><tr><td colspan="5">Cargando...</td></tr></tbody>
+            </table>
           </div>
         </div>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead><tr><th><input type="checkbox" id="check-all" onchange="toggleAllCheck()"></th><th>Restaurante</th><th>Teléfono</th><th>Etapa</th><th>Acciones</th></tr></thead>
-            <tbody id="prospects-tbody"><tr><td colspan="5">Cargando...</td></tr></tbody>
-          </table>
-        </div>
+      </div>
+
+    </div> </div> <div class="detail-panel" id="detail-panel">
+    <div class="dp-head">
+      <div><div class="dp-name" id="dp-name">—</div><div id="dp-phone-sub" style="font-size:.7rem;color:var(--muted);">—</div></div>
+      <button class="dp-close" onclick="closePanel()" style="background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;">✕</button>
+    </div>
+    <div class="dp-tabs">
+      <button class="dp-tab active" onclick="dpTab('info',this)">Info</button>
+      <button class="dp-tab" onclick="dpTab('chat',this)">Chat</button>
+      <button class="dp-tab" onclick="dpTab('notas',this)">Notas</button>
+    </div>
+    <div id="dp-info" class="dp-body">
+      <select class="form-select" id="dp-stage" onchange="updateStage()" style="margin-bottom:1rem; width:100%;"></select>
+      <div id="dp-fields"></div>
+      <button class="btn btn-red btn-sm" onclick="archiveProspect()" style="margin-top:1rem; width:100%;">🗑 Archivar</button>
+    </div>
+    <div id="dp-chat" style="display:none;flex:1;flex-direction:column;">
+      <div class="dp-body" id="chat-msgs-container"><div class="chat-msgs" id="chat-msgs"></div></div>
+      <div class="chat-input-area" style="padding:10px; border-top:1px solid var(--border); display:flex; gap:8px;">
+        <textarea class="form-textarea" id="chat-input" placeholder="Escribir mensaje…" onkeydown="chatKeydown(event)" style="min-height:40px;"></textarea>
+        <button class="btn btn-primary" onclick="sendMessage()">➤</button>
       </div>
     </div>
+    <div id="dp-notas" class="dp-body" style="display:none;">
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+        <select id="note-type" class="form-select" style="flex:1;">
+          <option value="note">📝 Nota</option><option value="call">📞 Llamada</option><option value="whatsapp">💬 WhatsApp</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="addNote()">Agregar</button>
+      </div>
+      <textarea class="form-textarea" id="note-input" placeholder="Escribe lo que pasó..." style="margin-bottom:15px; width:100%; min-height:80px;"></textarea>
+      <div id="notes-list"></div>
+    </div>
+  </div>
 
+</div> <div class="bulk-bar" id="bulk-bar" style="position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%); background:var(--card); border:1px solid var(--border); border-radius:100px; padding:.65rem 1.25rem; display:none; align-items:center; gap:12px; box-shadow:0 8px 32px rgba(0,0,0,.8); z-index:9000;">
+  <span id="bulk-bar-count" style="font-size:.8rem; font-weight:700; color:var(--g);">0 seleccionados</span>
+  <button class="btn btn-purple btn-sm" onclick="openTemplateModal()">📤 Enviar Template</button>
+  <button class="btn btn-outline btn-sm" onclick="clearSelection()">Cancelar</button>
+</div>
+
+<div class="modal-overlay" id="modal-add">
+  <div class="modal" style="background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:95%; max-width:500px;">
+    <div class="modal-head" style="padding:15px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:1.1rem; font-weight:bold; margin:0;">Nuevo Prospecto</h3>
+      <button onclick="closeModal('modal-add')" style="background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;">✕</button>
+    </div>
+    <div class="modal-body" style="padding:15px;">
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+        <div style="flex:1;"><label style="font-size:0.8rem; color:var(--muted);">Restaurante *</label><input type="text" class="form-input" id="f-name"></div>
+        <div style="flex:1;"><label style="font-size:0.8rem; color:var(--muted);">Dueño</label><input type="text" class="form-input" id="f-owner"></div>
+      </div>
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+        <div style="flex:1;"><label style="font-size:0.8rem; color:var(--muted);">Teléfono (WhatsApp) *</label><input type="text" class="form-input" id="f-phone" placeholder="573001234567"></div>
+        <div style="flex:1;"><label style="font-size:0.8rem; color:var(--muted);">Ciudad</label><input type="text" class="form-input" id="f-city"></div>
+      </div>
+    </div>
+    <div class="modal-footer" style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+      <button class="btn btn-outline" onclick="closeModal('modal-add')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveProspect()" id="btn-save-prospect">Guardar</button>
+    </div>
   </div>
 </div>
 
-<div class="detail-panel" id="detail-panel">
-  <div class="dp-head">
-    <div><div class="dp-name" id="dp-name">—</div><div id="dp-phone-sub" style="font-size:.7rem;color:var(--muted);">—</div></div>
-    <button class="dp-close" onclick="closePanel()">✕</button>
-  </div>
-  <div class="dp-tabs">
-    <button class="dp-tab active" onclick="dpTab('info',this)">Info</button>
-    <button class="dp-tab" onclick="dpTab('chat',this)">Chat</button>
-    <button class="dp-tab" onclick="dpTab('notas',this)">Notas</button>
-  </div>
-  <div id="dp-info" class="dp-body">
-    <select class="form-select" id="dp-stage" onchange="updateStage()" style="margin-bottom:1rem; width:100%;"></select>
-    <div id="dp-fields"></div>
-    <button class="btn btn-red btn-sm" onclick="archiveProspect()" style="margin-top:1rem; width:100%;">🗑 Archivar</button>
-  </div>
-  <div id="dp-chat" style="display:none;flex:1;flex-direction:column;">
-    <div class="dp-body" id="chat-msgs-container"><div class="chat-msgs" id="chat-msgs"></div></div>
-    <div class="chat-input-area">
-      <textarea class="form-textarea" id="chat-input" placeholder="Escribir mensaje…" onkeydown="chatKeydown(event)"></textarea>
-      <button class="btn btn-primary" onclick="sendMessage()">➤</button>
+<div class="modal-overlay" id="modal-template-send">
+  <div class="modal" style="background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:95%; max-width:600px;">
+    <div class="modal-head" style="padding:15px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:1.1rem; font-weight:bold; margin:0;">📤 Enviar Template de Meta</h3>
+      <button onclick="closeModal('modal-template-send')" style="background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;">✕</button>
+    </div>
+    <div class="modal-body" style="padding:15px; max-height:60vh; overflow-y:auto;">
+      <label style="font-size:0.8rem; color:var(--muted);">Selecciona el Template</label>
+      <select class="form-select" id="tpl-select" onchange="onTemplateSelect()" style="margin-bottom:15px;"></select>
+      
+      <div id="tpl-preview-wrap" style="background:var(--bg3); border:1px solid var(--border); padding:10px; border-radius:8px; margin-bottom:15px;">
+        <div style="font-size:0.7rem; color:var(--muted); margin-bottom:5px;">Vista previa:</div>
+        <div id="tpl-preview-text" style="font-size:0.85rem; white-space:pre-wrap;"></div>
+      </div>
+      
+      <div style="font-size:0.8rem; color:var(--muted); margin-bottom:5px;">Se enviará a:</div>
+      <div id="tpl-prospect-list" style="background:var(--bg3); border:1px solid var(--border); border-radius:8px; max-height:150px; overflow-y:auto; margin-bottom:15px;"></div>
+      
+      <div id="tpl-params-section" style="display:none; padding-top:10px; border-top:1px solid var(--border);">
+        <div style="font-size:0.8rem; color:var(--muted); margin-bottom:10px;">Variables (Aplicará para todos):</div>
+        <div id="tpl-params-inputs"></div>
+      </div>
+      
+      <div id="send-results" style="display:none; padding-top:10px; border-top:1px solid var(--border);">
+        <div style="font-size:0.8rem; color:var(--muted); margin-bottom:5px;">Resultados:</div>
+        <div id="send-results-list" style="max-height:150px; overflow-y:auto; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px;"></div>
+      </div>
+    </div>
+    <div class="modal-footer" style="padding:15px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+      <button class="btn btn-outline" onclick="closeModal('modal-template-send')">Cerrar</button>
+      <button class="btn btn-primary" onclick="doSendTemplate()" id="btn-send-tpl">📤 Enviar a seleccionados</button>
     </div>
   </div>
-  <div id="dp-notas" class="dp-body" style="display:none;">
-    <button class="btn btn-primary btn-sm" onclick="addNote()">Agregar Nota</button>
-    <textarea class="form-textarea" id="note-input" style="margin:10px 0; width:100%;"></textarea>
-    <div id="notes-list"></div>
+</div>
+
+<div class="modal-overlay" id="modal-templates-list">
+  <div class="modal" style="background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:95%; max-width:600px;">
+    <div class="modal-head" style="padding:15px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:1.1rem; font-weight:bold; margin:0;">📝 Mis Templates</h3>
+      <button onclick="closeModal('modal-templates-list')" style="background:none;border:none;color:#fff;font-size:1.2rem;cursor:pointer;">✕</button>
+    </div>
+    <div class="modal-body" style="padding:15px; max-height:60vh; overflow-y:auto;">
+      <div id="templates-list-content" style="margin-bottom:20px;"></div>
+      
+      <div style="border-top:1px solid var(--border); padding-top:15px;">
+        <h4 style="font-size:0.9rem; margin-bottom:10px;">➕ Crear Nuevo Template</h4>
+        <div style="display:flex; gap:10px; margin-bottom:10px;">
+          <div style="flex:1;"><label style="font-size:0.75rem; color:var(--muted);">Nombre visible</label><input type="text" class="form-input" id="nt-name" placeholder="Demo Seguimiento"></div>
+          <div style="flex:1;"><label style="font-size:0.75rem; color:var(--muted);">ID Meta (wa_name)</label><input type="text" class="form-input" id="nt-wa-name" placeholder="mesio_demo_1"></div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:0.75rem; color:var(--muted);">Cuerpo (Usa {{1}}, {{2}}...)</label>
+          <textarea class="form-textarea" id="nt-body" rows="3"></textarea>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:0.75rem; color:var(--muted);">Variables (separadas por coma)</label>
+          <input type="text" class="form-input" id="nt-params" placeholder="nombre, restaurante (Dejar en blanco si no tiene)">
+        </div>
+        <button class="btn btn-primary" style="width:100%;" onclick="saveTemplate()">Guardar Template</button>
+      </div>
+    </div>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/crm.js"></script>
+<script src="/static/crm.js?v=2"></script>
 </body>
 </html>
