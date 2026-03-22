@@ -437,7 +437,6 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
         if token and phone_id:
             try:
-                # 👇 LOGS DETALLADOS PARA DEBUGGEAR META
                 meta_payload = {
                     "messaging_product": "whatsapp",
                     "to": phone,
@@ -445,7 +444,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
                     "template": {
                         "name": tpl["wa_name"],
                         "language": {
-                            "policy": "deterministic", # 👈 Obliga a Meta a buscar exacto
+                            "policy": "deterministic",
                             "code": "es_MX"
                         },
                         "components": components
@@ -475,7 +474,6 @@ async def send_template(request: Request, body: SendTemplatePayload):
             status    = "no_credentials"
             error_msg = "Credenciales Meta no configuradas"
 
-        # Build preview of message with params filled in
         preview = tpl["body"]
         for i, p in enumerate(params):
             preview = preview.replace(f"{{{{{i+1}}}}}", str(p))
@@ -489,7 +487,6 @@ async def send_template(request: Request, body: SendTemplatePayload):
                     VALUES ($1,'outbound','whatsapp',$2,$3,$4,$5)
                 """, pid, preview, tpl["wa_name"], status, wa_msg_id)
 
-                # Auto-advance stage from prospecto → contactado
                 await conn.execute("""
                     UPDATE prospects
                     SET last_contact_at=NOW(), updated_at=NOW(),
@@ -576,7 +573,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
             phone = phone.replace(" ", "").replace("+", "").replace("-", "")
 
             try:
-                # 🔥 FIX: Búsqueda exacta indexada en lugar de ILIKE
+                # Búsqueda exacta indexada en lugar de ILIKE
                 existing = await conn.fetchval(
                     "SELECT id FROM prospects WHERE phone = $1", 
                     phone
@@ -595,7 +592,49 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
                 errors += 1
 
     return {"success": True, "inserted": inserted, "errors": errors}
-    
+
+# ── STATS / KANBAN COUNTS ─────────────────────────────────────────────
+@router.get("/stats")
+async def crm_stats(request: Request):
+    await _require_auth(request)
+    await _ensure_crm_tables()
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT stage, COUNT(*) as cnt
+            FROM prospects WHERE archived=FALSE
+            GROUP BY stage
+        """)
+        stage_counts = {r["stage"]: r["cnt"] for r in rows}
+
+        total       = await conn.fetchval("SELECT COUNT(*) FROM prospects WHERE archived=FALSE")
+        
+        contacted   = await conn.fetchval("""
+            SELECT COUNT(DISTINCT p.id) 
+            FROM prospects p
+            JOIN prospect_interactions pi ON p.id = pi.prospect_id
+            WHERE p.archived=FALSE 
+              AND pi.direction='outbound' 
+              AND pi.status='sent'
+        """)
+        
+        converted   = stage_counts.get("cerrado", 0)
+        follow_ups  = await conn.fetchval("""
+            SELECT COUNT(*) FROM prospects
+            WHERE next_follow_up <= NOW() + INTERVAL '24 hours'
+            AND next_follow_up >= NOW()
+            AND archived=FALSE
+        """)
+
+    return {
+        "stage_counts": stage_counts,
+        "total":        total or 0,
+        "contacted":    contacted or 0,
+        "converted":    converted,
+        "follow_ups":   follow_ups or 0,
+        "conversion_rate": round((converted / total * 100) if total else 0, 1)
+    }
+
 # ── PAGE ROUTE ────────────────────────────────────────────────────────
 from fastapi import Response as FResponse
 from pathlib import Path
@@ -620,13 +659,13 @@ async def register_inbound_from_prospect(phone: str, message: str, wa_message_id
         clean = phone.lstrip("+").replace(" ", "")
         
         async with pool.acquire() as conn:
-            # 🔥 FIX: Búsqueda exacta y rápida usando el índice de la BD
+            # Búsqueda exacta y rápida usando el índice de la BD
             row = await conn.fetchrow(
                 "SELECT id, stage FROM prospects WHERE phone = $1 ORDER BY id DESC LIMIT 1",
                 clean
             )
             
-            # 👇 Si no existe, creamos un prospecto entrante
+            # Si no existe, creamos un prospecto entrante
             if not row:
                 print(f"👤 Prospecto no encontrado para {clean}. Creando uno nuevo...", flush=True)
                 row = await conn.fetchrow("""
@@ -645,8 +684,7 @@ async def register_inbound_from_prospect(phone: str, message: str, wa_message_id
                 VALUES ($1,'inbound','whatsapp',$2,'received',$3)
             """, pid, message, wa_message_id)
 
-            # 🔥 FIX: Actualizamos la etapa a 'respondio' si es un prospecto frío, 
-            # o si estaba en PERDIDO / CERRADO (el cliente se arrepintió o volvió)
+            # Actualizamos la etapa a 'respondio' si es un prospecto frío
             new_stage = "respondio" if stage in ("prospecto", "contactado", "perdido", "cerrado") else stage
             
             # Forzamos archived=FALSE por si el prospecto estaba en la papelera
