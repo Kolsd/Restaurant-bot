@@ -1,6 +1,7 @@
 import os
 import httpx
 import urllib.parse
+import uuid
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -262,3 +263,91 @@ async def update_order_status(request: Request, order_id: str):
 @router.get("/cocina", response_class=HTMLResponse)
 async def kitchen_display():
     return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
+
+# ── MÓDULO PUNTO DE VENTA (POS) PARA MESEROS ─────────────────────────
+
+class ManualOrderRequest(BaseModel):
+    table_id: str
+    table_name: str
+    items: list
+    total: int
+    notes: str = ""
+
+@router.get("/api/pos/menu")
+async def get_pos_menu(request: Request):
+    """Devuelve el menú del restaurante para pintarlo en el POS del mesero"""
+    await require_auth(request)
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = await verify_token(token)
+    user = await db.db_get_user(username)
+    
+    # Buscamos el número de WhatsApp asociado a la sucursal del mesero
+    wa_number = "15556293573" # Fallback por defecto
+    if user and user.get("branch_id"):
+        r = await db.db_get_restaurant_by_id(user["branch_id"])
+        if r: wa_number = r.get("whatsapp_number", wa_number)
+    else:
+        all_r = await db.db_get_all_restaurants()
+        if all_r: wa_number = all_r[0].get("whatsapp_number", wa_number)
+        
+    menu = await db.db_get_menu(wa_number) or {}
+    return {"menu": menu}
+
+@router.get("/api/pos/tables-status")
+async def get_tables_status(request: Request):
+    """Devuelve todas las mesas y su estado actual (ideal para pintar el mapa)"""
+    await require_auth(request)
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = await verify_token(token)
+    user = await db.db_get_user(username)
+    branch_id = user.get("branch_id") if user else None
+    
+    tables = await db.db_get_tables(branch_id=branch_id)
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        # Buscamos qué mesas están hablando con el bot
+        active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status='active'")
+        # Buscamos qué mesas tienen pedidos en curso
+        pending_orders = await conn.fetch("SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado')")
+        
+    session_map = {s['table_id'] for s in active_sessions}
+    order_map = {}
+    for o in pending_orders:
+        if o['table_id'] not in order_map:
+            order_map[o['table_id']] = []
+        order_map[o['table_id']].append(o['status'])
+        
+    # Armamos la respuesta consolidada para el frontend
+    for t in tables:
+        tid = t['id']
+        t['bot_active'] = tid in session_map
+        t['pending_orders'] = order_map.get(tid, [])
+        
+    return {"tables": tables}
+
+@router.post("/api/pos/order")
+async def pos_manual_order(request: Request, body: ManualOrderRequest):
+    """Recibe la orden manual tocada en pantalla por el mesero y la manda a cocina"""
+    await require_auth(request)
+    
+    # Generamos un ID único con prefijo 'pos-' para identificar que fue manual
+    order_id = f"pos-{str(uuid.uuid4())[:8]}"
+    phone = "manual" # Como es manual, no hay celular del cliente atado al inicio
+    
+    order = {
+        "id": order_id,
+        "table_id": body.table_id,
+        "table_name": body.table_name,
+        "phone": phone,
+        "items": body.items,
+        "status": "recibido", # Entra directamente a la cola de la cocina
+        "notes": body.notes,
+        "total": body.total,
+        "base_order_id": order_id, 
+        "sub_number": 1
+    }
+    
+    await db.db_save_table_order(order)
+    
+    return {"success": True, "order_id": order_id, "message": "Comanda enviada a cocina"}    

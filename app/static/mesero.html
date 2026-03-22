@@ -2,182 +2,238 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — Vista Mesero</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mesio — POS Mesero</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #111; }
+
+/* ── TOPBAR Y TABS ── */
 .topbar { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; align-items: center; padding: 0 1rem; gap: 12px; z-index: 100; }
 .topbar-logo { width: 32px; height: 32px; background: #1D9E75; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
 .topbar-title { font-size: 15px; font-weight: 600; }
 .topbar-role { font-size: 11px; padding: 3px 10px; background: #E1F5EE; color: #0F6E56; border-radius: 20px; font-weight: 500; }
-.logout-btn { font-size: 12px; padding: 5px 10px; border: 0.5px solid #ddd; border-radius: 8px; background: none; cursor: pointer; color: #555; }
-/* NUEVO: ESTILOS DE LA BARRA DE ROLES */
+.logout-btn { font-size: 12px; padding: 5px 10px; border: 0.5px solid #ddd; border-radius: 8px; background: none; cursor: pointer; color: #555; margin-left: auto; }
+
 .role-nav { display: flex; gap: 8px; background: #f0f0e8; padding: 4px; border-radius: 10px; margin-left: 15px; }
+@media(max-width: 700px) { .role-nav { display: none !important; } }
 .role-btn { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #888; text-decoration: none; transition: all 0.2s; }
 .role-btn.active { background: #1D9E75; color: #fff; }
-.role-btn:hover:not(.active) { color: #333; background: #e0e0d8; }
-.tabs { position: fixed; top: 56px; left: 0; right: 0; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; z-index: 90; }
-.tab { flex: 1; padding: 12px; text-align: center; font-size: 13px; font-weight: 500; color: #888; cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; }
-.tab.active { color: #1D9E75; border-bottom-color: #1D9E75; }
+
+.tabs { position: fixed; top: 56px; left: 0; right: 0; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; z-index: 90; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 1; min-width: 90px; padding: 12px; text-align: center; font-size: 13px; font-weight: 600; color: #888; cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; white-space: nowrap; }
+.tab.active { color: #1D9E75; border-bottom-color: #1D9E75; background: #f9fbf9; }
 .tab-badge { display: inline-block; background: #E24B4A; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle; }
 .tab-badge-warn { background: #E8A020; }
-.content { margin-top: 104px; padding: 1rem; }
+
+.content { margin-top: 104px; padding: 1rem; padding-bottom: 80px; }
 .section { display: none; }
 .section.active { display: block; }
-
-/* ── ALERT CARDS ── */
-.alert-card { border-radius: 14px; padding: 1rem 1.1rem; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); animation: slideIn .3s ease; position: relative; }
-@keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
-.alert-bill   { background: #FFF8E6; border: 1.5px solid #F0A500; border-left: 5px solid #F0A500; }
-.alert-waiter { background: #EBF4FF; border: 1.5px solid #2D7DD2; border-left: 5px solid #2D7DD2; }
-.alert-admin  { background: #EEF2FF; border: 1.5px solid #6366F1; border-left: 5px solid #6366F1; }
-.alert-icon { font-size: 1.8rem; flex-shrink: 0; line-height: 1; }
-.alert-body { flex: 1; min-width: 0; }
-.alert-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
-.alert-title-bill   { color: #7A4F00; }
-.alert-title-waiter { color: #174A80; }
-.alert-title-admin  { color: #3730A3; }
-.alert-meta { font-size: 12px; color: #888; margin-bottom: 6px; }
-.alert-msg  { font-size: 13px; color: #444; }
-.alert-dismiss { position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 18px; color: #bbb; cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 6px; }
-.alert-dismiss:hover { color: #555; background: rgba(0,0,0,.06); }
-.alert-time { font-size: 11px; color: #aaa; white-space: nowrap; }
-
-/* ── TOAST ── */
-.toast { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(100px); background: #1D2226; color: #fff; padding: 12px 20px; border-radius: 50px; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 32px rgba(0,0,0,.25); transition: transform .35s cubic-bezier(.34,1.56,.64,1); z-index: 9999; max-width: 90vw; text-align: center; }
-.toast.show { transform: translateX(-50%) translateY(0); }
-.toast-icon { font-size: 1.3rem; flex-shrink: 0; }
-.toast-bill   { border-left: 4px solid #F0A500; }
-.toast-waiter { border-left: 4px solid #2D7DD2; }
-.toast-admin  { border-left: 4px solid #6366F1; }
-
-/* ── ORDER CARDS ── */
-.order-card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 10px; }
-.order-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.order-id { font-size: 13px; font-weight: 600; }
-.order-time { font-size: 11px; color: #888; }
-.order-items { font-size: 13px; color: #444; margin-bottom: 10px; line-height: 1.6; }
-.order-status { display: inline-block; font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px; margin-bottom: 10px; }
-.st-listo     { background: #E1F5EE; color: #0F6E56; }
-.st-recibido  { background: #FFF3CD; color: #856404; }
-.st-prep      { background: #E6F1FB; color: #185FA5; }
-.st-entregado { background: #f0f0e8; color: #888; }
-.st-factura   { background: #F0E6FF; color: #6B21A8; }
-.btn { padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; }
-.btn-green  { background: #1D9E75; color: #fff; }
-.btn-purple { background: #7C3AED; color: #fff; }
-
-/* ── CHAT ── */
-.conv-item { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
-.conv-avatar { width: 40px; height: 40px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #0F6E56; flex-shrink: 0; text-transform: uppercase; }
-.conv-phone { font-size: 13px; font-weight: 600; }
-.conv-preview { font-size: 12px; color: #888; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.conv-count { font-size: 11px; color: #aaa; flex-shrink: 0; }
+.section-header { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 12px; color: #555; }
 .empty { text-align: center; padding: 3rem 1rem; color: #aaa; font-size: 14px; }
 
+/* ── MAPA DE MESAS (POS) ── */
+.table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.table-card { background: #fff; border: 1px solid #e0e0d8; border-radius: 14px; padding: 1.5rem 1rem; text-align: center; cursor: pointer; transition: transform 0.1s; box-shadow: 0 4px 6px rgba(0,0,0,0.02); display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 110px; }
+.table-card:active { transform: scale(0.95); }
+.tc-name { font-size: 18px; font-weight: 800; margin-bottom: 8px; color: #333; }
+.tc-status { font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 20px; display: inline-block; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.tb-free { border-top: 5px solid #1D9E75; }
+.tb-free .tc-status { background: #E1F5EE; color: #0F6E56; }
+.tb-bot { border-top: 5px solid #378ADD; }
+.tb-bot .tc-status { background: #EBF4FF; color: #174A80; }
+.tb-busy { border-top: 5px solid #F59E0B; }
+.tb-busy .tc-status { background: #FFF8E6; color: #7A4F00; }
+
+/* ── POS MODAL Y MENÚ ── */
+.pos-modal { display: none; position: fixed; inset: 0; background: #f5f5f0; z-index: 3000; flex-direction: column; }
+.pos-modal.open { display: flex; animation: slideUp 0.3s ease-out forwards; }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.pos-header { height: 60px; background: #fff; border-bottom: 1px solid #ddd; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+.pos-title { font-size: 18px; font-weight: 800; color: #111; }
+.pos-close { font-size: 24px; background: none; border: none; color: #555; cursor: pointer; padding: 5px; line-height: 1; }
+.pos-body { flex: 1; display: flex; overflow: hidden; flex-direction: column; }
+
+@media(min-width: 800px) { .pos-body { flex-direction: row; } }
+
+.pos-menu-area { flex: 1; overflow-y: auto; padding: 20px; }
+.pos-cart-area { width: 340px; background: #fff; border-left: 1px solid #ddd; display: flex; flex-direction: column; flex-shrink: 0; }
+
+@media(max-width: 799px) { 
+    .pos-cart-area { width: 100%; height: 65vh; position: fixed; bottom: 0; transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index: 3010; box-shadow: 0 -10px 25px rgba(0,0,0,0.15); border-radius: 24px 24px 0 0; }
+    .pos-cart-area.open { transform: translateY(0); }
+    .pos-cart-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 3005; backdrop-filter: blur(2px); }
+    .pos-cart-backdrop.open { display: block; }
+}
+
+.menu-cat-title { font-size: 18px; font-weight: 800; color: #333; margin: 20px 0 12px; }
+.menu-cat-title:first-child { margin-top: 0; }
+.menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.pos-item-card { background: #fff; border: 1px solid #e0e0d8; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; min-height: 100px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: all 0.1s; }
+.pos-item-card:active { background: #E1F5EE; border-color: #1D9E75; transform: scale(0.96); }
+.pos-item-name { font-size: 14px; font-weight: 600; color: #444; margin-bottom: 6px; line-height: 1.3; }
+.pos-item-price { font-size: 15px; font-weight: 800; color: #1D9E75; }
+
+/* ── CARRITO (COMANDA) ── */
+.cart-header { padding: 20px; border-bottom: 1px solid #eee; font-weight: 800; font-size: 18px; background: #fff; border-radius: 24px 24px 0 0; display:flex; justify-content: space-between; align-items: center; }
+.cart-items { flex: 1; overflow-y: auto; padding: 10px 20px; }
+.cart-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #eee; }
+.cart-item-info { flex: 1; font-size: 14px; font-weight: 600; color: #333; padding-right: 10px; }
+.cart-item-qty { display: flex; align-items: center; gap: 12px; }
+.qty-btn { width: 32px; height: 32px; border-radius: 8px; border: none; background: #f0f0e8; color: #333; font-weight: bold; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.qty-btn:active { background: #ddd; }
+.cart-footer { padding: 20px; border-top: 1px solid #eee; background: #fff; }
+.cart-total { display: flex; justify-content: space-between; font-size: 20px; font-weight: 800; margin-bottom: 15px; color: #111; }
+.btn-send-order { width: 100%; padding: 16px; font-size: 16px; font-weight: 700; border-radius: 12px; background: #1D9E75; color: #fff; border: none; cursor: pointer; box-shadow: 0 4px 12px rgba(29,158,117,0.3); transition: opacity 0.2s; }
+.btn-send-order:active { opacity: 0.8; box-shadow: none; transform: translateY(2px); }
+
+/* Botón flotante móvil para ver carrito */
+.mobile-cart-toggle { display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; background: #1D9E75; color: #fff; padding: 16px 20px; border-radius: 16px; font-size: 16px; font-weight: 700; box-shadow: 0 6px 20px rgba(29,158,117,0.4); z-index: 2999; cursor: pointer; }
+@media(max-width: 799px) { .mobile-cart-toggle { display: flex; justify-content: space-between; align-items: center; } }
+
+/* ── ALERTAS, ORDERS Y CHATS (Viejos estilos simplificados) ── */
+.alert-card { border-radius: 14px; padding: 1rem 1.1rem; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.05); background: #fff; border: 1px solid #eee; }
+.alert-icon { font-size: 1.8rem; line-height: 1; }
+.alert-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; color: #333; }
+.alert-meta { font-size: 12px; color: #888; }
+.order-card { background: #fff; border: 1px solid #e0e0d8; border-radius: 12px; padding: 1rem; margin-bottom: 10px; }
+.order-header { display: flex; justify-content: space-between; font-weight: 700; margin-bottom: 8px; }
+.btn { padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; }
+.btn-green { background: #1D9E75; color: #fff; }
+.btn-purple { background: #7C3AED; color: #fff; }
+
+/* ── TOAST ── */
+.toast { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(100px); background: #222; color: #fff; padding: 12px 24px; border-radius: 50px; font-size: 14px; font-weight: 600; display: flex; gap: 10px; box-shadow: 0 8px 32px rgba(0,0,0,.25); transition: transform .3s; z-index: 9999; }
+.toast.show { transform: translateX(-50%) translateY(0); }
+
 /* ── CHAT MODAL ── */
-.chat-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 2000; align-items: center; justify-content: center; }
+.chat-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 4000; align-items: center; justify-content: center; }
 .chat-modal.open { display: flex; }
-.chat-box { background: #fff; border-radius: 16px; width: 520px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
-.chat-head { padding: 1rem 1.25rem; border-bottom: 0.5px solid #e0e0d8; display: flex; align-items: center; justify-content: space-between; background: #f8f8f5; }
-.chat-phone { font-size: 14px; font-weight: 600; }
-.chat-close { font-size: 20px; background: none; border: none; cursor: pointer; color: #aaa; }
-.chat-msgs { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 8px; background: #ECE5DD; min-height: 250px; }
-.msg { padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; max-width: 75%; }
-.msg-user { background: #DCF8C6; align-self: flex-end; border-bottom-right-radius: 3px; }
-.msg-bot  { background: #fff; align-self: flex-start; border-bottom-left-radius: 3px; }
-.chat-input-row { padding: .75rem 1rem; border-top: 0.5px solid #e0e0d8; display: flex; gap: 8px; background: #f8f8f5; }
-.chat-input-row input { flex: 1; padding: 8px 12px; border: 1px solid #e0e0d8; border-radius: 20px; font-size: 13px; outline: none; }
-.chat-input-row button { background: #1D9E75; color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; font-weight: 500; }
-
-.section-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; margin-top: 4px; }
-.sh-listo  { color: #0F6E56; }
-.sh-orders { color: #185FA5; }
-
-/* Botón de limpiar chat */
-.btn-delete-chat { background: none; border: none; color: #E24B4A; cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
-.btn-delete-chat:hover { opacity: 0.7; }
+.chat-box { background: #fff; border-radius: 16px; width: 500px; max-width: 95vw; height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
+.chat-msgs { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 8px; background: #ECE5DD; }
+.msg { padding: 8px 12px; border-radius: 12px; font-size: 13px; max-width: 75%; }
+.msg-user { background: #DCF8C6; align-self: flex-end; }
+.msg-bot  { background: #fff; align-self: flex-start; }
 </style>
 </head>
 <body>
 
   <div class="topbar">
     <div class="topbar-logo">M</div>
-    <div class="topbar-title" id="rest-name">Mi Restaurante</div>
+    <div class="topbar-title" id="rest-name">Cargando...</div>
     <div class="topbar-role">Mesero</div>
     <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
+    <button class="logout-btn" onclick="doLogout()">Salir</button>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" id="tab-mesas" onclick="switchTab('mesas',this)">
+      🪑 Map. Mesas
+    </div>
+    <div class="tab" id="tab-alertas" onclick="switchTab('alertas',this)">
+      🔔 Alertas
+      <span class="tab-badge tab-badge-warn" id="badge-alertas" style="display:none">0</span>
+    </div>
+    <div class="tab" id="tab-pedidos" onclick="switchTab('pedidos',this)">
+      📦 Pedidos
+      <span class="tab-badge" id="badge-pedidos" style="display:none">0</span>
+    </div>
+    <div class="tab" id="tab-chats" onclick="switchTab('chats',this)">
+      💬 WhatsApp
+    </div>
+  </div>
+
+  <div class="content">
     
-    <button class="logout-btn" onclick="doLogout()" style="margin-left: auto;">Salir</button>
-  </div>
-
-<div class="tabs">
-  <div class="tab active" id="tab-alertas" onclick="switchTab('alertas',this)">
-    🔔 Alertas
-    <span class="tab-badge tab-badge-warn" id="badge-alertas" style="display:none">0</span>
-  </div>
-  <div class="tab" id="tab-pedidos" onclick="switchTab('pedidos',this)">
-    Pedidos listos
-    <span class="tab-badge" id="badge-pedidos" style="display:none">0</span>
-  </div>
-  <div class="tab" id="tab-chats" onclick="switchTab('chats',this)">
-    WhatsApp
-    <span class="tab-badge" id="badge-chats" style="display:none">0</span>
-  </div>
-</div>
-
-<div class="content">
-  <div id="alertas" class="section active">
-    <div id="alerts-list"><div class="empty">Sin alertas activas. Cuando un cliente pida la cuenta o llame al mesero, aparecerá aquí.</div></div>
-  </div>
-  <div id="pedidos" class="section">
-    <div id="orders-list"><div class="empty">Cargando pedidos...</div></div>
-  </div>
-  <div id="chats" class="section">
-    <div id="chats-list"><div class="empty">Cargando conversaciones...</div></div>
-  </div>
-</div>
-
-<div class="toast" id="toast">
-  <span class="toast-icon" id="toast-icon">🔔</span>
-  <span id="toast-text">Nueva alerta</span>
-</div>
-
-<div class="chat-modal" id="chat-modal">
-  <div class="chat-box">
-    <div class="chat-head">
-      <div class="chat-phone" id="chat-phone"></div>
-      <div style="display:flex; gap:12px; align-items:center;">
-        <button class="btn-delete-chat" onclick="deleteCurrentChat()">🗑️ Limpiar</button>
-        <button class="chat-close" onclick="closeChat()">✕</button>
+    <div id="mesas" class="section active">
+      <div class="section-header">Estado del Salón</div>
+      <div id="tables-grid" class="table-grid">
+        <div class="empty">Cargando mapa de mesas...</div>
       </div>
     </div>
-    <div class="chat-msgs" id="chat-msgs"></div>
-    <div class="chat-input-row">
-      <input id="chat-input-msg" placeholder="Responder manualmente..." onkeydown="if(event.key==='Enter')sendReply()">
-      <button onclick="sendReply()">Enviar</button>
+
+    <div id="alertas" class="section">
+      <div class="section-header">Atención Requerida</div>
+      <div id="alerts-list"><div class="empty">Sin alertas activas.</div></div>
+    </div>
+
+    <div id="pedidos" class="section">
+      <div class="section-header">Cocina y Cajas</div>
+      <div id="orders-list"><div class="empty">Cargando pedidos...</div></div>
+    </div>
+
+    <div id="chats" class="section">
+      <div class="section-header">Conversaciones Bot</div>
+      <div id="chats-list"><div class="empty">Cargando conversaciones...</div></div>
     </div>
   </div>
-</div>
+
+  <div class="toast" id="toast">
+    <span id="toast-icon">🔔</span>
+    <span id="toast-text">Notificación</span>
+  </div>
+
+  <div class="pos-modal" id="pos-modal">
+    <div class="pos-header">
+      <div class="pos-title" id="pos-table-name">Mesa</div>
+      <button class="pos-close" onclick="closePOS()">✕</button>
+    </div>
+    <div class="pos-body">
+      <div class="pos-menu-area" id="pos-menu-area">
+        <div class="empty">Cargando menú...</div>
+      </div>
+      
+      <div class="pos-cart-backdrop" id="pos-cart-backdrop" onclick="toggleMobileCart()"></div>
+      <div class="pos-cart-area" id="pos-cart-area">
+        <div class="cart-header">
+          <span>📝 Comanda Actual</span>
+          <button class="pos-close" style="display:none;" id="mobile-cart-close" onclick="toggleMobileCart()">✕</button>
+        </div>
+        <div class="cart-items" id="pos-cart-items">
+          </div>
+        <div class="cart-footer">
+          <div class="cart-total"><span>Total:</span><span id="pos-total">$0</span></div>
+          <textarea id="pos-notes" placeholder="Notas a cocina (ej. sin cebolla, término medio)..." style="width:100%; border:1px solid #ddd; border-radius:10px; padding:10px; margin-bottom:12px; font-family:inherit; font-size:13px; resize:none; outline:none;"></textarea>
+          <button class="btn-send-order" onclick="sendPosOrder()">🚀 Enviar a Cocina</button>
+        </div>
+      </div>
+    </div>
+    <div class="mobile-cart-toggle" id="mobile-cart-toggle" onclick="toggleMobileCart()">
+      <span>🛒 Ver Comanda (<span id="m-cart-count">0</span>)</span>
+      <span id="m-cart-total">$0</span>
+    </div>
+  </div>
+
+  <div class="chat-modal" id="chat-modal">
+    <div class="chat-box">
+      <div style="padding: 15px; border-bottom: 1px solid #ddd; display:flex; justify-content:space-between; background:#f8f8f5;">
+        <b id="chat-phone">Cliente</b>
+        <div>
+          <button onclick="deleteCurrentChat()" style="background:none; border:none; color:red; margin-right:15px; font-weight:bold; cursor:pointer;">Limpiar</button>
+          <button onclick="closeChat()" style="background:none; border:none; font-size:18px; cursor:pointer;">✕</button>
+        </div>
+      </div>
+      <div class="chat-msgs" id="chat-msgs"></div>
+      <div style="padding: 10px; border-top: 1px solid #ddd; display: flex; gap: 8px;">
+        <input id="chat-input-msg" style="flex:1; padding: 10px; border-radius: 20px; border:1px solid #ddd; outline:none;" placeholder="Escribir al cliente...">
+        <button onclick="sendReply()" style="background:#1D9E75; color:#fff; border:none; padding:0 20px; border-radius:20px; font-weight:bold;">Enviar</button>
+      </div>
+    </div>
+  </div>
 
 <script>
-const token      = localStorage.getItem('rb_token');
+// --- AUTENTICACIÓN ---
+const token = localStorage.getItem('rb_token');
 const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
 if (!token) window.location.href = '/login';
-const headers = { 'Authorization': 'Bearer ' + token };
+const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 document.getElementById('rest-name').textContent = restaurant.name || 'Mi Restaurante';
 
-let currentChatPhone = null;
-let phoneToTableMap = {}; // Mapa para enmascarar números privados
-
-function getDisplayName(phone) {
-  if (phoneToTableMap[phone]) return phoneToTableMap[phone];
-  return "Cliente " + phone.substring(0, 4) + "***" + phone.slice(-2);
-}
-
 function doLogout() {
-  localStorage.removeItem('rb_token');
-  localStorage.removeItem('rb_restaurant');
+  localStorage.clear();
   window.location.href = '/login';
 }
 
@@ -188,72 +244,247 @@ function switchTab(id, btn) {
   btn.classList.add('active');
 }
 
-// ── SOUND ─────────────────────────────────────────────────────────
-const AudioCtx = window.AudioContext || window.webkitAudioContext;
-let _audioCtx = null;
-function getAudioCtx() {
-  if (!_audioCtx) _audioCtx = new AudioCtx();
-  return _audioCtx;
-}
-function playAlertSound(type) {
-  try {
-    const ctx  = getAudioCtx();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    gain.gain.setValueAtTime(0.4, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
-    const freqs = type === 'bill' ? [880, 660] : type === 'admin_alert' ? [660, 770, 880] : [440, 550, 660];
-    freqs.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.18);
-      osc.connect(gain);
-      osc.start(ctx.currentTime + i * 0.18);
-      osc.stop(ctx.currentTime + i * 0.18 + 0.15);
-    });
-  } catch(e) {}
-}
-
-// ── TOAST ─────────────────────────────────────────────────────────
-let toastTimer = null;
-function showToast(text, type) {
-  const t  = document.getElementById('toast');
-  document.getElementById('toast-icon').textContent = type === 'bill' ? '💳' : type === 'admin_alert' ? '🛡️' : '🙋';
-  document.getElementById('toast-text').textContent  = text;
-  t.className = 'toast show toast-' + (type === 'admin_alert' ? 'admin' : type);
+let toastTimer;
+function showToast(text, type='info') {
+  const t = document.getElementById('toast');
+  document.getElementById('toast-icon').textContent = type === 'waiter' ? '🙋' : '🔔';
+  document.getElementById('toast-text').textContent = text;
+  t.className = 'toast show';
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 5000);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
 }
 
-// ── ALERTS ────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// ── LÓGICA DEL POS Y MAPA DE MESAS (NUEVO) ──────────────
+// ════════════════════════════════════════════════════════
+let posMenu = null;
+let posCart = [];
+let currentPosTable = null;
+let currentPosTableName = '';
+
+async function loadTablesStatus() {
+    try {
+        const r = await fetch('/api/pos/tables-status', { headers });
+        if (!r.ok) return;
+        const data = await r.json();
+        const container = document.getElementById('tables-grid');
+        
+        if (!data.tables || data.tables.length === 0) {
+            container.innerHTML = '<div class="empty">No hay mesas configuradas. Un administrador debe crearlas.</div>';
+            return;
+        }
+
+        container.innerHTML = data.tables.map(t => {
+            let statusClass = 'tb-free';
+            let statusText = 'Libre';
+            
+            // Lógica de colores semánticos
+            if (t.pending_orders && t.pending_orders.length > 0) { 
+                statusClass = 'tb-busy'; statusText = '🍽️ Ocupada / Esperando'; 
+            } else if (t.bot_active) { 
+                statusClass = 'tb-bot'; statusText = '🤖 Bot Atendiendo'; 
+            }
+            
+            return `
+            <div class="table-card ${statusClass}" onclick="openPOS('${t.id}', '${t.name}')">
+                <div class="tc-name">${t.name}</div>
+                <div class="tc-status">${statusText}</div>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error('Error cargando mapa de mesas:', e); }
+}
+
+async function openPOS(tableId, tableName) {
+    currentPosTable = tableId;
+    currentPosTableName = tableName;
+    document.getElementById('pos-table-name').textContent = `Ordenando en: ${tableName}`;
+    
+    // Limpiar carrito al abrir nueva mesa
+    posCart = [];
+    document.getElementById('pos-notes').value = '';
+    renderCart();
+    
+    document.getElementById('pos-modal').classList.add('open');
+    
+    // Descargar el menú solo la primera vez que se abre el POS
+    if (!posMenu) {
+        document.getElementById('pos-menu-area').innerHTML = '<div class="empty spinner" style="color:#1D9E75;">Cargando productos...</div>';
+        try {
+            const r = await fetch('/api/pos/menu', { headers });
+            const data = await r.json();
+            posMenu = data.menu || {};
+        } catch(e) {
+            document.getElementById('pos-menu-area').innerHTML = '<div class="empty" style="color:red;">Error al cargar el menú. Verifica tu conexión.</div>';
+            return;
+        }
+    }
+    renderMenu();
+}
+
+function closePOS() {
+    document.getElementById('pos-modal').classList.remove('open');
+    document.getElementById('pos-cart-area').classList.remove('open');
+    document.getElementById('pos-cart-backdrop').classList.remove('open');
+}
+
+function toggleMobileCart() {
+    const isMobile = window.innerWidth < 800;
+    if(isMobile) {
+        document.getElementById('pos-cart-area').classList.toggle('open');
+        document.getElementById('pos-cart-backdrop').classList.toggle('open');
+        document.getElementById('mobile-cart-close').style.display = 'block';
+    }
+}
+
+function renderMenu() {
+    const container = document.getElementById('pos-menu-area');
+    let html = '';
+    
+    if (Object.keys(posMenu).length === 0) {
+        container.innerHTML = '<div class="empty">El menú del restaurante está vacío o no se ha configurado.</div>';
+        return;
+    }
+
+    for (const [category, items] of Object.entries(posMenu)) {
+        html += `<div class="menu-cat-title">${category}</div>`;
+        html += `<div class="menu-grid">`;
+        items.forEach(item => {
+            const priceFmt = '$' + Number(item.price).toLocaleString('es-CO');
+            // Escapar comillas simples para evitar errores en el onclick
+            const safeName = item.name.replace(/'/g, "\\'");
+            html += `
+            <div class="pos-item-card" onclick="addToCart('${safeName}', ${item.price})">
+                <div class="pos-item-name">${item.name}</div>
+                <div class="pos-item-price">${priceFmt}</div>
+            </div>`;
+        });
+        html += `</div>`;
+    }
+    container.innerHTML = html;
+}
+
+function addToCart(name, price) {
+    const existing = posCart.find(i => i.name === name);
+    if (existing) {
+        existing.quantity++;
+    } else {
+        posCart.push({ name: name, price: price, quantity: 1 });
+    }
+    renderCart();
+    
+    // Animación muy sutil tipo "haptic feedback" visual
+    const btn = document.getElementById('mobile-cart-toggle');
+    if(btn.style.display !== 'none') {
+        btn.style.transform = 'scale(1.05)';
+        setTimeout(() => btn.style.transform = 'scale(1)', 150);
+    }
+}
+
+function updateQty(index, delta) {
+    posCart[index].quantity += delta;
+    if (posCart[index].quantity <= 0) {
+        posCart.splice(index, 1); // Eliminar si llega a 0
+    }
+    renderCart();
+}
+
+function renderCart() {
+    const container = document.getElementById('pos-cart-items');
+    let total = 0;
+    let count = 0;
+    
+    if (posCart.length === 0) {
+        container.innerHTML = '<div class="empty" style="padding: 2rem;">Toca un producto del menú para agregarlo a la comanda.</div>';
+        document.getElementById('pos-total').textContent = '$0';
+        document.getElementById('m-cart-total').textContent = '$0';
+        document.getElementById('m-cart-count').textContent = '0';
+        document.getElementById('mobile-cart-toggle').style.display = 'none';
+        return;
+    }
+
+    let html = '';
+    posCart.forEach((item, index) => {
+        const lineTotal = item.price * item.quantity;
+        total += lineTotal;
+        count += item.quantity;
+        html += `
+        <div class="cart-item">
+            <div class="cart-item-info">
+                <div style="margin-bottom:4px; line-height:1.2;">${item.name}</div>
+                <div style="color:#1D9E75;">$${lineTotal.toLocaleString('es-CO')}</div>
+            </div>
+            <div class="cart-item-qty">
+                <button class="qty-btn" onclick="updateQty(${index}, -1)">−</button>
+                <span style="font-weight:bold; width:15px; text-align:center;">${item.quantity}</span>
+                <button class="qty-btn" onclick="updateQty(${index}, 1)">+</button>
+            </div>
+        </div>`;
+    });
+    
+    container.innerHTML = html;
+    const totalFmt = '$' + total.toLocaleString('es-CO');
+    document.getElementById('pos-total').textContent = totalFmt;
+    document.getElementById('m-cart-total').textContent = totalFmt;
+    document.getElementById('m-cart-count').textContent = count;
+    
+    if (window.innerWidth < 800) {
+        document.getElementById('mobile-cart-toggle').style.display = 'flex';
+    } else {
+        document.getElementById('mobile-cart-toggle').style.display = 'none';
+    }
+}
+
+async function sendPosOrder() {
+    if (posCart.length === 0) return alert('El carrito está vacío. Agrega productos primero.');
+    
+    const total = posCart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const notes = document.getElementById('pos-notes').value.trim();
+    const btn = document.querySelector('.btn-send-order');
+    
+    btn.disabled = true;
+    btn.innerHTML = 'Enviando... ⏳';
+    
+    try {
+        const res = await fetch('/api/pos/order', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                table_id: currentPosTable,
+                table_name: currentPosTableName,
+                items: posCart,
+                total: total,
+                notes: notes
+            })
+        });
+        
+        if (res.ok) {
+            showToast('✅ Comanda enviada a cocina exitosamente.', 'waiter');
+            closePOS();
+            loadTablesStatus(); // Refresca las mesas para ponerla color Naranja (Ocupada)
+            loadOrders();       // Refresca la pestaña de pedidos a cocina
+        } else {
+            alert('Hubo un problema al enviar la orden. Intenta nuevamente.');
+        }
+    } catch(e) {
+        alert('Error de conexión con el servidor principal.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🚀 Enviar a Cocina';
+    }
+}
+
+
+// ════════════════════════════════════════════════════════
+// ── LÓGICA ORIGINAL (ALERTAS, PEDIDOS Y CHAT) ───────────
+// ════════════════════════════════════════════════════════
+
+// 1. Alertas
 let knownAlertIds = new Set();
-
-function timeAgo(isoStr) {
-  const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
-  if (diff < 60)   return 'hace ' + diff + 's';
-  if (diff < 3600) return 'hace ' + Math.floor(diff/60) + 'min';
-  return 'hace ' + Math.floor(diff/3600) + 'h';
-}
-
 async function loadAlerts() {
   try {
     const r = await fetch('/api/waiter-alerts', { headers });
     if (!r.ok) return;
     const { alerts = [] } = await r.json();
-
-    alerts.forEach(a => {
-      if (a.phone && a.table_name) phoneToTableMap[a.phone] = a.table_name;
-      
-      if (!knownAlertIds.has(a.id)) {
-        knownAlertIds.add(a.id);
-        playAlertSound(a.alert_type);
-        let label = '';
-        if (a.alert_type === 'bill')        label = '💳 ' + (a.table_name||'Cliente') + ' pide la cuenta';
-        else if (a.alert_type === 'admin_alert') label = '🛡️ Admin: ' + (a.table_name||'') + ' — ' + (a.message||'atención requerida');
-        else                                label = '🙋 ' + (a.table_name||'Cliente') + ' llama al mesero';
-        showToast(label, a.alert_type);
-      }
-    });
 
     const badge = document.getElementById('badge-alertas');
     badge.textContent = alerts.length;
@@ -261,276 +492,168 @@ async function loadAlerts() {
 
     const container = document.getElementById('alerts-list');
     if (!alerts.length) {
-      container.innerHTML = '<div class="empty">Sin alertas activas. Cuando un cliente pida la cuenta o llame al mesero, aparecerá aquí.</div>';
+      container.innerHTML = '<div class="empty">Sin alertas activas.</div>';
       return;
     }
 
     container.innerHTML = alerts.map(a => {
-      const isAdmin  = a.alert_type === 'admin_alert';
-      const isBill   = a.alert_type === 'bill';
-      const cardClass  = isAdmin ? 'alert-admin'  : isBill ? 'alert-bill'  : 'alert-waiter';
-      const titleClass = isAdmin ? 'alert-title-admin' : isBill ? 'alert-title-bill' : 'alert-title-waiter';
-      const icon  = isAdmin ? '🛡️' : isBill ? '💳' : '🙋';
-      const title = isAdmin
-        ? 'Alerta del Administrador' + (a.table_name ? ' — ' + a.table_name : '')
-        : isBill
-          ? 'Solicitud de cuenta' + (a.table_name ? ' — ' + a.table_name : '')
-          : 'Llamada al mesero' + (a.table_name ? ' — ' + a.table_name : '');
-
-      const reopenBtn = isAdmin
-        ? `<button class="btn-reopen-alert" onclick="reopenSessionFromAlert('${a.phone}','${a.bot_number}',${a.id})">♻️ Reabrir sesión del cliente</button>`
-        : '';
-
-      return `<div class="alert-card ${cardClass}" id="alert-${a.id}">
-        <div class="alert-icon">${icon}</div>
-        <div class="alert-body">
-          <div class="alert-title ${titleClass}">${title}</div>
-          <div class="alert-meta">${a.phone} · <span class="alert-time">${timeAgo(a.created_at)}</span></div>
-          ${a.message ? '<div class="alert-msg">' + a.message + '</div>' : ''}
-          ${reopenBtn}
+      if (!knownAlertIds.has(a.id)) {
+        knownAlertIds.add(a.id);
+        showToast('🙋 ' + (a.table_name || 'Cliente') + ' solicita atención', 'waiter');
+      }
+      return `
+      <div class="alert-card" id="alert-${a.id}">
+        <div class="alert-icon">🙋</div>
+        <div style="flex:1;">
+          <div class="alert-title">Llamada de cliente — ${a.table_name || 'Mesa'}</div>
+          <div class="alert-meta">${a.message || 'El cliente necesita a un mesero'}</div>
         </div>
-        <button class="alert-dismiss" onclick="dismissAlert(${a.id})">✕</button>
+        <button onclick="dismissAlert(${a.id})" class="btn" style="background:#eee; color:#333;">✓ Atendido</button>
       </div>`;
     }).join('');
-  } catch(e) { console.error('loadAlerts:', e); }
-}
-
-async function dismissAlert(id) {
-  const el = document.getElementById('alert-' + id);
-  if (el) { el.style.opacity = '0'; el.style.transform = 'translateX(30px)'; el.style.transition = 'all .25s'; }
-  setTimeout(async () => {
-    try {
-      await fetch('/api/waiter-alerts/' + id + '/dismiss', { method: 'POST', headers });
-      knownAlertIds.delete(id);
-      loadAlerts();
-    } catch(e) {}
-  }, 250);
-}
-
-// ── ORDERS ────────────────────────────────────────────────────────
-function statusLabel(s) {
-  return {
-    recibido:'Recibido', en_preparacion:'En preparación', listo:'Listo para servir',
-    entregado:'Entregado', factura_entregada:'Factura entregada', pendiente_pago:'Pendiente pago'
-  }[s] || s;
-}
-function statusClass(s) {
-  if (s === 'listo')             return 'st-listo';
-  if (s === 'en_preparacion')    return 'st-prep';
-  if (s === 'entregado')         return 'st-entregado';
-  if (s === 'factura_entregada') return 'st-factura';
-  return 'st-recibido';
-}
-
-async function loadOrders() {
-  try {
-    const [r1, r2] = await Promise.all([
-      fetch('/api/table-orders', { headers }),
-      fetch('/api/dashboard/orders?period=today', { headers })
-    ]);
-    const allTableOrders = r1.ok ? (await r1.json()).orders || [] : [];
-    const regularOrders  = r2.ok ? (await r2.json()).orders || [] : [];
-
-    allTableOrders.forEach(o => {
-      if (o.phone && o.table_name) phoneToTableMap[o.phone] = o.table_name;
-    });
-
-    const listoTable     = allTableOrders.filter(o => o.status === 'listo');
-    const entregadoTable = allTableOrders.filter(o => o.status === 'entregado' || o.status === 'factura_generada');
-    const pendingRegular = regularOrders.filter(o => o.status !== 'entregado' && o.status !== 'cancelado');
-
-    const billsMap = {};
-    entregadoTable.forEach(o => {
-        const baseId = o.id.replace(/-\d+$/, '');
-        if (!billsMap[baseId]) {
-            billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, status: o.status, items: [], total: 0 };
-        }
-        if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada';
-        let parsedItems = [];
-        try {
-            const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-            parsedItems = Array.isArray(arr) ? arr : [];
-        } catch(e) {}
-        
-        billsMap[baseId].items.push(...parsedItems);
-        billsMap[baseId].total += (Number(o.total) || 0);
-    });
-    const groupedBills = Object.values(billsMap);
-
-    const total = listoTable.length + groupedBills.length + pendingRegular.length;
-    const badge = document.getElementById('badge-pedidos');
-    badge.textContent = total;
-    badge.style.display = total > 0 ? 'inline-block' : 'none';
-
-    let html = '';
-
-    if (listoTable.length > 0) {
-      html += '<div class="section-header sh-listo">✅ Listos para servir</div>';
-      listoTable.forEach(o => {
-        const items = Array.isArray(o.items) ? o.items.map(i => (i.quantity||1)+'x '+i.name).join(', ') : o.items || '';
-        const total_fmt = '$' + Number(o.total||0).toLocaleString('es-CO');
-        html += `<div class="order-card" style="border-left:3px solid #1D9E75;">
-          <div class="order-header">
-            <div class="order-id">${o.table_name}</div>
-            <div class="order-time">${(o.created_at||'').substring(11,16)}</div>
-          </div>
-          <div class="order-items">${items}</div>
-          <div style="font-size:12px;color:#0F6E56;font-weight:600;margin-bottom:8px;">Total: ${total_fmt}</div>
-          <div><button class="btn btn-green" onclick="updateTableOrder('${o.id}','entregado')">🍽️ Marcar entregado</button></div>
-        </div>`;
-      });
-    }
-
-    if (groupedBills.length > 0) {
-      html += '<div class="section-header" style="color:#7C3AED;margin-top:12px;">🧾 Pendientes de Cierre</div>';
-      groupedBills.forEach(b => {
-        const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
-        const total_fmt = '$' + Number(b.total||0).toLocaleString('es-CO');
-        const isGenerated = b.status === 'factura_generada';
-        
-        const actionBtns = isGenerated 
-            ? `<div style="font-size:11px; color:#1D9E75; font-weight:600; margin-bottom:6px;">✅ Factura enviada al sistema contable</div>
-               <button class="btn" style="background:#555; color:#fff; width:100%;" onclick="updateTableOrder('${b.id}','cerrar_mesa')">👋 Cerrar Mesa y Despedir</button>`
-            : `<div style="display:flex; gap:6px;">
-                 <button class="btn btn-purple" onclick="updateTableOrder('${b.id}','generar_factura')" style="flex:1;">🧾 Generar Factura</button>
-                 <button class="btn" style="background:#555; color:#fff; flex:1;" onclick="updateTableOrder('${b.id}','cerrar_mesa')">👋 Solo Cerrar</button>
-               </div>`;
-
-        html += `<div class="order-card" style="border-left:3px solid #7C3AED;">
-          <div class="order-header">
-            <div class="order-id">${b.table_name}</div>
-            <div class="order-time">${(b.created_at||'').substring(11,16)}</div>
-          </div>
-          <div class="order-items">${itemsJoined}</div>
-          <div style="font-size:13px;font-weight:700;color:#7C3AED;margin-bottom:10px;">Total: ${total_fmt}</div>
-          ${actionBtns}
-        </div>`;
-      });
-    }
-
-    if (pendingRegular.length > 0) {
-      html += '<div class="section-header sh-orders" style="margin-top:12px;color:#185FA5;">📱 Pedidos WhatsApp hoy</div>';
-      pendingRegular.forEach(o => {
-        html += `<div class="order-card">
-          <div class="order-header"><div class="order-id">${o.id.substring(0,12)}</div><div class="order-time">${o.time}</div></div>
-          <div class="order-items">${o.items}</div>
-          <div><span class="order-status ${statusClass(o.status)}">${statusLabel(o.status)}</span></div>
-          ${o.address ? '<div style="font-size:12px;color:#888;margin-bottom:8px;">'+o.address+'</div>' : ''}
-        </div>`;
-      });
-    }
-
-    if (!html) html = '<div class="empty">Sin pedidos activos ahora mismo</div>';
-    document.getElementById('orders-list').innerHTML = html;
-  } catch(e) { console.error('loadOrders:', e); }
-}
-
-async function updateTableOrder(id, status) {
-  try {
-    await fetch('/api/table-orders/' + id + '/status', {
-      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
-    });
-    loadOrders();
   } catch(e) {}
 }
 
-// ── CHATS ─────────────────────────────────────────────────────────
+async function dismissAlert(id) {
+  await fetch('/api/waiter-alerts/' + id + '/dismiss', { method: 'POST', headers });
+  knownAlertIds.delete(id);
+  loadAlerts();
+}
+
+// 2. Pedidos en curso
+async function loadOrders() {
+  try {
+    const r = await fetch('/api/table-orders', { headers });
+    if(!r.ok) return;
+    const { orders = [] } = await r.json();
+
+    const listos = orders.filter(o => o.status === 'listo');
+    const cuentas = orders.filter(o => o.status === 'entregado' || o.status === 'factura_generada');
+    
+    document.getElementById('badge-pedidos').textContent = listos.length + cuentas.length;
+    document.getElementById('badge-pedidos').style.display = (listos.length + cuentas.length) > 0 ? 'inline-block' : 'none';
+
+    let html = '';
+    listos.forEach(o => {
+        html += `
+        <div class="order-card" style="border-left: 4px solid #1D9E75;">
+            <div class="order-header"><span>${o.table_name}</span><span>LISTO EN COCINA</span></div>
+            <div style="margin-bottom:10px; font-size:13px;">Llevar a la mesa los platos solicitados.</div>
+            <button class="btn btn-green" onclick="updateOrderStatus('${o.id}', 'entregado')">✅ Marcar Entregado al Cliente</button>
+        </div>`;
+    });
+
+    cuentas.forEach(o => {
+        if(o.status === 'factura_generada') {
+            html += `
+            <div class="order-card" style="border-left: 4px solid #7C3AED;">
+                <div class="order-header"><span style="color:#7C3AED;">${o.table_name}</span><span>FACTURA CREADA</span></div>
+                <div style="margin-bottom:10px; font-size:13px;">La factura electrónica ya se generó. Cobra en caja.</div>
+                <button class="btn" style="background:#555; color:#fff; width:100%;" onclick="updateOrderStatus('${o.id}', 'cerrar_mesa')">👋 Liberar Mesa y Despedir</button>
+            </div>`;
+        } else {
+            html += `
+            <div class="order-card" style="border-left: 4px solid #F59E0B;">
+                <div class="order-header"><span style="color:#F59E0B;">${o.table_name}</span><span>ESPERANDO CUENTA</span></div>
+                <div style="margin-bottom:10px; font-size:13px;">El cliente terminó. Genera su factura o cierra la mesa.</div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn btn-purple" style="flex:1;" onclick="updateOrderStatus('${o.id}', 'generar_factura')">🧾 Hacer Factura</button>
+                    <button class="btn" style="background:#555; color:#fff; flex:1;" onclick="updateOrderStatus('${o.id}', 'cerrar_mesa')">👋 Solo Liberar</button>
+                </div>
+            </div>`;
+        }
+    });
+
+    if(!html) html = '<div class="empty">No hay pedidos listos ni cuentas pendientes.</div>';
+    document.getElementById('orders-list').innerHTML = html;
+  } catch(e) {}
+}
+
+async function updateOrderStatus(id, status) {
+  await fetch('/api/table-orders/' + id + '/status', {
+    method: 'POST', headers, body: JSON.stringify({ status })
+  });
+  loadOrders();
+  loadTablesStatus(); // Para refrescar los colores de las mesas
+}
+
+// 3. Chats
+let currentChatPhone = null;
 async function loadChats() {
   try {
     const r = await fetch('/api/dashboard/conversations', { headers });
-    if (!r.ok) return;
+    if(!r.ok) return;
     const { conversations = [] } = await r.json();
-    const badge = document.getElementById('badge-chats');
-    badge.textContent = conversations.length;
-    badge.style.display = conversations.length > 0 ? 'inline-block' : 'none';
-    if (!conversations.length) {
-      document.getElementById('chats-list').innerHTML = '<div class="empty">Sin conversaciones activas</div>';
-      return;
+    const cList = document.getElementById('chats-list');
+    
+    if(conversations.length === 0) {
+        cList.innerHTML = '<div class="empty">Nadie está chateando con el bot ahora.</div>';
+        return;
     }
     
-    document.getElementById('chats-list').innerHTML = conversations.map(c => {
-      const dName = getDisplayName(c.phone);
-      return `
-      <div class="conv-item" onclick="openChat('${c.phone}')">
-        <div class="conv-avatar">${dName.slice(0, 2).toUpperCase()}</div>
-        <div style="flex:1;min-width:0;">
-          <div class="conv-phone">${dName}</div>
-          <div class="conv-preview">${c.preview}</div>
+    cList.innerHTML = conversations.map(c => `
+      <div class="alert-card" style="cursor:pointer;" onclick="openChat('${c.phone}')">
+        <div class="alert-icon">📱</div>
+        <div>
+          <div class="alert-title">Cliente (${c.phone.slice(-4)})</div>
+          <div class="alert-meta">${c.preview || 'Conversación activa...'}</div>
         </div>
-        <div class="conv-count">${c.messages} msgs</div>
-      </div>`;
-    }).join('');
-  } catch(e) { console.error('loadChats:', e); }
+      </div>
+    `).join('');
+  } catch(e){}
 }
 
 async function openChat(phone) {
   currentChatPhone = phone;
-  document.getElementById('chat-phone').textContent = getDisplayName(phone);
+  document.getElementById('chat-phone').textContent = `Cel: ${phone}`;
   document.getElementById('chat-modal').classList.add('open');
-  document.body.style.overflow = 'hidden';
   try {
     const r = await fetch('/api/conversations/' + encodeURIComponent(phone), { headers });
-    if (!r.ok) return;
     const { history = [] } = await r.json();
-    const container = document.getElementById('chat-msgs');
-    container.innerHTML = history.map(m => `
-      <div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-bot'}">${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}</div>
+    const box = document.getElementById('chat-msgs');
+    box.innerHTML = history.map(m => `
+      <div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-bot'}">${typeof m.content === 'string' ? m.content : 'Mensaje multimedia'}</div>
     `).join('');
-    container.scrollTop = container.scrollHeight;
+    box.scrollTop = box.scrollHeight;
   } catch(e) {}
 }
 
 function closeChat() {
   document.getElementById('chat-modal').classList.remove('open');
-  document.body.style.overflow = '';
   currentChatPhone = null;
 }
 
-// BOTÓN PARA LIMPIAR CONVERSACIONES ATASCADAS (MANUAL)
+async function sendReply() {
+  const i = document.getElementById('chat-input-msg');
+  if(!i.value.trim() || !currentChatPhone) return;
+  await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
+    method: 'POST', headers, body: JSON.stringify({ message: i.value })
+  });
+  i.value = '';
+  openChat(currentChatPhone);
+}
+
 async function deleteCurrentChat() {
   if (!currentChatPhone) return;
-  if (!confirm('¿Seguro que deseas eliminar esta conversación? Esto limpiará la memoria del bot y cancelará cualquier pedido en curso para esta mesa.')) return;
-  
-  try {
-    const r = await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone), {
-      method: 'DELETE',
-      headers: headers
-    });
-    if (r.ok) {
-      closeChat();
-      loadChats();
-      showToast('Conversación eliminada correctamente.', 'admin_alert');
-    } else {
-      alert('Error al intentar limpiar el chat.');
-    }
-  } catch (e) {
-    console.error(e);
-    alert('Error de conexión.');
-  }
+  if (!confirm('¿Limpiar historial y cancelar el bot para este número?')) return;
+  await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone), { method: 'DELETE', headers });
+  closeChat();
+  loadChats();
+  loadTablesStatus();
 }
 
-async function sendReply() {
-  const input = document.getElementById('chat-input-msg');
-  const msg   = input.value.trim();
-  if (!msg || !currentChatPhone) return;
-  input.value = '';
-  try {
-    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
-      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg })
-    });
-    openChat(currentChatPhone);
-  } catch(e) {}
-}
-
-// ── POLLING ───────────────────────────────────────────────────────
+// ── Iniciar los bucles de actualización ──
+loadTablesStatus();
 loadAlerts();
 loadOrders();
 loadChats();
-setInterval(loadAlerts,  5000);
+
+// Polling súper optimizado
+setInterval(loadTablesStatus, 15000);
+setInterval(loadAlerts, 10000);
 setInterval(loadOrders, 15000);
-setInterval(loadChats,  15000);
+setInterval(loadChats, 20000);
+
 </script>
 <script src="/static/roles.js"></script>
 </body>
