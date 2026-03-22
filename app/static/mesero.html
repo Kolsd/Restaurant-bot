@@ -527,23 +527,50 @@ async function loadOrders() {
     if(!r.ok) return;
     const { orders = [] } = await r.json();
 
+    // Filtramos los pedidos listos en cocina (cada bandeja es un viaje distinto)
     const listos = orders.filter(o => o.status === 'listo');
-    const cuentas = orders.filter(o => o.status === 'entregado' || o.status === 'factura_generada');
     
-    document.getElementById('badge-pedidos').textContent = listos.length + cuentas.length;
-    document.getElementById('badge-pedidos').style.display = (listos.length + cuentas.length) > 0 ? 'inline-block' : 'none';
+    // Filtramos las cuentas (todo lo que la mesa ya se comió)
+    const cuentasRaw = orders.filter(o => o.status === 'entregado' || o.status === 'factura_generada');
+    
+    // 👇 LA MAGIA: Agrupar todas las sub-órdenes por Mesa
+    const mesasCuentas = {};
+    cuentasRaw.forEach(o => {
+        const tId = o.table_id;
+        if (!mesasCuentas[tId]) {
+            mesasCuentas[tId] = {
+                id: o.base_order_id || o.id, // ID base para mandarle la orden a la BD
+                table_name: o.table_name,
+                status: o.status 
+            };
+        }
+        // Si alguna sub-orden ya dice que se generó factura, toda la mesa pasa a ese estado
+        if (o.status === 'factura_generada') {
+            mesasCuentas[tId].status = 'factura_generada';
+        }
+    });
+
+    // Convertimos el objeto agrupado nuevamente en un Array
+    const cuentasAgrupadas = Object.values(mesasCuentas);
+    
+    // Actualizar el numerito rojo de notificaciones
+    document.getElementById('badge-pedidos').textContent = listos.length + cuentasAgrupadas.length;
+    document.getElementById('badge-pedidos').style.display = (listos.length + cuentasAgrupadas.length) > 0 ? 'inline-block' : 'none';
 
     let html = '';
+    
+    // Dibujar las bandejas por recoger
     listos.forEach(o => {
         html += `
         <div class="order-card" style="border-left: 4px solid #1D9E75;">
             <div class="order-header"><span>${o.table_name}</span><span>LISTO EN COCINA</span></div>
-            <div style="margin-bottom:10px; font-size:13px;">Llevar a la mesa los platos solicitados.</div>
+            <div style="margin-bottom:10px; font-size:13px;">Llevar a la mesa los platos solicitados. (Suborden ${o.sub_number || 1})</div>
             <button class="btn btn-green" onclick="updateOrderStatus('${o.id}', 'entregado')">✅ Marcar Entregado al Cliente</button>
         </div>`;
     });
 
-    cuentas.forEach(o => {
+    // Dibujar las cuentas fusionadas
+    cuentasAgrupadas.forEach(o => {
         if(o.status === 'factura_generada') {
             html += `
             <div class="order-card" style="border-left: 4px solid #7C3AED;">
