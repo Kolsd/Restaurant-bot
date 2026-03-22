@@ -553,24 +553,11 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
     await _require_auth(request)
     
     content = await file.read()
-    try:
-                # 🔥 FIX: Búsqueda exacta indexada en lugar de ILIKE
-                existing = await conn.fetchval(
-                    "SELECT id FROM prospects WHERE phone = $1", 
-                    phone
-                )
-                
-                # Solo inserta si no existe previamente
-                if not existing:
-                    await conn.execute("""
-                        INSERT INTO prospects (restaurant_name, owner_name, phone, city, source)
-                        VALUES ($1, $2, $3, $4, 'csv_import')
-                    """, name, owner, phone, city)
-                    inserted += 1
-                else:
-                    errors += 1 
-            except Exception as e:
-                errors += 1
+    
+    # Decodificar el archivo CSV y prepararlo para leer
+    text = content.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(text))
+
     pool = await db.get_pool()
     inserted = 0
     errors = 0
@@ -589,10 +576,10 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
             phone = phone.replace(" ", "").replace("+", "").replace("-", "")
 
             try:
-                # 👇 Verificamos si el teléfono (los últimos 10 dígitos) ya existe
+                # 🔥 FIX: Búsqueda exacta indexada en lugar de ILIKE
                 existing = await conn.fetchval(
-                    "SELECT id FROM prospects WHERE phone ILIKE $1", 
-                    f"%{phone[-10:]}%"
+                    "SELECT id FROM prospects WHERE phone = $1", 
+                    phone
                 )
                 
                 # Solo inserta si no existe previamente
@@ -603,55 +590,12 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
                     """, name, owner, phone, city)
                     inserted += 1
                 else:
-                    # Si ya existe, lo cuenta como error/omitido para no duplicar
                     errors += 1 
             except Exception as e:
                 errors += 1
 
     return {"success": True, "inserted": inserted, "errors": errors}
-# ── STATS / KANBAN COUNTS ─────────────────────────────────────────────
-@router.get("/stats")
-async def crm_stats(request: Request):
-    await _require_auth(request)
-    await _ensure_crm_tables()
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT stage, COUNT(*) as cnt
-            FROM prospects WHERE archived=FALSE
-            GROUP BY stage
-        """)
-        stage_counts = {r["stage"]: r["cnt"] for r in rows}
-
-        total       = await conn.fetchval("SELECT COUNT(*) FROM prospects WHERE archived=FALSE")
-        
-        # 👇 NUEVO: Cuenta prospectos únicos, no archivados, que recibieron al menos 1 mensaje exitoso
-        contacted   = await conn.fetchval("""
-            SELECT COUNT(DISTINCT p.id) 
-            FROM prospects p
-            JOIN prospect_interactions pi ON p.id = pi.prospect_id
-            WHERE p.archived=FALSE 
-              AND pi.direction='outbound' 
-              AND pi.status='sent'
-        """)
-        
-        converted   = stage_counts.get("cerrado", 0)
-        follow_ups  = await conn.fetchval("""
-            SELECT COUNT(*) FROM prospects
-            WHERE next_follow_up <= NOW() + INTERVAL '24 hours'
-            AND next_follow_up >= NOW()
-            AND archived=FALSE
-        """)
-
-    return {
-        "stage_counts": stage_counts,
-        "total":        total or 0,
-        "contacted":    contacted or 0,
-        "converted":    converted,
-        "follow_ups":   follow_ups or 0,
-        "conversion_rate": round((converted / total * 100) if total else 0, 1)
-    }
-
+    
 # ── PAGE ROUTE ────────────────────────────────────────────────────────
 from fastapi import Response as FResponse
 from pathlib import Path
