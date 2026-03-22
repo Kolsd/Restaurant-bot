@@ -335,6 +335,18 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     order_id = f"pos-{str(uuid.uuid4())[:8]}"
     phone = "manual" # Como es manual, no hay celular del cliente atado al inicio
     
+    # 👇 LA MAGIA ESTÁ AQUÍ: Verificamos si la mesa ya tiene una orden activa
+    base_id = await db.db_get_base_order_id(phone, body.table_id)
+    
+    if base_id:
+        # Es una adición (sub-orden) a una cuenta que ya existe
+        final_base_id = base_id
+        sub_num = await db.db_get_next_sub_number(base_id)
+    else:
+        # Es el primer pedido de la mesa
+        final_base_id = order_id
+        sub_num = 1
+
     order = {
         "id": order_id,
         "table_id": body.table_id,
@@ -344,10 +356,10 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
         "status": "recibido", # Entra directamente a la cola de la cocina
         "notes": body.notes,
         "total": body.total,
-        "base_order_id": order_id, 
-        "sub_number": 1
+        "base_order_id": final_base_id, 
+        "sub_number": sub_num
     }
     
     await db.db_save_table_order(order)
     
-    return {"success": True, "order_id": order_id, "message": "Comanda enviada a cocina"}    
+    return {"success": True, "order_id": order_id, "message": "Comanda enviada a cocina"}
