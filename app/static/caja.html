@@ -193,8 +193,7 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 const reqHeaders = { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
 
 function doLogout() {
-  localStorage.removeItem('rb_token');
-  localStorage.removeItem('rb_restaurant');
+  localStorage.clear();
   window.location.href = '/login';
 }
 
@@ -214,33 +213,49 @@ async function loadCajaOrders() {
     }
     const { orders = [] } = await r.json();
 
-    // Agrupar cuentas pendientes de pago (estado: factura_generada)
-    const billsMap = {};
+    // 1. Encontrar qué mesas (base_id) ya solicitaron la cuenta (factura_generada)
+    const mesasParaCobrar = new Set();
     orders.forEach(o => {
-      // Filtrar solo las que el mesero ya marcó para "Generar Factura"
-      if (o.status === 'factura_generada') {
-        const baseId = o.id.replace(/-\d+$/, '');
-        if (!billsMap[baseId]) {
-          billsMap[baseId] = {
-            id: baseId,
-            table_name: o.table_name,
-            created_at: o.created_at,
-            items: [],
-            total: 0
-          };
+        if (o.status === 'factura_generada') {
+            const baseId = o.base_order_id || o.id.replace(/-\d+$/, '');
+            mesasParaCobrar.add(baseId);
         }
-        let parsedItems = [];
-        try {
-          const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-          parsedItems = Array.isArray(arr) ? arr : [];
-        } catch(e) {}
+    });
+
+    // 2. Agrupar TODOS los ítems de las mesas que están en 'mesasParaCobrar'
+    const billsMap = {};
+    
+    orders.forEach(o => {
+        const baseId = o.base_order_id || o.id.replace(/-\d+$/, '');
         
-        billsMap[baseId].items.push(...parsedItems);
-        billsMap[baseId].total += (Number(o.total) || 0);
-      }
+        // Si esta sub-orden pertenece a una mesa que ya pidió la cuenta...
+        if (mesasParaCobrar.has(baseId)) {
+            // Inicializar el ticket si no existe
+            if (!billsMap[baseId]) {
+                billsMap[baseId] = {
+                    id: baseId,
+                    table_name: o.table_name,
+                    created_at: o.created_at, // Usa la hora de la orden base
+                    items: [],
+                    total: 0
+                };
+            }
+            
+            // Parsear y sumar los items de esta sub-orden específica
+            let parsedItems = [];
+            try {
+                const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+                parsedItems = Array.isArray(arr) ? arr : [];
+            } catch(e) {}
+            
+            billsMap[baseId].items.push(...parsedItems);
+            billsMap[baseId].total += (Number(o.total) || 0);
+        }
     });
 
     const pendingBills = Object.values(billsMap);
+    
+    // --- (A partir de aquí es exactamente tu mismo código de renderizado) ---
     document.getElementById('total-pending').textContent = `${pendingBills.length} cuenta${pendingBills.length !== 1 ? 's' : ''} pendiente${pendingBills.length !== 1 ? 's' : ''}`;
 
     const board = document.getElementById('board');
@@ -270,7 +285,7 @@ async function loadCajaOrders() {
           <div class="t-header">
             <div>
               <div class="t-table">${b.table_name}</div>
-              <div style="font-size:11px; color:#A1A1AA; margin-top:4px; font-family:monospace;">ID: ${b.id}</div>
+              <div style="font-size:11px; color:#A1A1AA; margin-top:4px; font-family:monospace;">ID: ${b.id.substring(0,8)}...</div>
             </div>
             <div class="t-time">⏱ ${time}</div>
           </div>
