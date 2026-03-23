@@ -55,7 +55,7 @@ async def get_current_user(request: Request) -> dict:
 
 class LoginRequest(BaseModel): username: str; password: str
 class CreateUserRequest(BaseModel): username: str; password: str; restaurant_name: str; admin_key: str
-class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}
+class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
 class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; status: str
 class TeamInviteRequest(BaseModel): username: str; password: str; role: str; branch_id: int = None
 class CreateBranchRequest(BaseModel): name: str; whatsapp_number: str = ""; address: str; menu: dict = {}
@@ -164,9 +164,23 @@ async def admin_create_restaurant(request: CreateRestaurantRequest):
     try: menu_dict = json.loads(request.menu)
     except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
     lat, lon, _ = await geocode_address(request.address)
+    
+    # 1. Crear el restaurante (como antes)
     await db.db_create_restaurant(request.name, request.whatsapp_number, request.address, menu_dict, lat, lon, request.features)
+    
+    # 2. Si vienen credenciales de Meta, actualizamos el registro
+    if request.wa_access_token:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE restaurants 
+                   SET wa_phone_id = $1, wa_access_token = $2 
+                   WHERE whatsapp_number = $3""",
+                request.wa_phone_id, request.wa_access_token, request.whatsapp_number
+            )
+            
     return {"success": True}
-
+    
 @router.post("/api/admin/set-subscription")
 async def admin_set_subscription(request: SetSubscriptionRequest):
     if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
@@ -448,7 +462,7 @@ async def get_closed_sessions(request: Request, hours: int = 24):
         sessions.append(s)
         
     return {"sessions": sessions}
-        
+
 @router.get("/api/dashboard/reservations")
 async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
     _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)

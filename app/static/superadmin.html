@@ -1145,6 +1145,16 @@ input:checked + .slider::before { transform: translateX(20px); background: var(-
                 <input type="text" id="r_city" class="form-input" placeholder="Bogotá">
               </div>
             </div>
+            <div class="form-grid2" style="margin-top:14px;">
+              <div class="form-group">
+                <label class="form-label">Meta Phone ID (Opcional)</label>
+                <input type="text" id="r_wa_phone_id" class="form-input" placeholder="Ej: 15556293573">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Meta Access Token (Opcional)</label>
+                <input type="password" id="r_wa_access_token" class="form-input" placeholder="Token permanente EAAI...">
+              </div>
+            </div>
           </div>
 
           <!-- Plan y módulos -->
@@ -1903,10 +1913,14 @@ async function parseMenuFile() {
 async function createRestaurant() {
   const name = document.getElementById('r_name').value.trim();
   const wa = document.getElementById('r_wa').value.trim();
+  const wa_phone_id = document.getElementById('r_wa_phone_id').value.trim();
+  const wa_access_token = document.getElementById('r_wa_access_token').value.trim();
+  
   if (!name || !wa) { toast('Nombre y WhatsApp son obligatorios', 'error'); return; }
   let menuJson = {};
   try { const raw = document.getElementById('r_menu').value; if (raw.trim()) menuJson = JSON.parse(raw); }
   catch(e) { toast('El JSON del menú tiene errores', 'error'); return; }
+  
   const features = {
     module_orders: document.getElementById('feat_orders').checked,
     module_tables: document.getElementById('feat_tables').checked,
@@ -1916,10 +1930,20 @@ async function createRestaurant() {
     module_inventory: document.getElementById('feat_inventory').checked,
     wompi_active: document.getElementById('feat_wompi').checked
   };
+  
   try {
     const res = await fetch('/api/admin/create-restaurant', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin_key: GLOBAL_KEY, name, whatsapp_number: wa.replace(/[+\s]/g,''), address: document.getElementById('r_addr').value, menu: JSON.stringify(menuJson), features })
+      body: JSON.stringify({ 
+        admin_key: GLOBAL_KEY, 
+        name, 
+        whatsapp_number: wa.replace(/[+\s]/g,''), 
+        address: document.getElementById('r_addr').value, 
+        menu: JSON.stringify(menuJson), 
+        features,
+        wa_phone_id: wa_phone_id,
+        wa_access_token: wa_access_token
+      })
     });
     if (!res.ok) { toast('Error del servidor: ' + await res.text(), 'error'); return; }
     toast('¡Restaurante creado con éxito!', 'success');
@@ -1930,7 +1954,7 @@ async function createRestaurant() {
 }
 
 function clearForm() {
-  ['r_name','r_wa','r_addr','r_city','r_menu'].forEach(id => document.getElementById(id).value = '');
+  ['r_name','r_wa','r_addr','r_city','r_menu','r_wa_phone_id','r_wa_access_token'].forEach(id => document.getElementById(id).value = '');
   ['feat_orders','feat_tables','feat_reservations','feat_pos'].forEach(id => document.getElementById(id).checked = true);
   ['feat_nps','feat_inventory','feat_wompi'].forEach(id => document.getElementById(id).checked = false);
 }

@@ -175,8 +175,18 @@ async def meta_webhook(request: Request):
         raw_bot_number = value.get("metadata", {}).get("display_phone_number", "")
         bot_number = _normalize_number(raw_bot_number)
         phone_id = value.get("metadata", {}).get("phone_number_id", "")
-        access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-
+        
+        # --- Obtener credenciales dinámicas desde PostgreSQL ---
+        restaurant = await db.db_get_restaurant_by_phone(bot_number)
+        if restaurant and restaurant.get("wa_access_token"):
+            access_token = restaurant["wa_access_token"]
+            # Si el restaurante tiene un phone_id guardado lo usamos, si no, usamos el del webhook
+            phone_id = restaurant.get("wa_phone_id") or phone_id
+        else:
+            # Fallback seguro: Si el cliente aún no tiene credenciales propias,
+            # usamos las globales de Railway para que tus clientes actuales no se rompan
+            access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+        # -------------------------------------------------------
         # 4. Rate limiting (V-05)
         crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
         
