@@ -422,7 +422,9 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
 
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
-    _, bot_number, _ = await get_dashboard_filters(request, "today")
+    # FIX: Ahora desempaquetamos 4 valores en lugar de 3
+    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         try:
@@ -441,12 +443,12 @@ async def get_closed_sessions(request: Request, hours: int = 24):
     sessions = []
     for r in rows:
         s = dict(r)
-        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat()
-        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat()
+        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat() + "Z"
+        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat() + "Z"
         sessions.append(s)
         
     return {"sessions": sessions}
-    
+        
 @router.get("/api/dashboard/reservations")
 async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
     _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
@@ -472,10 +474,11 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
         except Exception as e: pass
             
     return {"reservations": reservations}
-    
+
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
-    _, bot_number, _ = await get_dashboard_filters(request, "today")
+    # FIX: Ahora desempaquetamos 4 valores en lugar de 3
+    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
     
     pool = await db.get_pool()
     async with pool.acquire() as conn:
@@ -502,7 +505,7 @@ async def get_dashboard_conversations(request: Request):
             "phone": r["phone"],
             "messages": len(history),
             "preview": preview[:60] + "..." if len(preview) > 60 else preview,
-            "last_updated": r["updated_at"].isoformat() + "Z"  # <--- Z AÑADIDA
+            "last_updated": r["updated_at"].isoformat() + "Z"
         })
     return {"conversations": convs}
 
