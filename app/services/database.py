@@ -981,8 +981,8 @@ async def db_get_nps_stats(bot_number: str, period: str = "month") -> dict:
         "nps_score":    nps_score,
         "avg_score":    avg_score,
         "distribution": dist,
-    } 
- 
+    }
+     
 async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50) -> list:
     pool = await get_pool()
     period_map = {
