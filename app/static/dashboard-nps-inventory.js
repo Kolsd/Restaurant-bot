@@ -623,10 +623,20 @@ function filterInventory() {
 
 // ── Init ──
 (function() {
+    // Esperar a que showSection esté definido (viene de dashboard-core.js que carga antes)
     const origShowSection = window.showSection;
     window.showSection = function(id, btn) {
       if (typeof origShowSection === 'function') origShowSection(id, btn);
       if (id === 'nps')        loadNPS();
       if (id === 'inventario') loadInventory();
     };
+  
+    // Si la sección activa al cargar ya es nps o inventario, cargar datos
+    document.addEventListener('DOMContentLoaded', () => {
+      const active = document.querySelector('.section.active');
+      if (active) {
+        if (active.id === 'nps')        loadNPS();
+        if (active.id === 'inventario') loadInventory();
+      }
+    });
   })();
