@@ -108,9 +108,14 @@ async function loadTables() {
         tables.forEach(t => {
           const el = document.getElementById('qr-' + t.id);
           if (el && !el.hasChildNodes()) {
-            const botNum = (rest && rest.whatsapp_number) || '15556293573';
-            // ── NUEVO: URL apuntando al Catálogo Web interactivo ──
-            const catalogUrl = window.location.origin + '/catalog?bot=' + botNum + '&mesa=' + encodeURIComponent(t.name);
+            const botNum = (rest && rest.whatsapp_number) ? rest.whatsapp_number : null;
+          
+          if (!botNum) {
+              console.error("No se encontró el número de WhatsApp para este restaurante.");
+              return; // Detiene la generación del QR para esta mesa y evita enlaces rotos
+          }
+
+          const catalogUrl = window.location.origin + '/catalog?bot=' + botNum + '&mesa=' + encodeURIComponent(t.name);
             try { 
               new QRCode(el, { 
                 text: catalogUrl, 
