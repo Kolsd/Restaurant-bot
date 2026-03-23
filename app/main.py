@@ -10,8 +10,9 @@ from app.routes.dashboard import router as dashboard_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
 from app.routes.billing import router as billing_router
-from app.routes.crm import router as crm_router  
+from app.routes.crm import router as crm_router
 from app.routes import nps, inventory
+from app.services import database as db  # ← FIX: import directo de db
 
 app = FastAPI(
     title="🍽️ Mesio",
@@ -63,21 +64,16 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 async def startup():
-    from app.services.database import (
-        init_db, db_init_tables, db_init_waiter_alerts,
-        db_init_table_sessions, db_cleanup_expired_sessions
-        # Eliminamos db_init_billing porque ya está integrado en init_db()
-    )
-    await init_db()
-    await db_init_tables()
-    await db_init_waiter_alerts()
-    await db_init_table_sessions()
+    await db.init_db()
+    await db.db_init_tables()
+    await db.db_init_waiter_alerts()
+    await db.db_init_table_sessions()
     await db.db_init_nps_inventory()
 
     from app.services.scheduler import start_scheduler
     await start_scheduler()
 
-    await db_cleanup_expired_sessions()
+    await db.db_cleanup_expired_sessions()
 
     print("🚀 Mesio v5.9 iniciado con módulo Billing", flush=True)
 
