@@ -346,24 +346,6 @@
       <div id="sessions-container"><div class="empty-state">Cargando sesiones...</div></div>
     </div>
   </div>
-
-</div>
-
-<div class="chat-modal-overlay" id="chat-modal-overlay" onclick="if(event.target===this)closeChatModal()">
-  <div class="chat-modal-box">
-    <div class="chat-modal-head">
-      <div><div class="chat-modal-title" id="chat-modal-phone">+57 300 000 0000</div><div class="chat-modal-sub">Conversación en vivo</div></div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <button id="chat-pause-btn" class="chat-pause-btn" onclick="toggleBotPause()">⏸ Pausar bot</button>
-        <button onclick="closeChatModal()" style="font-size:18px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
-      </div>
-    </div>
-    <div id="chat-modal-msgs" class="chat-modal-msgs"></div>
-    <div class="chat-modal-input">
-      <input id="chat-reply-input" placeholder="Escribe una respuesta manual al cliente..." onkeydown="if(event.key==='Enter')sendManualReply()">
-      <button onclick="sendManualReply()">Enviar</button>
-    </div>
-  </div>
   <div id="nps" class="section">
  
     <!-- Barra de período propia -->
@@ -473,7 +455,23 @@
    
   </div>
 </div>
+</div>
 
+<div class="chat-modal-overlay" id="chat-modal-overlay" onclick="if(event.target===this)closeChatModal()">
+  <div class="chat-modal-box">
+    <div class="chat-modal-head">
+      <div><div class="chat-modal-title" id="chat-modal-phone">+57 300 000 0000</div><div class="chat-modal-sub">Conversación en vivo</div></div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="chat-pause-btn" class="chat-pause-btn" onclick="toggleBotPause()">⏸ Pausar bot</button>
+        <button onclick="closeChatModal()" style="font-size:18px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
+      </div>
+    </div>
+    <div id="chat-modal-msgs" class="chat-modal-msgs"></div>
+    <div class="chat-modal-input">
+      <input id="chat-reply-input" placeholder="Escribe una respuesta manual al cliente..." onkeydown="if(event.key==='Enter')sendManualReply()">
+      <button onclick="sendManualReply()">Enviar</button>
+    </div>
+  </div>
 <div class="ses-modal-overlay" id="ses-modal-overlay" onclick="if(event.target===this)closeSesModal()">
   <div class="ses-modal-box">
     <div class="ses-modal-head">
