@@ -122,6 +122,14 @@ async def get_public_menu(bot_number: str):
             "bot_number": bot_number
         }
 
+@router.get("/privacidad", response_class=HTMLResponse)
+async def privacidad_page(): 
+    return (STATIC / "privacidad.html").read_text(encoding="utf-8")
+
+@router.get("/terminos", response_class=HTMLResponse)
+async def terminos_page(): 
+    return (STATIC / "terminos.html").read_text(encoding="utf-8")
+
 # ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
 @router.get("/billing", response_class=HTMLResponse)
 async def billing_page():
