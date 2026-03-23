@@ -94,25 +94,34 @@
   </div>
 
   <div id="pedidos" class="section">
-    <div class="segmented-control">
-      <button id="tab-wa"   class="seg-btn active" onclick="switchOrderTab('wa',this)">📱 WhatsApp / Domicilio</button>
-      <button id="tab-mesa" class="seg-btn"        onclick="switchOrderTab('mesa',this)">🪑 Mesas en Salón (POS)</button>
+    <div class="segmented-control" style="margin-bottom: 1rem;">
+      <button id="tab-rt"   class="seg-btn active" onclick="switchOrderTab('rt',this)">⚡ Tiempo Real</button>
+      <button id="tab-hist" class="seg-btn"        onclick="switchOrderTab('hist',this)">📚 Histórico Completo</button>
     </div>
 
-    <div id="orders-tab-wa">
-      <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
-        <div class="metric"><div class="metric-label">Total WhatsApp</div><div class="metric-value" id="p-total">—</div></div>
-        <div class="metric"><div class="metric-label">Pagados</div><div class="metric-value delta-up" id="p-paid">—</div></div>
-        <div class="metric"><div class="metric-label">Pendiente pago</div><div class="metric-value delta-warn" id="p-pending">—</div></div>
+    <div id="orders-tab-rt">
+      <div class="card" style="border-top: 4px solid #378ADD; margin-bottom: 1.5rem;">
+        <div class="card-title" style="margin-bottom: 1rem;">🛵 Monitor Domicilios (Bot)</div>
+        <div class="metrics" style="grid-template-columns:repeat(4,1fr);">
+          <div class="metric"><div class="metric-label">Domicilios Atendidos</div><div class="metric-value" id="rt-dom-total">0</div></div>
+          <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;" id="rt-dom-cocina">0</div></div>
+          <div class="metric"><div class="metric-label">En Entrega</div><div class="metric-value" style="color:#378ADD;" id="rt-dom-entrega">0</div></div>
+          <div class="metric"><div class="metric-label">Entregados (Hoy)</div><div class="metric-value" style="color:#1D9E75;" id="rt-dom-entregados">0</div></div>
+        </div>
       </div>
-      <div class="card"><div class="card-title">Historial de Pedidos Externos</div><div id="orders-container"><div class="empty-state">Cargando...</div></div></div>
+
+      <div class="card" style="border-top: 4px solid #1D9E75;">
+        <div class="card-title" style="margin-bottom: 1rem;">🪑 Monitor de Salón (POS)</div>
+        <div class="metrics" style="grid-template-columns:repeat(4,1fr);" id="salon-metrics-container">
+          </div>
+        <div id="dine-in-container" style="margin-top: 1rem;"><div class="empty-state">Cargando monitores...</div></div>
+      </div>
     </div>
 
-    <div id="orders-tab-mesa" style="display:none;">
-      <div class="card" style="border-top: 4px solid #1D9E75;">
-        <div class="card-title" style="margin-bottom: 5px;">Monitor de Salón en Tiempo Real</div>
-        <p style="font-size:12px; color:#888; margin-bottom:1.5rem;">Visualiza los pedidos que están en cocina y las mesas que están pendientes de cobro.</p>
-        <div id="dine-in-container"><div class="empty-state">Cargando métricas de mesas...</div></div>
+    <div id="orders-tab-hist" style="display:none;">
+      <div class="card">
+        <div class="card-title">Historial Universal (Domicilios y Salón)</div>
+        <div id="orders-container"><div class="empty-state">Cargando...</div></div>
       </div>
     </div>
   </div>
@@ -372,15 +381,6 @@
   </div>
 </div>
 
-<script>
-  // Script rápido para manejar el estilo del Segmented Control visualmente
-  function switchOrderTab(tabId, btnElement) {
-    document.querySelectorAll('.seg-btn').forEach(btn => btn.classList.remove('active'));
-    btnElement.classList.add('active');
-    // La lógica real de mostrar/ocultar los divs ya está en dashboard-features.js,
-    // este script es solo un apoyo visual inmediato.
-  }
-</script>
 <script src="/static/dashboard-core.js?v=3"></script>
 <script src="/static/dashboard-features.js?v=3"></script>
 

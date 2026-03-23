@@ -349,6 +349,7 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
                     "id": r["id"],
                     "items": r["items"],
                     "type": r.get("order_type", "domicilio"),
+                    "status": r.get("status", "pendiente"), # <--- NUEVO
                     "paid": r.get("payment_status") == "paid" or r.get("paid") == True,
                     "total": float(r["total"]),
                     "time": r["created_at"].strftime("%H:%M"),
@@ -359,7 +360,6 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
 
         # 2. Órdenes de Mesa (POS / Dine-in)
         try:
-            # FIX: Corregido el nombre de la tabla a 'restaurant_tables'
             q_mesa = """
                 SELECT o.* FROM table_orders o
                 LEFT JOIN restaurant_tables t ON o.table_id = t.id
@@ -379,6 +379,7 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
                     mesa_groups[base_id] = {
                         "id": base_id,
                         "items": "Pedido en Salón (POS)",
+                        "status": r.get("status", "recibido"), # <--- NUEVO
                         "total": 0.0,
                         "is_paid": False,
                         "time": r["created_at"].strftime("%H:%M"),
@@ -389,12 +390,14 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
                 
                 if r["status"] in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
                     mesa_groups[base_id]["is_paid"] = True
+                    mesa_groups[base_id]["status"] = r["status"]
 
             for base_id, g in mesa_groups.items():
                 orders.append({
                     "id": g["id"],
                     "items": g["items"],
                     "type": "mesa",
+                    "status": g["status"], # <--- NUEVO
                     "paid": g["is_paid"],
                     "total": g["total"],
                     "time": g["time"],
@@ -405,7 +408,7 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
 
     orders.sort(key=lambda x: x["created_at"], reverse=True)
     return {"orders": orders}
-
+    
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
     _, bot_number, _ = await get_dashboard_filters(request, "today")
@@ -467,7 +470,7 @@ async def get_dashboard_reservations(request: Request, period: str = "today"):
             print(f"Aviso - Error en dashboard reservations: {e}")
             
     return {"reservations": reservations}
-    
+
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
     _, bot_number, _ = await get_dashboard_filters(request, "today")
