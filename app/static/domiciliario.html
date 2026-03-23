@@ -45,7 +45,38 @@
             gap: 6px;
         }
         .btn-logout:hover { background: #ffebee; }
+        
+/* Estilos para el menú dinámico de roles (Inyectado por roles.js) */
+        #dynamic-role-nav {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto; /* Permite deslizar con el dedo en móviles */
+            max-width: 50vw; /* Evita que empuje o aplaste el botón de salir */
+            align-items: center;
+            scrollbar-width: none; /* Oculta la barra de scroll en Firefox */
+        }
+        
+        #dynamic-role-nav::-webkit-scrollbar { 
+            display: none; /* Oculta la barra de scroll en Chrome/Safari/iOS */
+        }
+        
+        #dynamic-role-nav a {
+            text-decoration: none;
+            color: #444;
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap; /* Evita que el texto salte a la siguiente línea */
+            background: #f0f2f5;
+            padding: 6px 12px;
+            border-radius: 16px;
+            border: 1px solid #e4e4e4;
+            transition: all 0.2s ease;
+        }
 
+        #dynamic-role-nav a:hover {
+            background: #e4e6e9;
+            color: #111;
+        }
         /* Contenedor principal */
         .container { padding: 15px; }
 
@@ -102,7 +133,7 @@
             </button>
         </div>
     </div>
-    
+
     <div class="container">
         <div id="tab-recoger" class="tab-content active">
             <h3 style="margin-bottom: 15px; color: #555;">Esperando en Cocina 🧑‍🍳</h3>
