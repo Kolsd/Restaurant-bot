@@ -9,13 +9,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="stylesheet" href="/static/dashboard.css">
 <style>
-  /* Estilos para las tarjetas de selección de rol multirol */
   .role-card { border: 1.5px solid #e0e0d8; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fff; user-select: none; position: relative; overflow: hidden; }
   .role-card:hover { border-color: #1D9E75; background: #f9fdfb; }
   .role-card.active { border-color: #1D9E75; background: #E1F5EE; box-shadow: 0 4px 12px rgba(29,158,117,0.15); }
   .role-card.active::after { content: '✓'; position: absolute; top: 6px; right: 8px; font-size: 14px; color: #0F6E56; font-weight: bold; }
-  
-  /* Pestañas Segmentadas estilo MacOS para la sección pedidos */
   .segmented-control { display:flex; gap:4px; margin-bottom:1.5rem; background:#e0e0d8; border-radius:10px; padding:4px; width:fit-content; }
   .seg-btn { padding:8px 20px; border-radius:8px; border:none; font-size:13px; font-weight:600; cursor:pointer; transition: all 0.2s; }
   .seg-btn.active { background:#fff; color:#111; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
@@ -48,9 +45,11 @@
   <button class="nav-item" onclick="showSection('nps',this)">⭐ NPS</button>
   <button class="nav-item" onclick="showSection('inventario',this)">📦 Inventario</button>
   <div class="live-badge"><div class="live-dot"></div>Bot activo 24/7</div>
-  
 </div>
 
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!-- MAIN                                                          -->
+<!-- ══════════════════════════════════════════════════════════════ -->
 <div class="main">
   <div class="topbar">
     <div class="topbar-left">
@@ -58,26 +57,25 @@
       <div class="sync-badge" id="sync-badge">Sincronizando datos...</div>
     </div>
     <div class="topbar-right">
-      <div style="font-size:12px;color:#777; font-weight:500;" id="current-time"></div>
+      <div style="font-size:12px;color:#777;font-weight:500;" id="current-time"></div>
       <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
     </div>
   </div>
 
-  <div class="period-bar" id="period-bar" style="align-items: center; flex-wrap: wrap;">
+  <div class="period-bar" id="period-bar" style="align-items:center;flex-wrap:wrap;">
     <button class="period-btn active" onclick="setPeriod('today',this)">Hoy</button>
     <button class="period-btn" onclick="setPeriod('week',this)">7 días</button>
     <button class="period-btn" onclick="setPeriod('month',this)">Este mes</button>
     <button class="period-btn" onclick="setPeriod('semester',this)">Semestre</button>
     <button class="period-btn" onclick="setPeriod('year',this)">Este año</button>
-    
-    <div style="width: 1px; height: 20px; background: #e0e0d8; margin: 0 8px;"></div>
-    
-    <input type="date" id="custom-start" style="font-size:12px; padding:4px 8px; border:1px solid #e0e0d8; border-radius:6px; outline:none; color:#555; background: #fff;">
-    <span style="font-size:12px; color:#888; margin: 0 4px;">a</span>
-    <input type="date" id="custom-end" style="font-size:12px; padding:4px 8px; border:1px solid #e0e0d8; border-radius:6px; outline:none; color:#555; background: #fff;">
-    <button class="period-btn" style="border: 1px solid #1D9E75; color: #1D9E75; font-weight: 600; margin-left: 6px; background:#fff;" onclick="setCustomPeriod(this)">Aplicar</button>
+    <div style="width:1px;height:20px;background:#e0e0d8;margin:0 8px;"></div>
+    <input type="date" id="custom-start" style="font-size:12px;padding:4px 8px;border:1px solid #e0e0d8;border-radius:6px;outline:none;color:#555;background:#fff;">
+    <span style="font-size:12px;color:#888;margin:0 4px;">a</span>
+    <input type="date" id="custom-end" style="font-size:12px;padding:4px 8px;border:1px solid #e0e0d8;border-radius:6px;outline:none;color:#555;background:#fff;">
+    <button class="period-btn" style="border:1px solid #1D9E75;color:#1D9E75;font-weight:600;margin-left:6px;background:#fff;" onclick="setCustomPeriod(this)">Aplicar</button>
   </div>
 
+  <!-- RESUMEN -->
   <div id="resumen" class="section active">
     <div class="metrics">
       <div class="metric"><div class="metric-label">💰 Ingresos Totales</div><div class="metric-value" id="m-revenue">—</div><div class="metric-delta" id="m-revenue-sub"></div></div>
@@ -103,32 +101,29 @@
     </div>
   </div>
 
+  <!-- PEDIDOS -->
   <div id="pedidos" class="section">
-    <div class="segmented-control" style="margin-bottom: 1rem;">
-      <button id="tab-rt"   class="seg-btn active" onclick="switchOrderTab('rt',this)">⚡ Tiempo Real</button>
-      <button id="tab-hist" class="seg-btn"        onclick="switchOrderTab('hist',this)">📚 Histórico Completo</button>
+    <div class="segmented-control" style="margin-bottom:1rem;">
+      <button id="tab-rt" class="seg-btn active" onclick="switchOrderTab('rt',this)">⚡ Tiempo Real</button>
+      <button id="tab-hist" class="seg-btn" onclick="switchOrderTab('hist',this)">📚 Histórico Completo</button>
     </div>
-
     <div id="orders-tab-rt">
-      <div class="card" style="border-top: 4px solid #378ADD; margin-bottom: 1.5rem;">
-        <div class="card-title" style="margin-bottom: 1rem;">🛵 Monitor Domicilios (Bot)</div>
+      <div class="card" style="border-top:4px solid #378ADD;margin-bottom:1.5rem;">
+        <div class="card-title" style="margin-bottom:1rem;">🛵 Monitor Domicilios (Bot)</div>
         <div class="metrics" style="grid-template-columns:repeat(4,1fr);">
           <div class="metric"><div class="metric-label">Domicilios Atendidos</div><div class="metric-value" id="rt-dom-total">0</div></div>
           <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;" id="rt-dom-cocina">0</div></div>
           <div class="metric"><div class="metric-label">En Entrega</div><div class="metric-value" style="color:#378ADD;" id="rt-dom-entrega">0</div></div>
           <div class="metric"><div class="metric-label">Entregados (Hoy)</div><div class="metric-value" style="color:#1D9E75;" id="rt-dom-entregados">0</div></div>
         </div>
-        <div id="rt-domicilios-container" style="margin-top: 1rem;"></div>
+        <div id="rt-domicilios-container" style="margin-top:1rem;"></div>
       </div>
-
-      <div class="card" style="border-top: 4px solid #1D9E75;">
-        <div class="card-title" style="margin-bottom: 1rem;">🪑 Monitor de Salón (POS)</div>
-        <div class="metrics" style="grid-template-columns:repeat(4,1fr);" id="salon-metrics-container">
-          </div>
-        <div id="dine-in-container" style="margin-top: 1rem;"><div class="empty-state">Cargando monitores...</div></div>
+      <div class="card" style="border-top:4px solid #1D9E75;">
+        <div class="card-title" style="margin-bottom:1rem;">🪑 Monitor de Salón (POS)</div>
+        <div class="metrics" style="grid-template-columns:repeat(4,1fr);" id="salon-metrics-container"></div>
+        <div id="dine-in-container" style="margin-top:1rem;"><div class="empty-state">Cargando monitores...</div></div>
       </div>
     </div>
-
     <div id="orders-tab-hist" style="display:none;">
       <div class="card">
         <div class="card-title">Historial Universal (Domicilios y Salón)</div>
@@ -137,6 +132,7 @@
     </div>
   </div>
 
+  <!-- RESERVACIONES -->
   <div id="reservaciones" class="section">
     <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
       <div class="metric"><div class="metric-label">Total</div><div class="metric-value" id="r-total">—</div></div>
@@ -146,6 +142,7 @@
     <div class="card"><div class="card-title">Listado de Reservaciones</div><div id="res-container"><div class="empty-state">Cargando...</div></div></div>
   </div>
 
+  <!-- CONVERSACIONES -->
   <div id="conversaciones" class="section">
     <div class="metrics" style="grid-template-columns:repeat(2,1fr);">
       <div class="metric"><div class="metric-label">Conversaciones activas</div><div class="metric-value" id="c-total">—</div></div>
@@ -160,10 +157,12 @@
     </div>
   </div>
 
+  <!-- MENÚ -->
   <div id="menu" class="section">
     <div class="card"><div class="card-title">Platos del menú (Disponibilidad)</div><div id="menu-grid"></div></div>
   </div>
 
+  <!-- POS -->
   <div id="pos" class="section">
     <div id="ai-main-insight" class="ai-insight">
       <div class="ai-insight-header">
@@ -204,6 +203,7 @@
     </div>
   </div>
 
+  <!-- MESAS -->
   <div id="mesas" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
       <div>
@@ -228,6 +228,7 @@
     </div>
   </div>
 
+  <!-- EQUIPO -->
   <div id="equipo" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
       <div><div style="font-size:18px;font-weight:600;">Mi Equipo</div><div style="font-size:12px;color:#888;margin-top:2px;">Gestiona sucursales y accesos de personal (Multirol)</div></div>
@@ -271,30 +272,27 @@
       <span style="font-size:12px;color:#888;" id="branch-count"></span>
     </div>
     <div id="branches-list"></div>
-    
+
+    <!-- Modal invitar usuario — dentro de equipo para contexto, position:fixed lo saca del flujo -->
     <div id="modal-invite" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;">
       <div style="background:#fff;border-radius:16px;padding:2rem;width:420px;max-width:90vw;">
         <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar usuario a <span id="modal-branch-name" style="color:#1D9E75;"></span></div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <input id="invite-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          
-          <div style="font-size:13px; color:#555; margin-top:4px; font-weight:600;">Nivel de acceso:</div>
+          <div style="font-size:13px;color:#555;margin-top:4px;font-weight:600;">Nivel de acceso:</div>
           <input type="hidden" id="invite-role" value="waiter">
-          
-          <div class="role-card" data-role="admin" onclick="toggleRole('admin', this)" style="margin-bottom:8px; padding:10px;">
+          <div class="role-card" data-role="admin" onclick="toggleRole('admin', this)" style="margin-bottom:8px;padding:10px;">
             <div style="font-size:22px;margin-bottom:2px;">🛡️</div>
             <div style="font-weight:600;font-size:13px;color:#111;">Administrador</div>
             <div style="font-size:11px;color:#888;margin-top:2px;">Control total de la sucursal</div>
           </div>
-
-          <div style="display:flex; align-items:center; margin:8px 0;">
-            <div style="flex:1; height:1px; background:#e0e0d8;"></div>
-            <div style="font-size:10px; color:#888; padding:0 10px; font-weight:600;">O ROLES OPERATIVOS</div>
-            <div style="flex:1; height:1px; background:#e0e0d8;"></div>
+          <div style="display:flex;align-items:center;margin:8px 0;">
+            <div style="flex:1;height:1px;background:#e0e0d8;"></div>
+            <div style="font-size:10px;color:#888;padding:0 10px;font-weight:600;">O ROLES OPERATIVOS</div>
+            <div style="flex:1;height:1px;background:#e0e0d8;"></div>
           </div>
-
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom: 4px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px;">
             <div class="role-card active" data-role="waiter" onclick="toggleRole('waiter', this)" style="padding:10px 4px;">
               <div style="font-size:22px;margin-bottom:2px;">🍽️</div>
               <div style="font-weight:600;font-size:12px;color:#111;">Mesero</div>
@@ -308,7 +306,6 @@
               <div style="font-weight:600;font-size:12px;color:#111;">Cocina</div>
             </div>
           </div>
-
         </div>
         <div style="display:flex;gap:8px;margin-top:1.25rem;">
           <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear usuario</button>
@@ -318,6 +315,7 @@
     </div>
   </div>
 
+  <!-- SESIONES -->
   <div id="sesiones" class="section">
     <div class="metrics" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem;">
       <div class="metric"><div class="metric-label">Sesiones</div><div class="metric-value" id="ses-total">—</div></div>
@@ -346,9 +344,9 @@
       <div id="sessions-container"><div class="empty-state">Cargando sesiones...</div></div>
     </div>
   </div>
+
+  <!-- NPS -->
   <div id="nps" class="section">
- 
-    <!-- Barra de período propia -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
       <div>
         <div style="font-size:18px;font-weight:600;">NPS — Satisfacción del cliente</div>
@@ -357,106 +355,67 @@
       <div style="display:flex;gap:4px;background:#fff;border:0.5px solid #e0e0d8;border-radius:10px;padding:4px;">
         <button class="period-btn nps-period-btn active" onclick="setNPSPeriod('today',this)">Hoy</button>
         <button class="period-btn nps-period-btn" onclick="setNPSPeriod('week',this)">7 días</button>
-        <button class="period-btn nps-period-btn active" onclick="setNPSPeriod('month',this)">30 días</button>
+        <button class="period-btn nps-period-btn" onclick="setNPSPeriod('month',this)">30 días</button>
         <button class="period-btn nps-period-btn" onclick="setNPSPeriod('semester',this)">Semestre</button>
         <button class="period-btn nps-period-btn" onclick="setNPSPeriod('year',this)">Año</button>
       </div>
     </div>
-   
-    <!-- Fila superior: Score + Gráfico -->
     <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;margin-bottom:1.5rem;">
-   
-      <!-- Score Card -->
       <div class="card" style="margin-bottom:0;display:flex;align-items:center;justify-content:center;">
-        <div id="nps-score-display">
-          <div style="text-align:center;color:#aaa;font-size:13px;">Cargando...</div>
-        </div>
+        <div id="nps-score-display"><div style="text-align:center;color:#aaa;font-size:13px;">Cargando...</div></div>
       </div>
-   
-      <!-- Distribución de estrellas -->
       <div class="card" style="margin-bottom:0;">
         <div class="card-title">Distribución de puntuaciones</div>
-        <div style="position:relative;height:180px;">
-          <canvas id="nps-chart"></canvas>
-        </div>
+        <div style="position:relative;height:180px;"><canvas id="nps-chart"></canvas></div>
       </div>
     </div>
-   
-    <!-- Configuración Google Maps -->
     <div class="card" style="margin-bottom:1.5rem;">
       <div class="card-title">🗺️ Enlace de Google Maps (para promotores)</div>
-      <p style="font-size:12px;color:#888;margin-bottom:.75rem;">
-        Los clientes con puntuación 4 o 5 recibirán este enlace para dejar una reseña.
-      </p>
+      <p style="font-size:12px;color:#888;margin-bottom:.75rem;">Los clientes con puntuación 4 o 5 recibirán este enlace para dejar una reseña.</p>
       <div style="display:flex;gap:8px;align-items:center;max-width:600px;">
-        <input id="maps-url-input" type="url"
-          placeholder="https://g.page/r/TU-ENLACE-DE-GOOGLE-MAPS/review"
-          style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
-        <button id="maps-url-btn" onclick="saveGoogleMapsURL()"
-          style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;white-space:nowrap;">
-          Guardar
-        </button>
+        <input id="maps-url-input" type="url" placeholder="https://g.page/r/TU-ENLACE-DE-GOOGLE-MAPS/review" style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <button id="maps-url-btn" onclick="saveGoogleMapsURL()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;white-space:nowrap;">Guardar</button>
       </div>
     </div>
-   
-    <!-- Tabla de respuestas -->
     <div class="card">
       <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
         <span>Respuestas recientes</span>
-        <button onclick="loadNPS()" style="font-size:11px;padding:4px 10px;border:1px solid #e0e0d8;border-radius:6px;background:none;cursor:pointer;color:#888;">
-          ↻ Actualizar
-        </button>
+        <button onclick="loadNPS()" style="font-size:11px;padding:4px 10px;border:1px solid #e0e0d8;border-radius:6px;background:none;cursor:pointer;color:#888;">↻ Actualizar</button>
       </div>
       <div id="nps-responses-list"><div class="empty-state">Cargando...</div></div>
     </div>
-   
-  </div><!-- /nps -->
-   
-   
-  <!-- ══════════════════════════════════════════════ -->
-  <!-- SECCIÓN INVENTARIO                             -->
-  <!-- ══════════════════════════════════════════════ -->
+  </div>
+
+  <!-- INVENTARIO -->
   <div id="inventario" class="section">
-   
-    <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
       <div>
         <div style="font-size:18px;font-weight:600;">Inventario</div>
-        <div style="font-size:12px;color:#888;margin-top:2px;">
-          Gestiona el stock y vincúlalo a platos del menú. Al llegar a 0 se desactivan automáticamente.
-        </div>
+        <div style="font-size:12px;color:#888;margin-top:2px;">Gestiona el stock y vincúlalo a platos del menú. Al llegar a 0 se desactivan automáticamente.</div>
       </div>
-      <button onclick="openCreateInventoryModal()"
-        style="background:#1D9E75;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">
-        + Agregar producto
-      </button>
+      <button onclick="openCreateInventoryModal()" style="background:#1D9E75;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Agregar producto</button>
     </div>
-   
-    <!-- Banner alertas -->
-    <div id="inventory-alerts-banner"
-      style="display:none;background:#FFF8E6;border:1.5px solid #F0A500;border-radius:10px;
-             padding:.85rem 1.1rem;margin-bottom:1rem;flex-wrap:wrap;gap:8px;align-items:center;">
+    <div id="inventory-alerts-banner" style="display:none;background:#FFF8E6;border:1.5px solid #F0A500;border-radius:10px;padding:.85rem 1.1rem;margin-bottom:1rem;flex-wrap:wrap;gap:8px;align-items:center;">
       <span style="font-size:1.1rem;">⚠️</span>
       <div style="font-size:13px;font-weight:600;color:#7A4F00;margin-right:8px;">Productos con stock bajo o agotado:</div>
       <div id="inventory-alerts-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
     </div>
-   
-    <!-- Búsqueda -->
     <div style="margin-bottom:1rem;">
-      <input id="inv-search" placeholder="Buscar producto..."
-        oninput="filterInventory()"
-        style="padding:8px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;max-width:320px;outline:none;">
+      <input id="inv-search" placeholder="Buscar producto..." oninput="filterInventory()" style="padding:8px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;max-width:320px;outline:none;">
     </div>
-   
-    <!-- Tabla -->
     <div class="card">
       <div id="inventory-table-container"><div class="empty-state">Cargando inventario...</div></div>
     </div>
-   
   </div>
-</div>
-</div>
 
+</div><!-- /main -->
+
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!-- MODALES — todos fuera de .main y fuera de otros overlays      -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+
+<!-- Modal: Chat -->
 <div class="chat-modal-overlay" id="chat-modal-overlay" onclick="if(event.target===this)closeChatModal()">
   <div class="chat-modal-box">
     <div class="chat-modal-head">
@@ -472,6 +431,9 @@
       <button onclick="sendManualReply()">Enviar</button>
     </div>
   </div>
+</div><!-- /chat-modal-overlay -->
+
+<!-- Modal: Sesiones -->
 <div class="ses-modal-overlay" id="ses-modal-overlay" onclick="if(event.target===this)closeSesModal()">
   <div class="ses-modal-box">
     <div class="ses-modal-head">
@@ -486,7 +448,7 @@
         <button class="btn-ses-reopen" onclick="reopenFromModal()">♻️ Reabrir sesión</button>
       </div>
       <div class="ses-action-row">
-        <input id="ses-msg-input" type="text" class="ses-field" placeholder="Mensaje al cliente… (Se añade nombre del restaurante automáticamente)" onkeydown="if(event.key==='Enter')sendMsgFromModal()">
+        <input id="ses-msg-input" type="text" class="ses-field" placeholder="Mensaje al cliente…" onkeydown="if(event.key==='Enter')sendMsgFromModal()">
         <button class="btn-ses-send" onclick="sendMsgFromModal()">📨 Enviar</button>
       </div>
       <div class="ses-action-row">
@@ -496,22 +458,20 @@
       <div class="ses-feedback" id="ses-action-feedback"></div>
     </div>
   </div>
-</div>
-<div id="modal-inv-create"
-  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
+</div><!-- /ses-modal-overlay -->
+
+<!-- Modal: Crear producto de inventario -->
+<div id="modal-inv-create" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
   <div style="background:#fff;border-radius:16px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:1.75rem;box-shadow:0 24px 64px rgba(0,0,0,.18);">
     <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">➕ Nuevo producto de inventario</div>
- 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
       <div style="grid-column:1/-1;">
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Nombre del producto *</label>
-        <input id="inv-create-name" placeholder="Ej: Carne de res, Harina, Aceite..."
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-create-name" placeholder="Ej: Carne de res, Harina, Aceite..." style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Unidad de medida</label>
-        <select id="inv-create-unit"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;">
+        <select id="inv-create-unit" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;">
           <option value="unidades">Unidades</option>
           <option value="kg">Kilogramos (kg)</option>
           <option value="g">Gramos (g)</option>
@@ -522,61 +482,42 @@
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Stock inicial *</label>
-        <input id="inv-create-stock" type="number" min="0" step="0.5" placeholder="0"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-create-stock" type="number" min="0" step="0.5" placeholder="0" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Stock mínimo (alerta)</label>
-        <input id="inv-create-min" type="number" min="0" step="0.5" placeholder="0"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-create-min" type="number" min="0" step="0.5" placeholder="0" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Costo por unidad (opcional)</label>
-        <input id="inv-create-cost" type="number" min="0" step="100" placeholder="0"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-create-cost" type="number" min="0" step="100" placeholder="0" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
     </div>
- 
     <div style="margin-bottom:1.25rem;">
-      <label style="font-size:12px;color:#888;display:block;margin-bottom:8px;font-weight:600;">
-        🍽️ Platos del menú afectados
-        <span style="font-weight:400;">(al llegar a 0, se desactivarán automáticamente)</span>
-      </label>
-      <div id="inv-dish-selector-create"
-        style="max-height:160px;overflow-y:auto;border:1px solid #e0e0d8;border-radius:8px;padding:10px;background:#fafaf8;">
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:8px;font-weight:600;">🍽️ Platos del menú afectados <span style="font-weight:400;">(al llegar a 0, se desactivarán automáticamente)</span></label>
+      <div id="inv-dish-selector-create" style="max-height:160px;overflow-y:auto;border:1px solid #e0e0d8;border-radius:8px;padding:10px;background:#fafaf8;">
         <div style="color:#aaa;font-size:12px;">Cargando platos...</div>
       </div>
     </div>
- 
     <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button onclick="closeCreateInventoryModal()"
-        style="padding:8px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">
-        Cancelar
-      </button>
-      <button id="btn-inv-create-submit" onclick="submitCreateInventory()"
-        style="background:#1D9E75;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">
-        + Agregar producto
-      </button>
+      <button onclick="closeCreateInventoryModal()" style="padding:8px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
+      <button id="btn-inv-create-submit" onclick="submitCreateInventory()" style="background:#1D9E75;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Agregar producto</button>
     </div>
   </div>
 </div>
- 
+
 <!-- Modal: Editar producto -->
-<div id="modal-inv-edit"
-  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
+<div id="modal-inv-edit" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
   <div style="background:#fff;border-radius:16px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;padding:1.75rem;box-shadow:0 24px 64px rgba(0,0,0,.18);">
     <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">✏️ Editar producto</div>
- 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
       <div style="grid-column:1/-1;">
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Nombre</label>
-        <input id="inv-edit-name"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-edit-name" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Unidad</label>
-        <select id="inv-edit-unit"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;">
+        <select id="inv-edit-unit" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;">
           <option value="unidades">Unidades</option>
           <option value="kg">Kilogramos (kg)</option>
           <option value="g">Gramos (g)</option>
@@ -587,97 +528,63 @@
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Stock actual</label>
-        <input id="inv-edit-stock" type="number" min="0" step="0.5"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-edit-stock" type="number" min="0" step="0.5" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Stock mínimo</label>
-        <input id="inv-edit-min" type="number" min="0" step="0.5"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-edit-min" type="number" min="0" step="0.5" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
       <div>
         <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Costo por unidad</label>
-        <input id="inv-edit-cost" type="number" min="0" step="100"
-          style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+        <input id="inv-edit-cost" type="number" min="0" step="100" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
       </div>
     </div>
- 
     <div style="margin-bottom:1.25rem;">
       <label style="font-size:12px;color:#888;display:block;margin-bottom:8px;font-weight:600;">🍽️ Platos afectados</label>
-      <div id="inv-dish-selector-edit"
-        style="max-height:160px;overflow-y:auto;border:1px solid #e0e0d8;border-radius:8px;padding:10px;background:#fafaf8;">
-      </div>
+      <div id="inv-dish-selector-edit" style="max-height:160px;overflow-y:auto;border:1px solid #e0e0d8;border-radius:8px;padding:10px;background:#fafaf8;"></div>
     </div>
- 
     <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button onclick="closeEditModal()"
-        style="padding:8px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">
-        Cancelar
-      </button>
-      <button id="btn-inv-edit-submit" onclick="submitEditInventory()"
-        style="background:#1D9E75;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">
-        Guardar cambios
-      </button>
+      <button onclick="closeEditModal()" style="padding:8px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
+      <button id="btn-inv-edit-submit" onclick="submitEditInventory()" style="background:#1D9E75;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Guardar cambios</button>
     </div>
   </div>
 </div>
- 
+
 <!-- Modal: Ajustar stock -->
-<div id="modal-inv-adjust"
-  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;">
+<div id="modal-inv-adjust" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:16px;width:380px;max-width:95vw;padding:1.75rem;box-shadow:0 24px 64px rgba(0,0,0,.18);">
     <div style="font-size:16px;font-weight:600;margin-bottom:4px;">± Ajustar stock</div>
     <div id="adjust-item-name" style="font-size:13px;color:#888;margin-bottom:1.25rem;"></div>
- 
-    <div style="background:#f5f5f0;border-radius:8px;padding:10px 14px;margin-bottom:1rem;font-size:13px;">
-      Stock actual: <strong id="adjust-current-stock">—</strong>
-    </div>
- 
+    <div style="background:#f5f5f0;border-radius:8px;padding:10px 14px;margin-bottom:1rem;font-size:13px;">Stock actual: <strong id="adjust-current-stock">—</strong></div>
     <div style="margin-bottom:12px;">
-      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">
-        Cantidad <span style="color:#555;">(usa negativo para merma: -5)</span>
-      </label>
-      <input id="adjust-quantity" type="number" step="0.5" placeholder="Ej: 10 o -3"
-        style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Cantidad <span style="color:#555;">(usa negativo para merma: -5)</span></label>
+      <input id="adjust-quantity" type="number" step="0.5" placeholder="Ej: 10 o -3" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
     </div>
- 
     <div style="margin-bottom:1.25rem;">
       <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Motivo</label>
-      <select id="adjust-reason"
-        style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;">
+      <select id="adjust-reason" style="width:100%;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;">
         <option value="compra">📦 Compra / Reposición</option>
         <option value="merma">⚠️ Merma / Pérdida</option>
         <option value="ajuste_manual">✏️ Ajuste manual</option>
       </select>
     </div>
- 
-    <div id="adjust-feedback"
-      style="display:none;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;"></div>
- 
+    <div id="adjust-feedback" style="display:none;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button onclick="closeAdjustModal()"
-        style="padding:8px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">
-        Cancelar
-      </button>
-      <button id="btn-adjust-submit" onclick="submitAdjustStock()"
-        style="background:#1D9E75;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">
-        Aplicar
-      </button>
+      <button onclick="closeAdjustModal()" style="padding:8px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
+      <button id="btn-adjust-submit" onclick="submitAdjustStock()" style="background:#1D9E75;color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Aplicar</button>
     </div>
   </div>
 </div>
- 
+
 <!-- Modal: Historial de movimientos -->
-<div id="modal-inv-history"
-  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
+<div id="modal-inv-history" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
   <div style="background:#fff;border-radius:16px;width:580px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.18);">
     <div style="padding:1.25rem 1.5rem;border-bottom:0.5px solid #e0e0d8;display:flex;align-items:center;justify-content:space-between;">
       <div>
         <div style="font-size:15px;font-weight:600;">📋 Historial de movimientos</div>
         <div id="history-item-name" style="font-size:12px;color:#888;margin-top:2px;"></div>
       </div>
-      <button onclick="closeHistoryModal()"
-        style="font-size:20px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
+      <button onclick="closeHistoryModal()" style="font-size:20px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
     </div>
     <div id="history-list" style="flex:1;overflow-y:auto;padding:1rem;"></div>
   </div>
@@ -685,7 +592,7 @@
 
 <script src="/static/dashboard-core.js?v=3"></script>
 <script src="/static/dashboard-features.js?v=3"></script>
-<script src="/static/dashboard-nps-inventory.js?v=1"></script>
+<script src="/static/dashboard-nps-inventory.js?v=2"></script>
 
 </body>
 </html>
