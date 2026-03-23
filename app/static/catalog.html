@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Menú Interactivo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        body { background: #f8f9fa; color: #111; padding-bottom: 100px; }
+        
+        /* Cabecera del restaurante */
+        .hero { background: #111; color: #fff; padding: 40px 20px; text-align: center; border-radius: 0 0 20px 20px; }
+        .hero h1 { font-size: 24px; font-weight: 800; }
+        .hero p { color: #aaa; font-size: 14px; margin-top: 5px; }
+
+        .container { padding: 20px; max-width: 600px; margin: 0 auto; }
+        .category-title { font-size: 18px; font-weight: 700; margin: 25px 0 15px; border-bottom: 2px solid #eaeaea; padding-bottom: 5px; }
+        
+        /* Items del Menú */
+        .menu-item { background: #fff; border-radius: 12px; padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .item-info { flex: 1; padding-right: 15px; }
+        .item-name { font-weight: 600; font-size: 15px; }
+        .item-desc { font-size: 13px; color: #666; margin-top: 4px; line-height: 1.4; }
+        .item-price { font-weight: 700; color: #1D9E75; margin-top: 6px; }
+        
+        /* Controles de Carrito */
+        .controls { display: flex; align-items: center; gap: 10px; background: #f0f2f5; border-radius: 20px; padding: 4px; }
+        .btn-qty { background: #fff; border: none; width: 28px; height: 28px; border-radius: 50%; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .qty { font-weight: 600; width: 20px; text-align: center; }
+
+        /* Barra flotante de pago */
+        .floating-cart { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; padding: 15px 20px; box-shadow: 0 -4px 15px rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; z-index: 100; transform: translateY(100%); transition: transform 0.3s; }
+        .floating-cart.visible { transform: translateY(0); padding-bottom: calc(15px + env(safe-area-inset-bottom)); }
+        .cart-totals { display: flex; flex-direction: column; }
+        .cart-items-count { font-size: 12px; color: #666; }
+        .cart-price { font-size: 20px; font-weight: 800; color: #111; }
+        .btn-order { background: #25D366; color: #fff; border: none; padding: 12px 24px; border-radius: 25px; font-weight: 700; font-size: 16px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    </style>
+</head>
+<body>
+
+    <div class="hero">
+        <h1 id="rest-name">Cargando menú...</h1>
+        <p id="table-info"></p>
+    </div>
+
+    <div class="container" id="menu-container">
+        </div>
+
+    <div class="floating-cart" id="floating-cart">
+        <div class="cart-totals">
+            <span class="cart-items-count" id="cart-count">0 items</span>
+            <span class="cart-price" id="cart-total">$0</span>
+        </div>
+        <button class="btn-order" onclick="sendToWhatsApp()">
+            Pedir por WhatsApp 💬
+        </button>
+    </div>
+
+    <script>
+        // 1. Obtener datos de la URL (?bot=1555123&mesa=4)
+        const params = new URLSearchParams(window.location.search);
+        const botNumber = params.get('bot');
+        const mesa = params.get('mesa') || 'Barra';
+        
+        let cart = {}; // Almacena formato: { "Pizza Margarita": { price: 25000, qty: 2 } }
+
+        if (!botNumber) {
+            document.getElementById('rest-name').innerText = "Error: Faltan parámetros en el QR";
+        } else {
+            document.getElementById('table-info').innerText = `Ubicación: Mesa ${mesa}`;
+            loadMenu();
+        }
+
+        // 2. Cargar menú desde la API pública
+        async function loadMenu() {
+            try {
+                const res = await fetch(`/api/public/menu/${botNumber}`);
+                if (!res.ok) throw new Error("Menú no encontrado");
+                const data = await res.json();
+                
+                document.getElementById('rest-name').innerText = data.restaurant_name;
+                renderMenu(data.menu);
+            } catch (error) {
+                document.getElementById('rest-name').innerText = "Restaurante no disponible";
+            }
+        }
+
+        // 3. Renderizar JSON del menú a HTML
+        function renderMenu(menuDict) {
+            const container = document.getElementById('menu-container');
+            container.innerHTML = '';
+
+            for (const [category, items] of Object.entries(menuDict)) {
+                if (!items || items.length === 0) continue;
+                
+                container.innerHTML += `<div class="category-title">${category}</div>`;
+                
+                items.forEach(item => {
+                    const price = item.price || 0;
+                    const id = btoa(item.name).replace(/=/g, ''); // ID único seguro
+                    
+                    container.innerHTML += `
+                        <div class="menu-item">
+                            <div class="item-info">
+                                <div class="item-name">${item.name}</div>
+                                ${item.description ? `<div class="item-desc">${item.description}</div>` : ''}
+                                <div class="item-price">$${price.toLocaleString('es-CO')}</div>
+                            </div>
+                            <div class="controls">
+                                <button class="btn-qty" onclick="updateCart('${item.name}', ${price}, -1)">-</button>
+                                <span class="qty" id="qty-${id}">0</span>
+                                <button class="btn-qty" onclick="updateCart('${item.name}', ${price}, 1)">+</button>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+        }
+
+        // 4. Lógica del Carrito
+        function updateCart(name, price, change) {
+            if (!cart[name]) cart[name] = { price: price, qty: 0 };
+            
+            cart[name].qty += change;
+            if (cart[name].qty <= 0) delete cart[name];
+
+            const id = btoa(name).replace(/=/g, '');
+            document.getElementById(`qty-${id}`).innerText = cart[name] ? cart[name].qty : 0;
+            
+            updateFloatingCart();
+        }
+
+        function updateFloatingCart() {
+            let total = 0;
+            let count = 0;
+            
+            for (const item of Object.values(cart)) {
+                total += item.price * item.qty;
+                count += item.qty;
+            }
+
+            document.getElementById('cart-count').innerText = `${count} producto${count !== 1 ? 's' : ''}`;
+            document.getElementById('cart-total').innerText = `$${total.toLocaleString('es-CO')}`;
+
+            const floatingCart = document.getElementById('floating-cart');
+            if (count > 0) floatingCart.classList.add('visible');
+            else floatingCart.classList.remove('visible');
+        }
+
+        // 5. El Handoff a la IA (La Magia)
+        function sendToWhatsApp() {
+            let text = `¡Hola! Estoy en la *Mesa ${mesa}* y quiero ordenar lo siguiente:\n\n`;
+            
+            let total = 0;
+            for (const [name, item] of Object.entries(cart)) {
+                text += `▪️ ${item.qty}x ${name}\n`;
+                total += item.price * item.qty;
+            }
+            
+            text += `\n*Total aproximado:* $${total.toLocaleString('es-CO')}\n\n¿Me confirmas la orden?`;
+
+            const encodedText = encodeURIComponent(text);
+            // Redirigir a la API de WhatsApp oficial
+            window.location.href = `https://wa.me/${botNumber}?text=${encodedText}`;
+        }
+    </script>
+</body>
+</html>

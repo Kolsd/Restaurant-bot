@@ -90,7 +90,37 @@ async def demo_chat_bot_page():
     p = STATIC / "demo-chat.html"
     if p.exists():
         return HTMLResponse(p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Falta el archivo demo-chat.html en la carpeta static</h1>", status_code=404)      
+    return HTMLResponse("<h1>Falta el archivo demo-chat.html en la carpeta static</h1>", status_code=404)
+
+@router.get("/catalog", response_class=HTMLResponse)
+async def catalog_page():
+    # Renderiza el frontend del carrito/catálogo móvil
+    p = STATIC / "catalog.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Catálogo no disponible</h1>")
+
+@router.get("/api/public/menu/{bot_number}")
+async def get_public_menu(bot_number: str):
+    # Devuelve el menú y nombre del restaurante de forma pública
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rest = await conn.fetchrow(
+            "SELECT name, menu FROM restaurants WHERE whatsapp_number = $1", 
+            bot_number
+        )
+        if not rest:
+            raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+        
+        # Validar si el menú es string o dict
+        menu_data = rest["menu"]
+        if isinstance(menu_data, str):
+            try: menu_data = json.loads(menu_data)
+            except: menu_data = {}
+            
+        return {
+            "restaurant_name": rest["name"],
+            "menu": menu_data,
+            "bot_number": bot_number
+        }
 
 # ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
 @router.get("/billing", response_class=HTMLResponse)
