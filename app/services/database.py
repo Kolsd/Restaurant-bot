@@ -949,30 +949,31 @@ async def db_get_nps_stats(bot_number: str, period: str = "month") -> dict:
         "year":     "365 days",
     }
     interval = period_map.get(period, "30 days")
- 
+
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            f"""SELECT score, COUNT(*) as count, comment
+            f"""SELECT score, COUNT(*) AS count
                 FROM nps_responses
                 WHERE bot_number = $1
                   AND created_at >= NOW() - INTERVAL '{interval}'
-                ORDER BY created_at DESC""",
+                GROUP BY score
+                ORDER BY score""",
             bot_number
         )
- 
-    total       = sum(r["count"] for r in rows)
-    promoters   = sum(r["count"] for r in rows if r["score"] >= 4)
-    detractors  = sum(r["count"] for r in rows if r["score"] <= 3)
-    score_sum   = 0
-    dist        = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
- 
+
+    total      = sum(r["count"] for r in rows)
+    promoters  = sum(r["count"] for r in rows if r["score"] >= 4)
+    detractors = sum(r["count"] for r in rows if r["score"] <= 3)
+    score_sum  = 0
+    dist       = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+
     for r in rows:
         dist[r["score"]] = dist.get(r["score"], 0) + r["count"]
         score_sum += r["score"] * r["count"]
- 
-    nps_score   = round(((promoters - detractors) / total * 100)) if total > 0 else 0
-    avg_score   = round(score_sum / total, 2) if total > 0 else 0
- 
+
+    nps_score = round(((promoters - detractors) / total * 100)) if total > 0 else 0
+    avg_score = round(score_sum / total, 2) if total > 0 else 0
+
     return {
         "total":        total,
         "promoters":    promoters,
@@ -980,8 +981,7 @@ async def db_get_nps_stats(bot_number: str, period: str = "month") -> dict:
         "nps_score":    nps_score,
         "avg_score":    avg_score,
         "distribution": dist,
-    }
- 
+    } 
  
 async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50) -> list:
     pool = await get_pool()
