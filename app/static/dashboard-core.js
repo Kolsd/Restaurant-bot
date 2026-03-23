@@ -175,7 +175,9 @@ async function refreshAll() {
   if (badge) badge.textContent = 'Sincronizando...';
 
   try {
-    let urlParams = `period=${currentPeriod}`;
+    const localOffset = new Date().getTimezoneOffset();
+    
+    let urlParams = `period=${currentPeriod}&tz_offset=${localOffset}`;
     if (currentPeriod === 'custom') {
         urlParams += `&custom_start=${window.customStart}&custom_end=${window.customEnd}`;
     }
@@ -189,7 +191,6 @@ async function refreshAll() {
 
     const rChats = await fetch(`/api/dashboard/conversations`, { headers });
     const conversations = rChats.ok ? ((await rChats.json()).conversations || []) : [];
-    const paidOrders = orders.filter(o => o.paid);
     const pendingOrders = orders.filter(o => !o.paid);
     const totalRev = paidOrders.reduce((s,o) => s + o.total, 0);
     const pendingRev = pendingOrders.reduce((s,o) => s + o.total, 0);

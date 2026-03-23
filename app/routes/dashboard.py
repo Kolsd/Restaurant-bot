@@ -306,8 +306,8 @@ async def fix_conversations_bot_number(request: Request):
 # ════════════════════════════════════════════════════════════════
 from datetime import datetime, timedelta
 
-async def get_dashboard_filters(request: Request, period: str, custom_start: str = None, custom_end: str = None):
-    """Ayudante para filtrar por sucursal y rango exacto de fechas"""
+async def get_dashboard_filters(request: Request, period: str, custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
+    """Ayudante para filtrar por sucursal y rango exacto, calculando el 'Hoy' dinámicamente según la zona horaria del cliente"""
     username = await require_auth(request)
     user = await db.db_get_user(username)
     
@@ -317,24 +317,38 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
         r = await db.db_get_restaurant_by_id(branch_id)
         if r: bot_number = r.get("whatsapp_number")
     
-    now = datetime.now()
-    end_date = now + timedelta(days=1) # Por defecto, hasta "hoy en la noche"
+    # 1. Calculamos la hora local EXACTA del usuario que está viendo la pantalla
+    now_utc = datetime.utcnow()
+    # En JS, getTimezoneOffset() devuelve minutos positivos para zonas al Oeste (ej. 300 para UTC-5)
+    now_local = now_utc - timedelta(minutes=tz_offset)
     
-    # Lógica de fechas (Incluyendo el nuevo rango personalizado)
+    # 2. Definimos los límites del día en SU hora local
+    end_local = now_local + timedelta(days=1)
+    end_local = end_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    
     if period == "custom" and custom_start and custom_end:
-        start_date = datetime.strptime(custom_start, "%Y-%m-%d")
-        end_date = datetime.strptime(custom_end, "%Y-%m-%d") + timedelta(days=1)
-    elif period == "week": start_date = now - timedelta(days=7)
-    elif period == "month": start_date = now.replace(day=1)
-    elif period == "semester": start_date = now - timedelta(days=180)
-    elif period == "year": start_date = now.replace(month=1, day=1)
-    else: start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) # 'today'
+        start_local = datetime.strptime(custom_start, "%Y-%m-%d")
+        end_local = datetime.strptime(custom_end, "%Y-%m-%d") + timedelta(days=1)
+    elif period == "week": 
+        start_local = now_local - timedelta(days=7)
+    elif period == "month": 
+        start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == "semester": 
+        start_local = now_local - timedelta(days=180)
+    elif period == "year": 
+        start_local = now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else: # 'today'
+        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # 3. Devolvemos los límites nuevamente a UTC para que la base de datos filtre correctamente
+    start_date = start_local + timedelta(minutes=tz_offset)
+    end_date = end_local + timedelta(minutes=tz_offset)
     
     return branch_id, bot_number, start_date, end_date
 
 @router.get("/api/dashboard/orders")
-async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None):
-    branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end)
+async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
+    branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
     
     pool = await db.get_pool()
     orders = []
@@ -359,8 +373,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                     "time": r["created_at"].strftime("%H:%M"),
                     "created_at": r["created_at"].isoformat() + "Z"
                 })
-        except Exception as e:
-            print(f"Error WA Orders: {e}")
+        except Exception as e: pass
 
         try:
             q_mesa = """
@@ -380,11 +393,8 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                 base_id = r["base_order_id"] if r.get("base_order_id") else r["id"]
                 if base_id not in mesa_groups:
                     mesa_groups[base_id] = {
-                        "id": base_id,
-                        "items": [],
-                        "status": r.get("status", "recibido"),
-                        "total": 0.0,
-                        "is_paid": False,
+                        "id": base_id, "items": [], "status": r.get("status", "recibido"),
+                        "total": 0.0, "is_paid": False,
                         "time": r["created_at"].strftime("%H:%M"),
                         "created_at": r["created_at"].isoformat() + "Z"
                     }
@@ -392,8 +402,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                 
                 try:
                     parsed_items = json.loads(r["items"]) if isinstance(r["items"], str) else r["items"]
-                    if isinstance(parsed_items, list):
-                        mesa_groups[base_id]["items"].extend(parsed_items)
+                    if isinstance(parsed_items, list): mesa_groups[base_id]["items"].extend(parsed_items)
                 except: pass
                 
                 if r["status"] in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
@@ -406,8 +415,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                     "status": g["status"], "paid": g["is_paid"], "total": g["total"],
                     "time": g["time"], "created_at": g["created_at"]
                 })
-        except Exception as e:
-            print(f"Error table_orders: {e}")
+        except Exception as e: pass
 
     orders.sort(key=lambda x: x["created_at"], reverse=True)
     return {"orders": orders}
@@ -440,8 +448,8 @@ async def get_closed_sessions(request: Request, hours: int = 24):
     return {"sessions": sessions}
     
 @router.get("/api/dashboard/reservations")
-async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None):
-    _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end)
+async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
+    _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
     
     pool = await db.get_pool()
     reservations = []
@@ -449,11 +457,9 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
         try:
             query = "SELECT * FROM reservations WHERE created_at >= $1 AND created_at < $2"
             params = [start_date, end_date]
-            
             if bot_number:
                 query += " AND bot_number = $3"
                 params.append(bot_number)
-                
             query += " ORDER BY date ASC, time ASC"
             rows = await conn.fetch(query, *params)
             
@@ -463,7 +469,7 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
                     "time": str(r["time"])[:5], "guests": r["guests"],
                     "phone": r["phone"], "notes": r["notes"]
                 })
-        except Exception as e: print(f"Error reservations: {e}")
+        except Exception as e: pass
             
     return {"reservations": reservations}
     
