@@ -219,26 +219,33 @@ async function refreshAll() {
 
 function renderOrders(orders) {
   const container = document.getElementById('orders-container');
-  if (!orders || !orders.length) {
-    container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
+  const externalOrders = orders.filter(o => o.type !== 'mesa');
+  
+  if (!externalOrders || !externalOrders.length) {
+    container.innerHTML = '<div class="empty-state">Sin pedidos externos en este período.</div>';
     updateTiposChart(0, 0); return;
   }
+  
   let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
-  orders.forEach(o => {
+  externalOrders.forEach(o => {
+    // MAGIA DE ZONAS HORARIAS: Forzamos UTC ('Z') y convertimos a la hora de tu país
+    const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
+    const localTime = new Date(isoStr).toLocaleTimeString('es-CO', {hour: '2-digit', minute: '2-digit'});
+
     html += `<tr>
       <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
       <td style="color:#555;">${o.items || '—'}</td>
       <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
       <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
       <td style="font-weight:500;">${fmt(o.total)}</td>
-      <td style="color:#888;">${o.time||'—'}</td>
+      <td style="color:#888;">${localTime}</td>
     </tr>`;
   });
   html += '</tbody></table>';
   container.innerHTML = html;
-  updateTiposChart(orders.filter(o => o.type === 'domicilio').length, orders.filter(o => o.type === 'recoger').length);
+  
+  updateTiposChart(externalOrders.filter(o => o.type === 'domicilio').length, externalOrders.filter(o => o.type === 'recoger').length);
 }
-
 function renderReservations(reservations) {
   const container = document.getElementById('res-container');
   document.getElementById('r-total').textContent = reservations.length;
