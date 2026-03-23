@@ -154,6 +154,8 @@ async def init_db():
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL",
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS google_maps_url TEXT DEFAULT ''",
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS wa_phone_id TEXT DEFAULT ''",
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS wa_access_token TEXT DEFAULT ''",
         ]
         
         for m in migrations:
@@ -982,7 +984,7 @@ async def db_get_nps_stats(bot_number: str, period: str = "month") -> dict:
         "avg_score":    avg_score,
         "distribution": dist,
     }
-     
+
 async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50) -> list:
     pool = await get_pool()
     period_map = {
