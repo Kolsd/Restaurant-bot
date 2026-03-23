@@ -50,6 +50,8 @@ function logout() {
 }
 
 let currentPeriod = 'today';
+window.customStart = '';
+window.customEnd = '';
 const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones' };
 
 function setPeriod(p, btn) {
@@ -173,16 +175,20 @@ async function refreshAll() {
   if (badge) badge.textContent = 'Sincronizando...';
 
   try {
-    const rOrders = await fetch(`/api/dashboard/orders?period=${currentPeriod}`, { headers });
+    let urlParams = `period=${currentPeriod}`;
+    if (currentPeriod === 'custom') {
+        urlParams += `&custom_start=${window.customStart}&custom_end=${window.customEnd}`;
+    }
+
+    const rOrders = await fetch(`/api/dashboard/orders?${urlParams}`, { headers });
     if (rOrders.status === 401) { logout(); return; }
     const orders = (await rOrders.json()).orders || [];
     
-    const rRes = await fetch(`/api/dashboard/reservations?period=${currentPeriod}`, { headers });
+    const rRes = await fetch(`/api/dashboard/reservations?${urlParams}`, { headers });
     const reservations = rRes.ok ? ((await rRes.json()).reservations || []) : [];
 
     const rChats = await fetch(`/api/dashboard/conversations`, { headers });
     const conversations = rChats.ok ? ((await rChats.json()).conversations || []) : [];
-
     const paidOrders = orders.filter(o => o.paid);
     const pendingOrders = orders.filter(o => !o.paid);
     const totalRev = paidOrders.reduce((s,o) => s + o.total, 0);
@@ -259,37 +265,36 @@ async function refreshAll() {
 
 function renderOrders(orders) {
   const container = document.getElementById('orders-container');
-  
   if (!orders || !orders.length) {
     container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
     updateTiposChart(0, 0); return;
   }
   
-  let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Origen</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
+  // AÑADIDA COLUMNA "Fecha"
+  let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Origen</th><th>Estado</th><th>Total</th><th>Fecha</th><th>Hora</th></tr></thead><tbody>';
   orders.forEach(o => {
     const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
-    const localTime = new Date(isoStr).toLocaleTimeString('es-CO', {hour: '2-digit', minute: '2-digit'});
+    const dateObj = new Date(isoStr);
+    const localTime = dateObj.toLocaleTimeString('es-CO', {hour: '2-digit', minute: '2-digit'});
+    const localDate = dateObj.toLocaleDateString('es-CO', {day: '2-digit', month: 'short', year: 'numeric'}); // EXTRAE FECHA LOCAL
 
     let itemsStr = '—';
     try {
         const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-        if (Array.isArray(arr)) {
-            itemsStr = arr.map(i => `${i.quantity||1}x ${i.name}`).join(', ');
-        } else itemsStr = String(o.items);
+        itemsStr = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}x ${i.name}`).join(', ') : String(o.items);
     } catch(e) { itemsStr = String(o.items); }
 
-    const origenBadge = o.type === 'mesa' 
-        ? '<span class="badge" style="background:#E1F5EE;color:#0F6E56;">🪑 Salón</span>' 
-        : `<span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">🛵 ${o.type}</span>`;
-        
+    const origenBadge = o.type === 'mesa' ? '<span class="badge" style="background:#E1F5EE;color:#0F6E56;">🪑 Salón</span>' : `<span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">🛵 ${o.type}</span>`;
     const stFormat = (o.status || 'pendiente').replace(/_/g, ' ').toUpperCase();
 
+    // AÑADIDA CELDA DE FECHA (${localDate})
     html += `<tr>
       <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
       <td style="color:#555;font-size:12px;max-width:300px;">${itemsStr}</td>
       <td>${origenBadge}</td>
       <td><span class="badge" style="background:#f0f0e8;color:#555;">${stFormat}</span></td>
       <td style="font-weight:700;">${fmt(o.total)}</td>
+      <td style="color:#888;">${localDate}</td>
       <td style="color:#888;">${localTime}</td>
     </tr>`;
   });
@@ -421,4 +426,18 @@ function switchOrderTab(tab, btn) {
     histDiv.style.display = 'block';
     if (periodBar) periodBar.style.display = 'flex'; // Mostrar fechas en Histórico
   }
+}
+
+function setCustomPeriod(btn) {
+  const start = document.getElementById('custom-start').value;
+  const end = document.getElementById('custom-end').value;
+  if(!start || !end) return alert("Por favor selecciona una fecha de inicio y una fecha de fin.");
+  
+  currentPeriod = 'custom';
+  window.customStart = start;
+  window.customEnd = end;
+  
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  refreshAll();
 }
