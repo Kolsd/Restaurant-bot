@@ -306,8 +306,8 @@ async def fix_conversations_bot_number(request: Request):
 # ════════════════════════════════════════════════════════════════
 from datetime import datetime, timedelta
 
-async def get_dashboard_filters(request: Request, period: str):
-    """Ayudante para filtrar por sucursal y fechas"""
+async def get_dashboard_filters(request: Request, period: str, custom_start: str = None, custom_end: str = None):
+    """Ayudante para filtrar por sucursal y rango exacto de fechas"""
     username = await require_auth(request)
     user = await db.db_get_user(username)
     
@@ -317,29 +317,33 @@ async def get_dashboard_filters(request: Request, period: str):
         r = await db.db_get_restaurant_by_id(branch_id)
         if r: bot_number = r.get("whatsapp_number")
     
-    # Lógica de fechas
     now = datetime.now()
-    if period == "week": start_date = now - timedelta(days=7)
+    end_date = now + timedelta(days=1) # Por defecto, hasta "hoy en la noche"
+    
+    # Lógica de fechas (Incluyendo el nuevo rango personalizado)
+    if period == "custom" and custom_start and custom_end:
+        start_date = datetime.strptime(custom_start, "%Y-%m-%d")
+        end_date = datetime.strptime(custom_end, "%Y-%m-%d") + timedelta(days=1)
+    elif period == "week": start_date = now - timedelta(days=7)
     elif period == "month": start_date = now.replace(day=1)
     elif period == "semester": start_date = now - timedelta(days=180)
     elif period == "year": start_date = now.replace(month=1, day=1)
     else: start_date = now.replace(hour=0, minute=0, second=0, microsecond=0) # 'today'
     
-    return branch_id, bot_number, start_date
+    return branch_id, bot_number, start_date, end_date
 
 @router.get("/api/dashboard/orders")
-async def get_dashboard_orders(request: Request, period: str = "today"):
-    branch_id, bot_number, start_date = await get_dashboard_filters(request, period)
+async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None):
+    branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end)
     
     pool = await db.get_pool()
     orders = []
     async with pool.acquire() as conn:
-        # 1. Órdenes de WhatsApp (Delivery / Pickup)
         try:
-            q_wa = "SELECT * FROM orders WHERE created_at >= $1"
-            p_wa = [start_date]
+            q_wa = "SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2"
+            p_wa = [start_date, end_date]
             if bot_number:
-                q_wa += " AND bot_number = $2"
+                q_wa += " AND bot_number = $3"
                 p_wa.append(bot_number)
             q_wa += " ORDER BY created_at DESC"
             
@@ -349,25 +353,24 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
                     "id": r["id"],
                     "items": r["items"],
                     "type": r.get("order_type", "domicilio"),
-                    "status": r.get("status", "pendiente"), # <--- NUEVO
+                    "status": r.get("status", "pendiente"),
                     "paid": r.get("payment_status") == "paid" or r.get("paid") == True,
                     "total": float(r["total"]),
                     "time": r["created_at"].strftime("%H:%M"),
-                    "created_at": r["created_at"].isoformat()
+                    "created_at": r["created_at"].isoformat() + "Z"
                 })
         except Exception as e:
             print(f"Error WA Orders: {e}")
 
-        # 2. Órdenes de Mesa (POS / Dine-in)
         try:
             q_mesa = """
                 SELECT o.* FROM table_orders o
                 LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                WHERE o.created_at >= $1
+                WHERE o.created_at >= $1 AND o.created_at < $2
             """
-            p_mesa = [start_date]
+            p_mesa = [start_date, end_date]
             if branch_id:
-                q_mesa += " AND t.branch_id = $2"
+                q_mesa += " AND t.branch_id = $3"
                 p_mesa.append(branch_id)
             
             rows_mesa = await conn.fetch(q_mesa, *p_mesa)
@@ -378,15 +381,20 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
                 if base_id not in mesa_groups:
                     mesa_groups[base_id] = {
                         "id": base_id,
-                        "items": "Pedido en Salón (POS)",
-                        "status": r.get("status", "recibido"), # <--- NUEVO
+                        "items": [],
+                        "status": r.get("status", "recibido"),
                         "total": 0.0,
                         "is_paid": False,
                         "time": r["created_at"].strftime("%H:%M"),
-                        "created_at": r["created_at"].isoformat()
+                        "created_at": r["created_at"].isoformat() + "Z"
                     }
-                
                 mesa_groups[base_id]["total"] += float(r["total"])
+                
+                try:
+                    parsed_items = json.loads(r["items"]) if isinstance(r["items"], str) else r["items"]
+                    if isinstance(parsed_items, list):
+                        mesa_groups[base_id]["items"].extend(parsed_items)
+                except: pass
                 
                 if r["status"] in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
                     mesa_groups[base_id]["is_paid"] = True
@@ -394,21 +402,16 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
 
             for base_id, g in mesa_groups.items():
                 orders.append({
-                    "id": g["id"],
-                    "items": g["items"],
-                    "type": "mesa",
-                    "status": g["status"], # <--- NUEVO
-                    "paid": g["is_paid"],
-                    "total": g["total"],
-                    "time": g["time"],
-                    "created_at": g["created_at"]
+                    "id": g["id"], "items": json.dumps(g["items"]), "type": "mesa",
+                    "status": g["status"], "paid": g["is_paid"], "total": g["total"],
+                    "time": g["time"], "created_at": g["created_at"]
                 })
         except Exception as e:
-            print(f"Error cargando table_orders en dashboard: {e}")
+            print(f"Error table_orders: {e}")
 
     orders.sort(key=lambda x: x["created_at"], reverse=True)
     return {"orders": orders}
-    
+
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
     _, bot_number, _ = await get_dashboard_filters(request, "today")
@@ -437,20 +440,18 @@ async def get_closed_sessions(request: Request, hours: int = 24):
     return {"sessions": sessions}
     
 @router.get("/api/dashboard/reservations")
-async def get_dashboard_reservations(request: Request, period: str = "today"):
-    # Usamos bot_number en vez de branch_id
-    _, bot_number, start_date = await get_dashboard_filters(request, period)
+async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None):
+    _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end)
     
     pool = await db.get_pool()
     reservations = []
-    
     async with pool.acquire() as conn:
         try:
-            query = "SELECT * FROM reservations WHERE created_at >= $1"
-            params = [start_date]
+            query = "SELECT * FROM reservations WHERE created_at >= $1 AND created_at < $2"
+            params = [start_date, end_date]
             
             if bot_number:
-                query += " AND bot_number = $2"
+                query += " AND bot_number = $3"
                 params.append(bot_number)
                 
             query += " ORDER BY date ASC, time ASC"
@@ -458,19 +459,14 @@ async def get_dashboard_reservations(request: Request, period: str = "today"):
             
             for r in rows:
                 reservations.append({
-                    "id": r["id"],
-                    "name": r["name"],  # FIX: Corregido de 'customer_name' a 'name'
-                    "date": str(r["date"]),
-                    "time": str(r["time"])[:5],
-                    "guests": r["guests"],
-                    "phone": r["phone"],
-                    "notes": r["notes"]
+                    "id": r["id"], "name": r["name"], "date": str(r["date"]),
+                    "time": str(r["time"])[:5], "guests": r["guests"],
+                    "phone": r["phone"], "notes": r["notes"]
                 })
-        except Exception as e:
-            print(f"Aviso - Error en dashboard reservations: {e}")
+        except Exception as e: print(f"Error reservations: {e}")
             
     return {"reservations": reservations}
-
+    
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
     _, bot_number, _ = await get_dashboard_filters(request, "today")
@@ -494,13 +490,13 @@ async def get_dashboard_conversations(request: Request):
             if isinstance(preview, dict): preview = "Multimedia/Sistema"
         except:
             history = []
-            preview = "Error leyendo historial"
+            preview = "Conversación activa..."
             
         convs.append({
             "phone": r["phone"],
             "messages": len(history),
             "preview": preview[:60] + "..." if len(preview) > 60 else preview,
-            "last_updated": r["last_updated"].isoformat()
+            "last_updated": r["updated_at"].isoformat() + "Z"  # <--- Z AÑADIDA
         })
     return {"conversations": convs}
 
@@ -522,22 +518,29 @@ async def get_dashboard_menu(request: Request):
 
 # ── ENDPOINTS DE SESIONES (PARA PESTAÑA AUDITORÍA) ──
 
-@router.get("/api/table-sessions/closed")
+router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
-    branch_id, _, _ = await get_dashboard_filters(request, "today")
+    _, bot_number, _ = await get_dashboard_filters(request, "today")
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours'"
-        if branch_id:
-            query += f" AND branch_id = {branch_id}"
-        query += " ORDER BY closed_at DESC"
-        rows = await conn.fetch(query)
-        
+        try:
+            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours'"
+            params = []
+            if bot_number:
+                query += " AND bot_number = $1"
+                params.append(bot_number)
+            query += " ORDER BY closed_at DESC"
+            rows = await conn.fetch(query, *params)
+        except Exception as e:
+            print(f"Aviso - Error en table_sessions (intentando modo seguro): {e}")
+            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours' ORDER BY closed_at DESC"
+            rows = await conn.fetch(query)
+            
     sessions = []
     for r in rows:
         s = dict(r)
-        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat()
-        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat()
+        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat() + "Z" # <--- Z AÑADIDA
+        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat() + "Z"    # <--- Z AÑADIDA
         sessions.append(s)
         
     return {"sessions": sessions}
