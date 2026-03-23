@@ -876,7 +876,7 @@ async function loadTableOrdersSection() {
             const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
             items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${i.name||''}`).join(', ') : String(o.items);
           } catch(e) { items = String(o.items || '—'); }
-          const hora = (o.created_at || '').substring(11, 16);
+          onst hora = new Date((o.created_at||'')+'Z').toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
           const st   = o.status || 'recibido';
           const color = STATUS_COLOR[st] || '#888';
           const bg    = STATUS_BG[st]    || '#f0f0f0';
