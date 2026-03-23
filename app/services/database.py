@@ -295,16 +295,27 @@ async def db_get_all_conversations(bot_number: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
         if bot_number:
-            rows = await conn.fetch("SELECT phone, bot_number, history, updated_at FROM conversations WHERE bot_number=$1 OR bot_number='' ORDER BY updated_at DESC", bot_number)
+            # FIX: eliminado el OR bot_number='' que traía conversaciones huérfanas
+            rows = await conn.fetch(
+                "SELECT phone, bot_number, history, updated_at FROM conversations WHERE bot_number=$1 ORDER BY updated_at DESC",
+                bot_number
+            )
         else:
-            rows = await conn.fetch("SELECT phone, bot_number, history, updated_at FROM conversations ORDER BY updated_at DESC")
+            rows = await conn.fetch(
+                "SELECT phone, bot_number, history, updated_at FROM conversations ORDER BY updated_at DESC"
+            )
         result = []
         for r in rows:
             history = r["history"] if isinstance(r["history"], list) else json.loads(r["history"])
             last_user = next((m["content"] for m in reversed(history) if m["role"] == "user" and isinstance(m.get("content"), str)), "")
-            result.append({"phone": r["phone"], "messages": len(history), "preview": last_user[:60] if last_user else "...", "updated_at": r["updated_at"].isoformat()[:19]})
+            result.append({
+                "phone": r["phone"],
+                "messages": len(history),
+                "preview": last_user[:60] if last_user else "...",
+                "updated_at": r["updated_at"].isoformat()[:19]
+            })
         return result
-
+        
 async def db_delete_conversation(phone: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
