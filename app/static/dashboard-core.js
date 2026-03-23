@@ -156,32 +156,27 @@ function renderChart(orders) {
   });
 }
 
-// ── SYNC MAESTRO (Modularizado) ──
 async function refreshAll() {
   const badge = document.getElementById('sync-badge');
   if (badge) badge.textContent = 'Sincronizando...';
 
   try {
-    // 1. Cargar Pedidos
     const rOrders = await fetch(`/api/dashboard/orders?period=${currentPeriod}`, { headers });
     if (rOrders.status === 401) { logout(); return; }
     const orders = (await rOrders.json()).orders || [];
     
-    // 2. Cargar Reservas
     const rRes = await fetch(`/api/dashboard/reservations?period=${currentPeriod}`, { headers });
     const reservations = rRes.ok ? ((await rRes.json()).reservations || []) : [];
 
-    // 3. Cargar Conversaciones
     const rChats = await fetch(`/api/dashboard/conversations`, { headers });
     const conversations = rChats.ok ? ((await rChats.json()).conversations || []) : [];
 
-    // Calcular Métricas Globales (Resumen)
     const paidOrders = orders.filter(o => o.paid);
     const pendingOrders = orders.filter(o => !o.paid);
     const totalRev = paidOrders.reduce((s,o) => s + o.total, 0);
     const pendingRev = pendingOrders.reduce((s,o) => s + o.total, 0);
     
-    // Renderizar Resumen
+    // Resumen Global
     document.getElementById('m-revenue').textContent = fmt(totalRev);
     document.getElementById('m-revenue-sub').innerHTML = paidOrders.length + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
     document.getElementById('m-orders').textContent = orders.length;
@@ -190,23 +185,25 @@ async function refreshAll() {
     document.getElementById('m-res-sub').textContent = reservations.reduce((s,r) => s + (r.guests||0), 0) + ' personas';
     document.getElementById('m-convs').textContent = conversations.length;
     
-    // 👇 SOLUCIÓN PEDIDOS: Filtrar solo domicilios para las tarjetas verdes de la pestaña Pedidos
+    // MÉTRICAS DE DOMICILIOS EN TIEMPO REAL
     const extOrders = orders.filter(o => o.type !== 'mesa');
-    const extPaid = extOrders.filter(o => o.paid);
-    const extPending = extOrders.filter(o => !o.paid);
+    let domCocina = 0; let domEntrega = 0; let domEntregados = 0;
+    
+    extOrders.forEach(o => {
+       const st = (o.status || '').toLowerCase();
+       if (st.includes('entregado')) domEntregados++;
+       else if (st.includes('camino') || st.includes('entrega')) domEntrega++;
+       else domCocina++;
+    });
 
-    const pTotal = document.getElementById('p-total');
-    if (pTotal) pTotal.textContent = extOrders.length;
-    
-    const pPaid = document.getElementById('p-paid');
-    if (pPaid) pPaid.textContent = extPaid.length;
-    
-    const pPending = document.getElementById('p-pending');
-    if (pPending) pPending.textContent = extPending.length;
+    if (document.getElementById('rt-dom-total')) document.getElementById('rt-dom-total').textContent = extOrders.length;
+    if (document.getElementById('rt-dom-cocina')) document.getElementById('rt-dom-cocina').textContent = domCocina;
+    if (document.getElementById('rt-dom-entrega')) document.getElementById('rt-dom-entrega').textContent = domEntrega;
+    if (document.getElementById('rt-dom-entregados')) document.getElementById('rt-dom-entregados').textContent = domEntregados;
     
     updateStatusChart(paidOrders.length, pendingOrders.length);
     renderChart(orders);
-    renderOrders(orders);
+    renderOrders(orders); // Llama al histórico
     renderReservations(reservations);
     renderConversations(conversations);
     
@@ -219,45 +216,44 @@ async function refreshAll() {
 
 function renderOrders(orders) {
   const container = document.getElementById('orders-container');
-  const externalOrders = orders.filter(o => o.type !== 'mesa');
   
-  if (!externalOrders || !externalOrders.length) {
-    container.innerHTML = '<div class="empty-state">Sin pedidos externos en este período.</div>';
+  if (!orders || !orders.length) {
+    container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
     updateTiposChart(0, 0); return;
   }
   
-  let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
-  externalOrders.forEach(o => {
-    // Zonas horarias correctas
+  let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Origen</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
+  orders.forEach(o => {
     const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
     const localTime = new Date(isoStr).toLocaleTimeString('es-CO', {hour: '2-digit', minute: '2-digit'});
 
-    // MAGIA: Traducir el JSON a texto legible (ej: 3x Diavola)
     let itemsStr = '—';
     try {
         const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
         if (Array.isArray(arr)) {
             itemsStr = arr.map(i => `${i.quantity||1}x ${i.name}`).join(', ');
-        } else {
-            itemsStr = String(o.items);
-        }
-    } catch(e) { 
-        itemsStr = String(o.items); 
-    }
+        } else itemsStr = String(o.items);
+    } catch(e) { itemsStr = String(o.items); }
+
+    const origenBadge = o.type === 'mesa' 
+        ? '<span class="badge" style="background:#E1F5EE;color:#0F6E56;">🪑 Salón</span>' 
+        : `<span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">🛵 ${o.type}</span>`;
+        
+    const stFormat = (o.status || 'pendiente').replace(/_/g, ' ').toUpperCase();
 
     html += `<tr>
       <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
       <td style="color:#555;font-size:12px;max-width:300px;">${itemsStr}</td>
-      <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
-      <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
-      <td style="font-weight:500;">${fmt(o.total)}</td>
+      <td>${origenBadge}</td>
+      <td><span class="badge" style="background:#f0f0e8;color:#555;">${stFormat}</span></td>
+      <td style="font-weight:700;">${fmt(o.total)}</td>
       <td style="color:#888;">${localTime}</td>
     </tr>`;
   });
   html += '</tbody></table>';
   container.innerHTML = html;
   
-  updateTiposChart(externalOrders.filter(o => o.type === 'domicilio').length, externalOrders.filter(o => o.type === 'recoger').length);
+  updateTiposChart(orders.filter(o => o.type === 'domicilio').length, orders.filter(o => o.type === 'recoger').length);
 }
 
 function renderConversations(conversations) {
@@ -360,4 +356,22 @@ async function sendManualReply() {
     });
     await loadChatHistory(currentChatPhone);
   } catch(e) {}
+}
+
+function switchOrderTab(tab, btn) {
+  const rtDiv   = document.getElementById('orders-tab-rt');
+  const histDiv = document.getElementById('orders-tab-hist');
+  if (!rtDiv || !histDiv) return;
+
+  document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  if (tab === 'rt') {
+    rtDiv.style.display   = 'block';
+    histDiv.style.display = 'none';
+    if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
+  } else {
+    rtDiv.style.display   = 'none';
+    histDiv.style.display = 'block';
+  }
 }

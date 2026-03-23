@@ -790,30 +790,41 @@ const STATUS_BG = {
 async function loadTableOrdersSection() {
   const h         = window._dashHeaders;
   const container = document.getElementById('dine-in-container');
+  const mContainer = document.getElementById('salon-metrics-container');
+  
   if (!container) return;
   container.innerHTML = '<div class="empty-state">Cargando pedidos de mesa...</div>';
+  if (mContainer) mContainer.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">Calculando métricas...</div>';
+
   try {
     const r = await fetch('/api/table-orders', { headers: h });
-    if (!r.ok) { container.innerHTML = '<div class="empty-state">Error cargando pedidos de mesa.</div>'; return; }
-    // (Dentro de loadTableOrdersSection) ...
+    if (!r.ok) { 
+        container.innerHTML = '<div class="empty-state">Error cargando pedidos de mesa.</div>'; 
+        return; 
+    }
     const { orders: all = [] } = await r.json();
 
-    // Obtenemos el "Hoy" según la zona horaria real de tu computadora
     const dNow = new Date();
     const today = `${dNow.getFullYear()}-${String(dNow.getMonth()+1).padStart(2,'0')}-${String(dNow.getDate()).padStart(2,'0')}`;
     
-    // Filtrar todo lo que no esté cancelado ni facturado previamente
+    // Filtrar todo lo que no esté cancelado ni facturado previamente (cerrado)
     const visible = all.filter(o => {
       const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
-      // Verificamos el día real del pedido usando la 'Z'
       const dOrder = new Date((o.created_at || '') + 'Z');
       const orderDay = `${dOrder.getFullYear()}-${String(dOrder.getMonth()+1).padStart(2,'0')}-${String(dOrder.getDate()).padStart(2,'0')}`;
-      
       if (o.status === 'entregado') return orderDay === today;
       return !closed;
     });
 
     const active = visible.filter(o => o.status === 'recibido' || o.status === 'en_preparacion' || o.status === 'listo');
+    
+    // Agrupación inteligente (Misma lógica de la Caja)
+    const mesasParaCobrar = new Set();
+    visible.forEach(o => {
+        if (o.status === 'entregado' || o.status === 'factura_generada') {
+            mesasParaCobrar.add(o.base_order_id || o.id.replace(/-\d+$/, ''));
+        }
+    });
 
     const billsMap = {};
     visible.forEach(o => {
@@ -822,7 +833,7 @@ async function loadTableOrdersSection() {
             if (!billsMap[baseId]) {
                 billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, items: [], total: 0, status: o.status };
             }
-            if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada'; // Prioridad al status más avanzado
+            if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada'; 
             
             let parsedItems = [];
             try { const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items; parsedItems = Array.isArray(arr) ? arr : []; } catch(e) {}
@@ -833,21 +844,26 @@ async function loadTableOrdersSection() {
     const groupedBills = Object.values(billsMap);
 
     const fmt = n => '$' + Number(n).toLocaleString('es-CO');
-    const totalMesasActive = [...new Set(active.map(o => o.table_id))].length; // Contar mesas únicas
-    const totalMesasCobrar = groupedBills.length;
-    const revenue = groupedBills.reduce((s, o) => s + (o.total || 0), 0);
+    
+    // --- NUEVAS MÉTRICAS DEL SALÓN (Sin el dinero) ---
+    const enCocina = active.filter(o => o.status === 'recibido' || o.status === 'en_preparacion');
+    const conMesero = active.filter(o => o.status === 'listo');
+    const mesasAtendidas = [...new Set(visible.map(o => o.table_id))].length;
 
-    let html = `
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.25rem;">
-        <div class="metric"><div class="metric-label">Mesas Atendidas</div><div class="metric-value">${totalMesasActive + totalMesasCobrar}</div></div>
-        <div class="metric"><div class="metric-label">Pedidos en Cocina</div><div class="metric-value" style="color:#1D9E75;">${active.length}</div></div>
-        <div class="metric"><div class="metric-label">Facturas pendientes</div><div class="metric-value" style="color:#BA7517;">${totalMesasCobrar}</div></div>
-        <div class="metric"><div class="metric-label">Ventas en Salón</div><div class="metric-value" style="color:#1D9E75;">${fmt(revenue)}</div></div>
-      </div>`;
+    // Alimentar métricas superiores del Salón
+    const metricasHTML = `
+      <div class="metric"><div class="metric-label">Mesas Atendidas</div><div class="metric-value">${mesasAtendidas}</div></div>
+      <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;">${enCocina.length}</div></div>
+      <div class="metric"><div class="metric-label">Con Mesero (Listos)</div><div class="metric-value" style="color:#378ADD;">${conMesero.length}</div></div>
+      <div class="metric"><div class="metric-label">En Caja (Por Cobrar)</div><div class="metric-value" style="color:#1D9E75;">${groupedBills.length}</div></div>
+    `;
+    if (mContainer) mContainer.innerHTML = metricasHTML;
 
+    // --- TABLAS INFERIORES ---
+    let html = ''; 
+    
     if (!active.length && !groupedBills.length) {
-      html += '<div class="empty-state">No hay mesas con pedidos activos en este momento.</div>';
-      container.innerHTML = html;
+      container.innerHTML = '<div class="empty-state">No hay mesas con pedidos activos en este momento.</div>';
       return;
     }
 
@@ -868,7 +884,7 @@ async function loadTableOrdersSection() {
     }
 
     if(active.length > 0){
-        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 ACTIVOS EN COCINA</div>';
+        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 ACTIVOS EN COCINA / SALÓN</div>';
         html += '<table><thead><tr><th>Mesa</th><th>Platos del viaje</th><th>Estado</th><th>Hora</th></tr></thead><tbody>';
         active.forEach(o => {
           let items = '';
@@ -876,7 +892,11 @@ async function loadTableOrdersSection() {
             const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
             items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${i.name||''}`).join(', ') : String(o.items);
           } catch(e) { items = String(o.items || '—'); }
-          const hora = new Date((o.created_at||'')+'Z').toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
+          
+          // Aplicamos la zona horaria a la hora de la cocina
+          const isoStr = (o.created_at || '').endsWith('Z') ? o.created_at : (o.created_at || '') + 'Z';
+          const hora = new Date(isoStr).toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
+          
           const st   = o.status || 'recibido';
           const color = STATUS_COLOR[st] || '#888';
           const bg    = STATUS_BG[st]    || '#f0f0f0';
@@ -893,7 +913,10 @@ async function loadTableOrdersSection() {
     }
     
     container.innerHTML = html;
-  } catch(e) { console.error('loadTableOrdersSection:', e); container.innerHTML = '<div class="empty-state">Error de conexión.</div>'; }
+  } catch(e) { 
+    console.error('loadTableOrdersSection:', e); 
+    container.innerHTML = '<div class="empty-state">Error de conexión.</div>'; 
+  }
 }
 
 async function markTableDelivered(orderId) {
