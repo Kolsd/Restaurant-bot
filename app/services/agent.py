@@ -10,7 +10,6 @@ client = Anthropic()
 MODEL_FAST    = "claude-haiku-4-5-20251001"
 MODEL_PRECISE = "claude-sonnet-4-6"
 
-# V-09: Caracteres/patrones de inyección de prompt a neutralizar
 _INJECTION_PATTERNS = [
     r'\[MENÚ[:\s]',
     r'\[CARRITO[:\s]',
@@ -23,22 +22,15 @@ _INJECTION_PATTERNS = [
     r'system\s*prompt',
     r'<\|im_start\|>',
     r'<\|im_end\|>',
-    r'\{\{.*?\}\}',  # template injection
+    r'\{\{.*?\}\}',
 ]
 _INJECTION_RE = re.compile('|'.join(_INJECTION_PATTERNS), re.IGNORECASE)
 
 def _sanitize_user_input(text: str) -> str:
-    """
-    V-09 FIX: Sanitiza el input del usuario para mitigar prompt injection.
-    No bloquea el mensaje, pero neutraliza los patrones de inyección más comunes.
-    """
     if not text:
         return text
-    # Reemplazar corchetes que podrían confundir el contexto del sistema
     sanitized = text
-    # Escapar corchetes que inicien con keywords de nuestro sistema de contexto
     sanitized = re.sub(r'\[(MENÚ|CARRITO|RESTAURANTE|MESA|SESIÓN)', r'[\1*', sanitized, flags=re.IGNORECASE)
-    # Truncar si es muy largo (evitar context overflow attacks)
     if len(sanitized) > 2000:
         sanitized = sanitized[:2000] + "..."
     return sanitized
@@ -118,6 +110,80 @@ def _build_compact_menu(menu: dict, availability: dict) -> str:
             lines.append(f"{category}: {', '.join(cat_lines)}")
     return "\n".join(lines) if lines else "Sin menú."
 
+
+# ── NPS: estado en memoria por sesión ────────────────────────────────
+# Estructura: { "phone:bot_number": {"state": "waiting_score"|"waiting_comment", "score": int} }
+_nps_state: dict = {}
+
+def _nps_key(phone: str, bot_number: str) -> str:
+    return f"{phone}:{bot_number}"
+
+async def _handle_nps_flow(phone: str, bot_number: str, message: str,
+                            restaurant_name: str, google_maps_url: str) -> str | None:
+    """
+    Maneja el flujo NPS conversacional.
+    Retorna el mensaje a enviar al cliente, o None si no estamos en flujo NPS.
+    """
+    key = _nps_key(phone, bot_number)
+    state = _nps_state.get(key)
+
+    if state is None:
+        return None
+
+    # ── Estado: esperando puntuación ──
+    if state["state"] == "waiting_score":
+        # Extraer número del mensaje
+        nums = re.findall(r'[1-5]', message)
+        if not nums:
+            return "Por favor responde con un número del 1 al 5 ⭐"
+
+        score = int(nums[0])
+        _nps_state[key] = {"state": "waiting_comment", "score": score}
+
+        if score <= 3:
+            # Detractor → pedir comentario
+            return (
+                f"Gracias por tu honestidad 🙏 Tu opinión es muy valiosa para nosotros.\n\n"
+                f"¿Nos podrías contar qué podríamos mejorar? Tu comentario llega directo al equipo."
+            )
+        else:
+            # Promotor → guardar y ofrecer Google Maps
+            await db.db_save_nps_response(phone, bot_number, score, "")
+            del _nps_state[key]
+
+            maps_msg = ""
+            if google_maps_url:
+                maps_msg = f"\n\n¿Te animas a dejarnos una reseña en Google? Nos ayuda muchísimo 🌟\n{google_maps_url}"
+
+            return (
+                f"¡Muchas gracias! Nos alegra mucho que hayas tenido una gran experiencia 😊"
+                f"{maps_msg}\n\n¡Hasta la próxima!"
+            )
+
+    # ── Estado: esperando comentario (detractor) ──
+    if state["state"] == "waiting_comment":
+        score   = state["score"]
+        comment = message.strip()
+        await db.db_save_nps_response(phone, bot_number, score, comment)
+        del _nps_state[key]
+        return (
+            "¡Gracias por tu comentario! Lo tomaremos muy en cuenta para mejorar. "
+            "Esperamos verte pronto y darte una experiencia increíble 🙌"
+        )
+
+    return None
+
+
+async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
+    """
+    Inicia el flujo NPS para un cliente.
+    Llamar después de cerrar mesa (tables.py) o end_session (domicilio).
+    """
+    key = _nps_key(phone, bot_number)
+    _nps_state[key] = {"state": "waiting_score", "score": 0}
+    print(f"⭐ NPS iniciado para {phone}", flush=True)
+
+
 _STATIC_SYSTEM = """Eres Mesio, asistente virtual estrella del restaurante indicado en [RESTAURANTE].
 REGLA DE ORO: En tu primer saludo, DEBES dar la bienvenida mencionando explícitamente el nombre del restaurante.
 
@@ -178,7 +244,6 @@ async def build_system_prompt() -> list:
 async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> str:
     msgs = messages.copy()
     msgs.append({"role": "assistant", "content": "{"})
-
     response = client.messages.create(
         model=model, max_tokens=350, system=system, messages=msgs
     )
@@ -269,6 +334,12 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 "sub_number":    sub_number,
             })
 
+            # ── NUEVO: Descontar inventario ──
+            try:
+                await db.db_deduct_inventory_for_order(bot_number, cart_items)
+            except Exception as e:
+                print(f"⚠️ Error descontando inventario: {e}", flush=True)
+
             try:
                 await orders.clear_cart(phone, bot_number)
                 pool = await db.get_pool()
@@ -294,6 +365,12 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             if res["success"]:
                 order = res["order"]
                 await db.db_save_order(order)
+                # ── NUEVO: Descontar inventario en domicilio/recoger ──
+                try:
+                    cart = await db.db_get_cart(phone, bot_number)
+                    await db.db_deduct_inventory_for_order(bot_number, order.get("items", []))
+                except Exception as e:
+                    print(f"⚠️ Error descontando inventario domicilio: {e}", flush=True)
                 print(f"🆕 {order['id']} {action}", flush=True)
             if cart_errors:
                 failed = ", ".join(cart_errors)
@@ -335,6 +412,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                                    phone, bot_number)
             print(f"👋 Sesión cerrada: {phone}", flush=True)
 
+            # ── NUEVO: Disparar NPS después de despedida ──
+            await trigger_nps(phone, bot_number, "")  # restaurant_name se resuelve en chat()
+
     except Exception:
         print(f"❌ execute_action({action}):\n{traceback.format_exc()}", flush=True)
 
@@ -343,25 +423,54 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 HISTORY_WINDOW = 5
 
 async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
-    # V-09: Sanitizar input del usuario
     user_message_clean = _sanitize_user_input(user_message)
+
+    # ── NUEVO: Verificar si estamos en flujo NPS ──
+    nps_key = _nps_key(user_phone, bot_number)
+    if nps_key in _nps_state:
+        # Resolver nombre del restaurante y URL de Google Maps
+        restaurant_name  = ""
+        google_maps_url  = ""
+        all_r = await db.db_get_all_restaurants()
+        for r in all_r:
+            if r.get("whatsapp_number") == bot_number:
+                restaurant_name = r.get("name", "")
+                google_maps_url = r.get("features", {}).get("google_maps_url", "") if isinstance(r.get("features"), dict) else ""
+                break
+
+        nps_reply = await _handle_nps_flow(
+            user_phone, bot_number, user_message_clean,
+            restaurant_name, google_maps_url
+        )
+        if nps_reply:
+            # Guardar en historial para no perder contexto
+            full_history = await db.db_get_history(user_phone, bot_number)
+            full_history.append({"role": "user",      "content": user_message})
+            full_history.append({"role": "assistant", "content": nps_reply})
+            await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])
+            return {"message": nps_reply}
 
     table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
 
     restaurant_name = "nuestro restaurante"
+    google_maps_url = ""
     if table_context and table_context.get("branch_id"):
         r = await db.db_get_restaurant_by_id(table_context["branch_id"])
-        if r: restaurant_name = r.get("name", "nuestro restaurante")
+        if r:
+            restaurant_name = r.get("name", "nuestro restaurante")
+            feats = r.get("features", {})
+            google_maps_url = feats.get("google_maps_url", "") if isinstance(feats, dict) else ""
     else:
         all_r = await db.db_get_all_restaurants()
         if all_r:
             for r in all_r:
                 if r.get("whatsapp_number") == bot_number:
                     restaurant_name = r.get("name", "nuestro restaurante")
+                    feats = r.get("features", {})
+                    google_maps_url = feats.get("google_maps_url", "") if isinstance(feats, dict) else ""
                     break
             else:
-                # Si el número no pertenece a ningún restaurante, no respondemos
                 print(f"⚠️ Bot number {bot_number} no está asociado a ningún restaurante.", flush=True)
                 return {"message": ""}
 
@@ -404,7 +513,15 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     else:
         assistant_message = await execute_action(parsed, user_phone, bot_number, table_context, session_state)
 
-    # Guardar el mensaje ORIGINAL (no el sanitizado) para el historial visible
+    # ── NUEVO: Si se disparó NPS en execute_action, enviar pregunta ahora ──
+    if nps_key in _nps_state and _nps_state[nps_key]["state"] == "waiting_score":
+        nps_question = (
+            f"\n\n⭐ Antes de irte, ¿cómo calificarías tu experiencia en *{restaurant_name}* hoy?\n"
+            f"Responde con un número del *1 al 5*\n"
+            f"_(1 = Muy mala · 5 = Excelente)_"
+        )
+        assistant_message += nps_question
+
     full_history.append({"role": "user",      "content": user_message})
     full_history.append({"role": "assistant", "content": assistant_message})
     await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])

@@ -151,8 +151,9 @@ async def init_db():
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS address TEXT DEFAULT ''",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '72 hours'",
-            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL"
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL",
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS google_maps_url TEXT DEFAULT ''",
         ]
         
         for m in migrations:
@@ -175,6 +176,65 @@ async def init_db():
             pass
     print("Base de datos inicializada")
 
+async def db_init_nps_inventory():
+    """Inicializa las tablas de NPS e Inventario — llamar desde main.py en el startup"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS nps_responses (
+                id          SERIAL PRIMARY KEY,
+                phone       TEXT NOT NULL,
+                bot_number  TEXT NOT NULL DEFAULT '',
+                score       INTEGER NOT NULL CHECK (score BETWEEN 1 AND 5),
+                comment     TEXT DEFAULT '',
+                created_at  TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS inventory (
+                id              SERIAL PRIMARY KEY,
+                restaurant_id   INTEGER NOT NULL,
+                name            TEXT NOT NULL,
+                unit            TEXT NOT NULL DEFAULT 'unidades',
+                current_stock   NUMERIC(10,2) NOT NULL DEFAULT 0,
+                min_stock       NUMERIC(10,2) NOT NULL DEFAULT 0,
+                linked_dishes   JSONB NOT NULL DEFAULT '[]'::jsonb,
+                cost_per_unit   NUMERIC(10,2) DEFAULT 0,
+                created_at      TIMESTAMP DEFAULT NOW(),
+                updated_at      TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS inventory_history (
+                id              SERIAL PRIMARY KEY,
+                inventory_id    INTEGER NOT NULL,
+                quantity_delta  NUMERIC(10,2) NOT NULL,
+                stock_after     NUMERIC(10,2) NOT NULL,
+                reason          TEXT NOT NULL DEFAULT 'ajuste_manual',
+                created_at      TIMESTAMP DEFAULT NOW()
+            );
+        """)
+
+        # Índices (ignoramos si ya existen)
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_nps_bot_number ON nps_responses(bot_number, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_inventory_restaurant ON inventory(restaurant_id)",
+            "CREATE INDEX IF NOT EXISTS idx_inv_history ON inventory_history(inventory_id, created_at DESC)",
+        ]:
+            try:
+                await conn.execute(idx_sql)
+            except Exception:
+                pass
+
+        # Migraciones de columnas nuevas en tablas existentes
+        for col_sql in [
+            "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
+            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS google_maps_url TEXT DEFAULT ''",
+        ]:
+            try:
+                await conn.execute(col_sql)
+            except Exception:
+                pass
+
+    print("✅ Tablas NPS e Inventario listas", flush=True)
 
 # ── RESERVACIONES ────────────────────────────────────────────────────
 async def db_add_reservation(name, date_str, time, guests, phone, bot_number: str = "", notes=""):
@@ -867,3 +927,279 @@ async def db_reopen_session(session_id: int) -> dict | None:
 async def db_get_restaurant_settings() -> dict:
     all_r = await db_get_all_restaurants()
     return all_r[0] if all_r else {}
+ 
+async def db_save_nps_response(phone: str, bot_number: str, score: int, comment: str = "") -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO nps_responses (phone, bot_number, score, comment)
+               VALUES ($1, $2, $3, $4) RETURNING *""",
+            phone, bot_number, score, comment
+        )
+        return _serialize(dict(row))
+ 
+ 
+async def db_get_nps_stats(bot_number: str, period: str = "month") -> dict:
+    pool = await get_pool()
+    period_map = {
+        "today":    "1 day",
+        "week":     "7 days",
+        "month":    "30 days",
+        "semester": "180 days",
+        "year":     "365 days",
+    }
+    interval = period_map.get(period, "30 days")
+ 
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""SELECT score, COUNT(*) as count, comment
+                FROM nps_responses
+                WHERE bot_number = $1
+                  AND created_at >= NOW() - INTERVAL '{interval}'
+                ORDER BY created_at DESC""",
+            bot_number
+        )
+ 
+    total       = sum(r["count"] for r in rows)
+    promoters   = sum(r["count"] for r in rows if r["score"] >= 4)
+    detractors  = sum(r["count"] for r in rows if r["score"] <= 3)
+    score_sum   = 0
+    dist        = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+ 
+    for r in rows:
+        dist[r["score"]] = dist.get(r["score"], 0) + r["count"]
+        score_sum += r["score"] * r["count"]
+ 
+    nps_score   = round(((promoters - detractors) / total * 100)) if total > 0 else 0
+    avg_score   = round(score_sum / total, 2) if total > 0 else 0
+ 
+    return {
+        "total":        total,
+        "promoters":    promoters,
+        "detractors":   detractors,
+        "nps_score":    nps_score,
+        "avg_score":    avg_score,
+        "distribution": dist,
+    }
+ 
+ 
+async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50) -> list:
+    pool = await get_pool()
+    period_map = {
+        "today": "1 day", "week": "7 days",
+        "month": "30 days", "semester": "180 days", "year": "365 days",
+    }
+    interval = period_map.get(period, "30 days")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""SELECT * FROM nps_responses
+                WHERE bot_number = $1
+                  AND created_at >= NOW() - INTERVAL '{interval}'
+                ORDER BY created_at DESC
+                LIMIT $2""",
+            bot_number, limit
+        )
+    return [_serialize(dict(r)) for r in rows]
+ 
+ 
+# ── INVENTARIO ───────────────────────────────────────────────────────
+ 
+async def db_get_inventory(restaurant_id: int) -> list:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM inventory WHERE restaurant_id = $1 ORDER BY name ASC",
+            restaurant_id
+        )
+    return [_serialize(dict(r)) for r in rows]
+ 
+ 
+async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
+                                    current_stock: float, min_stock: float,
+                                    linked_dishes: list, cost_per_unit: float = 0) -> dict:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO inventory
+               (restaurant_id, name, unit, current_stock, min_stock, linked_dishes, cost_per_unit)
+               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+               RETURNING *""",
+            restaurant_id, name, unit, current_stock, min_stock,
+            json.dumps(linked_dishes), cost_per_unit
+        )
+        item = _serialize(dict(row))
+        # Si el stock es 0, desactivar platos vinculados
+        if current_stock <= 0:
+            await _sync_dish_availability(linked_dishes, False)
+        return item
+ 
+ 
+async def db_update_inventory_item(item_id: int, fields: dict) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT * FROM inventory WHERE id = $1", item_id)
+        if not existing:
+            return None
+ 
+        # Construimos el SET dinámico
+        allowed = {"name", "unit", "current_stock", "min_stock", "linked_dishes", "cost_per_unit"}
+        set_parts = []
+        values = []
+        idx = 1
+        for k, v in fields.items():
+            if k not in allowed:
+                continue
+            if k == "linked_dishes":
+                set_parts.append(f"{k} = ${idx}::jsonb")
+                values.append(json.dumps(v))
+            else:
+                set_parts.append(f"{k} = ${idx}")
+                values.append(v)
+            idx += 1
+ 
+        if not set_parts:
+            return _serialize(dict(existing))
+ 
+        set_parts.append(f"updated_at = NOW()")
+        values.append(item_id)
+        query = f"UPDATE inventory SET {', '.join(set_parts)} WHERE id = ${idx} RETURNING *"
+        row = await conn.fetchrow(query, *values)
+        item = _serialize(dict(row))
+ 
+        # Sincronizar disponibilidad si cambió el stock
+        new_stock = fields.get("current_stock", existing["current_stock"])
+        dishes    = fields.get("linked_dishes", existing["linked_dishes"])
+        if isinstance(dishes, str):
+            dishes = json.loads(dishes)
+        await _sync_dish_availability(dishes, new_stock > 0)
+        return item
+ 
+ 
+async def db_delete_inventory_item(item_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM inventory WHERE id = $1", item_id)
+ 
+ 
+async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
+                                     reason: str, restaurant_id: int) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE inventory
+               SET current_stock = GREATEST(0, current_stock + $1),
+                   updated_at = NOW()
+               WHERE id = $2 AND restaurant_id = $3
+               RETURNING *""",
+            quantity_delta, item_id, restaurant_id
+        )
+        if not row:
+            return None
+        item = _serialize(dict(row))
+ 
+        # Registrar en historial
+        await conn.execute(
+            """INSERT INTO inventory_history (inventory_id, quantity_delta, stock_after, reason)
+               VALUES ($1, $2, $3, $4)""",
+            item_id, quantity_delta, item["current_stock"], reason
+        )
+ 
+        # Sincronizar disponibilidad de platos vinculados
+        dishes = item.get("linked_dishes", [])
+        if isinstance(dishes, str):
+            dishes = json.loads(dishes)
+        await _sync_dish_availability(dishes, float(item["current_stock"]) > 0)
+        return item
+ 
+ 
+async def db_get_inventory_history(item_id: int) -> list:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT * FROM inventory_history
+               WHERE inventory_id = $1
+               ORDER BY created_at DESC
+               LIMIT 100""",
+            item_id
+        )
+    return [_serialize(dict(r)) for r in rows]
+ 
+ 
+async def db_get_inventory_alerts(restaurant_id: int) -> list:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT * FROM inventory
+               WHERE restaurant_id = $1
+                 AND current_stock <= min_stock
+               ORDER BY current_stock ASC""",
+            restaurant_id
+        )
+    return [_serialize(dict(r)) for r in rows]
+ 
+ 
+async def db_deduct_inventory_for_order(bot_number: str, items: list):
+    """
+    Descuenta stock por cada plato pedido.
+    items = [{"name": "Hamburguesa Clásica", "quantity": 2}, ...]
+    Llámalo desde tables.py y orders.py al confirmar una orden.
+    """
+    pool = await get_pool()
+    restaurant = await db_get_restaurant_by_phone(bot_number)
+    if not restaurant:
+        return
+ 
+    async with pool.acquire() as conn:
+        for item in items:
+            dish_name = item.get("name", "")
+            qty       = float(item.get("quantity", item.get("qty", 1)))
+            if not dish_name or qty <= 0:
+                continue
+ 
+            # Buscamos productos cuyo linked_dishes contiene este plato
+            rows = await conn.fetch(
+                """SELECT id, current_stock, linked_dishes, min_stock
+                   FROM inventory
+                   WHERE restaurant_id = $1
+                     AND linked_dishes @> $2::jsonb""",
+                restaurant["id"], json.dumps([dish_name])
+            )
+ 
+            for row in rows:
+                new_stock = max(0, float(row["current_stock"]) - qty)
+                await conn.execute(
+                    """UPDATE inventory
+                       SET current_stock = $1, updated_at = NOW()
+                       WHERE id = $2""",
+                    new_stock, row["id"]
+                )
+                # Historial
+                await conn.execute(
+                    """INSERT INTO inventory_history
+                       (inventory_id, quantity_delta, stock_after, reason)
+                       VALUES ($1, $2, $3, 'orden_confirmada')""",
+                    row["id"], -qty, new_stock
+                )
+                # Si se agotó, desactivar el plato
+                dishes = row["linked_dishes"]
+                if isinstance(dishes, str):
+                    dishes = json.loads(dishes)
+                if new_stock <= 0:
+                    await _sync_dish_availability(dishes, False)
+ 
+ 
+async def _sync_dish_availability(dish_names: list, available: bool):
+    """Activa o desactiva platos en menu_availability según el stock."""
+    if not dish_names:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        for name in dish_names:
+            await conn.execute(
+                """INSERT INTO menu_availability (dish_name, available, updated_at)
+                   VALUES ($1, $2, NOW())
+                   ON CONFLICT (dish_name)
+                   DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
+                name, available
+            )
+     

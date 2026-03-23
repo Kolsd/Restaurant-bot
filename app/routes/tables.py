@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.services import database as db
 from app.services.auth import verify_token
 from app.services import billing
+from app.services.agent import trigger_nps
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -230,27 +231,46 @@ async def update_order_status(request: Request, order_id: str):
     # ── B. CERRAR MESA (Limpia BD, despide, NO emite factura) ──
     elif status in ("cerrar_mesa", "factura_entregada"):
         base_id = order.get("base_order_id") if order.get("base_order_id") else order_id
-        
-        await db.db_close_table_bill(base_id) # status en BD = factura_entregada
-        
+ 
+        await db.db_close_table_bill(base_id)  # status en BD = factura_entregada
+ 
         if phone:
             msg = "👋 Tu mesa ha sido cerrada. ¡Muchas gracias por visitarnos, esperamos verte de nuevo pronto!"
             await send_wa_msg(phone, msg, db_phone_id)
-            
+ 
+            # ── Resolver bot_number y restaurant_name para NPS ──
+            bot_num = ""
+            rest_name = ""
+            if session_data and session_data.get("bot_number"):
+                bot_num = session_data["bot_number"]
+                try:
+                    rest = await db.db_get_restaurant_by_bot_number(bot_num)
+                    if rest:
+                        rest_name = rest.get("name", "")
+                except Exception:
+                    pass
+ 
+            # ── Disparar NPS ──
+            if bot_num:
+                await trigger_nps(phone, bot_num, rest_name)
+ 
             try:
                 if session_data and session_data.get("bot_number"):
                     await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", "mesero")
-                
+ 
                 async with pool.acquire() as conn:
-                    await conn.execute("UPDATE table_sessions SET closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
+                    await conn.execute(
+                        "UPDATE table_sessions SET closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL",
+                        phone
+                    )
                     await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
                     await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
                 print(f"🧹 CHAT, CARRITO E HISTORIAL BORRADOS DEFINITIVAMENTE PARA: {phone}")
             except Exception as e:
                 print(f"Error limpiando BD tras cerrar mesa: {e}")
-                    
+ 
         return {"success": True, "order_id": order_id, "status": "factura_entregada"}
-
+        
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
     else:
         await db.db_update_table_order_status(order_id, status)
