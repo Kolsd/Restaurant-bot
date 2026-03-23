@@ -104,16 +104,28 @@ async function loadTables() {
         </div>
       </div>`).join('');
 
-    if (typeof QRCode !== 'undefined') {
-      tables.forEach(t => {
-        const el = document.getElementById('qr-' + t.id);
-        if (el && !el.hasChildNodes()) {
-          const botNum = (rest && rest.whatsapp_number) || '15556293573';
-          const waUrl = 'https://wa.me/' + botNum + '?text=' + encodeURIComponent('Hola! Estoy en ' + t.name + ' y quiero hacer un pedido');
-          try { new QRCode(el, { text:waUrl, width:120, height:120, colorDark:'#0D1412', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); } catch(e) {}
-        }
-      });
-    }
+      if (typeof QRCode !== 'undefined') {
+        tables.forEach(t => {
+          const el = document.getElementById('qr-' + t.id);
+          if (el && !el.hasChildNodes()) {
+            const botNum = (rest && rest.whatsapp_number) || '15556293573';
+            // ── NUEVO: URL apuntando al Catálogo Web interactivo ──
+            const catalogUrl = window.location.origin + '/catalog?bot=' + botNum + '&mesa=' + encodeURIComponent(t.name);
+            try { 
+              new QRCode(el, { 
+                text: catalogUrl, 
+                width: 120, 
+                height: 120, 
+                colorDark: '#0D1412', 
+                colorLight: '#ffffff', 
+                correctLevel: QRCode.CorrectLevel.M 
+              }); 
+            } catch(e) {
+              console.error("Error generando QR:", e);
+            }
+          }
+        });
+      } 
   } catch(e) { console.error('loadTables:', e); }
 }
 
