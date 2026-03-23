@@ -155,8 +155,18 @@ function renderChart(orders) {
     options: {
       responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } },
       scales: {
-        y:  { ticks:{ callback: v => '$' + Math.round(v/1000) + 'k', font:{size:11} }, grid:{color:'#f0f0e8'} },
-        y2: { position:'right', ticks:{font:{size:11}}, grid:{display:false} },
+        y:  { 
+          ticks:{ callback: v => '$' + Math.round(v/1000) + 'k', font:{size:11} }, 
+          grid:{color:'#f0f0e8'},
+          beginAtZero: true
+        },
+        y2: { 
+          position:'right', 
+          ticks:{font:{size:11}}, 
+          grid:{display:false},
+          beginAtZero: true,
+          suggestedMax: Math.max(...countData) * 1.5  // ← da espacio arriba para que la línea quede sobre las barras
+        },
         x:  { ticks:{font:{size:10}, maxRotation:45}, grid:{display:false} }
       }
     }
