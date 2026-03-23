@@ -336,7 +336,6 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
     async with pool.acquire() as conn:
         # 1. Órdenes de WhatsApp (Delivery / Pickup)
         try:
-            # Usamos bot_number en lugar de branch_id, ya que las órdenes externas van atadas al bot
             q_wa = "SELECT * FROM orders WHERE created_at >= $1"
             p_wa = [start_date]
             if bot_number:
@@ -350,33 +349,20 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
                     "id": r["id"],
                     "items": r["items"],
                     "type": r.get("order_type", "domicilio"),
-                    "paid": r.get("payment_status") == "paid",
+                    "paid": r.get("payment_status") == "paid" or r.get("paid") == True,
                     "total": float(r["total"]),
                     "time": r["created_at"].strftime("%H:%M"),
                     "created_at": r["created_at"].isoformat()
                 })
         except Exception as e:
-            print(f"Aviso - Error filtrando orders WA (intentando modo seguro): {e}")
-            try:
-                # Camino seguro por si la columna no existe
-                rows_wa = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 ORDER BY created_at DESC", start_date)
-                for r in rows_wa:
-                    orders.append({
-                        "id": r["id"],
-                        "items": r["items"],
-                        "type": r.get("order_type", "domicilio"),
-                        "paid": r.get("payment_status") == "paid",
-                        "total": float(r["total"]),
-                        "time": r["created_at"].strftime("%H:%M"),
-                        "created_at": r["created_at"].isoformat()
-                    })
-            except Exception as e2: pass
+            print(f"Error WA Orders: {e}")
 
         # 2. Órdenes de Mesa (POS / Dine-in)
         try:
+            # FIX: Corregido el nombre de la tabla a 'restaurant_tables'
             q_mesa = """
                 SELECT o.* FROM table_orders o
-                LEFT JOIN tables t ON o.table_id = t.id
+                LEFT JOIN restaurant_tables t ON o.table_id = t.id
                 WHERE o.created_at >= $1
             """
             p_mesa = [start_date]
@@ -401,7 +387,6 @@ async def get_dashboard_orders(request: Request, period: str = "today"):
                 
                 mesa_groups[base_id]["total"] += float(r["total"])
                 
-                # Si la mesa ya fue cobrada, marca la cuenta como pagada
                 if r["status"] in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
                     mesa_groups[base_id]["is_paid"] = True
 
@@ -450,31 +435,39 @@ async def get_closed_sessions(request: Request, hours: int = 24):
     
 @router.get("/api/dashboard/reservations")
 async def get_dashboard_reservations(request: Request, period: str = "today"):
-    branch_id, _, start_date = await get_dashboard_filters(request, period)
+    # Usamos bot_number en vez de branch_id
+    _, bot_number, start_date = await get_dashboard_filters(request, period)
     
     pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        query = "SELECT * FROM reservations WHERE created_at >= $1"
-        params = [start_date]
-        if branch_id:
-            query += " AND branch_id = $2"
-            params.append(branch_id)
-        query += " ORDER BY date ASC, time ASC"
-        rows = await conn.fetch(query, *params)
-        
     reservations = []
-    for r in rows:
-        reservations.append({
-            "id": r["id"],
-            "name": r["customer_name"],
-            "date": str(r["date"]),
-            "time": str(r["time"])[:5],
-            "guests": r["guests"],
-            "phone": r["phone"],
-            "notes": r["notes"]
-        })
+    
+    async with pool.acquire() as conn:
+        try:
+            query = "SELECT * FROM reservations WHERE created_at >= $1"
+            params = [start_date]
+            
+            if bot_number:
+                query += " AND bot_number = $2"
+                params.append(bot_number)
+                
+            query += " ORDER BY date ASC, time ASC"
+            rows = await conn.fetch(query, *params)
+            
+            for r in rows:
+                reservations.append({
+                    "id": r["id"],
+                    "name": r["name"],  # FIX: Corregido de 'customer_name' a 'name'
+                    "date": str(r["date"]),
+                    "time": str(r["time"])[:5],
+                    "guests": r["guests"],
+                    "phone": r["phone"],
+                    "notes": r["notes"]
+                })
+        except Exception as e:
+            print(f"Aviso - Error en dashboard reservations: {e}")
+            
     return {"reservations": reservations}
-
+    
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
     _, bot_number, _ = await get_dashboard_filters(request, "today")
@@ -487,7 +480,7 @@ async def get_dashboard_conversations(request: Request):
             query += " WHERE bot_number = $1"
             params.append(bot_number)
             
-        query += " ORDER BY last_updated DESC"
+        query += " ORDER BY updated_at DESC"
         rows = await conn.fetch(query, *params)
         
     convs = []
