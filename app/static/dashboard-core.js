@@ -61,7 +61,6 @@ function setPeriod(p, btn) {
   refreshAll();
 }
 
-// Función que controla la barra lateral y oculta las fechas si estamos en "Tiempo Real"
 function showSection(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -78,7 +77,6 @@ function showSection(id, btn) {
     if (hidePeriod.includes(id)) {
         periodBar.style.display = 'none';
     } else if (id === 'pedidos') {
-        // Ocultar si la pestaña Tiempo Real está activa
         const rtActive = document.getElementById('tab-rt')?.classList.contains('active');
         periodBar.style.display = rtActive ? 'none' : 'flex';
     } else {
@@ -125,20 +123,15 @@ function renderChart(orders) {
   const titleEl = document.getElementById('chart-title');
   if (titleEl) titleEl.textContent = `Ingresos por día — ${periodLabels[currentPeriod]}`;
   
-  // Agrupar ingresos por fecha (CONVIRTIENDO A HORA LOCAL DEL USUARIO)
   const dataMap = {};
   orders.forEach(o => {
       if(o.paid) {
-          // Forzamos la interpretación en UTC agregando 'Z' si no la tiene
           const isoString = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
           const d = new Date(isoString);
-          
-          // Extraemos el día, mes y año según la zona horaria real de tu computadora
           const year = d.getFullYear();
           const month = String(d.getMonth() + 1).padStart(2, '0');
           const day = String(d.getDate()).padStart(2, '0');
           const localDate = `${year}-${month}-${day}`;
-          
           if(!dataMap[localDate]) dataMap[localDate] = { rev: 0, count: 0 };
           dataMap[localDate].rev += o.total;
           dataMap[localDate].count += 1;
@@ -191,21 +184,39 @@ async function refreshAll() {
 
     const rChats = await fetch(`/api/dashboard/conversations`, { headers });
     const conversations = rChats.ok ? ((await rChats.json()).conversations || []) : [];
+
+    // ── FIX CRÍTICO: paidOrders estaba sin definir ──
+    const paidOrders    = orders.filter(o => o.paid);
     const pendingOrders = orders.filter(o => !o.paid);
-    const totalRev = paidOrders.reduce((s,o) => s + o.total, 0);
-    const pendingRev = pendingOrders.reduce((s,o) => s + o.total, 0);
+    const totalRev      = paidOrders.reduce((s,o) => s + o.total, 0);
+    const pendingRev    = pendingOrders.reduce((s,o) => s + o.total, 0);
     
-    document.getElementById('m-revenue').textContent = fmt(totalRev);
-    document.getElementById('m-revenue-sub').innerHTML = paidOrders.length + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
-    document.getElementById('m-orders').textContent = orders.length;
-    document.getElementById('m-orders-sub').textContent = pendingOrders.length + ' sin pagar';
-    document.getElementById('m-res').textContent = reservations.length;
-    document.getElementById('m-res-sub').textContent = reservations.reduce((s,r) => s + (r.guests||0), 0) + ' personas';
-    document.getElementById('m-convs').textContent = conversations.length;
-    
-    // MÉTRICAS DE DOMICILIOS EN TIEMPO REAL
+    // ── Métricas del resumen ──
+    const mRevenue = document.getElementById('m-revenue');
+    if (mRevenue) mRevenue.textContent = fmt(totalRev);
+
+    const mRevenueSub = document.getElementById('m-revenue-sub');
+    if (mRevenueSub) mRevenueSub.innerHTML = paidOrders.length + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
+
+    const mOrders = document.getElementById('m-orders');
+    if (mOrders) mOrders.textContent = orders.length;
+
+    const mOrdersSub = document.getElementById('m-orders-sub');
+    if (mOrdersSub) mOrdersSub.textContent = pendingOrders.length + ' sin pagar';
+
+    const mRes = document.getElementById('m-res');
+    if (mRes) mRes.textContent = reservations.length;
+
+    const mResSub = document.getElementById('m-res-sub');
+    if (mResSub) mResSub.textContent = reservations.reduce((s,r) => s + (r.guests||0), 0) + ' personas';
+
+    // ── FIX: el HTML usa m-convs, no c-total ──
+    const mConvs = document.getElementById('m-convs');
+    if (mConvs) mConvs.textContent = conversations.length;
+
+    // ── MÉTRICAS DE DOMICILIOS EN TIEMPO REAL ──
     const extOrders = orders.filter(o => o.type !== 'mesa');
-    let domCocina = 0; let domEntrega = 0; let domEntregados = 0;
+    let domCocina = 0, domEntrega = 0, domEntregados = 0;
     const activeExt = [];
     
     extOrders.forEach(o => {
@@ -219,12 +230,16 @@ async function refreshAll() {
        }
     });
 
-    if (document.getElementById('rt-dom-total')) document.getElementById('rt-dom-total').textContent = extOrders.length;
-    if (document.getElementById('rt-dom-cocina')) document.getElementById('rt-dom-cocina').textContent = domCocina;
-    if (document.getElementById('rt-dom-entrega')) document.getElementById('rt-dom-entrega').textContent = domEntrega;
-    if (document.getElementById('rt-dom-entregados')) document.getElementById('rt-dom-entregados').textContent = domEntregados;
+    const rtDomTotal     = document.getElementById('rt-dom-total');
+    const rtDomCocina    = document.getElementById('rt-dom-cocina');
+    const rtDomEntrega   = document.getElementById('rt-dom-entrega');
+    const rtDomEntregados = document.getElementById('rt-dom-entregados');
+    if (rtDomTotal)      rtDomTotal.textContent      = extOrders.length;
+    if (rtDomCocina)     rtDomCocina.textContent     = domCocina;
+    if (rtDomEntrega)    rtDomEntrega.textContent    = domEntrega;
+    if (rtDomEntregados) rtDomEntregados.textContent = domEntregados;
     
-    // TEXTO VACÍO O TABLA DE DOMICILIOS ACTIVOS
+    // ── Tabla de domicilios activos ──
     const domContainer = document.getElementById('rt-domicilios-container');
     if (domContainer) {
        if (activeExt.length === 0) {
@@ -253,7 +268,7 @@ async function refreshAll() {
     
     updateStatusChart(paidOrders.length, pendingOrders.length);
     renderChart(orders);
-    renderOrders(orders); // Histórico
+    renderOrders(orders);
     renderReservations(reservations);
     renderConversations(conversations);
     
@@ -266,18 +281,18 @@ async function refreshAll() {
 
 function renderOrders(orders) {
   const container = document.getElementById('orders-container');
+  if (!container) return;
   if (!orders || !orders.length) {
     container.innerHTML = '<div class="empty-state">Sin pedidos en este período.</div>';
     updateTiposChart(0, 0); return;
   }
   
-  // AÑADIDA COLUMNA "Fecha"
   let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Origen</th><th>Estado</th><th>Total</th><th>Fecha</th><th>Hora</th></tr></thead><tbody>';
   orders.forEach(o => {
     const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
     const dateObj = new Date(isoStr);
     const localTime = dateObj.toLocaleTimeString('es-CO', {hour: '2-digit', minute: '2-digit'});
-    const localDate = dateObj.toLocaleDateString('es-CO', {day: '2-digit', month: 'short', year: 'numeric'}); // EXTRAE FECHA LOCAL
+    const localDate = dateObj.toLocaleDateString('es-CO', {day: '2-digit', month: 'short', year: 'numeric'});
 
     let itemsStr = '—';
     try {
@@ -285,10 +300,11 @@ function renderOrders(orders) {
         itemsStr = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}x ${i.name}`).join(', ') : String(o.items);
     } catch(e) { itemsStr = String(o.items); }
 
-    const origenBadge = o.type === 'mesa' ? '<span class="badge" style="background:#E1F5EE;color:#0F6E56;">🪑 Salón</span>' : `<span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">🛵 ${o.type}</span>`;
+    const origenBadge = o.type === 'mesa'
+      ? '<span class="badge" style="background:#E1F5EE;color:#0F6E56;">🪑 Salón</span>'
+      : `<span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">🛵 ${o.type}</span>`;
     const stFormat = (o.status || 'pendiente').replace(/_/g, ' ').toUpperCase();
 
-    // AÑADIDA CELDA DE FECHA (${localDate})
     html += `<tr>
       <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
       <td style="color:#555;font-size:12px;max-width:300px;">${itemsStr}</td>
@@ -305,14 +321,55 @@ function renderOrders(orders) {
   updateTiposChart(orders.filter(o => o.type === 'domicilio').length, orders.filter(o => o.type === 'recoger').length);
 }
 
+function renderReservations(reservations) {
+  const container = document.getElementById('res-container');
+  if (!container) return;
+
+  const rTotal  = document.getElementById('r-total');
+  const rGuests = document.getElementById('r-guests');
+  const rNext   = document.getElementById('r-next');
+
+  if (rTotal)  rTotal.textContent  = reservations.length;
+  if (rGuests) rGuests.textContent = reservations.reduce((s,r) => s + (r.guests||0), 0);
+
+  const upcoming = reservations.filter(r => r.date >= new Date().toISOString().slice(0,10));
+  if (rNext) rNext.textContent = upcoming.length ? `${upcoming[0].time} · ${upcoming[0].name}` : '—';
+
+  if (!reservations.length) {
+    container.innerHTML = '<div class="empty-state">Sin reservaciones en este período.</div>';
+    return;
+  }
+
+  let html = '<table><thead><tr><th>Nombre</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
+  reservations.forEach(r => {
+    html += `<tr>
+      <td style="font-weight:500;">${r.name}</td>
+      <td>${r.date}</td>
+      <td>${r.time}</td>
+      <td>${r.guests}</td>
+      <td style="color:#888;font-size:12px;">${r.phone}</td>
+      <td style="color:#888;font-size:12px;">${r.notes || '—'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
 function renderConversations(conversations) {
   const container = document.getElementById('convs-container');
+  if (!container) return;
+
+  // ── FIX: actualizar c-avg (existe en HTML) pero no c-total (no existe) ──
+  const cAvg = document.getElementById('c-avg');
+
   if (!conversations.length) {
     container.innerHTML = '<div class="empty-state">Sin conversaciones activas.</div>';
-    document.getElementById('c-avg').textContent = '0'; return;
+    if (cAvg) cAvg.textContent = '0';
+    return;
   }
   const avg = Math.round(conversations.reduce((s,c) => s + c.messages, 0) / conversations.length);
-  document.getElementById('c-avg').textContent = avg;
+  if (cAvg) cAvg.textContent = avg;
+
   container.innerHTML = conversations.map(c => `
     <div class="conv-row" onclick="openChat('${c.phone}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
       <div class="conv-avatar">${c.phone.slice(-4)}</div>
@@ -420,12 +477,12 @@ function switchOrderTab(tab, btn) {
   if (tab === 'rt') {
     rtDiv.style.display   = 'block';
     histDiv.style.display = 'none';
-    if (periodBar) periodBar.style.display = 'none'; // Ocultar fechas en Tiempo Real
+    if (periodBar) periodBar.style.display = 'none';
     if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
   } else {
     rtDiv.style.display   = 'none';
     histDiv.style.display = 'block';
-    if (periodBar) periodBar.style.display = 'flex'; // Mostrar fechas en Histórico
+    if (periodBar) periodBar.style.display = 'flex';
   }
 }
 
