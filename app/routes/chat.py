@@ -210,10 +210,11 @@ async def meta_webhook(request: Request):
             return {"status": "ok"}
 
 
-        if user_phone and _is_rate_limited(user_phone):
+        is_limited = await _is_rate_limited(user_phone)
+        if user_phone and is_limited:
             print(f"🚫 Rate limit activado para bot: {user_phone}", flush=True)
             return {"status": "ok"}
-
+            
         if msg_type == "location":
             loc = message.get("location", {})
             lat = loc.get("latitude")
