@@ -428,12 +428,17 @@ function reasonBadge(r) {
 
 function fmtDur(a, b) {
   if (!a||!b) return '—';
-  const m = Math.round((new Date(b) - new Date(a)) / 60000);
+  // Añadimos la Z para asegurar que la matemática del tiempo sea exacta
+  const zA = a.endsWith('Z') ? a : a + 'Z';
+  const zB = b.endsWith('Z') ? b : b + 'Z';
+  const m = Math.round((new Date(zB) - new Date(zA)) / 60000);
   return m < 60 ? m + 'min' : Math.floor(m/60) + 'h ' + (m%60) + 'min';
 }
+
 function fmtTime(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' });
+  const zIso = iso.endsWith('Z') ? iso : iso + 'Z';
+  return new Date(zIso).toLocaleTimeString('es-CO', { hour:'2-digit', minute:'2-digit' });
 }
 
 function setSesionPeriod(h, btn) {
@@ -790,22 +795,25 @@ async function loadTableOrdersSection() {
   try {
     const r = await fetch('/api/table-orders', { headers: h });
     if (!r.ok) { container.innerHTML = '<div class="empty-state">Error cargando pedidos de mesa.</div>'; return; }
+    // (Dentro de loadTableOrdersSection) ...
     const { orders: all = [] } = await r.json();
 
-    const today = new Date().toISOString().split('T')[0];
+    // Obtenemos el "Hoy" según la zona horaria real de tu computadora
+    const dNow = new Date();
+    const today = `${dNow.getFullYear()}-${String(dNow.getMonth()+1).padStart(2,'0')}-${String(dNow.getDate()).padStart(2,'0')}`;
     
     // Filtrar todo lo que no esté cancelado ni facturado previamente
-    const visible = all.filter(o => o.status !== 'factura_entregada' && o.status !== 'cancelado');
+    const visible = all.filter(o => {
+      const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
+      // Verificamos el día real del pedido usando la 'Z'
+      const dOrder = new Date((o.created_at || '') + 'Z');
+      const orderDay = `${dOrder.getFullYear()}-${String(dOrder.getMonth()+1).padStart(2,'0')}-${String(dOrder.getDate()).padStart(2,'0')}`;
+      
+      if (o.status === 'entregado') return orderDay === today;
+      return !closed;
+    });
 
     const active = visible.filter(o => o.status === 'recibido' || o.status === 'en_preparacion' || o.status === 'listo');
-    
-    // Agrupación inteligente (Misma lógica de la Caja)
-    const mesasParaCobrar = new Set();
-    visible.forEach(o => {
-        if (o.status === 'entregado' || o.status === 'factura_generada') {
-            mesasParaCobrar.add(o.base_order_id || o.id.replace(/-\d+$/, ''));
-        }
-    });
 
     const billsMap = {};
     visible.forEach(o => {
