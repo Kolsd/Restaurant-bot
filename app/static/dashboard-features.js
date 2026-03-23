@@ -954,23 +954,3 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadTableOrdersSection, 15000);
 });
 
-function switchOrderTab(tab, btn) {
-  const waDiv   = document.getElementById('orders-tab-wa');
-  const mesaDiv = document.getElementById('orders-tab-mesa');
-  const waBtn   = document.getElementById('tab-wa');
-  const mesaBtn = document.getElementById('tab-mesa');
-  if (!waDiv || !mesaDiv) return;
-
-  if (tab === 'wa') {
-    waDiv.style.display   = '';
-    mesaDiv.style.display = 'none';
-    waBtn.style.background   = '#1D9E75'; waBtn.style.color   = '#fff';
-    mesaBtn.style.background = 'none';    mesaBtn.style.color = '#555';
-  } else {
-    waDiv.style.display   = 'none';
-    mesaDiv.style.display = '';
-    mesaBtn.style.background = '#1D9E75'; mesaBtn.style.color   = '#fff';
-    waBtn.style.background   = 'none';    waBtn.style.color     = '#555';
-    loadTableOrdersSection();
-  }
-}
