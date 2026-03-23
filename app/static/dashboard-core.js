@@ -59,6 +59,7 @@ function setPeriod(p, btn) {
   refreshAll();
 }
 
+// Función que controla la barra lateral y oculta las fechas si estamos en "Tiempo Real"
 function showSection(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -70,7 +71,18 @@ function showSection(id, btn) {
 
   const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas'];
   const periodBar = document.getElementById('period-bar');
-  if (periodBar) periodBar.style.display = hidePeriod.includes(id) ? 'none' : 'flex';
+  
+  if (periodBar) {
+    if (hidePeriod.includes(id)) {
+        periodBar.style.display = 'none';
+    } else if (id === 'pedidos') {
+        // Ocultar si la pestaña Tiempo Real está activa
+        const rtActive = document.getElementById('tab-rt')?.classList.contains('active');
+        periodBar.style.display = rtActive ? 'none' : 'flex';
+    } else {
+        periodBar.style.display = 'flex';
+    }
+  }
 
   if (id === 'pos')        loadPOSData();
   if (id === 'mesas')      loadTables();
@@ -176,7 +188,6 @@ async function refreshAll() {
     const totalRev = paidOrders.reduce((s,o) => s + o.total, 0);
     const pendingRev = pendingOrders.reduce((s,o) => s + o.total, 0);
     
-    // Resumen Global
     document.getElementById('m-revenue').textContent = fmt(totalRev);
     document.getElementById('m-revenue-sub').innerHTML = paidOrders.length + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
     document.getElementById('m-orders').textContent = orders.length;
@@ -188,12 +199,17 @@ async function refreshAll() {
     // MÉTRICAS DE DOMICILIOS EN TIEMPO REAL
     const extOrders = orders.filter(o => o.type !== 'mesa');
     let domCocina = 0; let domEntrega = 0; let domEntregados = 0;
+    const activeExt = [];
     
     extOrders.forEach(o => {
        const st = (o.status || '').toLowerCase();
-       if (st.includes('entregado')) domEntregados++;
-       else if (st.includes('camino') || st.includes('entrega')) domEntrega++;
-       else domCocina++;
+       if (st.includes('entregado') || st.includes('cancelado')) {
+           if (st.includes('entregado')) domEntregados++;
+       } else {
+           if (st.includes('camino') || st.includes('entrega')) domEntrega++;
+           else domCocina++;
+           activeExt.push(o);
+       }
     });
 
     if (document.getElementById('rt-dom-total')) document.getElementById('rt-dom-total').textContent = extOrders.length;
@@ -201,9 +217,36 @@ async function refreshAll() {
     if (document.getElementById('rt-dom-entrega')) document.getElementById('rt-dom-entrega').textContent = domEntrega;
     if (document.getElementById('rt-dom-entregados')) document.getElementById('rt-dom-entregados').textContent = domEntregados;
     
+    // TEXTO VACÍO O TABLA DE DOMICILIOS ACTIVOS
+    const domContainer = document.getElementById('rt-domicilios-container');
+    if (domContainer) {
+       if (activeExt.length === 0) {
+           domContainer.innerHTML = '<div class="empty-state">No hay domicilios con pedidos activos en este momento.</div>';
+       } else {
+           let domHtml = '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 ACTIVOS EN PREPARACIÓN / ENTREGA</div>';
+           domHtml += '<table><thead><tr><th>ID</th><th>Platos</th><th>Estado</th><th>Total</th></tr></thead><tbody>';
+           activeExt.forEach(o => {
+               let itemsStr = '—';
+               try {
+                   const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+                   itemsStr = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}x ${i.name}`).join(', ') : String(o.items);
+               } catch(e) { itemsStr = String(o.items); }
+               const stFormat = (o.status || 'pendiente').replace(/_/g, ' ').toUpperCase();
+               domHtml += `<tr>
+                 <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
+                 <td style="color:#555;font-size:12px;">${itemsStr}</td>
+                 <td><span class="badge" style="background:#E6F1FB;color:#185FA5;">${stFormat}</span></td>
+                 <td style="font-weight:700;">${fmt(o.total)}</td>
+               </tr>`;
+           });
+           domHtml += '</tbody></table>';
+           domContainer.innerHTML = domHtml;
+       }
+    }
+    
     updateStatusChart(paidOrders.length, pendingOrders.length);
     renderChart(orders);
-    renderOrders(orders); // Llama al histórico
+    renderOrders(orders); // Histórico
     renderReservations(reservations);
     renderConversations(conversations);
     
@@ -361,17 +404,21 @@ async function sendManualReply() {
 function switchOrderTab(tab, btn) {
   const rtDiv   = document.getElementById('orders-tab-rt');
   const histDiv = document.getElementById('orders-tab-hist');
+  const periodBar = document.getElementById('period-bar');
+  
   if (!rtDiv || !histDiv) return;
 
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  if (btn) btn.classList.add('active');
 
   if (tab === 'rt') {
     rtDiv.style.display   = 'block';
     histDiv.style.display = 'none';
+    if (periodBar) periodBar.style.display = 'none'; // Ocultar fechas en Tiempo Real
     if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
   } else {
     rtDiv.style.display   = 'none';
     histDiv.style.display = 'block';
+    if (periodBar) periodBar.style.display = 'flex'; // Mostrar fechas en Histórico
   }
 }
