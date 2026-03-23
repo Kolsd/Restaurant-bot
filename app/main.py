@@ -11,6 +11,7 @@ from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
 from app.routes.billing import router as billing_router
 from app.routes.crm import router as crm_router  
+from app.routes import nps, inventory
 
 app = FastAPI(
     title="🍽️ Mesio",
@@ -71,6 +72,7 @@ async def startup():
     await db_init_tables()
     await db_init_waiter_alerts()
     await db_init_table_sessions()
+    await db.db_init_nps_inventory()
 
     from app.services.scheduler import start_scheduler
     await start_scheduler()
@@ -87,3 +89,5 @@ app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
 app.include_router(billing_router)
 app.include_router(crm_router)
+app.include_router(nps.router)
+app.include_router(inventory.router)
