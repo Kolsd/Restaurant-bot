@@ -70,7 +70,7 @@ function showSection(id, btn) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[id] || '';
 
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas'];
+  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas', 'nps', 'inventario'];
   const periodBar = document.getElementById('period-bar');
   
   if (periodBar) {
