@@ -152,6 +152,7 @@ async def init_db():
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '72 hours'",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS billing_config JSONB DEFAULT NULL"
+            "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
         ]
         
         for m in migrations:
@@ -291,23 +292,41 @@ async def db_save_history(phone: str, bot_number: str, history: list):
             ON CONFLICT (phone, bot_number) DO UPDATE SET history=EXCLUDED.history, updated_at=NOW()
         """, phone, bot_number, json.dumps(history[-20:]))
 
-async def db_get_all_conversations(bot_number: str = None):
+async def db_get_all_conversations(bot_number: str = None, date_from: str = None, date_to: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
+        conditions = []
+        params = []
+        idx = 1
+
         if bot_number:
-            # FIX: eliminado el OR bot_number='' que traía conversaciones huérfanas
-            rows = await conn.fetch(
-                "SELECT phone, bot_number, history, updated_at FROM conversations WHERE bot_number=$1 ORDER BY updated_at DESC",
-                bot_number
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT phone, bot_number, history, updated_at FROM conversations ORDER BY updated_at DESC"
-            )
+            conditions.append(f"bot_number = ${idx}")
+            params.append(bot_number)
+            idx += 1
+
+        if date_from:
+            conditions.append(f"created_at >= ${idx}")
+            params.append(_to_date(date_from))
+            idx += 1
+
+        if date_to:
+            conditions.append(f"created_at < ${idx}")
+            params.append(_to_date(date_to) + timedelta(days=1))
+            idx += 1
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        query = f"SELECT phone, bot_number, history, updated_at, created_at FROM conversations {where} ORDER BY updated_at DESC"
+
+        rows = await conn.fetch(query, *params)
+
         result = []
         for r in rows:
             history = r["history"] if isinstance(r["history"], list) else json.loads(r["history"])
-            last_user = next((m["content"] for m in reversed(history) if m["role"] == "user" and isinstance(m.get("content"), str)), "")
+            last_user = next(
+                (m["content"] for m in reversed(history)
+                 if m["role"] == "user" and isinstance(m.get("content"), str)),
+                ""
+            )
             result.append({
                 "phone": r["phone"],
                 "messages": len(history),
