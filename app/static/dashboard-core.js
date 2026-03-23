@@ -228,13 +228,26 @@ function renderOrders(orders) {
   
   let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody>';
   externalOrders.forEach(o => {
-    // MAGIA DE ZONAS HORARIAS: Forzamos UTC ('Z') y convertimos a la hora de tu país
+    // Zonas horarias correctas
     const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
     const localTime = new Date(isoStr).toLocaleTimeString('es-CO', {hour: '2-digit', minute: '2-digit'});
 
+    // MAGIA: Traducir el JSON a texto legible (ej: 3x Diavola)
+    let itemsStr = '—';
+    try {
+        const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+        if (Array.isArray(arr)) {
+            itemsStr = arr.map(i => `${i.quantity||1}x ${i.name}`).join(', ');
+        } else {
+            itemsStr = String(o.items);
+        }
+    } catch(e) { 
+        itemsStr = String(o.items); 
+    }
+
     html += `<tr>
       <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
-      <td style="color:#555;">${o.items || '—'}</td>
+      <td style="color:#555;font-size:12px;max-width:300px;">${itemsStr}</td>
       <td><span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">${o.type||'—'}</span></td>
       <td><span class="badge ${o.paid?'badge-paid':'badge-pending'}">${o.paid?'pagado':'pendiente'}</span></td>
       <td style="font-weight:500;">${fmt(o.total)}</td>
@@ -245,30 +258,6 @@ function renderOrders(orders) {
   container.innerHTML = html;
   
   updateTiposChart(externalOrders.filter(o => o.type === 'domicilio').length, externalOrders.filter(o => o.type === 'recoger').length);
-}
-function renderReservations(reservations) {
-  const container = document.getElementById('res-container');
-  document.getElementById('r-total').textContent = reservations.length;
-  document.getElementById('r-guests').textContent = reservations.reduce((s,r) => s + (r.guests||0), 0);
-  
-  if (!reservations.length) {
-    container.innerHTML = '<div class="empty-state">Sin reservaciones en este período.</div>';
-    document.getElementById('r-next').textContent = '—'; return;
-  }
-  const today = new Date().toISOString().split('T')[0];
-  const now   = new Date().toTimeString().slice(0,5);
-  const next  = reservations.find(res => res.date === today && res.time >= now);
-  document.getElementById('r-next').textContent = next ? next.time + ' · ' + next.name.split(' ')[0] : '—';
-  
-  let html = '<table><thead><tr><th>Cliente</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
-  reservations.forEach(res => {
-    html += `<tr>
-      <td style="font-weight:500;">${res.name}</td><td style="color:#888;">${res.date}</td>
-      <td>${res.time}</td><td>${res.guests}</td><td style="color:#888;">${res.phone||'—'}</td><td style="color:#888;">${res.notes||'—'}</td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-  container.innerHTML = html;
 }
 
 function renderConversations(conversations) {
