@@ -111,14 +111,23 @@ function renderChart(orders) {
   const titleEl = document.getElementById('chart-title');
   if (titleEl) titleEl.textContent = `Ingresos por día — ${periodLabels[currentPeriod]}`;
   
-  // Agrupar ingresos por fecha
+  // Agrupar ingresos por fecha (CONVIRTIENDO A HORA LOCAL DEL USUARIO)
   const dataMap = {};
   orders.forEach(o => {
       if(o.paid) {
-          const date = (o.created_at || '').substring(0, 10);
-          if(!dataMap[date]) dataMap[date] = { rev: 0, count: 0 };
-          dataMap[date].rev += o.total;
-          dataMap[date].count += 1;
+          // Forzamos la interpretación en UTC agregando 'Z' si no la tiene
+          const isoString = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
+          const d = new Date(isoString);
+          
+          // Extraemos el día, mes y año según la zona horaria real de tu computadora
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const localDate = `${year}-${month}-${day}`;
+          
+          if(!dataMap[localDate]) dataMap[localDate] = { rev: 0, count: 0 };
+          dataMap[localDate].rev += o.total;
+          dataMap[localDate].count += 1;
       }
   });
 
