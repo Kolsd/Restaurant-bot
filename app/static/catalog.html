@@ -61,14 +61,15 @@
         // 1. Obtener datos de la URL (?bot=1555123&mesa=4)
         const params = new URLSearchParams(window.location.search);
         const botNumber = params.get('bot');
-        const mesa = params.get('mesa') || 'Barra';
+        const mesa = params.get('mesa') || '';
+        const tableId = params.get('table_id') || '';
         
         let cart = {}; // Almacena formato: { "Pizza Margarita": { price: 25000, qty: 2 } }
 
         if (!botNumber) {
             document.getElementById('rest-name').innerText = "Error: Faltan parámetros en el QR";
         } else {
-            document.getElementById('table-info').innerText = `Ubicación: Mesa ${mesa}`;
+            document.getElementById('table-info').innerText = mesa ? `Mesa ${mesa}` : 'Pedido a domicilio / para recoger';
             loadMenu();
         }
 
@@ -148,22 +149,30 @@
             else floatingCart.classList.remove('visible');
         }
 
-        // 5. El Handoff a la IA (La Magia)
         function sendToWhatsApp() {
-            let text = `¡Hola! Estoy en la *Mesa ${mesa}* y quiero ordenar lo siguiente:\n\n`;
-            
-            let total = 0;
-            for (const [name, item] of Object.entries(cart)) {
-                text += `▪️ ${item.qty}x ${name}\n`;
-                total += item.price * item.qty;
-            }
-            
-            text += `\n*Total aproximado:* $${total.toLocaleString('es-CO')}\n\n¿Me confirmas la orden?`;
+    let text = '';
 
-            const encodedText = encodeURIComponent(text);
-            // Redirigir a la API de WhatsApp oficial
-            window.location.href = `https://wa.me/${botNumber}?text=${encodedText}`;
+    if (mesa) {
+        text += `¡Hola! Estoy en la Mesa ${mesa}`;
+        if (tableId) {
+            text += ` [table_id:${tableId}]`;
         }
+        text += ` y quiero ordenar lo siguiente:\n\n`;
+    } else {
+        text += `¡Hola! Quiero hacer un pedido:\n\n`;
+    }
+
+    let total = 0;
+    for (const [name, item] of Object.entries(cart)) {
+        text += `▪️ ${item.qty}x ${name}\n`;
+        total += item.price * item.qty;
+    }
+
+    text += `\n*Total aproximado:* $${total.toLocaleString('es-CO')}\n\n¿Me confirmas la orden?`;
+
+    const encodedText = encodeURIComponent(text);
+    window.location.href = `https://wa.me/${botNumber}?text=${encodedText}`;
+}
     </script>
 </body>
 </html>

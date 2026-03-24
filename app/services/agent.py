@@ -49,14 +49,25 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_touch_session(phone, bot_number)
             return table
 
+    # Detectar table_id explícito enviado por catalog.html
+    tid_match = re.search(r'\[table_id:([^\]]+)\]', message)
+    if tid_match:
+        table_id = tid_match.group(1).strip()
+        table = await db.db_get_table_by_id(table_id)
+        if table:
+            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+            return table
+
     branch_id    = None
     branch_match = re.search(r'\[branch=(\d+)\]', message)
     if branch_match:
         branch_id = branch_match.group(1)
 
-    m = re.search(r'Mesa\s+(\d+)', message, re.IGNORECASE)
+    # Limpiar URLs antes de buscar mesa para evitar falsos positivos (?mesa=Barra)
+    clean_message = re.sub(r'https?://\S+', '', message)
+    m = re.search(r'Mesa\s+(\d+)', clean_message, re.IGNORECASE)
     if not m:
-        m = re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', message, re.IGNORECASE)
+        m = re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', clean_message, re.IGNORECASE)
 
     if m:
         number = m.group(1)
@@ -84,7 +95,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                 return table
     return None
-
+    
 async def get_session_state(phone: str, bot_number: str) -> dict:
     session = await db.db_get_active_session(phone, bot_number)
     if not session:
@@ -382,7 +393,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
             if cart_errors:
                 reply += f" (Nota: No pude agregar '{', '.join(cart_errors)}')"
-                
+
         elif action == "reserve":
             rv = parsed.get("reservation", {})
             if rv.get("name") and rv.get("date") and rv.get("time"):
