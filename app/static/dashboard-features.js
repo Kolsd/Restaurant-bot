@@ -808,132 +808,209 @@ async function loadTableOrdersSection() {
   const h         = window._dashHeaders;
   const container = document.getElementById('dine-in-container');
   const mContainer = document.getElementById('salon-metrics-container');
+  const domContainer = document.getElementById('rt-domicilios-container');
   
   if (!container) return;
-  container.innerHTML = '<div class="empty-state">Cargando pedidos de mesa...</div>';
-  if (mContainer) mContainer.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">Calculando métricas...</div>';
 
   try {
-    const r = await fetch('/api/table-orders', { headers: h });
-    if (!r.ok) { 
-        container.innerHTML = '<div class="empty-state">Error cargando pedidos de mesa.</div>'; 
-        return; 
-    }
-    const { orders: all = [] } = await r.json();
+    // ── 1. Cargar pedidos de mesa ──
+    const rMesa = await fetch('/api/table-orders', { headers: h });
+    const { orders: allMesa = [] } = rMesa.ok ? await rMesa.json() : { orders: [] };
 
     const dNow = new Date();
     const today = `${dNow.getFullYear()}-${String(dNow.getMonth()+1).padStart(2,'0')}-${String(dNow.getDate()).padStart(2,'0')}`;
     
-    // Filtrar todo lo que no esté cancelado ni facturado previamente (cerrado)
-    const visible = all.filter(o => {
+    const visible = allMesa.filter(o => {
       const closed = o.status === 'factura_entregada' || o.status === 'cancelado';
-      const dOrder = new Date((o.created_at || '') + 'Z');
+      const dOrder = new Date((o.created_at || '') + (o.created_at?.endsWith('Z') ? '' : 'Z'));
       const orderDay = `${dOrder.getFullYear()}-${String(dOrder.getMonth()+1).padStart(2,'0')}-${String(dOrder.getDate()).padStart(2,'0')}`;
       if (o.status === 'entregado') return orderDay === today;
       return !closed;
     });
 
-    const active = visible.filter(o => o.status === 'recibido' || o.status === 'en_preparacion' || o.status === 'listo');
+    const active = visible.filter(o => ['recibido','en_preparacion','listo'].includes(o.status));
     
-    // Agrupación inteligente (Misma lógica de la Caja)
     const mesasParaCobrar = new Set();
     visible.forEach(o => {
-        if (o.status === 'entregado' || o.status === 'factura_generada') {
-            mesasParaCobrar.add(o.base_order_id || o.id.replace(/-\d+$/, ''));
-        }
+      if (o.status === 'entregado' || o.status === 'factura_generada') {
+        mesasParaCobrar.add(o.base_order_id || o.id.replace(/-\d+$/, ''));
+      }
     });
 
     const billsMap = {};
     visible.forEach(o => {
-        const baseId = o.base_order_id || o.id.replace(/-\d+$/, '');
-        if (mesasParaCobrar.has(baseId)) {
-            if (!billsMap[baseId]) {
-                billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, items: [], total: 0, status: o.status };
-            }
-            if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada'; 
-            
-            let parsedItems = [];
-            try { const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items; parsedItems = Array.isArray(arr) ? arr : []; } catch(e) {}
-            billsMap[baseId].items.push(...parsedItems);
-            billsMap[baseId].total += (Number(o.total) || 0);
+      const baseId = o.base_order_id || o.id.replace(/-\d+$/, '');
+      if (mesasParaCobrar.has(baseId)) {
+        if (!billsMap[baseId]) {
+          billsMap[baseId] = { id: baseId, table_name: o.table_name, created_at: o.created_at, items: [], total: 0, status: o.status };
         }
+        if (o.status === 'factura_generada') billsMap[baseId].status = 'factura_generada';
+        let parsedItems = [];
+        try { const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items; parsedItems = Array.isArray(arr) ? arr : []; } catch(e) {}
+        billsMap[baseId].items.push(...parsedItems);
+        billsMap[baseId].total += (Number(o.total) || 0);
+      }
     });
     const groupedBills = Object.values(billsMap);
 
+    // ── 2. Cargar pedidos de domicilio/recoger ──
+    const localOffset = new Date().getTimezoneOffset();
+    const rDom = await fetch(`/api/dashboard/orders?period=today&tz_offset=${localOffset}`, { headers: h });
+    const allOrders = rDom.ok ? ((await rDom.json()).orders || []) : [];
+    const extOrders = allOrders.filter(o => o.type !== 'mesa');
+    const activeExt = extOrders.filter(o => {
+      const st = (o.status || '').toLowerCase();
+      return !st.includes('entregado') && !st.includes('cancelado');
+    });
+    const domEntregados = extOrders.filter(o => (o.status||'').includes('entregado')).length;
+
     const fmt = n => '$' + Number(n).toLocaleString('es-CO');
-    
-    // --- NUEVAS MÉTRICAS DEL SALÓN (Sin el dinero) ---
-    const enCocina = active.filter(o => o.status === 'recibido' || o.status === 'en_preparacion');
-    const conMesero = active.filter(o => o.status === 'listo');
+
+    // ── 3. Métricas salón ──
+    const enCocina   = active.filter(o => ['recibido','en_preparacion'].includes(o.status));
+    const conMesero  = active.filter(o => o.status === 'listo');
     const mesasAtendidas = [...new Set(visible.map(o => o.table_id))].length;
 
-    // Alimentar métricas superiores del Salón
-    const metricasHTML = `
-      <div class="metric"><div class="metric-label">Mesas Atendidas</div><div class="metric-value">${mesasAtendidas}</div></div>
-      <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;">${enCocina.length}</div></div>
-      <div class="metric"><div class="metric-label">Con Mesero (Listos)</div><div class="metric-value" style="color:#378ADD;">${conMesero.length}</div></div>
-      <div class="metric"><div class="metric-label">En Caja (Por Cobrar)</div><div class="metric-value" style="color:#1D9E75;">${groupedBills.length}</div></div>
-    `;
-    if (mContainer) mContainer.innerHTML = metricasHTML;
-
-    // --- TABLAS INFERIORES ---
-    let html = ''; 
-    
-    if (!active.length && !groupedBills.length) {
-      container.innerHTML = '<div class="empty-state">No hay mesas con pedidos activos en este momento.</div>';
-      return;
+    if (mContainer) {
+      mContainer.innerHTML = `
+        <div class="metric"><div class="metric-label">Mesas Atendidas</div><div class="metric-value">${mesasAtendidas}</div></div>
+        <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;">${enCocina.length}</div></div>
+        <div class="metric"><div class="metric-label">Con Mesero (Listos)</div><div class="metric-value" style="color:#378ADD;">${conMesero.length}</div></div>
+        <div class="metric"><div class="metric-label">En Caja (Por Cobrar)</div><div class="metric-value" style="color:#1D9E75;">${groupedBills.length}</div></div>
+      `;
     }
 
-    if(groupedBills.length > 0){
-        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #6B21A8;">🧾 PENDIENTES DE FACTURA / PAGO</div>';
-        html += '<table><thead><tr><th>Mesa</th><th>Platos Consolidados</th><th>Total</th><th>Acción Rápida</th></tr></thead><tbody>';
+    // ── 4. Monitor domicilios ──
+    const rtDomTotal      = document.getElementById('rt-dom-total');
+    const rtDomCocina     = document.getElementById('rt-dom-cocina');
+    const rtDomEntrega    = document.getElementById('rt-dom-entrega');
+    const rtDomEntregados = document.getElementById('rt-dom-entregados');
+    if (rtDomTotal)      rtDomTotal.textContent      = extOrders.length;
+    if (rtDomCocina)     rtDomCocina.textContent     = activeExt.filter(o => !['en_camino','en_entrega'].includes(o.status||'')).length;
+    if (rtDomEntrega)    rtDomEntrega.textContent    = activeExt.filter(o => ['en_camino','en_entrega'].includes(o.status||'')).length;
+    if (rtDomEntregados) rtDomEntregados.textContent = domEntregados;
+
+    if (domContainer) {
+      if (activeExt.length === 0) {
+        domContainer.innerHTML = '<div class="empty-state">No hay domicilios activos en este momento.</div>';
+      } else {
+        let domHtml = '<div style="font-size:13px;font-weight:bold;margin-bottom:10px;">🕒 ACTIVOS EN PREPARACIÓN / ENTREGA</div>';
+        domHtml += '<table><thead><tr><th>Teléfono</th><th>Platos</th><th>Dirección</th><th>Pago</th><th>Estado</th><th>Total</th><th>Acción</th></tr></thead><tbody>';
+        activeExt.forEach(o => {
+          let itemsStr = '—';
+          try {
+            const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+            itemsStr = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}x ${i.name}`).join(', ') : String(o.items);
+          } catch(e) { itemsStr = String(o.items); }
+          const stFormat = (o.status || 'pendiente').replace(/_/g,' ').toUpperCase();
+          const nextStatus = getNextDeliveryStatus(o.status);
+          domHtml += `<tr>
+            <td style="font-size:12px;">${o.phone || '—'}</td>
+            <td style="color:#555;font-size:12px;max-width:200px;">${itemsStr}</td>
+            <td style="font-size:11px;color:#888;max-width:150px;">${o.address || (o.type === 'recoger' ? '🏠 Recoger' : '—')}</td>
+            <td style="font-size:11px;color:#0F6E56;font-weight:500;">${o.payment_method || '—'}</td>
+            <td><span class="badge" style="background:#E6F1FB;color:#185FA5;">${stFormat}</span></td>
+            <td style="font-weight:700;">${fmt(o.total)}</td>
+            <td>${nextStatus ? `<button onclick="updateDeliveryStatus('${o.id}','${nextStatus.status}')" style="font-size:11px;padding:4px 8px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">${nextStatus.label}</button>` : '<span style="font-size:11px;color:#888;">—</span>'}</td>
+          </tr>`;
+        });
+        domHtml += '</tbody></table>';
+        domContainer.innerHTML = domHtml;
+      }
+    }
+
+    // ── 5. Monitor salón ──
+    let html = '';
+    if (!active.length && !groupedBills.length) {
+      container.innerHTML = '<div class="empty-state">No hay mesas con pedidos activos en este momento.</div>';
+    } else {
+      if (groupedBills.length > 0) {
+        html += '<div style="font-size:13px;font-weight:bold;margin-bottom:10px;color:#6B21A8;">🧾 PENDIENTES DE FACTURA / PAGO</div>';
+        html += '<table><thead><tr><th>Mesa</th><th>Platos Consolidados</th><th>Total</th><th>Acción</th></tr></thead><tbody>';
         groupedBills.forEach(b => {
           const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
-          const total_fmt = fmt(b.total);
           html += `<tr>
-            <td style="font-weight:600;">${b.table_name || '—'}</td>
+            <td style="font-weight:600;">${b.table_name||'—'}</td>
             <td style="color:#555;font-size:12px;max-width:300px;">${itemsJoined}</td>
-            <td style="font-weight:700; color:#6B21A8;">${total_fmt}</td>
+            <td style="font-weight:700;color:#6B21A8;">${fmt(b.total)}</td>
             <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:5px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">Facturar</button></td>
           </tr>`;
         });
         html += '</tbody></table><br/>';
-    }
-
-    if(active.length > 0){
-        html += '<div style="font-size: 13px; font-weight: bold; margin-bottom: 10px;">🕒 ACTIVOS EN COCINA / SALÓN</div>';
-        html += '<table><thead><tr><th>Mesa</th><th>Platos del viaje</th><th>Estado</th><th>Hora</th></tr></thead><tbody>';
+      }
+      if (active.length > 0) {
+        html += '<div style="font-size:13px;font-weight:bold;margin-bottom:10px;">🕒 ACTIVOS EN COCINA / SALÓN</div>';
+        html += '<table><thead><tr><th>Mesa</th><th>Platos</th><th>Estado</th><th>Hora</th><th>Acción</th></tr></thead><tbody>';
         active.forEach(o => {
           let items = '';
           try {
             const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
             items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${i.name||''}`).join(', ') : String(o.items);
-          } catch(e) { items = String(o.items || '—'); }
-          
-          // Aplicamos la zona horaria a la hora de la cocina
-          const isoStr = (o.created_at || '').endsWith('Z') ? o.created_at : (o.created_at || '') + 'Z';
-          const hora = new Date(isoStr).toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
-          
-          const st   = o.status || 'recibido';
+          } catch(e) { items = String(o.items||'—'); }
+          const isoStr = (o.created_at||'').endsWith('Z') ? o.created_at : (o.created_at||'')+'Z';
+          const hora = new Date(isoStr).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+          const st    = o.status || 'recibido';
           const color = STATUS_COLOR[st] || '#888';
           const bg    = STATUS_BG[st]    || '#f0f0f0';
           const label = STATUS_LABEL[st] || st;
-          
+          const nextSt = getNextTableStatus(st);
           html += `<tr>
-            <td style="font-weight:600;">${o.table_name || '—'}</td>
-            <td style="color:#555;font-size:12px;max-width:300px;">${items}</td>
+            <td style="font-weight:600;">${o.table_name||'—'}</td>
+            <td style="color:#555;font-size:12px;max-width:280px;">${items}</td>
             <td><span style="font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;background:${bg};color:${color};">${label}</span></td>
             <td style="color:#888;">${hora}</td>
+            <td>${nextSt ? `<button onclick="updateTableOrderStatus('${o.id}','${nextSt.status}')" style="font-size:11px;padding:4px 8px;background:#378ADD;color:#fff;border:none;border-radius:6px;cursor:pointer;">${nextSt.label}</button>` : ''}</td>
           </tr>`;
         });
         html += '</tbody></table>';
+      }
+      container.innerHTML = html;
     }
-    
-    container.innerHTML = html;
-  } catch(e) { 
-    console.error('loadTableOrdersSection:', e); 
-    container.innerHTML = '<div class="empty-state">Error de conexión.</div>'; 
+  } catch(e) {
+    console.error('loadTableOrdersSection:', e);
+    if (container) container.innerHTML = '<div class="empty-state">Error de conexión.</div>';
   }
+}
+
+function getNextTableStatus(current) {
+  const flow = {
+    recibido:        { status: 'en_preparacion', label: '🍳 En preparación' },
+    en_preparacion:  { status: 'listo',          label: '✅ Listo para servir' },
+    listo:           { status: 'entregado',      label: '🍽️ Entregado' },
+  };
+  return flow[current] || null;
+}
+
+function getNextDeliveryStatus(current) {
+  const flow = {
+    pendiente_pago:  { status: 'confirmado',  label: '✅ Confirmar' },
+    confirmado:      { status: 'en_camino',   label: '🛵 En camino' },
+    en_camino:       { status: 'entregado',   label: '✅ Entregado' },
+  };
+  return flow[current] || null;
+}
+
+async function updateTableOrderStatus(orderId, newStatus) {
+  const h = window._dashHeaders;
+  try {
+    const r = await fetch(`/api/table-orders/${orderId}/status`, {
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    });
+    if (r.ok) loadTableOrdersSection();
+  } catch(e) { console.error('updateTableOrderStatus:', e); }
+}
+
+async function updateDeliveryStatus(orderId, newStatus) {
+  const h = window._dashHeaders;
+  try {
+    const r = await fetch(`/api/orders/${orderId}/status`, {
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    });
+    if (r.ok) loadTableOrdersSection();
+    else console.error('Error actualizando domicilio status');
+  } catch(e) { console.error('updateDeliveryStatus:', e); }
 }
 
 async function markTableDelivered(orderId) {
