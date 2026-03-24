@@ -294,7 +294,7 @@ async def db_save_order(order: dict):
         order["subtotal"], order["delivery_fee"], order["total"],
         order["status"], order["paid"], order.get("payment_url", ""),
         order.get("bot_number", ""), order.get("payment_method", ""))
-                
+
 async def db_confirm_payment(order_id: str, transaction_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -721,9 +721,9 @@ async def db_get_base_order_id(phone: str, table_id: str) -> str | None:
         row = await conn.fetchrow("""
             SELECT COALESCE(base_order_id, id) as base_id
             FROM table_orders
-            WHERE phone=$1 AND table_id=$2 AND status NOT IN ('factura_entregada', 'cancelado')
+            WHERE table_id=$2 AND status NOT IN ('factura_entregada', 'cancelado')
             ORDER BY created_at ASC LIMIT 1
-        """, phone, table_id)
+        """, phone, table_id) # 🟢 Mantenemos $1 (phone) y $2 (table_id) por compatibilidad con la firma, pero la consulta solo usa $2
         return row['base_id'] if row else None
 
 async def db_get_next_sub_number(base_order_id: str) -> int:
