@@ -1,32 +1,12 @@
 import os
-import httpx
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
-from app.services.auth import verify_token
+from app.routes.deps import require_auth, get_current_restaurant
+
+_NPS_INTERNAL_KEY = os.getenv("NPS_INTERNAL_KEY", "")
 
 router = APIRouter()
-
-async def require_auth(request: Request) -> str:
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    if not username:
-        raise HTTPException(status_code=401, detail="No autorizado")
-    return username
-
-async def get_current_restaurant(request: Request) -> dict:
-    username = await require_auth(request)
-    user = await db.db_get_user(username)
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    if user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r:
-            return r
-    all_r = await db.db_get_all_restaurants()
-    if all_r:
-        return all_r[0]
-    raise HTTPException(status_code=403, detail="Restaurante no encontrado")
 
 
 class NPSResponse(BaseModel):
@@ -37,15 +17,18 @@ class NPSResponse(BaseModel):
 
 
 @router.post("/api/nps/response")
-async def save_nps_response(body: NPSResponse):
-    """Guarda la respuesta NPS del cliente (llamado desde el agent)"""
+async def save_nps_response(request: Request, body: NPSResponse):
+    """Internal endpoint: saves NPS response. Called only from the agent service."""
+    key = request.headers.get("X-Internal-Key", "")
+    if not _NPS_INTERNAL_KEY or key != _NPS_INTERNAL_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
     if body.score < 1 or body.score > 5:
-        raise HTTPException(status_code=400, detail="Score debe ser entre 1 y 5")
+        raise HTTPException(status_code=400, detail="Score must be between 1 and 5")
     await db.db_save_nps_response(
         phone=body.phone,
         bot_number=body.bot_number,
         score=body.score,
-        comment=body.comment
+        comment=body.comment,
     )
     return {"success": True}
 

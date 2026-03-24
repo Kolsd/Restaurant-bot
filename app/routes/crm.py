@@ -7,13 +7,14 @@ from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile
 from pydantic import BaseModel
-from app.services.auth import verify_token
 from app.services import database as db
 
 router = APIRouter(prefix="/api/crm", tags=["crm"])
 
-# ── AUTH HELPER ───────────────────────────────────────────────────────
-ADMIN_KEY = os.getenv("ADMIN_KEY") # <-- Sin contraseña por defecto
+# ── CONFIG ────────────────────────────────────────────────────────────
+ADMIN_KEY = os.getenv("ADMIN_KEY")
+META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
+CRM_TEMPLATE_LANGUAGE = os.getenv("CRM_TEMPLATE_LANGUAGE", "en")
 
 async def _require_auth(request: Request) -> dict:
     key = (
@@ -122,7 +123,7 @@ async def _ensure_crm_tables():
             CREATE TABLE IF NOT EXISTS prospect_notes (
                 id          SERIAL PRIMARY KEY,
                 prospect_id INTEGER NOT NULL,
-                author      TEXT    NOT NULL DEFAULT 'miguel',
+                author      TEXT    NOT NULL DEFAULT 'admin',
                 content     TEXT    NOT NULL,
                 note_type   TEXT    NOT NULL DEFAULT 'note',
                 created_at  TIMESTAMP DEFAULT NOW()
@@ -161,8 +162,8 @@ async def _ensure_crm_tables():
                    'Hola {{1}}, vi que tienen {{2}} y quería hacerles una pregunta rápida — ¿reciben pedidos por WhatsApp o solo por Rappi? Tenemos algo que podría ahorrarles la comisión. 🙋',
                    ARRAY['nombre del dueño','nombre del restaurante']),
                   ('Follow-up demo', 'mesio_followup_demo_v1', 'MARKETING',
-                   'Hola {{1}}! Les comparto el demo de Mesio para que vean cómo funcionaría para {{2}}: mesioai.com/demo — ¿tienen 15 minutos esta semana para una llamada rápida?',
-                   ARRAY['nombre','restaurante']),
+                   'Hi {{1}}! Here is the Mesio demo so you can see how it would work for {{2}}: {{3}} — Do you have 15 minutes this week for a quick call?',
+                   ARRAY['name','restaurant','demo_url']),
                   ('Cierre', 'mesio_cierre_v1', 'MARKETING',
                    'Hola {{1}}, quería saber si pudieron ver el demo de Mesio. Tenemos el plan Starter desde $49 USD/mes y podemos tenerlo configurado en 48h. ¿Arrancamos esta semana?',
                    ARRAY['nombre'])
@@ -177,10 +178,11 @@ async def get_prospects(
     priority: str = None,
     search: str = None,
     archived: bool = False,
-    limit: int = 10000  # 👈 Límite aumentado a 10,000 para evitar que desaparezcan
+    limit: int = 500,
 ):
     await _require_auth(request)
     await _ensure_crm_tables()
+    limit = max(1, min(limit, 500))  # hard cap
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         conditions = ["archived = $1"]
@@ -195,9 +197,10 @@ async def get_prospects(
             conditions.append(f"(restaurant_name ILIKE ${idx} OR owner_name ILIKE ${idx} OR phone ILIKE ${idx})")
             params.append(f"%{search}%"); idx += 1
 
+        params.append(limit)
         where = " AND ".join(conditions)
         rows = await conn.fetch(
-            f"SELECT * FROM prospects WHERE {where} ORDER BY updated_at DESC LIMIT {limit}",
+            f"SELECT * FROM prospects WHERE {where} ORDER BY updated_at DESC LIMIT ${idx}",
             *params
         )
         return {"prospects": [_ser(dict(r)) for r in rows]}
@@ -299,7 +302,7 @@ async def add_note(request: Request, pid: int, body: NoteCreate):
         row = await conn.fetchrow("""
             INSERT INTO prospect_notes (prospect_id, author, content, note_type)
             VALUES ($1,$2,$3,$4) RETURNING *
-        """, pid, user.get("username", "miguel"), body.content, body.note_type)
+        """, pid, user.get("username", "admin"), body.content, body.note_type)
         # Update prospect last contact
         await conn.execute(
             "UPDATE prospects SET last_contact_at=NOW(), updated_at=NOW() WHERE id=$1",
@@ -354,7 +357,7 @@ async def send_manual_message(request: Request, body: SendMessagePayload):
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
-                    f"https://graph.facebook.com/v20.0/{phone_id}/messages",
+                    f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
                     headers={"Authorization": f"Bearer {token}"},
                     json={
                         "messaging_product": "whatsapp",
@@ -460,7 +463,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
                         "name": tpl["wa_name"],
                         "language": {
                             "policy": "deterministic",
-                            "code": "es_MX"
+                            "code": tpl.get("language") or CRM_TEMPLATE_LANGUAGE
                         },
                         "components": components
                     }
@@ -469,7 +472,7 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.post(
-                        f"https://graph.facebook.com/v20.0/{phone_id}/messages",
+                        f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
                         headers={"Authorization": f"Bearer {token}"},
                         json=meta_payload
                     )

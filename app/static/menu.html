@@ -203,7 +203,7 @@ async function init() {
       waBtn.href = data.wa_url;
       waBtn.style.display = 'flex';
 
-      renderMenu(data.menu, data.availability);
+      renderMenu(data.menu, data.availability, data.locale || 'en-US', data.currency || 'USD');
     } else {
       document.getElementById('menu-content').innerHTML = '<div class="loading">Mesa no encontrada. Verifica el código QR.</div>';
       document.getElementById('table-name').textContent = 'Error';
@@ -213,7 +213,9 @@ async function init() {
   }
 }
 
-function renderMenu(menu, availability) {
+function renderMenu(menu, availability, locale, currency) {
+  locale   = locale   || 'en-US';
+  currency = currency || 'USD';
   const container = document.getElementById('menu-content');
   const navScroll = document.getElementById('nav-scroll');
   const navContainer = document.getElementById('nav-container');
@@ -243,7 +245,10 @@ function renderMenu(menu, availability) {
     
     items.forEach(item => {
       const isAvail = availability[item.name] !== false;
-      const fmtPrice = item.price ? '$' + Number(item.price).toLocaleString('es-CO') : '';
+      const fmtPrice = item.price ? new Intl.NumberFormat(locale, {
+        style: 'currency', currency: currency,
+        minimumFractionDigits: ['COP','CLP','PYG','JPY'].includes(currency) ? 0 : 2
+      }).format(Number(item.price)) : '';
       
       html += `
         <div class="dish-card ${!isAvail ? 'dish-unavailable' : ''}">

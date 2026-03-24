@@ -3,6 +3,8 @@ import os
 import httpx
 from app.services import database as db
 
+META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
+
 # Semáforo para limitar concurrencia del scheduler (V-13 parcial)
 _scheduler_semaphore = asyncio.Semaphore(10)
 
@@ -11,10 +13,10 @@ async def _send_whatsapp(phone: str, message: str, bot_number: str, db_phone_id:
     token    = os.getenv("META_ACCESS_TOKEN", "")
     phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID", "")
     if not token or not phone_id:
-        print("⚠️ Scheduler: META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurados", flush=True)
+        print("Scheduler: META_ACCESS_TOKEN or META_PHONE_NUMBER_ID not configured", flush=True)
         return False
     clean_phone = phone.lstrip("+").replace(" ", "")
-    url  = f"https://graph.facebook.com/v20.0/{phone_id}/messages"
+    url  = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
     body = {
         "messaging_product": "whatsapp",
         "to":   clean_phone,
@@ -59,25 +61,25 @@ async def _process_stale_session(session: dict):
 
         if order_delivered:
             msg = (
-                f"¡Hola! 😊 Esperamos que todo haya estado delicioso en {table_name}. "
-                f"Cuando gustes, puedes pedir la cuenta o llamar al mesero. ¡Fue un placer atenderte!"
+                f"Hi! We hope you enjoyed your meal at {table_name}. "
+                f"Whenever you're ready, you can request the bill or call the waiter. It was a pleasure serving you!"
             )
         elif not has_order:
             msg = (
-                f"¡Hola! 😊 Seguimos aquí por si necesitas algo en {table_name}. "
-                f"¿Te puedo ayudar con algo o ver el menú?"
+                f"Hi! We're still here if you need anything at {table_name}. "
+                f"Can I help you with something or show you the menu?"
             )
         else:
             msg = (
-                f"¡Hola! 😊 ¿Todo bien en {table_name}? "
-                f"Aquí estamos si necesitas algo más."
+                f"Hi! Is everything alright at {table_name}? "
+                f"Let us know if you need anything else."
             )
 
         sent = await _send_whatsapp(phone, msg, bot_number, db_phone_id)
         if sent:
             await db.db_mark_session_warned(session["id"])
             await _create_inactivity_alert(session)
-            print(f"⏰ Scheduler: advertencia → {phone} ({table_name})", flush=True)
+            print(f"Scheduler: inactivity warning sent to {phone} ({table_name})", flush=True)
 
 
 async def _process_closeable_session(session: dict):
@@ -90,7 +92,7 @@ async def _process_closeable_session(session: dict):
 
         await _send_whatsapp(
             phone,
-            f"¡Hasta pronto! 👋 Fue un placer atenderte en {table_name}. ¡Esperamos verte de nuevo pronto!",
+            f"Goodbye! It was a pleasure serving you at {table_name}. We hope to see you again soon!",
             bot_number,
             db_phone_id
         )
@@ -109,7 +111,7 @@ async def _process_closeable_session(session: dict):
                 phone, bot_number
             )
 
-        print(f"🔒 Scheduler: sesión cerrada por inactividad → {phone} ({table_name})", flush=True)
+        print(f"Scheduler: session closed due to inactivity for {phone} ({table_name})", flush=True)
 
 
 async def _run_inactivity_check():

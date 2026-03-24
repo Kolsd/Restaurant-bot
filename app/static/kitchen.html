@@ -116,7 +116,7 @@ if (!token) window.location.href = '/login';
 const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
 function clock() {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }
 clock(); setInterval(clock, 1000);
 

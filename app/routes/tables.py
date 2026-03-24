@@ -7,20 +7,16 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from app.services import database as db
-from app.services.auth import verify_token
 from app.services import billing
 from app.services.agent import trigger_nps
+from app.routes.deps import require_auth, get_current_user
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
-
-async def require_auth(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not await verify_token(token):
-        raise HTTPException(status_code=401, detail="No autorizado")
+META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
 async def get_table_wa_number(table: dict) -> str:
-    wa_number = "15556293573"
+    wa_number = ""
     if table.get("branch_id"):
         r = await db.db_get_restaurant_by_id(table["branch_id"])
         if r:
@@ -38,19 +34,13 @@ class TableRequest(BaseModel):
 
 @router.get("/api/tables")
 async def get_tables(request: Request):
-    await require_auth(request)
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    user = await db.db_get_user(username) if username else None
-    return {"tables": await db.db_get_tables(branch_id=user.get("branch_id") if user else None)}
+    user = await get_current_user(request)
+    return {"tables": await db.db_get_tables(branch_id=user.get("branch_id"))}
 
 @router.post("/api/tables")
 async def create_table(request: Request, body: TableRequest):
-    await require_auth(request)
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    user = await db.db_get_user(username) if username else None
-    branch_id = body.branch_id or (user.get("branch_id") if user else None)
+    user = await get_current_user(request)
+    branch_id = body.branch_id or user.get("branch_id")
     table_id = f"{f'b{branch_id}-' if branch_id else ''}mesa-{body.number}"
     name = body.name or f"Mesa {body.number}"
     await db.db_create_table(table_id, body.number, name, branch_id=branch_id)
@@ -82,11 +72,20 @@ async def public_menu_context(table_id: str):
     menu = await db.db_get_menu(wa_number) or {}
     availability = await db.db_get_menu_availability()
 
+    restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
+    features = restaurant.get("features") or {}
+    if isinstance(features, str):
+        import json as _json
+        try: features = _json.loads(features)
+        except Exception: features = {}
+
     return {
         "table_name": table["name"],
         "wa_url": wa_url,
         "menu": menu,
-        "availability": availability
+        "availability": availability,
+        "locale": features.get("locale", "en-US"),
+        "currency": features.get("currency", "USD"),
     }
 
 def build_qr_html(menu_url: str, table_name: str, width: int = 300) -> str:
@@ -234,11 +233,8 @@ async def update_delivery_order_status(request: Request, order_id: str):
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None):
-    await require_auth(request)
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    user = await db.db_get_user(username) if username else None
-    branch_id = user.get("branch_id") if user else None
+    user = await get_current_user(request)
+    branch_id = user.get("branch_id")
     
     pool = await db.get_pool()
     async with pool.acquire() as conn:
@@ -288,7 +284,7 @@ async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
         try:
             async with httpx.AsyncClient(timeout=8) as client:
                 resp = await client.post(
-                    f"https://graph.facebook.com/v20.0/{final_phone_id}/messages",
+                    f"https://graph.facebook.com/{META_API_VERSION}/{final_phone_id}/messages",
                     headers={"Authorization": f"Bearer {token}"},
                     json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": text}}
                 )
@@ -345,7 +341,7 @@ async def update_order_status(request: Request, order_id: str):
         await db.db_update_table_order_status(base_id, "factura_generada")
         
         if phone:
-            msg = "🧾 Estamos generando tu cuenta. En un momento el mesero te la entregará en la mesa."
+            msg = "Your bill is being prepared. The waiter will bring it to your table shortly."
             await send_wa_msg(phone, msg, db_phone_id)
 
         return {"success": True, "order_id": order_id, "status": "factura_generada"}
@@ -357,7 +353,7 @@ async def update_order_status(request: Request, order_id: str):
         await db.db_close_table_bill(base_id)  # status en BD = factura_entregada
  
         if phone:
-            msg = "👋 Tu mesa ha sido cerrada. ¡Muchas gracias por visitarnos, esperamos verte de nuevo pronto!"
+            msg = "Your table has been closed. Thank you for visiting us — we hope to see you again soon!"
             await send_wa_msg(phone, msg, db_phone_id)
  
             # ── Resolver bot_number y restaurant_name para NPS ──
@@ -398,7 +394,7 @@ async def update_order_status(request: Request, order_id: str):
     else:
         await db.db_update_table_order_status(order_id, status)
         if status == "entregado" and phone:
-            msg = f"🍽️ ¡Tu pedido ha sido entregado en la {table_name}!\n\nDisfruta tu comida. Cuando termines, puedes pedirme la cuenta por aquí mismo."
+            msg = f"Your order has been delivered to {table_name}!\n\nEnjoy your meal. When you're ready, you can request the bill right here."
             await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}
@@ -419,19 +415,16 @@ class ManualOrderRequest(BaseModel):
 @router.get("/api/pos/menu")
 async def get_pos_menu(request: Request):
     """Devuelve el menú del restaurante para pintarlo en el POS del mesero"""
-    await require_auth(request)
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    user = await db.db_get_user(username)
+    user = await get_current_user(request)
     
     # Buscamos el número de WhatsApp asociado a la sucursal del mesero
-    wa_number = "15556293573" # Fallback por defecto
+    wa_number = ""
     if user and user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r: wa_number = r.get("whatsapp_number", wa_number)
-    else:
+        if r: wa_number = r.get("whatsapp_number", "")
+    if not wa_number:
         all_r = await db.db_get_all_restaurants()
-        if all_r: wa_number = all_r[0].get("whatsapp_number", wa_number)
+        if all_r: wa_number = all_r[0].get("whatsapp_number", "")
         
     menu = await db.db_get_menu(wa_number) or {}
     return {"menu": menu}
@@ -439,11 +432,8 @@ async def get_pos_menu(request: Request):
 @router.get("/api/pos/tables-status")
 async def get_tables_status(request: Request):
     """Devuelve todas las mesas y su estado actual (ideal para pintar el mapa)"""
-    await require_auth(request)
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    user = await db.db_get_user(username)
-    branch_id = user.get("branch_id") if user else None
+    user = await get_current_user(request)
+    branch_id = user.get("branch_id")
     
     tables = await db.db_get_tables(branch_id=branch_id)
     
@@ -479,7 +469,7 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     phone = "manual" # Como es manual, no hay celular del cliente atado al inicio
     
     # 👇 LA MAGIA ESTÁ AQUÍ: Verificamos si la mesa ya tiene una orden activa
-    base_id = await db.db_get_base_order_id(phone, body.table_id)
+    base_id = await db.db_get_base_order_id(body.table_id)
     
     if base_id:
         # Es una adición (sub-orden) a una cuenta que ya existe

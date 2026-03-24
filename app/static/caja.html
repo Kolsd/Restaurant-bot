@@ -199,13 +199,13 @@ function doLogout() {
 
 // Reloj en tiempo real
 setInterval(() => {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }, 1000);
 
 // Leemos la configuración del restaurante desde LocalStorage
 const _restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-const _locale = _restData.locale || 'es-CO';
-const _currency = _restData.currency || 'COP';
+const _locale = _restData.locale || 'en-US';
+const _currency = _restData.currency || 'USD';
 
 // Formateador Universal Inteligente
 const fmt = (amount) => {

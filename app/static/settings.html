@@ -135,9 +135,9 @@ async function loadSettings() {
     document.getElementById('delivery-fee').value       = d.delivery_fee || 0;
     document.getElementById('min-order').value          = d.min_order || 0;
     document.getElementById('maps-url').value           = d.google_maps_url || '';
-    document.getElementById('config-timezone').value = d.timezone || 'America/Bogota';
-    document.getElementById('config-currency').value = d.currency || 'COP';
-    document.getElementById('config-locale').value   = d.locale || 'es-CO';
+    document.getElementById('config-timezone').value = d.timezone || 'UTC';
+    document.getElementById('config-currency').value = d.currency || 'USD';
+    document.getElementById('config-locale').value   = d.locale || 'en-US';
   } catch(e) { console.error(e); }
 }
 

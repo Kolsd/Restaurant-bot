@@ -165,8 +165,8 @@ const token = localStorage.getItem('rb_token');
         const roles = rawRole.toLowerCase().split(',');
 
         const _restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-        const _locale = _restData.locale || 'es-CO';
-        const _currency = _restData.currency || 'COP';
+        const _locale = _restData.locale || 'en-US';
+        const _currency = _restData.currency || 'USD';
 
         // Formateador Universal
         const fmt = (amount) => {

@@ -1,8 +1,10 @@
 import os
 import io
+import time
 import base64
 import json
 import pypdf
+from collections import defaultdict
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -10,11 +12,25 @@ from pathlib import Path
 from anthropic import Anthropic
 import httpx
 
-from app.services.auth import login, logout, verify_token, create_user, get_users, hash_password
+from app.services.auth import login, logout, create_user, get_users, hash_password
 from app.services import database as db
+from app.routes.deps import require_auth, get_current_user
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
+
+# ── LOGIN RATE LIMITER (in-process, resets on restart) ────────────────
+_login_attempts: dict = defaultdict(list)
+_LOGIN_MAX    = 10   # max attempts
+_LOGIN_WINDOW = 900  # 15 minutes in seconds
+
+def _check_login_rate_limit(ip: str) -> None:
+    now = time.time()
+    attempts = _login_attempts[ip]
+    _login_attempts[ip] = [t for t in attempts if now - t < _LOGIN_WINDOW]
+    if len(_login_attempts[ip]) >= _LOGIN_MAX:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again in 15 minutes.")
+    _login_attempts[ip].append(now)
 
 async def geocode_address(address: str) -> tuple:
     try:
@@ -105,8 +121,8 @@ async def get_public_menu(bot_number: str):
             "restaurant_name": rest["name"],
             "menu": menu_data,
             "bot_number": bot_number,
-            "locale": features.get("locale", "es-CO"),
-            "currency": features.get("currency", "COP")
+            "locale": features.get("locale", "en-US"),
+            "currency": features.get("currency", "USD")
         }
         
 @router.get("/privacidad", response_class=HTMLResponse)
@@ -198,7 +214,7 @@ async def save_settings(request: Request):
         "payment_methods", "google_maps_url", "bot_active",
         "upsell_active", "domicilio_active", "recoger_active",
         "delivery_fee", "min_order", "delivery_message",
-        "pickup_message", "welcome_message"
+        "pickup_message", "welcome_message",
         "timezone", "currency", "locale"
     ]
     for key in updatable:
@@ -215,9 +231,12 @@ async def save_settings(request: Request):
 
 # ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
-async def auth_login(request: LoginRequest):
-    result = await login(request.username, request.password)
-    if not result["success"]: raise HTTPException(status_code=401, detail=result["error"])
+async def auth_login(request: Request, body: LoginRequest):
+    ip = request.client.host if request.client else "unknown"
+    _check_login_rate_limit(ip)
+    result = await login(body.username, body.password)
+    if not result["success"]:
+        raise HTTPException(status_code=401, detail=result["error"])
     return result
 
 @router.post("/api/auth/logout")
@@ -316,7 +335,7 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     wa_number = body.whatsapp_number.strip()
     if not wa_number:
         all_r = await db.db_get_all_restaurants()
-        wa_number = all_r[0]["whatsapp_number"] + f"_b{len(all_r)+1}" if all_r else "15556293573"
+        wa_number = all_r[0]["whatsapp_number"] + f"_b{len(all_r)+1}" if all_r else ""
     lat, lon, display = await geocode_address(body.address)
     await db.db_create_restaurant(body.name, wa_number, body.address, body.menu, lat, lon)
     return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
@@ -423,7 +442,7 @@ async def fix_conversations_bot_number(request: Request):
     body = await request.json()
     if body.get("admin_key") != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
     pool = await db.get_pool()
-    async with pool.acquire() as conn: await conn.execute("UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL", body.get("bot_number", "15556293573"))
+    async with pool.acquire() as conn: await conn.execute("UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL", body.get("bot_number", ""))
     return {"success": True}
 # ════════════════════════════════════════════════════════════════
 # ── MÓDULOS DE DATOS PARA EL DASHBOARD (FRONTEND JAVASCRIPT) ──
@@ -562,23 +581,29 @@ async def update_order_status(order_id: str, request: Request):
 
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
-    # FIX: Ahora desempaquetamos 4 valores en lugar de 3
+    hours = max(1, min(hours, 720))  # clamp: 1h – 30 days
     _, bot_number, _, _ = await get_dashboard_filters(request, "today")
-    
+
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         try:
-            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours'"
-            params = []
             if bot_number:
-                query += " AND bot_number = $1"
-                params.append(bot_number)
-            query += " ORDER BY closed_at DESC"
-            rows = await conn.fetch(query, *params)
+                rows = await conn.fetch(
+                    "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
+                    " AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')"
+                    " AND bot_number = $2 ORDER BY closed_at DESC",
+                    hours, bot_number,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
+                    " AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')"
+                    " ORDER BY closed_at DESC",
+                    hours,
+                )
         except Exception as e:
-            print(f"Aviso - Error en table_sessions (intentando modo seguro): {e}")
-            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours' ORDER BY closed_at DESC"
-            rows = await conn.fetch(query)
+            print(f"Warning - table_sessions query error: {e}", flush=True)
+            rows = []
             
     sessions = []
     for r in rows:
@@ -654,7 +679,7 @@ async def get_dashboard_menu(request: Request):
     username = await require_auth(request)
     user = await db.db_get_user(username)
     
-    wa_number = "15556293573" # Fallback
+    wa_number = ""
     if user and user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
         if r: wa_number = r.get("whatsapp_number", wa_number)
@@ -664,35 +689,6 @@ async def get_dashboard_menu(request: Request):
         
     menu = await db.db_get_menu(wa_number) or {}
     return {"menu": menu}    
-
-# ── ENDPOINTS DE SESIONES (PARA PESTAÑA AUDITORÍA) ──
-
-router.get("/api/table-sessions/closed")
-async def get_closed_sessions(request: Request, hours: int = 24):
-    _, bot_number, _ = await get_dashboard_filters(request, "today")
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        try:
-            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours'"
-            params = []
-            if bot_number:
-                query += " AND bot_number = $1"
-                params.append(bot_number)
-            query += " ORDER BY closed_at DESC"
-            rows = await conn.fetch(query, *params)
-        except Exception as e:
-            print(f"Aviso - Error en table_sessions (intentando modo seguro): {e}")
-            query = f"SELECT * FROM table_sessions WHERE closed_at IS NOT NULL AND closed_at >= NOW() - INTERVAL '{hours} hours' ORDER BY closed_at DESC"
-            rows = await conn.fetch(query)
-            
-    sessions = []
-    for r in rows:
-        s = dict(r)
-        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat() + "Z" # <--- Z AÑADIDA
-        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat() + "Z"    # <--- Z AÑADIDA
-        sessions.append(s)
-        
-    return {"sessions": sessions}
 
 @router.get("/api/table-sessions/{session_id}/history")
 async def get_session_history(request: Request, session_id: int):

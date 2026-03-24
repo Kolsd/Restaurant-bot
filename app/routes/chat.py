@@ -17,41 +17,25 @@ router = APIRouter()
 # ── RATE LIMITING BACKED BY POSTGRES (Workers Safe) ──────────────────
 RATE_LIMIT_MESSAGES = 20   # max mensajes por ventana
 RATE_LIMIT_WINDOW   = 60   # segundos
-_rate_table_checked = False
 
 async def _is_rate_limited(phone: str) -> bool:
-    global _rate_table_checked
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # 1. Crear la tabla si es la primera vez que la app arranca
-        if not _rate_table_checked:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS meta_rate_limits (
-                    id SERIAL PRIMARY KEY,
-                    phone TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_rate_phone ON meta_rate_limits(phone);
-            """)
-            _rate_table_checked = True
-
-        # 2. Borrar el historial viejo de este número (Mantiene la tabla ultra ligera)
+        # 1. Borrar el historial viejo de este número (mantiene la tabla liviana)
         await conn.execute(
-            f"DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - INTERVAL '{RATE_LIMIT_WINDOW} seconds'", 
+            f"DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - INTERVAL '{RATE_LIMIT_WINDOW} seconds'",
             phone
         )
 
-        # 3. Contar cuántos mensajes ha enviado en los últimos 60 segundos
+        # 2. Contar cuántos mensajes ha enviado en los últimos N segundos
         count = await conn.fetchval(
-            "SELECT COUNT(*) FROM meta_rate_limits WHERE phone = $1", 
+            "SELECT COUNT(*) FROM meta_rate_limits WHERE phone = $1",
             phone
         )
 
-        # 4. Bloquear o permitir
         if count >= RATE_LIMIT_MESSAGES:
             return True
 
-        # Si todo está bien, registramos este mensaje
         await conn.execute("INSERT INTO meta_rate_limits (phone) VALUES ($1)", phone)
         return False
 
@@ -78,10 +62,13 @@ def _normalize_number(number: str) -> str:
     return number.replace(" ", "").replace("+", "")
 
 
+META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
+
+
 class ChatRequest(BaseModel):
     phone: str
     message: str
-    bot_number: str = "15556293573"
+    bot_number: str = ""
 
 
 class ResetRequest(BaseModel):
@@ -107,7 +94,9 @@ async def verify_meta_webhook(request: Request):
     mode = params.get("hub.mode")
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
-    verify_token = os.getenv("META_VERIFY_TOKEN") or os.getenv("WHATSAPP_VERIFY_TOKEN", "mesio_secret_2024")
+    verify_token = os.getenv("META_VERIFY_TOKEN") or os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+    if not verify_token:
+        return Response(content="Verify token not configured", status_code=500)
     if mode == "subscribe" and token == verify_token:
         return Response(content=challenge)
     return Response(content="Error de verificacion", status_code=403)
@@ -122,7 +111,7 @@ async def _process_message(user_phone: str, user_text: str, bot_number: str,
         print(f"🤖 Resultado IA: {result}", flush=True)
 
         if result and result.get("message"):
-            url = f"https://graph.facebook.com/v20.0/{phone_id}/messages"
+            url = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
             headers = {"Authorization": f"Bearer {access_token}"}
             async with httpx.AsyncClient(timeout=10) as client:
                 res = await client.post(url, headers=headers, json={
