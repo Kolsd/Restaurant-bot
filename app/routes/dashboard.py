@@ -212,6 +212,7 @@ async def save_settings(request: Request):
         "upsell_active", "domicilio_active", "recoger_active",
         "delivery_fee", "min_order", "delivery_message",
         "pickup_message", "welcome_message"
+        "timezone", "currency", "locale"
     ]
     for key in updatable:
         if key in body:
@@ -224,7 +225,7 @@ async def save_settings(request: Request):
             _json.dumps(current_features), branch_id
         )
     return {"success": True, "features": current_features}
-    
+
 # ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
 async def auth_login(request: LoginRequest):

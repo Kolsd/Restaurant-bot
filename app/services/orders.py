@@ -4,9 +4,8 @@ import os
 import asyncio
 from datetime import datetime, timezone, timedelta
 from app.services import database as db
+from zoneinfo import ZoneInfo
 
-# ── FIX: Zona Horaria de Colombia (UTC -5) ──
-COT = timezone(timedelta(hours=-5))
 
 DELIVERY_FEE = 5000
 
@@ -180,6 +179,12 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
 
         else:
             # ── ORDEN NUEVA ──
+            # 👇 Buscamos la zona horaria de ESTE restaurante específico
+            rest_data = await db.db_get_restaurant_by_phone(bot_number)
+            tz_str = "UTC"
+            if rest_data and isinstance(rest_data.get("features"), dict):
+                tz_str = rest_data["features"].get("timezone", "UTC")
+
             order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
             order = {
                 "id": order_id,
@@ -193,11 +198,10 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 "total": total,
                 "status": "confirmado",
                 "paid": False,
-                "created_at": datetime.now(COT).isoformat(),
+                # 👇 Asignamos la hora local dinámicamente
+                "created_at": datetime.now(ZoneInfo(tz_str)).isoformat(),
                 "bot_number": bot_number,
                 "payment_method": payment_method,
                 "payment_url": generate_wompi_payment_link(order_id, total),
                 "is_additional": False,
             }
-            await db.db_clear_cart(phone, bot_number)
-            return {"success": True, "order": order}

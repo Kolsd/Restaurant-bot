@@ -1154,6 +1154,37 @@ input:checked + .slider::before { transform: translateX(20px); background: var(-
                 <label class="form-label">Meta Access Token (Opcional)</label>
                 <input type="password" id="r_wa_access_token" class="form-input" placeholder="Token permanente EAAI...">
               </div>
+              <div class="form-grid3" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+                <div class="form-group">
+                  <label class="form-label">Zona Horaria *</label>
+                  <select id="r_timezone" class="form-input">
+                    <option value="America/Bogota">Colombia (UTC-5)</option>
+                    <option value="America/New_York">EE. UU. - Este (EST)</option>
+                    <option value="America/Chicago">EE. UU. - Central (CST)</option>
+                    <option value="America/Los_Angeles">EE. UU. - Pacífico (PST)</option>
+                    <option value="America/Mexico_City">México (CDMX)</option>
+                    <option value="Europe/Madrid">España (Madrid)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Moneda *</label>
+                  <select id="r_currency" class="form-input">
+                    <option value="COP">COP ($)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="MXN">MXN ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Formato Regional *</label>
+                  <select id="r_locale" class="form-input">
+                    <option value="es-CO">es-CO (Español Col)</option>
+                    <option value="en-US">en-US (Inglés US)</option>
+                    <option value="es-MX">es-MX (Español Mex)</option>
+                    <option value="es-ES">es-ES (Español Esp)</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1928,9 +1959,13 @@ async function createRestaurant() {
     module_pos: document.getElementById('feat_pos').checked,
     module_nps: document.getElementById('feat_nps').checked,
     module_inventory: document.getElementById('feat_inventory').checked,
-    wompi_active: document.getElementById('feat_wompi').checked
+    wompi_active: document.getElementById('feat_wompi').checked,
+    // 👇 Valores por defecto (se pueden cambiar luego en Settings)
+    timezone: "America/Bogota",
+    currency: "COP",
+    locale: "es-CO"
   };
-  
+
   try {
     const res = await fetch('/api/admin/create-restaurant', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

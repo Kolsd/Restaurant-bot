@@ -1,14 +1,20 @@
 import os
 import json
 from fastapi import APIRouter, Request, HTTPException, Query
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from app.services.auth import verify_token
 from app.services import database as db
 
 router = APIRouter()
 
-# Zona Horaria de Colombia (UTC -5)
-COT = timezone(timedelta(hours=-5))
+def get_tz(restaurant: dict) -> str:
+    feats = restaurant.get("features", {})
+    if isinstance(feats, str):
+        import json
+        try: feats = json.loads(feats)
+        except: feats = {}
+    return feats.get("timezone", "UTC")
 
 async def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -37,15 +43,16 @@ async def get_current_restaurant(request: Request) -> dict:
         
     raise HTTPException(status_code=403, detail="Restaurante no encontrado")
 
-def get_date_range(period: str):
-    today = datetime.now(COT).date()
+ddef get_date_range(period: str, tz_str: str):
+    tz = ZoneInfo(tz_str)
+    today = datetime.now(tz).date()
     if period == "today": return str(today), str(today)
     elif period == "week": return str(today - timedelta(days=6)), str(today)
     elif period == "month": return str(today.replace(day=1)), str(today)
     elif period == "semester": return str(today.replace(month=1 if today.month <= 6 else 7, day=1)), str(today)
     elif period == "year": return str(today.replace(month=1, day=1)), str(today)
     return str(today), str(today)
-
+    
 # =====================================================================
 # ENDPOINT MAESTRO (SYNC)
 # =====================================================================
@@ -53,7 +60,7 @@ def get_date_range(period: str):
 async def dashboard_sync(request: Request, period: str = Query("today")):
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
-    date_from, date_to = get_date_range(period)
+    date_from, date_to = get_date_range(period, get_tz(restaurant))
 
     orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
@@ -135,7 +142,7 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
 async def dashboard_stats(request: Request, period: str = Query("today")):
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
-    date_from, date_to = get_date_range(period)
+    date_from, date_to = get_date_range(period, get_tz(restaurant))
 
     orders       = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     paid         = [o for o in orders if o["paid"]]
@@ -166,7 +173,7 @@ async def dashboard_stats(request: Request, period: str = Query("today")):
 async def dashboard_orders(request: Request, period: str = Query("today")):
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
-    date_from, date_to = get_date_range(period)
+    date_from, date_to = get_date_range(period, get_tz(restaurant))
     orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     result = []
     for o in orders:
@@ -212,7 +219,7 @@ async def dashboard_conversations(request: Request):
 @router.get("/api/dashboard/chart")
 async def dashboard_chart(request: Request, period: str = Query("week")):
     restaurant = await get_current_restaurant(request)
-    date_from, date_to = get_date_range(period)
+    date_from, date_to = get_date_range(period, get_tz(restaurant))
     orders = await db.db_get_orders_range(date_from, date_to, bot_number=restaurant["whatsapp_number"])
     by_date = {}
     current = datetime.strptime(date_from, "%Y-%m-%d").date()

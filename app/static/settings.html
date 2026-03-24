@@ -135,6 +135,9 @@ async function loadSettings() {
     document.getElementById('delivery-fee').value       = d.delivery_fee || 0;
     document.getElementById('min-order').value          = d.min_order || 0;
     document.getElementById('maps-url').value           = d.google_maps_url || '';
+    document.getElementById('config-timezone').value = d.timezone || 'America/Bogota';
+    document.getElementById('config-currency').value = d.currency || 'COP';
+    document.getElementById('config-locale').value   = d.locale || 'es-CO';
   } catch(e) { console.error(e); }
 }
 
@@ -179,6 +182,9 @@ async function saveSettings() {
       delivery_fee:     parseInt(document.getElementById('delivery-fee').value) || 0,
       min_order:        parseInt(document.getElementById('min-order').value) || 0,
       google_maps_url:  document.getElementById('maps-url').value.trim(),
+      timezone:         document.getElementById('config-timezone').value,
+      currency:         document.getElementById('config-currency').value,
+      locale:           document.getElementById('config-locale').value
     };
     const r = await fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify(body) });
     const fb = document.getElementById('feedback');
