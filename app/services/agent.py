@@ -216,7 +216,8 @@ STEP 6 — CREATE ORDER: Only after confirmation. action="delivery" or action="p
 CRITICAL RULES FOR EXTERNAL MODE:
 - NEVER use action="delivery" or action="pickup" without a confirmed address (if applicable) AND payment_method.
 - If the customer says "yes" or "confirm" but address or payment method is missing, ASK FOR THEM first.
-- If [MÉTODOS_DE_PAGO] is empty, ask how they prefer to pay anyway and save it in payment_method.
+- ONLY offer payment methods that appear in [MÉTODOS_DE_PAGO]. NEVER invent or suggest methods not in that list.
+- If [MÉTODOS_DE_PAGO] is empty, ask how the customer prefers to pay without suggesting any specific method.
 
 =========================================
 CRITICAL DINE-IN RULES (TABLE MODE)
@@ -224,6 +225,8 @@ CRITICAL DINE-IN RULES (TABLE MODE)
 - If you see [MESA: X]: the customer is inside the restaurant. Use action="order". DO NOT ask for address or payment method.
 - If you see [ALERTA: MESA NO DETECTADA] but the customer says they are inside the restaurant: ask "What is your table number?" action="chat"
 - NEVER use action="order" without [MESA: X] in the context.
+- When the customer asks for the bill or wants to pay (any method including card): use action="bill". NEVER mention or calculate a total amount in the reply — taxes and service charges may apply and the official bill comes from the waiter.
+- NEVER use action="waiter" for payment requests. action="waiter" is ONLY for non-billing assistance (spill, extra napkins, help needed, etc.).
 
 =========================================
 GENERAL RULES
@@ -298,7 +301,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 print(f"Warning: 'order' attempted without table context for {phone}. Blocked.", flush=True)
                 base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
                 menu_url = f"{base_url}/catalog?bot={bot_number}" if base_url else f"/catalog?bot={bot_number}"
-                return f"To take your order, I need to know your table number. What table are you at?\n\nIf you'd like to order for Delivery or Pickup, please use our digital menu: {menu_url}"
+                return f"Para tomar tu pedido, necesito saber en qué mesa estás. ¿En qué número de mesa te encuentras?\n\nSi prefieres Domicilio o Recoger, usa nuestro menú digital: {menu_url}"
 
             cart = await db.db_get_cart(phone, bot_number)
             if not cart or not cart.get("items"):
@@ -364,7 +367,8 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             if action == "delivery" and not address:
                 return reply
 
-            res = await orders.create_order(phone, action, address, notes, bot_number, payment_method)
+            order_type = "domicilio" if action == "delivery" else "recoger"
+            res = await orders.create_order(phone, order_type, address, notes, bot_number, payment_method)
             if res["success"]:
                 order = res["order"]
                 await db.db_save_order(order)
@@ -540,6 +544,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         assistant_message = "Lo siento, hubo un problema. ¿Puedes repetir tu pedido?"
     else:
         assistant_message = await execute_action(parsed, user_phone, bot_number, table_context, session_state)
+        assistant_message = assistant_message.replace("[LINK_MENU]", menu_url)
 
     if nps_key in _nps_state and _nps_state[nps_key]["state"] == "waiting_score":
         nps_question = (

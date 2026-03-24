@@ -8,8 +8,8 @@ const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":
 if (!token) window.location.href = '/login';
 
 const headers = { 'Authorization': 'Bearer ' + token };
-const _locale = restaurant.locale || 'es-CO';
-const _currency = restaurant.currency || 'COP';
+const _locale = restaurant.locale || 'en-US';
+const _currency = restaurant.currency || 'USD';
 
 const fmt = (amount) => {
     return new Intl.NumberFormat(_locale, {
@@ -292,7 +292,7 @@ async function refreshAll() {
 
   } catch(e) { console.error('Sync Error:', e); }
 
-  if (badge) badge.textContent = 'En vivo · ' + new Date().toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  if (badge) badge.textContent = 'En vivo · ' + new Date().toLocaleTimeString(navigator.language || 'default', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
 
 function renderOrders(orders) {
@@ -307,8 +307,8 @@ function renderOrders(orders) {
   orders.forEach(o => {
     const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
     const dateObj = new Date(isoStr);
-    const localTime = dateObj.toLocaleTimeString('_locale', {hour: '2-digit', minute: '2-digit'});
-    const localDate = dateObj.toLocaleDateString('_locale', {day: '2-digit', month: 'short', year: 'numeric'});
+    const localTime = dateObj.toLocaleTimeString(_locale, {hour: '2-digit', minute: '2-digit'});
+    const localDate = dateObj.toLocaleDateString(_locale, {day: '2-digit', month: 'short', year: 'numeric'});
 
     let itemsStr = '—';
     try {
@@ -499,6 +499,7 @@ function switchOrderTab(tab, btn) {
     rtDiv.style.display   = 'none';
     histDiv.style.display = 'block';
     if (periodBar) periodBar.style.display = 'flex';
+    if(typeof refreshAll === 'function') refreshAll();
   }
 }
 

@@ -459,6 +459,11 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     if branch_id:
         r = await db.db_get_restaurant_by_id(branch_id)
         if r: bot_number = r.get("whatsapp_number")
+    else:
+        all_r = await db.db_get_all_restaurants()
+        if all_r:
+            branch_id = all_r[0].get("id")
+            bot_number = all_r[0].get("whatsapp_number")
     
     # 1. Calculamos la hora local EXACTA del usuario que está viendo la pantalla
     now_utc = datetime.utcnow()
