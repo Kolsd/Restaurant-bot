@@ -80,7 +80,7 @@
         if (!botNumber) {
             document.getElementById('rest-name').innerText = "Error: Faltan parámetros en el QR";
         } else {
-            document.getElementById('table-info').innerText = mesa ? `Mesa ${mesa}` : 'Pedido a domicilio / para recoger';
+            document.getElementById('table-info').innerText = mesa ? mesa : 'Pedido a domicilio / para recoger';
             loadMenu();
         }
 
@@ -168,7 +168,7 @@
             let text = '';
 
             if (mesa) {
-                text += `¡Hola! Estoy en la Mesa ${mesa} y quiero ordenar lo siguiente:\n\n`;
+                text += `¡Hola! Estoy en la ${mesa} y quiero ordenar lo siguiente:\n\n`;
             } else {
                 text += `¡Hola! Quiero hacer un pedido:\n\n`;
             }

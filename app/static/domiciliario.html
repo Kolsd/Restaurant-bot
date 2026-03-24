@@ -223,6 +223,19 @@ const token = localStorage.getItem('rb_token');
             }
         }
 
+        function getWazeLink(address) {
+            if (!address) return `https://waze.com/ul?q=`;
+            // Google Maps URL with coordinates: ?q=lat,lon
+            const mapsMatch = address.match(/[?&]q=([-\d.]+),([-\d.]+)/);
+            if (mapsMatch) return `https://waze.com/ul?ll=${mapsMatch[1]},${mapsMatch[2]}&navigate=yes`;
+            // lat:X lon:Y format (from WhatsApp GPS share)
+            const latMatch = address.match(/lat:([-\d.]+)/);
+            const lonMatch = address.match(/lon:([-\d.]+)/);
+            if (latMatch && lonMatch) return `https://waze.com/ul?ll=${latMatch[1]},${lonMatch[1]}&navigate=yes`;
+            // Default: text address search
+            return `https://waze.com/ul?q=${encodeURIComponent(address)}`;
+        }
+
         function renderOrders(orders) {
             const listRecoger = document.getElementById('list-recoger');
             const listRuta = document.getElementById('list-ruta');
@@ -234,14 +247,14 @@ const token = localStorage.getItem('rb_token');
 
             orders.forEach(order => {
                 const isPaid = order.paid;
-                const paymentBadge = isPaid 
+                const paymentBadge = isPaid
                     ? `<span class="badge pagado">✅ PAGADO</span>`
                     : `<span class="badge cobrar">💰 COBRAR: ${fmt(order.total)}</span>`;
-                
-                // Limpiar teléfono para el link de WhatsApp
+
                 const cleanPhone = order.phone.replace(/\D/g, '');
-                const wazeLink = `https://waze.com/ul?q=${encodeURIComponent(order.address || '')}`;
+                const wazeLink = getWazeLink(order.address);
                 const waLink = `https://wa.me/${cleanPhone}`;
+                const isDelivered = order.status === 'entregado';
 
                 const cardHtml = `
                     <div class="order-card">
@@ -251,20 +264,22 @@ const token = localStorage.getItem('rb_token');
                         </div>
                         <div class="address">📍 ${order.address || 'Sin dirección'}</div>
                         ${order.notes ? `<div class="notes">📝 <b>Nota:</b> ${order.notes}</div>` : ''}
-                        
+
+                        ${!isDelivered ? `
                         <div class="action-btns">
                             <a href="${wazeLink}" target="_blank" class="btn btn-waze">🗺️ Waze</a>
                             <a href="${waLink}" target="_blank" class="btn btn-wa">💬 Llama/WA</a>
-                        </div>
-                        
+                        </div>` : ''}
+
                         ${order.status === 'listo' ? `<button class="btn btn-main btn-start" onclick="updateStatus('${order.id}', 'en_camino')">🚀 Iniciar Ruta</button>` : ''}
-                        ${order.status === 'en_camino' ? `<button class="btn btn-main btn-deliver" onclick="updateStatus('${order.id}', 'entregado')">✅ Marcar Entregado</button>` : ''}
-                        ${order.status === 'entregado' ? `<p style="text-align:center; color:#1D9E75; font-weight:bold;">Entregado correctamente</p>` : ''}
+                        ${order.status === 'en_camino' ? `<button class="btn btn-main btn-start" onclick="updateStatus('${order.id}', 'en_puerta')" style="background:#f57c00;">📍 Estoy en la puerta</button>` : ''}
+                        ${order.status === 'en_puerta' ? `<button class="btn btn-main btn-deliver" onclick="updateStatus('${order.id}', 'entregado')">✅ Marcar Entregado</button>` : ''}
+                        ${isDelivered ? `<p style="text-align:center; color:#1D9E75; font-weight:bold; padding:12px 0;">Entregado correctamente ✅</p>` : ''}
                     </div>
                 `;
 
                 if (order.status === 'listo') { listRecoger.innerHTML += cardHtml; recogerCount++; }
-                else if (order.status === 'en_camino') { listRuta.innerHTML += cardHtml; rutaCount++; }
+                else if (order.status === 'en_camino' || order.status === 'en_puerta') { listRuta.innerHTML += cardHtml; rutaCount++; }
                 else if (order.status === 'entregado') { listEntregados.innerHTML += cardHtml; entregadoCount++; }
             });
 

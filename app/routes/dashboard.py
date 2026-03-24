@@ -549,28 +549,39 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
             
             mesa_groups = {}
             for r in rows_mesa:
+                if not r["created_at"]:
+                    continue  # skip rows with NULL timestamp
                 base_id = r["base_order_id"] if r.get("base_order_id") else r["id"]
                 if base_id not in mesa_groups:
                     mesa_groups[base_id] = {
-                        "id": base_id, "items": [], "status": r.get("status", "recibido"),
+                        "id": base_id, "items": [], "status": r.get("status") or "recibido",
                         "total": 0.0, "is_paid": False,
                         "time": r["created_at"].strftime("%H:%M"),
                         "created_at": r["created_at"].isoformat() + "Z"
                     }
                 mesa_groups[base_id]["total"] += float(r["total"] or 0)
-                
+
                 try:
-                    parsed_items = json.loads(r["items"]) if isinstance(r["items"], str) else r["items"]
-                    if isinstance(parsed_items, list): mesa_groups[base_id]["items"].extend(parsed_items)
-                except: pass
-                
-                if r["status"] in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
+                    raw_items = r["items"]
+                    if isinstance(raw_items, str):
+                        parsed_items = json.loads(raw_items)
+                    elif isinstance(raw_items, list):
+                        parsed_items = raw_items
+                    else:
+                        parsed_items = []
+                    if isinstance(parsed_items, list):
+                        mesa_groups[base_id]["items"].extend(parsed_items)
+                except Exception:
+                    pass
+
+                row_status = r.get("status") or ""
+                if row_status in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
                     mesa_groups[base_id]["is_paid"] = True
-                    mesa_groups[base_id]["status"] = r["status"]
+                    mesa_groups[base_id]["status"] = row_status
 
             for base_id, g in mesa_groups.items():
                 orders.append({
-                    "id": g["id"], "items": json.dumps(g["items"]), "type": "mesa",
+                    "id": g["id"], "items": json.dumps(g["items"], default=str), "type": "mesa",
                     "status": g["status"], "paid": g["is_paid"], "total": g["total"],
                     "time": g["time"], "created_at": g["created_at"]
                 })

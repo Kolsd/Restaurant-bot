@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
 from app.routes.deps import require_auth
+from app.services.agent import trigger_nps
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -117,24 +118,40 @@ class UpdateOrderStatusRequest(BaseModel):
 class UpdateOrderStatusRequest(BaseModel):
     status: str
 
-async def send_delivery_notification(phone: str, status: str):
+async def send_delivery_notification(phone: str, status: str, bot_number: str = ""):
     """Envía un mensaje automático de WhatsApp según el estado del pedido"""
     token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-    phone_id = os.getenv("META_PHONE_NUMBER_ID", "") 
-    
+    phone_id = os.getenv("META_PHONE_NUMBER_ID", "")
+
     if not token or not phone_id:
         print("⚠️ No hay credenciales de Meta para enviar la notificación.")
-        return 
-        
+        return
+
     if status == 'en_camino':
         msg = "🛵 *¡Buenas noticias!*\n\nNuestro domiciliario acaba de salir del restaurante con tu pedido. ¡Ve preparando la mesa! 🍔"
+    elif status == 'en_puerta':
+        msg = "📍 *¡El domiciliario está en la puerta!*\n\n¡Ya casi llega tu pedido! Por favor ten listo el pago si aplica. 🏠"
     elif status == 'entregado':
-        msg = "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
+        rest_name = ""
+        if bot_number:
+            try:
+                rest = await db.db_get_restaurant_by_bot_number(bot_number)
+                if rest:
+                    rest_name = rest.get("name", "")
+            except Exception:
+                pass
+        nps_label = rest_name or "nuestro restaurante"
+        msg = (
+            "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
+            f"\n\n⭐ ¿Cómo calificarías tu experiencia con *{nps_label}*?\n"
+            "Responde con un número del *1 al 5*\n"
+            "_(1 = Muy mala · 5 = Excelente)_"
+        )
     else:
         return # No enviamos mensajes para otros estados
 
     clean_phone = phone.replace("+", "").replace(" ", "")
-    
+
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post(
@@ -151,6 +168,20 @@ async def send_delivery_notification(phone: str, status: str):
     except Exception as e:
         print(f"❌ Error enviando notificación de delivery: {e}")
 
+    # After entregado notification: set NPS state and clear conversation
+    if status == 'entregado' and bot_number:
+        try:
+            await trigger_nps(phone, bot_number, rest_name)
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
+                    phone, bot_number
+                )
+            print(f"✅ Sesión limpiada post-entrega: {phone}", flush=True)
+        except Exception as e:
+            print(f"❌ Error en cleanup post-entrega: {e}", flush=True)
+
 
 @router.get("/delivery/check-updates")
 async def check_delivery_updates(request: Request):
@@ -162,7 +193,7 @@ async def check_delivery_updates(request: Request):
         rows = await conn.fetch("""
             SELECT id, status
             FROM orders
-            WHERE order_type IN ('domicilio', 'recoger') AND status IN ('listo', 'en_camino')
+            WHERE order_type IN ('domicilio', 'recoger') AND status IN ('listo', 'en_camino', 'en_puerta')
             ORDER BY id
         """)
         current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
@@ -173,7 +204,7 @@ async def check_delivery_updates(request: Request):
 async def get_delivery_orders(request: Request):
     await require_auth(request)
 
-    orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'entregado'])
+    orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'en_puerta', 'entregado'])
     return {"orders": orders}
 
 
@@ -190,7 +221,7 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
     await db.db_update_order_status(order_id, req.status)
     
     # 3. Disparamos el mensaje de WhatsApp en SEGUNDO PLANO
-    if req.status in ['en_camino', 'entregado']:
-        asyncio.create_task(send_delivery_notification(order["phone"], req.status))
-        
+    if req.status in ['en_camino', 'en_puerta', 'entregado']:
+        asyncio.create_task(send_delivery_notification(order["phone"], req.status, order.get("bot_number", "")))
+
     return {"success": True, "new_status": req.status}
