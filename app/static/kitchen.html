@@ -150,10 +150,10 @@ async function setStatus(orderId, status) {
 }
 
 function renderCard(o) {
-  const items    = Array.isArray(o.items) ? o.items : [];
-  const subNum   = o.sub_number || 1;
-  const isAdd    = o.base_order_id !== null && o.base_order_id !== undefined && subNum > 1;
-  const isDel    = o.is_delivery || false;
+  const items   = Array.isArray(o.items) ? o.items : [];
+  const subNum  = o.sub_number || 1;
+  const isAdd   = o.base_order_id && subNum > 1;
+  const isDel   = o.is_delivery || false;
 
   const subTag = isDel
     ? `<div class="sub-tag add">🛵 Domicilio/Recoger</div>`
@@ -162,30 +162,27 @@ function renderCard(o) {
       : `<div class="sub-tag first">🆕 Pedido inicial</div>`;
 
   const itemsHtml = items.length
-    ? items.map(i =>
-        `<div class="order-item">
-          <span class="order-item-qty">${i.quantity || i.qty || 1}×</span>
-          <span>${i.name || ''}</span>
-        </div>`).join('')
+    ? items.map(i => `<div class="order-item"><span class="order-item-qty">${i.quantity || i.qty || 1}×</span><span>${i.name || ''}</span></div>`).join('')
     : '<div class="order-item" style="color:#555;">Sin items</div>';
 
   const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
   let actionHtml = '';
   if (isDel) {
+    const oid = o.original_id || o.id;
     if (o.status === 'recibido') {
-      actionHtml = `<button class="btn btn-prep" onclick="setDeliveryStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
+      actionHtml = `<button class="btn btn-prep" onclick="setDeliveryStatus('${oid}','en_preparacion')">👨‍🍳 En preparación</button>`;
     } else if (o.status === 'en_preparacion') {
-      actionHtml = `<button class="btn btn-listo" onclick="setDeliveryStatus('${o.id}','listo')">✅ Listo para domicilio</button>`;
-    } else if (o.status === 'listo') {
-      actionHtml = `<div class="listo-badge">📦 Listo — esperando domiciliario</div>`;
+      actionHtml = `<button class="btn btn-listo" onclick="setDeliveryStatus('${oid}','listo')">✅ Listo para domiciliario</button>`;
+    } else {
+      actionHtml = `<div class="listo-badge">📦 Esperando domiciliario</div>`;
     }
   } else {
     if (o.status === 'recibido') {
       actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
     } else if (o.status === 'en_preparacion') {
       actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">✅ Listo para servir</button>`;
-    } else if (o.status === 'listo') {
+    } else {
       actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
     }
   }
@@ -200,6 +197,28 @@ function renderCard(o) {
     ${notesHtml}
     ${actionHtml}
   </div>`;
+}
+
+async function setStatus(orderId, status) {
+  try {
+    await fetch(`/api/table-orders/${orderId}/status`, {
+      method: 'POST', headers: hdr, body: JSON.stringify({ status })
+    });
+    if (status === 'listo') notify('✅ Listo para servir — avisa al mesero');
+    if (status === 'en_preparacion') notify('👨‍🍳 Preparando...');
+    loadOrders();
+  } catch(e) { console.error(e); }
+}
+
+async function setDeliveryStatus(orderId, status) {
+  try {
+    await fetch(`/api/delivery/orders/${orderId}/status`, {
+      method: 'PATCH', headers: hdr, body: JSON.stringify({ status })
+    });
+    if (status === 'listo') notify('📦 Listo para domiciliario');
+    if (status === 'en_preparacion') notify('👨‍🍳 Preparando domicilio...');
+    loadOrders();
+  } catch(e) { console.error(e); }
 }
 
 async function setDeliveryStatus(orderId, status) {
@@ -217,29 +236,28 @@ let prevIds = new Set();
 
 async function loadOrders() {
   try {
-    // Cargar pedidos de mesa
     const r1 = await fetch('/api/table-orders', { headers: hdr });
-    const { orders: tableOrders = [] } = r1.ok ? await r1.json() : {};
+    if (!r1.ok) { if (r1.status === 401) window.location.href = '/login'; return; }
+    const { orders: tableOrders = [] } = await r1.json();
 
-    // Cargar pedidos de domicilio/recoger en estados activos
     const r2 = await fetch('/api/delivery/orders', { headers: hdr });
-    const { orders: deliveryOrders = [] } = r2.ok ? await r2.json() : {};
+    const { orders: deliveryOrders = [] } = r2.ok ? await r2.json() : { orders: [] };
 
-    // Normalizar domicilios para que tengan la misma forma que table_orders
     const normalizedDelivery = deliveryOrders
-      .filter(o => !['entregado','cancelado'].includes(o.status))
+      .filter(o => !['entregado', 'cancelado'].includes(o.status))
       .map(o => ({
         id: o.id,
         table_name: o.order_type === 'domicilio'
-          ? `🛵 Domicilio — ${o.phone?.slice(-4) || ''}`
-          : `🏠 Recoger — ${o.phone?.slice(-4) || ''}`,
-        items: o.items,
-        notes: o.notes + (o.payment_method ? ` | Pago: ${o.payment_method}` : ''),
+          ? `🛵 Domicilio — ${(o.phone || '').slice(-4)}`
+          : `🏠 Recoger — ${(o.phone || '').slice(-4)}`,
+        items: Array.isArray(o.items) ? o.items : [],
+        notes: (o.notes || '') + (o.payment_method ? ` | Pago: ${o.payment_method}` : '') + (o.address ? ` | 📍 ${o.address}` : ''),
         status: mapDeliveryStatus(o.status),
         created_at: o.created_at,
         sub_number: 1,
         base_order_id: null,
         is_delivery: true,
+        original_id: o.id,
       }));
 
     const orders = [...tableOrders, ...normalizedDelivery];
@@ -267,7 +285,13 @@ async function loadOrders() {
       if (cnt) cnt.textContent = groups[status].length;
     });
 
-  } catch(e) { console.error(e); }
+  } catch(e) { console.error('loadOrders error:', e); }
+}
+
+function mapDeliveryStatus(s) {
+  if (['listo', 'en_camino'].includes(s)) return 'listo';
+  if (['confirmado', 'en_preparacion'].includes(s)) return 'en_preparacion';
+  return 'recibido';
 }
 
 function mapDeliveryStatus(s) {

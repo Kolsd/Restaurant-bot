@@ -359,30 +359,30 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 reply += f" (Nota: No pude agregar '{failed}' porque no aparece exacto en el menú)"
 
         elif action in ("domicilio", "recoger"):
-            address = parsed.get("address", "")
-            notes   = parsed.get("notes", "")
+            address        = parsed.get("address", "")
+            notes          = parsed.get("notes", "")
             payment_method = parsed.get("payment_method", "")
-            # Guardar en notas el método de pago si no hay campo dedicado
-            if payment_method and payment_method not in notes:
-                notes = f"Pago: {payment_method}" + (f" | {notes}" if notes else "")
+
             if action == "domicilio" and not address:
                 return reply
-            res = await orders.create_order(phone, action, address, notes, bot_number)
+
+            res = await orders.create_order(phone, action, address, notes, bot_number, payment_method)
             if res["success"]:
                 order = res["order"]
-                # Inyectar método de pago en la orden
-                order["payment_method"] = payment_method
-                order["notes"] = notes
                 await db.db_save_order(order)
                 try:
                     await db.db_deduct_inventory_for_order(bot_number, order.get("items", []))
                 except Exception as e:
-                    print(f"⚠️ Error descontando inventario domicilio: {e}", flush=True)
-                print(f"🆕 {order['id']} {action} | Pago: {payment_method}", flush=True)
-            if cart_errors:
-                failed = ", ".join(cart_errors)
-                reply += f" (Nota: No pude agregar '{failed}')"
+                    print(f"⚠️ Error descontando inventario: {e}", flush=True)
 
+                if res["order"].get("is_additional"):
+                    print(f"➕ Adicional agregado a {order['id']} | Total: {order['total']}", flush=True)
+                else:
+                    print(f"🆕 {order['id']} {action} | Pago: {payment_method}", flush=True)
+
+            if cart_errors:
+                reply += f" (Nota: No pude agregar '{', '.join(cart_errors)}')"
+                
         elif action == "reserve":
             rv = parsed.get("reservation", {})
             if rv.get("name") and rv.get("date") and rv.get("time"):
