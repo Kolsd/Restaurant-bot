@@ -120,8 +120,22 @@ class UpdateOrderStatusRequest(BaseModel):
 
 async def send_delivery_notification(phone: str, status: str, bot_number: str = ""):
     """Envía un mensaje automático de WhatsApp según el estado del pedido"""
-    token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-    phone_id = os.getenv("META_PHONE_NUMBER_ID", "")
+    # Fetch restaurant credentials first (restaurant-specific phone_id takes priority)
+    rest_name = ""
+    rest_phone_id = ""
+    rest_token = ""
+    if bot_number:
+        try:
+            rest = await db.db_get_restaurant_by_bot_number(bot_number)
+            if rest:
+                rest_name = rest.get("name", "")
+                rest_phone_id = rest.get("wa_phone_id", "") or ""
+                rest_token = rest.get("wa_access_token", "") or ""
+        except Exception:
+            pass
+
+    token = rest_token or os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+    phone_id = rest_phone_id or os.getenv("META_PHONE_NUMBER_ID", "")
 
     if not token or not phone_id:
         print("⚠️ No hay credenciales de Meta para enviar la notificación.")
@@ -132,14 +146,6 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     elif status == 'en_puerta':
         msg = "📍 *¡El domiciliario está en la puerta!*\n\n¡Ya casi llega tu pedido! Por favor ten listo el pago si aplica. 🏠"
     elif status == 'entregado':
-        rest_name = ""
-        if bot_number:
-            try:
-                rest = await db.db_get_restaurant_by_bot_number(bot_number)
-                if rest:
-                    rest_name = rest.get("name", "")
-            except Exception:
-                pass
         nps_label = rest_name or "nuestro restaurante"
         msg = (
             "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"

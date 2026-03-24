@@ -532,8 +532,9 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
             if branch_id:
                 q_mesa = """
                     SELECT o.* FROM table_orders o
-                    JOIN restaurant_tables t ON o.table_id = t.id AND t.branch_id = $3
+                    LEFT JOIN restaurant_tables t ON o.table_id = t.id
                     WHERE o.created_at >= $1 AND o.created_at < $2
+                    AND (t.branch_id = $3 OR t.branch_id IS NULL)
                     ORDER BY o.created_at DESC
                 """
                 p_mesa = [start_date, end_date, branch_id]

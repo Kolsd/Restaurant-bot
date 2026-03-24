@@ -989,6 +989,46 @@ async def db_save_nps_response(phone: str, bot_number: str, score: int, comment:
         return _serialize(dict(row))
  
  
+async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
+    """Save a preliminary NPS record when score is received but comment is still pending.
+    Returns the inserted row id so it can be updated later."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO nps_responses (phone, bot_number, score, comment)
+               VALUES ($1, $2, $3, '__pending__') RETURNING id""",
+            phone, bot_number, score
+        )
+        return row["id"] if row else 0
+
+
+async def db_update_nps_comment(phone: str, bot_number: str, comment: str) -> bool:
+    """Update the pending NPS record with the actual comment."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """UPDATE nps_responses SET comment=$3
+               WHERE phone=$1 AND bot_number=$2 AND comment='__pending__'
+               AND created_at > NOW() - INTERVAL '24 hours'""",
+            phone, bot_number, comment
+        )
+        return result != "UPDATE 0"
+
+
+async def db_get_pending_nps_score(phone: str, bot_number: str) -> int | None:
+    """Check if there is a pending NPS comment request in the DB (score saved, comment missing)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT score FROM nps_responses
+               WHERE phone=$1 AND bot_number=$2 AND comment='__pending__'
+               AND created_at > NOW() - INTERVAL '24 hours'
+               ORDER BY created_at DESC LIMIT 1""",
+            phone, bot_number
+        )
+        return row["score"] if row else None
+
+
 async def db_get_nps_stats(bot_number: str, period: str = "month") -> dict:
     pool = await get_pool()
     period_map = {
