@@ -155,31 +155,17 @@ async def force_delete_conversation(request: Request, phone: str):
 @router.get("/api/delivery/orders")
 async def get_delivery_orders(request: Request):
     await require_auth(request)
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    user = await db.db_get_user(username) if username else None
-    bot_number = None
-    if user and user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r:
-            bot_number = r.get("whatsapp_number")
-    if not bot_number:
-        all_r = await db.db_get_all_restaurants()
-        if all_r:
-            bot_number = all_r[0].get("whatsapp_number")
+    import json as _json
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        if bot_number:
-            rows = await conn.fetch(
-                "SELECT * FROM orders WHERE bot_number=$1 AND order_type IN ('domicilio','recoger') AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC",
-                bot_number
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT * FROM orders WHERE order_type IN ('domicilio','recoger') AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
-            )
-    import json as _json
+        rows = await conn.fetch(
+            """SELECT * FROM orders 
+               WHERE order_type IN ('domicilio','recoger') 
+               AND created_at >= NOW() - INTERVAL '24 hours' 
+               ORDER BY created_at DESC"""
+        )
+
     orders = []
     for r in rows:
         items = r["items"]
@@ -195,7 +181,7 @@ async def get_delivery_orders(request: Request):
             "notes": r.get("notes", ""),
             "total": float(r["total"]),
             "paid": r.get("paid", False),
-            "status": r.get("status", "pendiente_pago"),
+            "status": r.get("status", "confirmado"),
             "payment_method": r.get("payment_method", ""),
             "created_at": r["created_at"].isoformat() + "Z",
         })
@@ -244,13 +230,56 @@ async def update_delivery_order_status(request: Request, order_id: str):
                     db_phone_id = None
                 await send_wa_msg(phone, msg, db_phone_id)
     return {"success": True}
-    
+
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None):
     await require_auth(request)
-    return {"orders": await db.db_get_table_orders(status)}
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = await verify_token(token)
+    user = await db.db_get_user(username) if username else None
+    branch_id = user.get("branch_id") if user else None
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        if status:
+            if branch_id:
+                rows = await conn.fetch(
+                    """SELECT o.* FROM table_orders o
+                       LEFT JOIN restaurant_tables t ON o.table_id = t.id
+                       WHERE o.status = $1 AND (t.branch_id = $2 OR t.branch_id IS NULL)
+                       ORDER BY o.created_at ASC""", status, branch_id)
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at ASC", status)
+        else:
+            if branch_id:
+                rows = await conn.fetch(
+                    """SELECT o.* FROM table_orders o
+                       LEFT JOIN restaurant_tables t ON o.table_id = t.id
+                       WHERE o.status NOT IN ('factura_entregada','cancelado')
+                       AND (t.branch_id = $1 OR t.branch_id IS NULL)
+                       ORDER BY o.created_at ASC""", branch_id)
+            else:
+                rows = await conn.fetch(
+                    """SELECT * FROM table_orders 
+                       WHERE status NOT IN ('factura_entregada','cancelado') 
+                       ORDER BY created_at ASC""")
 
+    import json as _json
+    result = []
+    for r in rows:
+        d = dict(r)
+        if isinstance(d.get('items'), str):
+            try: d['items'] = _json.loads(d['items'])
+            except: pass
+        if d.get('created_at') and hasattr(d['created_at'], 'isoformat'):
+            d['created_at'] = d['created_at'].isoformat() + 'Z'
+        if d.get('updated_at') and hasattr(d['updated_at'], 'isoformat'):
+            d['updated_at'] = d['updated_at'].isoformat() + 'Z'
+        result.append(d)
+    return {"orders": result}
+    
 async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
     token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
