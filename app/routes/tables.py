@@ -66,7 +66,7 @@ async def public_menu_context(table_id: str):
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
 
     wa_number = await get_table_wa_number(table)
-    wa_msg = f"Hola! Estoy en {table['name']} y quiero hacer un pedido"
+    wa_msg = f"Hola! Estoy en {table['name']} [table_id:{table['id']}]"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
     menu = await db.db_get_menu(wa_number) or {}
@@ -139,13 +139,13 @@ async def dismiss_waiter_alert(request: Request, alert_id: int):
 @router.delete("/api/conversations/{phone}")
 async def force_delete_conversation(request: Request, phone: str):
     """Permite al mesero limpiar un chat manualmente (ej. pruebas atascadas)"""
-    await require_auth(request)
+    username = await require_auth(request)
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         try:
             await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
             await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
-            await conn.execute("UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'manual_delete', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
+            await conn.execute("UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'manual_delete', closed_by_username = $2 WHERE phone = $1 AND closed_at IS NULL", phone, username)
         except Exception as e:
             print(f"Error forzando limpieza de chat: {e}")
     return {"success": True}
@@ -296,7 +296,7 @@ async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
 
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
-    await require_auth(request)
+    username = await require_auth(request)
     body = await request.json()
     status = body.get("status")
     
@@ -341,7 +341,7 @@ async def update_order_status(request: Request, order_id: str):
         await db.db_update_table_order_status(base_id, "factura_generada")
         
         if phone:
-            msg = "Your bill is being prepared. The waiter will bring it to your table shortly."
+            msg = "Estamos preparando tu cuenta. El mesero la llevará a tu mesa en un momento."
             await send_wa_msg(phone, msg, db_phone_id)
 
         return {"success": True, "order_id": order_id, "status": "factura_generada"}
@@ -353,7 +353,7 @@ async def update_order_status(request: Request, order_id: str):
         await db.db_close_table_bill(base_id)  # status en BD = factura_entregada
  
         if phone:
-            msg = "Your table has been closed. Thank you for visiting us — we hope to see you again soon!"
+            msg = "Tu mesa ha sido cerrada. ¡Gracias por visitarnos, esperamos verte pronto!"
             await send_wa_msg(phone, msg, db_phone_id)
  
             # ── Resolver bot_number y restaurant_name para NPS ──
@@ -374,13 +374,13 @@ async def update_order_status(request: Request, order_id: str):
  
             try:
                 if session_data and session_data.get("bot_number"):
-                    await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", "mesero")
- 
+                    await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", username)
+
                 async with pool.acquire() as conn:
                     # 👇 AQUÍ ESTÁ EL CAMBIO IMPORTANTÍSIMO: status = 'closed'
                     await conn.execute(
-                        "UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL",
-                        phone
+                        "UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = $2 WHERE phone = $1 AND closed_at IS NULL",
+                        phone, username
                     )
                     await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
                     await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
@@ -394,7 +394,7 @@ async def update_order_status(request: Request, order_id: str):
     else:
         await db.db_update_table_order_status(order_id, status)
         if status == "entregado" and phone:
-            msg = f"Your order has been delivered to {table_name}!\n\nEnjoy your meal. When you're ready, you can request the bill right here."
+            msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
             await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}

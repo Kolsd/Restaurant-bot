@@ -208,7 +208,8 @@ async def meta_webhook(request: Request):
             loc = message.get("location", {})
             lat = loc.get("latitude")
             lon = loc.get("longitude")
-            user_text = f"Mi ubicacion es lat:{lat} lon:{lon}. Quiero hacer un pedido de domicilio."
+            maps_url = f"https://maps.google.com/?q={lat},{lon}"
+            user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
         else:
             user_text = message.get("text", {}).get("body", "")
 

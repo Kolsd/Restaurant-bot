@@ -57,7 +57,7 @@ async def test_boton_generar_factura(client, monkeypatch, mock_db_pool):
     # 2. Verificamos que se avisó por WhatsApp que la cuenta va en camino
     mock_send_wa.assert_called_once()
     wa_args, _ = mock_send_wa.call_args
-    assert "Your bill is being prepared" in wa_args[1]
+    assert "Estamos preparando tu cuenta" in wa_args[1]
 
 # ── PRUEBA 2: Botón "Cerrar Mesa" ──
 @pytest.mark.asyncio
@@ -92,4 +92,4 @@ async def test_boton_cerrar_mesa(client, monkeypatch, mock_db_pool):
     # 3. Verificamos que el WhatsApp de despedida se haya enviado
     mock_send_wa.assert_called_once()
     wa_args, _ = mock_send_wa.call_args
-    assert "Your table has been closed" in wa_args[1]
+    assert "Tu mesa ha sido cerrada" in wa_args[1]
