@@ -204,8 +204,8 @@ async function refreshAll() {
     // ── FIX CRÍTICO: paidOrders estaba sin definir ──
     const paidOrders    = orders.filter(o => o.paid);
     const pendingOrders = orders.filter(o => !o.paid);
-    const totalRev      = paidOrders.reduce((s,o) => s + o.total, 0);
-    const pendingRev    = pendingOrders.reduce((s,o) => s + o.total, 0);
+    const totalRev      = paidOrders.reduce((s,o) => s + (Number(o.total) || 0), 0);
+    const pendingRev    = pendingOrders.reduce((s,o) => s + (Number(o.total) || 0), 0);
     
     // ── Métricas del resumen ──
     const mRevenue = document.getElementById('m-revenue');
@@ -452,6 +452,18 @@ async function loadChatHistory(phone) {
     }).join('');
     container.scrollTop = container.scrollHeight;
   } catch(e) { console.error('loadChatHistory:', e); }
+}
+
+async function forceCloseChat() {
+  if (!currentChatPhone) return;
+  if (!confirm(`¿Limpiar y cerrar el chat de ${currentChatPhone}? Esto elimina la conversación activa.`)) return;
+  try {
+    await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone), {
+      method: 'DELETE', headers
+    });
+    closeChatModal();
+    refreshAll();
+  } catch(e) { console.error('forceCloseChat:', e); }
 }
 
 async function toggleBotPause() {

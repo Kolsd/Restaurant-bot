@@ -160,9 +160,9 @@ async def check_delivery_updates(request: Request):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, status 
-            FROM orders 
-            WHERE order_type='delivery' AND status IN ('listo', 'en_camino') 
+            SELECT id, status
+            FROM orders
+            WHERE order_type IN ('domicilio', 'recoger') AND status IN ('listo', 'en_camino')
             ORDER BY id
         """)
         current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
