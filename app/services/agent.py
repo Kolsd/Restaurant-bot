@@ -282,7 +282,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             # 🛡️ PROTECCIÓN ANTIFANTASMAS: Bloquea intentos de orden sin mesa detectada
             if not table_context:
                 print(f"⚠️ Seguridad: Intento de 'order' sin mesa para {phone}. Bloqueado.", flush=True)
-                menu_url = f"https://mesio.app/menu?bot={bot_number}"
+                menu_url = f"https://mesioai.com/catalog?bot={bot_number}"
                 return f"Para tomar tu pedido, necesito saber si estás en nuestro local. ¿En qué número de mesa te encuentras? 😊\n\nSi deseas hacer un pedido para *Domicilio* o *Recoger*, por favor usa nuestro menú digital aquí: {menu_url}"
 
             cart = await db.db_get_cart(phone, bot_number)
