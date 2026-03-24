@@ -221,17 +221,6 @@ async function setDeliveryStatus(orderId, status) {
   } catch(e) { console.error(e); }
 }
 
-async function setDeliveryStatus(orderId, status) {
-  try {
-    await fetch(`/api/delivery/orders/${orderId}/status`, {
-      method: 'PATCH', headers: hdr, body: JSON.stringify({ status })
-    });
-    if (status === 'listo') notify('📦 Listo para domiciliario');
-    if (status === 'en_preparacion') notify('👨‍🍳 Preparando domicilio...');
-    loadOrders();
-  } catch(e) { console.error(e); }
-}
-
 let prevIds = new Set();
 
 async function loadOrders() {
@@ -289,15 +278,9 @@ async function loadOrders() {
 }
 
 function mapDeliveryStatus(s) {
-  if (['listo', 'en_camino'].includes(s)) return 'listo';
-  if (['confirmado', 'en_preparacion'].includes(s)) return 'en_preparacion';
-  return 'recibido';
-}
-
-function mapDeliveryStatus(s) {
   if (s === 'confirmado' || s === 'en_preparacion') return 'en_preparacion';
   if (s === 'listo' || s === 'en_camino') return 'listo';
-  return 'recibido'; // pendiente_pago, cualquier otro
+  return 'recibido'; // Para pendiente_pago o cualquier otro estado inicial
 }
 
 loadOrders();

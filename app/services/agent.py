@@ -343,7 +343,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 "items":         cart_items,
                 "notes":         extra_notes,
                 "total":         cart_total,
-                "status":        "confirmado",
+                "status":        "recibido",
                 "base_order_id": base_order_id,
                 "sub_number":    sub_number,
             })
