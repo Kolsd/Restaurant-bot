@@ -146,7 +146,7 @@ async def force_delete_conversation(request: Request, phone: str):
         try:
             await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
             await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
-            await conn.execute("UPDATE table_sessions SET closed_at = NOW(), closed_by = 'manual_delete', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
+            await conn.execute("UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'manual_delete', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL", phone)
         except Exception as e:
             print(f"Error forzando limpieza de chat: {e}")
     return {"success": True}
@@ -279,7 +279,7 @@ async def get_table_orders(request: Request, status: str = None):
             d['updated_at'] = d['updated_at'].isoformat() + 'Z'
         result.append(d)
     return {"orders": result}
-    
+
 async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
     token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
