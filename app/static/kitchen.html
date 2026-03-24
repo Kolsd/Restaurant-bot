@@ -212,7 +212,8 @@ async function setStatus(orderId, status) {
 
 async function setDeliveryStatus(orderId, status) {
   try {
-    await fetch(`/api/delivery/orders/${orderId}/status`, {
+    // Usamos la nueva ruta de la cocina
+    await fetch(`/api/kitchen/delivery-orders/${orderId}/status`, {
       method: 'PATCH', headers: hdr, body: JSON.stringify({ status })
     });
     if (status === 'listo') notify('📦 Listo para domiciliario');
@@ -229,7 +230,7 @@ async function loadOrders() {
     if (!r1.ok) { if (r1.status === 401) window.location.href = '/login'; return; }
     const { orders: tableOrders = [] } = await r1.json();
 
-    const r2 = await fetch('/api/delivery/orders', { headers: hdr });
+    const r2 = await fetch('/api/kitchen/delivery-orders', { headers: hdr });
     const { orders: deliveryOrders = [] } = r2.ok ? await r2.json() : { orders: [] };
 
     const normalizedDelivery = deliveryOrders
@@ -278,9 +279,11 @@ async function loadOrders() {
 }
 
 function mapDeliveryStatus(s) {
-  if (s === 'confirmado' || s === 'en_preparacion') return 'en_preparacion';
+  // Cuando el bot confirma, debe entrar a la primera columna para alertar al cocinero
+  if (s === 'confirmado') return 'recibido'; 
+  if (s === 'en_preparacion') return 'en_preparacion';
   if (s === 'listo' || s === 'en_camino') return 'listo';
-  return 'recibido'; // Para pendiente_pago o cualquier otro estado inicial
+  return 'recibido';
 }
 
 loadOrders();
