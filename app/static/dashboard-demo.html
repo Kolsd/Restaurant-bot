@@ -512,7 +512,7 @@ function buildMesas() {
   // Generate real QR codes after DOM is ready
   mesas.forEach((m, i) => {
     const tableId = m.toLowerCase().replace(' ', '-');
-    const url = `https://mesioai.com/menu/${tableId}`;
+    const url = `${window.location.origin}/menu/${tableId}`;
     try {
       new QRCode(document.getElementById(`qr-${i}`), {
         text: url,

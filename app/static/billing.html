@@ -397,6 +397,12 @@ tr:hover td { background:#FAFAF8; }
 <div class="toast" id="toast"></div>
 
 <script>
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s ?? '');
+  return d.innerHTML;
+}
+
 const token      = localStorage.getItem('rb_token');
 const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
 if (!token) window.location.href = '/login';
@@ -679,7 +685,7 @@ async function loadLog() {
       <td><span class="prov-badge ${provClass[l.provider]||''}">${provLabel[l.provider]||l.provider}</span></td>
       <td>${l.status==='success'?'<span class="badge-success">Exitosa</span>':l.status==='error'?'<span class="badge-error">Error</span>':'<span class="badge-pending">Pendiente</span>'}</td>
       <td class="mono">${l.external_id||'—'}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.75rem;color:var(--muted);" title="${l.error_message||''}">${l.error_message||'—'}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.75rem;color:var(--muted);" title="${escHtml(l.error_message||'')}">${escHtml(l.error_message||'—')}</td>
     </tr>`).join('');
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">Error cargando historial</div></td></tr>';

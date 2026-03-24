@@ -3,32 +3,12 @@ import json
 from fastapi import APIRouter, Request, HTTPException, Query
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from app.services.auth import verify_token
 from app.services import database as db
+from app.routes.deps import require_auth, get_current_restaurant
+
+META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
 router = APIRouter()
-
-async def require_auth(request: Request) -> str:
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    if not username: raise HTTPException(status_code=401, detail="No autorizado")
-    return username
-
-async def get_current_restaurant(request: Request) -> dict:
-    username = await require_auth(request)
-    user = await db.db_get_user(username)
-    if not user: raise HTTPException(status_code=401, detail="Usuario no encontrado en la base de datos")
-
-    if user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r: return r
-        
-    all_restaurants = await db.db_get_all_restaurants()
-    for r in all_restaurants:
-        if r["name"].lower().strip() == user.get("restaurant_name", "").lower().strip(): 
-            return r
-    if all_restaurants: return all_restaurants[0]
-    raise HTTPException(status_code=403, detail="Restaurante no encontrado")
 
 def get_tz(restaurant: dict) -> str:
     feats = restaurant.get("features", {})
@@ -292,7 +272,7 @@ async def manual_reply(phone: str, request: Request):
         try:
             async with _httpx.AsyncClient(timeout=8) as client:
                 await client.post(
-                    f"https://graph.facebook.com/v18.0/{phone_id}/messages",
+                    f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
                     headers={"Authorization": f"Bearer {meta_token}"},
                     json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}}
                 )

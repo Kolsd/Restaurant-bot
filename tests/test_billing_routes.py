@@ -14,8 +14,8 @@ def test_get_providers_list(client):
 
 def test_get_billing_config_authorized(client, monkeypatch):
     # 1. Burlamos la seguridad para que crea que somos un usuario válido
-    monkeypatch.setattr(billing_routes, "verify_token", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr(billing_routes.db, "db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
+    monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
     
     # 2. Burlamos la configuración que viene de la base de datos
     mock_cfg = {
@@ -37,17 +37,17 @@ def test_get_billing_config_authorized(client, monkeypatch):
 
 def test_get_billing_config_unauthorized(client, monkeypatch):
     # Simulamos que el token no es válido
-    monkeypatch.setattr(billing_routes, "verify_token", AsyncMock(return_value=None))
-    
+    monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value=None))
+
     response = client.get("/api/billing/config")
-    
+
     assert response.status_code == 401
-    assert response.json()["detail"] == "No autorizado"
+    assert response.json()["detail"] == "Unauthorized"
 
 def test_emit_manual_invoice_endpoint(client, monkeypatch):
     # Burlamos la seguridad nuevamente
-    monkeypatch.setattr(billing_routes, "verify_token", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr(billing_routes.db, "db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
+    monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
 
     # Burlamos la función que emite la factura a Alegra/Siigo
     mock_emit = AsyncMock(return_value={"success": True, "provider": "alegra", "external_id": "999"})

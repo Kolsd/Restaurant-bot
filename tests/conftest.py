@@ -52,5 +52,5 @@ def mock_db(monkeypatch):
     monkeypatch.setattr(db, "db_get_table_bill", mock_get_table_bill)
     monkeypatch.setattr("app.services.billing.get_billing_config", mock_get_billing_config)
     monkeypatch.setattr("app.services.billing.log_billing_event", mock_log_billing_event)
-    monkeypatch.setattr("app.routes.billing.verify_token", mock_verify_token)
+    monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db, "db_get_user", mock_get_user)

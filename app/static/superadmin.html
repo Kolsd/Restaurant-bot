@@ -1473,7 +1473,7 @@ let CHARTS = {};
 ══════════════════════════════ */
 function updateClock() {
   const now = new Date();
-  document.getElementById('clock').textContent = now.toLocaleTimeString('es-CO', {hour12: false});
+  document.getElementById('clock').textContent = now.toLocaleTimeString(navigator.language || 'default', {hour12: false});
 }
 setInterval(updateClock, 1000);
 updateClock();
@@ -1551,7 +1551,7 @@ function renderStats(d) {
   const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
   set('st_total_rest', d.total_restaurants ?? '—');
   set('st_active_rest', d.active_restaurants ?? '—');
-  set('st_orders', (d.total_orders ?? 0).toLocaleString('es-CO'));
+  set('st_orders', (d.total_orders ?? 0).toLocaleString(navigator.language || 'default'));
   set('st_mrr', '$' + ((d.mrr ?? 0) / 1000).toFixed(0) + 'k');
   set('fin-mrr', '$' + ((d.mrr ?? 0) / 1000).toFixed(0) + 'k');
   set('fin-arr', '$' + (((d.mrr ?? 0) * 12) / 1000000).toFixed(1) + 'M');
@@ -1564,7 +1564,7 @@ function renderStats(d) {
   set('fin-ltv', '$' + (((d.mrr ?? 0) / (total || 1)) * 18 / 1000).toFixed(0) + 'k');
 
   /* Msgs today simulation */
-  set('st_msgs_today', ((d.total_orders ?? 0) * 6).toLocaleString('es-CO'));
+  set('st_msgs_today', ((d.total_orders ?? 0) * 6).toLocaleString(navigator.language || 'default'));
 
   /* At risk */
   set('st_at_risk', Math.floor((d.total_restaurants ?? 0) * 0.12));
@@ -1843,7 +1843,7 @@ function renderTable(rests) {
     } catch(e) {}
     const health = isActive ? ['A','B','A','B','C'][r.id % 5] : 'D';
     const healthColors = {A:'var(--accent)',B:'var(--info)',C:'var(--warn)',D:'var(--danger)'};
-    const orders = (r.total_orders ?? Math.floor(Math.random()*500)).toLocaleString('es-CO');
+    const orders = (r.total_orders ?? Math.floor(Math.random()*500)).toLocaleString(navigator.language || 'default');
     const actionBtn = isActive
       ? `<button class="btn btn-danger-soft btn-sm" onclick="event.stopPropagation();toggleSub(${r.id},'past_due')">Suspender</button>`
       : `<button class="btn btn-success-soft btn-sm" onclick="event.stopPropagation();toggleSub(${r.id},'active')">Activar</button>`;
@@ -1960,10 +1960,10 @@ async function createRestaurant() {
     module_nps: document.getElementById('feat_nps').checked,
     module_inventory: document.getElementById('feat_inventory').checked,
     wompi_active: document.getElementById('feat_wompi').checked,
-    // 👇 Valores por defecto (se pueden cambiar luego en Settings)
-    timezone: "America/Bogota",
-    currency: "COP",
-    locale: "es-CO"
+    // Default values — restaurant can update these in Settings
+    timezone: "UTC",
+    currency: "USD",
+    locale: "en-US"
   };
 
   try {

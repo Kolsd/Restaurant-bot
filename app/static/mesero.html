@@ -225,11 +225,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 
 <script>
+// --- UTILIDADES ---
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s ?? '');
+  return d.innerHTML;
+}
+
 // --- AUTENTICACIÓN Y LOCALIZACIÓN ---
 const token = localStorage.getItem('rb_token');
 const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-const _locale = restaurant.locale || 'es-CO';
-const _currency = restaurant.currency || 'COP';
+const _locale = restaurant.locale || 'en-US';
+const _currency = restaurant.currency || 'USD';
 
 if (!token) window.location.href = '/login';
 const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
@@ -631,11 +638,11 @@ async function loadChats() {
     }
     
     cList.innerHTML = conversations.map(c => `
-      <div class="alert-card" style="cursor:pointer;" onclick="openChat('${c.phone}')">
+      <div class="alert-card" style="cursor:pointer;" onclick="openChat('${escHtml(c.phone)}')">
         <div class="alert-icon">📱</div>
         <div>
-          <div class="alert-title">Cliente (${c.phone.slice(-4)})</div>
-          <div class="alert-meta">${c.preview || 'Conversación activa...'}</div>
+          <div class="alert-title">Cliente (${escHtml(c.phone.slice(-4))})</div>
+          <div class="alert-meta">${escHtml(c.preview || 'Conversación activa...')}</div>
         </div>
       </div>
     `).join('');
@@ -651,7 +658,7 @@ async function openChat(phone) {
     const { history = [] } = await r.json();
     const box = document.getElementById('chat-msgs');
     box.innerHTML = history.map(m => `
-      <div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-bot'}">${typeof m.content === 'string' ? m.content : 'Mensaje multimedia'}</div>
+      <div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-bot'}">${typeof m.content === 'string' ? escHtml(m.content) : 'Mensaje multimedia'}</div>
     `).join('');
     box.scrollTop = box.scrollHeight;
   } catch(e) {}

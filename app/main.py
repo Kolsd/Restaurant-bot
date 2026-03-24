@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,9 +15,11 @@ from app.routes.crm import router as crm_router
 from app.routes import nps, inventory
 from app.services import database as db  # ← FIX: import directo de db
 
+APP_DOMAIN = os.getenv("APP_DOMAIN", "")
+
 app = FastAPI(
-    title="🍽️ Mesio",
-    description="IA colombiana para restaurantes",
+    title="Mesio",
+    description="AI assistant for restaurants",
     version="5.9.0",
     docs_url=None,
     redoc_url=None,
@@ -26,8 +29,8 @@ app = FastAPI(
 @app.middleware("http")
 async def force_domain_middleware(request: Request, call_next):
     host = request.headers.get("host", "")
-    if "railway.app" in host:
-        url = str(request.url).replace(host, "mesioai.com").replace("http://", "https://")
+    if APP_DOMAIN and "railway.app" in host:
+        url = str(request.url).replace(host, APP_DOMAIN).replace("http://", "https://")
         return RedirectResponse(url, status_code=301)
     return await call_next(request)
 
@@ -42,13 +45,14 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     return response
 
-# ── CORS RESTRICTIVO ──────────────────────────────────────────────────
-ALLOWED_ORIGINS = [
-    "https://mesioai.com",
-    "https://www.mesioai.com",
+# ── CORS ──────────────────────────────────────────────────────────────
+_origins_env = os.getenv("APP_ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
     "http://localhost:3000",
     "http://localhost:8000",
 ]
+if APP_DOMAIN:
+    ALLOWED_ORIGINS += [f"https://{APP_DOMAIN}", f"https://www.{APP_DOMAIN}"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,7 +79,7 @@ async def startup():
 
     await db.db_cleanup_expired_sessions()
 
-    print("🚀 Mesio v5.9 iniciado con módulo Billing", flush=True)
+    print("Mesio v5.9 started", flush=True)
 
 
 app.include_router(dashboard_router)

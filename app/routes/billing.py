@@ -8,8 +8,8 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from app.services.auth import verify_token
 from app.services import database as db
+from app.routes.deps import get_current_user
 from app.services.billing import (
     get_billing_config,
     save_billing_config,
@@ -24,16 +24,6 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 
 # ── AUTH HELPER ───────────────────────────────────────────────────────
-
-async def _require_auth(request: Request) -> dict:
-    token    = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    if not username:
-        raise HTTPException(status_code=401, detail="No autorizado")
-    user = await db.db_get_user(username)
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    return user
 
 async def _get_restaurant_id(user: dict) -> int:
     if user.get("branch_id"):
@@ -94,7 +84,7 @@ class AdminConfigPayload(BaseModel):
 
 @router.get("/config")
 async def get_config(request: Request):
-    user          = await _require_auth(request)
+    user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
     config        = await get_billing_config(restaurant_id)
     if not config:
@@ -107,7 +97,7 @@ async def get_config(request: Request):
 
 @router.post("/config")
 async def set_config(request: Request, payload: BillingConfigPayload):
-    user          = await _require_auth(request)
+    user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
 
     allowed = {"siigo", "alegra", "loggro"}
@@ -122,7 +112,7 @@ async def set_config(request: Request, payload: BillingConfigPayload):
 @router.post("/emit")
 async def emit(request: Request, payload: EmitInvoicePayload):
     """Emite manualmente una factura para un pedido específico."""
-    user          = await _require_auth(request)
+    user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
     result        = await emit_invoice(payload.order_id, restaurant_id, payload.customer)
     if not result["success"]:
@@ -132,7 +122,7 @@ async def emit(request: Request, payload: EmitInvoicePayload):
 
 @router.get("/log")
 async def billing_log(request: Request, limit: int = 50):
-    user          = await _require_auth(request)
+    user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
     log           = await get_billing_log(restaurant_id, limit)
     return {"log": log}
@@ -141,7 +131,7 @@ async def billing_log(request: Request, limit: int = 50):
 @router.post("/test-connection")
 async def test_connection(request: Request):
     """Prueba las credenciales sin emitir factura real."""
-    user          = await _require_auth(request)
+    user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
     config        = await get_billing_config(restaurant_id)
 

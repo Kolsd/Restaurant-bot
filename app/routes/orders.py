@@ -1,14 +1,14 @@
 import hashlib
 import os
-import httpx   
+import httpx
 import asyncio
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
-from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
-from app.services.auth import verify_token
+from app.routes.deps import require_auth
+
+META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
 router = APIRouter()
 
@@ -19,8 +19,10 @@ class ClearCartRequest(BaseModel):
     phone: str
     bot_number: str
 
+
 @router.get("/orders")
-async def list_orders():
+async def list_orders(request: Request):
+    await require_auth(request)
     all_orders = await db.db_get_all_orders()
     paid = [o for o in all_orders if o["paid"]]
     total_revenue = sum(o["total"] for o in paid)
@@ -29,16 +31,18 @@ async def list_orders():
             "total_orders": len(all_orders),
             "paid": len(paid),
             "pending_payment": len(all_orders) - len(paid),
-            "total_revenue_cop": total_revenue
+            "total_revenue": total_revenue,
         },
-        "orders": all_orders
+        "orders": all_orders,
     }
 
+
 @router.get("/orders/{order_id}")
-async def get_single_order(order_id: str):
+async def get_single_order(request: Request, order_id: str):
+    await require_auth(request)
     order = await db.db_get_order(order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Orden no encontrada")
+        raise HTTPException(status_code=404, detail="Order not found")
     return order
 
 @router.post("/cart/clear")
@@ -47,7 +51,8 @@ async def clear_user_cart(request: ClearCartRequest):
     return {"success": True}
 
 @router.get("/cart/{phone}/{bot_number}")
-async def view_cart(phone: str, bot_number: str):
+async def view_cart(request: Request, phone: str, bot_number: str):
+    await require_auth(request)
     summary = await cart_summary(phone, bot_number)
     return {"summary": summary}
 
@@ -80,7 +85,7 @@ async def wompi_webhook(request: Request):
             if reference:
                 result = await db.db_confirm_payment(reference, transaction_id)
                 if result:
-                    print(f"✅ PAGO CONFIRMADO — Orden: {reference} — ${result['total']:,} COP")
+                    print(f"Payment confirmed — Order: {reference} — {result['total']}", flush=True)
 
     return {"status": "ok"}
 
@@ -93,25 +98,19 @@ async def payment_confirm(request: Request):
 
     if status == "APPROVED" and order:
         return {
-            "message": "✅ ¡Pago exitoso!",
+            "message": "Payment successful",
             "order_id": order_id,
-            "total": f"${order['total']:,} COP",
-            "status": "Tu pedido está siendo preparado 🍽️"
+            "total": order['total'],
+            "status": "Your order is being prepared"
         }
     return {
-        "message": "❌ Pago no completado",
+        "message": "Payment not completed",
         "order_id": order_id,
         "status": status
     }
 
 class UpdateOrderStatusRequest(BaseModel):
     status: str
-
-@router.get("/delivery/orders")
-async def get_delivery_orders():
-    # Traemos los pedidos que el domiciliario necesita ver
-    orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'entregado'])
-    return {"orders": orders}
 
 # --- FUNCIONES Y ENDPOINTS DEL DOMICILIARIO ---
 
@@ -139,7 +138,7 @@ async def send_delivery_notification(phone: str, status: str):
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post(
-                f"https://graph.facebook.com/v20.0/{phone_id}/messages",
+                f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     "messaging_product": "whatsapp",
@@ -155,8 +154,7 @@ async def send_delivery_notification(phone: str, status: str):
 
 @router.get("/delivery/check-updates")
 async def check_delivery_updates(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not await verify_token(token): raise HTTPException(status_code=401, detail="No autorizado")
+    await require_auth(request)
 
     """Consulta ultra-ligera para saber si hay cambios en los pedidos del domiciliario"""
     pool = await db.get_pool()
@@ -173,8 +171,7 @@ async def check_delivery_updates(request: Request):
 
 @router.get("/delivery/orders")
 async def get_delivery_orders(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not await verify_token(token): raise HTTPException(status_code=401, detail="No autorizado")
+    await require_auth(request)
 
     orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'entregado'])
     return {"orders": orders}
@@ -182,8 +179,7 @@ async def get_delivery_orders(request: Request):
 
 @router.patch("/delivery/orders/{order_id}/status")
 async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not await verify_token(token): raise HTTPException(status_code=401, detail="No autorizado")
+    await require_auth(request)
 
     # 1. Buscamos el pedido original en la base de datos para obtener el número del cliente
     order = await db.db_get_order(order_id)

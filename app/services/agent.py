@@ -1,9 +1,12 @@
+import os
 import uuid
 import json
 import re
 import traceback
 from anthropic import Anthropic
 from app.services import orders, database as db
+
+APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
 client = Anthropic()
 
@@ -292,9 +295,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         elif action == "order":
             # 🛡️ PROTECCIÓN ANTIFANTASMAS: Bloquea intentos de orden sin mesa detectada
             if not table_context:
-                print(f"⚠️ Seguridad: Intento de 'order' sin mesa para {phone}. Bloqueado.", flush=True)
-                menu_url = f"https://mesioai.com/catalog?bot={bot_number}"
-                return f"Para tomar tu pedido, necesito saber si estás en nuestro local. ¿En qué número de mesa te encuentras? 😊\n\nSi deseas hacer un pedido para *Domicilio* o *Recoger*, por favor usa nuestro menú digital aquí: {menu_url}"
+                print(f"Warning: 'order' attempted without table context for {phone}. Blocked.", flush=True)
+                base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
+                menu_url = f"{base_url}/catalog?bot={bot_number}" if base_url else f"/catalog?bot={bot_number}"
+                return f"To take your order, I need to know your table number. What table are you at?\n\nIf you'd like to order for Delivery or Pickup, please use our digital menu: {menu_url}"
 
             cart = await db.db_get_cart(phone, bot_number)
             if not cart or not cart.get("items"):
@@ -308,7 +312,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             separate_bill = parsed.get("separate_bill", False)
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
-            base_order_id = await db.db_get_base_order_id(phone, table_context["id"])
+            base_order_id = await db.db_get_base_order_id(table_context["id"])
 
             if separate_bill or base_order_id is None:
                 order_id      = f"MESA-{uuid.uuid4().hex[:6].upper()}"
@@ -496,7 +500,8 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     menu         = await db.db_get_menu(bot_number) or {}
     compact_menu = _build_compact_menu(menu, availability)
 
-    menu_url = f"https://mesioai.com/catalog?bot={bot_number}"
+    base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
+    menu_url = f"{base_url}/catalog?bot={bot_number}" if base_url else f"/catalog?bot={bot_number}"
 
     if table_context:
         table_note = f"\n[MESA: {table_context['name']}]"

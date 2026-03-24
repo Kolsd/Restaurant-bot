@@ -95,7 +95,7 @@ class SiigoClient:
             tax_info = [{"id": config["tax_id"]}] if iva_pct > 0 and config.get("tax_id") else []
             siigo_items.append({
                 "code":        config.get("product_code", "CONSUMO"),
-                "description": it.get("name", "Consumo restaurante"),
+                "description": it.get("name", "Restaurant item"),
                 "quantity":    qty,
                 "price":       price,
                 "discount":    0,
@@ -195,7 +195,7 @@ class AlegraClient:
             qty   = int(it.get("quantity", 1))
             item_entry = {
                 "id":       config.get("item_id_default", 1),
-                "name":     it.get("name", "Consumo"),
+                "name":     it.get("name", "Item"),
                 "price":    price,
                 "quantity": qty,
                 "discount": 0,
@@ -291,7 +291,7 @@ class LoggroClient:
             qty   = int(it.get("quantity", 1))
             entry = {
                 "productCode": config.get("product_code_default", "CONS001"),
-                "description": it.get("name", "Consumo restaurante"),
+                "description": it.get("name", "Restaurant item"),
                 "quantity":    qty,
                 "unitPrice":   price,
                 "discount":    0,
@@ -308,7 +308,7 @@ class LoggroClient:
             "currency":       config.get("currency", "COP"),
             "customer": {
                 "nit":   customer.get("nit", config.get("customer_nit_default", "222222222")),
-                "name":  customer.get("name", "Consumidor Final"),
+                "name":  customer.get("name", "Final Consumer"),
                 "email": customer.get("email", "")
             },
             "items": loggro_items,

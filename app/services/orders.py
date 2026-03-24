@@ -6,6 +6,8 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
 
+APP_DOMAIN = os.getenv("APP_DOMAIN", "")
+
 # 🚨 FIX SEGURIDAD
 WOMPI_PUBLIC_KEY = os.getenv("WOMPI_PUBLIC_KEY")
 WOMPI_INTEGRITY_SECRET = os.getenv("WOMPI_INTEGRITY_SECRET")
@@ -80,23 +82,22 @@ async def get_cart_total(phone: str, bot_number: str) -> int:
 
 async def cart_summary(phone: str, bot_number: str) -> str:
     cart = await db.db_get_cart(phone, bot_number)
-    if not cart["items"]: 
-        return "Tu carrito está vacío."
-    
-    lines = [f"• {i['quantity']}x {i['name']} — ${i['subtotal']:,}" for i in cart["items"]]
+    if not cart["items"]:
+        return "Cart is empty."
+
+    lines = [f"• {i['quantity']}x {i['name']} — {i['subtotal']:,}" for i in cart["items"]]
     total = sum(item["subtotal"] for item in cart["items"])
-    tipo = cart.get("order_type", "")
-    extra = " (+ $5,000 domicilio)" if tipo == "domicilio" else ""
-    lines.append(f"\n*Total: ${total:,} COP{extra}*")
+    lines.append(f"\n*Total: {total:,}*")
     return "\n".join(lines)
 
 def generate_wompi_payment_link(order_id: str, amount_cop: int) -> str:
     amount_cents = amount_cop * 100
-    # Validamos que el secreto exista para no generar un hash erróneo
     secret = WOMPI_INTEGRITY_SECRET or ""
     signature_string = f"{order_id}{amount_cents}COP{secret}"
     signature = hashlib.sha256(signature_string.encode()).hexdigest()
-    return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency=COP&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url=https://mesioai.com/api/payment/confirm"
+    redirect_base = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
+    redirect_url = f"{redirect_base}/api/payment/confirm"
+    return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency=COP&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
 
 async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "") -> dict:
     async with _get_cart_lock(phone):

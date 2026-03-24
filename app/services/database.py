@@ -134,6 +134,12 @@ async def init_db():
                 updated_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (phone, bot_number)
             );
+
+            CREATE TABLE IF NOT EXISTS meta_rate_limits (
+                id SERIAL PRIMARY KEY,
+                phone TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
         """)
         
         migrations = [
@@ -161,22 +167,61 @@ async def init_db():
         for m in migrations:
             try:
                 await conn.execute(m)
-            except Exception as e:
+            except Exception:
                 pass
         try:
             await conn.execute("ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_pkey")
             await conn.execute("ALTER TABLE conversations ADD CONSTRAINT conversations_pkey PRIMARY KEY (phone, bot_number)")
         except Exception:
             pass
-        import hashlib
-        try:
-            await conn.execute("""
-                INSERT INTO users (username, password_hash, restaurant_name)
-                VALUES ($1,$2,$3) ON CONFLICT (username) DO NOTHING
-            """, "demo@restaurante.com", hashlib.sha256("demo123".encode()).hexdigest(), "Demo Restaurante")
-        except Exception:
-            pass
-    print("Base de datos inicializada")
+
+        # ── schema additions that used to live inside data functions ──
+        for col_sql in [
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT ''",
+        ]:
+            try:
+                await conn.execute(col_sql)
+            except Exception:
+                pass
+
+        # ── menu_availability table ───────────────────────────────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS menu_availability (
+                dish_name TEXT PRIMARY KEY,
+                available BOOLEAN DEFAULT TRUE,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        # ── performance indexes ───────────────────────────────────────
+        indexes = [
+            # orders
+            "CREATE INDEX IF NOT EXISTS idx_orders_bot_date     ON orders(bot_number, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_phone        ON orders(phone)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_paid_date    ON orders(paid, created_at DESC)",
+            # table_orders
+            "CREATE INDEX IF NOT EXISTS idx_table_orders_table  ON table_orders(table_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_table_orders_phone  ON table_orders(phone)",
+            # waiter_alerts
+            "CREATE INDEX IF NOT EXISTS idx_waiter_alerts_bot   ON waiter_alerts(bot_number, dismissed, created_at DESC)",
+            # sessions (auth)
+            "CREATE INDEX IF NOT EXISTS idx_sessions_expires    ON sessions(expires_at)",
+            # reservations
+            "CREATE INDEX IF NOT EXISTS idx_reservations_bot    ON reservations(bot_number, date ASC)",
+            # conversations
+            "CREATE INDEX IF NOT EXISTS idx_convs_updated       ON conversations(bot_number, updated_at DESC)",
+            # restaurants
+            "CREATE INDEX IF NOT EXISTS idx_restaurants_wa      ON restaurants(whatsapp_number)",
+            # rate limiting
+            "CREATE INDEX IF NOT EXISTS idx_rate_phone          ON meta_rate_limits(phone)",
+        ]
+        for idx_sql in indexes:
+            try:
+                await conn.execute(idx_sql)
+            except Exception:
+                pass
+
+    print("Database initialized", flush=True)
 
 async def db_init_nps_inventory():
     """Inicializa las tablas de NPS e Inventario — llamar desde main.py en el startup"""
@@ -271,10 +316,6 @@ async def db_get_all_reservations(bot_number: str = None):
 async def db_save_order(order: dict):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        try:
-            await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT ''")
-        except Exception:
-            pass
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
                 subtotal, delivery_fee, total, status, paid, payment_url, bot_number, payment_method)
@@ -537,13 +578,6 @@ async def db_update_subscription(restaurant_id: int, new_status: str):
 async def db_get_menu_availability():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS menu_availability (
-                dish_name TEXT PRIMARY KEY,
-                available BOOLEAN DEFAULT TRUE,
-                updated_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
         rows = await conn.fetch("SELECT dish_name, available FROM menu_availability")
         return {r['dish_name']: r['available'] for r in rows}
 
@@ -653,7 +687,6 @@ async def db_init_tables():
 async def db_get_tables(branch_id: int = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await db_init_tables()
         if branch_id is not None:
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id=$1 ORDER BY number", branch_id)
         else:
@@ -663,7 +696,6 @@ async def db_get_tables(branch_id: int = None):
 async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await db_init_tables()
         await conn.execute("""
             INSERT INTO restaurant_tables (id, number, name, branch_id, active)
             VALUES ($1,$2,$3,$4,TRUE)
@@ -715,15 +747,15 @@ async def db_update_table_order_status(order_id: str, status: str):
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
 
-async def db_get_base_order_id(phone: str, table_id: str) -> str | None:
+async def db_get_base_order_id(table_id: str) -> str | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT COALESCE(base_order_id, id) as base_id
             FROM table_orders
-            WHERE table_id=$2 AND status NOT IN ('factura_entregada', 'cancelado')
+            WHERE table_id=$1 AND status NOT IN ('factura_entregada', 'cancelado')
             ORDER BY created_at ASC LIMIT 1
-        """, phone, table_id) # 🟢 Mantenemos $1 (phone) y $2 (table_id) por compatibilidad con la firma, pero la consulta solo usa $2
+        """, table_id)
         return row['base_id'] if row else None
 
 async def db_get_next_sub_number(base_order_id: str) -> int:
@@ -915,9 +947,14 @@ async def db_get_closeable_sessions() -> list:
         return [_serialize(dict(r)) for r in rows]
 
 async def db_get_closed_sessions(bot_number: str, hours: int = 24) -> list:
+    hours = max(1, min(hours, 720))
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM table_sessions WHERE bot_number=$1 AND status='closed' AND closed_at > NOW() - ($2 || ' hours')::INTERVAL ORDER BY closed_at DESC", bot_number, str(hours))
+        rows = await conn.fetch(
+            "SELECT * FROM table_sessions WHERE bot_number=$1 AND status='closed'"
+            " AND closed_at > NOW() - ($2 * INTERVAL '1 hour') ORDER BY closed_at DESC",
+            bot_number, hours,
+        )
         return [_serialize(dict(r)) for r in rows]
 
 async def db_get_session_by_id(session_id: int) -> dict | None:
