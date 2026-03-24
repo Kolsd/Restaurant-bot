@@ -502,7 +502,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     menu         = await db.db_get_menu(bot_number) or {}
     compact_menu = _build_compact_menu(menu, availability)
 
-    menu_url = f"https://mesio.app/menu?bot={bot_number}"
+    menu_url = f"https://mesioai.com/catalog?bot={bot_number}"
 
     if table_context:
         table_note = f"\n[MESA: {table_context['name']}]"
