@@ -151,6 +151,100 @@ async def force_delete_conversation(request: Request, phone: str):
             print(f"Error forzando limpieza de chat: {e}")
     return {"success": True}
 
+# ── DELIVERY ORDERS ───────────────────────────────────────────────────
+@router.get("/api/delivery/orders")
+async def get_delivery_orders(request: Request):
+    await require_auth(request)
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    username = await verify_token(token)
+    user = await db.db_get_user(username) if username else None
+    bot_number = None
+    if user and user.get("branch_id"):
+        r = await db.db_get_restaurant_by_id(user["branch_id"])
+        if r:
+            bot_number = r.get("whatsapp_number")
+    if not bot_number:
+        all_r = await db.db_get_all_restaurants()
+        if all_r:
+            bot_number = all_r[0].get("whatsapp_number")
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        if bot_number:
+            rows = await conn.fetch(
+                "SELECT * FROM orders WHERE bot_number=$1 AND order_type IN ('domicilio','recoger') AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC",
+                bot_number
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM orders WHERE order_type IN ('domicilio','recoger') AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
+            )
+    import json as _json
+    orders = []
+    for r in rows:
+        items = r["items"]
+        if isinstance(items, str):
+            try: items = _json.loads(items)
+            except: items = []
+        orders.append({
+            "id": r["id"],
+            "phone": r["phone"],
+            "items": items,
+            "order_type": r["order_type"],
+            "address": r.get("address", ""),
+            "notes": r.get("notes", ""),
+            "total": float(r["total"]),
+            "paid": r.get("paid", False),
+            "status": r.get("status", "pendiente_pago"),
+            "payment_method": r.get("payment_method", ""),
+            "created_at": r["created_at"].isoformat() + "Z",
+        })
+    return {"orders": orders}
+
+@router.get("/api/delivery/check-updates")
+async def delivery_check_updates(request: Request):
+    await require_auth(request)
+    import hashlib as _hashlib
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, status FROM orders WHERE order_type IN ('domicilio','recoger') AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
+        )
+    h = _hashlib.md5(str([(r["id"], r["status"]) for r in rows]).encode()).hexdigest()
+    return {"hash": h}
+
+@router.patch("/api/delivery/orders/{order_id}/status")
+async def update_delivery_order_status(request: Request, order_id: str):
+    await require_auth(request)
+    body = await request.json()
+    new_status = body.get("status", "")
+    valid = ["pendiente_pago", "confirmado", "en_preparacion", "listo", "en_camino", "entregado", "cancelado"]
+    if new_status not in valid:
+        raise HTTPException(status_code=400, detail="Estado inválido")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
+        # Notificar al cliente si avanza
+        if new_status in ("en_camino", "entregado"):
+            row = await conn.fetchrow("SELECT phone, address, total FROM orders WHERE id=$1", order_id)
+            if row:
+                phone = row["phone"]
+                if new_status == "en_camino":
+                    msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
+                else:
+                    msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
+                # Buscar phone_id de la sesión si existe
+                try:
+                    session = await conn.fetchrow(
+                        "SELECT meta_phone_id, bot_number FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1",
+                        phone
+                    )
+                    db_phone_id = session["meta_phone_id"] if session else None
+                except Exception:
+                    db_phone_id = None
+                await send_wa_msg(phone, msg, db_phone_id)
+    return {"success": True}
+    
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None):

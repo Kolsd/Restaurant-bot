@@ -153,15 +153,18 @@ function renderCard(o) {
   const items    = Array.isArray(o.items) ? o.items : [];
   const subNum   = o.sub_number || 1;
   const isAdd    = o.base_order_id !== null && o.base_order_id !== undefined && subNum > 1;
+  const isDel    = o.is_delivery || false;
 
-  const subTag = isAdd
-    ? `<div class="sub-tag add">➕ Adicional #${subNum}</div>`
-    : `<div class="sub-tag first">🆕 Pedido inicial</div>`;
+  const subTag = isDel
+    ? `<div class="sub-tag add">🛵 Domicilio/Recoger</div>`
+    : isAdd
+      ? `<div class="sub-tag add">➕ Adicional #${subNum}</div>`
+      : `<div class="sub-tag first">🆕 Pedido inicial</div>`;
 
   const itemsHtml = items.length
     ? items.map(i =>
         `<div class="order-item">
-          <span class="order-item-qty">${i.quantity || 1}×</span>
+          <span class="order-item-qty">${i.quantity || i.qty || 1}×</span>
           <span>${i.name || ''}</span>
         </div>`).join('')
     : '<div class="order-item" style="color:#555;">Sin items</div>';
@@ -169,17 +172,25 @@ function renderCard(o) {
   const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
 
   let actionHtml = '';
-  if (o.status === 'recibido') {
-    actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
-  } else if (o.status === 'en_preparacion') {
-    actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">✅ Listo para servir</button>`;
-  } else if (o.status === 'listo') {
-    actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
+  if (isDel) {
+    if (o.status === 'recibido') {
+      actionHtml = `<button class="btn btn-prep" onclick="setDeliveryStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
+    } else if (o.status === 'en_preparacion') {
+      actionHtml = `<button class="btn btn-listo" onclick="setDeliveryStatus('${o.id}','listo')">✅ Listo para domicilio</button>`;
+    } else if (o.status === 'listo') {
+      actionHtml = `<div class="listo-badge">📦 Listo — esperando domiciliario</div>`;
+    }
+  } else {
+    if (o.status === 'recibido') {
+      actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
+    } else if (o.status === 'en_preparacion') {
+      actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">✅ Listo para servir</button>`;
+    } else if (o.status === 'listo') {
+      actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
+    }
   }
 
-  const cardClass = o.status.replace('_', '-');
-
-  return `<div class="order-card ${cardClass}" data-id="${o.id}">
+  return `<div class="order-card ${o.status.replace('_','-')}" data-id="${o.id}">
     ${subTag}
     <div class="order-header">
       <div><div class="order-table">${o.table_name}</div><div class="order-id">${o.id}</div></div>
@@ -191,23 +202,53 @@ function renderCard(o) {
   </div>`;
 }
 
+async function setDeliveryStatus(orderId, status) {
+  try {
+    await fetch(`/api/delivery/orders/${orderId}/status`, {
+      method: 'PATCH', headers: hdr, body: JSON.stringify({ status })
+    });
+    if (status === 'listo') notify('📦 Listo para domiciliario');
+    if (status === 'en_preparacion') notify('👨‍🍳 Preparando domicilio...');
+    loadOrders();
+  } catch(e) { console.error(e); }
+}
+
 let prevIds = new Set();
 
 async function loadOrders() {
   try {
-    const r = await fetch('/api/table-orders', { headers: hdr });
-    if (!r.ok) { if (r.status === 401) window.location.href = '/login'; return; }
-    const { orders = [] } = await r.json();
+    // Cargar pedidos de mesa
+    const r1 = await fetch('/api/table-orders', { headers: hdr });
+    const { orders: tableOrders = [] } = r1.ok ? await r1.json() : {};
+
+    // Cargar pedidos de domicilio/recoger en estados activos
+    const r2 = await fetch('/api/delivery/orders', { headers: hdr });
+    const { orders: deliveryOrders = [] } = r2.ok ? await r2.json() : {};
+
+    // Normalizar domicilios para que tengan la misma forma que table_orders
+    const normalizedDelivery = deliveryOrders
+      .filter(o => !['entregado','cancelado','pendiente_pago'].includes(o.status))
+      .map(o => ({
+        id: o.id,
+        table_name: o.order_type === 'domicilio'
+          ? `🛵 Domicilio — ${o.phone?.slice(-4) || ''}`
+          : `🏠 Recoger — ${o.phone?.slice(-4) || ''}`,
+        items: o.items,
+        notes: o.notes + (o.payment_method ? ` | Pago: ${o.payment_method}` : ''),
+        status: mapDeliveryStatus(o.status),
+        created_at: o.created_at,
+        sub_number: 1,
+        base_order_id: null,
+        is_delivery: true,
+      }));
+
+    const orders = [...tableOrders, ...normalizedDelivery];
 
     const curIds = new Set(orders.map(o => o.id));
     for (const id of curIds) {
       if (!prevIds.has(id)) {
         const o = orders.find(x => x.id === id);
-        if (o) {
-          const sub   = o.sub_number || 1;
-          const isAdd = o.base_order_id && sub > 1;
-          notify(isAdd ? `➕ Adicional #${sub} — ${o.table_name}` : `🔔 Nuevo pedido — ${o.table_name}`);
-        }
+        if (o) notify(`🔔 Nuevo pedido — ${o.table_name}`);
       }
     }
     prevIds = curIds;
@@ -220,11 +261,19 @@ async function loadOrders() {
      ['listo', 'col-listo', 'cnt-listo']].forEach(([status, colId, cntId]) => {
       const col = document.getElementById(colId);
       const cnt = document.getElementById(cntId);
-      if (col) col.innerHTML = groups[status].length ? groups[status].map(renderCard).join('') : '<div class="empty">Sin pedidos</div>';
+      if (col) col.innerHTML = groups[status].length
+        ? groups[status].map(renderCard).join('')
+        : '<div class="empty">Sin pedidos</div>';
       if (cnt) cnt.textContent = groups[status].length;
     });
 
   } catch(e) { console.error(e); }
+}
+
+function mapDeliveryStatus(s) {
+  if (s === 'confirmado' || s === 'en_preparacion') return 'en_preparacion';
+  if (s === 'listo' || s === 'en_camino') return 'listo';
+  return 'recibido'; // pendiente_pago, cualquier otro
 }
 
 loadOrders();

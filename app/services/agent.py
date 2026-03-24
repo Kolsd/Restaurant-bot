@@ -332,7 +332,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 "items":         cart_items,
                 "notes":         extra_notes,
                 "total":         cart_total,
-                "status":        "recibido",
+                "status":        "confirmado",
                 "base_order_id": base_order_id,
                 "sub_number":    sub_number,
             })
@@ -382,7 +382,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             if cart_errors:
                 failed = ", ".join(cart_errors)
                 reply += f" (Nota: No pude agregar '{failed}')"
-                
+
         elif action == "reserve":
             rv = parsed.get("reservation", {})
             if rv.get("name") and rv.get("date") and rv.get("time"):
