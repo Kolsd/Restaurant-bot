@@ -17,7 +17,6 @@ router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
 
 async def geocode_address(address: str) -> tuple:
-    # Ya no forzamos ", Colombia" para que funcione en cualquier país
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get("https://geocode.maps.co/search", params={"q": address, "limit": 1}, headers={"User-Agent": "Mesio/1.0"})
@@ -36,20 +35,6 @@ async def geocode_address(address: str) -> tuple:
     except Exception as e:
         pass
     return None, None, None
-
-async def require_auth(request: Request) -> str:
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    username = await verify_token(token)
-    if not username:
-        raise HTTPException(status_code=401, detail="No autorizado")
-    return username
-
-async def get_current_user(request: Request) -> dict:
-    username = await require_auth(request)
-    user = await db.db_get_user(username)
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    return user
 
 class LoginRequest(BaseModel): username: str; password: str
 class CreateUserRequest(BaseModel): username: str; password: str; restaurant_name: str; admin_key: str
@@ -98,30 +83,32 @@ async def catalog_page():
 
 @router.get("/api/public/menu/{bot_number}")
 async def get_public_menu(bot_number: str):
-    # Devuelve el menú y nombre del restaurante de forma pública
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        rest = await conn.fetchrow(
-            "SELECT name, menu FROM restaurants WHERE whatsapp_number = $1", 
-            bot_number
-        )
+        rest = await conn.fetchrow("SELECT name, menu, features FROM restaurants WHERE whatsapp_number = $1", bot_number)
         if not rest:
             raise HTTPException(status_code=404, detail="Restaurante no encontrado")
         
-        # Validar si el menú es string o dict
         menu_data = rest["menu"]
         if isinstance(menu_data, str):
             try: menu_data = json.loads(menu_data)
             except: menu_data = {}
             
+        features = rest["features"]
+        if isinstance(features, str):
+            try: features = json.loads(features)
+            except: features = {}
+        elif features is None:
+            features = {}
+            
         return {
             "restaurant_name": rest["name"],
             "menu": menu_data,
-            "bot_number": bot_number
-            "locale": features.get("locale", "es-CO"),  
+            "bot_number": bot_number,
+            "locale": features.get("locale", "es-CO"),
             "currency": features.get("currency", "COP")
         }
-
+        
 @router.get("/privacidad", response_class=HTMLResponse)
 async def privacidad_page(): 
     return (STATIC / "privacidad.html").read_text(encoding="utf-8")

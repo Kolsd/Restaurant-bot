@@ -8,17 +8,12 @@ const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":
 if (!token) window.location.href = '/login';
 
 const headers = { 'Authorization': 'Bearer ' + token };
-// Leemos la configuración del restaurante desde LocalStorage
-const _restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-const _locale = _restData.locale || 'es-CO';
-const _currency = _restData.currency || 'COP';
+const _locale = restaurant.locale || 'es-CO';
+const _currency = restaurant.currency || 'COP';
 
-// Formateador Universal Inteligente
 const fmt = (amount) => {
     return new Intl.NumberFormat(_locale, {
-        style: 'currency',
-        currency: _currency,
-        // Monedas que no usan decimales (Pesos, Guaraníes, etc.)
+        style: 'currency', currency: _currency,
         minimumFractionDigits: ['COP', 'CLP', 'PYG', 'JPY'].includes(_currency) ? 0 : 2
     }).format(Number(amount));
 };
@@ -34,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const equipoNav = document.getElementById('nav-equipo');
   if (equipoNav) equipoNav.style.display = (roleStr.includes('owner') || roleStr.includes('admin')) ? '' : 'none';
   
-  // Ocultar/Mostrar módulos según suscripción
   const feats = restaurant.features || {};
   const toggleNav = (id, isEnabled) => {
     const el = document.querySelector(`[onclick*="'${id}'"]`);
@@ -46,15 +40,14 @@ document.addEventListener('DOMContentLoaded', () => {
   toggleNav('reservaciones', feats.module_reservations !== false);
   toggleNav('pos', feats.module_pos !== false);
 
-  // Iniciar dashboard
   loadMenu();
   refreshAll();
-  setInterval(refreshAll, 30000); // Auto-refresh cada 30 seg
+  setInterval(refreshAll, 30000); 
 });
 
 function updateTime() {
   const el = document.getElementById('current-time');
-  if (el) el.textContent = new Date().toLocaleString('es-MX', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+  if (el) el.textContent = new Date().toLocaleString(_locale, { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
 }
 updateTime(); setInterval(updateTime, 60000);
 
@@ -314,8 +307,8 @@ function renderOrders(orders) {
   orders.forEach(o => {
     const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
     const dateObj = new Date(isoStr);
-    const localTime = dateObj.toLocaleTimeString('es-CO', {hour: '2-digit', minute: '2-digit'});
-    const localDate = dateObj.toLocaleDateString('es-CO', {day: '2-digit', month: 'short', year: 'numeric'});
+    const localTime = dateObj.toLocaleTimeString('_locale', {hour: '2-digit', minute: '2-digit'});
+    const localDate = dateObj.toLocaleDateString('_locale', {day: '2-digit', month: 'short', year: 'numeric'});
 
     let itemsStr = '—';
     try {

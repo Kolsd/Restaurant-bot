@@ -3,11 +3,10 @@ import uuid
 import os
 import asyncio
 from datetime import datetime, timezone, timedelta
-from app.services import database as db
 from zoneinfo import ZoneInfo
+from app.services import database as db
 
-
-# 🚨 FIX SEGURIDAD: Eliminamos los fallbacks en texto plano
+# 🚨 FIX SEGURIDAD
 WOMPI_PUBLIC_KEY = os.getenv("WOMPI_PUBLIC_KEY")
 WOMPI_INTEGRITY_SECRET = os.getenv("WOMPI_INTEGRITY_SECRET")
 
@@ -107,14 +106,17 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
         if order_type == "domicilio" and not address:
             return {"success": False, "error": "Se necesita dirección de entrega"}
 
-        subtotal = sum(item["subtotal"] for item in cart["items"])
+        # 👇 Nueva lógica internacional de tarifas y zonas horarias
         rest_data = await db.db_get_restaurant_by_phone(bot_number)
         delivery_fee = 0
-        if order_type == "delivery" and rest_data and isinstance(rest_data.get("features"), dict):
-            delivery_fee = rest_data["features"].get("delivery_fee", 0)
+        tz_str = "UTC"
+        if rest_data and isinstance(rest_data.get("features"), dict):
+            delivery_fee = rest_data["features"].get("delivery_fee", 0) if order_type == "domicilio" else 0
+            tz_str = rest_data["features"].get("timezone", "UTC")
+
+        subtotal = sum(item["subtotal"] for item in cart["items"])
         total = subtotal + delivery_fee
 
-        # ── Buscar orden activa para este teléfono (aún no en camino/entregada) ──
         pool = await db.get_pool()
         async with pool.acquire() as conn:
             existing = await conn.fetchrow(
@@ -128,14 +130,12 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             )
 
         if existing:
-            # ── MODO ADICIONAL: agregar items a la orden existente ──
             import json as _json
             existing_items = existing["items"]
             if isinstance(existing_items, str):
                 try: existing_items = _json.loads(existing_items)
                 except: existing_items = []
 
-            # Merge items — acumula cantidades si el plato ya está
             merged = {i["name"]: i for i in existing_items}
             for item in cart["items"]:
                 if item["name"] in merged:
@@ -146,7 +146,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
 
             new_items     = list(merged.values())
             new_subtotal  = sum(i["subtotal"] for i in new_items)
-            new_total     = new_subtotal + (DELIVERY_FEE if order_type == "domicilio" else 0)
+            new_total     = new_subtotal + delivery_fee
             order_id      = existing["id"]
 
             async with pool.acquire() as conn:
@@ -179,13 +179,6 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             return {"success": True, "order": order}
 
         else:
-            # ── ORDEN NUEVA ──
-            # 👇 Buscamos la zona horaria de ESTE restaurante específico
-            rest_data = await db.db_get_restaurant_by_phone(bot_number)
-            tz_str = "UTC"
-            if rest_data and isinstance(rest_data.get("features"), dict):
-                tz_str = rest_data["features"].get("timezone", "UTC")
-
             order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
             order = {
                 "id": order_id,
@@ -199,10 +192,12 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 "total": total,
                 "status": "confirmado",
                 "paid": False,
-                # 👇 Asignamos la hora local dinámicamente
+                # 👇 Usamos la zona horaria dinámica del restaurante
                 "created_at": datetime.now(ZoneInfo(tz_str)).isoformat(),
                 "bot_number": bot_number,
                 "payment_method": payment_method,
                 "payment_url": generate_wompi_payment_link(order_id, total),
                 "is_additional": False,
             }
+            await db.db_clear_cart(phone, bot_number)
+            return {"success": True, "order": order}
