@@ -8,14 +8,6 @@ from app.services import database as db
 
 router = APIRouter()
 
-def get_tz(restaurant: dict) -> str:
-    feats = restaurant.get("features", {})
-    if isinstance(feats, str):
-        import json
-        try: feats = json.loads(feats)
-        except: feats = {}
-    return feats.get("timezone", "UTC")
-
 async def require_auth(request: Request) -> str:
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     username = await verify_token(token)
@@ -25,9 +17,7 @@ async def require_auth(request: Request) -> str:
 async def get_current_restaurant(request: Request) -> dict:
     username = await require_auth(request)
     user = await db.db_get_user(username)
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado en la base de datos")
+    if not user: raise HTTPException(status_code=401, detail="Usuario no encontrado en la base de datos")
 
     if user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
@@ -37,13 +27,17 @@ async def get_current_restaurant(request: Request) -> dict:
     for r in all_restaurants:
         if r["name"].lower().strip() == user.get("restaurant_name", "").lower().strip(): 
             return r
-            
-    if all_restaurants: 
-        return all_restaurants[0]
-        
+    if all_restaurants: return all_restaurants[0]
     raise HTTPException(status_code=403, detail="Restaurante no encontrado")
 
-ddef get_date_range(period: str, tz_str: str):
+def get_tz(restaurant: dict) -> str:
+    feats = restaurant.get("features", {})
+    if isinstance(feats, str):
+        try: feats = json.loads(feats)
+        except: feats = {}
+    return feats.get("timezone", "UTC")
+
+def get_date_range(period: str, tz_str: str):
     tz = ZoneInfo(tz_str)
     today = datetime.now(tz).date()
     if period == "today": return str(today), str(today)
