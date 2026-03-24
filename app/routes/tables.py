@@ -152,7 +152,7 @@ async def force_delete_conversation(request: Request, phone: str):
     return {"success": True}
 
 # ── DELIVERY ORDERS ───────────────────────────────────────────────────
-@router.get("/api/delivery/orders")
+@router.get("/api/kitchen/delivery-orders")
 async def get_delivery_orders(request: Request):
     await require_auth(request)
     import json as _json
@@ -199,7 +199,7 @@ async def delivery_check_updates(request: Request):
     h = _hashlib.md5(str([(r["id"], r["status"]) for r in rows]).encode()).hexdigest()
     return {"hash": h}
 
-@router.patch("/api/delivery/orders/{order_id}/status")
+@router.patch("/api/kitchen/delivery-orders/{order_id}/status")
 async def update_delivery_order_status(request: Request, order_id: str):
     await require_auth(request)
     body = await request.json()
@@ -402,7 +402,7 @@ async def update_order_status(request: Request, order_id: str):
             await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}
-    
+
 @router.get("/cocina", response_class=HTMLResponse)
 async def kitchen_display():
     return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
