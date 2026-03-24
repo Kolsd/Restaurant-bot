@@ -227,7 +227,7 @@ async function loadOrders() {
 
     // Normalizar domicilios para que tengan la misma forma que table_orders
     const normalizedDelivery = deliveryOrders
-      .filter(o => !['entregado','cancelado','pendiente_pago'].includes(o.status))
+      .filter(o => !['entregado','cancelado'].includes(o.status))
       .map(o => ({
         id: o.id,
         table_name: o.order_type === 'domicilio'

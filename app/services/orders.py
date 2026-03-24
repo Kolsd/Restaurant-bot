@@ -126,7 +126,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             "subtotal": subtotal, 
             "delivery_fee": delivery_fee, 
             "total": total,
-            "status": "pendiente_pago", 
+            "status": "confirmado", 
             "paid": False,
             # ⏰ FIX HORARIO: Usamos COT para la hora exacta de Colombia
             "created_at": datetime.now(COT).isoformat(), 
