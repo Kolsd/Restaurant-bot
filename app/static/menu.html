@@ -244,20 +244,19 @@ function renderMenu(menu, availability, locale, currency) {
                 <div class="category-title">${icon} ${category}</div>`;
     
     items.forEach(item => {
-      const isAvail = availability[item.name] !== false;
+      if (availability[item.name] === false) return; // skip agotado
       const fmtPrice = item.price ? new Intl.NumberFormat(locale, {
         style: 'currency', currency: currency,
         minimumFractionDigits: ['COP','CLP','PYG','JPY'].includes(currency) ? 0 : 2
       }).format(Number(item.price)) : '';
-      
+
       html += `
-        <div class="dish-card ${!isAvail ? 'dish-unavailable' : ''}">
+        <div class="dish-card">
           <div class="dish-header">
             <h3 class="dish-name">${item.name}</h3>
             <div class="dish-price">${fmtPrice}</div>
           </div>
           <p class="dish-desc">${item.description || ''}</p>
-          ${!isAvail ? '<span class="badge-unavailable">Agotado</span>' : ''}
         </div>
       `;
     });

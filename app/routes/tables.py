@@ -466,6 +466,42 @@ async def get_tables_status(request: Request):
         
     return {"tables": tables}
 
+@router.patch("/api/table-orders/{base_order_id}/adjust")
+async def adjust_table_bill(request: Request, base_order_id: str):
+    """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""
+    await require_auth(request)
+    import json as _json
+
+    body = await request.json()
+    adjusted_items = body.get("items", [])
+    new_total = float(body.get("total", 0))
+
+    if new_total < 0:
+        raise HTTPException(status_code=400, detail="El total no puede ser negativo")
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        base_row = await conn.fetchrow(
+            "SELECT id FROM table_orders WHERE id=$1", base_order_id
+        )
+        if not base_row:
+            raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+        # Update base order with the adjusted items and new total
+        await conn.execute(
+            "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1",
+            base_order_id, _json.dumps(adjusted_items), new_total
+        )
+        # Zero out sub-orders so they don't double-count in the bill sum
+        await conn.execute(
+            "UPDATE table_orders SET items='[]'::jsonb, total=0, updated_at=NOW() WHERE base_order_id=$1",
+            base_order_id
+        )
+
+    print(f"✏️ Factura ajustada: {base_order_id} → total={new_total}", flush=True)
+    return {"success": True, "base_order_id": base_order_id, "new_total": new_total}
+
+
 @router.post("/api/pos/order")
 async def pos_manual_order(request: Request, body: ManualOrderRequest):
     """Recibe la orden manual tocada en pantalla por el mesero y la manda a cocina"""

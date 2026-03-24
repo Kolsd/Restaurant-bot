@@ -121,16 +121,22 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
         pool = await db.get_pool()
         async with pool.acquire() as conn:
             existing = await conn.fetchrow(
-                """SELECT id, items, subtotal, total, address, notes, payment_method
+                """SELECT id, items, subtotal, total, address, notes, payment_method, status
                    FROM orders
                    WHERE phone=$1 AND bot_number=$2
                      AND order_type=$3
-                     AND status NOT IN ('en_camino','entregado','cancelado')
+                     AND status NOT IN ('entregado','cancelado')
                    ORDER BY created_at DESC LIMIT 1""",
                 phone, bot_number, order_type
             )
 
         if existing:
+            current_status = existing["status"]
+
+            # Block modification if order is already dispatched
+            if current_status in ("en_camino", "en_puerta"):
+                return {"success": False, "error": "in_transit", "blocked_in_transit": True}
+
             import json as _json
             existing_items = existing["items"]
             if isinstance(existing_items, str):
@@ -145,18 +151,26 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 else:
                     merged[item["name"]] = item.copy()
 
-            new_items     = list(merged.values())
-            new_subtotal  = sum(i["subtotal"] for i in new_items)
-            new_total     = new_subtotal + delivery_fee
-            order_id      = existing["id"]
+            new_items    = list(merged.values())
+            new_subtotal = sum(i["subtotal"] for i in new_items)
+            new_total    = new_subtotal + delivery_fee
+            order_id     = existing["id"]
+
+            # Preserve status if chef is already working — only reset to 'confirmado'
+            # when the order hasn't been picked up by the kitchen yet
+            new_status = "confirmado" if current_status in ("recibido", "confirmado") else current_status
 
             async with pool.acquire() as conn:
-                await conn.execute(
+                result = await conn.execute(
                     """UPDATE orders
-                       SET items=$1, subtotal=$2, total=$3, status='confirmado'
-                       WHERE id=$4""",
-                    _json.dumps(new_items), new_subtotal, new_total, order_id
+                       SET items=$1, subtotal=$2, total=$3, status=$4
+                       WHERE id=$5
+                         AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')""",
+                    _json.dumps(new_items), new_subtotal, new_total, new_status, order_id
                 )
+                if result == "UPDATE 0":
+                    # Race condition: order moved to a protected state between SELECT and UPDATE
+                    return {"success": False, "error": "in_transit", "blocked_in_transit": True}
 
             await db.db_clear_cart(phone, bot_number)
 
@@ -170,7 +184,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 "subtotal": new_subtotal,
                 "delivery_fee": delivery_fee,
                 "total": new_total,
-                "status": "confirmado",
+                "status": new_status,
                 "paid": False,
                 "bot_number": bot_number,
                 "payment_method": payment_method or existing.get("payment_method", ""),

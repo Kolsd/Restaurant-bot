@@ -324,7 +324,11 @@ async def db_save_order(order: dict):
                 items=EXCLUDED.items,
                 subtotal=EXCLUDED.subtotal,
                 total=EXCLUDED.total,
-                status=EXCLUDED.status,
+                status=CASE
+                    WHEN orders.status IN ('en_preparacion','listo','en_camino','en_puerta','entregado')
+                    THEN orders.status
+                    ELSE EXCLUDED.status
+                END,
                 paid=EXCLUDED.paid,
                 payment_url=EXCLUDED.payment_url,
                 notes=EXCLUDED.notes,
@@ -727,6 +731,49 @@ async def db_save_table_order(order: dict):
             order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0),
             order.get('base_order_id'),
             order.get('sub_number', 1))
+
+async def db_get_base_order_status(base_order_id: str) -> str | None:
+    """Returns the status of the base order record itself (not sub-orders)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status FROM table_orders WHERE id=$1", base_order_id
+        )
+        return row["status"] if row else None
+
+async def db_merge_table_order_items(base_order_id: str, new_items: list, additional_total: float) -> bool:
+    """Merges new items into the base order when it's still in 'recibido' status.
+    Combines quantities for duplicate item names. Returns False if order is no longer recibido."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT items, total FROM table_orders WHERE id=$1 AND status='recibido'",
+            base_order_id
+        )
+        if row is None:
+            return False
+
+        existing = row["items"]
+        if isinstance(existing, str):
+            try: existing = json.loads(existing)
+            except: existing = []
+        existing = existing or []
+
+        items_map = {i["name"]: dict(i) for i in existing}
+        for ni in new_items:
+            name = ni["name"]
+            if name in items_map:
+                items_map[name]["quantity"] = items_map[name].get("quantity", 1) + ni.get("quantity", 1)
+            else:
+                items_map[name] = dict(ni)
+
+        merged = list(items_map.values())
+        new_total = float(row["total"]) + float(additional_total)
+        await conn.execute(
+            "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1",
+            base_order_id, json.dumps(merged), new_total
+        )
+        return True
 
 async def db_get_table_orders(status: str = None):
     pool = await get_pool()

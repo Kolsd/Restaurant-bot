@@ -136,17 +136,6 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
     key = _nps_key(phone, bot_number)
     state = _nps_state.get(key)
 
-    # DB recovery: if in-memory state was lost (e.g. server restart), check for a pending
-    # NPS record in the DB — score already saved but comment still missing.
-    if state is None:
-        try:
-            pending_score = await db.db_get_pending_nps_score(phone, bot_number)
-            if pending_score is not None:
-                state = {"state": "waiting_comment", "score": pending_score}
-                _nps_state[key] = state
-        except Exception:
-            pass
-
     if state is None:
         return None
 
@@ -346,27 +335,50 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
             base_order_id = await db.db_get_base_order_id(table_context["id"])
+            sub_number    = 1  # default; overwritten for sub-orders
 
             if separate_bill or base_order_id is None:
+                # First order for this table session
                 order_id      = f"MESA-{uuid.uuid4().hex[:6].upper()}"
                 base_order_id = order_id
                 sub_number    = 1
+                await db.db_save_table_order({
+                    "id":            order_id,
+                    "table_id":      table_context["id"],
+                    "table_name":    table_context["name"],
+                    "phone":         phone,
+                    "items":         cart_items,
+                    "notes":         extra_notes,
+                    "total":         cart_total,
+                    "status":        "recibido",
+                    "base_order_id": base_order_id,
+                    "sub_number":    sub_number,
+                })
             else:
-                sub_number = await db.db_get_next_sub_number(base_order_id)
-                order_id   = f"{base_order_id}-{sub_number}"
+                base_status = await db.db_get_base_order_status(base_order_id)
+                if base_status == "recibido":
+                    # Chef hasn't started yet — merge items into existing order
+                    merged = await db.db_merge_table_order_items(base_order_id, cart_items, cart_total)
+                    if not merged:
+                        # Race condition: status changed between checks — fall back to sub-order
+                        base_status = "en_preparacion"
 
-            await db.db_save_table_order({
-                "id":            order_id,
-                "table_id":      table_context["id"],
-                "table_name":    table_context["name"],
-                "phone":         phone,
-                "items":         cart_items,
-                "notes":         extra_notes,
-                "total":         cart_total,
-                "status":        "recibido",
-                "base_order_id": base_order_id,
-                "sub_number":    sub_number,
-            })
+                if base_status != "recibido":
+                    # Already being prepared or ready — create a new sub-order
+                    sub_number = await db.db_get_next_sub_number(base_order_id)
+                    order_id   = f"{base_order_id}-{sub_number}"
+                    await db.db_save_table_order({
+                        "id":            order_id,
+                        "table_id":      table_context["id"],
+                        "table_name":    table_context["name"],
+                        "phone":         phone,
+                        "items":         cart_items,
+                        "notes":         extra_notes,
+                        "total":         cart_total,
+                        "status":        "recibido",
+                        "base_order_id": base_order_id,
+                        "sub_number":    sub_number,
+                    })
 
             try:
                 await db.db_deduct_inventory_for_order(bot_number, cart_items)
@@ -399,6 +411,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
             order_type = "domicilio" if action == "delivery" else "recoger"
             res = await orders.create_order(phone, order_type, address, notes, bot_number, payment_method)
+
+            if res.get("blocked_in_transit"):
+                return "Tu pedido ya va en camino 🛵 No es posible modificarlo en este momento. Si tienes alguna duda, contáctanos directamente."
+
             if res["success"]:
                 order = res["order"]
                 await db.db_save_order(order)
@@ -468,26 +484,37 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     user_message_clean = _sanitize_user_input(user_message)
 
     nps_key = _nps_key(user_phone, bot_number)
+
+    # Recover NPS state from DB if it was lost (e.g. server restart)
+    if nps_key not in _nps_state:
+        try:
+            pending_score = await db.db_get_pending_nps_score(user_phone, bot_number)
+            if pending_score is not None:
+                _nps_state[nps_key] = {"state": "waiting_comment", "score": pending_score}
+        except Exception:
+            pass
+
     if nps_key in _nps_state:
-        restaurant_name  = ""
-        google_maps_url  = ""
+        nps_restaurant_name = ""
+        nps_google_maps_url = ""
         all_r = await db.db_get_all_restaurants()
         for r in all_r:
             if r.get("whatsapp_number") == bot_number:
-                restaurant_name = r.get("name", "")
-                google_maps_url = r.get("features", {}).get("google_maps_url", "") if isinstance(r.get("features"), dict) else ""
+                nps_restaurant_name = r.get("name", "")
+                nps_google_maps_url = r.get("features", {}).get("google_maps_url", "") if isinstance(r.get("features"), dict) else ""
                 break
 
         nps_reply = await _handle_nps_flow(
             user_phone, bot_number, user_message_clean,
-            restaurant_name, google_maps_url
+            nps_restaurant_name, nps_google_maps_url
         )
-        if nps_reply:
-            full_history = await db.db_get_history(user_phone, bot_number)
-            full_history.append({"role": "user",      "content": user_message})
-            full_history.append({"role": "assistant", "content": nps_reply})
-            await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])
-            return {"message": nps_reply}
+        # Always return — never fall through to LLM when in NPS flow
+        reply_msg = nps_reply or "Por favor responde con un número del 1 al 5 ⭐"
+        full_history = await db.db_get_history(user_phone, bot_number)
+        full_history.append({"role": "user",      "content": user_message})
+        full_history.append({"role": "assistant", "content": reply_msg})
+        await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])
+        return {"message": reply_msg}
 
     table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
