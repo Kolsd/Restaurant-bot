@@ -299,7 +299,6 @@ async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
         print(f"⚠️ No se envió WA a {phone} -> Faltan variables (Token: {bool(token)}, PhoneID: {final_phone_id})")
 
 @router.post("/api/table-orders/{order_id}/status")
-
 async def update_order_status(request: Request, order_id: str):
     await require_auth(request)
     body = await request.json()
@@ -382,8 +381,9 @@ async def update_order_status(request: Request, order_id: str):
                     await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", "mesero")
  
                 async with pool.acquire() as conn:
+                    # 👇 AQUÍ ESTÁ EL CAMBIO IMPORTANTÍSIMO: status = 'closed'
                     await conn.execute(
-                        "UPDATE table_sessions SET closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL",
+                        "UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = 'mesero' WHERE phone = $1 AND closed_at IS NULL",
                         phone
                     )
                     await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
@@ -402,7 +402,7 @@ async def update_order_status(request: Request, order_id: str):
             await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}
-
+    
 @router.get("/cocina", response_class=HTMLResponse)
 async def kitchen_display():
     return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
