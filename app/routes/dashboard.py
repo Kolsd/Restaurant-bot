@@ -104,22 +104,28 @@ async def get_public_menu(bot_number: str):
         rest = await conn.fetchrow("SELECT name, menu, features FROM restaurants WHERE whatsapp_number = $1", bot_number)
         if not rest:
             raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-        
+
         menu_data = rest["menu"]
         if isinstance(menu_data, str):
             try: menu_data = json.loads(menu_data)
             except: menu_data = {}
-            
+
         features = rest["features"]
         if isinstance(features, str):
             try: features = json.loads(features)
             except: features = {}
         elif features is None:
             features = {}
-            
+
+        inv_rows = await conn.fetch(
+            "SELECT item_name, available FROM inventory WHERE bot_number = $1", bot_number
+        )
+        availability = {r["item_name"]: r["available"] for r in inv_rows}
+
         return {
             "restaurant_name": rest["name"],
             "menu": menu_data,
+            "availability": availability,
             "bot_number": bot_number,
             "locale": features.get("locale", "en-US"),
             "currency": features.get("currency", "USD")

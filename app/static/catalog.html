@@ -96,27 +96,27 @@
                 restCurrency = data.currency || restCurrency;
                 
                 document.getElementById('rest-name').innerText = data.restaurant_name;
-                renderMenu(data.menu);
+                renderMenu(data.menu, data.availability || {});
             } catch (error) {
                 document.getElementById('rest-name').innerText = "Restaurante no disponible";
             }
         }
 
         // 3. Renderizar JSON del menú a HTML
-        function renderMenu(menuDict) {
+        function renderMenu(menuDict, availability) {
+            availability = availability || {};
             const container = document.getElementById('menu-container');
             container.innerHTML = '';
 
             for (const [category, items] of Object.entries(menuDict)) {
                 if (!items || items.length === 0) continue;
-                
-                container.innerHTML += `<div class="category-title">${category}</div>`;
-                
+
+                let categoryHtml = '';
                 items.forEach(item => {
+                    if (availability[item.name] === false) return; // skip agotado
                     const price = item.price || 0;
-                    const id = btoa(item.name).replace(/=/g, ''); 
-                    
-                    container.innerHTML += `
+                    const id = btoa(item.name).replace(/=/g, '');
+                    categoryHtml += `
                         <div class="menu-item">
                             <div class="item-info">
                                 <div class="item-name">${item.name}</div>
@@ -131,6 +131,9 @@
                         </div>
                     `;
                 });
+                if (categoryHtml) {
+                    container.innerHTML += `<div class="category-title">${category}</div>` + categoryHtml;
+                }
             }
         }
 

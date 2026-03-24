@@ -98,15 +98,16 @@ async function doLogin() {
       if (roles.length === 1) {
         if (roles[0] === 'cook') window.location.href = '/cocina';
         else if (roles[0] === 'waiter') window.location.href = '/mesero';
-        else if (roles[0] === 'cashier') window.location.href = '/caja'; // FIX: Aquí iba a /billing
-        else window.location.href = '/dashboard'; 
+        else if (roles[0] === 'cashier') window.location.href = '/caja';
+        else if (roles[0] === 'delivery' || roles[0] === 'domiciliario') window.location.href = '/domiciliario';
+        else window.location.href = '/dashboard';
         return;
       }
 
       // 3. Multirol
       document.getElementById('login-form').style.display = 'none';
       document.getElementById('role-selector').style.display = 'block';
-      
+
       const selector = document.getElementById('role-buttons');
       selector.innerHTML = '';
 
@@ -114,10 +115,13 @@ async function doLogin() {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/mesero'" style="background:#E1F5EE; color:#0F6E56;">🍽️ Entrar como Mesero</button>`;
       }
       if (roles.includes('cashier')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/caja'" style="background:#FFF8E6; color:#BA7517;">💰 Entrar a Caja</button>`; // FIX: Aquí iba a /billing
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/caja'" style="background:#FFF8E6; color:#BA7517;">💰 Entrar a Caja</button>`;
       }
       if (roles.includes('cook')) {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/cocina'" style="background:#FAEEDA; color:#854F0B;">👨‍🍳 Entrar a Cocina</button>`;
+      }
+      if (roles.includes('delivery') || roles.includes('domiciliario')) {
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/domiciliario'" style="background:#E3F2FD; color:#1565C0;">🛵 Entrar a Domicilios</button>`;
       }
 
     } else {

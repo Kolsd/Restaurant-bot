@@ -161,6 +161,47 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 
 .empty-state { grid-column: 1 / -1; text-align: center; padding: 4rem 2rem; background: #fff; border: 2px dashed #E4E4E7; border-radius: 16px; color: #A1A1AA; }
 .empty-state h3 { font-size: 1.25rem; color: #71717A; margin-bottom: 8px; }
+
+/* ── BOTÓN AJUSTAR FACTURA ── */
+.btn-adjust { width: 100%; background: none; color: #7C3AED; border: 1.5px solid #DDD6FE; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.btn-adjust:hover { background: #F5F3FF; border-color: #7C3AED; }
+
+/* ── MODAL AJUSTAR FACTURA ── */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 1rem; }
+.modal-overlay.open { display: flex; }
+.modal-box { background: #fff; border-radius: 20px; padding: 1.5rem; max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
+.modal-header h3 { font-size: 1.1rem; font-weight: 800; color: #18181B; }
+.modal-close { background: #F4F4F5; border: none; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.adj-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #F4F4F5; }
+.adj-item-name { flex: 1; font-size: 14px; font-weight: 600; }
+.adj-qty-ctrl { display: flex; align-items: center; gap: 8px; }
+.adj-qty-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #E4E4E7; background: #F4F4F5; cursor: pointer; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.adj-qty-val { font-weight: 700; min-width: 22px; text-align: center; }
+.adj-item-price { font-size: 13px; color: #52525B; min-width: 75px; text-align: right; font-weight: 600; }
+.adj-removed .adj-item-name { opacity: 0.4; text-decoration: line-through; }
+.adj-removed .adj-item-price { opacity: 0.4; }
+.adj-tip-row { margin-top: 1rem; padding-top: 1rem; border-top: 2px dashed #E4E4E7; }
+.adj-tip-row label { font-size: 11px; font-weight: 700; color: #71717A; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+.adj-tip-input { width: 100%; padding: 10px 14px; border: 1.5px solid #E4E4E7; border-radius: 10px; font-size: 16px; font-weight: 700; outline: none; }
+.adj-tip-input:focus { border-color: #7C3AED; }
+.adj-total-preview { background: #F4F4F5; border-radius: 12px; padding: 1rem; margin-top: 1rem; display: flex; justify-content: space-between; align-items: center; }
+.adj-total-label { font-size: 12px; font-weight: 700; color: #71717A; text-transform: uppercase; letter-spacing: 1px; }
+.adj-total-val { font-size: 1.5rem; font-weight: 900; color: #7C3AED; }
+.btn-adj-confirm { width: 100%; background: #7C3AED; color: #fff; border: none; padding: 14px; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 1rem; transition: background 0.2s; }
+.btn-adj-confirm:hover { background: #6D28D9; }
+
+/* ── MÓVIL: header compacto ── */
+@media (max-width: 600px) {
+  header { padding: 0.75rem 1rem; flex-wrap: wrap; gap: 8px; }
+  .logo-container { flex: 1 1 100%; }
+  #dynamic-role-nav { display: none !important; }
+  .header-right { width: 100%; justify-content: space-between; }
+  .live-badge { font-size: 10px; padding: 4px 8px; }
+  #clock { display: none; }
+  .main { padding: 1rem; }
+  .board { grid-template-columns: 1fr !important; }
+}
 </style>
 </head>
 <body>
@@ -188,9 +229,31 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   </div>
 </div>
 
+<!-- MODAL AJUSTAR FACTURA -->
+<div class="modal-overlay" id="adj-modal" onclick="if(event.target===this)closeAdjModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>✏️ Ajustar Factura</h3>
+      <button class="modal-close" onclick="closeAdjModal()">✕</button>
+    </div>
+    <div id="adj-items-list"></div>
+    <div class="adj-tip-row">
+      <label>Propina / Recargo extra</label>
+      <input type="number" class="adj-tip-input" id="adj-tip" placeholder="0" min="0" inputmode="decimal" oninput="updateAdjTotal()">
+    </div>
+    <div class="adj-total-preview">
+      <span class="adj-total-label">Nuevo Total</span>
+      <span class="adj-total-val" id="adj-total-val">$0</span>
+    </div>
+    <button class="btn-adj-confirm" onclick="submitAdjuste()">✅ Confirmar Ajuste</button>
+  </div>
+</div>
+
 <script src="/static/roles.js"></script>
 <script>
 const reqHeaders = { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
+let _billsCache = {}; // id → bill object, used by Ajustar Factura modal
+let _adjBill = null;
 
 function doLogout() {
   localStorage.clear();
@@ -267,6 +330,8 @@ async function loadCajaOrders() {
     });
 
     const pendingBills = Object.values(billsMap);
+    _billsCache = {}; // refresh cache
+    pendingBills.forEach(b => { _billsCache[b.id] = b; });
     
     // --- (A partir de aquí es exactamente tu mismo código de renderizado) ---
     document.getElementById('total-pending').textContent = `${pendingBills.length} cuenta${pendingBills.length !== 1 ? 's' : ''} pendiente${pendingBills.length !== 1 ? 's' : ''}`;
@@ -317,6 +382,9 @@ async function loadCajaOrders() {
             <span class="t-total-val">${fmt(b.total)}</span>
           </div>
 
+          <button class="btn-adjust" onclick="openAdjModal('${b.id}')">
+            ✏️ Ajustar Factura
+          </button>
           <button class="btn-pay" onclick="cobrarYcerrar('${b.id}')">
             💰 Confirmar Pago y Cerrar Mesa
           </button>
@@ -350,9 +418,88 @@ async function cobrarYcerrar(orderId) {
   }
 }
 
+// ── MODAL AJUSTAR FACTURA ──
+
+function openAdjModal(billId) {
+  const bill = _billsCache[billId];
+  if (!bill) return;
+  _adjBill = {
+    id: billId,
+    items: bill.items.map(i => ({ name: i.name, price: Number(i.price) || 0, quantity: i.quantity || 1, adjQty: i.quantity || 1 }))
+  };
+  renderAdjItems();
+  document.getElementById('adj-tip').value = '';
+  updateAdjTotal();
+  document.getElementById('adj-modal').classList.add('open');
+}
+
+function closeAdjModal() {
+  document.getElementById('adj-modal').classList.remove('open');
+  _adjBill = null;
+}
+
+function renderAdjItems() {
+  const container = document.getElementById('adj-items-list');
+  container.innerHTML = _adjBill.items.map((item, idx) => `
+    <div class="adj-item ${item.adjQty === 0 ? 'adj-removed' : ''}" id="adj-row-${idx}">
+      <div class="adj-item-name">${item.name}</div>
+      <div class="adj-qty-ctrl">
+        <button class="adj-qty-btn" onclick="adjQty(${idx},-1)">−</button>
+        <span class="adj-qty-val" id="adj-qty-${idx}">${item.adjQty}</span>
+        <button class="adj-qty-btn" onclick="adjQty(${idx},1)">+</button>
+      </div>
+      <div class="adj-item-price" id="adj-price-${idx}">${fmt(item.price * item.adjQty)}</div>
+    </div>
+  `).join('');
+}
+
+function adjQty(idx, delta) {
+  const item = _adjBill.items[idx];
+  item.adjQty = Math.max(0, item.adjQty + delta);
+  const row = document.getElementById(`adj-row-${idx}`);
+  document.getElementById(`adj-qty-${idx}`).textContent = item.adjQty;
+  document.getElementById(`adj-price-${idx}`).textContent = fmt(item.price * item.adjQty);
+  if (item.adjQty === 0) row.classList.add('adj-removed');
+  else row.classList.remove('adj-removed');
+  updateAdjTotal();
+}
+
+function updateAdjTotal() {
+  if (!_adjBill) return;
+  const tip = Number(document.getElementById('adj-tip').value) || 0;
+  const itemsTotal = _adjBill.items.reduce((sum, i) => sum + i.price * i.adjQty, 0);
+  document.getElementById('adj-total-val').textContent = fmt(itemsTotal + tip);
+}
+
+async function submitAdjuste() {
+  if (!_adjBill) return;
+  const tip = Number(document.getElementById('adj-tip').value) || 0;
+  const adjustedItems = _adjBill.items
+    .filter(i => i.adjQty > 0)
+    .map(i => ({ name: i.name, price: i.price, quantity: i.adjQty }));
+  const newTotal = adjustedItems.reduce((s, i) => s + i.price * i.quantity, 0) + tip;
+
+  try {
+    const r = await fetch(`/api/table-orders/${_adjBill.id}/adjust`, {
+      method: 'PATCH',
+      headers: reqHeaders,
+      body: JSON.stringify({ items: adjustedItems, tip, total: newTotal })
+    });
+    if (r.ok) {
+      closeAdjModal();
+      loadCajaOrders();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert(err.detail || 'Error al ajustar la factura.');
+    }
+  } catch(e) {
+    alert('Error de conexión.');
+  }
+}
+
 // Iniciar polling
 loadCajaOrders();
-setInterval(loadCajaOrders, 5000); 
+setInterval(loadCajaOrders, 5000);
 </script>
 </body>
 </html>
