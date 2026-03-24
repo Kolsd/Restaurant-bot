@@ -141,6 +141,74 @@ async def domiciliario_page():
     p = STATIC / "domiciliario.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)    
 
+# ── SETTINGS ─────────────────────────────────────────────────────────
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page():
+    p = STATIC / "settings.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Settings no disponible</h1>")
+
+@router.get("/api/settings")
+async def get_settings(request: Request):
+    user = await get_current_user(request)
+    branch_id = user.get("branch_id")
+    if not branch_id:
+        all_r = await db.db_get_all_restaurants()
+        if not all_r:
+            raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+        restaurant = all_r[0]
+    else:
+        restaurant = await db.db_get_restaurant_by_id(branch_id)
+    
+    features = restaurant.get("features", {}) or {}
+    return {
+        "restaurant_id": restaurant["id"],
+        "name": restaurant["name"],
+        "whatsapp_number": restaurant.get("whatsapp_number", ""),
+        "address": restaurant.get("address", ""),
+        "features": features,
+        "payment_methods": features.get("payment_methods", []),
+        "google_maps_url": features.get("google_maps_url", ""),
+        "bot_active": features.get("bot_active", True),
+        "upsell_active": features.get("upsell_active", True),
+        "domicilio_active": features.get("domicilio_active", True),
+        "recoger_active": features.get("recoger_active", True),
+        "delivery_fee": features.get("delivery_fee", 0),
+        "min_order": features.get("min_order", 0),
+    }
+
+@router.post("/api/settings")
+async def save_settings(request: Request):
+    user = await get_current_user(request)
+    body = await request.json()
+    branch_id = user.get("branch_id")
+    if not branch_id:
+        all_r = await db.db_get_all_restaurants()
+        if not all_r:
+            raise HTTPException(status_code=404, detail="No hay restaurante")
+        branch_id = all_r[0]["id"]
+    
+    restaurant = await db.db_get_restaurant_by_id(branch_id)
+    current_features = restaurant.get("features", {}) or {}
+    
+    # Merge — solo actualiza los campos enviados
+    updatable = [
+        "payment_methods", "google_maps_url", "bot_active",
+        "upsell_active", "domicilio_active", "recoger_active",
+        "delivery_fee", "min_order", "delivery_message",
+        "pickup_message", "welcome_message"
+    ]
+    for key in updatable:
+        if key in body:
+            current_features[key] = body[key]
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
+            json.dumps(current_features), branch_id
+        )
+    return {"success": True, "features": current_features}
+
 # ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
 async def auth_login(request: LoginRequest):
@@ -423,9 +491,14 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                     "paid": r.get("payment_status") == "paid" or r.get("paid") == True,
                     "total": float(r["total"]),
                     "time": r["created_at"].strftime("%H:%M"),
-                    "created_at": r["created_at"].isoformat() + "Z"
+                    "created_at": r["created_at"].isoformat() + "Z",
+                    "address": r.get("address", ""),
+                    "payment_method": r.get("payment_method", ""),
+                    "notes": r.get("notes", ""),
+                    "phone": r.get("phone", ""),
                 })
-        except Exception as e: pass
+        except Exception as e:
+            print(f"Error cargando orders: {e}", flush=True)
 
         try:
             q_mesa = """
@@ -467,11 +540,22 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                     "status": g["status"], "paid": g["is_paid"], "total": g["total"],
                     "time": g["time"], "created_at": g["created_at"]
                 })
-        except Exception as e: pass
+        except Exception as e:
+            print(f"Error cargando table_orders: {e}", flush=True)
 
     orders.sort(key=lambda x: x["created_at"], reverse=True)
     return {"orders": orders}
 
+@router.post("/api/orders/{order_id}/status")
+async def update_order_status(order_id: str, request: Request):
+    await require_auth(request)
+    body = await request.json()
+    new_status = body.get("status", "")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="status requerido")
+    await db.db_update_order_status(order_id, new_status)
+    return {"success": True}
+    
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
     # FIX: Ahora desempaquetamos 4 valores en lugar de 3

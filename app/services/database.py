@@ -271,19 +271,25 @@ async def db_get_all_reservations(bot_number: str = None):
 async def db_save_order(order: dict):
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # Migración en caliente: añadir columna payment_method si no existe
+        try:
+            await conn.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT ''")
+        except Exception:
+            pass
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
-                subtotal, delivery_fee, total, status, paid, payment_url, bot_number)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                subtotal, delivery_fee, total, status, paid, payment_url, bot_number, payment_method)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             ON CONFLICT (id) DO UPDATE SET
-                status=EXCLUDED.status, paid=EXCLUDED.paid, payment_url=EXCLUDED.payment_url
+                status=EXCLUDED.status, paid=EXCLUDED.paid, payment_url=EXCLUDED.payment_url,
+                notes=EXCLUDED.notes, payment_method=EXCLUDED.payment_method
         """,
         order["id"], order["phone"], json.dumps(order["items"]),
         order["order_type"], order.get("address", ""), order.get("notes", ""),
         order["subtotal"], order["delivery_fee"], order["total"],
         order["status"], order["paid"], order.get("payment_url", ""),
-        order.get("bot_number", ""))
-
+        order.get("bot_number", ""), order.get("payment_method", ""))
+        
 async def db_confirm_payment(order_id: str, transaction_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:

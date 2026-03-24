@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Configuración</title>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<link rel="stylesheet" href="/static/dashboard.css">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; margin: 0; padding: 2rem; color: #111; }
+  .container { max-width: 700px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 16px; margin-bottom: 2rem; }
+  .back-btn { background: #fff; border: 1px solid #e0e0d8; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; color: #555; text-decoration: none; }
+  h1 { font-size: 22px; font-weight: 700; margin: 0; }
+  .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 14px; padding: 1.5rem; margin-bottom: 1.25rem; }
+  .card-title { font-size: 15px; font-weight: 600; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 8px; }
+  label { font-size: 12px; color: #888; display: block; margin-bottom: 4px; font-weight: 500; }
+  input[type=text], input[type=url], input[type=number], select {
+    width: 100%; padding: 9px 12px; border: 1px solid #e0e0d8; border-radius: 8px; font-size: 13px; outline: none; box-sizing: border-box; background: #fff;
+  }
+  input:focus { border-color: #1D9E75; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 0.5px solid #f0f0e8; }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-label { font-size: 13px; color: #333; font-weight: 500; }
+  .toggle-sub { font-size: 11px; color: #888; margin-top: 2px; }
+  .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; border-radius: 24px; transition: .3s; }
+  .toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
+  input:checked + .toggle-slider { background-color: #1D9E75; }
+  input:checked + .toggle-slider:before { transform: translateX(20px); }
+  .payment-chip { display: inline-flex; align-items: center; gap: 6px; background: #E1F5EE; color: #0F6E56; border-radius: 20px; padding: 5px 12px; font-size: 13px; font-weight: 500; margin: 4px; }
+  .payment-chip button { background: none; border: none; cursor: pointer; color: #0F6E56; font-size: 14px; padding: 0; line-height: 1; }
+  .chips-container { display: flex; flex-wrap: wrap; gap: 0; margin-bottom: 12px; min-height: 36px; padding: 8px; border: 1px solid #e0e0d8; border-radius: 8px; background: #fafaf8; }
+  .add-payment-row { display: flex; gap: 8px; }
+  .btn-save { background: #1D9E75; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 8px; }
+  .btn-save:hover { background: #0F6E56; }
+  .feedback { text-align: center; font-size: 13px; padding: 10px; border-radius: 8px; margin-top: 10px; display: none; }
+  .feedback.ok { background: #E1F5EE; color: #0F6E56; }
+  .feedback.err { background: #FDE8E8; color: #C0392B; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <a href="/dashboard" class="back-btn">← Volver al Dashboard</a>
+    <h1>⚙️ Configuración del restaurante</h1>
+  </div>
+
+  <!-- Métodos de pago -->
+  <div class="card">
+    <div class="card-title">💳 Métodos de pago aceptados</div>
+    <p style="font-size:12px;color:#888;margin-bottom:1rem;">El bot informará estos métodos al cliente durante el flujo de domicilio/recoger.</p>
+    <div class="chips-container" id="payment-chips"></div>
+    <div class="add-payment-row">
+      <input type="text" id="new-payment" placeholder="Ej: Nequi, Daviplata, Efectivo..." onkeydown="if(event.key==='Enter'){event.preventDefault();addPayment();}">
+      <button onclick="addPayment()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap;font-weight:500;">+ Agregar</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+      <button onclick="addPreset('Nequi')" class="back-btn" style="font-size:12px;">Nequi</button>
+      <button onclick="addPreset('Daviplata')" class="back-btn" style="font-size:12px;">Daviplata</button>
+      <button onclick="addPreset('Bancolombia')" class="back-btn" style="font-size:12px;">Bancolombia</button>
+      <button onclick="addPreset('Wompi')" class="back-btn" style="font-size:12px;">Wompi</button>
+      <button onclick="addPreset('Efectivo')" class="back-btn" style="font-size:12px;">Efectivo</button>
+      <button onclick="addPreset('Tarjeta')" class="back-btn" style="font-size:12px;">Tarjeta</button>
+    </div>
+  </div>
+
+  <!-- Módulos activos -->
+  <div class="card">
+    <div class="card-title">🔧 Módulos del bot</div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">Bot activo</div><div class="toggle-sub">El bot responde mensajes de WhatsApp automáticamente</div></div>
+      <label class="toggle-switch"><input type="checkbox" id="toggle-bot" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">Domicilios</div><div class="toggle-sub">Permitir pedidos a domicilio por WhatsApp</div></div>
+      <label class="toggle-switch"><input type="checkbox" id="toggle-domicilio" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">Pedidos para recoger</div><div class="toggle-sub">Permitir pedidos para recoger por WhatsApp</div></div>
+      <label class="toggle-switch"><input type="checkbox" id="toggle-recoger" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div><div class="toggle-label">Upselling automático</div><div class="toggle-sub">El bot sugiere productos adicionales al confirmar un pedido</div></div>
+      <label class="toggle-switch"><input type="checkbox" id="toggle-upsell" checked><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+
+  <!-- Precios y costos -->
+  <div class="card">
+    <div class="card-title">💰 Precios y costos</div>
+    <div class="grid2">
+      <div>
+        <label>Costo de domicilio ($)</label>
+        <input type="number" id="delivery-fee" placeholder="0" min="0" step="500">
+      </div>
+      <div>
+        <label>Pedido mínimo ($)</label>
+        <input type="number" id="min-order" placeholder="0" min="0" step="1000">
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Maps -->
+  <div class="card">
+    <div class="card-title">📍 Google Maps (reseñas NPS)</div>
+    <label>Enlace de tu negocio en Google Maps (para clientes satisfechos)</label>
+    <input type="url" id="maps-url" placeholder="https://g.page/r/...">
+  </div>
+
+  <button class="btn-save" onclick="saveSettings()">💾 Guardar configuración</button>
+  <div class="feedback" id="feedback"></div>
+</div>
+
+<script>
+const token = localStorage.getItem('rb_token');
+if (!token) window.location.href = '/login';
+const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+let paymentMethods = [];
+
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings', { headers });
+    if (r.status === 401) { window.location.href = '/login'; return; }
+    const d = await r.json();
+    paymentMethods = d.payment_methods || [];
+    renderChips();
+    document.getElementById('toggle-bot').checked       = d.bot_active !== false;
+    document.getElementById('toggle-domicilio').checked = d.domicilio_active !== false;
+    document.getElementById('toggle-recoger').checked   = d.recoger_active !== false;
+    document.getElementById('toggle-upsell').checked    = d.upsell_active !== false;
+    document.getElementById('delivery-fee').value       = d.delivery_fee || 0;
+    document.getElementById('min-order').value          = d.min_order || 0;
+    document.getElementById('maps-url').value           = d.google_maps_url || '';
+  } catch(e) { console.error(e); }
+}
+
+function renderChips() {
+  const c = document.getElementById('payment-chips');
+  if (!paymentMethods.length) {
+    c.innerHTML = '<span style="font-size:12px;color:#aaa;padding:4px;">Sin métodos configurados</span>';
+    return;
+  }
+  c.innerHTML = paymentMethods.map((m, i) =>
+    `<div class="payment-chip">${m}<button onclick="removePayment(${i})">×</button></div>`
+  ).join('');
+}
+
+function addPayment() {
+  const input = document.getElementById('new-payment');
+  const val = input.value.trim();
+  if (!val) return;
+  if (!paymentMethods.includes(val)) { paymentMethods.push(val); renderChips(); }
+  input.value = '';
+}
+
+function addPreset(name) {
+  if (!paymentMethods.includes(name)) { paymentMethods.push(name); renderChips(); }
+}
+
+function removePayment(index) {
+  paymentMethods.splice(index, 1);
+  renderChips();
+}
+
+async function saveSettings() {
+  const btn = document.querySelector('.btn-save');
+  btn.textContent = 'Guardando...'; btn.disabled = true;
+  try {
+    const body = {
+      payment_methods:  paymentMethods,
+      bot_active:       document.getElementById('toggle-bot').checked,
+      domicilio_active: document.getElementById('toggle-domicilio').checked,
+      recoger_active:   document.getElementById('toggle-recoger').checked,
+      upsell_active:    document.getElementById('toggle-upsell').checked,
+      delivery_fee:     parseInt(document.getElementById('delivery-fee').value) || 0,
+      min_order:        parseInt(document.getElementById('min-order').value) || 0,
+      google_maps_url:  document.getElementById('maps-url').value.trim(),
+    };
+    const r = await fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify(body) });
+    const fb = document.getElementById('feedback');
+    if (r.ok) {
+      fb.textContent = '✅ Configuración guardada correctamente.';
+      fb.className = 'feedback ok'; fb.style.display = 'block';
+    } else {
+      const e = await r.json();
+      fb.textContent = '❌ Error: ' + (e.detail || 'No se pudo guardar.');
+      fb.className = 'feedback err'; fb.style.display = 'block';
+    }
+    setTimeout(() => { fb.style.display = 'none'; }, 3500);
+  } catch(e) {
+    console.error(e);
+  }
+  btn.textContent = '💾 Guardar configuración'; btn.disabled = false;
+}
+
+loadSettings();
+</script>
+</body>
+</html>
