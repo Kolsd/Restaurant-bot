@@ -201,18 +201,20 @@ async function refreshAll() {
     const rChats = await fetch(`/api/dashboard/conversations`, { headers });
     const conversations = rChats.ok ? ((await rChats.json()).conversations || []) : [];
 
-    // ── FIX CRÍTICO: paidOrders estaba sin definir ──
+    // ── Ingresos: total de todos los pedidos no cancelados ──
+    const cancelledStatuses = ['cancelado', 'cancelled'];
+    const activeOrders  = orders.filter(o => !cancelledStatuses.includes(String(o.status || '')));
     const paidOrders    = orders.filter(o => o.paid);
-    const pendingOrders = orders.filter(o => !o.paid);
-    const totalRev      = paidOrders.reduce((s,o) => s + (Number(o.total) || 0), 0);
+    const pendingOrders = activeOrders.filter(o => !o.paid);
+    const totalRev      = activeOrders.reduce((s,o) => s + (Number(o.total) || 0), 0);
     const pendingRev    = pendingOrders.reduce((s,o) => s + (Number(o.total) || 0), 0);
-    
+
     // ── Métricas del resumen ──
     const mRevenue = document.getElementById('m-revenue');
     if (mRevenue) mRevenue.textContent = fmt(totalRev);
 
     const mRevenueSub = document.getElementById('m-revenue-sub');
-    if (mRevenueSub) mRevenueSub.innerHTML = paidOrders.length + ' pagados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
+    if (mRevenueSub) mRevenueSub.innerHTML = paidOrders.length + ' confirmados' + (pendingRev > 0 ? ' · <span class="delta-warn">' + fmt(pendingRev) + ' pendiente</span>' : '');
 
     const mOrders = document.getElementById('m-orders');
     if (mOrders) mOrders.textContent = orders.length;
