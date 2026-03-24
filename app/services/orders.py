@@ -102,39 +102,102 @@ def generate_wompi_payment_link(order_id: str, amount_cop: int) -> str:
     signature = hashlib.sha256(signature_string.encode()).hexdigest()
     return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency=COP&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url=https://mesioai.com/api/payment/confirm"
 
-async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str) -> dict:
-    # Bloqueamos el carrito para que no cambie mientras se genera la orden
+async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "") -> dict:
     async with _get_cart_lock(phone):
         cart = await db.db_get_cart(phone, bot_number)
-        if not cart["items"]: 
+        if not cart["items"]:
             return {"success": False, "error": "El carrito está vacío"}
-        if order_type == "domicilio" and not address: 
+        if order_type == "domicilio" and not address:
             return {"success": False, "error": "Se necesita dirección de entrega"}
 
         subtotal = sum(item["subtotal"] for item in cart["items"])
         delivery_fee = DELIVERY_FEE if order_type == "domicilio" else 0
         total = subtotal + delivery_fee
-        order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
 
-        order = {
-            "id": order_id, 
-            "phone": phone, 
-            "items": cart["items"].copy(),
-            "order_type": order_type, 
-            "address": address or "", 
-            "notes": notes, 
-            "subtotal": subtotal, 
-            "delivery_fee": delivery_fee, 
-            "total": total,
-            "status": "confirmado", 
-            "paid": False,
-            # ⏰ FIX HORARIO: Usamos COT para la hora exacta de Colombia
-            "created_at": datetime.now(COT).isoformat(), 
-            "bot_number": bot_number,
-            "payment_url": generate_wompi_payment_link(order_id, total)
-        }
-        
-        # Limpiamos el carrito en la misma transacción segura
-        await db.db_clear_cart(phone, bot_number)
-        
-    return {"success": True, "order": order}
+        # ── Buscar orden activa para este teléfono (aún no en camino/entregada) ──
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """SELECT id, items, subtotal, total, address, notes, payment_method
+                   FROM orders
+                   WHERE phone=$1 AND bot_number=$2
+                     AND order_type=$3
+                     AND status NOT IN ('en_camino','entregado','cancelado')
+                   ORDER BY created_at DESC LIMIT 1""",
+                phone, bot_number, order_type
+            )
+
+        if existing:
+            # ── MODO ADICIONAL: agregar items a la orden existente ──
+            import json as _json
+            existing_items = existing["items"]
+            if isinstance(existing_items, str):
+                try: existing_items = _json.loads(existing_items)
+                except: existing_items = []
+
+            # Merge items — acumula cantidades si el plato ya está
+            merged = {i["name"]: i for i in existing_items}
+            for item in cart["items"]:
+                if item["name"] in merged:
+                    merged[item["name"]]["quantity"] += item["quantity"]
+                    merged[item["name"]]["subtotal"] += item["subtotal"]
+                else:
+                    merged[item["name"]] = item.copy()
+
+            new_items     = list(merged.values())
+            new_subtotal  = sum(i["subtotal"] for i in new_items)
+            new_total     = new_subtotal + (DELIVERY_FEE if order_type == "domicilio" else 0)
+            order_id      = existing["id"]
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE orders
+                       SET items=$1, subtotal=$2, total=$3, status='confirmado'
+                       WHERE id=$4""",
+                    _json.dumps(new_items), new_subtotal, new_total, order_id
+                )
+
+            await db.db_clear_cart(phone, bot_number)
+
+            order = {
+                "id": order_id,
+                "phone": phone,
+                "items": new_items,
+                "order_type": order_type,
+                "address": address or existing.get("address", ""),
+                "notes": notes or existing.get("notes", ""),
+                "subtotal": new_subtotal,
+                "delivery_fee": delivery_fee,
+                "total": new_total,
+                "status": "confirmado",
+                "paid": False,
+                "bot_number": bot_number,
+                "payment_method": payment_method or existing.get("payment_method", ""),
+                "payment_url": generate_wompi_payment_link(order_id, new_total),
+                "is_additional": True,
+            }
+            return {"success": True, "order": order}
+
+        else:
+            # ── ORDEN NUEVA ──
+            order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+            order = {
+                "id": order_id,
+                "phone": phone,
+                "items": cart["items"].copy(),
+                "order_type": order_type,
+                "address": address or "",
+                "notes": notes,
+                "subtotal": subtotal,
+                "delivery_fee": delivery_fee,
+                "total": total,
+                "status": "confirmado",
+                "paid": False,
+                "created_at": datetime.now(COT).isoformat(),
+                "bot_number": bot_number,
+                "payment_method": payment_method,
+                "payment_url": generate_wompi_payment_link(order_id, total),
+                "is_additional": False,
+            }
+            await db.db_clear_cart(phone, bot_number)
+            return {"success": True, "order": order}
