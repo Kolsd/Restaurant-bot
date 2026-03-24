@@ -376,7 +376,7 @@ async def db_get_delivery_orders(status_list: list):
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM orders WHERE order_type='delivery' AND status = ANY($1) ORDER BY created_at ASC", 
+            "SELECT * FROM orders WHERE order_type IN ('domicilio', 'recoger') AND status = ANY($1) ORDER BY created_at ASC",
             status_list
         )
         return [_serialize(dict(r)) for r in rows]

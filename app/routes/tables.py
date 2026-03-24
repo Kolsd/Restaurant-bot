@@ -353,10 +353,7 @@ async def update_order_status(request: Request, order_id: str):
         await db.db_close_table_bill(base_id)  # status en BD = factura_entregada
  
         if phone:
-            msg = "Tu mesa ha sido cerrada. ¡Gracias por visitarnos, esperamos verte pronto!"
-            await send_wa_msg(phone, msg, db_phone_id)
- 
-            # ── Resolver bot_number y restaurant_name para NPS ──
+            # ── Resolver bot_number y restaurant_name para NPS ANTES de enviar ──
             bot_num = ""
             rest_name = ""
             if session_data and session_data.get("bot_number"):
@@ -367,11 +364,21 @@ async def update_order_status(request: Request, order_id: str):
                         rest_name = rest.get("name", "")
                 except Exception:
                     pass
- 
-            # ── Disparar NPS ──
+
+            msg = "Tu mesa ha sido cerrada. ¡Gracias por visitarnos, esperamos verte pronto!"
+
+            # ── Disparar NPS y adjuntar pregunta al mensaje de despedida ──
             if bot_num:
                 await trigger_nps(phone, bot_num, rest_name)
- 
+                nps_label = rest_name or "nuestro restaurante"
+                msg += (
+                    f"\n\n⭐ Antes de irte, ¿cómo calificarías tu experiencia en *{nps_label}* hoy?\n"
+                    f"Responde con un número del *1 al 5*\n"
+                    f"_(1 = Muy mala · 5 = Excelente)_"
+                )
+
+            await send_wa_msg(phone, msg, db_phone_id)
+
             try:
                 if session_data and session_data.get("bot_number"):
                     await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", username)

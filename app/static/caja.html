@@ -283,7 +283,8 @@ async function loadCajaOrders() {
     }
 
     board.innerHTML = pendingBills.map(b => {
-      const time = (b.created_at || '').substring(11, 16);
+      const isoStr = (b.created_at || '').endsWith('Z') ? b.created_at : b.created_at + 'Z';
+      const time = new Date(isoStr).toLocaleTimeString(_locale, {hour: '2-digit', minute: '2-digit'});
       
       // Renderizar items agrupados
       const itemsHtml = b.items.map(i => `

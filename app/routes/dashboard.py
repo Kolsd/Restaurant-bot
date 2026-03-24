@@ -517,7 +517,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                     "type": r.get("order_type", "domicilio"),
                     "status": r.get("status", "pendiente"),
                     "paid": r.get("payment_status") == "paid" or r.get("paid") == True,
-                    "total": float(r["total"]),
+                    "total": float(r["total"] or 0),
                     "time": r["created_at"].strftime("%H:%M"),
                     "created_at": r["created_at"].isoformat() + "Z",
                     "address": r.get("address", ""),
@@ -529,16 +529,22 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
             print(f"Error cargando orders: {e}", flush=True)
 
         try:
-            q_mesa = """
-                SELECT o.* FROM table_orders o
-                LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                WHERE o.created_at >= $1 AND o.created_at < $2
-            """
-            p_mesa = [start_date, end_date]
             if branch_id:
-                q_mesa += " AND t.branch_id = $3"
-                p_mesa.append(branch_id)
-            
+                q_mesa = """
+                    SELECT o.* FROM table_orders o
+                    JOIN restaurant_tables t ON o.table_id = t.id AND t.branch_id = $3
+                    WHERE o.created_at >= $1 AND o.created_at < $2
+                    ORDER BY o.created_at DESC
+                """
+                p_mesa = [start_date, end_date, branch_id]
+            else:
+                q_mesa = """
+                    SELECT * FROM table_orders
+                    WHERE created_at >= $1 AND created_at < $2
+                    ORDER BY created_at DESC
+                """
+                p_mesa = [start_date, end_date]
+
             rows_mesa = await conn.fetch(q_mesa, *p_mesa)
             
             mesa_groups = {}
@@ -551,7 +557,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                         "time": r["created_at"].strftime("%H:%M"),
                         "created_at": r["created_at"].isoformat() + "Z"
                     }
-                mesa_groups[base_id]["total"] += float(r["total"])
+                mesa_groups[base_id]["total"] += float(r["total"] or 0)
                 
                 try:
                     parsed_items = json.loads(r["items"]) if isinstance(r["items"], str) else r["items"]
