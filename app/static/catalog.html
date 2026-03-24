@@ -64,7 +64,18 @@
         const mesa = params.get('mesa') || '';
         const tableId = params.get('table_id') || '';
         
-        let cart = {}; // Almacena formato: { "Pizza Margarita": { price: 25000, qty: 2 } }
+        let cart = {}; 
+        let restLocale = 'es-CO';
+        let restCurrency = 'COP';
+        
+        // Formateador dinámico basado en lo que mande el backend
+        const formatMoney = (amount) => {
+            return new Intl.NumberFormat(restLocale, {
+                style: 'currency',
+                currency: restCurrency,
+                minimumFractionDigits: ['COP', 'CLP', 'PYG', 'JPY'].includes(restCurrency) ? 0 : 2
+            }).format(Number(amount));
+        };
 
         if (!botNumber) {
             document.getElementById('rest-name').innerText = "Error: Faltan parámetros en el QR";
@@ -79,6 +90,10 @@
                 const res = await fetch(`/api/public/menu/${botNumber}`);
                 if (!res.ok) throw new Error("Menú no encontrado");
                 const data = await res.json();
+                
+                // Capturar configuración regional del restaurante
+                restLocale = data.locale || 'es-CO';
+                restCurrency = data.currency || 'COP';
                 
                 document.getElementById('rest-name').innerText = data.restaurant_name;
                 renderMenu(data.menu);
@@ -99,14 +114,14 @@
                 
                 items.forEach(item => {
                     const price = item.price || 0;
-                    const id = btoa(item.name).replace(/=/g, ''); // ID único seguro
+                    const id = btoa(item.name).replace(/=/g, ''); 
                     
                     container.innerHTML += `
                         <div class="menu-item">
                             <div class="item-info">
                                 <div class="item-name">${item.name}</div>
                                 ${item.description ? `<div class="item-desc">${item.description}</div>` : ''}
-                                <div class="item-price">$${price.toLocaleString('es-CO')}</div>
+                                <div class="item-price">${formatMoney(price)}</div>
                             </div>
                             <div class="controls">
                                 <button class="btn-qty" onclick="updateCart('${item.name}', ${price}, -1)">-</button>
@@ -142,7 +157,7 @@
             }
 
             document.getElementById('cart-count').innerText = `${count} producto${count !== 1 ? 's' : ''}`;
-            document.getElementById('cart-total').innerText = `$${total.toLocaleString('es-CO')}`;
+            document.getElementById('cart-total').innerText = formatMoney(total);
 
             const floatingCart = document.getElementById('floating-cart');
             if (count > 0) floatingCart.classList.add('visible');
@@ -150,29 +165,29 @@
         }
 
         function sendToWhatsApp() {
-    let text = '';
+            let text = '';
 
-    if (mesa) {
-        text += `¡Hola! Estoy en la Mesa ${mesa}`;
-        if (tableId) {
-            text += ` [table_id:${tableId}]`;
+            if (mesa) {
+                text += `¡Hola! Estoy en la Mesa ${mesa}`;
+                if (tableId) {
+                    text += ` [table_id:${tableId}]`;
+                }
+                text += ` y quiero ordenar lo siguiente:\n\n`;
+            } else {
+                text += `¡Hola! Quiero hacer un pedido:\n\n`;
+            }
+
+            let total = 0;
+            for (const [name, item] of Object.entries(cart)) {
+                text += `▪️ ${item.qty}x ${name}\n`;
+                total += item.price * item.qty;
+            }
+
+            text += `\n*Total aproximado:* ${formatMoney(total)}\n\n¿Me confirmas la orden?`;
+
+            const encodedText = encodeURIComponent(text);
+            window.location.href = `https://wa.me/${botNumber}?text=${encodedText}`;
         }
-        text += ` y quiero ordenar lo siguiente:\n\n`;
-    } else {
-        text += `¡Hola! Quiero hacer un pedido:\n\n`;
-    }
-
-    let total = 0;
-    for (const [name, item] of Object.entries(cart)) {
-        text += `▪️ ${item.qty}x ${name}\n`;
-        total += item.price * item.qty;
-    }
-
-    text += `\n*Total aproximado:* $${total.toLocaleString('es-CO')}\n\n¿Me confirmas la orden?`;
-
-    const encodedText = encodeURIComponent(text);
-    window.location.href = `https://wa.me/${botNumber}?text=${encodedText}`;
-}
     </script>
 </body>
 </html>

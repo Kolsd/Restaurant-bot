@@ -7,8 +7,6 @@ from app.services import database as db
 from zoneinfo import ZoneInfo
 
 
-DELIVERY_FEE = 5000
-
 # 🚨 FIX SEGURIDAD: Eliminamos los fallbacks en texto plano
 WOMPI_PUBLIC_KEY = os.getenv("WOMPI_PUBLIC_KEY")
 WOMPI_INTEGRITY_SECRET = os.getenv("WOMPI_INTEGRITY_SECRET")
@@ -110,7 +108,10 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             return {"success": False, "error": "Se necesita dirección de entrega"}
 
         subtotal = sum(item["subtotal"] for item in cart["items"])
-        delivery_fee = DELIVERY_FEE if order_type == "domicilio" else 0
+        rest_data = await db.db_get_restaurant_by_phone(bot_number)
+        delivery_fee = 0
+        if order_type == "delivery" and rest_data and isinstance(rest_data.get("features"), dict):
+            delivery_fee = rest_data["features"].get("delivery_fee", 0)
         total = subtotal + delivery_fee
 
         # ── Buscar orden activa para este teléfono (aún no en camino/entregada) ──

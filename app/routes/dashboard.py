@@ -17,19 +17,17 @@ router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
 
 async def geocode_address(address: str) -> tuple:
-    search_query = address
-    if not any(x in address.lower() for x in ["colombia","bogot","medell","cali","barranquilla","cartagena"]):
-        search_query = address + ", Colombia"
+    # Ya no forzamos ", Colombia" para que funcione en cualquier país
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get("https://geocode.maps.co/search", params={"q": search_query, "limit": 1}, headers={"User-Agent": "Mesio/1.0"})
+            r = await client.get("https://geocode.maps.co/search", params={"q": address, "limit": 1}, headers={"User-Agent": "Mesio/1.0"})
             if r.status_code == 200 and r.json():
                 return float(r.json()[0]["lat"]), float(r.json()[0]["lon"]), r.json()[0].get("display_name","")
     except Exception as e:
         pass
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get("https://photon.komoot.io/api/", params={"q": search_query, "limit": 1, "lang": "es"}, headers={"User-Agent": "Mesio/1.0"})
+            r = await client.get("https://photon.komoot.io/api/", params={"q": address, "limit": 1, "lang": "en"})
             if r.status_code == 200 and r.json().get("features"):
                 coords = r.json()["features"][0]["geometry"]["coordinates"]
                 props = r.json()["features"][0].get("properties", {})
@@ -120,6 +118,8 @@ async def get_public_menu(bot_number: str):
             "restaurant_name": rest["name"],
             "menu": menu_data,
             "bot_number": bot_number
+            "locale": features.get("locale", "es-CO"),  
+            "currency": features.get("currency", "COP")
         }
 
 @router.get("/privacidad", response_class=HTMLResponse)

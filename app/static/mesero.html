@@ -225,12 +225,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 
 <script>
-// --- AUTENTICACIÓN ---
+// --- AUTENTICACIÓN Y LOCALIZACIÓN ---
 const token = localStorage.getItem('rb_token');
 const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+const _locale = restaurant.locale || 'es-CO';
+const _currency = restaurant.currency || 'COP';
+
 if (!token) window.location.href = '/login';
 const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 document.getElementById('rest-name').textContent = restaurant.name || 'Mi Restaurante';
+
+// Formateador Universal Inteligente
+const fmt = (amount) => {
+    return new Intl.NumberFormat(_locale, {
+        style: 'currency',
+        currency: _currency,
+        minimumFractionDigits: ['COP', 'CLP', 'PYG', 'JPY'].includes(_currency) ? 0 : 2
+    }).format(Number(amount));
+};
 
 function doLogout() {
   localStorage.clear();
@@ -349,7 +361,7 @@ function renderMenu() {
         html += `<div class="menu-cat-title">${category}</div>`;
         html += `<div class="menu-grid">`;
         items.forEach(item => {
-            const priceFmt = '$' + Number(item.price).toLocaleString('es-CO');
+            const priceFmt = fmt(item.price); // Uso del formateador universal
             // Escapar comillas simples para evitar errores en el onclick
             const safeName = item.name.replace(/'/g, "\\'");
             html += `
@@ -395,8 +407,8 @@ function renderCart() {
     
     if (posCart.length === 0) {
         container.innerHTML = '<div class="empty" style="padding: 2rem;">Toca un producto del menú para agregarlo a la comanda.</div>';
-        document.getElementById('pos-total').textContent = '$0';
-        document.getElementById('m-cart-total').textContent = '$0';
+        document.getElementById('pos-total').textContent = fmt(0);
+        document.getElementById('m-cart-total').textContent = fmt(0);
         document.getElementById('m-cart-count').textContent = '0';
         document.getElementById('mobile-cart-toggle').style.display = 'none';
         return;
@@ -411,7 +423,7 @@ function renderCart() {
         <div class="cart-item">
             <div class="cart-item-info">
                 <div style="margin-bottom:4px; line-height:1.2;">${item.name}</div>
-                <div style="color:#1D9E75;">$${lineTotal.toLocaleString('es-CO')}</div>
+                <div style="color:#1D9E75;">${fmt(lineTotal)}</div>
             </div>
             <div class="cart-item-qty">
                 <button class="qty-btn" onclick="updateQty(${index}, -1)">−</button>
@@ -422,7 +434,7 @@ function renderCart() {
     });
     
     container.innerHTML = html;
-    const totalFmt = '$' + total.toLocaleString('es-CO');
+    const totalFmt = fmt(total);
     document.getElementById('pos-total').textContent = totalFmt;
     document.getElementById('m-cart-total').textContent = totalFmt;
     document.getElementById('m-cart-count').textContent = count;

@@ -159,22 +159,32 @@
 
     <script src="/static/roles.js"></script>
     <script>
-// --- 1. Autenticación y Permisos (Candado Multi-Rol) ---
+// --- 1. Autenticación, Permisos y Localización ---
 const token = localStorage.getItem('rb_token');
         const rawRole = localStorage.getItem('rb_role') || '';
-        const roles = rawRole.toLowerCase().split(','); // Soporta multi-rol (ej. "waiter,delivery")
+        const roles = rawRole.toLowerCase().split(',');
+
+        const _restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+        const _locale = _restData.locale || 'es-CO';
+        const _currency = _restData.currency || 'COP';
+
+        // Formateador Universal
+        const fmt = (amount) => {
+            return new Intl.NumberFormat(_locale, {
+                style: 'currency',
+                currency: _currency,
+                minimumFractionDigits: ['COP', 'CLP', 'PYG', 'JPY'].includes(_currency) ? 0 : 2
+            }).format(Number(amount));
+        };
 
         if (!token) {
             window.location.href = '/login';
         } else {
-            // Verificar si tiene alguno de los roles permitidos para esta pantalla
             const canAccess = roles.includes('owner') || 
                               roles.includes('admin') || 
                               roles.includes('delivery') || 
                               roles.includes('domiciliario');
-            
             if (!canAccess) {
-                // Si no tiene permiso, lo expulsamos a la pantalla que le corresponde
                 if (roles.includes('waiter')) window.location.href = '/mesero';
                 else if (roles.includes('cook')) window.location.href = '/cocina';
                 else if (roles.includes('cashier')) window.location.href = '/caja';
@@ -188,7 +198,7 @@ const token = localStorage.getItem('rb_token');
             localStorage.clear();
             window.location.href = '/login';
         }
-
+        
         // --- 2. Lógica de Pestañas ---
         function switchTab(tabId, element) {
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -226,7 +236,7 @@ const token = localStorage.getItem('rb_token');
                 const isPaid = order.paid;
                 const paymentBadge = isPaid 
                     ? `<span class="badge pagado">✅ PAGADO</span>`
-                    : `<span class="badge cobrar">💰 COBRAR: $${order.total.toLocaleString('es-CO')}</span>`;
+                    : `<span class="badge cobrar">💰 COBRAR: ${fmt(order.total)}</span>`;
                 
                 // Limpiar teléfono para el link de WhatsApp
                 const cleanPhone = order.phone.replace(/\D/g, '');
