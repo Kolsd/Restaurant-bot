@@ -95,7 +95,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                 return table
     return None
-    
+
 async def get_session_state(phone: str, bot_number: str) -> dict:
     session = await db.db_get_active_session(phone, bot_number)
     if not session:
@@ -255,7 +255,7 @@ async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> 
     msgs = messages.copy()
     msgs.append({"role": "assistant", "content": "{"})
     response = client.messages.create(
-        model=model, max_tokens=350, system=system, messages=msgs
+        model=model, max_tokens=1024, system=system, messages=msgs
     )
     for block in response.content:
         text = _block_attr(block, "text")
