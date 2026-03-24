@@ -8,7 +8,20 @@ const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":
 if (!token) window.location.href = '/login';
 
 const headers = { 'Authorization': 'Bearer ' + token };
-const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+// Leemos la configuración del restaurante desde LocalStorage
+const _restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+const _locale = _restData.locale || 'es-CO';
+const _currency = _restData.currency || 'COP';
+
+// Formateador Universal Inteligente
+const fmt = (amount) => {
+    return new Intl.NumberFormat(_locale, {
+        style: 'currency',
+        currency: _currency,
+        // Monedas que no usan decimales (Pesos, Guaraníes, etc.)
+        minimumFractionDigits: ['COP', 'CLP', 'PYG', 'JPY'].includes(_currency) ? 0 : 2
+    }).format(Number(amount));
+};
 
 window._dashHeaders    = headers;
 window._dashRestaurant = restaurant;
