@@ -158,8 +158,17 @@ async def get_settings(request: Request):
         restaurant = all_r[0]
     else:
         restaurant = await db.db_get_restaurant_by_id(branch_id)
-    
-    features = restaurant.get("features", {}) or {}
+
+    raw_features = restaurant.get("features", {}) or {}
+    if isinstance(raw_features, str):
+        try:
+            import json as _json
+            features = _json.loads(raw_features)
+        except Exception:
+            features = {}
+    else:
+        features = raw_features
+
     return {
         "restaurant_id": restaurant["id"],
         "name": restaurant["name"],
@@ -178,6 +187,7 @@ async def get_settings(request: Request):
 
 @router.post("/api/settings")
 async def save_settings(request: Request):
+    import json as _json
     user = await get_current_user(request)
     body = await request.json()
     branch_id = user.get("branch_id")
@@ -186,11 +196,17 @@ async def save_settings(request: Request):
         if not all_r:
             raise HTTPException(status_code=404, detail="No hay restaurante")
         branch_id = all_r[0]["id"]
-    
+
     restaurant = await db.db_get_restaurant_by_id(branch_id)
-    current_features = restaurant.get("features", {}) or {}
-    
-    # Merge — solo actualiza los campos enviados
+    raw_features = restaurant.get("features", {}) or {}
+    if isinstance(raw_features, str):
+        try:
+            current_features = _json.loads(raw_features)
+        except Exception:
+            current_features = {}
+    else:
+        current_features = dict(raw_features)
+
     updatable = [
         "payment_methods", "google_maps_url", "bot_active",
         "upsell_active", "domicilio_active", "recoger_active",
@@ -200,15 +216,15 @@ async def save_settings(request: Request):
     for key in updatable:
         if key in body:
             current_features[key] = body[key]
-    
+
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
-            json.dumps(current_features), branch_id
+            _json.dumps(current_features), branch_id
         )
     return {"success": True, "features": current_features}
-
+    
 # ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
 async def auth_login(request: LoginRequest):
@@ -555,7 +571,7 @@ async def update_order_status(order_id: str, request: Request):
         raise HTTPException(status_code=400, detail="status requerido")
     await db.db_update_order_status(order_id, new_status)
     return {"success": True}
-    
+
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
     # FIX: Ahora desempaquetamos 4 valores en lugar de 3
