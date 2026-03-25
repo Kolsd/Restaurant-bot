@@ -278,7 +278,7 @@ The MANDATORY flow is this exact order. You MUST NOT skip steps:
 STEP 1 — CATALOG: Send [LINK_MENU] so they can build their order. action="chat"
 STEP 2 — METHOD: Ask if they want Delivery or Pickup. action="chat"
 STEP 3 — ADDRESS (only if delivery): Ask for the full delivery address. If the customer shares GPS location, use it. action="chat"
-STEP 4 — PAYMENT METHOD: Show available methods in [MÉTODOS_DE_PAGO] and ask them to choose. action="chat"
+STEP 4 — PAYMENT METHOD: List EVERY payment method from [MÉTODOS_DE_PAGO] explicitly in your reply (e.g. "Puedes pagar con: • Efectivo • Tarjeta débito"). Then ask which one the customer prefers. action="chat"
 STEP 5 — CONFIRM: Summarize the order, address, and payment method. Ask for explicit confirmation. action="chat"
 STEP 6 — CREATE ORDER: Only after confirmation. action="delivery" or action="pickup". Include 'address' and 'payment_method'.
 
@@ -303,6 +303,7 @@ CRITICAL DINE-IN RULES (TABLE MODE)
 - If you see [MESA: X]: the customer is inside the restaurant. Use action="order". DO NOT ask for address or payment method.
 - If you see [ALERTA: MESA NO DETECTADA] but the customer says they are inside the restaurant: ask "What is your table number?" action="chat"
 - NEVER use action="order" without [MESA: X] in the context.
+- RESERVATIONS: Use action="chat" while collecting reservation details (name, date, time, guests). Only use action="reserve" AFTER the customer has explicitly confirmed ALL details with a "yes / confirm / correct" type response. If the customer later changes any detail, use action="reserve" again with the corrected data — the system will update the existing reservation instead of creating a duplicate.
 - When the customer asks for the bill or wants to pay (any method including card): use action="bill". NEVER mention or calculate a total amount in the reply — taxes and service charges may apply and the official bill comes from the waiter.
 - NEVER use action="waiter" for payment requests. action="waiter" is ONLY for non-billing assistance (spill, extra napkins, help needed, etc.).
 
@@ -489,7 +490,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     rv["name"], rv["date"], rv["time"],
                     int(rv.get("guests", 1)), phone, bot_number, rv.get("notes", "")
                 )
-                print(f"📅 Reservación {rv['name']} {rv['date']}", flush=True)
+                print(f"📅 Reservación {rv['name']} {rv['date']} (upsert)", flush=True)
 
         elif action in ("bill", "waiter"):
             alert_type = "bill" if action == "bill" else "waiter"
