@@ -113,3 +113,58 @@ async def get_menu_items_for_linking(request: Request):
         for item in items:
             dishes.append({"name": item.get("name", ""), "category": category})
     return {"dishes": dishes}
+
+
+# ── ESCANDALLOS / RECETAS (FASE 4) ────────────────────────────────────────────
+
+class RecipeLine(BaseModel):
+    ingredient_id: int
+    quantity: float
+
+
+class RecipeUpsert(BaseModel):
+    dish_name: str
+    lines: List[RecipeLine]
+
+
+@router.get("/api/inventory/recipes")
+async def get_all_recipes(request: Request):
+    """Lista todos los escandallos con food cost por plato."""
+    restaurant = await get_current_restaurant(request)
+    recipes = await db.db_get_all_recipes(restaurant["id"])
+    return {"recipes": recipes}
+
+
+@router.get("/api/inventory/recipes/{dish_name}")
+async def get_recipe(request: Request, dish_name: str):
+    """Devuelve las líneas de ingredientes de un plato."""
+    restaurant = await get_current_restaurant(request)
+    lines = await db.db_get_dish_recipe(restaurant["id"], dish_name)
+    return {"dish_name": dish_name, "lines": lines}
+
+
+@router.post("/api/inventory/recipes")
+async def upsert_recipe(request: Request, body: RecipeUpsert):
+    """Crea o reemplaza el escandallo completo de un plato."""
+    restaurant = await get_current_restaurant(request)
+    if not body.dish_name.strip():
+        raise HTTPException(status_code=400, detail="dish_name no puede estar vacío")
+    lines = [{"ingredient_id": l.ingredient_id, "quantity": l.quantity} for l in body.lines]
+    result = await db.db_upsert_dish_recipe(restaurant["id"], body.dish_name, lines)
+    return {"success": True, "dish_name": body.dish_name, "lines": result}
+
+
+@router.delete("/api/inventory/recipes/{dish_name}")
+async def delete_recipe(request: Request, dish_name: str):
+    """Elimina todos los ingredientes del escandallo de un plato."""
+    restaurant = await get_current_restaurant(request)
+    await db.db_delete_dish_recipe(restaurant["id"], dish_name)
+    return {"success": True}
+
+
+@router.get("/api/inventory/food-costs")
+async def get_food_costs(request: Request):
+    """Food cost de cada plato con desglose por ingrediente."""
+    restaurant = await get_current_restaurant(request)
+    costs = await db.db_get_food_costs(restaurant["id"])
+    return {"food_costs": costs}
