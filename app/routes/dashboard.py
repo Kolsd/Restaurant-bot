@@ -118,9 +118,9 @@ async def get_public_menu(bot_number: str):
             features = {}
 
         inv_rows = await conn.fetch(
-            "SELECT item_name, available FROM inventory WHERE bot_number = $1", bot_number
+            "SELECT dish_name, available FROM menu_availability"
         )
-        availability = {r["item_name"]: r["available"] for r in inv_rows}
+        availability = {r["dish_name"]: r["available"] for r in inv_rows}
 
         return {
             "restaurant_name": rest["name"],

@@ -124,11 +124,16 @@ function renderNPSResponses(responses) {
   responses.forEach(r => {
     const date = new Date((r.created_at||'') + 'Z').toLocaleDateString('es-CO',
       { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+    // Extract comment from either field name; treat '__pending__' as empty
+    const rawComment = r.comment || r.feedback || '';
+    const displayComment = (rawComment && rawComment !== '__pending__')
+      ? `<span>${rawComment}</span>`
+      : '<span style="color:#bbb;">—</span>';
     html += `<tr>
       <td style="font-size:12px;color:#888;">${r.phone}</td>
       <td>${stars(r.score)}</td>
       <td>${typeLabel(r.score)}</td>
-      <td style="font-size:12px;color:#555;max-width:280px;">${r.comment || '<span style="color:#bbb;">—</span>'}</td>
+      <td style="font-size:12px;color:#555;max-width:280px;">${displayComment}</td>
       <td style="font-size:11px;color:#aaa;">${date}</td>
     </tr>`;
   });
