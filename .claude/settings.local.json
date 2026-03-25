@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(python -m pytest tests/ -v)",
-      "Bash(python -c \"from app.main import app; print\\(''OK - all imports resolved''\\)\")"
+      "Bash(python -c \"from app.main import app; print\\(''OK - all imports resolved''\\)\")",
+      "Bash(python -m pytest tests/test_billing_routes.py tests/test_billing_clients.py -v)",
+      "Bash(python -c \":*)",
+      "Bash(python -m pytest tests/test_billing_native.py -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(pytest tests/test_station_routing.py -v)",
+      "Bash(pytest --tb=no -q)",
+      "Bash(pytest tests/test_billing_native.py -v)",
+      "Bash(ls app/static/*.html)",
+      "Bash(pytest tests/test_print_ticket.py -v)",
+      "Bash(python -m pytest tests/test_print_ticket.py tests/test_billing_native.py -v)",
+      "Bash(python -c \"from app.routes.inventory import router; print\\(''OK''\\)\")",
+      "Bash(python -m pytest tests/test_recipes.py -v)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(python -c \"from app.routes.tables import router; print\\(''OK''\\)\")",
+      "Bash(python -m pytest tests/test_split_checks.py -v)"
     ]
   }
 }
