@@ -245,42 +245,114 @@ const token = localStorage.getItem('rb_token');
 
             let recogerCount = 0, rutaCount = 0, entregadoCount = 0;
 
+            const grupos = {};
             orders.forEach(order => {
-                const isPaid = order.paid;
+                const groupId = order.base_order_id || order.id;
+                
+                if (!grupos[groupId]) {
+                    grupos[groupId] = {
+                        principal: null,
+                        subOrdenes: [],
+                        todasListas: true,
+                        itemsPendientes: []
+                    };
+                }
+
+                if (order.id === groupId) {
+                    grupos[groupId].principal = order;
+                } else {
+                    grupos[groupId].subOrdenes.push(order);
+                }
+
+                // Si cualquier parte del pedido NO está lista (ej. confirmado o en_preparacion)
+                if (order.status !== 'listo' && order.status !== 'en_camino' && order.status !== 'en_puerta' && order.status !== 'entregado') {
+                    grupos[groupId].todasListas = false;
+                    
+                    // Extraer los nombres de los items que faltan para mostrarlos en la alerta
+                    let nombres = "";
+                    try {
+                        const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+                        nombres = items.map(i => `${i.quantity || i.qty || 1}x ${i.name}`).join(', ');
+                    } catch(e) {}
+                    if (nombres) grupos[groupId].itemsPendientes.push(nombres);
+                }
+            });
+
+            // 2. Renderizar las tarjetas agrupadas
+            Object.values(grupos).forEach(grupo => {
+                // Usamos la principal para pintar la tarjeta. Si no está, usamos la primera suborden.
+                const mainOrder = grupo.principal || grupo.subOrdenes[0];
+                if (!mainOrder) return;
+
+                const isPaid = mainOrder.paid;
+                // Calculamos el total sumando la principal y las subórdenes
+                const totalGrupo = (grupo.principal ? grupo.principal.total : 0) + 
+                                   grupo.subOrdenes.reduce((sum, sub) => sum + sub.total, 0);
+
                 const paymentBadge = isPaid
                     ? `<span class="badge pagado">✅ PAGADO</span>`
-                    : `<span class="badge cobrar">💰 COBRAR: ${fmt(order.total)}</span>`;
+                    : `<span class="badge cobrar">💰 COBRAR: ${fmt(totalGrupo)}</span>`;
 
-                const cleanPhone = order.phone.replace(/\D/g, '');
-                const wazeLink = getWazeLink(order.address);
+                const cleanPhone = mainOrder.phone.replace(/\D/g, '');
+                const wazeLink = getWazeLink(mainOrder.address);
                 const waLink = `https://wa.me/${cleanPhone}`;
-                const isDelivered = order.status === 'entregado';
+                const isDelivered = mainOrder.status === 'entregado';
 
-                const cardHtml = `
+                let cardHtml = `
                     <div class="order-card">
                         <div class="order-header">
-                            <span class="order-id">#${order.id.slice(0,6)}</span>
+                            <span class="order-id">#${mainOrder.id.slice(0,6)}</span>
                             ${paymentBadge}
                         </div>
-                        <div class="address">📍 ${order.address || 'Sin dirección'}</div>
-                        ${order.notes ? `<div class="notes">📝 <b>Nota:</b> ${order.notes}</div>` : ''}
+                        <div class="address">📍 ${mainOrder.address || 'Sin dirección'}</div>
+                        ${mainOrder.notes ? `<div class="notes">📝 <b>Nota:</b> ${mainOrder.notes}</div>` : ''}
 
                         ${!isDelivered ? `
                         <div class="action-btns">
                             <a href="${wazeLink}" target="_blank" class="btn btn-waze">🗺️ Waze</a>
                             <a href="${waLink}" target="_blank" class="btn btn-wa">💬 Llama/WA</a>
                         </div>` : ''}
-
-                        ${order.status === 'listo' ? `<button class="btn btn-main btn-start" onclick="updateStatus('${order.id}', 'en_camino')">🚀 Iniciar Ruta</button>` : ''}
-                        ${order.status === 'en_camino' ? `<button class="btn btn-main btn-start" onclick="updateStatus('${order.id}', 'en_puerta')" style="background:#f57c00;">📍 Estoy en la puerta</button>` : ''}
-                        ${order.status === 'en_puerta' ? `<button class="btn btn-main btn-deliver" onclick="updateStatus('${order.id}', 'entregado')">✅ Marcar Entregado</button>` : ''}
-                        ${isDelivered ? `<p style="text-align:center; color:#1D9E75; font-weight:bold; padding:12px 0;">Entregado correctamente ✅</p>` : ''}
-                    </div>
                 `;
 
-                if (order.status === 'listo') { listRecoger.innerHTML += cardHtml; recogerCount++; }
-                else if (order.status === 'en_camino' || order.status === 'en_puerta') { listRuta.innerHTML += cardHtml; rutaCount++; }
-                else if (order.status === 'entregado') { listEntregados.innerHTML += cardHtml; entregadoCount++; }
+                // 3. Lógica para mostrar la alerta o los botones de despacho
+                // Si la orden principal (o alguna suborden) apenas se va a despachar:
+                if (mainOrder.status === 'listo' || mainOrder.status === 'confirmado' || mainOrder.status === 'en_preparacion') {
+                    if (!grupo.todasListas) {
+                        // 🚨 ALERTA: Faltan cosas en cocina
+                        cardHtml += `
+                            <div style="background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin: 10px 0; border: 1px solid #ffeeba;">
+                                <strong style="display: flex; align-items: center; gap: 5px;">
+                                    ⏳ FALTAN ADICIONES EN COCINA
+                                </strong>
+                                <div style="margin-top: 5px; font-size: 0.9em;">
+                                    Pendiente: ${grupo.itemsPendientes.join(' | ')}
+                                </div>
+                            </div>
+                            <button class="btn btn-main" disabled style="background:#ccc; cursor:not-allowed;">Esperando a cocina...</button>
+                        `;
+                    } else {
+                        // Todo el grupo está 'listo'
+                        cardHtml += `<button class="btn btn-main btn-start" onclick="updateStatus('${mainOrder.id}', 'en_camino')">🚀 Iniciar Ruta</button>`;
+                    }
+                    cardHtml += `</div>`;
+                    listRecoger.innerHTML += cardHtml;
+                    recogerCount++;
+                } 
+                else if (mainOrder.status === 'en_camino') {
+                    cardHtml += `<button class="btn btn-main btn-start" onclick="updateStatus('${mainOrder.id}', 'en_puerta')" style="background:#f57c00;">📍 Estoy en la puerta</button></div>`;
+                    listRuta.innerHTML += cardHtml;
+                    rutaCount++;
+                }
+                else if (mainOrder.status === 'en_puerta') {
+                    cardHtml += `<button class="btn btn-main btn-deliver" onclick="updateStatus('${mainOrder.id}', 'entregado')">✅ Marcar Entregado</button></div>`;
+                    listRuta.innerHTML += cardHtml;
+                    rutaCount++;
+                }
+                else if (mainOrder.status === 'entregado') {
+                    cardHtml += `<p style="text-align:center; color:#1D9E75; font-weight:bold; padding:12px 0;">Entregado correctamente ✅</p></div>`;
+                    listEntregados.innerHTML += cardHtml;
+                    entregadoCount++;
+                }
             });
 
             if(recogerCount === 0) listRecoger.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">No hay pedidos por recoger</p>';
