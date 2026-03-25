@@ -395,42 +395,98 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             separate_bill = parsed.get("separate_bill", False)
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
+            # ── FASE 2: enrutamiento multi-estación (Cocina vs. Bar) ──────────────
+            # Leemos features del restaurante. Si bar_enabled=true y bar_categories
+            # está definido, separamos los ítems por categoría.
+            # Los pedidos sin bar activo usan station='all' (comportamiento original).
+            bar_enabled    = False
+            bar_categories: list = []
+            try:
+                restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
+                if restaurant:
+                    features = restaurant.get("features") or {}
+                    if isinstance(features, str):
+                        features = json.loads(features)
+                    bar_enabled    = bool(features.get("bar_enabled", False))
+                    bar_categories = list(features.get("bar_categories", []))
+            except Exception as _e:
+                print(f"⚠️ Error leyendo features para routing: {_e}", flush=True)
+
+            if bar_enabled and bar_categories:
+                kitchen_items = [i for i in cart_items if i.get("category", "") not in bar_categories]
+                bar_items     = [i for i in cart_items if i.get("category", "") in bar_categories]
+            else:
+                kitchen_items = cart_items
+                bar_items     = []
+
+            has_split       = bool(kitchen_items) and bool(bar_items)
+            kitchen_station = "kitchen" if has_split else "all"
+
+            def _station_total(item_list: list) -> int:
+                return sum(
+                    int(i.get("subtotal", i.get("price", 0) * i.get("quantity", 1)))
+                    for i in item_list
+                )
+            # ─────────────────────────────────────────────────────────────────────
+
             base_order_id = await db.db_get_base_order_id(table_context["id"])
             sub_number    = 1  # default; overwritten for sub-orders
 
+            def _order_base(order_id: str, these_items: list, these_total: int,
+                            sub_num: int, station: str) -> dict:
+                return {
+                    "id":            order_id,
+                    "table_id":      table_context["id"],
+                    "table_name":    table_context["name"],
+                    "phone":         phone,
+                    "items":         these_items,
+                    "notes":         extra_notes,
+                    "total":         these_total,
+                    "status":        "recibido",
+                    "base_order_id": base_order_id,
+                    "sub_number":    sub_num,
+                    "station":       station,
+                }
+
             if separate_bill or base_order_id is None:
-                # First order for this table session
+                # Primera orden de la sesión de mesa
                 order_id      = f"MESA-{uuid.uuid4().hex[:6].upper()}"
                 base_order_id = order_id
                 sub_number    = 1
-                await db.db_save_table_order({
-                    "id":            order_id,
-                    "table_id":      table_context["id"],
-                    "table_name":    table_context["name"],
-                    "phone":         phone,
-                    "items":         cart_items,
-                    "notes":         extra_notes,
-                    "total":         cart_total,
-                    "status":        "recibido",
-                    "base_order_id": base_order_id,
-                    "sub_number":    sub_number,
-                })
+
+                k_items = kitchen_items if has_split else cart_items
+                k_total = _station_total(k_items) if has_split else cart_total
+                await db.db_save_table_order(
+                    _order_base(order_id, k_items, k_total, sub_number, kitchen_station)
+                )
+
+                if has_split and bar_items:
+                    sub_number = await db.db_get_next_sub_number(base_order_id)
+                    bar_oid    = f"{base_order_id}-{sub_number}"
+                    await db.db_save_table_order(
+                        _order_base(bar_oid, bar_items, _station_total(bar_items), sub_number, "bar")
+                    )
+                    bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
+                    print(f"🍹 Bar order {bar_oid}: {bar_summary}", flush=True)
             else:
-                # Existing session: ALWAYS create a sub-order (never merge)
+                # Sub-orden adicional a una sesión existente
                 sub_number = await db.db_get_next_sub_number(base_order_id)
                 order_id   = f"{base_order_id}-{sub_number}"
-                await db.db_save_table_order({
-                    "id":            order_id,
-                    "table_id":      table_context["id"],
-                    "table_name":    table_context["name"],
-                    "phone":         phone,
-                    "items":         cart_items,
-                    "notes":         extra_notes,
-                    "total":         cart_total,
-                    "status":        "recibido",
-                    "base_order_id": base_order_id,
-                    "sub_number":    sub_number,
-                })
+
+                k_items = kitchen_items if has_split else cart_items
+                k_total = _station_total(k_items) if has_split else cart_total
+                await db.db_save_table_order(
+                    _order_base(order_id, k_items, k_total, sub_number, kitchen_station)
+                )
+
+                if has_split and bar_items:
+                    sub_number = await db.db_get_next_sub_number(base_order_id)
+                    bar_oid    = f"{base_order_id}-{sub_number}"
+                    await db.db_save_table_order(
+                        _order_base(bar_oid, bar_items, _station_total(bar_items), sub_number, "bar")
+                    )
+                    bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
+                    print(f"🍹 Bar order {bar_oid}: {bar_summary}", flush=True)
 
             try:
                 await db.db_deduct_inventory_for_order(bot_number, cart_items)

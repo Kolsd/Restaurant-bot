@@ -265,10 +265,16 @@ async def update_delivery_order_status(request: Request, order_id: str):
 
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 @router.get("/api/table-orders")
-async def get_table_orders(request: Request, status: str = None):
+async def get_table_orders(request: Request, status: str = None, station: str = None):
+    """
+    Devuelve órdenes de mesa activas.
+    station: 'kitchen' → muestra station IN ('kitchen','all')
+             'bar'     → muestra station IN ('bar','all')
+             None      → todas (usado por Caja y facturación)
+    """
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
-    
+
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         if status:
@@ -291,8 +297,8 @@ async def get_table_orders(request: Request, status: str = None):
                        ORDER BY o.created_at ASC""", branch_id)
             else:
                 rows = await conn.fetch(
-                    """SELECT * FROM table_orders 
-                       WHERE status NOT IN ('factura_entregada','cancelado') 
+                    """SELECT * FROM table_orders
+                       WHERE status NOT IN ('factura_entregada','cancelado')
                        ORDER BY created_at ASC""")
 
     import json as _json
@@ -307,6 +313,11 @@ async def get_table_orders(request: Request, status: str = None):
         if d.get('updated_at') and hasattr(d['updated_at'], 'isoformat'):
             d['updated_at'] = d['updated_at'].isoformat() + 'Z'
         result.append(d)
+
+    # Filtro por estación (post-fetch: ≤30 órdenes activas en producción)
+    if station:
+        result = [r for r in result if r.get("station", "all") in (station, "all")]
+
     return {"orders": result}
 
 async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
@@ -478,14 +489,22 @@ async def update_order_status(request: Request, order_id: str):
 async def kitchen_display():
     return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
 
+@router.get("/bar", response_class=HTMLResponse)
+async def bar_display():
+    p = STATIC / "bar.html"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="bar.html no encontrado en static/")
+    return HTMLResponse(p.read_text(encoding="utf-8"))
+
 # ── MÓDULO PUNTO DE VENTA (POS) PARA MESEROS ─────────────────────────
 
 class ManualOrderRequest(BaseModel):
-    table_id: str
+    table_id:   str
     table_name: str
-    items: list
-    total: int
-    notes: str = ""
+    items:      list
+    total:      int
+    notes:      str = ""
+    station:    str = "all"  # 'kitchen' | 'bar' | 'all'
 
 @router.get("/api/pos/menu")
 async def get_pos_menu(request: Request):
@@ -593,18 +612,20 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
         sub_num = 1
 
     order = {
-        "id": order_id,
-        "table_id": body.table_id,
-        "table_name": body.table_name,
-        "phone": phone,
-        "items": body.items,
-        "status": "recibido", # Entra directamente a la cola de la cocina
-        "notes": body.notes,
-        "total": body.total,
-        "base_order_id": final_base_id, 
-        "sub_number": sub_num
+        "id":            order_id,
+        "table_id":      body.table_id,
+        "table_name":    body.table_name,
+        "phone":         phone,
+        "items":         body.items,
+        "status":        "recibido",
+        "notes":         body.notes,
+        "total":         body.total,
+        "base_order_id": final_base_id,
+        "sub_number":    sub_num,
+        "station":       body.station,  # Mesero indica destino: 'kitchen'|'bar'|'all'
     }
-    
+
     await db.db_save_table_order(order)
-    
-    return {"success": True, "order_id": order_id, "message": "Comanda enviada a cocina"}
+
+    dest = {"kitchen": "cocina", "bar": "bar", "all": "cocina y bar"}.get(body.station, "cocina")
+    return {"success": True, "order_id": order_id, "message": f"Comanda enviada a {dest}"}
