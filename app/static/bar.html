@@ -79,6 +79,7 @@ header { background:#0F1220; border-bottom:1px solid #1E2340; padding:1rem 1.5re
 .empty { text-align:center; padding:2rem; color:#2A2F50; font-size:13px; }
 .notification { position:fixed; top:1rem; right:1rem; background:#7B8CDE; color:#000; padding:12px 20px; border-radius:10px; font-size:13px; font-weight:600; transform:translateY(-100px); transition:transform .3s; z-index:100; max-width:300px; }
 .notification.show { transform:translateY(0); }
+.btn-print { background:rgba(255,255,255,.04); color:#555; border:1px solid #1E2340; margin-bottom:6px; }
 </style>
 </head>
 <body>
@@ -155,6 +156,7 @@ async function setStatus(orderId, status) {
 }
 
 function renderCard(o) {
+  _ordersMap[o.id] = o;
   const items  = Array.isArray(o.items) ? o.items : [];
   const subNum = o.sub_number || 1;
   const isAdd  = o.base_order_id && subNum > 1;
@@ -186,8 +188,62 @@ function renderCard(o) {
     </div>
     <div class="order-items">${itemsHtml}</div>
     ${notesHtml}
+    <button class="btn btn-print" onclick="printComanda('${o.id}')">🖨️ Imprimir Comanda</button>
     ${actionHtml}
   </div>`;
+}
+
+const _ordersMap = {};
+
+function printComanda(orderId) {
+  const o = _ordersMap[orderId];
+  if (!o) return;
+  const items = Array.isArray(o.items) ? o.items : [];
+  const iso = (o.created_at || '').endsWith('Z') ? o.created_at : (o.created_at || '') + 'Z';
+  const dt = new Date(iso);
+  const timeStr = dt.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
+  const dateStr = dt.toLocaleDateString('es-CO');
+  const subNum = o.sub_number || 1;
+  const subLabel = (o.base_order_id && subNum > 1) ? `ADICIONAL #${subNum}` : 'PEDIDO INICIAL';
+  const itemsHtml = items.map(i =>
+    `<div class="item"><span class="qty">${i.quantity||i.qty||1}x</span> ${i.name||''}</div>`
+  ).join('');
+  const notesHtml = o.notes
+    ? `<div class="sep"></div><div class="notes">NOTAS: ${o.notes}</div>`
+    : '';
+  const win = window.open('', '_blank', 'width=340,height=560,toolbar=0,menubar=0');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Comanda Bar ${o.table_name}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
+@page{size:80mm auto;margin:0}
+.title{font-size:13pt;font-weight:bold;text-align:center;letter-spacing:2px}
+.sub{font-size:8pt;text-align:center;margin-bottom:2px}
+.sep{border-top:1px dashed #000;margin:5px 0}
+.label{font-size:8pt;color:#444;margin-top:3px}
+.mesa{font-size:15pt;font-weight:bold}
+.item{font-size:11pt;margin:3px 0}
+.qty{font-weight:bold;display:inline-block;width:22px}
+.notes{font-size:9pt;font-style:italic;margin-top:3px}
+.footer{text-align:center;font-size:8pt;margin-top:4px}
+</style></head><body>
+<div class="title">COMANDA BAR</div>
+<div class="sub">${subLabel}</div>
+<div class="sep"></div>
+<div class="label">MESA</div>
+<div class="mesa">${o.table_name}</div>
+<div class="label">Hora: ${timeStr} &nbsp;|&nbsp; ${dateStr}</div>
+<div class="sep"></div>
+<div class="label" style="font-weight:bold;margin-bottom:3px">BEBIDAS</div>
+${itemsHtml}
+${notesHtml}
+<div class="sep"></div>
+<div class="footer">— Mesio POS —</div>
+</body></html>`);
+  win.document.close();
+  win.focus();
+  win.onload = () => { win.print(); };
 }
 
 let prevIds = new Set();
