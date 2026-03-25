@@ -1823,6 +1823,52 @@ async def db_get_fiscal_invoices(restaurant_id: int, limit: int = 50) -> list:
 # SPLIT CHECKS / PAGOS MIXTOS (FASE 5)
 # ══════════════════════════════════════════════════════════════════════
 
+async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) -> dict | None:
+    """
+    Retorna los ítems y total agregados de todas las sub-órdenes de un ticket.
+    Usado por create_checks para validar cantidades antes de crear la división.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if branch_id:
+            rows = await conn.fetch(
+                """SELECT o.* FROM table_orders o
+                   LEFT JOIN restaurant_tables t ON o.table_id = t.id
+                   WHERE (o.id = $1 OR o.base_order_id = $1)
+                     AND (t.branch_id = $2 OR t.branch_id IS NULL)
+                   ORDER BY o.created_at ASC""",
+                base_order_id, branch_id
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT * FROM table_orders
+                   WHERE id=$1 OR base_order_id=$1
+                   ORDER BY created_at ASC""",
+                base_order_id
+            )
+    if not rows:
+        return None
+    all_items = []
+    total = 0.0
+    first = dict(rows[0])
+    for row in rows:
+        d = dict(row)
+        items = d.get("items", [])
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except Exception:
+                items = []
+        if isinstance(items, list):
+            all_items.extend(items)
+        total += float(d.get("total") or 0)
+    return {
+        "base_order_id": base_order_id,
+        "table_name": first.get("table_name", ""),
+        "items": all_items,
+        "total": total,
+    }
+
 async def db_init_table_checks():
     """
     Crea la tabla table_checks para división de cuentas y pagos mixtos.

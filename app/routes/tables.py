@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.services import database as db
 from app.services import billing
 from app.services.agent import trigger_nps
-from app.routes.deps import require_auth, get_current_user
+from app.routes.deps import require_auth, get_current_user, get_current_restaurant
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -711,3 +711,221 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
 
     dest = {"kitchen": "cocina", "bar": "bar", "all": "cocina y bar"}.get(body.station, "cocina")
     return {"success": True, "order_id": order_id, "message": f"Comanda enviada a {dest}"}
+
+
+# ── SPLIT CHECKS / PAGOS MIXTOS (FASE 5) ──────────────────────────────────────
+
+class CheckItem(BaseModel):
+    name: str
+    qty: int
+    unit_price: float
+
+class CheckDef(BaseModel):
+    check_number: int
+    items: list[CheckItem]
+
+class CreateChecksBody(BaseModel):
+    checks: list[CheckDef]
+    tax_pct: float = 19.0        # enviado por el cliente desde la config de billing
+    tax_regime: str = "iva"
+
+class PaymentMethod(BaseModel):
+    method: str    # efectivo | tarjeta | nequi | transferencia
+    amount: float
+
+class PayCheckBody(BaseModel):
+    payments: list[PaymentMethod]
+    customer_name: str = "Consumidor Final"
+    customer_nit:  str = "222222222"
+    customer_email: str = ""
+
+
+@router.post("/api/table-orders/{base_order_id}/checks")
+async def create_checks(request: Request, base_order_id: str, body: CreateChecksBody):
+    """
+    Crea o reemplaza la división de cuenta de una mesa.
+    Valida integridad de cantidades contra el ticket original.
+    Calcula subtotal/impuesto/total servidor-side (no confía en el cliente).
+    """
+    user = await get_current_user(request)
+
+    # Obtener el ticket completo para validar cantidades
+    ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    # Mapa de qty disponible por plato en el ticket original
+    available: dict[str, int] = {}
+    for item in ticket.get("items", []):
+        key = item["name"].strip().lower()
+        available[key] = available.get(key, 0) + int(item.get("quantity", item.get("qty", 1)))
+
+    # Validar que los checks no excedan las cantidades disponibles
+    check_totals: dict[str, int] = {}
+    for chk in body.checks:
+        for it in chk.items:
+            key = it.name.strip().lower()
+            check_totals[key] = check_totals.get(key, 0) + it.qty
+    for name, qty in check_totals.items():
+        avail = available.get(name, 0)
+        if qty > avail:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{name}': cantidad en checks ({qty}) supera la pedida ({avail})"
+            )
+
+    # Construir checks con totales calculados servidor-side
+    tax_factor = body.tax_pct / 100
+    validated = []
+    for chk in body.checks:
+        # Reconstruir items con unit_price desde el ticket (busca por nombre)
+        price_map: dict[str, float] = {}
+        for item in ticket.get("items", []):
+            price_map[item["name"].strip().lower()] = float(item.get("price", 0))
+
+        items_out = []
+        gross = 0.0
+        for it in chk.items:
+            unit_price = price_map.get(it.name.strip().lower(), it.unit_price)
+            line_sub = round(unit_price * it.qty / (1 + tax_factor), 2)
+            items_out.append({
+                "name": it.name, "qty": it.qty,
+                "unit_price": unit_price,
+                "subtotal": round(unit_price * it.qty, 2)
+            })
+            gross += unit_price * it.qty
+
+        subtotal  = round(gross / (1 + tax_factor), 2)
+        tax_amount = round(gross - subtotal, 2)
+        total     = round(gross, 2)
+
+        validated.append({
+            "check_number": chk.check_number,
+            "items": items_out,
+            "subtotal": subtotal,
+            "tax_amount": tax_amount,
+            "total": total,
+        })
+
+    result = await db.db_create_checks(base_order_id, validated)
+    return {"success": True, "checks": result}
+
+
+@router.get("/api/table-orders/{base_order_id}/checks")
+async def get_checks(request: Request, base_order_id: str):
+    """Lista todos los checks de una mesa con sus datos fiscales."""
+    await get_current_user(request)
+    checks = await db.db_get_checks(base_order_id)
+    return {"checks": checks}
+
+
+@router.post("/api/table-orders/{base_order_id}/checks/{check_id}/pay")
+async def pay_check(request: Request, base_order_id: str, check_id: str, body: PayCheckBody):
+    """
+    Procesa el pago de un check:
+    1. Valida que la suma de pagos >= total del check.
+    2. Llama al motor de billing para emitir una factura DIAN individual.
+    3. En una transacción DB: marca el check invoiced + cierra la mesa si aplica.
+    Regla DIAN: 1 factura electrónica por check cobrado.
+    """
+    restaurant = await get_current_restaurant(request)
+
+    check = await db.db_get_check(check_id)
+    if not check:
+        raise HTTPException(status_code=404, detail="Check no encontrado")
+    if check["base_order_id"] != base_order_id:
+        raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
+    if check["status"] != "open":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Este check ya fue procesado (status: {check['status']})"
+        )
+
+    total_pagado = sum(p.amount for p in body.payments)
+    if total_pagado < float(check["total"]):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pago insuficiente: se requieren ${check['total']:,.0f}, "
+                   f"se recibieron ${total_pagado:,.0f}"
+        )
+    change = round(total_pagado - float(check["total"]), 2)
+
+    # Obtener config de billing
+    config = await billing.get_billing_config(restaurant["id"])
+    if not config:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay configuración de facturación. Configura el proveedor primero."
+        )
+
+    # Construir el objeto order para el adaptador de billing
+    items = check.get("items", [])
+    if isinstance(items, str):
+        import json as _json
+        items = _json.loads(items)
+
+    order_for_billing = {
+        "id":             check_id,
+        "total":          float(check["total"]),
+        "items":          items,
+        "payment_method": body.payments[0].method if body.payments else "cash",
+        "order_ref":      base_order_id,
+        "customer": {
+            "name":  body.customer_name,
+            "nit":   body.customer_nit,
+            "email": body.customer_email,
+        },
+    }
+
+    config["_restaurant_id"] = restaurant["id"]
+    provider = config.get("provider", "mesio_native")
+    adapter  = billing.get_adapter(provider)
+
+    try:
+        fiscal = await adapter.create_invoice(order_for_billing, config)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
+
+    payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
+
+    await db.db_finalize_check_payment(
+        check_id=check_id,
+        base_order_id=base_order_id,
+        payments=payments_list,
+        change_amount=change,
+        fiscal_invoice_id=fiscal["id"],
+        customer_name=body.customer_name,
+        customer_nit=body.customer_nit,
+        customer_email=body.customer_email,
+    )
+
+    return {
+        "success":  True,
+        "check_id": check_id,
+        "change":   change,
+        "fiscal":   fiscal,
+    }
+
+
+@router.get("/api/table-orders/{base_order_id}/checks/{check_id}/ticket")
+async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
+    """Devuelve los datos del check para impresión de factura térmica."""
+    await get_current_user(request)
+    ticket = await db.db_get_check_ticket(check_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Check no encontrado")
+    return ticket
+
+
+@router.delete("/api/table-orders/{base_order_id}/checks/{check_id}")
+async def delete_check(request: Request, base_order_id: str, check_id: str):
+    """Elimina un check en estado 'open'. No afecta checks ya cobrados."""
+    await get_current_user(request)
+    deleted = await db.db_delete_open_check(check_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede eliminar: el check no existe o ya fue procesado"
+        )
+    return {"success": True}
+
