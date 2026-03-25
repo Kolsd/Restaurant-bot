@@ -74,6 +74,7 @@ async def startup():
     await db.db_init_table_sessions()
     await db.db_init_nps_inventory()
     await db.db_init_fiscal_tables()
+    await db.db_init_dish_recipes()
 
     from app.services.scheduler import start_scheduler
     await start_scheduler()

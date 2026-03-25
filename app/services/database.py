@@ -1356,68 +1356,251 @@ async def db_get_inventory_alerts(restaurant_id: int) -> list:
  
 async def db_deduct_inventory_for_order(bot_number: str, items: list):
     """
-    Descuenta stock por cada plato pedido.
+    Descuenta stock por cada plato pedido, con soporte para escandallos (dish_recipes).
     items = [{"name": "Hamburguesa Clásica", "quantity": 2}, ...]
-    Llámalo desde tables.py y orders.py al confirmar una orden.
+    Usa SELECT FOR UPDATE dentro de una transacción para evitar race conditions
+    con los 4 workers de Railway.
+    Si no hay receta definida, cae al comportamiento legacy de linked_dishes.
     """
     pool = await get_pool()
     restaurant = await db_get_restaurant_by_phone(bot_number)
     if not restaurant:
         return
- 
+
+    restaurant_id = restaurant["id"]
+
     async with pool.acquire() as conn:
-        for item in items:
-            dish_name = item.get("name", "")
-            qty       = float(item.get("quantity", item.get("qty", 1)))
-            if not dish_name or qty <= 0:
-                continue
- 
-            # Buscamos productos cuyo linked_dishes contiene este plato
-            rows = await conn.fetch(
-                """SELECT id, current_stock, linked_dishes, min_stock
-                   FROM inventory
-                   WHERE restaurant_id = $1
-                     AND linked_dishes @> $2::jsonb""",
-                restaurant["id"], json.dumps([dish_name])
-            )
- 
-            for row in rows:
-                new_stock = max(0, float(row["current_stock"]) - qty)
-                await conn.execute(
-                    """UPDATE inventory
-                       SET current_stock = $1, updated_at = NOW()
-                       WHERE id = $2""",
-                    new_stock, row["id"]
+        async with conn.transaction():
+            for item in items:
+                dish_name = item.get("name", "")
+                qty       = float(item.get("quantity", item.get("qty", 1)))
+                if not dish_name or qty <= 0:
+                    continue
+
+                # ── 1. Intentar receta (escandallo) ──────────────────────
+                recipe_rows = await conn.fetch(
+                    """SELECT r.ingredient_id, r.quantity AS recipe_qty
+                       FROM dish_recipes r
+                       WHERE r.restaurant_id = $1 AND r.dish_name = $2""",
+                    restaurant_id, dish_name
                 )
-                # Historial
-                await conn.execute(
-                    """INSERT INTO inventory_history
-                       (inventory_id, quantity_delta, stock_after, reason)
-                       VALUES ($1, $2, $3, 'orden_confirmada')""",
-                    row["id"], -qty, new_stock
-                )
-                # Si se agotó, desactivar el plato
-                dishes = row["linked_dishes"]
-                if isinstance(dishes, str):
-                    dishes = json.loads(dishes)
-                if new_stock <= 0:
-                    await _sync_dish_availability(dishes, False)
+
+                if recipe_rows:
+                    # Bloquear las filas de ingredientes antes de modificar
+                    ingredient_ids = [r["ingredient_id"] for r in recipe_rows]
+                    locked = await conn.fetch(
+                        """SELECT id, current_stock, min_stock, linked_dishes
+                           FROM inventory
+                           WHERE id = ANY($1::int[])
+                           FOR UPDATE""",
+                        ingredient_ids
+                    )
+                    locked_map = {r["id"]: r for r in locked}
+
+                    for rline in recipe_rows:
+                        ing_id    = rline["ingredient_id"]
+                        deduct    = float(rline["recipe_qty"]) * qty
+                        inv       = locked_map.get(ing_id)
+                        if not inv:
+                            continue
+                        new_stock = max(0.0, float(inv["current_stock"]) - deduct)
+                        await conn.execute(
+                            """UPDATE inventory
+                               SET current_stock = $1, updated_at = NOW()
+                               WHERE id = $2""",
+                            new_stock, ing_id
+                        )
+                        await conn.execute(
+                            """INSERT INTO inventory_history
+                               (inventory_id, quantity_delta, stock_after, reason)
+                               VALUES ($1, $2, $3, 'orden_confirmada')""",
+                            ing_id, -deduct, new_stock
+                        )
+                        # Desactivar platos vinculados cuando el stock se agota
+                        if new_stock <= float(inv["min_stock"] or 0):
+                            dishes = inv["linked_dishes"]
+                            if isinstance(dishes, str):
+                                dishes = json.loads(dishes)
+                            if dishes:
+                                await _sync_dish_availability_conn(conn, dishes, False)
+
+                else:
+                    # ── 2. Fallback legacy: linked_dishes ────────────────
+                    rows = await conn.fetch(
+                        """SELECT id, current_stock, linked_dishes, min_stock
+                           FROM inventory
+                           WHERE restaurant_id = $1
+                             AND linked_dishes @> $2::jsonb
+                           FOR UPDATE""",
+                        restaurant_id, json.dumps([dish_name])
+                    )
+                    for row in rows:
+                        new_stock = max(0.0, float(row["current_stock"]) - qty)
+                        await conn.execute(
+                            """UPDATE inventory
+                               SET current_stock = $1, updated_at = NOW()
+                               WHERE id = $2""",
+                            new_stock, row["id"]
+                        )
+                        await conn.execute(
+                            """INSERT INTO inventory_history
+                               (inventory_id, quantity_delta, stock_after, reason)
+                               VALUES ($1, $2, $3, 'orden_confirmada')""",
+                            row["id"], -qty, new_stock
+                        )
+                        dishes = row["linked_dishes"]
+                        if isinstance(dishes, str):
+                            dishes = json.loads(dishes)
+                        if new_stock <= float(row["min_stock"] or 0) and dishes:
+                            await _sync_dish_availability_conn(conn, dishes, False)
  
  
+async def _sync_dish_availability_conn(conn, dish_names: list, available: bool):
+    """Activa o desactiva platos usando una conexión existente (dentro de transacción)."""
+    for name in dish_names:
+        await conn.execute(
+            """INSERT INTO menu_availability (dish_name, available, updated_at)
+               VALUES ($1, $2, NOW())
+               ON CONFLICT (dish_name)
+               DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
+            name, available
+        )
+
+
 async def _sync_dish_availability(dish_names: list, available: bool):
     """Activa o desactiva platos en menu_availability según el stock."""
     if not dish_names:
         return
     pool = await get_pool()
     async with pool.acquire() as conn:
-        for name in dish_names:
-            await conn.execute(
-                """INSERT INTO menu_availability (dish_name, available, updated_at)
-                   VALUES ($1, $2, NOW())
-                   ON CONFLICT (dish_name)
-                   DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
-                name, available
+        await _sync_dish_availability_conn(conn, dish_names, available)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ESCANDALLOS / RECETAS (FASE 4)
+# ══════════════════════════════════════════════════════════════════════
+
+async def db_init_dish_recipes():
+    """
+    Crea la tabla dish_recipes (escandallos).
+    Mapea platos del menú a sus ingredientes con cantidad exacta por porción.
+    Llamar desde main.py en el startup, después de db_init_fiscal_tables().
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS dish_recipes (
+                id              SERIAL PRIMARY KEY,
+                restaurant_id   INTEGER       NOT NULL,
+                dish_name       TEXT          NOT NULL,
+                ingredient_id   INTEGER       NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
+                quantity        NUMERIC(10,4) NOT NULL CHECK (quantity > 0),
+                created_at      TIMESTAMP DEFAULT NOW(),
+                updated_at      TIMESTAMP DEFAULT NOW(),
+                UNIQUE (restaurant_id, dish_name, ingredient_id)
             )
+        """)
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_dish_recipes_lookup     ON dish_recipes(restaurant_id, dish_name)",
+            "CREATE INDEX IF NOT EXISTS idx_dish_recipes_ingredient ON dish_recipes(ingredient_id)",
+        ]:
+            await conn.execute(idx_sql)
+    print("Dish recipes table ready", flush=True)
+
+
+async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list) -> list:
+    """
+    Reemplaza el escandallo completo de un plato.
+    lines = [{"ingredient_id": int, "quantity": float}, ...]
+    Pasar lines=[] para eliminar la receta.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM dish_recipes WHERE restaurant_id=$1 AND dish_name=$2",
+                restaurant_id, dish_name
+            )
+            for line in lines:
+                await conn.execute(
+                    """INSERT INTO dish_recipes (restaurant_id, dish_name, ingredient_id, quantity)
+                       VALUES ($1, $2, $3, $4)""",
+                    restaurant_id, dish_name,
+                    int(line["ingredient_id"]), float(line["quantity"])
+                )
+    return await db_get_dish_recipe(restaurant_id, dish_name)
+
+
+async def db_get_dish_recipe(restaurant_id: int, dish_name: str) -> list:
+    """Devuelve las líneas de ingredientes de un plato, con costo por línea."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT r.id, r.ingredient_id, r.quantity,
+                   i.name AS ingredient_name, i.unit, i.cost_per_unit,
+                   ROUND((r.quantity * i.cost_per_unit)::numeric, 2) AS line_cost
+            FROM dish_recipes r
+            JOIN inventory i ON r.ingredient_id = i.id
+            WHERE r.restaurant_id = $1 AND r.dish_name = $2
+            ORDER BY i.name
+        """, restaurant_id, dish_name)
+        return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_all_recipes(restaurant_id: int) -> list:
+    """Lista todos los escandallos con food cost total por plato."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT r.dish_name,
+                   COUNT(*) AS ingredient_count,
+                   ROUND(SUM(r.quantity * i.cost_per_unit)::numeric, 2) AS food_cost
+            FROM dish_recipes r
+            JOIN inventory i ON r.ingredient_id = i.id
+            WHERE r.restaurant_id = $1
+            GROUP BY r.dish_name
+            ORDER BY r.dish_name
+        """, restaurant_id)
+        return [_serialize(dict(r)) for r in rows]
+
+
+async def db_delete_dish_recipe(restaurant_id: int, dish_name: str):
+    """Elimina todos los ingredientes del escandallo de un plato."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM dish_recipes WHERE restaurant_id=$1 AND dish_name=$2",
+            restaurant_id, dish_name
+        )
+
+
+async def db_get_food_costs(restaurant_id: int) -> list:
+    """
+    Devuelve el Food Cost de cada plato que tiene escandallo definido.
+    Incluye desglose por ingrediente para que el dueño vea de dónde viene el costo.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                r.dish_name,
+                ROUND(SUM(r.quantity * i.cost_per_unit)::numeric, 2) AS food_cost,
+                json_agg(
+                    json_build_object(
+                        'ingredient',    i.name,
+                        'unit',          i.unit,
+                        'quantity',      r.quantity,
+                        'cost_per_unit', i.cost_per_unit,
+                        'line_cost',     ROUND((r.quantity * i.cost_per_unit)::numeric, 2)
+                    ) ORDER BY i.name
+                ) AS breakdown
+            FROM dish_recipes r
+            JOIN inventory i ON r.ingredient_id = i.id
+            WHERE r.restaurant_id = $1
+            GROUP BY r.dish_name
+            ORDER BY r.dish_name
+        """, restaurant_id)
+        return [_serialize(dict(r)) for r in rows]
 
 
 # ══════════════════════════════════════════════════════════════════════
