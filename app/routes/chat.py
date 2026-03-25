@@ -114,12 +114,22 @@ async def _process_message(user_phone: str, user_text: str, bot_number: str,
             url = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
             headers = {"Authorization": f"Bearer {access_token}"}
             async with httpx.AsyncClient(timeout=10) as client:
-                res = await client.post(url, headers=headers, json={
-                    "messaging_product": "whatsapp",
-                    "to": user_phone,
-                    "type": "text",
-                    "text": {"body": result["message"]}
-                })
+                if result.get("interactive"):
+                    # Send as interactive message with buttons
+                    wa_payload = {
+                        "messaging_product": "whatsapp",
+                        "to": user_phone,
+                        "type": "interactive",
+                        "interactive": result["interactive"]
+                    }
+                else:
+                    wa_payload = {
+                        "messaging_product": "whatsapp",
+                        "to": user_phone,
+                        "type": "text",
+                        "text": {"body": result["message"]}
+                    }
+                res = await client.post(url, headers=headers, json=wa_payload)
                 print(f"📤 Meta Status: {res.status_code}", flush=True)
                 if res.status_code != 200:
                     print(f"🚨 ERROR META: {res.text}", flush=True)
@@ -210,6 +220,11 @@ async def meta_webhook(request: Request):
             lon = loc.get("longitude")
             maps_url = f"https://maps.google.com/?q={lat},{lon}"
             user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
+        elif msg_type == "interactive":
+            # Handle button replies (e.g. NPS skip button)
+            interactive = message.get("interactive", {})
+            button_reply = interactive.get("button_reply", {})
+            user_text = button_reply.get("id", "") or button_reply.get("title", "")
         else:
             user_text = message.get("text", {}).get("body", "")
 

@@ -56,14 +56,14 @@ Mesio is a multi-tenant SaaS WhatsApp AI bot for restaurants. Each restaurant is
 4. `app/services/agent.py:chat()` is the AI core:
    - Detects table context (dine-in vs. delivery/pickup) by parsing `[table_id:X]` tags or table number mentions
    - Enriches the user message with `[RESTAURANTE]`, `[MENÚ]`, `[CARRITO]`, `[MESA]` context blocks
-   - Calls Claude (`claude-haiku-4-5` for speed) with a structured JSON system prompt
+   - Calls Claude (`claude-haiku-4-5-20251001` for speed, `claude-sonnet-4-6` for precise tasks) with a structured JSON system prompt
    - Parses the JSON response and dispatches an `action` (`order`, `delivery`, `pickup`, `reserve`, `bill`, `waiter`, `end_session`)
 
 ### Multi-tenancy
 
 - Each restaurant has `whatsapp_number` (bot's phone) as the routing key
 - `bot_number` from the webhook identifies which restaurant to serve
-- Restaurant `features` (JSONB) stores `payment_methods`, `google_maps_url`, etc.
+- Restaurant `features` (JSONB) stores `payment_methods`, `google_maps_url`, `timezone`, `locale`, `currency`, etc.
 - Restaurants can have sub-branches: `restaurant_tables` have a `branch_id` FK to `restaurants`
 
 ### Key Services
@@ -83,15 +83,28 @@ Mesio is a multi-tenant SaaS WhatsApp AI bot for restaurants. Each restaurant is
 |--------|------|-------|
 | `/api` | `routes/chat.py` | WhatsApp webhooks + `/api/chat` test endpoint |
 | `/api` | `routes/orders.py` | Order list, cart, Wompi payment webhook |
+| `/api` | `routes/stats.py` | Dashboard sync/stats, conversation management, manual reply, menu availability |
+| `/api/tables`, `/menu`, `/cocina` | `routes/tables.py` | Table CRUD, QR generation, waiter alerts, kitchen display, POS manual orders, delivery order management |
 | `/api/billing` | `routes/billing.py` | Billing config + invoice emission |
 | `/api/crm` | `routes/crm.py` | Internal prospect CRM (ADMIN_KEY protected) |
 | `/api` | `routes/nps.py` | NPS responses |
 | `/api` | `routes/inventory.py` | Menu availability/inventory |
 | (dashboard) | `routes/dashboard.py` | Static HTML dashboard |
 
+### Authentication
+
+`app/routes/deps.py` provides three shared dependencies used across all protected routes:
+- `require_auth(request)` — validates Bearer token, returns username
+- `get_current_user(request)` — returns the full user dict (includes `branch_id`, `role`)
+- `get_current_restaurant(request)` — returns the restaurant row for the authenticated user
+
+Public endpoints (no auth): `GET /api/webhook/meta`, `GET /menu/{table_id}`, `GET /api/public/menu-context/{table_id}`.
+
 ### Database Tables (auto-created on startup)
 
-`restaurants`, `billing_log`, `reservations`, `conversations`, `orders`, `carts`, `table_sessions`, `waiter_alerts`, `restaurant_tables`, `nps_responses`, `inventory`, `meta_rate_limits`, `sessions` (auth), `users`
+`restaurants`, `billing_log`, `reservations`, `conversations`, `orders`, `carts`, `table_sessions`, `table_orders`, `waiter_alerts`, `restaurant_tables`, `nps_responses`, `inventory`, `meta_rate_limits`, `sessions` (auth), `users`
+
+`table_orders` is distinct from `orders`: it tracks dine-in kitchen tickets (with `base_order_id` grouping sub-orders per table) while `orders` tracks delivery/pickup.
 
 CRM tables are created lazily on first CRM request: `prospects`, `prospect_notes`, `prospect_interactions`, `crm_templates`.
 
@@ -102,6 +115,12 @@ The system prompt in `agent.py:_STATIC_SYSTEM` is marked with `cache_control: ep
 - Return structured JSON with `action`, `items`, `reply`, and optional fields
 - Follow a strict sales funnel for external (delivery/pickup) orders
 - Use `action="order"` only when a table context is detected
+
+User input is sanitized against prompt injection before being sent to Claude (`_sanitize_user_input`, `_INJECTION_RE`).
+
+### NPS Flow
+
+NPS state (`_nps_state` dict in `agent.py`) is in-memory — it does not survive server restarts. For scores ≤ 3, a pending record is persisted to DB via `db_save_nps_pending` so the follow-up comment can be collected after a restart.
 
 ### Tests
 
