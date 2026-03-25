@@ -1,6 +1,7 @@
 """
 Tests para el Motor de Facturación Nativa DIAN (MesioNativeAdapter).
-Cubre: CUFE, CUDS, XML UBL 2.1, create_invoice con mocks de DB, test_connection.
+Cubre: CUFE, CUDS, payload JSON para proveedor, create_invoice con mocks de DB,
+test_connection, modo mock sin provider_api_url.
 No requiere base de datos ni credenciales reales.
 """
 import pytest
@@ -123,13 +124,16 @@ def test_cuds_cambia_con_pin_diferente(adapter):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3. XML UBL 2.1 — estructura básica
+# 3. Payload JSON para el Proveedor Tecnológico
 # ══════════════════════════════════════════════════════════════════════
 
-def test_xml_contiene_elementos_obligatorios(adapter):
-    """El XML generado debe incluir los elementos UBL 2.1 requeridos por la DIAN."""
-    xml = adapter._build_ubl_xml(
-        invoice_number="FE-1001",
+def test_provider_payload_contiene_campos_obligatorios(adapter):
+    """_build_provider_payload debe retornar un dict con todas las secciones clave."""
+    customer = {"nit": "222222222", "name": "Consumidor Final", "email": "", "id_type": "13"}
+    payload = adapter._build_provider_payload(
+        invoice_number="FE990000001",
+        prefix="FE",
+        inv_number=990000001,
         issue_date="2024-06-15",
         issue_time="12:00:00",
         cufe="a" * 96,
@@ -143,76 +147,41 @@ def test_xml_contiene_elementos_obligatorios(adapter):
         total_cents=11900000,
         tax_regime="iva",
         tax_pct=19.0,
-        customer={"nit": "222222222", "name": "Consumidor Final", "email": "", "id_type": "13"},
-        environment_id="2",
+        customer=customer,
+        env="test",
     )
-    assert '<?xml version="1.0"' in xml
-    assert "UBL 2.1" in xml
-    assert "CUFE-SHA384" in xml
-    assert "FE-1001" in xml
-    assert "2024-06-15" in xml
-    assert "18764006352289" in xml          # Número de resolución
-    assert "700085462" in xml               # NIT emisor
-    assert "222222222" in xml               # NIT cliente genérico
-    assert "Pizza Margherita" in xml
-    assert "Gaseosa" in xml
-    assert "01" in xml                      # Código IVA
-    assert "IVA" in xml
+    # Secciones obligatorias
+    assert "invoice_number" in payload
+    assert "cufe" in payload
+    assert "cuds" in payload
+    assert "resolution" in payload
+    assert "emitter" in payload
+    assert "customer" in payload
+    assert "items" in payload
+    assert "totals" in payload
+    # Valores concretos
+    assert payload["invoice_number"] == "FE990000001"
+    assert payload["cufe"] == "a" * 96
+    assert payload["emitter"]["nit"] == "700085462"
+    assert payload["totals"]["tax_regime"] == "iva"
+    assert payload["totals"]["tax_pct"] == 19.0
+    assert len(payload["items"]) == 2
+    assert payload["items"][0]["name"] == "Pizza Margherita"
 
 
-def test_xml_ico_usa_esquema_04(adapter):
-    """Para régimen ICO el XML debe usar código de impuesto '04' y nombre 'INC'."""
-    xml = adapter._build_ubl_xml(
-        invoice_number="FE-2001",
-        issue_date="2024-06-15",
-        issue_time="12:00:00",
-        cufe="c" * 96,
-        cuds="d" * 96,
-        qr_url="https://example.com/qr",
-        resolution=MOCK_RESOLUTION,
-        config={**MOCK_CONFIG, "tax_regime": "ico"},
-        order=MOCK_ORDER,
-        subtotal_cents=10000000,
-        tax_cents=800000,
-        total_cents=10800000,
-        tax_regime="ico",
-        tax_pct=8.0,
-        customer={"nit": "222222222", "name": "Consumidor Final", "email": "", "id_type": "13"},
-        environment_id="2",
-    )
-    assert "INC" in xml
-    assert "<cbc:ID>04</cbc:ID>" in xml
-
-
-def test_xml_escapa_caracteres_especiales(adapter):
-    """Nombres con caracteres XML especiales no deben romper el documento."""
-    order_con_ampersand = {
-        **MOCK_ORDER,
-        "items": [{"name": "Pollo & Papas <fritas>", "price": 25000, "quantity": 1}],
-    }
-    xml = adapter._build_ubl_xml(
-        invoice_number="FE-3001",
-        issue_date="2024-06-15",
-        issue_time="12:00:00",
-        cufe="e" * 96,
-        cuds="f" * 96,
-        qr_url="https://example.com/qr",
-        resolution=MOCK_RESOLUTION,
-        config=MOCK_CONFIG,
-        order=order_con_ampersand,
-        subtotal_cents=2100840,
-        tax_cents=399160,
-        total_cents=2500000,
-        tax_regime="iva",
-        tax_pct=19.0,
-        customer={"nit": "222222222", "name": "Consumidor Final", "email": "", "id_type": "13"},
-        environment_id="2",
-    )
-    assert "&amp;" in xml
-    assert "&lt;" in xml
-    assert "&gt;" in xml
-    # No debe haber & o < sin escapar dentro de contenido de elemento
-    assert "Pollo &amp; Papas &lt;fritas&gt;" in xml
+@pytest.mark.asyncio
+async def test_mock_mode_sin_api_url_retorna_cufe_fake(adapter):
+    """Sin provider_api_url configurado _call_provider_api debe retornar mock de éxito."""
+    payload = {"invoice_number": "FE-TEST-001", "issue_date": "2024-06-15"}
+    # Config sin provider_api_url → modo mock
+    result = await adapter._call_provider_api(payload, MOCK_CONFIG)
+    assert result["success"] is True
+    assert result["mock"] is True
+    assert result["dian_status"] == "accepted"
+    assert len(result["cufe"]) == 96
+    # El CUFE mock es determinista para el mismo invoice_number + issue_date
+    result2 = await adapter._call_provider_api(payload, MOCK_CONFIG)
+    assert result["cufe"] == result2["cufe"]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -231,8 +200,8 @@ async def test_create_invoice_flujo_completo(adapter):
 
     assert result["invoice_number"] == "FE990000001"
     assert len(result["cufe"]) == 96
-    assert result["dian_status"] == "draft"
-    assert result["xml_available"] is True
+    assert result["dian_status"] == "accepted"   # mock retorna accepted
+    assert result["provider_mock"] is True
     # Verificar cálculo de impuesto IVA 19% sobre precio que ya incluye impuesto
     # total=119000 → subtotal=100000 (aprox), iva=19000
     assert abs(result["total"] - 119000) < 1
@@ -296,7 +265,8 @@ async def test_db_save_fiscal_invoice_se_llama_con_cufe(adapter):
 
     call_args = mock_save.call_args[0][0]
     assert len(call_args["cufe"]) == 96
-    assert call_args["dian_status"] == "draft"
+    assert call_args["dian_status"] == "accepted"   # mock retorna accepted
+    assert call_args["dian_response"] is not None    # respuesta del proveedor persistida
     assert call_args["restaurant_id"] == 42
     assert call_args["order_id"] == "MESA-ABC123"
 
