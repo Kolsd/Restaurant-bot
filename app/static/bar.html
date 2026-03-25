@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mesio — Bar</title>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#0A0C14; color:#fff; min-height:100vh; }
+
+/* ── HEADER ── */
+header { background:#0F1220; border-bottom:1px solid #1E2340; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; }
+.logo { font-size:1.2rem; font-weight:700; color:#fff; display:flex; align-items:center; }
+.logo span { color:#7B8CDE; }
+
+.role-nav { display: flex; gap: 8px; background: #1A1D2E; padding: 4px; border-radius: 10px; margin-left: 20px; }
+.role-btn { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #666; text-decoration: none; transition: all 0.2s; }
+.role-btn.active { background: #7B8CDE; color: #fff; }
+.role-btn:hover:not(.active) { color: #fff; background: #252840; }
+
+.header-right { display:flex; align-items:center; gap:12px; }
+.live-dot { width:8px; height:8px; border-radius:50%; background:#7B8CDE; animation:pulse 2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+.live-text { font-size:12px; color:#7B8CDE; }
+.time { font-size:13px; color:#555; }
+.btn-logout { width:auto; padding:5px 12px; background:none; border:1px solid #252840; border-radius:8px; color:#888; margin-left:15px; cursor:pointer; font-size:12px; font-weight:600; transition:all .15s;}
+.btn-logout:hover { color:#fff; border-color:#444; }
+
+/* ── BOARD ── */
+.main { padding:1.5rem; }
+.board { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+@media(max-width:900px){ .board{grid-template-columns:1fr;} }
+@media(max-width:600px){
+  header { padding:.75rem 1rem; }
+  .role-nav { display:none !important; }
+  .main { padding:1rem; }
+  .btn { padding:12px; font-size:14px; }
+}
+
+.col-header { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin-bottom:.75rem; padding:.5rem .75rem; border-radius:6px; display:flex; align-items:center; gap:8px; }
+.col-recibido    .col-header { color:#F5C542; background:rgba(245,197,66,.08); }
+.col-preparacion .col-header { color:#7B8CDE; background:rgba(123,140,222,.08); }
+.col-listo       .col-header { color:#5BC4A0; background:rgba(91,196,160,.08); }
+.badge { background:#7B8CDE; color:#000; font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; margin-left:auto; }
+
+/* ── TARJETAS ── */
+.order-card { background:#111526; border:1px solid #1E2340; border-radius:12px; padding:1rem; margin-bottom:.75rem; transition:border-color .2s; }
+.order-card:hover { border-color:#2A2F50; }
+.order-card.recibido       { border-left:3px solid #F5C542; }
+.order-card.en_preparacion { border-left:3px solid #7B8CDE; }
+.order-card.listo          { border-left:3px solid #5BC4A0; }
+
+.sub-tag { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600; padding:2px 8px; border-radius:8px; margin-bottom:6px; }
+.sub-tag.first { background:rgba(91,196,160,.12); color:#5BC4A0; }
+.sub-tag.add   { background:rgba(245,197,66,.12); color:#F5C542; }
+
+.order-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:.5rem; }
+.order-table { font-size:15px; font-weight:700; color:#fff; }
+.order-id { font-size:10px; color:#444; margin-top:2px; }
+
+.elapsed { font-size:10px; padding:2px 6px; border-radius:8px; font-weight:500; flex-shrink:0; }
+.elapsed.ok   { background:rgba(91,196,160,.15); color:#5BC4A0; }
+.elapsed.warn { background:rgba(245,197,66,.15); color:#F5C542; }
+.elapsed.late { background:rgba(226,75,74,.15); color:#E24B4A; }
+
+.order-items { margin-bottom:.75rem; }
+.order-item { font-size:13px; color:#ccc; padding:3px 0; display:flex; gap:6px; }
+.order-item-qty { color:#7B8CDE; font-weight:600; flex-shrink:0; }
+.order-notes { font-size:11px; color:#555; background:#0A0C14; border-radius:6px; padding:5px 8px; margin-bottom:.75rem; font-style:italic; }
+
+.btn { width:100%; padding:8px; border:none; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; transition:all .15s; }
+.btn:active { transform:scale(.97); }
+.btn-prep { background:rgba(123,140,222,.2); color:#7B8CDE; border:1px solid rgba(123,140,222,.3); }
+.btn-prep:hover { background:rgba(123,140,222,.35); }
+.btn-listo { background:rgba(91,196,160,.2); color:#5BC4A0; border:1px solid rgba(91,196,160,.3); }
+.btn-listo:hover { background:rgba(91,196,160,.35); }
+.listo-badge { width:100%; padding:8px; border-radius:8px; font-size:12px; font-weight:600; text-align:center; background:rgba(91,196,160,.08); color:#5BC4A0; border:1px solid rgba(91,196,160,.2); }
+
+.empty { text-align:center; padding:2rem; color:#2A2F50; font-size:13px; }
+.notification { position:fixed; top:1rem; right:1rem; background:#7B8CDE; color:#000; padding:12px 20px; border-radius:10px; font-size:13px; font-weight:600; transform:translateY(-100px); transition:transform .3s; z-index:100; max-width:300px; }
+.notification.show { transform:translateY(0); }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#444;font-weight:400;margin-left:8px;">Bar</span>
+      <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
+    </div>
+    <div class="header-right">
+      <div class="live-dot"></div>
+      <span class="live-text">En vivo</span>
+      <span class="time" id="clock"></span>
+      <button class="btn-logout" onclick="localStorage.removeItem('rb_token'); window.location.href='/login';">Salir</button>
+    </div>
+  </header>
+
+<div class="main">
+  <div class="board">
+    <div class="col-recibido">
+      <div class="col-header">🍸 Recibidos <span class="badge" id="cnt-recibido">0</span></div>
+      <div id="col-recibido"></div>
+    </div>
+    <div class="col-preparacion">
+      <div class="col-header">🧪 Preparando <span class="badge" id="cnt-preparacion">0</span></div>
+      <div id="col-preparacion"></div>
+    </div>
+    <div class="col-listo">
+      <div class="col-header">✅ Listos para servir <span class="badge" id="cnt-listo">0</span></div>
+      <div id="col-listo"></div>
+    </div>
+  </div>
+</div>
+
+<div class="notification" id="notif"></div>
+
+<script src="/static/roles.js"></script>
+<script>
+const token = localStorage.getItem('rb_token');
+if (!token) window.location.href = '/login';
+const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+
+function clock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+clock(); setInterval(clock, 1000);
+
+let notifTimer = null;
+function notify(msg) {
+  const n = document.getElementById('notif');
+  n.textContent = msg;
+  n.classList.add('show');
+  if (notifTimer) clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => n.classList.remove('show'), 3500);
+}
+
+function elapsed(createdAt) {
+  const iso  = createdAt.endsWith('Z') ? createdAt : createdAt + 'Z';
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const min  = Math.max(0, Math.floor(diff / 60));
+  const sec  = Math.max(0, diff % 60);
+  const cls  = min < 3 ? 'ok' : min < 8 ? 'warn' : 'late';
+  return `<span class="elapsed ${cls}">${min}m ${sec}s</span>`;
+}
+
+async function setStatus(orderId, status) {
+  try {
+    await fetch(`/api/table-orders/${orderId}/status`, {
+      method: 'POST', headers: hdr, body: JSON.stringify({status})
+    });
+    if (status === 'listo')          notify('✅ Listo para servir — avisa al mesero');
+    if (status === 'en_preparacion') notify('🧪 Preparando...');
+    loadOrders();
+  } catch(e) { console.error(e); }
+}
+
+function renderCard(o) {
+  const items  = Array.isArray(o.items) ? o.items : [];
+  const subNum = o.sub_number || 1;
+  const isAdd  = o.base_order_id && subNum > 1;
+
+  const subTag = isAdd
+    ? `<div class="sub-tag add">➕ Adicional #${subNum}</div>`
+    : `<div class="sub-tag first">🆕 Pedido inicial</div>`;
+
+  const itemsHtml = items.length
+    ? items.map(i => `<div class="order-item"><span class="order-item-qty">${i.quantity || i.qty || 1}×</span><span>${i.name || ''}</span></div>`).join('')
+    : '<div class="order-item" style="color:#333;">Sin ítems</div>';
+
+  const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
+
+  let actionHtml = '';
+  if (o.status === 'recibido') {
+    actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">🧪 Preparando</button>`;
+  } else if (o.status === 'en_preparacion') {
+    actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">✅ Listo para servir</button>`;
+  } else {
+    actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
+  }
+
+  return `<div class="order-card ${o.status.replace('_','-')}" data-id="${o.id}">
+    ${subTag}
+    <div class="order-header">
+      <div><div class="order-table">${o.table_name}</div><div class="order-id">${o.id}</div></div>
+      ${elapsed(o.created_at)}
+    </div>
+    <div class="order-items">${itemsHtml}</div>
+    ${notesHtml}
+    ${actionHtml}
+  </div>`;
+}
+
+let prevIds = new Set();
+
+async function loadOrders() {
+  try {
+    // Solo cargamos pedidos con station='bar' (o 'all' para compatibilidad)
+    const r = await fetch('/api/table-orders?station=bar', { headers: hdr });
+    if (!r.ok) { if (r.status === 401) window.location.href = '/login'; return; }
+    const { orders = [] } = await r.json();
+
+    const curIds = new Set(orders.map(o => o.id));
+    for (const id of curIds) {
+      if (!prevIds.has(id)) {
+        const o = orders.find(x => x.id === id);
+        if (o) notify(`🍸 Nueva bebida — ${o.table_name}`);
+      }
+    }
+    prevIds = curIds;
+
+    const groups = { recibido: [], en_preparacion: [], listo: [] };
+    orders.forEach(o => { if (groups[o.status]) groups[o.status].push(o); });
+
+    [['recibido', 'col-recibido', 'cnt-recibido'],
+     ['en_preparacion', 'col-preparacion', 'cnt-preparacion'],
+     ['listo', 'col-listo', 'cnt-listo']].forEach(([status, colId, cntId]) => {
+      const col = document.getElementById(colId);
+      const cnt = document.getElementById(cntId);
+      if (col) col.innerHTML = groups[status].length
+        ? groups[status].map(renderCard).join('')
+        : '<div class="empty">Sin pedidos de bar</div>';
+      if (cnt) cnt.textContent = groups[status].length;
+    });
+
+  } catch(e) { console.error('loadOrders error:', e); }
+}
+
+loadOrders();
+setInterval(loadOrders, 5000);
+</script>
+</body>
+</html>

@@ -233,7 +233,7 @@ let prevIds = new Set();
 
 async function loadOrders() {
   try {
-    const r1 = await fetch('/api/table-orders', { headers: hdr });
+    const r1 = await fetch('/api/table-orders?station=kitchen', { headers: hdr });
     if (!r1.ok) { if (r1.status === 401) window.location.href = '/login'; return; }
     const { orders: tableOrders = [] } = await r1.json();
 
