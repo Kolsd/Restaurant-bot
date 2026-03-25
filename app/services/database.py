@@ -1132,6 +1132,7 @@ async def db_get_nps_responses(bot_number: str, period: str = "month", limit: in
             f"""SELECT * FROM nps_responses
                 WHERE bot_number = $1
                   AND created_at >= NOW() - INTERVAL '{interval}'
+                  AND comment != '__pending__'
                 ORDER BY created_at DESC
                 LIMIT $2""",
             bot_number, limit

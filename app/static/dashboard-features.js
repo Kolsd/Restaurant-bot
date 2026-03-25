@@ -503,10 +503,13 @@ async function loadSessions() {
         <td style="font-size:12px;${warn?'color:#BA7517;font-weight:500;':'color:#888;'}">${s.closed_by_username||'—'}${warn?' ⚠️':''}</td>
         <td style="font-weight:500;">${s.total_spent?'$'+Number(s.total_spent).toLocaleString('es-CO'):'—'}</td>
         <td>
-          <button onclick="viewSession(${s.id},'${(s.table_name||'').replace(/'/g,"\\'")}','${s.phone}','${s.closed_by||''}')"
-            style="font-size:11px;padding:4px 9px;border:1px solid #e0e0d8;border-radius:6px;background:#fff;cursor:pointer;">
-            💬 Gestionar
-          </button>
+          ${!s.total_spent
+            ? `<button onclick="callWaiterAdmin('${s.bot_number||''}','${s.phone}','${(s.table_name||'').replace(/'/g,"\\'")}','${s.table_id||''}')"
+                style="font-size:11px;padding:4px 9px;background:#FFF8E6;color:#BA7517;border:1px solid #FDE68A;border-radius:6px;cursor:pointer;font-weight:500;">
+                📞 Llamar al Mesero
+              </button>`
+            : ''
+          }
         </td>
       </tr>`;
     });
@@ -560,6 +563,40 @@ function closeSesModal() {
   document.getElementById('ses-modal-overlay').classList.remove('open');
   document.body.style.overflow = '';
   _currentSesId = null;
+}
+
+async function callWaiterAdmin(botNumber, phone, tableName, tableId) {
+  const headers = window._dashHeaders;
+  try {
+    const r = await fetch('/api/waiter-alerts/admin-call', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bot_number: botNumber, phone, table_name: tableName, table_id: tableId })
+    });
+    if (r.ok) {
+      _showAdminCallToast('✅ Alerta enviada al mesero', true);
+    } else {
+      _showAdminCallToast('Error al enviar la alerta', false);
+    }
+  } catch(e) {
+    _showAdminCallToast('Error de conexión', false);
+  }
+}
+
+function _showAdminCallToast(msg, ok) {
+  let el = document.getElementById('_admin-call-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = '_admin-call-toast';
+    el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:20px;font-size:13px;font-weight:600;z-index:9999;transition:opacity .3s;pointer-events:none;';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.background = ok ? '#1D9E75' : '#E24B4A';
+  el.style.color = '#fff';
+  el.style.opacity = '1';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.opacity = '0'; }, 3000);
 }
 
 function showSesFeedback(msg, ok = true) {

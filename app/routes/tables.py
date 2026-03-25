@@ -124,6 +124,26 @@ async def get_waiter_alerts(request: Request):
             rows = []
     return {"alerts": [dict(r) for r in rows]}
 
+class AdminCallRequest(BaseModel):
+    phone: str = ""
+    table_id: str = ""
+    table_name: str = ""
+    bot_number: str = ""
+
+@router.post("/api/waiter-alerts/admin-call")
+async def admin_call_waiter(request: Request, body: AdminCallRequest):
+    """El administrador convoca a un mesero/empleado a caja o dashboard."""
+    await require_auth(request)
+    alert = await db.db_create_waiter_alert(
+        phone=body.phone or "admin",
+        bot_number=body.bot_number,
+        alert_type="admin_call",
+        message="El Administrador requiere verte en caja/dashboard",
+        table_id=body.table_id,
+        table_name=body.table_name,
+    )
+    return {"success": True, "alert": alert}
+
 @router.post("/api/waiter-alerts/{alert_id}/dismiss")
 async def dismiss_waiter_alert(request: Request, alert_id: int):
     await require_auth(request)
