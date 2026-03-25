@@ -218,7 +218,8 @@ async def check_delivery_updates(request: Request):
         rows = await conn.fetch("""
             SELECT id, status
             FROM orders
-            WHERE order_type IN ('domicilio', 'recoger') AND status IN ('listo', 'en_camino', 'en_puerta')
+            WHERE order_type IN ('domicilio', 'recoger') 
+              AND status IN ('confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
             ORDER BY id
         """)
         current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
@@ -229,53 +230,9 @@ async def check_delivery_updates(request: Request):
 async def get_delivery_orders(request: Request):
     await require_auth(request)
 
-    raw = await db.db_get_delivery_orders(['listo', 'en_camino', 'en_puerta', 'entregado'])
+    raw = await db.db_get_delivery_orders(['confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta', 'entregado'])
 
-    # Merge sub-orders into their base order so the domiciliario sees one card per delivery
-    groups: dict = {}  # base_id -> merged order dict
-    for o in raw:
-        base_id = o.get("base_order_id") or o["id"]
-        if base_id not in groups:
-            groups[base_id] = dict(o)
-            groups[base_id]["id"] = base_id  # always expose the base id
-            groups[base_id]["sub_order_count"] = 1
-            # Ensure items is always a parsed list
-            raw_items = groups[base_id].get("items", [])
-            if isinstance(raw_items, str):
-                try:
-                    raw_items = _json.loads(raw_items)
-                except Exception:
-                    raw_items = []
-            groups[base_id]["items"] = raw_items or []
-        else:
-            base = groups[base_id]
-            # Merge items (sum quantities for same dish name)
-            raw_base_items = base["items"]
-            if isinstance(raw_base_items, str):
-                try:
-                    raw_base_items = _json.loads(raw_base_items)
-                except Exception:
-                    raw_base_items = []
-            items_map = {i["name"]: dict(i) for i in (raw_base_items or [])}
-            raw_o_items = o.get("items", [])
-            if isinstance(raw_o_items, str):
-                try:
-                    raw_o_items = _json.loads(raw_o_items)
-                except Exception:
-                    raw_o_items = []
-            for item in (raw_o_items or []):
-                name = item["name"]
-                if name in items_map:
-                    items_map[name]["quantity"] = items_map[name].get("quantity", 1) + item.get("quantity", 1)
-                    items_map[name]["subtotal"]  = items_map[name].get("subtotal", 0)  + item.get("subtotal", 0)
-                else:
-                    items_map[name] = dict(item)
-            base["items"] = list(items_map.values())
-            base["total"] = base.get("total", 0) + o.get("total", 0)
-            base["sub_order_count"] = base.get("sub_order_count", 1) + 1
-
-    return {"orders": list(groups.values())}
-
+    return {"orders": raw}
 
 @router.patch("/delivery/orders/{order_id}/status")
 async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
