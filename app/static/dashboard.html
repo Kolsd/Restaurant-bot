@@ -407,6 +407,20 @@
     <div class="card">
       <div id="inventory-table-container"><div class="empty-state">Cargando inventario...</div></div>
     </div>
+
+    <!-- ESCANDALLOS / FOOD COST -->
+    <div style="margin-top:2rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:15px;font-weight:600;">Escandallos & Food Cost</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">Define qué ingredientes consume cada plato y calcula su costo de producción automáticamente.</div>
+        </div>
+        <button onclick="openRecipeModal()" style="background:#7B5EA7;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nuevo Escandallo</button>
+      </div>
+      <div class="card">
+        <div id="food-costs-container"><div class="empty-state">Cargando escandallos...</div></div>
+      </div>
+    </div>
   </div>
 
 </div><!-- /main -->
@@ -592,9 +606,46 @@
   </div>
 </div>
 
+<!-- Modal: Escandallo / Receta -->
+<div id="modal-recipe" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:#fff;border-radius:16px;width:620px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.18);">
+    <div style="padding:1.25rem 1.5rem;border-bottom:0.5px solid #e0e0d8;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:15px;font-weight:600;">🧪 Escandallo (Receta)</div>
+        <div style="font-size:12px;color:#888;margin-top:2px;">Define los ingredientes y cantidades por porción de un plato.</div>
+      </div>
+      <button onclick="closeRecipeModal()" style="font-size:20px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:1.25rem 1.5rem;">
+      <div style="margin-bottom:1rem;">
+        <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">Plato del Menú</label>
+        <select id="recipe-dish-select" style="width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+          <option value="">— Selecciona un plato —</option>
+        </select>
+      </div>
+      <div style="margin-bottom:.75rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
+          <label style="font-size:12px;font-weight:600;color:#555;">Ingredientes</label>
+          <button onclick="addRecipeLine()" style="font-size:11px;padding:4px 10px;background:#E1F5EE;color:#0F6E56;border:1px solid #b3ddd1;border-radius:6px;cursor:pointer;font-weight:600;">+ Agregar ingrediente</button>
+        </div>
+        <div id="recipe-lines" style="display:flex;flex-direction:column;gap:8px;">
+          <!-- líneas dinámicas -->
+        </div>
+        <div id="recipe-lines-empty" style="font-size:12px;color:#bbb;text-align:center;padding:1rem 0;">Agrega al menos un ingrediente.</div>
+      </div>
+      <div id="recipe-food-cost-preview" style="display:none;background:#F7FBF9;border:1px solid #b3ddd1;border-radius:8px;padding:.75rem 1rem;font-size:13px;color:#0F6E56;font-weight:600;margin-top:.5rem;"></div>
+      <div id="recipe-feedback" style="display:none;border-radius:8px;padding:8px 12px;font-size:13px;margin-top:.75rem;"></div>
+    </div>
+    <div style="padding:1rem 1.5rem;border-top:0.5px solid #e0e0d8;display:flex;justify-content:flex-end;gap:10px;">
+      <button onclick="closeRecipeModal()" style="padding:8px 18px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
+      <button id="btn-recipe-submit" onclick="submitRecipe()" style="background:#7B5EA7;color:#fff;border:none;padding:8px 22px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;">Guardar Escandallo</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/dashboard-core.js?v=3"></script>
 <script src="/static/dashboard-features.js?v=3"></script>
-<script src="/static/dashboard-nps-inventory.js?v=2"></script>
+<script src="/static/dashboard-nps-inventory.js?v=3"></script>
 
 </body>
 </html>
