@@ -136,8 +136,8 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             current_status = existing["status"]
 
             if current_status in ("en_camino", "en_puerta"):
-                # Previous order is already dispatched — create a new independent order instead
-                previous_in_transit = True
+                # Order is already dispatched — block additions and inform customer
+                return {"success": False, "error": "in_transit", "blocked_in_transit": True}
             else:
                 import json as _json
                 existing_items = existing["items"]
@@ -216,7 +216,5 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             "payment_url": generate_wompi_payment_link(order_id, total),
             "is_additional": False,
         }
-        if previous_in_transit:
-            order["previous_in_transit"] = True
         await db.db_clear_cart(phone, bot_number)
         return {"success": True, "order": order}

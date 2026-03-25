@@ -258,6 +258,13 @@ async def db_init_nps_inventory():
                 reason          TEXT NOT NULL DEFAULT 'ajuste_manual',
                 created_at      TIMESTAMP DEFAULT NOW()
             );
+
+            CREATE TABLE IF NOT EXISTS nps_waiting (
+                phone       TEXT NOT NULL,
+                bot_number  TEXT NOT NULL,
+                created_at  TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (phone, bot_number)
+            );
         """)
 
         # Índices (ignoramos si ya existen)
@@ -265,6 +272,7 @@ async def db_init_nps_inventory():
             "CREATE INDEX IF NOT EXISTS idx_nps_bot_number ON nps_responses(bot_number, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_inventory_restaurant ON inventory(restaurant_id)",
             "CREATE INDEX IF NOT EXISTS idx_inv_history ON inventory_history(inventory_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_nps_waiting_phone ON nps_waiting(phone, bot_number)",
         ]:
             try:
                 await conn.execute(idx_sql)
@@ -1138,8 +1146,43 @@ async def db_get_nps_responses(bot_number: str, period: str = "month", limit: in
             bot_number, limit
         )
     return [_serialize(dict(r)) for r in rows]
- 
- 
+
+
+# ── NPS WAITING STATE (persiste el estado "waiting_score" en DB) ──────
+
+async def db_save_nps_waiting(phone: str, bot_number: str):
+    """Persists that we are waiting for an NPS score from this customer.
+    Called when trigger_nps is invoked so state survives server restarts."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO nps_waiting (phone, bot_number, created_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (phone, bot_number) DO UPDATE SET created_at = NOW()
+        """, phone, bot_number)
+
+
+async def db_get_nps_waiting(phone: str, bot_number: str) -> bool:
+    """Returns True if there is a pending NPS score request for this customer."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT 1 FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
+            phone, bot_number
+        )
+        return row is not None
+
+
+async def db_clear_nps_waiting(phone: str, bot_number: str):
+    """Removes the pending NPS state — called after score is received or survey is skipped."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
+            phone, bot_number
+        )
+
+
 # ── INVENTARIO ───────────────────────────────────────────────────────
  
 async def db_get_inventory(restaurant_id: int) -> list:
