@@ -1,4 +1,5 @@
 import hashlib
+import json as _json
 import os
 import httpx
 import asyncio
@@ -238,11 +239,31 @@ async def get_delivery_orders(request: Request):
             groups[base_id] = dict(o)
             groups[base_id]["id"] = base_id  # always expose the base id
             groups[base_id]["sub_order_count"] = 1
+            # Ensure items is always a parsed list
+            raw_items = groups[base_id].get("items", [])
+            if isinstance(raw_items, str):
+                try:
+                    raw_items = _json.loads(raw_items)
+                except Exception:
+                    raw_items = []
+            groups[base_id]["items"] = raw_items or []
         else:
             base = groups[base_id]
             # Merge items (sum quantities for same dish name)
-            items_map = {i["name"]: dict(i) for i in base["items"]}
-            for item in o.get("items", []):
+            raw_base_items = base["items"]
+            if isinstance(raw_base_items, str):
+                try:
+                    raw_base_items = _json.loads(raw_base_items)
+                except Exception:
+                    raw_base_items = []
+            items_map = {i["name"]: dict(i) for i in (raw_base_items or [])}
+            raw_o_items = o.get("items", [])
+            if isinstance(raw_o_items, str):
+                try:
+                    raw_o_items = _json.loads(raw_o_items)
+                except Exception:
+                    raw_o_items = []
+            for item in (raw_o_items or []):
                 name = item["name"]
                 if name in items_map:
                     items_map[name]["quantity"] = items_map[name].get("quantity", 1) + item.get("quantity", 1)
