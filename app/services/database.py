@@ -1817,4 +1817,192 @@ async def db_get_fiscal_invoices(restaurant_id: int, limit: int = 50) -> list:
             restaurant_id, limit
         )
     return [_serialize(dict(r)) for r in rows]
-     
+
+
+# ══════════════════════════════════════════════════════════════════════
+# SPLIT CHECKS / PAGOS MIXTOS (FASE 5)
+# ══════════════════════════════════════════════════════════════════════
+
+async def db_init_table_checks():
+    """
+    Crea la tabla table_checks para división de cuentas y pagos mixtos.
+    Cada check es una unidad de cobro independiente con su propia factura DIAN.
+    Llamar desde main.py en el startup.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS table_checks (
+                id                TEXT PRIMARY KEY,
+                base_order_id     TEXT NOT NULL,
+                check_number      SMALLINT NOT NULL,
+                items             JSONB NOT NULL DEFAULT '[]',
+                subtotal          NUMERIC(10,2) NOT NULL DEFAULT 0,
+                tax_amount        NUMERIC(10,2) NOT NULL DEFAULT 0,
+                total             NUMERIC(10,2) NOT NULL DEFAULT 0,
+                payments          JSONB NOT NULL DEFAULT '[]',
+                change_amount     NUMERIC(10,2) NOT NULL DEFAULT 0,
+                status            TEXT NOT NULL DEFAULT 'open',
+                fiscal_invoice_id INTEGER REFERENCES fiscal_invoices(id),
+                customer_name     TEXT,
+                customer_nit      TEXT,
+                customer_email    TEXT,
+                created_at        TIMESTAMP DEFAULT NOW(),
+                paid_at           TIMESTAMP,
+                UNIQUE (base_order_id, check_number)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_table_checks_base "
+            "ON table_checks(base_order_id)"
+        )
+    print("Table checks table ready", flush=True)
+
+
+async def db_create_checks(base_order_id: str, checks: list) -> list:
+    """
+    Reemplaza los checks 'open' del ticket y crea los nuevos.
+    checks = [{"check_number": 1, "items": [...], "subtotal": N, "tax_amount": N, "total": N}, ...]
+    Cada item en items: {"name": str, "qty": int, "unit_price": float, "subtotal": float}
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Eliminar únicamente los checks todavía abiertos (no los ya cobrados)
+            await conn.execute(
+                "DELETE FROM table_checks WHERE base_order_id=$1 AND status='open'",
+                base_order_id
+            )
+            inserted_ids = []
+            for c in checks:
+                check_id = f"{base_order_id}-CHK-{c['check_number']}"
+                await conn.execute(
+                    """INSERT INTO table_checks
+                       (id, base_order_id, check_number, items,
+                        subtotal, tax_amount, total)
+                       VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+                       ON CONFLICT (base_order_id, check_number)
+                       DO UPDATE SET items=$4::jsonb, subtotal=$5,
+                                     tax_amount=$6, total=$7, status='open'""",
+                    check_id, base_order_id, int(c["check_number"]),
+                    json.dumps(c["items"]),
+                    float(c["subtotal"]), float(c["tax_amount"]), float(c["total"])
+                )
+                inserted_ids.append(check_id)
+        rows = await conn.fetch(
+            "SELECT * FROM table_checks WHERE base_order_id=$1 ORDER BY check_number",
+            base_order_id
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_checks(base_order_id: str) -> list:
+    """Devuelve todos los checks de un ticket, con datos fiscales si existen."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT tc.*,
+                   fi.cufe, fi.qr_data, fi.invoice_number, fi.dian_status,
+                   fi.tax_regime, fi.tax_pct
+            FROM table_checks tc
+            LEFT JOIN fiscal_invoices fi ON fi.id = tc.fiscal_invoice_id
+            WHERE tc.base_order_id = $1
+            ORDER BY tc.check_number
+        """, base_order_id)
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_check(check_id: str) -> dict | None:
+    """Devuelve un check individual."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM table_checks WHERE id=$1", check_id
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_finalize_check_payment(
+    check_id: str,
+    base_order_id: str,
+    payments: list,
+    change_amount: float,
+    fiscal_invoice_id: int,
+    customer_name: str = None,
+    customer_nit: str = None,
+    customer_email: str = None,
+) -> None:
+    """
+    Atómicamente:
+    1. Actualiza el check a status='invoiced' con pagos y cambio.
+    2. Si TODOS los checks del base_order_id están en {invoiced, cancelled},
+       actualiza table_orders a status='factura_entregada'.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """UPDATE table_checks
+                   SET payments=$1::jsonb, change_amount=$2,
+                       fiscal_invoice_id=$3, status='invoiced',
+                       customer_name=$4, customer_nit=$5, customer_email=$6,
+                       paid_at=NOW()
+                   WHERE id=$7""",
+                json.dumps(payments), float(change_amount),
+                fiscal_invoice_id,
+                customer_name, customer_nit, customer_email,
+                check_id
+            )
+            # Verificar si todos los checks del grupo están cerrados
+            pending = await conn.fetchval(
+                """SELECT COUNT(*) FROM table_checks
+                   WHERE base_order_id=$1
+                     AND status NOT IN ('invoiced','cancelled')""",
+                base_order_id
+            )
+            if pending == 0:
+                await conn.execute(
+                    """UPDATE table_orders
+                       SET status='factura_entregada', updated_at=NOW()
+                       WHERE (id=$1 OR base_order_id=$1)
+                         AND status NOT IN ('cancelado','factura_entregada')""",
+                    base_order_id
+                )
+
+
+async def db_delete_open_check(check_id: str) -> bool:
+    """Elimina un check solo si está en estado 'open'. Retorna True si se eliminó."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM table_checks WHERE id=$1 AND status='open'", check_id
+        )
+    return result != "DELETE 0"
+
+
+async def db_get_check_ticket(check_id: str) -> dict | None:
+    """Devuelve datos del check + info fiscal para impresión de factura."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT tc.id, tc.base_order_id, tc.check_number,
+                   tc.items, tc.subtotal, tc.tax_amount, tc.total,
+                   tc.payments, tc.change_amount, tc.status,
+                   tc.customer_name, tc.customer_nit,
+                   tc.created_at, tc.paid_at,
+                   fi.cufe, fi.qr_data, fi.invoice_number,
+                   fi.dian_status, fi.tax_regime, fi.tax_pct,
+                   to2.table_name
+            FROM table_checks tc
+            LEFT JOIN fiscal_invoices fi ON fi.id = tc.fiscal_invoice_id
+            LEFT JOIN table_orders to2  ON to2.id = tc.base_order_id
+            WHERE tc.id = $1
+        """, check_id)
+    if not row:
+        return None
+    d = _serialize(dict(row))
+    if isinstance(d.get("items"), str):
+        d["items"] = json.loads(d["items"])
+    if isinstance(d.get("payments"), str):
+        d["payments"] = json.loads(d["payments"])
+    return d
