@@ -537,19 +537,21 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
 
     nps_key = _nps_key(user_phone, bot_number)
 
-    # Recover NPS state from DB if it was lost (e.g. server restart)
-    if nps_key not in _nps_state:
-        try:
-            pending_score = await db.db_get_pending_nps_score(user_phone, bot_number)
-            if pending_score is not None:
-                _nps_state[nps_key] = {"state": "waiting_comment", "score": pending_score}
-            else:
-                # Check if we are waiting for initial score (waiting_score state)
-                is_waiting = await db.db_get_nps_waiting(user_phone, bot_number)
-                if is_waiting:
-                    _nps_state[nps_key] = {"state": "waiting_score", "score": 0}
-        except Exception:
-            pass
+    # Always sync NPS state from DB — DB is the single source of truth across workers.
+    # This prevents stale in-memory state on one worker intercepting messages after
+    # another worker already completed/cleared the NPS flow.
+    try:
+        pending_score = await db.db_get_pending_nps_score(user_phone, bot_number)
+        is_waiting    = await db.db_get_nps_waiting(user_phone, bot_number)
+        if pending_score is not None:
+            _nps_state[nps_key] = {"state": "waiting_comment", "score": pending_score}
+        elif is_waiting:
+            _nps_state[nps_key] = {"state": "waiting_score", "score": 0}
+        else:
+            # DB says no NPS pending — evict any stale in-memory state on this worker
+            _nps_state.pop(nps_key, None)
+    except Exception:
+        pass
 
     if nps_key in _nps_state:
         nps_restaurant_name = ""
