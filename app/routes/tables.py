@@ -513,8 +513,9 @@ async def adjust_table_bill(request: Request, base_order_id: str):
             base_order_id, _json.dumps(adjusted_items), new_total
         )
         # Zero out sub-orders so they don't double-count in the bill sum
+        # Exclude the base order itself (base_order_id = id for the first order)
         await conn.execute(
-            "UPDATE table_orders SET items='[]'::jsonb, total=0, updated_at=NOW() WHERE base_order_id=$1",
+            "UPDATE table_orders SET items='[]'::jsonb, total=0, updated_at=NOW() WHERE base_order_id=$1 AND id != $1",
             base_order_id
         )
 

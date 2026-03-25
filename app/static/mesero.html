@@ -518,7 +518,22 @@ async function loadAlerts() {
     container.innerHTML = alerts.map(a => {
       if (!knownAlertIds.has(a.id)) {
         knownAlertIds.add(a.id);
-        showToast('🙋 ' + (a.table_name || 'Cliente') + ' solicita atención', 'waiter');
+        if (a.alert_type === 'admin_call') {
+          showToast('👔 El Administrador te llama', 'waiter');
+        } else {
+          showToast('🙋 ' + (a.table_name || 'Cliente') + ' solicita atención', 'waiter');
+        }
+      }
+      if (a.alert_type === 'admin_call') {
+        return `
+        <div class="alert-card" id="alert-${a.id}" style="border-left:4px solid #7C3AED;background:#F5F3FF;">
+          <div class="alert-icon">👔</div>
+          <div style="flex:1;">
+            <div class="alert-title" style="color:#6D28D9;">Llamado del Administrador</div>
+            <div class="alert-meta">${a.message || 'El Administrador requiere verte en caja/dashboard'}</div>
+          </div>
+          <button onclick="dismissAlert(${a.id})" class="btn" style="background:#EDE9FE;color:#6D28D9;">✓ En camino</button>
+        </div>`;
       }
       return `
       <div class="alert-card" id="alert-${a.id}">
