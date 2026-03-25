@@ -1163,11 +1163,11 @@ async def db_save_nps_waiting(phone: str, bot_number: str):
 
 
 async def db_get_nps_waiting(phone: str, bot_number: str) -> bool:
-    """Returns True if there is a pending NPS score request for this customer."""
+    """Returns True if there is a pending NPS score request for this customer (within 48 hours)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT 1 FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
+            "SELECT 1 FROM nps_waiting WHERE phone=$1 AND bot_number=$2 AND created_at > NOW() - INTERVAL '48 hours'",
             phone, bot_number
         )
         return row is not None
@@ -1180,6 +1180,10 @@ async def db_clear_nps_waiting(phone: str, bot_number: str):
         await conn.execute(
             "DELETE FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
             phone, bot_number
+        )
+        # Prune expired records while we're at it
+        await conn.execute(
+            "DELETE FROM nps_waiting WHERE created_at < NOW() - INTERVAL '48 hours'"
         )
 
 

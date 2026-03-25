@@ -1,4 +1,5 @@
 import os
+import time
 import httpx
 import urllib.parse
 import uuid
@@ -14,6 +15,18 @@ from app.routes.deps import require_auth, get_current_user
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
+
+# Rate-limit WA "entregado" notifications: max 1 per phone per 5 minutes
+_entregado_notif_sent: dict = {}  # phone -> last sent timestamp (epoch seconds)
+_ENTREGADO_COOLDOWN = 300  # seconds
+
+
+def _can_send_entregado_notif(phone: str) -> bool:
+    last = _entregado_notif_sent.get(phone, 0)
+    if time.time() - last >= _ENTREGADO_COOLDOWN:
+        _entregado_notif_sent[phone] = time.time()
+        return True
+    return False
 
 async def get_table_wa_number(table: dict) -> str:
     wa_number = ""
@@ -299,7 +312,7 @@ async def get_table_orders(request: Request, status: str = None):
 async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
     token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
-    
+
     if token and final_phone_id:
         try:
             async with httpx.AsyncClient(timeout=8) as client:
@@ -313,6 +326,46 @@ async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
             print(f"❌ Error enviando WhatsApp: {e}")
     else:
         print(f"⚠️ No se envió WA a {phone} -> Faltan variables (Token: {bool(token)}, PhoneID: {final_phone_id})")
+
+
+async def send_wa_interactive_nps(phone: str, nps_label: str, db_phone_id: str = None):
+    """Send the NPS rating question as an interactive WhatsApp message with a skip button."""
+    token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+    final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
+
+    if not token or not final_phone_id:
+        print(f"⚠️ No se envió NPS interactivo a {phone} -> Faltan variables")
+        return
+
+    nps_text = (
+        f"⭐ Antes de irte, ¿cómo calificarías tu experiencia en {nps_label} hoy?\n"
+        f"Responde con un número del 1 al 5\n"
+        f"(1 = Muy mala · 5 = Excelente)"
+    )
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": nps_text},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
+                ]
+            }
+        }
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.post(
+                f"https://graph.facebook.com/{META_API_VERSION}/{final_phone_id}/messages",
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload
+            )
+            print(f"✅ WA NPS interactivo a {phone}: {resp.status_code}")
+    except Exception as e:
+        print(f"❌ Error enviando NPS interactivo: {e}")
 
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
@@ -386,18 +439,13 @@ async def update_order_status(request: Request, order_id: str):
                     pass
 
             msg = "Tu mesa ha sido cerrada. ¡Gracias por visitarnos, esperamos verte pronto!"
+            await send_wa_msg(phone, msg, db_phone_id)
 
-            # ── Disparar NPS y adjuntar pregunta al mensaje de despedida ──
+            # ── Disparar NPS y enviar pregunta interactiva (con botón "No calificar") ──
             if bot_num:
                 await trigger_nps(phone, bot_num, rest_name)
                 nps_label = rest_name or "nuestro restaurante"
-                msg += (
-                    f"\n\n⭐ Antes de irte, ¿cómo calificarías tu experiencia en *{nps_label}* hoy?\n"
-                    f"Responde con un número del *1 al 5*\n"
-                    f"_(1 = Muy mala · 5 = Excelente)_"
-                )
-
-            await send_wa_msg(phone, msg, db_phone_id)
+                await send_wa_interactive_nps(phone, nps_label, db_phone_id)
 
             try:
                 if session_data and session_data.get("bot_number"):
@@ -420,7 +468,7 @@ async def update_order_status(request: Request, order_id: str):
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
     else:
         await db.db_update_table_order_status(order_id, status)
-        if status == "entregado" and phone:
+        if status == "entregado" and phone and _can_send_entregado_notif(phone):
             msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
             await send_wa_msg(phone, msg, db_phone_id)
 
