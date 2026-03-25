@@ -1408,4 +1408,220 @@ async def _sync_dish_availability(dish_names: list, available: bool):
                    DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
                 name, available
             )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FACTURACIÓN ELECTRÓNICA DIAN — TABLAS FISCALES
+# ══════════════════════════════════════════════════════════════════════
+
+async def db_init_fiscal_tables():
+    """
+    Crea las tablas de Facturación Electrónica DIAN.
+    fiscal_resolution: resolución DIAN por restaurante (prefijo, rango, ClTec).
+    fiscal_invoices:   registro inmutable de cada factura emitida con sus datos fiscales.
+    Llamar desde main.py en el startup, después de db_init_nps_inventory().
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS fiscal_resolution (
+                id                SERIAL PRIMARY KEY,
+                restaurant_id     INTEGER NOT NULL UNIQUE,
+                resolution_number TEXT    NOT NULL,
+                resolution_date   DATE    NOT NULL,
+                prefix            TEXT    NOT NULL DEFAULT '',
+                from_number       INTEGER NOT NULL,
+                to_number         INTEGER NOT NULL,
+                valid_from        DATE    NOT NULL,
+                valid_to          DATE    NOT NULL,
+                technical_key     TEXT    NOT NULL,
+                current_number    INTEGER NOT NULL DEFAULT 0,
+                environment       TEXT    NOT NULL DEFAULT 'test',
+                software_id       TEXT    NOT NULL DEFAULT '',
+                software_pin      TEXT    NOT NULL DEFAULT '',
+                updated_at        TIMESTAMP DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS fiscal_invoices (
+                id                  SERIAL PRIMARY KEY,
+                billing_log_id      INTEGER REFERENCES billing_log(id) ON DELETE SET NULL,
+                restaurant_id       INTEGER NOT NULL,
+                order_id            TEXT    NOT NULL,
+
+                resolution_number   TEXT    NOT NULL,
+                prefix              TEXT    NOT NULL DEFAULT '',
+                invoice_number      INTEGER NOT NULL,
+
+                issue_date          DATE      NOT NULL DEFAULT CURRENT_DATE,
+                issue_time          TIME      NOT NULL DEFAULT CURRENT_TIME,
+
+                subtotal_cents      BIGINT    NOT NULL DEFAULT 0,
+                tax_regime          TEXT      NOT NULL DEFAULT 'iva',
+                tax_pct             NUMERIC(5,2) NOT NULL DEFAULT 19.00,
+                tax_cents           BIGINT    NOT NULL DEFAULT 0,
+                total_cents         BIGINT    NOT NULL DEFAULT 0,
+
+                cufe                TEXT      NOT NULL DEFAULT '',
+                qr_data             TEXT      NOT NULL DEFAULT '',
+                uuid_dian           TEXT      NOT NULL DEFAULT '',
+
+                xml_content         TEXT,
+                pdf_url             TEXT,
+
+                customer_nit        TEXT      NOT NULL DEFAULT '222222222',
+                customer_name       TEXT      NOT NULL DEFAULT 'Consumidor Final',
+                customer_email      TEXT      NOT NULL DEFAULT '',
+                customer_id_type    TEXT      NOT NULL DEFAULT '13',
+
+                payment_method      TEXT      NOT NULL DEFAULT 'cash',
+
+                dian_status         TEXT      NOT NULL DEFAULT 'draft',
+                dian_response       JSONB     DEFAULT NULL,
+
+                created_at          TIMESTAMP DEFAULT NOW(),
+
+                UNIQUE (restaurant_id, resolution_number, invoice_number)
+            );
+        """)
+
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_fiscal_invoices_restaurant ON fiscal_invoices(restaurant_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_fiscal_invoices_order ON fiscal_invoices(order_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fiscal_invoices_cufe ON fiscal_invoices(cufe) WHERE cufe != ''",
+        ]:
+            try:
+                await conn.execute(idx_sql)
+            except Exception:
+                pass
+
+    print("Fiscal tables initialized", flush=True)
+
+
+async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
+    """Devuelve la resolución DIAN activa del restaurante, o None si no existe."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM fiscal_resolution WHERE restaurant_id=$1",
+            restaurant_id
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_upsert_fiscal_resolution(restaurant_id: int, data: dict) -> None:
+    """Inserta o actualiza la resolución DIAN de un restaurante."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO fiscal_resolution
+               (restaurant_id, resolution_number, resolution_date, prefix,
+                from_number, to_number, valid_from, valid_to,
+                technical_key, current_number, environment, software_id, software_pin)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               ON CONFLICT (restaurant_id) DO UPDATE SET
+                 resolution_number = EXCLUDED.resolution_number,
+                 resolution_date   = EXCLUDED.resolution_date,
+                 prefix            = EXCLUDED.prefix,
+                 from_number       = EXCLUDED.from_number,
+                 to_number         = EXCLUDED.to_number,
+                 valid_from        = EXCLUDED.valid_from,
+                 valid_to          = EXCLUDED.valid_to,
+                 technical_key     = EXCLUDED.technical_key,
+                 environment       = EXCLUDED.environment,
+                 software_id       = EXCLUDED.software_id,
+                 software_pin      = EXCLUDED.software_pin,
+                 updated_at        = NOW()""",
+            restaurant_id,
+            data["resolution_number"], data["resolution_date"], data.get("prefix", ""),
+            data["from_number"], data["to_number"],
+            data["valid_from"], data["valid_to"],
+            data["technical_key"], data.get("current_number", 0),
+            data.get("environment", "test"),
+            data.get("software_id", ""), data.get("software_pin", ""),
+        )
+
+
+async def db_claim_next_invoice_number(restaurant_id: int) -> int:
+    """
+    Incrementa atómicamente el consecutivo de factura y lo devuelve.
+    Lanza RuntimeError si la resolución no existe o el rango está agotado.
+    La operación es atómica (UPDATE ... RETURNING) — segura con múltiples workers.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE fiscal_resolution
+               SET current_number = current_number + 1,
+                   updated_at     = NOW()
+               WHERE restaurant_id = $1
+                 AND current_number + 1 <= to_number
+               RETURNING current_number, from_number, to_number,
+                         valid_from, valid_to, resolution_number, prefix""",
+            restaurant_id
+        )
+    if not row:
+        # Puede ser: no existe resolución, rango agotado, o resolución vencida
+        res = await db_get_fiscal_resolution(restaurant_id)
+        if not res:
+            raise RuntimeError("No hay resolución DIAN configurada para este restaurante")
+        if res["current_number"] >= res["to_number"]:
+            raise RuntimeError(
+                f"Rango de facturación agotado ({res['from_number']}-{res['to_number']}). "
+                "Solicita una nueva resolución ante la DIAN."
+            )
+        raise RuntimeError("Error desconocido al reclamar número de factura")
+    return row["current_number"]
+
+
+async def db_save_fiscal_invoice(data: dict) -> int:
+    """Persiste la factura electrónica. Devuelve el ID generado."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO fiscal_invoices
+               (billing_log_id, restaurant_id, order_id,
+                resolution_number, prefix, invoice_number,
+                issue_date, issue_time,
+                subtotal_cents, tax_regime, tax_pct, tax_cents, total_cents,
+                cufe, qr_data, uuid_dian, xml_content, pdf_url,
+                customer_nit, customer_name, customer_email, customer_id_type,
+                payment_method, dian_status, dian_response)
+               VALUES
+               ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+                $19,$20,$21,$22,$23,$24,$25)
+               RETURNING id""",
+            data.get("billing_log_id"),
+            data["restaurant_id"], data["order_id"],
+            data["resolution_number"], data.get("prefix", ""), data["invoice_number"],
+            data.get("issue_date"), data.get("issue_time"),
+            data["subtotal_cents"], data.get("tax_regime", "iva"),
+            data["tax_pct"], data["tax_cents"], data["total_cents"],
+            data.get("cufe", ""), data.get("qr_data", ""), data.get("uuid_dian", ""),
+            data.get("xml_content"), data.get("pdf_url"),
+            data.get("customer_nit", "222222222"),
+            data.get("customer_name", "Consumidor Final"),
+            data.get("customer_email", ""),
+            data.get("customer_id_type", "13"),
+            data.get("payment_method", "cash"),
+            data.get("dian_status", "draft"),
+            json.dumps(data["dian_response"]) if data.get("dian_response") else None,
+        )
+    return row["id"]
+
+
+async def db_get_fiscal_invoices(restaurant_id: int, limit: int = 50) -> list:
+    """Lista las facturas electrónicas emitidas por el restaurante."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, order_id, prefix, invoice_number, issue_date,
+                      subtotal_cents, tax_regime, tax_pct, tax_cents, total_cents,
+                      cufe, qr_data, customer_nit, customer_name,
+                      payment_method, dian_status, created_at
+               FROM fiscal_invoices
+               WHERE restaurant_id=$1
+               ORDER BY created_at DESC LIMIT $2""",
+            restaurant_id, limit
+        )
+    return [_serialize(dict(r)) for r in rows]
      
