@@ -626,6 +626,246 @@ function filterInventory() {
   renderInventoryTable(filtered);
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+// ESCANDALLOS / FOOD COST (FASE 4)
+// ══════════════════════════════════════════════════════════════════
+
+async function loadFoodCosts() {
+  const h = window._dashHeaders;
+  const c = document.getElementById('food-costs-container');
+  if (!c) return;
+  try {
+    const r = await fetch('/api/inventory/food-costs', { headers: h });
+    if (!r.ok) { c.innerHTML = '<div class="empty-state">Error al cargar escandallos.</div>'; return; }
+    const { food_costs } = await r.json();
+    renderFoodCostTable(food_costs || []);
+  } catch(e) {
+    c.innerHTML = '<div class="empty-state">Error de conexión.</div>';
+  }
+}
+
+function renderFoodCostTable(costs) {
+  const c = document.getElementById('food-costs-container');
+  if (!c) return;
+  if (!costs.length) {
+    c.innerHTML = '<div class="empty-state">No hay escandallos definidos. Crea uno con "+ Nuevo Escandallo".</div>';
+    return;
+  }
+  let html = `<table>
+    <thead><tr>
+      <th>Plato</th><th>Food Cost</th><th>Ingredientes</th><th>Acciones</th>
+    </tr></thead><tbody>`;
+  costs.forEach(row => {
+    const breakdown = Array.isArray(row.breakdown) ? row.breakdown : [];
+    const ingredientTags = breakdown.map(b =>
+      `<span style="background:#f0f0e8;color:#555;padding:2px 7px;border-radius:5px;font-size:10px;margin:1px;" title="${b.quantity} ${b.unit} × $${b.cost_per_unit}">${b.ingredient}</span>`
+    ).join('');
+    const dishEsc = (row.dish_name || '').replace(/'/g, "\\'");
+    html += `<tr>
+      <td style="font-weight:500;">${row.dish_name}</td>
+      <td style="font-weight:700;color:#7B5EA7;">$${parseFloat(row.food_cost).toLocaleString('es-CO')}</td>
+      <td style="max-width:240px;line-height:1.8;">${ingredientTags}</td>
+      <td>
+        <div style="display:flex;gap:6px;">
+          <button onclick="openRecipeModal('${dishEsc}')"
+            style="font-size:11px;padding:4px 9px;background:#F0EBF8;color:#7B5EA7;border:none;border-radius:6px;cursor:pointer;font-weight:500;">
+            ✏️ Editar
+          </button>
+          <button onclick="deleteRecipe('${dishEsc}')"
+            style="font-size:11px;padding:4px 9px;background:#FDE8E8;color:#C0392B;border:none;border-radius:6px;cursor:pointer;">
+            🗑️
+          </button>
+        </div>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  c.innerHTML = html;
+}
+
+async function openRecipeModal(dishName) {
+  // Ensure dishes and inventory are loaded
+  if (!menuDishesCache.length) await loadMenuDishes();
+  if (!inventoryItems.length) await loadInventory();
+
+  // Populate dish selector
+  const sel = document.getElementById('recipe-dish-select');
+  sel.innerHTML = '<option value="">— Selecciona un plato —</option>';
+  menuDishesCache.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d.name;
+    opt.textContent = d.name + (d.category ? ` (${d.category})` : '');
+    sel.appendChild(opt);
+  });
+
+  // Clear lines
+  document.getElementById('recipe-lines').innerHTML = '';
+  document.getElementById('recipe-food-cost-preview').style.display = 'none';
+  const fb = document.getElementById('recipe-feedback');
+  fb.style.display = 'none';
+
+  if (dishName) {
+    sel.value = dishName;
+    sel.disabled = true;  // can't change dish when editing existing
+    // Load existing lines
+    const h = window._dashHeaders;
+    try {
+      const r = await fetch(`/api/inventory/recipes/${encodeURIComponent(dishName)}`, { headers: h });
+      if (r.ok) {
+        const { lines } = await r.json();
+        lines.forEach(l => addRecipeLine(l.ingredient_id, l.quantity));
+      }
+    } catch(e) {}
+  } else {
+    sel.disabled = false;
+  }
+
+  _updateRecipeLinesEmpty();
+  document.getElementById('modal-recipe').style.display = 'flex';
+}
+
+function closeRecipeModal() {
+  document.getElementById('modal-recipe').style.display = 'none';
+  document.getElementById('recipe-dish-select').disabled = false;
+}
+
+function addRecipeLine(ingredientId, quantity) {
+  const container = document.getElementById('recipe-lines');
+  const lineId = 'rl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+
+  const options = inventoryItems.map(i =>
+    `<option value="${i.id}" data-unit="${i.unit}" data-cost="${i.cost_per_unit || 0}" ${String(i.id) === String(ingredientId) ? 'selected' : ''}>${i.name} (${i.unit})</option>`
+  ).join('');
+
+  const div = document.createElement('div');
+  div.id = lineId;
+  div.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fafaf7;border:1px solid #e0e0d8;border-radius:8px;padding:8px 10px;';
+  div.innerHTML = `
+    <select onchange="_recalcFoodCost()" style="flex:1;padding:6px 8px;border:1px solid #e0e0d8;border-radius:6px;font-size:12px;outline:none;">
+      <option value="">— Ingrediente —</option>${options}
+    </select>
+    <input type="number" min="0.001" step="0.001" placeholder="Cantidad"
+      value="${quantity != null ? quantity : ''}"
+      onchange="_recalcFoodCost()"
+      style="width:90px;padding:6px 8px;border:1px solid #e0e0d8;border-radius:6px;font-size:12px;outline:none;">
+    <span class="rl-unit" style="font-size:11px;color:#888;min-width:32px;"></span>
+    <button onclick="document.getElementById('${lineId}').remove();_updateRecipeLinesEmpty();_recalcFoodCost();"
+      style="background:#FDE8E8;color:#C0392B;border:none;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:13px;">✕</button>
+  `;
+
+  // Update unit label when ingredient changes
+  const sel = div.querySelector('select');
+  const unitSpan = div.querySelector('.rl-unit');
+  const updateUnit = () => {
+    const opt = sel.options[sel.selectedIndex];
+    unitSpan.textContent = opt ? (opt.dataset.unit || '') : '';
+  };
+  sel.addEventListener('change', updateUnit);
+  updateUnit();
+
+  container.appendChild(div);
+  _updateRecipeLinesEmpty();
+  _recalcFoodCost();
+}
+
+function _updateRecipeLinesEmpty() {
+  const lines = document.getElementById('recipe-lines');
+  const empty = document.getElementById('recipe-lines-empty');
+  if (!lines || !empty) return;
+  empty.style.display = lines.children.length ? 'none' : 'block';
+}
+
+function _recalcFoodCost() {
+  const lines = document.getElementById('recipe-lines');
+  const preview = document.getElementById('recipe-food-cost-preview');
+  if (!lines || !preview) return;
+  let total = 0;
+  let valid = true;
+  Array.from(lines.children).forEach(div => {
+    const sel = div.querySelector('select');
+    const inp = div.querySelector('input[type=number]');
+    if (!sel || !inp) return;
+    const opt = sel.options[sel.selectedIndex];
+    const cost = parseFloat(opt ? opt.dataset.cost || 0 : 0);
+    const qty  = parseFloat(inp.value) || 0;
+    if (!sel.value || qty <= 0) { valid = false; return; }
+    total += cost * qty;
+  });
+  if (lines.children.length && valid && total > 0) {
+    preview.style.display = 'block';
+    preview.textContent = `Food Cost estimado: $${total.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  } else {
+    preview.style.display = 'none';
+  }
+}
+
+async function submitRecipe() {
+  const h = window._dashHeaders;
+  const dishName = document.getElementById('recipe-dish-select').value.trim();
+  const fb = document.getElementById('recipe-feedback');
+  const btn = document.getElementById('btn-recipe-submit');
+
+  if (!dishName) {
+    fb.style.display = 'block';
+    fb.style.background = '#FDE8E8'; fb.style.color = '#C0392B';
+    fb.textContent = 'Selecciona un plato del menú.';
+    return;
+  }
+
+  const lines = [];
+  const lineEls = document.getElementById('recipe-lines').children;
+  for (const div of lineEls) {
+    const sel = div.querySelector('select');
+    const inp = div.querySelector('input[type=number]');
+    const ingId = parseInt(sel ? sel.value : 0);
+    const qty   = parseFloat(inp ? inp.value : 0);
+    if (!ingId || qty <= 0) {
+      fb.style.display = 'block';
+      fb.style.background = '#FDE8E8'; fb.style.color = '#C0392B';
+      fb.textContent = 'Completa todos los ingredientes con cantidad válida.';
+      return;
+    }
+    lines.push({ ingredient_id: ingId, quantity: qty });
+  }
+
+  btn.textContent = 'Guardando...'; btn.disabled = true;
+  fb.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/inventory/recipes', {
+      method: 'POST',
+      headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dish_name: dishName, lines })
+    });
+    if (r.ok) {
+      fb.style.display = 'block';
+      fb.style.background = '#E1F5EE'; fb.style.color = '#0F6E56';
+      fb.textContent = '✓ Escandallo guardado correctamente.';
+      setTimeout(() => { closeRecipeModal(); loadFoodCosts(); }, 1000);
+    } else {
+      const e = await r.json();
+      fb.style.display = 'block';
+      fb.style.background = '#FDE8E8'; fb.style.color = '#C0392B';
+      fb.textContent = 'Error: ' + (e.detail || 'No se pudo guardar');
+    }
+  } catch(e) {
+    fb.style.display = 'block';
+    fb.textContent = 'Error de conexión';
+  }
+  btn.textContent = 'Guardar Escandallo'; btn.disabled = false;
+}
+
+async function deleteRecipe(dishName) {
+  if (!confirm(`¿Eliminar el escandallo de "${dishName}"?`)) return;
+  const h = window._dashHeaders;
+  try {
+    const r = await fetch(`/api/inventory/recipes/${encodeURIComponent(dishName)}`, { method: 'DELETE', headers: h });
+    if (r.ok) loadFoodCosts();
+    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo eliminar')); }
+  } catch(e) { alert('Error de conexión'); }
+}
+
 // ── Init ──
 (function() {
     // Esperar a que showSection esté definido (viene de dashboard-core.js que carga antes)
@@ -633,15 +873,15 @@ function filterInventory() {
     window.showSection = function(id, btn) {
       if (typeof origShowSection === 'function') origShowSection(id, btn);
       if (id === 'nps')        loadNPS();
-      if (id === 'inventario') loadInventory();
+      if (id === 'inventario') { loadInventory(); loadFoodCosts(); }
     };
-  
+
     // Si la sección activa al cargar ya es nps o inventario, cargar datos
     document.addEventListener('DOMContentLoaded', () => {
       const active = document.querySelector('.section.active');
       if (active) {
         if (active.id === 'nps')        loadNPS();
-        if (active.id === 'inventario') loadInventory();
+        if (active.id === 'inventario') { loadInventory(); loadFoodCosts(); }
       }
     });
   })();
