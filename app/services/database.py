@@ -711,11 +711,18 @@ async def db_init_tables():
             "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER",
             "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS base_order_id TEXT DEFAULT NULL",
             "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS sub_number INTEGER DEFAULT 1",
+            # FASE 2: enrutamiento multi-estación Cocina / Bar
+            # DEFAULT 'all' → pedidos existentes siguen apareciendo en todos los KDS
+            "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS station TEXT NOT NULL DEFAULT 'all'",
         ]:
             try: await conn.execute(col_sql)
             except Exception: pass
-        try: await conn.execute("CREATE INDEX IF NOT EXISTS idx_table_orders_base ON table_orders(base_order_id)")
-        except Exception: pass
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_table_orders_base    ON table_orders(base_order_id)",
+            "CREATE INDEX IF NOT EXISTS idx_table_orders_station ON table_orders(station)",
+        ]:
+            try: await conn.execute(idx_sql)
+            except Exception: pass
 
 async def db_get_tables(branch_id: int = None):
     pool = await get_pool()
@@ -750,8 +757,10 @@ async def db_save_table_order(order: dict):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO table_orders (id, table_id, table_name, phone, items, status, notes, total, base_order_id, sub_number)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            INSERT INTO table_orders
+                (id, table_id, table_name, phone, items, status, notes, total,
+                 base_order_id, sub_number, station)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items, status=EXCLUDED.status,
                 notes=EXCLUDED.notes, total=EXCLUDED.total, updated_at=NOW()
@@ -759,7 +768,8 @@ async def db_save_table_order(order: dict):
             json.dumps(order['items']),
             order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0),
             order.get('base_order_id'),
-            order.get('sub_number', 1))
+            order.get('sub_number', 1),
+            order.get('station', 'all'))
 
 async def db_get_base_order_status(base_order_id: str) -> str | None:
     """Returns the status of the base order record itself (not sub-orders)."""
