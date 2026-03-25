@@ -178,6 +178,8 @@ async def init_db():
         # ── schema additions that used to live inside data functions ──
         for col_sql in [
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS base_order_id TEXT",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS sub_number INTEGER DEFAULT 1",
         ]:
             try:
                 await conn.execute(col_sql)
@@ -293,12 +295,25 @@ async def db_init_nps_inventory():
 
 # ── RESERVACIONES ────────────────────────────────────────────────────
 async def db_add_reservation(name, date_str, time, guests, phone, bot_number: str = "", notes=""):
+    """Upsert reservation — updates existing if same phone/bot/date/time to prevent duplicates."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            INSERT INTO reservations (name, date, time, guests, phone, bot_number, notes)
-            VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *
-        """, name, date_str, time, int(guests), phone, bot_number, notes)
+        existing = await conn.fetchrow(
+            "SELECT id FROM reservations WHERE phone=$1 AND bot_number=$2 AND date=$3 AND time=$4",
+            phone, bot_number, date_str, time
+        )
+        if existing:
+            row = await conn.fetchrow(
+                """UPDATE reservations SET name=$1, guests=$2, notes=$3
+                   WHERE id=$4 RETURNING *""",
+                name, int(guests), notes, existing["id"]
+            )
+        else:
+            row = await conn.fetchrow(
+                """INSERT INTO reservations (name, date, time, guests, phone, bot_number, notes)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *""",
+                name, date_str, time, int(guests), phone, bot_number, notes
+            )
         return _serialize(dict(row))
 
 async def db_get_reservations_range(date_from: str, date_to: str, bot_number: str = None):
@@ -326,8 +341,9 @@ async def db_save_order(order: dict):
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
-                subtotal, delivery_fee, total, status, paid, payment_url, bot_number, payment_method)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                subtotal, delivery_fee, total, status, paid, payment_url, bot_number,
+                payment_method, base_order_id, sub_number)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 subtotal=EXCLUDED.subtotal,
@@ -346,7 +362,8 @@ async def db_save_order(order: dict):
         order["order_type"], order.get("address", ""), order.get("notes", ""),
         order["subtotal"], order["delivery_fee"], order["total"],
         order["status"], order["paid"], order.get("payment_url", ""),
-        order.get("bot_number", ""), order.get("payment_method", ""))
+        order.get("bot_number", ""), order.get("payment_method", ""),
+        order.get("base_order_id"), order.get("sub_number", 1))
 
 async def db_confirm_payment(order_id: str, transaction_id: str):
     pool = await get_pool()

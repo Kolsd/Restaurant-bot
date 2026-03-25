@@ -120,101 +120,87 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
 
         pool = await db.get_pool()
         async with pool.acquire() as conn:
-            existing = await conn.fetchrow(
-                """SELECT id, items, subtotal, total, address, notes, payment_method, status
+            # Look only at base orders (not sub-orders) to find an active session
+            base_order = await conn.fetchrow(
+                """SELECT id, address, notes, payment_method, status
                    FROM orders
                    WHERE phone=$1 AND bot_number=$2
                      AND order_type=$3
+                     AND (base_order_id IS NULL OR base_order_id = id)
                      AND status NOT IN ('entregado','cancelado')
                    ORDER BY created_at DESC LIMIT 1""",
                 phone, bot_number, order_type
             )
 
-        previous_in_transit = False
-
-        if existing:
-            current_status = existing["status"]
+        if base_order:
+            current_status = base_order["status"]
 
             if current_status in ("en_camino", "en_puerta"):
-                # Order is already dispatched — block additions and inform customer
+                # Order is already dispatched — block additions
                 return {"success": False, "error": "in_transit", "blocked_in_transit": True}
-            else:
-                import json as _json
-                existing_items = existing["items"]
-                if isinstance(existing_items, str):
-                    try: existing_items = _json.loads(existing_items)
-                    except: existing_items = []
 
-                merged = {i["name"]: i for i in existing_items}
-                for item in cart["items"]:
-                    if item["name"] in merged:
-                        merged[item["name"]]["quantity"] += item["quantity"]
-                        merged[item["name"]]["subtotal"] += item["subtotal"]
-                    else:
-                        merged[item["name"]] = item.copy()
+            # Create a sub-order linked to the base order (same as table sub-order logic)
+            base_id = base_order["id"]
+            async with pool.acquire() as conn:
+                # Race-condition guard: verify base order is still not in transit
+                locked = await conn.fetchrow(
+                    "SELECT status FROM orders WHERE id=$1 AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')",
+                    base_id
+                )
+                if not locked:
+                    return {"success": False, "error": "in_transit", "blocked_in_transit": True}
 
-                new_items    = list(merged.values())
-                new_subtotal = sum(i["subtotal"] for i in new_items)
-                new_total    = new_subtotal + delivery_fee
-                order_id     = existing["id"]
+                max_sub = await conn.fetchval(
+                    "SELECT COALESCE(MAX(sub_number), 1) FROM orders WHERE base_order_id=$1 OR id=$1",
+                    base_id
+                )
+            sub_number = max_sub + 1
+            order_id   = f"{base_id}-{sub_number}"
 
-                # Preserve status if chef is already working — only reset to 'confirmado'
-                # when the order hasn't been picked up by the kitchen yet
-                new_status = "confirmado" if current_status in ("recibido", "confirmado") else current_status
+            order = {
+                "id":            order_id,
+                "phone":         phone,
+                "items":         cart["items"].copy(),
+                "order_type":    order_type,
+                "address":       address or base_order.get("address", ""),
+                "notes":         notes or base_order.get("notes", ""),
+                "subtotal":      subtotal,
+                "delivery_fee":  0,  # already charged on base order
+                "total":         subtotal,
+                "status":        "confirmado",
+                "paid":          False,
+                "created_at":    datetime.now(ZoneInfo(tz_str)).isoformat(),
+                "bot_number":    bot_number,
+                "payment_method": payment_method or base_order.get("payment_method", ""),
+                "payment_url":   generate_wompi_payment_link(order_id, subtotal),
+                "is_additional": True,
+                "base_order_id": base_id,
+                "sub_number":    sub_number,
+            }
+            await db.db_clear_cart(phone, bot_number)
+            return {"success": True, "order": order}
 
-                async with pool.acquire() as conn:
-                    result = await conn.execute(
-                        """UPDATE orders
-                           SET items=$1, subtotal=$2, total=$3, status=$4
-                           WHERE id=$5
-                             AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')""",
-                        _json.dumps(new_items), new_subtotal, new_total, new_status, order_id
-                    )
-                    if result == "UPDATE 0":
-                        # Race condition: order moved to a protected state between SELECT and UPDATE
-                        return {"success": False, "error": "in_transit", "blocked_in_transit": True}
-
-                await db.db_clear_cart(phone, bot_number)
-
-                order = {
-                    "id": order_id,
-                    "phone": phone,
-                    "items": new_items,
-                    "order_type": order_type,
-                    "address": address or existing.get("address", ""),
-                    "notes": notes or existing.get("notes", ""),
-                    "subtotal": new_subtotal,
-                    "delivery_fee": delivery_fee,
-                    "total": new_total,
-                    "status": new_status,
-                    "paid": False,
-                    "bot_number": bot_number,
-                    "payment_method": payment_method or existing.get("payment_method", ""),
-                    "payment_url": generate_wompi_payment_link(order_id, new_total),
-                    "is_additional": True,
-                }
-                return {"success": True, "order": order}
-
-        # New order (no existing order, or previous was in transit and we skip it)
+        # New base order
         order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
         order = {
-            "id": order_id,
-            "phone": phone,
-            "items": cart["items"].copy(),
-            "order_type": order_type,
-            "address": address or "",
-            "notes": notes,
-            "subtotal": subtotal,
-            "delivery_fee": delivery_fee,
-            "total": total,
-            "status": "confirmado",
-            "paid": False,
-            # 👇 Usamos la zona horaria dinámica del restaurante
-            "created_at": datetime.now(ZoneInfo(tz_str)).isoformat(),
-            "bot_number": bot_number,
+            "id":            order_id,
+            "phone":         phone,
+            "items":         cart["items"].copy(),
+            "order_type":    order_type,
+            "address":       address or "",
+            "notes":         notes,
+            "subtotal":      subtotal,
+            "delivery_fee":  delivery_fee,
+            "total":         total,
+            "status":        "confirmado",
+            "paid":          False,
+            "created_at":    datetime.now(ZoneInfo(tz_str)).isoformat(),
+            "bot_number":    bot_number,
             "payment_method": payment_method,
-            "payment_url": generate_wompi_payment_link(order_id, total),
+            "payment_url":   generate_wompi_payment_link(order_id, total),
             "is_additional": False,
+            "base_order_id": None,
+            "sub_number":    1,
         }
         await db.db_clear_cart(phone, bot_number)
         return {"success": True, "order": order}
