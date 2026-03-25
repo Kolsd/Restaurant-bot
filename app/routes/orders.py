@@ -146,13 +146,7 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     elif status == 'en_puerta':
         msg = "📍 *¡El domiciliario está en la puerta!*\n\n¡Ya casi llega tu pedido! Por favor ten listo el pago si aplica. 🏠"
     elif status == 'entregado':
-        nps_label = rest_name or "nuestro restaurante"
-        msg = (
-            "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
-            f"\n\n⭐ ¿Cómo calificarías tu experiencia con *{nps_label}*?\n"
-            "Responde con un número del *1 al 5*\n"
-            "_(1 = Muy mala · 5 = Excelente)_"
-        )
+        msg = "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
     else:
         return # No enviamos mensajes para otros estados
 
@@ -174,14 +168,43 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     except Exception as e:
         print(f"❌ Error enviando notificación de delivery: {e}")
 
-    # After entregado notification: set NPS state
-    # Conversation cleanup happens after NPS flow completes in _handle_nps_flow
+    # After entregado: trigger NPS and send interactive question with skip button
     if status == 'entregado' and bot_number:
         try:
             await trigger_nps(phone, bot_number, rest_name)
             print(f"⭐ NPS iniciado post-entrega: {phone}", flush=True)
         except Exception as e:
             print(f"❌ Error iniciando NPS post-entrega: {e}", flush=True)
+
+        # Send interactive NPS message with "No calificar" button
+        try:
+            nps_label = rest_name or "nuestro restaurante"
+            nps_text = (
+                f"⭐ ¿Cómo calificarías tu experiencia con {nps_label}?\n"
+                "Responde con un número del 1 al 5\n"
+                "(1 = Muy mala · 5 = Excelente)"
+            )
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(
+                    f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "messaging_product": "whatsapp",
+                        "to": clean_phone,
+                        "type": "interactive",
+                        "interactive": {
+                            "type": "button",
+                            "body": {"text": nps_text},
+                            "action": {
+                                "buttons": [
+                                    {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
+                                ]
+                            }
+                        }
+                    }
+                )
+        except Exception as e:
+            print(f"❌ Error enviando NPS interactivo delivery: {e}")
 
 
 @router.get("/delivery/check-updates")
@@ -205,8 +228,32 @@ async def check_delivery_updates(request: Request):
 async def get_delivery_orders(request: Request):
     await require_auth(request)
 
-    orders = await db.db_get_delivery_orders(['listo', 'en_camino', 'en_puerta', 'entregado'])
-    return {"orders": orders}
+    raw = await db.db_get_delivery_orders(['listo', 'en_camino', 'en_puerta', 'entregado'])
+
+    # Merge sub-orders into their base order so the domiciliario sees one card per delivery
+    groups: dict = {}  # base_id -> merged order dict
+    for o in raw:
+        base_id = o.get("base_order_id") or o["id"]
+        if base_id not in groups:
+            groups[base_id] = dict(o)
+            groups[base_id]["id"] = base_id  # always expose the base id
+            groups[base_id]["sub_order_count"] = 1
+        else:
+            base = groups[base_id]
+            # Merge items (sum quantities for same dish name)
+            items_map = {i["name"]: dict(i) for i in base["items"]}
+            for item in o.get("items", []):
+                name = item["name"]
+                if name in items_map:
+                    items_map[name]["quantity"] = items_map[name].get("quantity", 1) + item.get("quantity", 1)
+                    items_map[name]["subtotal"]  = items_map[name].get("subtotal", 0)  + item.get("subtotal", 0)
+                else:
+                    items_map[name] = dict(item)
+            base["items"] = list(items_map.values())
+            base["total"] = base.get("total", 0) + o.get("total", 0)
+            base["sub_order_count"] = base.get("sub_order_count", 1) + 1
+
+    return {"orders": list(groups.values())}
 
 
 @router.patch("/delivery/orders/{order_id}/status")

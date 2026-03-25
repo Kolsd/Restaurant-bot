@@ -294,25 +294,24 @@ async def db_init_nps_inventory():
     print("✅ Tablas NPS e Inventario listas", flush=True)
 
 # ── RESERVACIONES ────────────────────────────────────────────────────
-async def db_add_reservation(name, date_str, time, guests, phone, bot_number: str = "", notes=""):
-    """Upsert reservation — updates existing if same phone/bot/date/time to prevent duplicates."""
+async def db_add_reservation(name, date_str, time_str, guests, phone, bot_number: str = "", notes=""):
+    """Insert or update reservation. Updates an existing one for same phone/bot/date/time to prevent duplicates."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        existing = await conn.fetchrow(
-            "SELECT id FROM reservations WHERE phone=$1 AND bot_number=$2 AND date=$3 AND time=$4",
-            phone, bot_number, date_str, time
+        # Use upsert pattern: delete any earlier reservation for same slot, then insert fresh
+        existing_id = await conn.fetchval(
+            'SELECT id FROM reservations WHERE phone=$1 AND bot_number=$2 AND "date"=$3 AND "time"=$4',
+            phone, bot_number, date_str, time_str
         )
-        if existing:
+        if existing_id:
             row = await conn.fetchrow(
-                """UPDATE reservations SET name=$1, guests=$2, notes=$3
-                   WHERE id=$4 RETURNING *""",
-                name, int(guests), notes, existing["id"]
+                'UPDATE reservations SET name=$1, guests=$2, notes=$3 WHERE id=$4 RETURNING *',
+                name, int(guests), notes, existing_id
             )
         else:
             row = await conn.fetchrow(
-                """INSERT INTO reservations (name, date, time, guests, phone, bot_number, notes)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *""",
-                name, date_str, time, int(guests), phone, bot_number, notes
+                'INSERT INTO reservations (name, "date", "time", guests, phone, bot_number, notes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+                name, date_str, time_str, int(guests), phone, bot_number, notes
             )
         return _serialize(dict(row))
 
@@ -411,10 +410,15 @@ async def db_get_delivery_orders(status_list: list):
         return [_serialize(dict(r)) for r in rows]
 
 async def db_update_order_status(order_id: str, new_status: str):
-    """Actualiza el estado de un pedido (ej. listo -> en_camino -> entregado)"""
+    """Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
+        # Cascade to sub-orders (base order id matches both base_order_id column and the passed id)
+        await conn.execute(
+            "UPDATE orders SET status=$2 WHERE base_order_id=$1 AND id != $1",
+            order_id, new_status
+        )
 
 # ── CONVERSACIONES ───────────────────────────────────────────────────
 async def db_get_history(phone: str, bot_number: str = "") -> list:
