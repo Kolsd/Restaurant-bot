@@ -165,6 +165,8 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 /* ── BOTÓN AJUSTAR FACTURA ── */
 .btn-adjust { width: 100%; background: none; color: #7C3AED; border: 1.5px solid #DDD6FE; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .btn-adjust:hover { background: #F5F3FF; border-color: #7C3AED; }
+.btn-print-factura { width: 100%; background: none; color: #3B82F6; border: 1.5px solid #BFDBFE; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.btn-print-factura:hover { background: #EFF6FF; border-color: #3B82F6; }
 
 /* ── MODAL AJUSTAR FACTURA ── */
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 1rem; }
@@ -280,6 +282,86 @@ const fmt = (amount) => {
     }).format(Number(amount));
 };
 
+async function printFactura(billId) {
+  const bill = _billsCache[billId];
+  if (!bill) return;
+
+  // Obtener datos fiscales del backend (CUFE, QR, régimen de impuesto)
+  let fiscal = null;
+  try {
+    const r = await fetch(`/api/table-orders/${billId}/ticket`, { headers: reqHeaders });
+    if (r.ok) { fiscal = (await r.json()).fiscal; }
+  } catch(e) {}
+
+  const taxRegime = (fiscal && fiscal.tax_regime) || 'iva';
+  const taxPct    = (fiscal && fiscal.tax_pct != null) ? Number(fiscal.tax_pct) : 19.0;
+  const taxLabel  = taxRegime === 'ico' ? `Impoconsumo ${taxPct}%` : `IVA ${taxPct}%`;
+  const total     = bill.total;
+  const subtotal  = taxPct > 0 ? total / (1 + taxPct / 100) : total;
+  const tax       = total - subtotal;
+
+  const iso = (bill.created_at || '').endsWith('Z') ? bill.created_at : (bill.created_at || '') + 'Z';
+  const dt  = new Date(iso);
+  const timeStr = dt.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
+  const dateStr = dt.toLocaleDateString('es-CO');
+
+  const itemsHtml = bill.items.map(i => {
+    const lineTotal = (Number(i.price) || 0) * (Number(i.quantity) || 1);
+    return `<tr><td>${i.quantity||1}x ${i.name}</td><td class="val">${fmt(lineTotal)}</td></tr>`;
+  }).join('');
+
+  const cufeHtml = (fiscal && fiscal.cufe) ? `
+<div class="sep"></div>
+<div class="label">Factura N°: ${fiscal.invoice_number || ''}</div>
+<div class="label">Estado DIAN: ${fiscal.dian_status || '-'}</div>
+<div class="label cufe">CUFE: ${fiscal.cufe}</div>
+${fiscal.qr_data ? `<div class="label" style="word-break:break-all;font-size:7pt;">QR: ${fiscal.qr_data}</div>` : ''}` : '';
+
+  const win = window.open('', '_blank', 'width=340,height=700,toolbar=0,menubar=0');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Factura ${bill.table_name}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
+@page{size:80mm auto;margin:0}
+.title{font-size:13pt;font-weight:bold;text-align:center;letter-spacing:1px}
+.center{text-align:center}
+.sep{border-top:1px dashed #000;margin:5px 0}
+.label{font-size:8pt;color:#444;margin-top:2px}
+.mesa{font-size:14pt;font-weight:bold}
+table{width:100%;border-collapse:collapse;margin:4px 0;font-size:10pt}
+td{padding:2px 0;vertical-align:top}
+.val{text-align:right;white-space:nowrap}
+.total-row td{font-weight:bold;font-size:11pt;border-top:1px solid #000;padding-top:3px}
+.footer{text-align:center;font-size:9pt;margin-top:4px}
+.cufe{font-size:7pt;word-break:break-all}
+</style></head><body>
+<div class="title">FACTURA DE VENTA</div>
+<div class="center label">Mesio · Sistema POS</div>
+<div class="sep"></div>
+<div class="label">MESA</div><div class="mesa">${bill.table_name}</div>
+<div class="label">Fecha: ${dateStr} &nbsp;${timeStr}</div>
+<div class="sep"></div>
+<table>
+  <thead><tr><th style="text-align:left;font-size:8pt">ITEM</th><th style="text-align:right;font-size:8pt">VALOR</th></tr></thead>
+  <tbody>${itemsHtml}</tbody>
+</table>
+<div class="sep"></div>
+<table>
+  <tr><td class="label">Subtotal (base gravable)</td><td class="val label">${fmt(subtotal)}</td></tr>
+  <tr><td class="label">${taxLabel}</td><td class="val label">${fmt(tax)}</td></tr>
+  <tr class="total-row"><td>TOTAL</td><td class="val">${fmt(total)}</td></tr>
+</table>
+${cufeHtml}
+<div class="sep"></div>
+<div class="footer">Gracias por su visita</div>
+<div class="center label">— Mesio POS —</div>
+</body></html>`);
+  win.document.close();
+  win.focus();
+  win.onload = () => { win.print(); };
+}
+
 async function loadCajaOrders() {
   try {
     const r = await fetch('/api/table-orders', { headers: reqHeaders });
@@ -384,6 +466,9 @@ async function loadCajaOrders() {
 
           <button class="btn-adjust" onclick="openAdjModal('${b.id}')">
             ✏️ Ajustar Factura
+          </button>
+          <button class="btn-print-factura" onclick="printFactura('${b.id}')">
+            🖨️ Imprimir Factura
           </button>
           <button class="btn-pay" onclick="cobrarYcerrar('${b.id}')">
             💰 Confirmar Pago y Cerrar Mesa
