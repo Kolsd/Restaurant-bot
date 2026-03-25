@@ -174,19 +174,14 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     except Exception as e:
         print(f"❌ Error enviando notificación de delivery: {e}")
 
-    # After entregado notification: set NPS state and clear conversation
+    # After entregado notification: set NPS state
+    # Conversation cleanup happens after NPS flow completes in _handle_nps_flow
     if status == 'entregado' and bot_number:
         try:
             await trigger_nps(phone, bot_number, rest_name)
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
-                    phone, bot_number
-                )
-            print(f"✅ Sesión limpiada post-entrega: {phone}", flush=True)
+            print(f"⭐ NPS iniciado post-entrega: {phone}", flush=True)
         except Exception as e:
-            print(f"❌ Error en cleanup post-entrega: {e}", flush=True)
+            print(f"❌ Error iniciando NPS post-entrega: {e}", flush=True)
 
 
 @router.get("/delivery/check-updates")

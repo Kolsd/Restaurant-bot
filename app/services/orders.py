@@ -130,89 +130,93 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 phone, bot_number, order_type
             )
 
+        previous_in_transit = False
+
         if existing:
             current_status = existing["status"]
 
-            # Block modification if order is already dispatched
             if current_status in ("en_camino", "en_puerta"):
-                return {"success": False, "error": "in_transit", "blocked_in_transit": True}
+                # Previous order is already dispatched — create a new independent order instead
+                previous_in_transit = True
+            else:
+                import json as _json
+                existing_items = existing["items"]
+                if isinstance(existing_items, str):
+                    try: existing_items = _json.loads(existing_items)
+                    except: existing_items = []
 
-            import json as _json
-            existing_items = existing["items"]
-            if isinstance(existing_items, str):
-                try: existing_items = _json.loads(existing_items)
-                except: existing_items = []
+                merged = {i["name"]: i for i in existing_items}
+                for item in cart["items"]:
+                    if item["name"] in merged:
+                        merged[item["name"]]["quantity"] += item["quantity"]
+                        merged[item["name"]]["subtotal"] += item["subtotal"]
+                    else:
+                        merged[item["name"]] = item.copy()
 
-            merged = {i["name"]: i for i in existing_items}
-            for item in cart["items"]:
-                if item["name"] in merged:
-                    merged[item["name"]]["quantity"] += item["quantity"]
-                    merged[item["name"]]["subtotal"] += item["subtotal"]
-                else:
-                    merged[item["name"]] = item.copy()
+                new_items    = list(merged.values())
+                new_subtotal = sum(i["subtotal"] for i in new_items)
+                new_total    = new_subtotal + delivery_fee
+                order_id     = existing["id"]
 
-            new_items    = list(merged.values())
-            new_subtotal = sum(i["subtotal"] for i in new_items)
-            new_total    = new_subtotal + delivery_fee
-            order_id     = existing["id"]
+                # Preserve status if chef is already working — only reset to 'confirmado'
+                # when the order hasn't been picked up by the kitchen yet
+                new_status = "confirmado" if current_status in ("recibido", "confirmado") else current_status
 
-            # Preserve status if chef is already working — only reset to 'confirmado'
-            # when the order hasn't been picked up by the kitchen yet
-            new_status = "confirmado" if current_status in ("recibido", "confirmado") else current_status
+                async with pool.acquire() as conn:
+                    result = await conn.execute(
+                        """UPDATE orders
+                           SET items=$1, subtotal=$2, total=$3, status=$4
+                           WHERE id=$5
+                             AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')""",
+                        _json.dumps(new_items), new_subtotal, new_total, new_status, order_id
+                    )
+                    if result == "UPDATE 0":
+                        # Race condition: order moved to a protected state between SELECT and UPDATE
+                        return {"success": False, "error": "in_transit", "blocked_in_transit": True}
 
-            async with pool.acquire() as conn:
-                result = await conn.execute(
-                    """UPDATE orders
-                       SET items=$1, subtotal=$2, total=$3, status=$4
-                       WHERE id=$5
-                         AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')""",
-                    _json.dumps(new_items), new_subtotal, new_total, new_status, order_id
-                )
-                if result == "UPDATE 0":
-                    # Race condition: order moved to a protected state between SELECT and UPDATE
-                    return {"success": False, "error": "in_transit", "blocked_in_transit": True}
+                await db.db_clear_cart(phone, bot_number)
 
-            await db.db_clear_cart(phone, bot_number)
+                order = {
+                    "id": order_id,
+                    "phone": phone,
+                    "items": new_items,
+                    "order_type": order_type,
+                    "address": address or existing.get("address", ""),
+                    "notes": notes or existing.get("notes", ""),
+                    "subtotal": new_subtotal,
+                    "delivery_fee": delivery_fee,
+                    "total": new_total,
+                    "status": new_status,
+                    "paid": False,
+                    "bot_number": bot_number,
+                    "payment_method": payment_method or existing.get("payment_method", ""),
+                    "payment_url": generate_wompi_payment_link(order_id, new_total),
+                    "is_additional": True,
+                }
+                return {"success": True, "order": order}
 
-            order = {
-                "id": order_id,
-                "phone": phone,
-                "items": new_items,
-                "order_type": order_type,
-                "address": address or existing.get("address", ""),
-                "notes": notes or existing.get("notes", ""),
-                "subtotal": new_subtotal,
-                "delivery_fee": delivery_fee,
-                "total": new_total,
-                "status": new_status,
-                "paid": False,
-                "bot_number": bot_number,
-                "payment_method": payment_method or existing.get("payment_method", ""),
-                "payment_url": generate_wompi_payment_link(order_id, new_total),
-                "is_additional": True,
-            }
-            return {"success": True, "order": order}
-
-        else:
-            order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
-            order = {
-                "id": order_id,
-                "phone": phone,
-                "items": cart["items"].copy(),
-                "order_type": order_type,
-                "address": address or "",
-                "notes": notes,
-                "subtotal": subtotal,
-                "delivery_fee": delivery_fee,
-                "total": total,
-                "status": "confirmado",
-                "paid": False,
-                # 👇 Usamos la zona horaria dinámica del restaurante
-                "created_at": datetime.now(ZoneInfo(tz_str)).isoformat(),
-                "bot_number": bot_number,
-                "payment_method": payment_method,
-                "payment_url": generate_wompi_payment_link(order_id, total),
-                "is_additional": False,
-            }
-            await db.db_clear_cart(phone, bot_number)
-            return {"success": True, "order": order}
+        # New order (no existing order, or previous was in transit and we skip it)
+        order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+        order = {
+            "id": order_id,
+            "phone": phone,
+            "items": cart["items"].copy(),
+            "order_type": order_type,
+            "address": address or "",
+            "notes": notes,
+            "subtotal": subtotal,
+            "delivery_fee": delivery_fee,
+            "total": total,
+            "status": "confirmado",
+            "paid": False,
+            # 👇 Usamos la zona horaria dinámica del restaurante
+            "created_at": datetime.now(ZoneInfo(tz_str)).isoformat(),
+            "bot_number": bot_number,
+            "payment_method": payment_method,
+            "payment_url": generate_wompi_payment_link(order_id, total),
+            "is_additional": False,
+        }
+        if previous_in_transit:
+            order["previous_in_transit"] = True
+        await db.db_clear_cart(phone, bot_number)
+        return {"success": True, "order": order}

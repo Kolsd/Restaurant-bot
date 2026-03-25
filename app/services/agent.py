@@ -165,6 +165,17 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             if google_maps_url:
                 maps_msg = f"\n\n¿Te animas a dejarnos una reseña en Google? Nos ayuda muchísimo 🌟\n{google_maps_url}"
 
+            # Clean up conversation now that NPS is complete
+            try:
+                pool = await db.get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
+                        phone, bot_number
+                    )
+            except Exception:
+                pass
+
             return (
                 f"¡Muchas gracias! Nos alegra mucho que hayas tenido una gran experiencia 😊"
                 f"{maps_msg}\n\n¡Hasta la próxima!"
@@ -186,6 +197,18 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             except Exception:
                 pass
         del _nps_state[key]
+
+        # Clean up conversation now that NPS is complete
+        try:
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
+                    phone, bot_number
+                )
+        except Exception:
+            pass
+
         return (
             "¡Gracias por tu comentario! Lo tomaremos muy en cuenta para mejorar. "
             "Esperamos verte pronto y darte una experiencia increíble 🙌"
@@ -423,7 +446,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 except Exception as e:
                     print(f"⚠️ Error descontando inventario: {e}", flush=True)
 
-                if res["order"].get("is_additional"):
+                if res["order"].get("previous_in_transit"):
+                    reply = "Tu pedido anterior ya va en camino 🛵 He creado un nuevo pedido:\n\n" + reply
+                    print(f"🆕 Nuevo pedido tras entrega en tránsito {order['id']} | Pago: {payment_method}", flush=True)
+                elif res["order"].get("is_additional"):
                     print(f"➕ Adicional agregado a {order['id']} | Total: {order['total']}", flush=True)
                 else:
                     print(f"🆕 {order['id']} {action} | Pago: {payment_method}", flush=True)

@@ -110,6 +110,52 @@
     <input type="url" id="maps-url" placeholder="https://g.page/r/...">
   </div>
 
+  <!-- Regionalización -->
+  <div class="card">
+    <div class="card-title">🌐 Regionalización</div>
+    <div class="grid2">
+      <div>
+        <label>Zona horaria</label>
+        <select id="config-timezone">
+          <option value="America/Bogota">América/Bogotá (COT)</option>
+          <option value="America/Mexico_City">América/Ciudad de México (CST)</option>
+          <option value="America/Lima">América/Lima (PET)</option>
+          <option value="America/Santiago">América/Santiago (CLT)</option>
+          <option value="America/Buenos_Aires">América/Buenos Aires (ART)</option>
+          <option value="America/Caracas">América/Caracas (VET)</option>
+          <option value="America/New_York">América/Nueva York (EST)</option>
+          <option value="UTC">UTC</option>
+        </select>
+      </div>
+      <div>
+        <label>Moneda</label>
+        <select id="config-currency">
+          <option value="COP">COP — Peso colombiano</option>
+          <option value="MXN">MXN — Peso mexicano</option>
+          <option value="PEN">PEN — Sol peruano</option>
+          <option value="CLP">CLP — Peso chileno</option>
+          <option value="ARS">ARS — Peso argentino</option>
+          <option value="VES">VES — Bolívar venezolano</option>
+          <option value="USD">USD — Dólar</option>
+          <option value="EUR">EUR — Euro</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <label>Formato regional (locale)</label>
+      <select id="config-locale">
+        <option value="es-CO">es-CO (Colombia)</option>
+        <option value="es-MX">es-MX (México)</option>
+        <option value="es-PE">es-PE (Perú)</option>
+        <option value="es-CL">es-CL (Chile)</option>
+        <option value="es-AR">es-AR (Argentina)</option>
+        <option value="es-VE">es-VE (Venezuela)</option>
+        <option value="es-ES">es-ES (España)</option>
+        <option value="en-US">en-US (English)</option>
+      </select>
+    </div>
+  </div>
+
   <button class="btn-save" onclick="saveSettings()">💾 Guardar configuración</button>
   <div class="feedback" id="feedback"></div>
 </div>
@@ -199,6 +245,10 @@ async function saveSettings() {
     setTimeout(() => { fb.style.display = 'none'; }, 3500);
   } catch(e) {
     console.error(e);
+    const fb = document.getElementById('feedback');
+    fb.textContent = '❌ Error inesperado. Intenta de nuevo.';
+    fb.className = 'feedback err'; fb.style.display = 'block';
+    setTimeout(() => { fb.style.display = 'none'; }, 3500);
   }
   btn.textContent = '💾 Guardar configuración'; btn.disabled = false;
 }
