@@ -1,12 +1,14 @@
 """
 Mesio — Módulo de Facturación / Billing
-Integración con: Siigo, Alegra, Loggro
+Integración con: Siigo, Alegra, Loggro, Mesio Native (DIAN)
 """
 
 import os
 import json
 import httpx
 import base64
+import hashlib
+from abc import ABC, abstractmethod
 from datetime import datetime, date
 from typing import Optional
 from app.services import database as db
@@ -328,6 +330,572 @@ class LoggroClient:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# PATRÓN ADAPTADOR
+# ══════════════════════════════════════════════════════════════════════
+
+class BillingAdapter(ABC):
+    """Contrato único para todos los proveedores de facturación."""
+
+    @abstractmethod
+    async def create_invoice(self, order: dict, config: dict) -> dict:
+        """Emite la factura y devuelve el resultado del proveedor."""
+
+    @abstractmethod
+    async def test_connection(self, config: dict) -> dict:
+        """Valida las credenciales/configuración sin emitir factura real."""
+
+
+class SiigoAdapter(BillingAdapter):
+    async def create_invoice(self, order: dict, config: dict) -> dict:
+        client = SiigoClient(config["siigo_username"], config["siigo_access_key"])
+        return await client.create_invoice(order, config)
+
+    async def test_connection(self, config: dict) -> dict:
+        client = SiigoClient(config["siigo_username"], config["siigo_access_key"])
+        result = await client.get_document_types()
+        return {"sample": result[:2]}
+
+
+class AlegraAdapter(BillingAdapter):
+    async def create_invoice(self, order: dict, config: dict) -> dict:
+        client = AlegraClient(config["alegra_email"], config["alegra_token"])
+        return await client.create_invoice(order, config)
+
+    async def test_connection(self, config: dict) -> dict:
+        client = AlegraClient(config["alegra_email"], config["alegra_token"])
+        result = await client.get_payment_methods()
+        return {"sample": result[:2]}
+
+
+class LoggroAdapter(BillingAdapter):
+    async def create_invoice(self, order: dict, config: dict) -> dict:
+        client = LoggroClient(config["loggro_api_key"], config["loggro_company_id"])
+        return await client.create_invoice(order, config)
+
+    async def test_connection(self, config: dict) -> dict:
+        client = LoggroClient(config["loggro_api_key"], config["loggro_company_id"])
+        result = await client.get_products()
+        return {"sample": result[:2]}
+
+
+class MesioNativeAdapter(BillingAdapter):
+    """
+    Proveedor nativo de Facturación Electrónica DIAN (Colombia).
+    Genera CUFE (SHA-384), XML UBL 2.1 y persiste en fiscal_invoices.
+    Nota: La firma digital XMLDSig y la transmisión directa a la DIAN
+    requieren un certificado .p12 — se activan en FASE 1-B.
+    En esta versión el dian_status queda en 'draft' (listo para firmar y enviar).
+    """
+
+    # ── CUFE / CUDS ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _calcular_cufe(
+        num_fac: str, fec_fac: str, hor_fac: str,
+        val_fac: str, val_imp1: str, val_imp2: str, val_tot: str,
+        nit_ofe: str, num_adq: str, cl_tec: str,
+        cod_imp1: str = "01", cod_imp2: str = "04", cod_imp3: str = "03",
+        val_imp3: str = "0.00",
+    ) -> str:
+        """
+        Calcula el CUFE según especificación DIAN Anexo Técnico FE v1.9.
+        Parámetros val_* deben tener exactamente 2 decimales, ej: "45000.00".
+        cod_imp1="01"=IVA, cod_imp2="04"=INC, cod_imp3="03"=ICA (generalmente 0).
+        """
+        cadena = (
+            f"{num_fac}{fec_fac}{hor_fac}{val_fac}"
+            f"{cod_imp1}{val_imp1}"
+            f"{cod_imp2}{val_imp2}"
+            f"{cod_imp3}{val_imp3}"
+            f"{val_tot}{nit_ofe}{num_adq}{cl_tec}"
+        )
+        return hashlib.sha384(cadena.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _calcular_cuds(software_id: str, pin: str, nit_emisor: str) -> str:
+        """Código único del software (CUDS) = SHA-384(software_id + pin + nit)."""
+        cadena = f"{software_id}{pin}{nit_emisor}"
+        return hashlib.sha384(cadena.encode("utf-8")).hexdigest()
+
+    # ── XML UBL 2.1 ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _xml_escape(text: str) -> str:
+        return (
+            str(text)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+
+    def _build_ubl_xml(
+        self,
+        invoice_number: str,
+        issue_date: str,
+        issue_time: str,
+        cufe: str,
+        cuds: str,
+        qr_url: str,
+        resolution: dict,
+        config: dict,
+        order: dict,
+        subtotal_cents: int,
+        tax_cents: int,
+        total_cents: int,
+        tax_regime: str,
+        tax_pct: float,
+        customer: dict,
+        environment_id: str,
+    ) -> str:
+        """
+        Construye el XML UBL 2.1 según el Anexo Técnico DIAN para
+        Factura Electrónica de Venta (tipo 01).
+        Retorna el XML como string UTF-8 (sin firma digital).
+        """
+        x = self._xml_escape
+        nit       = x(config.get("restaurant_nit", ""))
+        nit_type  = x(config.get("nit_id_type", "31"))
+        legal_name = x(config.get("restaurant_legal_name", ""))
+        city_code  = x(config.get("restaurant_city_code", "11001"))
+        city_name  = x(config.get("restaurant_city_name", "Bogotá"))
+        address    = x(config.get("restaurant_address_dian", ""))
+        currency   = x(config.get("currency", "COP"))
+
+        res_number = x(resolution["resolution_number"])
+        res_prefix = x(resolution.get("prefix", ""))
+        res_from   = x(str(resolution["from_number"]))
+        res_to     = x(str(resolution["to_number"]))
+        res_date   = x(str(resolution.get("resolution_date", "")))
+        valid_from = x(str(resolution["valid_from"]))
+        valid_to   = x(str(resolution["valid_to"]))
+        software_id = x(resolution.get("software_id", config.get("software_id", "")))
+
+        # Esquema DIAN para el impuesto
+        if tax_regime == "ico":
+            tax_scheme_id   = "04"
+            tax_scheme_name = "INC"
+        else:
+            tax_scheme_id   = "01"
+            tax_scheme_name = "IVA"
+
+        sub_str  = f"{subtotal_cents / 100:.2f}"
+        tax_str  = f"{tax_cents / 100:.2f}"
+        tot_str  = f"{total_cents / 100:.2f}"
+        tax_pct_str = f"{tax_pct:.2f}"
+
+        # Líneas de factura
+        lines_xml = ""
+        items = order.get("items", [])
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except Exception:
+                items = []
+
+        for idx, item in enumerate(items, start=1):
+            price    = float(item.get("price", 0))
+            qty      = int(item.get("quantity", 1))
+            line_sub = price * qty
+            line_tax = round(line_sub * tax_pct / 100, 2)
+            lines_xml += f"""
+  <cac:InvoiceLine>
+    <cbc:ID>{idx}</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="EA">{qty}</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="{currency}">{line_sub:.2f}</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="{currency}">{line_tax:.2f}</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+        <cbc:TaxableAmount currencyID="{currency}">{line_sub:.2f}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="{currency}">{line_tax:.2f}</cbc:TaxAmount>
+        <cac:TaxCategory>
+          <cbc:Percent>{tax_pct_str}</cbc:Percent>
+          <cac:TaxScheme>
+            <cbc:ID>{tax_scheme_id}</cbc:ID>
+            <cbc:Name>{tax_scheme_name}</cbc:Name>
+          </cac:TaxScheme>
+        </cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item>
+      <cbc:Description>{x(item.get('name', 'Item'))}</cbc:Description>
+      <cac:StandardItemIdentification>
+        <cbc:ID schemeID="999">ITEM-{idx:04d}</cbc:ID>
+      </cac:StandardItemIdentification>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="{currency}">{price:.2f}</cbc:PriceAmount>
+      <cbc:BaseQuantity unitCode="EA">1</cbc:BaseQuantity>
+    </cac:Price>
+  </cac:InvoiceLine>"""
+
+        cust_nit      = x(customer.get("nit", "222222222"))
+        cust_name     = x(customer.get("name", "Consumidor Final"))
+        cust_email    = x(customer.get("email", ""))
+        cust_id_type  = x(customer.get("id_type", "13"))  # 13=CC, 31=NIT
+
+        line_count = len(items)
+        order_note = x(f"Pedido Mesio #{order.get('id', '')} · {order.get('order_type', 'mesa')}")
+
+        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+  xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+  xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+  xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2"
+  xmlns:sts="dian:gov:co:facturaelectronica:Structures-2-1">
+  <ext:UBLExtensions>
+    <ext:UBLExtension>
+      <ext:ExtensionContent>
+        <sts:DianExtensions>
+          <sts:InvoiceControl>
+            <sts:InvoiceAuthorization>{res_number}</sts:InvoiceAuthorization>
+            <sts:AuthorizationPeriod>
+              <cbc:StartDate>{valid_from}</cbc:StartDate>
+              <cbc:EndDate>{valid_to}</cbc:EndDate>
+            </sts:AuthorizationPeriod>
+            <sts:AuthorizedInvoices>
+              <sts:Prefix>{res_prefix}</sts:Prefix>
+              <sts:From>{res_from}</sts:From>
+              <sts:To>{res_to}</sts:To>
+            </sts:AuthorizedInvoices>
+          </sts:InvoiceControl>
+          <sts:InvoiceSource>
+            <cbc:IdentificationCode listAgencyID="6"
+              listAgencyName="United Nations Economic Commission for Europe"
+              listSchemeURI="urn:oasis:names:specification:ubl:codelist:gc:CountryIdentificationCode-2.1">CO</cbc:IdentificationCode>
+          </sts:InvoiceSource>
+          <sts:SoftwareProvider>
+            <sts:ProviderID schemeAgencyID="195"
+              schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)">{nit}</sts:ProviderID>
+            <sts:SoftwareID schemeAgencyID="195"
+              schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)">{software_id}</sts:SoftwareID>
+          </sts:SoftwareProvider>
+          <sts:SoftwareSecurityCode schemeAgencyID="195"
+            schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)">{cuds}</sts:SoftwareSecurityCode>
+          <sts:AuthorizationProvider>
+            <sts:AuthorizationProviderID schemeAgencyID="195"
+              schemeAgencyName="CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)"
+              schemeID="4" schemeName="31">800197268</sts:AuthorizationProviderID>
+          </sts:AuthorizationProvider>
+          <sts:QRCode>{x(qr_url)}</sts:QRCode>
+        </sts:DianExtensions>
+      </ext:ExtensionContent>
+    </ext:UBLExtension>
+  </ext:UBLExtensions>
+  <cbc:UBLVersionID>UBL 2.1</cbc:UBLVersionID>
+  <cbc:CustomizationID>10</cbc:CustomizationID>
+  <cbc:ProfileID>DIAN 2.1</cbc:ProfileID>
+  <cbc:ProfileExecutionID>{environment_id}</cbc:ProfileExecutionID>
+  <cbc:ID>{x(invoice_number)}</cbc:ID>
+  <cbc:UUID schemeID="CUFE-SHA384" schemeName="CUFE-SHA384">{cufe}</cbc:UUID>
+  <cbc:IssueDate>{issue_date}</cbc:IssueDate>
+  <cbc:IssueTime>{issue_time}-05:00</cbc:IssueTime>
+  <cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode>
+  <cbc:Note>{order_note}</cbc:Note>
+  <cbc:DocumentCurrencyCode>{currency}</cbc:DocumentCurrencyCode>
+  <cbc:LineCountNumeric>{line_count}</cbc:LineCountNumeric>
+  <cac:AccountingSupplierParty>
+    <cbc:AdditionalAccountID>1</cbc:AdditionalAccountID>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>{legal_name}</cbc:Name></cac:PartyName>
+      <cac:PhysicalLocation>
+        <cac:Address>
+          <cbc:ID>{city_code}</cbc:ID>
+          <cbc:CityName>{city_name}</cbc:CityName>
+          <cbc:AddressLine><cac:Line>{address}</cac:Line></cbc:AddressLine>
+          <cac:Country><cbc:IdentificationCode>CO</cbc:IdentificationCode></cac:Country>
+        </cac:Address>
+      </cac:PhysicalLocation>
+      <cac:PartyTaxScheme>
+        <cbc:RegistrationName>{legal_name}</cbc:RegistrationName>
+        <cbc:CompanyID schemeAgencyID="195" schemeID="{nit_type}" schemeName="{nit_type}">{nit}</cbc:CompanyID>
+        <cac:TaxScheme><cbc:ID>ZZ</cbc:ID></cac:TaxScheme>
+      </cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cbc:AdditionalAccountID>2</cbc:AdditionalAccountID>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>{cust_name}</cbc:Name></cac:PartyName>
+      <cac:PartyTaxScheme>
+        <cbc:RegistrationName>{cust_name}</cbc:RegistrationName>
+        <cbc:CompanyID schemeAgencyID="195" schemeID="{cust_id_type}" schemeName="{cust_id_type}">{cust_nit}</cbc:CompanyID>
+        <cac:TaxScheme><cbc:ID>ZZ</cbc:ID></cac:TaxScheme>
+      </cac:PartyTaxScheme>
+      {f'<cac:Contact><cbc:ElectronicMail>{cust_email}</cbc:ElectronicMail></cac:Contact>' if cust_email else ''}
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:PaymentMeans>
+    <cbc:ID>1</cbc:ID>
+    <cbc:PaymentMeansCode>10</cbc:PaymentMeansCode>
+    <cbc:PaymentDueDate>{issue_date}</cbc:PaymentDueDate>
+  </cac:PaymentMeans>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="{currency}">{tax_str}</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="{currency}">{sub_str}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="{currency}">{tax_str}</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:Percent>{tax_pct_str}</cbc:Percent>
+        <cac:TaxScheme>
+          <cbc:ID>{tax_scheme_id}</cbc:ID>
+          <cbc:Name>{tax_scheme_name}</cbc:Name>
+        </cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="{currency}">{sub_str}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="{currency}">{sub_str}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="{currency}">{tot_str}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="{currency}">{tot_str}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>{lines_xml}
+</Invoice>"""
+        return xml
+
+    # ── create_invoice ────────────────────────────────────────────────
+
+    async def create_invoice(self, order: dict, config: dict) -> dict:
+        """
+        Genera la factura electrónica DIAN completa:
+        1. Obtiene la resolución del restaurante desde DB.
+        2. Reclama el próximo número de factura (atómico).
+        3. Calcula IVA o INC sobre el total.
+        4. Genera el CUFE (SHA-384) y el CUDS.
+        5. Construye el XML UBL 2.1.
+        6. Persiste en fiscal_invoices.
+        dian_status='draft' — la firma XMLDSig y el envío a DIAN se hacen en FASE 1-B.
+        """
+        restaurant_id = config.get("_restaurant_id")
+        if not restaurant_id:
+            raise ValueError("config debe incluir '_restaurant_id' para Mesio Native")
+
+        resolution = await db.db_get_fiscal_resolution(restaurant_id)
+        if not resolution:
+            raise RuntimeError("No hay resolución DIAN configurada. Ve a Configuración → Resolución DIAN.")
+
+        # Validar vigencia de la resolución
+        today = date.today()
+        valid_to = resolution.get("valid_to", "")
+        if valid_to and str(valid_to)[:10] < str(today):
+            raise RuntimeError(
+                f"La resolución DIAN venció el {valid_to}. Renuévala ante la DIAN."
+            )
+
+        # Reclamar número consecutivo (atómico en PostgreSQL)
+        inv_number = await db.db_claim_next_invoice_number(restaurant_id)
+
+        # Calcular montos fiscales (en centavos para evitar float drift)
+        total_raw = float(order.get("total", 0))
+        tax_regime = config.get("tax_regime", "iva")
+        if tax_regime == "ico":
+            tax_pct = float(config.get("tax_percentage", 8.0))
+        else:
+            tax_pct = float(config.get("tax_percentage", 19.0))
+
+        # En Colombia el precio en menú generalmente ya incluye el impuesto.
+        # Extraemos la base gravable: subtotal = total / (1 + pct/100)
+        if tax_pct > 0:
+            subtotal_raw = total_raw / (1 + tax_pct / 100)
+        else:
+            subtotal_raw = total_raw
+
+        subtotal_cents = round(subtotal_raw * 100)
+        tax_cents      = round(total_raw * 100) - subtotal_cents
+        total_cents    = subtotal_cents + tax_cents
+
+        # Fechas y hora
+        now        = datetime.utcnow()
+        issue_date = now.strftime("%Y-%m-%d")
+        issue_time = now.strftime("%H:%M:%S")
+
+        # Número completo: prefijo + consecutivo
+        prefix     = resolution.get("prefix", "")
+        full_num   = f"{prefix}{inv_number}"
+
+        # Cliente
+        customer_override = order.get("customer", {})
+        customer = {
+            "nit":     customer_override.get("nit", "222222222"),
+            "name":    customer_override.get("name", "Consumidor Final"),
+            "email":   customer_override.get("email", ""),
+            "id_type": customer_override.get("id_type", "13"),
+        }
+
+        # CUDS (identifica el software)
+        nit_emisor  = config.get("restaurant_nit", "")
+        software_id = resolution.get("software_id") or config.get("software_id", "")
+        software_pin = resolution.get("software_pin") or config.get("software_pin", "")
+        cuds = self._calcular_cuds(software_id, software_pin, nit_emisor)
+
+        # CUFE (identifica la factura individual)
+        tech_key    = resolution.get("technical_key", "")
+        val_fac_str = f"{subtotal_cents / 100:.2f}"
+        tax_str     = f"{tax_cents / 100:.2f}"
+        tot_str     = f"{total_cents / 100:.2f}"
+
+        if tax_regime == "ico":
+            cufe = self._calcular_cufe(
+                num_fac=full_num, fec_fac=issue_date, hor_fac=issue_time + "-05:00",
+                val_fac=val_fac_str,
+                cod_imp1="01", val_imp1="0.00",
+                cod_imp2="04", val_imp2=tax_str,
+                cod_imp3="03", val_imp3="0.00",
+                val_tot=tot_str,
+                nit_ofe=nit_emisor,
+                num_adq=customer["nit"],
+                cl_tec=tech_key,
+            )
+        else:
+            cufe = self._calcular_cufe(
+                num_fac=full_num, fec_fac=issue_date, hor_fac=issue_time + "-05:00",
+                val_fac=val_fac_str,
+                cod_imp1="01", val_imp1=tax_str,
+                cod_imp2="04", val_imp2="0.00",
+                cod_imp3="03", val_imp3="0.00",
+                val_tot=tot_str,
+                nit_ofe=nit_emisor,
+                num_adq=customer["nit"],
+                cl_tec=tech_key,
+            )
+
+        # URL de validación DIAN (QR)
+        env = resolution.get("environment", config.get("dian_environment", "test"))
+        if env == "production":
+            qr_base = "https://catalogo-vpfe.dian.gov.co/document/searchqr"
+        else:
+            qr_base = "https://catalogo-vpfe-hab.dian.gov.co/document/searchqr"
+        qr_url = f"{qr_base}?documentkey={cufe}"
+
+        # XML UBL 2.1
+        environment_id = "1" if env == "production" else "2"
+        xml_content = self._build_ubl_xml(
+            invoice_number=full_num,
+            issue_date=issue_date,
+            issue_time=issue_time,
+            cufe=cufe,
+            cuds=cuds,
+            qr_url=qr_url,
+            resolution=resolution,
+            config=config,
+            order=order,
+            subtotal_cents=subtotal_cents,
+            tax_cents=tax_cents,
+            total_cents=total_cents,
+            tax_regime=tax_regime,
+            tax_pct=tax_pct,
+            customer=customer,
+            environment_id=environment_id,
+        )
+
+        # Persistir en fiscal_invoices
+        fiscal_id = await db.db_save_fiscal_invoice({
+            "billing_log_id":   None,
+            "restaurant_id":    restaurant_id,
+            "order_id":         order.get("id", ""),
+            "resolution_number": resolution["resolution_number"],
+            "prefix":           prefix,
+            "invoice_number":   inv_number,
+            "issue_date":       issue_date,
+            "issue_time":       issue_time,
+            "subtotal_cents":   subtotal_cents,
+            "tax_regime":       tax_regime,
+            "tax_pct":          tax_pct,
+            "tax_cents":        tax_cents,
+            "total_cents":      total_cents,
+            "cufe":             cufe,
+            "qr_data":          qr_url,
+            "uuid_dian":        "",
+            "xml_content":      xml_content,
+            "pdf_url":          None,
+            "customer_nit":     customer["nit"],
+            "customer_name":    customer["name"],
+            "customer_email":   customer["email"],
+            "customer_id_type": customer["id_type"],
+            "payment_method":   order.get("payment_method", "cash"),
+            "dian_status":      "draft",
+            "dian_response":    None,
+        })
+
+        return {
+            "id":             fiscal_id,
+            "invoice_number": full_num,
+            "cufe":           cufe,
+            "qr_data":        qr_url,
+            "subtotal":       subtotal_cents / 100,
+            "tax_regime":     tax_regime,
+            "tax_pct":        tax_pct,
+            "tax":            tax_cents / 100,
+            "total":          total_cents / 100,
+            "dian_status":    "draft",
+            "xml_available":  True,
+        }
+
+    # ── test_connection ───────────────────────────────────────────────
+
+    async def test_connection(self, config: dict) -> dict:
+        """
+        Valida la configuración DIAN:
+        - Campos obligatorios presentes en config
+        - Resolución en DB existe y está vigente
+        - Rango de numeración no está agotado
+        """
+        required = ["restaurant_nit", "restaurant_legal_name", "software_id", "software_pin"]
+        missing  = [k for k in required if not config.get(k)]
+        if missing:
+            raise ValueError(f"Faltan campos DIAN obligatorios: {', '.join(missing)}")
+
+        restaurant_id = config.get("_restaurant_id")
+        status_info: dict = {
+            "config_ok":   True,
+            "environment": config.get("dian_environment", "test"),
+        }
+
+        if restaurant_id:
+            resolution = await db.db_get_fiscal_resolution(restaurant_id)
+            if resolution:
+                today    = str(date.today())
+                expired  = str(resolution.get("valid_to", ""))[:10] < today
+                cur      = int(resolution.get("current_number", 0))
+                to_num   = int(resolution.get("to_number", 0))
+                remaining = to_num - cur
+                status_info["resolution"] = {
+                    "number":         resolution["resolution_number"],
+                    "prefix":         resolution.get("prefix", ""),
+                    "valid_to":       str(resolution.get("valid_to", "")),
+                    "expired":        expired,
+                    "invoices_used":  cur,
+                    "invoices_left":  remaining,
+                }
+                if expired:
+                    raise RuntimeError(
+                        f"Resolución DIAN vencida el {resolution['valid_to']}. Renuévala ante la DIAN."
+                    )
+                if remaining <= 0:
+                    raise RuntimeError("Rango de facturación agotado. Solicita nueva resolución.")
+            else:
+                status_info["resolution"] = "No configurada — ve a Configuración → Resolución DIAN"
+
+        return {"sample": [status_info]}
+
+
+_ADAPTERS: dict[str, BillingAdapter] = {
+    "siigo":         SiigoAdapter(),
+    "alegra":        AlegraAdapter(),
+    "loggro":        LoggroAdapter(),
+    "mesio_native":  MesioNativeAdapter(),
+}
+
+
+def get_adapter(provider: str) -> BillingAdapter:
+    """Devuelve el adaptador correcto. Lanza ValueError si el proveedor no existe."""
+    adapter = _ADAPTERS.get(provider.lower())
+    if not adapter:
+        raise ValueError(f"Proveedor '{provider}' no soportado. Opciones: {list(_ADAPTERS)}")
+    return adapter
+
+
+# ══════════════════════════════════════════════════════════════════════
 # FÁBRICA / DISPATCHER
 # ══════════════════════════════════════════════════════════════════════
 
@@ -386,20 +954,21 @@ async def emit_invoice(order_id: str, restaurant_id: int,
         return {"success": False, "error": "Billing no configurado para este restaurante"}
 
     provider = config.get("provider", "").lower()
-    if provider not in ("siigo", "alegra", "loggro"):
-        return {"success": False, "error": f"Proveedor '{provider}' no soportado"}
+    try:
+        adapter = get_adapter(provider)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
 
     # 1. Intentar cargar como pedido normal de delivery
     order = await db.db_get_order(order_id)
-    
-    # 2. Si no existe en 'orders', es un pedido de MESA. Hay que consolidar la factura completa.
+
+    # 2. Si no existe en 'orders', es un pedido de MESA. Consolidar subórdenes.
     if not order:
         full_bill = await db.db_get_table_bill(order_id)
         if not full_bill or not full_bill.get("sub_orders"):
             return {"success": False, "error": f"Orden {order_id} no encontrada"}
 
-        # Consolidar (sumar) los items de TODAS las subórdenes de la visita
-        aggregated_items = {}
+        aggregated_items: dict[str, dict] = {}
         for sub in full_bill.get("sub_orders", []):
             items_list = sub.get("items", [])
             if isinstance(items_list, str):
@@ -407,45 +976,34 @@ async def emit_invoice(order_id: str, restaurant_id: int,
                     items_list = json.loads(items_list)
                 except Exception:
                     items_list = []
-                    
+
             for item in items_list:
-                name = item.get("name", "")
-                qty = int(item.get("quantity", 1))
-                price = float(item.get("price", 0)) 
-                
+                name  = item.get("name", "")
+                qty   = int(item.get("quantity", 1))
+                price = float(item.get("price", 0))
                 if name in aggregated_items:
                     aggregated_items[name]["quantity"] += qty
                 else:
                     aggregated_items[name] = {"name": name, "quantity": qty, "price": price}
 
         order = {
-            "id": order_id,
+            "id":         order_id,
             "order_type": "mesa",
-            "total": full_bill.get("total", 0),
-            "items": list(aggregated_items.values())
+            "total":      full_bill.get("total", 0),
+            "items":      list(aggregated_items.values()),
         }
 
     if customer_override:
         order["customer"] = customer_override
 
     try:
-        result_data = None
-        if provider == "siigo":
-            client      = SiigoClient(config["siigo_username"], config["siigo_access_key"])
-            result_data = await client.create_invoice(order, config)
-
-        elif provider == "alegra":
-            client      = AlegraClient(config["alegra_email"], config["alegra_token"])
-            result_data = await client.create_invoice(order, config)
-
-        elif provider == "loggro":
-            client      = LoggroClient(config["loggro_api_key"], config["loggro_company_id"])
-            result_data = await client.create_invoice(order, config)
+        result_data = await adapter.create_invoice(order, config)
 
         ext_id = (
             str(result_data.get("id", ""))
             or str(result_data.get("invoiceId", ""))
             or str(result_data.get("number", ""))
+            or str(result_data.get("cufe", ""))[:16]
         )
         await log_billing_event(restaurant_id, order_id, provider, "success", ext_id)
         return {"success": True, "provider": provider, "data": result_data, "external_id": ext_id}
