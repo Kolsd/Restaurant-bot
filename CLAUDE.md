@@ -36,13 +36,27 @@ CRM_PHONE_NUMBER_ID   # Separate WhatsApp number ID used for prospect outreach
 ADMIN_KEY             # Secret key for CRM and admin-only endpoints
 
 # Payments
-WOMPI_EVENTS_SECRET   # For Wompi webhook signature verification
+WOMPI_EVENTS_SECRET       # For Wompi webhook signature verification
+WOMPI_PUBLIC_KEY          # Wompi public key (used in payment links)
+WOMPI_INTEGRITY_SECRET    # For Wompi payment integrity hash verification
 
 # App
 APP_DOMAIN            # Public domain, e.g. "mesioai.com" (no https://)
 APP_ALLOWED_ORIGINS   # Comma-separated CORS origins, e.g. "https://example.com,http://localhost:3000"
 NPS_INTERNAL_KEY      # Random secret used to authorize POST /api/nps/response (internal only)
 ```
+
+## Deployment
+
+Hosted on Railway. Production start command (from `railway.toml`):
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop
+```
+
+Running 4 workers means **in-process state is not shared across workers**. This shapes several design decisions:
+- Rate limiting uses the `meta_rate_limits` PostgreSQL table (not in-memory) so all workers see the same counts.
+- Cart race conditions are guarded by a per-phone `asyncio.Lock` in `orders.py` — safe within one worker, but concurrent requests for the same phone could land on different workers. The DB cart is the source of truth.
+- NPS state (`_nps_state` dict in `agent.py`) is in-memory and does not survive restarts or cross-worker. Scores ≤ 3 are immediately persisted to DB as a fallback.
 
 ## Architecture Overview
 
@@ -116,6 +130,8 @@ The system prompt in `agent.py:_STATIC_SYSTEM` is marked with `cache_control: ep
 - Follow a strict sales funnel for external (delivery/pickup) orders
 - Use `action="order"` only when a table context is detected
 
+`call_claude()` uses the **assistant prefill trick**: it appends `{"role": "assistant", "content": "{"}` before calling the API, forcing the model to complete a JSON object. The raw response is then prefixed with `{` before parsing. This is why `_parse_bot_response` always receives a string starting with `{`.
+
 User input is sanitized against prompt injection before being sent to Claude (`_sanitize_user_input`, `_INJECTION_RE`).
 
 ### NPS Flow
@@ -124,4 +140,7 @@ NPS state (`_nps_state` dict in `agent.py`) is in-memory — it does not survive
 
 ### Tests
 
-Tests use `pytest` with `fastapi.testclient.TestClient`. The `conftest.py` fixture `mock_db` monkeypatches all DB calls — tests do not require a live database or API keys.
+Tests use `pytest` with no live database or API keys required. Two patterns exist:
+
+- **Sync route tests** (`test_billing_routes.py`): use `fastapi.testclient.TestClient` + the `mock_db` fixture from `conftest.py`, which monkeypatches DB functions and auth via `monkeypatch.setattr`.
+- **Async service tests** (`test_table_flow.py`): use `pytest.mark.asyncio` + `unittest.mock.AsyncMock`, monkeypatching at the module level (e.g., `tables_routes.db.get_pool`).
