@@ -193,6 +193,65 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 .btn-adj-confirm { width: 100%; background: #7C3AED; color: #fff; border: none; padding: 14px; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 1rem; transition: background 0.2s; }
 .btn-adj-confirm:hover { background: #6D28D9; }
 
+/* ── SPLIT CUENTA ── */
+.btn-split { width: 100%; background: none; color: #059669; border: 1.5px solid #A7F3D0; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.btn-split:hover { background: #ECFDF5; border-color: #059669; }
+
+/* ── MODALES SPLIT & PAY ── */
+.sp-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1100; align-items: center; justify-content: center; padding: 1rem; }
+.sp-overlay.open { display: flex; }
+.sp-box { background: #fff; border-radius: 20px; width: 860px; max-width: 98vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.22); overflow: hidden; }
+.sp-head { padding: 1.1rem 1.5rem; border-bottom: 1px solid #E4E4E7; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.sp-head h3 { font-size: 1rem; font-weight: 800; color: #18181B; }
+.sp-body { flex: 1; overflow-y: auto; padding: 1.25rem 1.5rem; }
+.sp-foot { padding: 1rem 1.5rem; border-top: 1px solid #E4E4E7; display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0; }
+.sp-btn-cancel { padding: 9px 20px; background: none; border: 1.5px solid #E4E4E7; border-radius: 10px; font-size: 13px; cursor: pointer; color: #71717A; font-weight: 600; }
+.sp-btn-ok { padding: 9px 20px; background: #18181B; border: none; border-radius: 10px; font-size: 13px; cursor: pointer; color: #fff; font-weight: 700; }
+.sp-btn-ok:disabled { background: #D1D5DB; cursor: not-allowed; }
+
+/* Split table */
+#split-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#split-table th { text-align: left; font-size: 11px; font-weight: 700; color: #71717A; padding: 6px 8px; border-bottom: 2px solid #E4E4E7; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+#split-table th.chk-col { text-align: center; min-width: 88px; }
+#split-table td { padding: 7px 8px; border-bottom: 1px solid #F4F4F5; vertical-align: middle; }
+#split-table td.chk-cell { text-align: center; }
+#split-table tr:last-child td { border-bottom: none; }
+.split-qty-in { width: 64px; padding: 5px 6px; border: 1.5px solid #E4E4E7; border-radius: 8px; font-size: 13px; font-weight: 700; text-align: center; outline: none; }
+.split-qty-in:focus { border-color: #7C3AED; }
+.split-qty-in.over { border-color: #EF4444; background: #FEF2F2; }
+#split-unassigned { margin-top: .75rem; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 8px; display: inline-block; }
+#split-unassigned.ok  { background: #ECFDF5; color: #059669; }
+#split-unassigned.bad { background: #FEF2F2; color: #EF4444; }
+
+/* Check totals strip */
+.split-totals-row { display: flex; gap: 12px; margin-top: 1rem; flex-wrap: wrap; }
+.split-total-badge { padding: 8px 14px; border-radius: 10px; background: #F4F4F5; font-size: 13px; font-weight: 700; color: #18181B; }
+
+/* Checks list (phase 2) */
+.check-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border: 1.5px solid #E4E4E7; border-radius: 12px; margin-bottom: 8px; }
+.check-row.invoiced { border-color: #6EE7B7; background: #ECFDF5; }
+.check-row-label { font-size: 14px; font-weight: 700; }
+.check-row-total { font-size: 1.1rem; font-weight: 900; color: #7C3AED; }
+.check-row-actions { display: flex; gap: 8px; }
+.btn-cobrar-check { padding: 7px 14px; background: #18181B; color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.btn-cobrar-check:disabled { background: #D1D5DB; cursor: not-allowed; }
+.btn-print-check { padding: 7px 10px; background: none; color: #3B82F6; border: 1.5px solid #BFDBFE; border-radius: 8px; font-size: 12px; cursor: pointer; }
+
+/* Pay modal */
+.pay-box { background: #fff; border-radius: 20px; width: 480px; max-width: 98vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.22); overflow: hidden; }
+.pay-method-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.pay-method-sel { flex: 1; padding: 8px 10px; border: 1.5px solid #E4E4E7; border-radius: 8px; font-size: 13px; outline: none; }
+.pay-method-amt { width: 110px; padding: 8px 10px; border: 1.5px solid #E4E4E7; border-radius: 8px; font-size: 13px; font-weight: 700; outline: none; text-align: right; }
+.pay-method-rm { width: 30px; height: 30px; background: #FEF2F2; border: none; border-radius: 6px; color: #EF4444; cursor: pointer; font-size: 14px; flex-shrink: 0; }
+.pay-summary-box { background: #F4F4F5; border-radius: 12px; padding: 1rem; margin: .75rem 0; }
+.pay-summary-line { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.pay-summary-line.total { font-weight: 900; font-size: 1.1rem; border-top: 1px solid #E4E4E7; padding-top: 6px; margin-top: 6px; }
+.pay-change { font-size: 1.3rem; font-weight: 900; color: #059669; }
+.pay-change.insuf { color: #EF4444; }
+.pay-input { width: 100%; padding: 9px 12px; border: 1.5px solid #E4E4E7; border-radius: 8px; font-size: 13px; outline: none; margin-bottom: 8px; }
+.pay-input:focus { border-color: #7C3AED; }
+#pay-feedback { border-radius: 8px; padding: 8px 12px; font-size: 13px; display: none; }
+
 /* ── MÓVIL: header compacto ── */
 @media (max-width: 600px) {
   header { padding: 0.75rem 1rem; flex-wrap: wrap; gap: 8px; }
@@ -203,6 +262,8 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   #clock { display: none; }
   .main { padding: 1rem; }
   .board { grid-template-columns: 1fr !important; }
+  .sp-box { max-height: 98vh; }
+  #split-table { font-size: 12px; }
 }
 </style>
 </head>
@@ -248,6 +309,84 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
       <span class="adj-total-val" id="adj-total-val">$0</span>
     </div>
     <button class="btn-adj-confirm" onclick="submitAdjuste()">✅ Confirmar Ajuste</button>
+  </div>
+</div>
+
+<!-- ══ MODAL: DIVIDIR CUENTA ══ -->
+<div class="sp-overlay" id="split-modal" onclick="if(event.target===this)closeSplitModal()">
+  <div class="sp-box">
+    <div class="sp-head">
+      <h3 id="split-modal-title">✂️ Dividir Cuenta</h3>
+      <button class="modal-close" onclick="closeSplitModal()">✕</button>
+    </div>
+    <div class="sp-body">
+
+      <!-- Fase 1: asignar ítems -->
+      <div id="split-phase-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;flex-wrap:wrap;gap:8px;">
+          <div style="font-size:12px;color:#71717A;">Asigna los ítems a cada cuenta. La suma por plato debe igualar lo pedido.</div>
+          <button onclick="addSplitCheck()" style="font-size:12px;padding:5px 12px;background:#F5F3FF;color:#7C3AED;border:1.5px solid #DDD6FE;border-radius:8px;cursor:pointer;font-weight:700;">+ Nueva Cuenta</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="split-table">
+            <thead id="split-table-head"></thead>
+            <tbody id="split-table-body"></tbody>
+          </table>
+        </div>
+        <div class="split-totals-row" id="split-totals-row"></div>
+        <div style="margin-top:.75rem;">
+          <span id="split-unassigned" class="ok">✓ Todo asignado</span>
+        </div>
+      </div>
+
+      <!-- Fase 2: lista de checks para cobrar -->
+      <div id="split-phase-2" style="display:none;">
+        <div style="font-size:13px;color:#71717A;margin-bottom:1rem;">División creada. Cobra cada cuenta por separado.</div>
+        <div id="split-checks-list"></div>
+        <div id="split-complete-msg" style="display:none;text-align:center;padding:1.5rem;background:#ECFDF5;border-radius:12px;color:#059669;font-weight:700;font-size:15px;">
+          ✅ Todas las cuentas han sido cobradas. Mesa cerrada.
+        </div>
+      </div>
+
+    </div>
+    <div class="sp-foot" id="split-footer">
+      <button class="sp-btn-cancel" onclick="closeSplitModal()">Cancelar</button>
+      <button class="sp-btn-ok" id="btn-create-split" onclick="submitSplit()">Crear División</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: COBRAR CHECK ══ -->
+<div class="sp-overlay" id="pay-modal" onclick="if(event.target===this)closePayModal()">
+  <div class="pay-box">
+    <div class="sp-head">
+      <h3 id="pay-modal-title">💰 Cobrar Cuenta</h3>
+      <button class="modal-close" onclick="closePayModal()">✕</button>
+    </div>
+    <div class="sp-body">
+      <div style="font-size:12px;color:#71717A;margin-bottom:.75rem;">Métodos de pago</div>
+      <div id="pay-methods-list"></div>
+      <button onclick="addPayMethod()" style="font-size:12px;padding:5px 12px;background:#F0FDF4;color:#059669;border:1.5px solid #A7F3D0;border-radius:8px;cursor:pointer;font-weight:700;margin-bottom:.75rem;">+ Agregar método</button>
+
+      <div class="pay-summary-box">
+        <div class="pay-summary-line"><span>Total a cobrar</span><span id="pay-check-total">$0</span></div>
+        <div class="pay-summary-line"><span>Recibido</span><span id="pay-received">$0</span></div>
+        <div class="pay-summary-line total"><span>Cambio / Vueltas</span><span class="pay-change" id="pay-change">$0</span></div>
+      </div>
+
+      <div style="margin-bottom:.5rem;">
+        <div style="font-size:11px;font-weight:700;color:#71717A;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Datos del cliente (opcional — para factura)</div>
+        <input class="pay-input" id="pay-customer-name" placeholder="Nombre del cliente (Ej: Juan García)">
+        <input class="pay-input" id="pay-customer-nit"  placeholder="NIT / Cédula (vacío = Consumidor Final)">
+        <input class="pay-input" id="pay-customer-email" placeholder="Email (opcional)">
+      </div>
+
+      <div id="pay-feedback"></div>
+    </div>
+    <div class="sp-foot">
+      <button class="sp-btn-cancel" onclick="closePayModal()">Cancelar</button>
+      <button class="sp-btn-ok" id="btn-process-pay" onclick="processPayment()">Procesar Pago y Emitir Factura</button>
+    </div>
   </div>
 </div>
 
@@ -467,11 +606,11 @@ async function loadCajaOrders() {
           <button class="btn-adjust" onclick="openAdjModal('${b.id}')">
             ✏️ Ajustar Factura
           </button>
-          <button class="btn-print-factura" onclick="printFactura('${b.id}')">
-            🖨️ Imprimir Factura
+          <button class="btn-split" onclick="openSplitModal('${b.id}')">
+            ✂️ Dividir Cuenta
           </button>
-          <button class="btn-pay" onclick="cobrarYcerrar('${b.id}')">
-            💰 Confirmar Pago y Cerrar Mesa
+          <button class="btn-pay" onclick="cobrarTodo('${b.id}')">
+            💰 Cobrar Todo
           </button>
         </div>
       `;
@@ -482,26 +621,462 @@ async function loadCajaOrders() {
   }
 }
 
-async function cobrarYcerrar(orderId) {
-  if(!confirm(`¿Confirmas que recibiste el pago para la cuenta de esta mesa? Esta acción la cerrará definitivamente.`)) return;
+// ══════════════════════════════════════════════════════════════════
+// FASE 5 — SPLIT CHECKS & PAGOS MIXTOS
+// ══════════════════════════════════════════════════════════════════
+
+let _splitBillId   = null;
+let _splitCheckN   = 2;      // número de columnas de cuenta en fase 1
+let _splitChecks   = [];     // check objects del servidor (fase 2)
+let _payBillId     = null;
+let _payCheckId    = null;
+let _payCheckTotal = 0;
+let _billingConfig = null;
+
+// Carga la config de billing para obtener tax_pct
+async function loadBillingConfig() {
+  try {
+    const r = await fetch('/api/billing/config', { headers: reqHeaders });
+    if (r.ok) { const d = await r.json(); _billingConfig = d.config || null; }
+  } catch(e) {}
+}
+
+// ── "Cobrar Todo" — crea un check único con todos los ítems ────────
+async function cobrarTodo(billId) {
+  const bill = _billsCache[billId];
+  if (!bill) return;
+
+  // Agrupar ítems por nombre
+  const byName = {};
+  (bill.items || []).forEach(i => {
+    const k = i.name;
+    if (!byName[k]) byName[k] = { name: k, qty: 0, unit_price: Number(i.price) || 0 };
+    byName[k].qty += Number(i.quantity) || 1;
+  });
+  const items = Object.values(byName);
+
+  const taxPct = _billingConfig?.tax_percentage ?? 19.0;
+  try {
+    const r = await fetch(`/api/table-orders/${billId}/checks`, {
+      method: 'POST', headers: reqHeaders,
+      body: JSON.stringify({
+        checks: [{ check_number: 1, items }],
+        tax_pct: taxPct,
+        tax_regime: _billingConfig?.tax_regime ?? 'iva'
+      })
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.detail || 'Error al crear check'); return; }
+    const { checks } = await r.json();
+    const check = checks[0];
+    openPayModal(billId, check.id, check);
+  } catch(e) { alert('Error de conexión'); }
+}
+
+// ── MODAL DIVIDIR CUENTA ──────────────────────────────────────────
+
+function openSplitModal(billId) {
+  const bill = _billsCache[billId];
+  if (!bill) return;
+  _splitBillId   = billId;
+  _splitCheckN   = 2;
+  _splitChecks   = [];
+
+  document.getElementById('split-modal-title').textContent =
+    `✂️ Dividir Cuenta — ${bill.table_name}`;
+  document.getElementById('split-phase-1').style.display = '';
+  document.getElementById('split-phase-2').style.display = 'none';
+  document.getElementById('split-footer').style.display = '';
+  document.getElementById('split-complete-msg').style.display = 'none';
+
+  _renderSplitTable();
+  document.getElementById('split-modal').classList.add('open');
+}
+
+function closeSplitModal() {
+  document.getElementById('split-modal').classList.remove('open');
+  _splitBillId = null;
+  loadCajaOrders();  // Refresh board
+}
+
+function addSplitCheck() {
+  _splitCheckN++;
+  _renderSplitTable();
+}
+
+function removeSplitCheck(n) {
+  if (_splitCheckN <= 1) return;
+  // Move qty from removed column back to 0 for all rows, then shift columns
+  // Simplest: just decrement and re-render (user re-enters)
+  _splitCheckN--;
+  _renderSplitTable();
+}
+
+function _splitItems() {
+  const bill = _billsCache[_splitBillId];
+  const byName = {};
+  (bill.items || []).forEach(i => {
+    const k = i.name;
+    if (!byName[k]) byName[k] = { name: k, qty: 0, unit_price: Number(i.price) || 0 };
+    byName[k].qty += Number(i.quantity) || 1;
+  });
+  return Object.values(byName);
+}
+
+function _renderSplitTable() {
+  const items = _splitItems();
+  const n = _splitCheckN;
+
+  // Header
+  let thHtml = `<th>Ítem</th><th>Precio Unit.</th><th style="text-align:center">Total</th>`;
+  for (let c = 1; c <= n; c++) {
+    thHtml += `<th class="chk-col">Cuenta ${c}
+      ${n > 1 ? `<button onclick="removeSplitCheck(${c})" style="background:none;border:none;color:#EF4444;cursor:pointer;font-size:11px;margin-left:3px;" title="Quitar">✕</button>` : ''}
+    </th>`;
+  }
+  document.getElementById('split-table-head').innerHTML = `<tr>${thHtml}</tr>`;
+
+  // Body
+  let tbHtml = '';
+  items.forEach((item, idx) => {
+    let tdHtml = `<td style="font-weight:500;">${item.name}</td>
+      <td style="color:#71717A;">${fmt(item.unit_price)}</td>
+      <td style="text-align:center;font-weight:700;">${item.qty}</td>`;
+    for (let c = 1; c <= n; c++) {
+      const defaultQty = c === 1 ? item.qty : 0;
+      tdHtml += `<td class="chk-cell">
+        <input class="split-qty-in" type="number" min="0" max="${item.qty}"
+               id="sq-${idx}-${c}" value="${defaultQty}"
+               oninput="_onSplitQtyChange(${idx},${c},${n})">
+      </td>`;
+    }
+    tbHtml += `<tr>${tdHtml}</tr>`;
+  });
+  document.getElementById('split-table-body').innerHTML = tbHtml;
+
+  _validateSplit();
+}
+
+function _onSplitQtyChange(itemIdx, checkCol, totalCols) {
+  _validateSplit();
+}
+
+function _validateSplit() {
+  const items = _splitItems();
+  const n = _splitCheckN;
+  let allOk = true;
+  const checkTotals = Array(n + 1).fill(0);
+
+  items.forEach((item, idx) => {
+    let assigned = 0;
+    for (let c = 1; c <= n; c++) {
+      const el = document.getElementById(`sq-${idx}-${c}`);
+      const v = Math.max(0, parseInt(el?.value || '0') || 0);
+      assigned += v;
+      checkTotals[c] += item.unit_price * v;
+      el?.classList.toggle('over', assigned > item.qty);
+    }
+    if (assigned !== item.qty) allOk = false;
+  });
+
+  const badge = document.getElementById('split-unassigned');
+  if (allOk) {
+    badge.textContent = '✓ Todo asignado correctamente';
+    badge.className = 'ok';
+  } else {
+    badge.textContent = '⚠ Hay ítems sin asignar o excedidos';
+    badge.className = 'bad';
+  }
+  document.getElementById('btn-create-split').disabled = !allOk;
+
+  // Totals strip
+  let totalsHtml = '';
+  for (let c = 1; c <= n; c++) {
+    totalsHtml += `<div class="split-total-badge">Cuenta ${c}: <strong>${fmt(checkTotals[c])}</strong></div>`;
+  }
+  document.getElementById('split-totals-row').innerHTML = totalsHtml;
+}
+
+async function submitSplit() {
+  const items = _splitItems();
+  const n = _splitCheckN;
+  const taxPct = _billingConfig?.tax_percentage ?? 19.0;
+
+  const checks = [];
+  for (let c = 1; c <= n; c++) {
+    const checkItems = [];
+    items.forEach((item, idx) => {
+      const el = document.getElementById(`sq-${idx}-${c}`);
+      const qty = parseInt(el?.value || '0') || 0;
+      if (qty > 0) checkItems.push({ name: item.name, qty, unit_price: item.unit_price });
+    });
+    if (checkItems.length > 0) checks.push({ check_number: c, items: checkItems });
+  }
+
+  const btn = document.getElementById('btn-create-split');
+  btn.textContent = 'Creando...'; btn.disabled = true;
 
   try {
-    const r = await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST', 
-      headers: reqHeaders,
-      body: JSON.stringify({ status: 'cerrar_mesa' })
+    const r = await fetch(`/api/table-orders/${_splitBillId}/checks`, {
+      method: 'POST', headers: reqHeaders,
+      body: JSON.stringify({ checks, tax_pct: taxPct,
+                             tax_regime: _billingConfig?.tax_regime ?? 'iva' })
     });
-    
-    if (r.ok) {
-      loadCajaOrders();
-    } else {
-      alert("Hubo un error al cerrar la mesa.");
+    if (!r.ok) {
+      const e = await r.json();
+      alert(e.detail || 'Error al crear la división');
+      btn.textContent = 'Crear División'; btn.disabled = false;
+      return;
     }
+    const { checks: createdChecks } = await r.json();
+    _splitChecks = createdChecks;
+    _showSplitPhase2();
   } catch(e) {
-    console.error(e);
-    alert("Error de red.");
+    alert('Error de conexión');
+    btn.textContent = 'Crear División'; btn.disabled = false;
   }
 }
+
+function _showSplitPhase2() {
+  document.getElementById('split-phase-1').style.display = 'none';
+  document.getElementById('split-phase-2').style.display = '';
+  document.getElementById('split-footer').style.display = 'none';
+  _renderSplitChecks();
+}
+
+function _renderSplitChecks() {
+  const listEl = document.getElementById('split-checks-list');
+  let html = '';
+  _splitChecks.forEach(chk => {
+    const isPaid = chk.status === 'invoiced' || chk.status === 'paid';
+    html += `<div class="check-row${isPaid ? ' invoiced' : ''}" id="chk-row-${chk.id.replace(/[^a-z0-9]/gi,'-')}">
+      <div>
+        <div class="check-row-label">Cuenta ${chk.check_number}</div>
+        <div style="font-size:11px;color:#71717A;">${(chk.items||[]).length} ítem(s)</div>
+      </div>
+      <div class="check-row-total">${fmt(chk.total)}</div>
+      <div class="check-row-actions">
+        ${isPaid
+          ? `<span style="font-size:12px;color:#059669;font-weight:700;">✅ Cobrada</span>
+             <button class="btn-print-check" onclick="printCheckTicket('${_splitBillId}','${chk.id}')">🖨️</button>`
+          : `<button class="btn-cobrar-check" onclick="openPayModal('${_splitBillId}','${chk.id}',${JSON.stringify(chk).replace(/"/g,'&quot;')})">💰 Cobrar</button>`
+        }
+      </div>
+    </div>`;
+  });
+  listEl.innerHTML = html;
+
+  const allPaid = _splitChecks.every(c => c.status === 'invoiced' || c.status === 'paid');
+  document.getElementById('split-complete-msg').style.display = allPaid ? '' : 'none';
+}
+
+// ── MODAL COBRAR CHECK ────────────────────────────────────────────
+
+function openPayModal(billId, checkId, checkData) {
+  _payBillId     = billId;
+  _payCheckId    = checkId;
+  _payCheckTotal = parseFloat(checkData.total) || 0;
+
+  document.getElementById('pay-modal-title').textContent =
+    `💰 Cobrar Cuenta ${checkData.check_number || ''}`;
+  document.getElementById('pay-check-total').textContent = fmt(_payCheckTotal);
+  document.getElementById('pay-customer-name').value  = '';
+  document.getElementById('pay-customer-nit').value   = '';
+  document.getElementById('pay-customer-email').value = '';
+  const fb = document.getElementById('pay-feedback');
+  fb.style.display = 'none';
+  document.getElementById('btn-process-pay').disabled = false;
+  document.getElementById('btn-process-pay').textContent = 'Procesar Pago y Emitir Factura';
+
+  // Reset methods to 1 row with full amount
+  document.getElementById('pay-methods-list').innerHTML = '';
+  addPayMethod(_payCheckTotal);
+  _recalcChange();
+
+  document.getElementById('pay-modal').classList.add('open');
+}
+
+function closePayModal() {
+  document.getElementById('pay-modal').classList.remove('open');
+  _payBillId = _payCheckId = null;
+}
+
+function addPayMethod(defaultAmt) {
+  const list = document.getElementById('pay-methods-list');
+  const idx  = list.children.length;
+  const div  = document.createElement('div');
+  div.className = 'pay-method-row';
+  div.innerHTML = `
+    <select class="pay-method-sel">
+      <option value="efectivo">💵 Efectivo</option>
+      <option value="tarjeta">💳 Tarjeta</option>
+      <option value="nequi">📱 Nequi</option>
+      <option value="transferencia">🏦 Transferencia</option>
+      <option value="daviplata">📱 Daviplata</option>
+    </select>
+    <input class="pay-method-amt" type="number" min="0" step="1000"
+           placeholder="Monto" value="${defaultAmt != null ? defaultAmt : ''}"
+           oninput="_recalcChange()">
+    <button class="pay-method-rm" onclick="this.parentElement.remove();_recalcChange();">✕</button>
+  `;
+  list.appendChild(div);
+  _recalcChange();
+}
+
+function _recalcChange() {
+  let received = 0;
+  document.querySelectorAll('.pay-method-amt').forEach(el => {
+    received += parseFloat(el.value) || 0;
+  });
+  const change = received - _payCheckTotal;
+  document.getElementById('pay-received').textContent = fmt(received);
+  const changeEl = document.getElementById('pay-change');
+  changeEl.textContent = fmt(Math.abs(change));
+  changeEl.className = `pay-change${change < 0 ? ' insuf' : ''}`;
+  document.getElementById('pay-check-total').textContent = fmt(_payCheckTotal);
+}
+
+async function processPayment() {
+  const payments = [];
+  let received = 0;
+  let valid = true;
+  document.querySelectorAll('.pay-method-row').forEach(row => {
+    const method = row.querySelector('.pay-method-sel')?.value;
+    const amount = parseFloat(row.querySelector('.pay-method-amt')?.value) || 0;
+    if (!method || amount <= 0) { valid = false; return; }
+    payments.push({ method, amount });
+    received += amount;
+  });
+
+  const fb = document.getElementById('pay-feedback');
+  if (!valid || payments.length === 0) {
+    fb.style.display = 'block';
+    fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
+    fb.textContent = 'Completa al menos un método de pago con monto válido.';
+    return;
+  }
+  if (received < _payCheckTotal) {
+    fb.style.display = 'block';
+    fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
+    fb.textContent = `Pago insuficiente: faltan ${fmt(_payCheckTotal - received)}.`;
+    return;
+  }
+
+  const btn = document.getElementById('btn-process-pay');
+  btn.textContent = 'Procesando...'; btn.disabled = true;
+  fb.style.display = 'none';
+
+  const body = {
+    payments,
+    customer_name:  document.getElementById('pay-customer-name').value.trim()  || 'Consumidor Final',
+    customer_nit:   document.getElementById('pay-customer-nit').value.trim()   || '222222222',
+    customer_email: document.getElementById('pay-customer-email').value.trim() || '',
+  };
+
+  try {
+    const r = await fetch(`/api/table-orders/${_payBillId}/checks/${_payCheckId}/pay`, {
+      method: 'POST', headers: reqHeaders, body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (r.ok) {
+      fb.style.cssText = 'display:block;background:#ECFDF5;color:#059669;border-radius:8px;padding:8px 12px;font-size:13px;';
+      const change = data.change || 0;
+      fb.textContent = `✅ Pago registrado. CUFE: ${(data.fiscal?.cufe||'').slice(0,16)}...${change > 0 ? ` Cambio: ${fmt(change)}` : ''}`;
+
+      // Si venimos de la fase 2 del split modal, actualizar el check en _splitChecks
+      const updIdx = _splitChecks.findIndex(c => c.id === _payCheckId);
+      if (updIdx >= 0) {
+        _splitChecks[updIdx].status = 'invoiced';
+        setTimeout(() => { closePayModal(); _renderSplitChecks(); }, 1800);
+      } else {
+        // Cobrar Todo → cerrar ambos modales y recargar
+        setTimeout(() => { closePayModal(); loadCajaOrders(); }, 1800);
+      }
+    } else {
+      fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
+      fb.textContent = data.detail || 'Error al procesar el pago.';
+      btn.textContent = 'Procesar Pago y Emitir Factura'; btn.disabled = false;
+    }
+  } catch(e) {
+    fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
+    fb.textContent = 'Error de conexión.';
+    btn.textContent = 'Procesar Pago y Emitir Factura'; btn.disabled = false;
+  }
+}
+
+async function printCheckTicket(billId, checkId) {
+  try {
+    const r = await fetch(`/api/table-orders/${billId}/checks/${checkId}/ticket`, { headers: reqHeaders });
+    if (!r.ok) { alert('No se encontró el ticket del check'); return; }
+    const ticket = await r.json();
+    _printCheckWindow(ticket);
+  } catch(e) { alert('Error de conexión'); }
+}
+
+function _printCheckWindow(ticket) {
+  const taxPct   = parseFloat(ticket.tax_pct) || 19.0;
+  const total    = parseFloat(ticket.total) || 0;
+  const subtotal = taxPct > 0 ? total / (1 + taxPct / 100) : total;
+  const tax      = total - subtotal;
+  const taxLabel = (ticket.tax_regime === 'ico') ? `Impoconsumo (${taxPct}%)` : `IVA (${taxPct}%)`;
+
+  const itemsHtml = (ticket.items || []).map(i => {
+    const line = (Number(i.unit_price||i.price||0)) * (Number(i.qty||i.quantity||1));
+    return `<tr><td>${i.qty||i.quantity||1}x ${i.name}</td><td class="val">${fmt(line)}</td></tr>`;
+  }).join('');
+
+  const payments = (ticket.payments || []).map(p =>
+    `<tr><td class="label">${p.method}</td><td class="val label">${fmt(p.amount)}</td></tr>`
+  ).join('');
+  const changeLine = (ticket.change_amount > 0)
+    ? `<tr><td class="label">Cambio</td><td class="val label">${fmt(ticket.change_amount)}</td></tr>` : '';
+
+  const cufeHtml = ticket.cufe ? `
+<div class="sep"></div>
+<div class="label">Factura N°: ${ticket.invoice_number||''}</div>
+<div class="label">Estado DIAN: ${ticket.dian_status||''}</div>
+<div class="label cufe">CUFE: ${ticket.cufe}</div>
+${ticket.qr_data ? `<div class="label" style="word-break:break-all;font-size:7pt;">QR: ${ticket.qr_data}</div>` : ''}` : '';
+
+  const win = window.open('', '_blank', 'width=340,height=740,toolbar=0,menubar=0');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
+@page{size:80mm auto;margin:0}
+.title{font-size:13pt;font-weight:bold;text-align:center;letter-spacing:1px}
+.center{text-align:center}.sep{border-top:1px dashed #000;margin:5px 0}
+.label{font-size:8pt;color:#444;margin-top:2px}
+.mesa{font-size:14pt;font-weight:bold}
+table{width:100%;border-collapse:collapse;margin:4px 0;font-size:10pt}
+td{padding:2px 0;vertical-align:top}.val{text-align:right;white-space:nowrap}
+.total-row td{font-weight:bold;font-size:11pt;border-top:1px solid #000;padding-top:3px}
+.footer{text-align:center;font-size:9pt;margin-top:4px}.cufe{font-size:7pt;word-break:break-all}
+</style></head><body>
+<div class="title">FACTURA DE VENTA</div>
+<div class="center label">Cuenta ${ticket.check_number||''} de ${ticket.base_order_id||''}</div>
+<div class="sep"></div>
+<div class="label">MESA</div><div class="mesa">${ticket.table_name||''}</div>
+<div class="sep"></div>
+<table><thead><tr><th style="text-align:left;font-size:8pt">ÍTEM</th><th style="text-align:right;font-size:8pt">VALOR</th></tr></thead>
+<tbody>${itemsHtml}</tbody></table>
+<div class="sep"></div>
+<table>
+<tr><td class="label">Subtotal</td><td class="val label">${fmt(subtotal)}</td></tr>
+<tr><td class="label">${taxLabel}</td><td class="val label">${fmt(tax)}</td></tr>
+<tr class="total-row"><td>TOTAL</td><td class="val">${fmt(total)}</td></tr>
+</table>
+<div class="sep"></div>
+<table>${payments}${changeLine}</table>
+${cufeHtml}
+<div class="sep"></div>
+<div class="footer">Gracias por su visita — Mesio POS</div>
+</body></html>`);
+  win.document.close(); win.focus();
+  win.onload = () => { win.print(); };
+}
+
+// Inicializar config de billing en el arranque de la página
+loadBillingConfig();
 
 // ── MODAL AJUSTAR FACTURA ──
 
