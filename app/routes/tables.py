@@ -320,6 +320,88 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
 
     return {"orders": result}
 
+
+@router.get("/api/table-orders/{order_id}/ticket")
+async def get_order_ticket(request: Request, order_id: str):
+    """
+    Devuelve los datos estructurados de un ticket/comanda agregando todas
+    las sub-órdenes del mismo base_order_id.
+    Incluye datos fiscales (CUFE, QR) si existe una factura emitida.
+    """
+    import json as _json
+    user = await get_current_user(request)
+    branch_id = user.get("branch_id")
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        if branch_id:
+            rows = await conn.fetch(
+                """SELECT o.* FROM table_orders o
+                   LEFT JOIN restaurant_tables t ON o.table_id = t.id
+                   WHERE (o.id = $1 OR o.base_order_id = $1)
+                   AND (t.branch_id = $2 OR t.branch_id IS NULL)
+                   ORDER BY o.created_at ASC""",
+                order_id, branch_id)
+        else:
+            rows = await conn.fetch(
+                """SELECT * FROM table_orders
+                   WHERE id = $1 OR base_order_id = $1
+                   ORDER BY created_at ASC""",
+                order_id)
+
+        if not rows:
+            raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+        # Agregar ítems y totales de todas las sub-órdenes
+        all_items: list = []
+        total: float = 0.0
+        notes_parts: list = []
+        first = dict(rows[0])
+
+        for row in rows:
+            d = dict(row)
+            items = d.get("items", [])
+            if isinstance(items, str):
+                try:
+                    items = _json.loads(items)
+                except Exception:
+                    items = []
+            if isinstance(items, list):
+                all_items.extend(items)
+            total += float(d.get("total") or 0)
+            if d.get("notes"):
+                notes_parts.append(d["notes"])
+
+        # Datos fiscales: última factura emitida para esta orden
+        fiscal = None
+        try:
+            fiscal_row = await conn.fetchrow(
+                """SELECT cufe, qr_data, invoice_number, issue_date,
+                          tax_regime, tax_pct, dian_status, uuid_dian
+                   FROM fiscal_invoices
+                   WHERE order_id = $1
+                   ORDER BY created_at DESC LIMIT 1""",
+                order_id)
+            if fiscal_row:
+                fiscal = dict(fiscal_row)
+        except Exception:
+            pass  # tabla puede no existir en entornos sin billing
+
+    created = first.get("created_at")
+    if created and hasattr(created, "isoformat"):
+        created = created.isoformat() + "Z"
+
+    return {
+        "order_id":   order_id,
+        "table_name": first.get("table_name", ""),
+        "created_at": created,
+        "items":      all_items,
+        "total":      total,
+        "notes":      " | ".join(notes_parts) if notes_parts else "",
+        "fiscal":     fiscal,
+    }
+
+
 async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
     token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
