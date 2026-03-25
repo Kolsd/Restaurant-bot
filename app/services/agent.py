@@ -453,7 +453,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 failed = ", ".join(cart_errors)
                 reply += f" (Nota: No pude agregar '{failed}' porque no aparece exacto en el menú)"
 
-elif action in ("delivery", "pickup"):
+        elif action in ("delivery", "pickup"):
             address        = parsed.get("address", "")
             notes          = parsed.get("notes", "")
             payment_method = parsed.get("payment_method", "")
