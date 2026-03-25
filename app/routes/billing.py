@@ -15,9 +15,7 @@ from app.services.billing import (
     save_billing_config,
     get_billing_log,
     emit_invoice,
-    SiigoClient,
-    AlegraClient,
-    LoggroClient,
+    get_adapter,
 )
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
@@ -40,7 +38,7 @@ async def _get_restaurant_id(user: dict) -> int:
 # ── MODELOS ──────────────────────────────────────────────────────────
 
 class BillingConfigPayload(BaseModel):
-    provider:    str  # "siigo" | "alegra" | "loggro"
+    provider:    str  # "siigo" | "alegra" | "loggro" | "mesio_native"
     auto_emit:   bool = False
     # Siigo
     siigo_username:      Optional[str] = None
@@ -69,6 +67,17 @@ class BillingConfigPayload(BaseModel):
     # Compartidos
     iva_percentage:      Optional[float] = 0
     currency:            Optional[str]   = "COP"
+    # Mesio Native (DIAN)
+    restaurant_nit:          Optional[str]   = None  # NIT sin dígito verificación, ej: "900123456"
+    restaurant_legal_name:   Optional[str]   = None  # Razón social
+    restaurant_city_code:    Optional[str]   = None  # Código DANE municipio, ej: "11001"
+    restaurant_city_name:    Optional[str]   = None  # ej: "Bogotá"
+    restaurant_address_dian: Optional[str]   = None  # Dirección fiscal
+    tax_regime:              Optional[str]   = None  # "iva" | "ico" (Impuesto al Consumo)
+    nit_id_type:             Optional[str]   = None  # "31"=NIT (default) | "13"=CC
+    software_id:             Optional[str]   = None  # ID software habilitado en DIAN
+    software_pin:            Optional[str]   = None  # PIN del software DIAN
+    dian_environment:        Optional[str]   = None  # "test" | "production"
 
 class EmitInvoicePayload(BaseModel):
     order_id:  str
@@ -100,7 +109,7 @@ async def set_config(request: Request, payload: BillingConfigPayload):
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
 
-    allowed = {"siigo", "alegra", "loggro"}
+    allowed = {"siigo", "alegra", "loggro", "mesio_native"}
     if payload.provider.lower() not in allowed:
         raise HTTPException(status_code=400, detail=f"Proveedor debe ser uno de: {allowed}")
 
@@ -140,24 +149,11 @@ async def test_connection(request: Request):
 
     provider = config.get("provider", "").lower()
     try:
-        if provider == "siigo":
-            client  = SiigoClient(config["siigo_username"], config["siigo_access_key"])
-            result  = await client.get_document_types()
-            return {"success": True, "provider": "siigo", "sample": result[:2]}
-
-        elif provider == "alegra":
-            client  = AlegraClient(config["alegra_email"], config["alegra_token"])
-            result  = await client.get_payment_methods()
-            return {"success": True, "provider": "alegra", "sample": result[:2]}
-
-        elif provider == "loggro":
-            client  = LoggroClient(config["loggro_api_key"], config["loggro_company_id"])
-            result  = await client.get_products()
-            return {"success": True, "provider": "loggro", "sample": result[:2]}
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Proveedor '{provider}' no soportado")
-
+        adapter = get_adapter(provider)
+        result  = await adapter.test_connection(config)
+        return {"success": True, "provider": provider, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -215,6 +211,30 @@ async def list_providers():
                     {"key": "iva_percentage",        "label": "% IVA",                 "type": "number",   "required": False},
                 ],
                 "docs": "https://desarrolladores.loggro.com"
+            },
+            {
+                "id": "mesio_native",
+                "name": "Mesio Native (DIAN Colombia)",
+                "logo": "/static/mesio-icon.png",
+                "fields": [
+                    {"key": "restaurant_nit",          "label": "NIT del restaurante",          "type": "text",     "required": True},
+                    {"key": "restaurant_legal_name",   "label": "Razón social",                 "type": "text",     "required": True},
+                    {"key": "restaurant_city_code",    "label": "Código DANE municipio",        "type": "text",     "required": True},
+                    {"key": "restaurant_city_name",    "label": "Ciudad",                       "type": "text",     "required": True},
+                    {"key": "restaurant_address_dian", "label": "Dirección fiscal",             "type": "text",     "required": True},
+                    {"key": "tax_regime",              "label": "Régimen tributario",           "type": "select",   "required": True,
+                     "options": ["iva", "ico"],
+                     "hint": "iva=IVA 19% | ico=Impto. al Consumo 8%"},
+                    {"key": "nit_id_type",             "label": "Tipo ID emisor",               "type": "select",   "required": False,
+                     "options": ["31", "13"], "hint": "31=NIT | 13=Cédula"},
+                    {"key": "software_id",             "label": "ID Software DIAN",             "type": "text",     "required": True},
+                    {"key": "software_pin",            "label": "PIN Software DIAN",            "type": "password", "required": True},
+                    {"key": "dian_environment",        "label": "Ambiente DIAN",                "type": "select",   "required": True,
+                     "options": ["test", "production"]},
+                    {"key": "currency",                "label": "Moneda",                       "type": "select",   "required": False,
+                     "options": ["COP"]},
+                ],
+                "docs": "https://www.dian.gov.co/impuestos/factura-electronica"
             }
         ]
     }
