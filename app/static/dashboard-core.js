@@ -58,7 +58,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Then fetch fresh features from API and re-apply (keeps localStorage in sync)
   fetch('/api/settings', { headers }).then(r => r.ok ? r.json() : null).then(data => {
     if (!data) return;
-    const freshFeats = data.features || {};
+    
+    // --- INICIO CÓDIGO CORREGIDO ---
+    let freshFeats = data.features || {};
+    if (typeof freshFeats === 'string') {
+        try { freshFeats = JSON.parse(freshFeats); } catch(e) { freshFeats = {}; }
+    }
+
     // Update localStorage so next page load is also correct
     const stored = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
     stored.features = freshFeats;
