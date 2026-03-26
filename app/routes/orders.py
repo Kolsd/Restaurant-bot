@@ -9,6 +9,7 @@ from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
 from app.routes.deps import require_auth
 from app.services.agent import trigger_nps
+from app.services import loyalty as loyalty_svc
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -88,6 +89,13 @@ async def wompi_webhook(request: Request):
                 result = await db.db_confirm_payment(reference, transaction_id)
                 if result:
                     print(f"Payment confirmed — Order: {reference} — {result['total']}", flush=True)
+                    # Acumulación de puntos loyalty en background (silenciosa)
+                    asyncio.create_task(loyalty_svc.accrue_on_order(
+                        bot_number=result.get("bot_number", ""),
+                        phone=result.get("phone", ""),
+                        order_id=reference,
+                        total_cop=float(result.get("total", 0)),
+                    ))
 
     return {"status": "ok"}
 

@@ -1034,6 +1034,9 @@ class MesioNativeAdapter(BillingAdapter):
             "dian_response":     None,
         })
 
+        # Verificar límite de facturas antes de consumir cuota MATIAS
+        await db.db_check_usage_limits(restaurant_id)
+
         # Llamar a MATIAS API
         bearer_token = await _get_matias_token()
 
@@ -1098,6 +1101,9 @@ class MesioNativeAdapter(BillingAdapter):
             qr_data=qr_data,
             dian_response=matias_response,
         )
+
+        # Registrar consumo de factura del día
+        await db.db_increment_invoice_usage(restaurant_id)
 
         return {
             "id":             fiscal_id,

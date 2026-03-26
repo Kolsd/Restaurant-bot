@@ -3,605 +3,1004 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — Demo Interactivo</title>
+<title>Mesio Full — Demo Interactivo</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;0,9..144,900;1,9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --g: #1D9E75; --g2: #39FF6A; --blue: #378ADD; --amber: #F59E0B;
-  --bg: #F2F2EE; --sidebar: #FFFFFF; --card: #FFFFFF;
-  --border: #E5E5DF; --border2: #DEDEDA;
-  --text: #111111; --muted: #777777; --muted2: #999;
-  --ink: #0A0A0A;
+  --g:#1D9E75; --g2:#39FF6A; --blue:#378ADD; --amber:#F59E0B; --violet:#8B5CF6; --red:#E53E3E;
+  --bg:#F2F2EE; --sidebar:#FFFFFF; --card:#FFFFFF;
+  --border:#E5E5DF; --border2:#DEDEDA;
+  --text:#111111; --muted:#777777; --muted2:#999;
 }
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Instrument Sans', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; max-width: 100%; }
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Instrument Sans',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
 
-.demo-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: var(--g); color: #fff; text-align: center; padding: 9px 1rem; font-size: .8rem; font-weight: 500; line-height: 1.4; }
-.demo-banner a { color: #fff; font-weight: 700; text-decoration: underline; cursor: pointer; }
+/* ── BANNER ── */
+.demo-banner{position:fixed;top:0;left:0;right:0;z-index:1000;background:var(--g);color:#fff;text-align:center;padding:9px 1rem;font-size:.8rem;font-weight:500}
+.demo-banner a{color:#fff;font-weight:700;text-decoration:underline;cursor:pointer}
 
-.layout { display: flex; height: 100vh; margin-top: 38px; }
-.sidebar { width: 230px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 1.5rem 1rem; flex-shrink: 0; position: fixed; top: 38px; bottom: 0; left: 0; overflow-y: auto; }
-.sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
-.logo-icon { width: 34px; height: 34px; background: var(--g); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
-.logo-text { font-size: 14px; font-weight: 600; }
-.logo-rest { font-size: 11px; color: var(--muted); }
-.nav-section { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--muted2); padding: 0 12px; margin-bottom: 4px; margin-top: 16px; }
-.nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; transition: all .15s; }
-.nav-item:hover { background: var(--bg); color: var(--text); }
-.nav-item.active { background: #E1F5EE; color: #0F6E56; }
-.nav-item .icon { width: 16px; text-align: center; flex-shrink: 0; font-size: 14px; }
-.nav-badge { margin-left: auto; background: var(--g); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 100px; }
-.nav-badge-amber { background: var(--amber); }
-.live-badge { margin-top: auto; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--g); background: #E1F5EE; padding: 9px 13px; border-radius: 10px; font-weight: 500; }
-.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--g); animation: pulse 2s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+/* ── LAYOUT ── */
+.layout{display:flex;height:100vh;margin-top:38px}
+.sidebar{width:240px;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:1.25rem 1rem;flex-shrink:0;position:fixed;top:38px;bottom:0;left:0;overflow-y:auto}
+.main{margin-left:240px;flex:1;padding:2rem;overflow-y:auto;min-width:0}
 
-.main { margin-left: 230px; flex: 1; padding: 2rem; overflow-y: auto; min-width: 0; max-width: 100%; }
-.topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.75rem; }
-.page-title { font-family: 'Fraunces', serif; font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em; }
-.topbar-right { display: flex; align-items: center; gap: 10px; }
-.live-chip { font-size: 11px; color: var(--g); background: #E1F5EE; padding: 4px 12px; border-radius: 100px; font-weight: 600; }
-.cta-chip { font-size: 12px; background: var(--g); color: #fff; padding: 6px 14px; border-radius: 100px; font-weight: 600; cursor: pointer; border: none; transition: opacity .2s; text-decoration: none; }
-.cta-chip:hover { opacity: .9; }
+/* ── SIDEBAR ── */
+.sb-logo{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid var(--border)}
+.sb-logo-icon{width:34px;height:34px;background:var(--g);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0}
+.sb-logo-text{font-size:14px;font-weight:600}
+.sb-logo-sub{font-size:11px;color:var(--muted)}
+.nav-section{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);padding:0 10px;margin:14px 0 4px}
+.nav-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--muted);margin-bottom:2px;border:none;background:none;width:100%;text-align:left;transition:all .15s}
+.nav-item:hover{background:var(--bg);color:var(--text)}
+.nav-item.active{background:#E1F5EE;color:#0F6E56;font-weight:600}
+.nav-item .ni-icon{font-size:15px;width:20px;text-align:center;flex-shrink:0}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:100px;animation:pulse 2s infinite}
+.nav-badge-g{background:var(--g)}
+.nav-badge-a{background:var(--amber)}
+.sb-plan{margin-top:auto;background:linear-gradient(135deg,rgba(29,158,117,.08),rgba(55,138,221,.05));border:1px solid rgba(29,158,117,.2);border-radius:10px;padding:10px 12px;font-size:11px}
+.sb-plan-title{font-weight:700;color:#0F6E56;margin-bottom:2px;font-size:12px}
+.sb-plan-sub{color:var(--muted);line-height:1.4}
+.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--g);animation:pulse 2s infinite;margin-right:4px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
-.section { display: none; }
-.section.active { display: block; }
-.section-fade { animation: fadeIn .25s ease; }
-@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+/* ── MAIN CHROME ── */
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.75rem;gap:12px;flex-wrap:wrap}
+.page-title{font-family:'Fraunces',serif;font-size:1.4rem;font-weight:700;letter-spacing:-.02em}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.live-chip{font-size:11px;color:var(--g);background:#E1F5EE;padding:4px 12px;border-radius:100px;font-weight:600}
+.cta-chip{font-size:12px;background:var(--g);color:#fff;padding:6px 14px;border-radius:100px;font-weight:600;cursor:pointer;border:none;transition:opacity .2s;text-decoration:none;display:inline-block}
+.cta-chip:hover{opacity:.9}
+.btn-sm{font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--border2);background:#fff;cursor:pointer;font-weight:500;color:var(--text);transition:all .15s}
+.btn-sm:hover{background:var(--bg)}
+.btn-sm.primary{background:var(--g);color:#fff;border-color:var(--g)}
+.btn-sm.primary:hover{opacity:.9}
 
-.metrics-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 1.5rem; }
-.metric { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.25rem; }
-.metric-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
-.metric-value { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900; letter-spacing: -.03em; color: var(--text); line-height: 1; }
-.metric-value.green { color: var(--g); }
-.metric-value.amber { color: #BA7517; }
-.metric-sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
-.metric-sub.up   { color: var(--g); }
-.metric-sub.warn { color: #BA7517; }
+/* ── SECTIONS ── */
+.section{display:none}
+.section.active{display:block;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 
-.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem; }
-.card-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 1rem; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
-.grid3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 1.25rem; }
+/* ── METRICS ── */
+.metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:1.5rem}
+.metric{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.25rem}
+.metric-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.metric-value{font-family:'Fraunces',serif;font-size:2rem;font-weight:900;letter-spacing:-.03em;line-height:1}
+.metric-value.green{color:var(--g)}
+.metric-value.amber{color:#BA7517}
+.metric-value.blue{color:var(--blue)}
+.metric-sub{font-size:11px;color:var(--muted);margin-top:5px}
+.metric-sub.up{color:var(--g)}
 
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); letter-spacing: .04em; text-transform: uppercase; }
-td { padding: 10px 12px; border-bottom: 1px solid #F5F5F1; vertical-align: middle; }
-tr:last-child td { border-bottom: none; }
-tr:hover td { background: var(--bg); }
-.badge { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600; }
-.b-paid { background: #E1F5EE; color: #0F6E56; }
-.b-pend { background: #FAEEDA; color: #854F0B; }
-.b-dom  { background: #E6F1FB; color: #185FA5; }
-.b-rec  { background: #EEEDFE; color: #534AB7; }
-.b-conf { background: #E1F5EE; color: #0F6E56; }
-.b-ok   { background: #E1F5EE; color: #0F6E56; }
-.b-err  { background: #FDE8E8; color: #C0392B; }
+/* ── CARDS ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.25rem;margin-bottom:1.25rem}
+.card-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1.25rem}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:1.25rem}
+.chart-wrap{position:relative;width:100%}
 
-.chart-wrap { position: relative; width: 100%; }
-.empty { text-align: center; padding: 2.5rem; color: var(--muted); font-size: 13px; }
+/* ── TABLES ── */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);letter-spacing:.04em;text-transform:uppercase}
+td{padding:10px 12px;border-bottom:1px solid #F5F5F1;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg)}
 
-/* ── BILLING SECTION ── */
-.billing-status-card {
-  background: linear-gradient(135deg, rgba(245,158,11,.06), rgba(245,158,11,.02));
-  border: 1px solid rgba(245,158,11,.25);
-  border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem;
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-}
-.billing-status-icon { font-size: 2rem; flex-shrink: 0; }
-.billing-status-body { flex: 1; }
-.billing-status-title { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
-.billing-status-sub   { font-size: 12px; color: var(--muted); }
-.billing-status-pill  { display: inline-flex; align-items: center; gap: 5px; background: #E1F5EE; color: #0F6E56; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
-.billing-status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--g); }
+/* ── BADGES ── */
+.badge{font-size:11px;padding:3px 8px;border-radius:20px;font-weight:600;white-space:nowrap}
+.b-paid{background:#E1F5EE;color:#0F6E56}
+.b-pend{background:#FAEEDA;color:#854F0B}
+.b-dom{background:#E6F1FB;color:#185FA5}
+.b-mesa{background:#F3E8FF;color:#6D28D9}
+.b-ok{background:#E1F5EE;color:#0F6E56}
+.b-err{background:#FDE8E8;color:#C0392B}
+.b-warn{background:#FFFBEB;color:#92400E}
+.b-libre{background:#DCFCE7;color:#15803D}
+.b-ocup{background:#FEE2E2;color:#991B1B}
+.b-cuent{background:#FEF3C7;color:#92400E}
 
-.connector-flow { display: flex; align-items: center; gap: 10px; padding: 1rem; background: rgba(0,0,0,.03); border-radius: 10px; margin-bottom: 1rem; flex-wrap: wrap; }
-.cf-node { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.cf-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: .75rem; font-weight: 800; }
-.cf-mesio  { background: #E1F5EE; color: #0F6E56; border: 1px solid #B2E8D4; }
-.cf-siigo  { background: #EBF4FF; color: #185FA5; border: 1px solid #BFDBFE; }
-.cf-label  { font-size: 10px; color: var(--muted); text-align: center; }
-.cf-arrow  { font-size: 16px; color: var(--muted); flex-shrink: 0; }
-.cf-note   { flex: 1; font-size: 11px; color: var(--muted); line-height: 1.5; min-width: 120px; }
+/* ══════════════════════════════
+   POS / CAJA
+══════════════════════════════ */
+.pos-layout{display:grid;grid-template-columns:1fr 320px;gap:1.25rem;align-items:start}
+.pos-products{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.pos-product{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem;cursor:pointer;transition:all .15s;text-align:center}
+.pos-product:hover{border-color:var(--g);background:#F0FAF6}
+.pos-product.added{border-color:var(--g);background:#E1F5EE}
+.pp-emoji{font-size:2rem;margin-bottom:.4rem}
+.pp-name{font-size:13px;font-weight:600;margin-bottom:2px}
+.pp-price{font-size:12px;color:var(--g);font-weight:700}
+.pos-receipt{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.25rem;position:sticky;top:1rem}
+.receipt-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:1rem}
+.receipt-items{min-height:120px;margin-bottom:1rem}
+.receipt-item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #F5F5F1;font-size:13px}
+.ri-name{flex:1}
+.ri-qty{background:var(--bg);border-radius:6px;padding:2px 8px;font-weight:600;font-size:12px;margin:0 8px}
+.ri-del{background:none;border:none;color:#ccc;cursor:pointer;font-size:14px;padding:0 2px}
+.ri-del:hover{color:var(--red)}
+.ri-price{font-weight:600;color:var(--g);white-space:nowrap}
+.receipt-empty{text-align:center;color:var(--muted);font-size:13px;padding:2rem 0;font-style:italic}
+.receipt-divider{height:1px;background:var(--border);margin:.75rem 0}
+.receipt-total{display:flex;justify-content:space-between;font-size:15px;font-weight:700;margin-bottom:1rem}
+.receipt-total span:last-child{color:var(--g);font-family:'Fraunces',serif;font-size:1.3rem}
+.pay-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.pay-btn{padding:.6rem;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;text-align:center}
+.pay-btn:hover{border-color:var(--g);color:var(--g)}
+.pay-full{grid-column:1/-1;background:var(--g);color:#fff;border-color:var(--g);padding:.75rem;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:none;width:100%;transition:opacity .2s}
+.pay-full:hover{opacity:.9}
+.dian-chip{margin-top:8px;display:flex;align-items:center;gap:6px;padding:6px 10px;background:#FFFBEB;border:1px solid rgba(245,158,11,.25);border-radius:8px;font-size:11px;color:#92400E}
+.receipt-success{display:none;text-align:center;padding:1.5rem;background:#E1F5EE;border-radius:10px;margin-top:.5rem}
 
-.billing-log-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #F5F5F1; }
-.billing-log-row:last-child { border-bottom: none; }
-.bl-order { font-size: 12px; font-weight: 600; font-family: monospace; width: 130px; flex-shrink: 0; }
-.bl-prov  { font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 700; flex-shrink: 0; }
-.prov-siigo  { background: #EBF4FF; color: #185FA5; }
-.prov-alegra { background: #E0F7FA; color: #006064; }
-.prov-loggro { background: #F3E8FF; color: #6D28D9; }
-.bl-amount { font-size: 12px; font-weight: 600; color: var(--g); }
-.bl-time   { font-size: 11px; color: var(--muted); margin-left: auto; }
-.bl-status { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 700; flex-shrink: 0; }
+/* ══════════════════════════════
+   MESAS
+══════════════════════════════ */
+.mesas-wrap{display:grid;grid-template-columns:1fr 280px;gap:1.25rem;align-items:start}
+.mesas-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.mesa-card{border-radius:12px;padding:.85rem;cursor:pointer;transition:all .15s;border:2px solid transparent;position:relative}
+.mesa-card.libre{background:#F0FDF4;border-color:#BBF7D0}
+.mesa-card.libre:hover{border-color:var(--g)}
+.mesa-card.ocupada{background:#FEF2F2;border-color:#FECACA}
+.mesa-card.ocupada:hover{border-color:var(--red)}
+.mesa-card.cuenta{background:#FFFBEB;border-color:#FDE68A}
+.mesa-card.cuenta:hover{border-color:var(--amber)}
+.mesa-num{font-family:'Fraunces',serif;font-size:1.2rem;font-weight:900;letter-spacing:-.02em}
+.mesa-status{font-size:11px;font-weight:600;margin-top:2px}
+.libre .mesa-num{color:#15803D}
+.libre .mesa-status{color:#15803D}
+.ocupada .mesa-num{color:#991B1B}
+.ocupada .mesa-status{color:#991B1B}
+.cuenta .mesa-num{color:#92400E}
+.cuenta .mesa-status{color:#92400E}
+.mesa-time{font-size:10px;color:var(--muted);margin-top:4px}
+.mesa-detail{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.25rem;position:sticky;top:1rem;min-height:300px}
+.mesa-detail-title{font-size:14px;font-weight:700;margin-bottom:.25rem}
+.mesa-detail-sub{font-size:12px;color:var(--muted);margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)}
+.mesa-order-item{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid #F5F5F1}
+.mesa-order-item:last-of-type{border-bottom:none}
+.mesa-total{display:flex;justify-content:space-between;font-weight:700;font-size:14px;margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border)}
+.mesa-total span:last-child{color:var(--g)}
+.mesa-actions{display:flex;gap:8px;margin-top:1rem}
 
-/* ── PRICING SECTION ── */
-.plans-demo { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
-.plan-demo { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; position: relative; }
-.plan-demo.pop      { border-color: rgba(29,158,117,.4); }
-.plan-demo.pop-blue { border-color: rgba(55,138,221,.3); }
-.plan-demo.pop-combo { border: 1px solid rgba(29,158,117,.25); background: linear-gradient(135deg, rgba(29,158,117,.02), rgba(55,138,221,.02)); }
-.plan-pill-demo { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-size: .65rem; font-weight: 700; padding: 3px 12px; border-radius: 100px; white-space: nowrap; }
-.pp-green { background: var(--g); color: #fff; }
-.pp-blue  { background: var(--blue); color: #fff; }
-.plan-demo-name { font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 700; margin-bottom: 2px; }
-.plan-demo-desc { font-size: .72rem; color: var(--muted); margin-bottom: .85rem; }
-.plan-demo-price { font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900; letter-spacing: -.03em; color: var(--g); }
-.plan-demo-price.b { color: var(--blue); }
-.plan-demo-price span { font-size: .8rem; color: var(--muted); font-family: 'Instrument Sans', sans-serif; font-weight: 400; }
-.plan-demo-setup  { font-size: .7rem; color: var(--muted); margin-bottom: .85rem; }
-.plan-demo-divider { height: 1px; background: var(--border); margin: .85rem 0; }
-.plan-demo-feat { font-size: .78rem; color: var(--text); margin-bottom: .4rem; display: flex; gap: 6px; }
-.feat-g   { color: var(--g); font-weight: 700; }
-.feat-b   { color: var(--blue); font-weight: 700; }
-.feat-off { color: #ccc; }
+/* ══════════════════════════════
+   KDS COCINA
+══════════════════════════════ */
+.kds-board{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.kds-col-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.kds-col-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;display:flex;align-items:center;gap:6px}
+.kds-count{background:var(--bg);border:1px solid var(--border);border-radius:100px;font-size:11px;font-weight:700;padding:1px 8px;color:var(--text)}
+.kds-cards{display:flex;flex-direction:column;gap:8px;min-height:200px}
+.kds-ticket{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem;transition:all .2s}
+.kds-ticket.new{animation:slideDown .3s ease}
+.kds-ticket.recibido{border-left:3px solid var(--blue)}
+.kds-ticket.preparando{border-left:3px solid var(--amber)}
+.kds-ticket.listo{border-left:3px solid var(--g);opacity:.8}
+@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+.kds-ticket-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem}
+.kds-mesa{font-weight:700;font-size:13px}
+.kds-timer{font-size:11px;color:var(--muted);background:var(--bg);padding:2px 7px;border-radius:100px}
+.kds-timer.warn{color:#92400E;background:#FFFBEB}
+.kds-item{font-size:12px;color:var(--muted);padding:2px 0;display:flex;gap:6px}
+.kds-item::before{content:"·";flex-shrink:0}
+.kds-btn{width:100%;margin-top:.75rem;padding:.45rem;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;border:none;transition:all .15s}
+.kds-btn.preparar{background:#EBF4FF;color:#185FA5}
+.kds-btn.preparar:hover{background:#BFDBFE}
+.kds-btn.marcar{background:#E1F5EE;color:#0F6E56}
+.kds-btn.marcar:hover{background:#BBF7D0}
 
-/* Billing chip inside plan demo cards */
-.billing-chip-addon {
-  margin-top: 10px; display: flex; align-items: center; gap: 6px;
-  padding: 7px 9px; background: rgba(245,158,11,.08);
-  border: 1px solid rgba(245,158,11,.2); border-radius: 8px;
-  font-size: .7rem;
-}
-.billing-chip-addon .bc-label { flex: 1; color: #9A6E10; line-height: 1.3; }
-.billing-chip-addon .bc-label strong { color: var(--amber); display: block; }
-.billing-chip-addon .bc-price { font-weight: 700; color: var(--amber); white-space: nowrap; font-size: .75rem; }
-.billing-chip-inc {
-  margin-top: 10px; display: flex; align-items: center; gap: 6px;
-  padding: 7px 9px; background: rgba(29,158,117,.06);
-  border: 1px solid rgba(29,158,117,.2); border-radius: 8px;
-  font-size: .7rem; color: #0F6E56;
-}
-.billing-chip-inc strong { color: var(--g); }
+/* ══════════════════════════════
+   INVENTARIO
+══════════════════════════════ */
+.inv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.inv-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem;transition:border-color .2s}
+.inv-card.low{border-color:rgba(245,158,11,.4);background:#FFFBEB}
+.inv-card.out{border-color:rgba(229,62,62,.35);background:#FFF5F5}
+.inv-emoji{font-size:1.8rem;margin-bottom:.3rem}
+.inv-name{font-size:13px;font-weight:600;margin-bottom:2px}
+.inv-cat{font-size:11px;color:var(--muted);margin-bottom:.75rem}
+.inv-footer{display:flex;align-items:center;justify-content:space-between}
+.inv-stock{font-size:12px;font-weight:600}
+.inv-stock.ok{color:var(--g)}
+.inv-stock.low{color:#92400E}
+.inv-stock.out{color:var(--red)}
+.toggle{width:34px;height:18px;border-radius:100px;cursor:pointer;position:relative;transition:background .2s;border:none;flex-shrink:0}
+.toggle.on{background:var(--g)}
+.toggle.off{background:#D1D5DB}
+.toggle::after{content:'';position:absolute;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.toggle.on::after{left:18px}
+.toggle.off::after{left:2px}
 
-.plan-demo-btn { display: block; text-align: center; padding: .7rem; border-radius: 100px; font-size: .82rem; font-weight: 600; text-decoration: none; margin-top: 1rem; background: var(--g); color: #fff; }
-.plan-demo-btn.b { background: var(--blue); }
-.plan-demo-btn.combo { background: linear-gradient(90deg, var(--g), var(--blue)); color: #000; }
-.plan-demo-btn.outline { background: none; border: 1px solid var(--border2); color: var(--text); }
+/* ══════════════════════════════
+   FACTURACIÓN DIAN
+══════════════════════════════ */
+.dian-status-card{display:flex;align-items:center;gap:16px;background:linear-gradient(135deg,rgba(29,158,117,.06),rgba(55,138,221,.04));border:1px solid rgba(29,158,117,.2);border-radius:14px;padding:1.25rem;margin-bottom:1.25rem;flex-wrap:wrap}
+.dian-status-icon{font-size:2.5rem;flex-shrink:0}
+.dian-status-body{flex:1}
+.dian-status-title{font-size:15px;font-weight:700;margin-bottom:3px}
+.dian-status-sub{font-size:12px;color:var(--muted);margin-bottom:.5rem}
+.dian-pill{display:inline-flex;align-items:center;gap:5px;background:#E1F5EE;color:#0F6E56;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px}
+.dian-cufe{font-size:10px;color:var(--muted);font-family:monospace;display:block;margin-top:3px}
 
-/* ── MISC ── */
-.menu-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
-.menu-item { border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
-.menu-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
-.menu-cat  { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
-.menu-footer { display: flex; align-items: center; justify-content: space-between; }
-.menu-price { font-size: 13px; font-weight: 700; color: var(--g); }
-.avail-toggle { width: 32px; height: 18px; background: var(--g); border-radius: 100px; cursor: pointer; position: relative; transition: background .2s; }
-.avail-toggle::after { content:''; position: absolute; top: 2px; left: 14px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; }
-.avail-toggle.off { background: #e0e0d8; }
-.avail-toggle.off::after { left: 2px; }
+/* ══════════════════════════════
+   STAFF & PROPINAS
+══════════════════════════════ */
+.staff-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:1.25rem}
+.staff-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:1rem}
+.staff-head{display:flex;align-items:center;gap:10px;margin-bottom:.75rem}
+.staff-av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+.staff-av-g{background:#E1F5EE;color:#0F6E56}
+.staff-av-b{background:#EBF4FF;color:#185FA5}
+.staff-av-a{background:#FFFBEB;color:#92400E}
+.staff-av-v{background:#F3E8FF;color:#6D28D9}
+.staff-name{font-size:14px;font-weight:600}
+.staff-role{font-size:11px;color:var(--muted)}
+.staff-stat{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);padding:3px 0}
+.staff-stat span:last-child{font-weight:600;color:var(--text)}
+.staff-status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}
+.turno{background:var(--g)}
+.descanso{background:#D1D5DB}
 
-.qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-.qr-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; text-align: center; }
-.qr-table-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-.qr-id { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
-.qr-placeholder { width: 100px; height: 100px; background: var(--bg); border-radius: 8px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border2); }
-.qr-btn { font-size: 11px; padding: 5px 10px; border-radius: 6px; font-weight: 500; border: none; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
-.qr-btn-print { background: #E1F5EE; color: #0F6E56; }
+/* ══════════════════════════════
+   LOYALTY & CRM
+══════════════════════════════ */
+.loyalty-layout{display:grid;grid-template-columns:1fr 300px;gap:1.25rem}
+.loyalty-customer{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #F5F5F1;cursor:pointer;border-radius:0;transition:background .15s}
+.loyalty-customer:last-child{border-bottom:none}
+.loyalty-customer:hover{background:var(--bg);margin:0 -10px;padding-left:10px;padding-right:10px;border-radius:8px}
+.lc-av{width:36px;height:36px;border-radius:50%;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#0F6E56;flex-shrink:0}
+.lc-info{flex:1}
+.lc-name{font-size:13px;font-weight:600}
+.lc-visits{font-size:11px;color:var(--muted)}
+.lc-pts{text-align:right}
+.lc-pts-val{font-family:'Fraunces',serif;font-size:1.1rem;font-weight:900;color:var(--violet)}
+.lc-pts-label{font-size:10px;color:var(--muted)}
+.nps-gauge{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:1rem}
+.nps-box{border-radius:10px;padding:.75rem;text-align:center}
+.nps-promotor{background:#E1F5EE}
+.nps-pasivo{background:#FFFBEB}
+.nps-detractor{background:#FEE2E2}
+.nps-num{font-family:'Fraunces',serif;font-size:1.8rem;font-weight:900}
+.nps-promotor .nps-num{color:#15803D}
+.nps-pasivo .nps-num{color:#92400E}
+.nps-detractor .nps-num{color:#991B1B}
+.nps-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.nps-comment{background:var(--bg);border-radius:8px;padding:.75rem;font-size:12px;color:var(--muted);font-style:italic;margin-bottom:.5rem;line-height:1.5}
+.nps-comment-star{color:#F59E0B;font-style:normal;margin-right:4px}
 
-.period-bar { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 3px; width: fit-content; margin-bottom: 1.5rem; }
-.pb-btn { font-size: 12px; padding: 5px 14px; border-radius: 7px; border: none; background: none; cursor: pointer; color: var(--muted); font-weight: 500; transition: all .15s; }
-.pb-btn.active { background: var(--g); color: #fff; font-weight: 600; }
+/* ══════════════════════════════
+   WHATSAPP BOT
+══════════════════════════════ */
+.wa-layout{display:grid;grid-template-columns:1fr 260px;gap:1.25rem}
+.conv-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #F5F5F1;cursor:pointer}
+.conv-row:last-child{border-bottom:none}
+.conv-av{width:38px;height:38px;border-radius:50%;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#0F6E56;flex-shrink:0}
+.conv-main{flex:1;min-width:0}
+.conv-name{font-size:13px;font-weight:600;margin-bottom:1px}
+.conv-preview{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conv-meta{text-align:right;flex-shrink:0}
+.conv-time{font-size:11px;color:var(--muted)}
+.conv-badge-dot{width:18px;height:18px;background:var(--g);border-radius:50%;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:4px;margin-left:auto}
 
-.conv-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F5F5F1; }
-.conv-row:last-child { border-bottom: none; }
-.conv-av { width: 36px; height: 36px; border-radius: 50%; background: #E1F5EE; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0F6E56; flex-shrink: 0; }
+/* ══════════════════════════════
+   MISC
+══════════════════════════════ */
+.period-bar{display:flex;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:3px;width:fit-content}
+.pb-btn{font-size:12px;padding:5px 14px;border-radius:7px;border:none;background:none;cursor:pointer;color:var(--muted);font-weight:500;transition:all .15s}
+.pb-btn.active{background:var(--g);color:#fff;font-weight:600}
+.empty-kds{text-align:center;color:var(--muted);font-size:12px;padding:2rem;font-style:italic}
 
-.ham-btn { display: none; position: fixed; top: 50px; left: 12px; z-index: 400; background: var(--card); border: 1px solid var(--border); border-radius: 10px; width: 38px; height: 38px; align-items: center; justify-content: center; cursor: pointer; flex-direction: column; gap: 4px; }
-.ham-btn span { display: block; width: 16px; height: 2px; background: var(--text); border-radius: 2px; }
-.overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 350; }
-.overlay.open { display: block; }
-@media(max-width: 768px) {
-  .ham-btn { display: flex; }
-  .sidebar { left: -260px; z-index: 390; transition: left .25s ease; }
-  .sidebar.open { left: 0; }
-  .main { margin-left: 0; padding: .75rem; margin-top: 44px; max-width: 100%; overflow-x: hidden; }
-  .metrics-row { grid-template-columns: repeat(2,1fr) !important; gap: 8px; }
-  .metric-value { font-size: 1.5rem; }
-  .grid2 { grid-template-columns: 1fr; }
-  .grid3 { grid-template-columns: repeat(2,1fr); }
-  .menu-grid { grid-template-columns: 1fr 1fr; }
-  .qr-grid { grid-template-columns: repeat(2,1fr); }
-  .plans-demo { grid-template-columns: 1fr; }
+/* ══════════════════════════════
+   HAMBURGER / MOBILE
+══════════════════════════════ */
+.ham-btn{display:none;position:fixed;top:48px;left:12px;z-index:400;background:var(--card);border:1px solid var(--border);border-radius:10px;width:38px;height:38px;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px}
+.ham-btn span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:350}
+.overlay.open{display:block}
 
-  /* topbar — stack vertically on mobile */
-  .topbar { flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 1rem; }
-  .topbar-right { flex-wrap: wrap; gap: 6px; width: 100%; }
-  .period-bar { width: 100%; }
-  .pb-btn { flex: 1; text-align: center; }
-
-  /* tables — scroll horizontally */
-  .card { overflow-x: auto; }
-  table { min-width: 480px; font-size: 12px; }
-  th, td { padding: 7px 8px; }
-
-  /* billing log — fix fixed width on mobile */
-  .billing-log-row { flex-wrap: wrap; gap: 6px; }
-  .bl-order { width: auto; font-size: 11px; }
-  .bl-time { margin-left: 0; }
-
-  /* connector flow — stack on mobile */
-  .connector-flow { flex-direction: column; align-items: flex-start; }
-  .cf-note { min-width: unset; width: 100%; }
-  .cf-arrow { transform: rotate(90deg); align-self: center; }
-
-  /* billing status card */
-  .billing-status-card { flex-direction: column; }
-
-  /* kitchen board — 1 col on mobile */
-  #kitchen-board-demo { grid-template-columns: 1fr !important; }
-
-  /* QR grid — 2 col, smaller cards */
-  .qr-card { padding: .85rem; }
-  .qr-table-name { font-size: 13px; }
+@media(max-width:900px){
+  .ham-btn{display:flex}
+  .sidebar{left:-260px;z-index:390;transition:left .25s ease;top:38px}
+  .sidebar.open{left:0}
+  .main{margin-left:0;padding:.75rem;max-width:100%}
+  .metrics-row{grid-template-columns:repeat(2,1fr)!important;gap:8px}
+  .metric-value{font-size:1.5rem}
+  .grid2,.mesas-wrap,.pos-layout,.kds-board,.loyalty-layout,.wa-layout{grid-template-columns:1fr}
+  .kds-board{grid-template-columns:1fr}
+  .staff-grid{grid-template-columns:1fr}
+  .inv-grid,.pos-products{grid-template-columns:repeat(2,1fr)}
+  .mesas-grid{grid-template-columns:repeat(3,1fr)}
 }
 </style>
 </head>
 <body>
 
 <div class="demo-banner">
-  Vista demo — Así se vería el panel de tu restaurante.
-  <strong>¡Estas son funciones reales!</strong>
-  <a onclick="window.location.href='/'">Ver planes y precios</a>
+  <span class="live-dot"></span> Demo — Plan <strong>Mesio Full</strong> · Todos los módulos activos.
+  <a onclick="window.location.href='/#precios'"> Ver planes y precios →</a>
 </div>
 
 <div class="overlay" id="overlay" onclick="closeSidebar()"></div>
 <button class="ham-btn" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
 
 <div class="layout">
+  <!-- ══ SIDEBAR ══ -->
   <div class="sidebar" id="sidebar">
-    <div class="sidebar-logo">
-      <div class="logo-icon">LT</div>
-      <div><div class="logo-text">La Trattoria</div><div class="logo-rest">Panel de control</div></div>
+    <div class="sb-logo">
+      <div class="sb-logo-icon">LT</div>
+      <div><div class="sb-logo-text">La Trattoria</div><div class="sb-logo-sub">Panel de control</div></div>
     </div>
+
     <div class="nav-section">Principal</div>
-    <button class="nav-item active" onclick="show('resumen', this)"><span class="icon">◼</span> Resumen</button>
-    <button class="nav-item" onclick="show('pedidos', this)"><span class="icon">◼</span> Pedidos</button>
-    <button class="nav-item" onclick="show('reservaciones', this)"><span class="icon">◼</span> Reservaciones</button>
-    <button class="nav-item" onclick="show('conversaciones', this)"><span class="icon">◼</span> WhatsApp</button>
-    <div class="nav-section">Restaurante</div>
-    <button class="nav-item" onclick="show('menu', this)"><span class="icon">◼</span> Menú</button>
-    <button class="nav-item" onclick="show('mesas', this)"><span class="icon">◼</span> Mesas & QR</button>
-    <button class="nav-item" onclick="show('cocina', this)"><span class="icon">◼</span> Cocina en vivo <span class="nav-badge">3</span></button>
-    <div class="nav-section">Finanzas & IA</div>
-    <button class="nav-item" onclick="show('billing', this)"><span class="icon">◼</span> Conector Contable <span class="nav-badge nav-badge-amber">✓</span></button>
-    <button class="nav-item" onclick="show('pos', this)"><span class="icon">◼</span> Mesio Analytics</button>
-    <button class="nav-item" onclick="show('precios', this)"><span class="icon">◼</span> Planes & Precios</button>
-    <div class="live-badge"><div class="live-dot"></div> Bot activo 24/7</div>
+    <button class="nav-item active" data-section="resumen" onclick="show('resumen',this)"><span class="ni-icon">📊</span> Resumen</button>
+    <button class="nav-item" data-section="pos" onclick="show('pos',this)"><span class="ni-icon">💵</span> POS / Caja</button>
+
+    <div class="nav-section">Operaciones</div>
+    <button class="nav-item" data-section="whatsapp" onclick="show('whatsapp',this)"><span class="ni-icon">🤖</span> Bot WhatsApp <span class="nav-badge">5</span></button>
+    <button class="nav-item" data-section="inventario" onclick="show('inventario',this)"><span class="ni-icon">📦</span> Inventario Pro</button>
+    <button class="nav-item" data-section="mesas" onclick="show('mesas',this)"><span class="ni-icon">🪑</span> Mesas</button>
+    <button class="nav-item" data-section="cocina" onclick="show('cocina',this)"><span class="ni-icon">🍳</span> KDS Cocina <span class="nav-badge nav-badge-a">3</span></button>
+
+    <div class="nav-section">Finanzas</div>
+    <button class="nav-item" data-section="dian" onclick="show('dian',this)"><span class="ni-icon">🧾</span> Facturación DIAN <span class="nav-badge nav-badge-g">✓</span></button>
+    <button class="nav-item" data-section="staff" onclick="show('staff',this)"><span class="ni-icon">👥</span> Staff & Propinas</button>
+    <button class="nav-item" data-section="loyalty" onclick="show('loyalty',this)"><span class="ni-icon">⭐</span> Loyalty & CRM</button>
+
+    <div class="sb-plan" style="margin-top:auto">
+      <div class="sb-plan-title"><span class="live-dot"></span> Mesio Full activo</div>
+      <div class="sb-plan-sub">Todos los módulos desbloqueados · Bot IA 24/7 · DIAN conectado</div>
+    </div>
   </div>
 
+  <!-- ══ MAIN ══ -->
   <div class="main">
 
-    <!-- ── RESUMEN ── -->
-    <div id="resumen" class="section active section-fade">
+    <!-- ══════════ RESUMEN ══════════ -->
+    <div id="resumen" class="section active">
       <div class="topbar">
-        <div class="page-title">Resumen</div>
+        <div class="page-title">Resumen del día</div>
         <div class="topbar-right">
           <div class="period-bar"><button class="pb-btn active">Hoy</button><button class="pb-btn">7 días</button><button class="pb-btn">Mes</button></div>
           <span class="live-chip">● En vivo</span>
-          <a href="/" class="cta-chip">Ver planes</a>
+          <a href="/#precios" class="cta-chip">Ver planes</a>
         </div>
       </div>
       <div class="metrics-row">
-        <div class="metric"><div class="metric-label">Ingresos hoy</div><div class="metric-value green">$847k</div><div class="metric-sub up">↑ +12% vs ayer</div></div>
-        <div class="metric"><div class="metric-label">Pedidos hoy</div><div class="metric-value">23</div><div class="metric-sub">19 pagados · 4 pendientes</div></div>
-        <div class="metric"><div class="metric-label">Mesas activas</div><div class="metric-value green">7</div><div class="metric-sub up">3 pedidos en cocina</div></div>
-        <div class="metric"><div class="metric-label">Facturas enviadas</div><div class="metric-value green">19</div><div class="metric-sub up">→ Siigo · automático</div></div>
+        <div class="metric"><div class="metric-label">Ingresos hoy</div><div class="metric-value green">$1.24M</div><div class="metric-sub up">↑ +18% vs ayer</div></div>
+        <div class="metric"><div class="metric-label">Pedidos activos</div><div class="metric-value">31</div><div class="metric-sub">24 pagados · 7 pendientes</div></div>
+        <div class="metric"><div class="metric-label">Mesas ocupadas</div><div class="metric-value blue">8<span style="font-size:1rem;color:var(--muted);">/16</span></div><div class="metric-sub">3 esperando cuenta</div></div>
+        <div class="metric"><div class="metric-label">Facturas DIAN</div><div class="metric-value green">27</div><div class="metric-sub up">→ MATIAS · 0 errores</div></div>
       </div>
       <div class="grid2">
-        <div class="card"><div class="card-title">Ingresos últimos 7 días</div><div class="chart-wrap" style="height:190px;"><canvas id="chart-revenue"></canvas></div></div>
+        <div class="card"><div class="card-title">Ingresos últimos 7 días</div><div class="chart-wrap" style="height:180px"><canvas id="chart-revenue"></canvas></div></div>
+        <div class="card"><div class="card-title">Canales de venta</div><div class="chart-wrap" style="height:180px"><canvas id="chart-canales"></canvas></div></div>
+      </div>
+      <div class="card"><div class="card-title">Platos más pedidos hoy</div><div class="chart-wrap" style="height:150px"><canvas id="chart-platos"></canvas></div></div>
+      <div class="card">
+        <div class="card-title">Actividad reciente</div>
+        <table><thead><tr><th>Hora</th><th>Evento</th><th>Módulo</th><th>Valor</th></tr></thead>
+        <tbody>
+          <tr><td>8:47 pm</td><td>Factura LZT-0851 emitida · Mesa 7</td><td><span class="badge b-ok">DIAN</span></td><td style="color:var(--g);font-weight:600">$124,000</td></tr>
+          <tr><td>8:31 pm</td><td>Pedido domicilio · Juan Ramírez · +45 pts</td><td><span class="badge b-mesa">Loyalty</span></td><td style="color:var(--g);font-weight:600">$75,000</td></tr>
+          <tr><td>8:12 pm</td><td>Mesa 3 — cuenta dividida (2 personas)</td><td><span class="badge b-dom">Mesas</span></td><td style="color:var(--g);font-weight:600">$170,000</td></tr>
+          <tr><td>7:58 pm</td><td>Bot IA — upsell Vino de la Casa aceptado</td><td><span class="badge b-ok">WhatsApp</span></td><td style="color:var(--g);font-weight:600">+$35,000</td></tr>
+          <tr><td>7:44 pm</td><td>Risotto Funghi — stock bajo (3 und.)</td><td><span class="badge b-warn">Inventario</span></td><td style="color:#92400E;font-weight:600">Alerta</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+
+    <!-- ══════════ POS / CAJA ══════════ -->
+    <div id="pos" class="section">
+      <div class="topbar">
+        <div class="page-title">POS / Caja</div>
+        <div class="topbar-right">
+          <button class="btn-sm primary" onclick="resetPOS()">+ Nueva venta</button>
+          <a href="/demo-chat" class="btn-sm">Ver bot WhatsApp</a>
+        </div>
+      </div>
+      <div class="pos-layout">
+        <div>
+          <div class="card-title" style="margin-bottom:.75rem">Selecciona los productos</div>
+          <div class="pos-products">
+            <div class="pos-product" onclick="addToOrder('Pizza Margherita','🍕',32000)"><div class="pp-emoji">🍕</div><div class="pp-name">Pizza Margherita</div><div class="pp-price">$32,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Pasta Carbonara','🍝',28000)"><div class="pp-emoji">🍝</div><div class="pp-name">Pasta Carbonara</div><div class="pp-price">$28,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Risotto Funghi','🍚',35000)"><div class="pp-emoji">🍚</div><div class="pp-name">Risotto Funghi</div><div class="pp-price">$35,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Lasaña Bolognesa','🫙',30000)"><div class="pp-emoji">🫙</div><div class="pp-name">Lasaña Bolognesa</div><div class="pp-price">$30,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Tiramisú','🍮',18000)"><div class="pp-emoji">🍮</div><div class="pp-name">Tiramisú</div><div class="pp-price">$18,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Vino de la Casa','🍷',35000)"><div class="pp-emoji">🍷</div><div class="pp-name">Vino de la Casa</div><div class="pp-price">$35,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Agua Mineral','💧',5000)"><div class="pp-emoji">💧</div><div class="pp-name">Agua Mineral</div><div class="pp-price">$5,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Gaseosa','🥤',6000)"><div class="pp-emoji">🥤</div><div class="pp-name">Gaseosa</div><div class="pp-price">$6,000</div></div>
+            <div class="pos-product" onclick="addToOrder('Café Espresso','☕',8000)"><div class="pp-emoji">☕</div><div class="pp-name">Café Espresso</div><div class="pp-price">$8,000</div></div>
+          </div>
+        </div>
+        <div class="pos-receipt">
+          <div class="receipt-title">Orden actual</div>
+          <div class="receipt-items" id="receipt-items">
+            <div class="receipt-empty" id="receipt-empty">Toca un producto para agregar</div>
+          </div>
+          <div class="receipt-divider"></div>
+          <div class="receipt-total"><span>Total</span><span id="receipt-total">$0</span></div>
+          <div class="pay-btns">
+            <div class="pay-btn" onclick="processPay('Efectivo')">💵 Efectivo</div>
+            <div class="pay-btn" onclick="processPay('Nequi/WP')">📲 Nequi</div>
+          </div>
+          <button class="pay-full" onclick="processPay('Datáfono')">Cobrar con datáfono 💳</button>
+          <div class="dian-chip">🧾 Factura DIAN se emite automáticamente al cobrar</div>
+          <div class="receipt-success" id="receipt-success">
+            <div style="font-size:2rem;margin-bottom:.5rem">✅</div>
+            <div style="font-weight:700;margin-bottom:.25rem">¡Cobro exitoso!</div>
+            <div style="font-size:12px;color:var(--muted)" id="success-method"></div>
+            <div style="font-size:11px;color:var(--g);margin-top:.4rem;font-family:monospace" id="success-folio"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ WHATSAPP BOT ══════════ -->
+    <div id="whatsapp" class="section">
+      <div class="topbar">
+        <div class="page-title">Bot WhatsApp</div>
+        <div class="topbar-right">
+          <a href="/demo-chat" class="cta-chip">Simular conversación →</a>
+        </div>
+      </div>
+      <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
+        <div class="metric"><div class="metric-label">Conversaciones activas</div><div class="metric-value">18</div></div>
+        <div class="metric"><div class="metric-label">Respuesta promedio</div><div class="metric-value green">&lt;30s</div><div class="metric-sub up">94% automatizadas</div></div>
+        <div class="metric"><div class="metric-label">Ventas por bot hoy</div><div class="metric-value green">$847k</div><div class="metric-sub">12 órdenes cerradas</div></div>
+        <div class="metric"><div class="metric-label">Upsells aceptados</div><div class="metric-value blue">7</div><div class="metric-sub up">+$218k adicionales</div></div>
+      </div>
+      <div class="wa-layout">
         <div class="card">
-          <div class="card-title">Distribución de pedidos</div>
-          <div style="display:flex;gap:1.5rem;margin-top:.5rem;margin-bottom:1rem;">
-            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:var(--g);"></div>Domicilio 58%</div>
-            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);"><div style="width:10px;height:10px;border-radius:2px;background:var(--blue);"></div>Recoger 42%</div>
+          <div class="card-title">Conversaciones recientes</div>
+          <div class="conv-row"><div class="conv-av">JR</div><div class="conv-main"><div class="conv-name">Juan Ramírez</div><div class="conv-preview">Bot: ¡Tu pedido está en camino! 🛵 ETA 20 min</div></div><div class="conv-meta"><div class="conv-time">hace 2 min</div><div class="conv-badge-dot">1</div></div></div>
+          <div class="conv-row"><div class="conv-av">MG</div><div class="conv-main"><div class="conv-name">María González</div><div class="conv-preview">Usuario: Sí, la misma dirección de siempre ✓</div></div><div class="conv-meta"><div class="conv-time">hace 5 min</div><div class="conv-badge-dot">2</div></div></div>
+          <div class="conv-row"><div class="conv-av">CO</div><div class="conv-main"><div class="conv-name">Carlos Ospina</div><div class="conv-preview">Bot: Aquí tu link de pago: wompi.co/LT-04...</div></div><div class="conv-meta"><div class="conv-time">hace 8 min</div></div></div>
+          <div class="conv-row"><div class="conv-av">LH</div><div class="conv-main"><div class="conv-name">Laura Herrera</div><div class="conv-preview">Bot: ¿Deseas el Risotto o la Pizza Margherita?</div></div><div class="conv-meta"><div class="conv-time">hace 12 min</div><div class="conv-badge-dot">3</div></div></div>
+          <div class="conv-row"><div class="conv-av">AP</div><div class="conv-main"><div class="conv-name">Andrés Pedraza</div><div class="conv-preview">Bot: Tu reserva para el sábado está confirmada 📅</div></div><div class="conv-meta"><div class="conv-time">hace 18 min</div></div></div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="card-title">Módulos IA activos</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:var(--g);display:inline-block"></span> CRM — reconoce clientes frecuentes</div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:var(--g);display:inline-block"></span> Inventario — verifica stock en tiempo real</div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:var(--g);display:inline-block"></span> Upsell IA — sugiere complementos</div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:var(--g);display:inline-block"></span> Pagos Wompi — link automático</div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:var(--g);display:inline-block"></span> Facturación DIAN — al confirmar pago</div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="width:8px;height:8px;border-radius:50%;background:var(--g);display:inline-block"></span> Loyalty — acumula puntos silenciosamente</div>
+            </div>
           </div>
-          <div class="chart-wrap" style="height:150px;"><canvas id="chart-tipos"></canvas></div>
+          <div class="card">
+            <div class="card-title">Hoy</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Mensajes procesados</span><strong>347</strong></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Escalados a humano</span><strong style="color:var(--amber)">2</strong></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">NPS enviados</span><strong>9</strong></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Tokens Claude IA</span><strong>84,230</strong></div>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="card"><div class="card-title">Platos más pedidos hoy</div><div class="chart-wrap" style="height:160px;"><canvas id="chart-platos"></canvas></div></div>
     </div>
 
-    <!-- ── PEDIDOS ── -->
-    <div id="pedidos" class="section section-fade">
-      <div class="topbar"><div class="page-title">Pedidos</div></div>
-      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
-        <div class="metric"><div class="metric-label">Total hoy</div><div class="metric-value">23</div></div>
-        <div class="metric"><div class="metric-label">Pagados</div><div class="metric-value green">19</div></div>
-        <div class="metric"><div class="metric-label">Pendiente pago</div><div class="metric-value amber">4</div></div>
+    <!-- ══════════ INVENTARIO ══════════ -->
+    <div id="inventario" class="section">
+      <div class="topbar">
+        <div class="page-title">Inventario Pro</div>
+        <div class="topbar-right"><span class="live-chip">● Sincronizado con bot</span></div>
       </div>
-      <div class="card"><div class="card-title">Pedidos de hoy</div><table><thead><tr><th>ID</th><th>Platos</th><th>Tipo</th><th>Estado</th><th>Total</th><th>Hora</th></tr></thead><tbody id="orders-tbody"></tbody></table></div>
-    </div>
-
-    <!-- ── RESERVACIONES ── -->
-    <div id="reservaciones" class="section section-fade">
-      <div class="topbar"><div class="page-title">Reservaciones</div></div>
-      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
-        <div class="metric"><div class="metric-label">Hoy</div><div class="metric-value">8</div></div>
-        <div class="metric"><div class="metric-label">Total personas</div><div class="metric-value">34</div></div>
-        <div class="metric"><div class="metric-label">Próxima</div><div class="metric-value" style="font-size:1.2rem;">20:30 · Pedro</div></div>
+      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr)">
+        <div class="metric"><div class="metric-label">Items activos</div><div class="metric-value">14</div></div>
+        <div class="metric"><div class="metric-label">Stock bajo</div><div class="metric-value amber">2</div><div class="metric-sub warn">↗ Risotto · Lasaña</div></div>
+        <div class="metric"><div class="metric-label">No disponibles</div><div class="metric-value" style="color:var(--red)">1</div><div class="metric-sub">Arancini agotados</div></div>
       </div>
-      <div class="card"><div class="card-title">Reservaciones del día</div><table><thead><tr><th>Cliente</th><th>Hora</th><th>Personas</th><th>Notas</th><th>Estado</th></tr></thead><tbody id="res-tbody"></tbody></table></div>
-    </div>
-
-    <!-- ── CONVERSACIONES ── -->
-    <div id="conversaciones" class="section section-fade">
-      <div class="topbar"><div class="page-title">WhatsApp</div></div>
-      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
-        <div class="metric"><div class="metric-label">Chats hoy</div><div class="metric-value">47</div></div>
-        <div class="metric"><div class="metric-label">Resueltos por IA</div><div class="metric-value green">43</div><div class="metric-sub up">91% automatizado</div></div>
-        <div class="metric"><div class="metric-label">Escalados</div><div class="metric-value amber">4</div></div>
-      </div>
-      <div class="card"><div class="card-title">Conversaciones recientes</div><div id="convs-list"></div></div>
-    </div>
-
-    <!-- ── MENÚ ── -->
-    <div id="menu" class="section section-fade">
-      <div class="topbar"><div class="page-title">Menú</div></div>
-      <div class="card"><div class="card-title">Disponibilidad en tiempo real</div><div class="menu-grid" id="menu-grid"></div></div>
-    </div>
-
-    <!-- ── MESAS ── -->
-    <div id="mesas" class="section section-fade">
-      <div class="topbar"><div class="page-title">Mesas & QR</div><a href="/cocina" target="_blank" class="cta-chip">Abrir cocina →</a></div>
-      <div class="card" style="margin-bottom:1rem;background:linear-gradient(135deg,rgba(29,158,117,.04),rgba(55,138,221,.04));border-color:rgba(29,158,117,.15);">
-        <div class="card-title">Flujo del módulo Mesa</div>
-        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);">
-          <span style="background:#E1F5EE;color:#0F6E56;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">1. Cliente escanea QR</span>
-          <span>→</span><span style="background:#E6F1FB;color:#185FA5;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">2. Ve menú en el celular</span>
-          <span>→</span><span style="background:#E1F5EE;color:#0F6E56;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">3. Pide por WhatsApp</span>
-          <span>→</span><span style="background:#FAEEDA;color:#854F0B;padding:4px 10px;border-radius:100px;font-weight:600;font-size:12px;">4. Llega a cocina</span>
-        </div>
-      </div>
-      <div class="card"><div class="card-title">Mesas configuradas — QR imprimible por mesa</div><div class="qr-grid" id="qr-grid"></div></div>
-    </div>
-
-    <!-- ── COCINA ── -->
-    <div id="cocina" class="section section-fade">
-      <div class="topbar"><div class="page-title">Cocina en vivo</div><span class="live-chip">● En vivo</span></div>
-      <div class="card"><div class="card-title">Pedidos activos en cocina</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;" id="kitchen-board-demo"></div>
-      </div>
-    </div>
-
-    <!-- ── BILLING ── -->
-    <div id="billing" class="section section-fade">
-      <div class="topbar"><div class="page-title">Conector Contable</div><span class="live-chip">● Conectado a Siigo</span></div>
-
-      <!-- Status -->
-      <div class="billing-status-card">
-        <div class="billing-status-icon">🔗</div>
-        <div class="billing-status-body">
-          <div class="billing-status-title">Siigo conectado · Auto-envío activo</div>
-          <div class="billing-status-sub">Cada pedido pagado se envía automáticamente a tu Siigo. La factura electrónica la genera tu sistema con tu resolución DIAN.</div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-          <div class="billing-status-pill"><span class="dot"></span> Activo</div>
-          <div style="font-size:11px;color:var(--muted);">Proveedor: Siigo</div>
-        </div>
-      </div>
-
-      <!-- Cómo funciona -->
       <div class="card">
-        <div class="card-title">Cómo fluye la información</div>
-        <div class="connector-flow">
-          <div class="cf-node">
-            <div class="cf-icon cf-mesio">Mesio</div>
-            <div class="cf-label">Pedido<br>pagado</div>
-          </div>
-          <div class="cf-arrow">→</div>
-          <div class="cf-node">
-            <div class="cf-icon cf-siigo">S</div>
-            <div class="cf-label">Siigo<br>API</div>
-          </div>
-          <div class="cf-arrow">→</div>
-          <div class="cf-node">
-            <div class="cf-icon" style="background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;font-size:.65rem;width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;">DIAN</div>
-            <div class="cf-label">Factura<br>electrónica</div>
-          </div>
-          <div class="cf-note">
-            Mesio solo transfiere los datos del pedido. La factura electrónica la genera Siigo con tu resolución DIAN y tu configuración contable. Cero trabajo manual.
-          </div>
-        </div>
-        <div style="font-size:12px;color:var(--muted);padding:.75rem;background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.15);border-radius:8px;">
-          💡 <strong>¿Ya tienes Siigo, Alegra o Loggro?</strong> Solo necesitas ingresar tus credenciales API una vez. Mesio se conecta a tu cuenta existente — no necesitas cambiar nada de tu contabilidad.
+        <div class="card-title">Menú con disponibilidad en tiempo real <span style="font-size:11px;color:var(--muted);font-weight:400">— el bot consulta esto antes de cada pedido</span></div>
+        <div class="inv-grid" id="inv-grid"></div>
+      </div>
+    </div>
+
+    <!-- ══════════ MESAS ══════════ -->
+    <div id="mesas" class="section">
+      <div class="topbar">
+        <div class="page-title">Mapa de Mesas</div>
+        <div class="topbar-right">
+          <span style="font-size:12px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:6px 12px">
+            <span style="color:#15803D;font-weight:600">● Libre</span>
+            <span style="color:#991B1B;font-weight:600">● Ocupada</span>
+            <span style="color:#92400E;font-weight:600">● Cuenta</span>
+          </span>
         </div>
       </div>
-
-      <!-- Métricas -->
-      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr);">
-        <div class="metric"><div class="metric-label">Enviados hoy</div><div class="metric-value green">19</div><div class="metric-sub">100% exitosos</div></div>
-        <div class="metric"><div class="metric-label">Este mes</div><div class="metric-value">347</div><div class="metric-sub">344 ok · 3 con error</div></div>
-        <div class="metric"><div class="metric-label">Errores</div><div class="metric-value amber">3</div><div class="metric-sub warn">Reenviar manualmente</div></div>
+      <div class="mesas-wrap">
+        <div>
+          <div class="mesas-grid" id="mesas-grid"></div>
+        </div>
+        <div class="mesa-detail" id="mesa-detail">
+          <div style="text-align:center;color:var(--muted);font-size:13px;padding:2rem 0;font-style:italic">Toca una mesa ocupada para ver su orden</div>
+        </div>
       </div>
+    </div>
 
-      <!-- Log -->
+    <!-- ══════════ COCINA KDS ══════════ -->
+    <div id="cocina" class="section">
+      <div class="topbar">
+        <div class="page-title">KDS Cocina</div>
+        <div class="topbar-right">
+          <span class="live-chip">● Tiempo real</span>
+          <button class="btn-sm" onclick="addNewTicket()">+ Simular pedido</button>
+        </div>
+      </div>
+      <div class="kds-board">
+        <div>
+          <div class="kds-col-header">
+            <div class="kds-col-title" style="color:var(--blue)">📥 Recibido <span class="kds-count" id="count-recibido">0</span></div>
+          </div>
+          <div class="kds-cards" id="col-recibido"></div>
+        </div>
+        <div>
+          <div class="kds-col-header">
+            <div class="kds-col-title" style="color:var(--amber)">🔥 Preparando <span class="kds-count" id="count-preparando">0</span></div>
+          </div>
+          <div class="kds-cards" id="col-preparando"></div>
+        </div>
+        <div>
+          <div class="kds-col-header">
+            <div class="kds-col-title" style="color:var(--g)">✅ Listo <span class="kds-count" id="count-listo">0</span></div>
+          </div>
+          <div class="kds-cards" id="col-listo"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ FACTURACIÓN DIAN ══════════ -->
+    <div id="dian" class="section">
+      <div class="topbar">
+        <div class="page-title">Facturación DIAN</div>
+        <div class="topbar-right"><span class="live-chip">● MATIAS API conectado</span></div>
+      </div>
+      <div class="dian-status-card">
+        <div class="dian-status-icon">🧾</div>
+        <div class="dian-status-body">
+          <div class="dian-status-title">Facturación electrónica UBL 2.1 activa</div>
+          <div class="dian-status-sub">Resolución DIAN #18764074347312 · Prefijo LZT · Rango 1–99,999 · Vigente hasta 2030</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="dian-pill"><span style="width:6px;height:6px;border-radius:50%;background:var(--g);display:inline-block"></span> MATIAS API</span>
+            <span class="dian-pill" style="background:#EBF4FF;color:#185FA5">27 folios hoy</span>
+            <span class="dian-pill" style="background:#FFFBEB;color:#92400E">0 rechazos</span>
+          </div>
+        </div>
+      </div>
+      <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
+        <div class="metric"><div class="metric-label">Folios emitidos hoy</div><div class="metric-value green">27</div></div>
+        <div class="metric"><div class="metric-label">Total facturado</div><div class="metric-value green">$2.1M</div></div>
+        <div class="metric"><div class="metric-label">Aceptadas DIAN</div><div class="metric-value green">27</div><div class="metric-sub up">100% aprobadas</div></div>
+        <div class="metric"><div class="metric-label">Folios disponibles</div><div class="metric-value">99,972</div></div>
+      </div>
       <div class="card">
-        <div class="card-title">Historial de envíos recientes</div>
-        <div id="billing-log-list"></div>
+        <div class="card-title">Log de facturas electrónicas</div>
+        <table><thead><tr><th>Folio</th><th>Origen</th><th>Total</th><th>CUFE</th><th>Estado</th><th>Hora</th></tr></thead>
+        <tbody>
+          <tr><td><strong style="font-family:monospace">LZT-0851</strong></td><td>Mesa 7</td><td style="color:var(--g);font-weight:600">$124,000</td><td><span class="dian-cufe">a3f2b1c4d5e6f7a8b9c0d1e2f3...</span></td><td><span class="badge b-ok">Aceptada</span></td><td>8:47 pm</td></tr>
+          <tr><td><strong style="font-family:monospace">LZT-0850</strong></td><td>Domicilio</td><td style="color:var(--g);font-weight:600">$75,000</td><td><span class="dian-cufe">9d8c7a6b5e4f3a2b1c0d9e8f7...</span></td><td><span class="badge b-ok">Aceptada</span></td><td>8:31 pm</td></tr>
+          <tr><td><strong style="font-family:monospace">LZT-0849</strong></td><td>Mesa 3</td><td style="color:var(--g);font-weight:600">$85,000</td><td><span class="dian-cufe">4e5f6a7b8c9d0e1f2a3b4c5d6...</span></td><td><span class="badge b-ok">Aceptada</span></td><td>8:12 pm</td></tr>
+          <tr><td><strong style="font-family:monospace">LZT-0848</strong></td><td>Mesa 11</td><td style="color:var(--g);font-weight:600">$47,500</td><td><span class="dian-cufe">2b3c4d5e6f7a8b9c0d1e2f3a4...</span></td><td><span class="badge b-ok">Aceptada</span></td><td>7:58 pm</td></tr>
+          <tr><td><strong style="font-family:monospace">LZT-0847</strong></td><td>Domicilio</td><td style="color:var(--g);font-weight:600">$55,000</td><td><span class="dian-cufe">7h8i9j0k1l2m3n4o5p6q7r8s9...</span></td><td><span class="badge b-pend">En proceso</span></td><td>7:44 pm</td></tr>
+        </tbody></table>
       </div>
     </div>
 
-    <!-- ── POS ── -->
-    <div id="pos" class="section section-fade">
-      <div class="topbar"><div class="page-title">Mesio Analytics</div></div>
-      <div style="background:linear-gradient(135deg,#0A1F16,#0D2A1C);border:1px solid rgba(29,158,117,.25);border-radius:14px;padding:1.25rem;margin-bottom:1.25rem;">
-        <div style="font-size:11px;font-weight:600;color:var(--g);letter-spacing:.08em;text-transform:uppercase;margin-bottom:.6rem;">✦ Mesio IA — análisis del día</div>
-        <div style="font-size:13px;color:#D0F0E0;line-height:1.65;">Los viernes de noche generan <strong style="color:#39FF6A;">38% más ingresos</strong> que el promedio semanal. Se proyectan <strong style="color:#39FF6A;">28–32 pedidos</strong> esta noche. Considera reforzar <strong style="color:#39FF6A;">Carbonara y Margherita</strong> — son el 45% de la demanda.</div>
+    <!-- ══════════ STAFF & PROPINAS ══════════ -->
+    <div id="staff" class="section">
+      <div class="topbar">
+        <div class="page-title">Staff & Propinas</div>
+        <div class="topbar-right"><span class="live-chip">● Turno activo</span></div>
       </div>
-      <div class="grid3">
-        <div class="metric"><div class="metric-label">Ticket promedio</div><div class="metric-value green">$37k</div><div class="metric-sub up">↑ +8% vs semana pasada</div></div>
-        <div class="metric"><div class="metric-label">Hora pico</div><div class="metric-value">20:00h</div><div class="metric-sub">según histórico</div></div>
-        <div class="metric"><div class="metric-label">Top plato</div><div class="metric-value" style="font-size:1rem;padding-top:4px;">Margherita</div><div class="metric-sub">820 pedidos históricos</div></div>
+      <div class="metrics-row" style="grid-template-columns:repeat(3,1fr)">
+        <div class="metric"><div class="metric-label">En turno ahora</div><div class="metric-value">3</div><div class="metric-sub">de 4 empleados</div></div>
+        <div class="metric"><div class="metric-label">Propinas del día</div><div class="metric-value green">$125,000</div></div>
+        <div class="metric"><div class="metric-label">Horas trabajadas hoy</div><div class="metric-value">14.5h</div><div class="metric-sub">total equipo</div></div>
+      </div>
+      <div class="staff-grid">
+        <div class="staff-card">
+          <div class="staff-head"><div class="staff-av staff-av-g">CM</div><div><div class="staff-name">Carlos Martínez</div><div class="staff-role"><span class="staff-status-dot turno"></span>En turno · Mesero</div></div></div>
+          <div class="staff-stat"><span>Ingresó</span><span>4:00 pm</span></div>
+          <div class="staff-stat"><span>Horas hoy</span><span>4h 47min</span></div>
+          <div class="staff-stat"><span>Propinas asignadas</span><span style="color:var(--g)">$37,500</span></div>
+        </div>
+        <div class="staff-card">
+          <div class="staff-head"><div class="staff-av staff-av-b">VR</div><div><div class="staff-name">Valentina Ruiz</div><div class="staff-role"><span class="staff-status-dot turno"></span>En turno · Cocina</div></div></div>
+          <div class="staff-stat"><span>Ingresó</span><span>2:00 pm</span></div>
+          <div class="staff-stat"><span>Horas hoy</span><span>6h 47min</span></div>
+          <div class="staff-stat"><span>Propinas asignadas</span><span style="color:var(--g)">$22,500</span></div>
+        </div>
+        <div class="staff-card">
+          <div class="staff-head"><div class="staff-av staff-av-v">DP</div><div><div class="staff-name">Diego Pedraza</div><div class="staff-role"><span class="staff-status-dot descanso" style="background:#D1D5DB"></span>Descanso · Mesero</div></div></div>
+          <div class="staff-stat"><span>Ingresó</span><span>1:00 pm</span></div>
+          <div class="staff-stat"><span>Horas hoy</span><span>7h 47min</span></div>
+          <div class="staff-stat"><span>Propinas asignadas</span><span style="color:var(--g)">$37,500</span></div>
+        </div>
+        <div class="staff-card">
+          <div class="staff-head"><div class="staff-av staff-av-a">SL</div><div><div class="staff-name">Sara López</div><div class="staff-role"><span class="staff-status-dot turno"></span>En turno · Bar</div></div></div>
+          <div class="staff-stat"><span>Ingresó</span><span>5:00 pm</span></div>
+          <div class="staff-stat"><span>Horas hoy</span><span>3h 47min</span></div>
+          <div class="staff-stat"><span>Propinas asignadas</span><span style="color:var(--g)">$27,500</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Distribución de propinas hoy — $125,000 COP total</div>
+        <div class="chart-wrap" style="height:140px"><canvas id="chart-tips"></canvas></div>
       </div>
     </div>
 
-    <!-- ── PRECIOS ── -->
-    <div id="precios" class="section section-fade">
-      <div class="topbar"><div class="page-title">Planes & Precios</div></div>
-      <div class="plans-demo" id="plans-grid"></div>
-      <p style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center;">El Conector Contable requiere que el restaurante ya tenga Siigo, Alegra o Loggro contratado. Mesio conecta tu operación con tu sistema existente.</p>
+    <!-- ══════════ LOYALTY & CRM ══════════ -->
+    <div id="loyalty" class="section">
+      <div class="topbar">
+        <div class="page-title">Loyalty & CRM</div>
+        <div class="topbar-right"><span class="live-chip">● Puntos acumulando</span></div>
+      </div>
+      <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
+        <div class="metric"><div class="metric-label">Clientes con puntos</div><div class="metric-value">247</div></div>
+        <div class="metric"><div class="metric-label">Puntos emitidos hoy</div><div class="metric-value blue">+1,240</div></div>
+        <div class="metric"><div class="metric-label">NPS del mes</div><div class="metric-value green">+78</div><div class="metric-sub up">↑ Excelente</div></div>
+        <div class="metric"><div class="metric-label">Canjes este mes</div><div class="metric-value amber">$84,000</div></div>
+      </div>
+      <div class="loyalty-layout">
+        <div>
+          <div class="card">
+            <div class="card-title">Top clientes por puntos</div>
+            <div>
+              <div class="loyalty-customer"><div class="lc-av">JR</div><div class="lc-info"><div class="lc-name">Juan Ramírez</div><div class="lc-visits">14 visitas · último pedido hace 2 días</div></div><div class="lc-pts"><div class="lc-pts-val">2,385</div><div class="lc-pts-label">pts · $23,850</div></div></div>
+              <div class="loyalty-customer"><div class="lc-av">MG</div><div class="lc-info"><div class="lc-name">María González</div><div class="lc-visits">11 visitas · último pedido hace 4 días</div></div><div class="lc-pts"><div class="lc-pts-val">1,890</div><div class="lc-pts-label">pts · $18,900</div></div></div>
+              <div class="loyalty-customer"><div class="lc-av">CO</div><div class="lc-info"><div class="lc-name">Carlos Ospina</div><div class="lc-visits">8 visitas · último pedido hace 1 semana</div></div><div class="lc-pts"><div class="lc-pts-val">1,450</div><div class="lc-pts-label">pts · $14,500</div></div></div>
+              <div class="loyalty-customer"><div class="lc-av">LH</div><div class="lc-info"><div class="lc-name">Laura Herrera</div><div class="lc-visits">6 visitas · último pedido ayer</div></div><div class="lc-pts"><div class="lc-pts-val">980</div><div class="lc-pts-label">pts · $9,800</div></div></div>
+              <div class="loyalty-customer"><div class="lc-av">AP</div><div class="lc-info"><div class="lc-name">Andrés Pedraza</div><div class="lc-visits">5 visitas · último pedido hace 3 días</div></div><div class="lc-pts"><div class="lc-pts-val">740</div><div class="lc-pts-label">pts · $7,400</div></div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Últimos movimientos de puntos</div>
+            <table><thead><tr><th>Cliente</th><th>Delta</th><th>Razón</th><th>Hora</th></tr></thead>
+            <tbody>
+              <tr><td>Juan Ramírez</td><td style="color:var(--g);font-weight:700">+75 pts</td><td>Pedido domicilio $75k</td><td>8:31 pm</td></tr>
+              <tr><td>María González</td><td style="color:var(--g);font-weight:700">+85 pts</td><td>Mesa 3 $85k</td><td>8:12 pm</td></tr>
+              <tr><td>Laura Herrera</td><td style="color:var(--red);font-weight:700">-200 pts</td><td>Canje · $2,000 desc.</td><td>7:55 pm</td></tr>
+              <tr><td>Carlos Ospina</td><td style="color:var(--g);font-weight:700">+55 pts</td><td>Pedido domicilio $55k</td><td>7:44 pm</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="card-title">NPS del mes</div>
+            <div class="nps-gauge">
+              <div class="nps-box nps-promotor"><div class="nps-num">68</div><div class="nps-label">Promotores</div></div>
+              <div class="nps-box nps-pasivo"><div class="nps-num">21</div><div class="nps-label">Pasivos</div></div>
+              <div class="nps-box nps-detractor"><div class="nps-num">11</div><div class="nps-label">Detractores</div></div>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:.75rem">Comentarios recientes:</div>
+            <div class="nps-comment"><span class="nps-comment-star">★★★★★</span>"El bot me avisó que el risotto estaba agotado y me recomendó la pasta. Muy amable."</div>
+            <div class="nps-comment"><span class="nps-comment-star">★★★★★</span>"Pedí desde la mesa, llegó en 12 minutos. El sistema de QR es genial."</div>
+            <div class="nps-comment"><span class="nps-comment-star">★★★☆☆</span>"Bien, pero me confundió con el método de pago."</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Regla de puntos activa</div>
+            <div style="font-size:13px;line-height:1.7;color:var(--muted)">
+              <div>⚡ <strong style="color:var(--text)">1 punto</strong> por cada $1,000 COP pagados</div>
+              <div>💰 Cada punto vale <strong style="color:var(--text)">$10 COP</strong> al canjear</div>
+              <div>🎁 El bot avisa el saldo automáticamente</div>
+              <div>🔇 Acumulación silenciosa — sin intervención IA</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-  </div>
-</div>
+  </div><!-- /main -->
+</div><!-- /layout -->
 
 <script>
-function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('overlay').classList.toggle('open'); }
-function closeSidebar()  { document.getElementById('sidebar').classList.remove('open'); document.getElementById('overlay').classList.remove('open'); }
+// ══════════════════════════════════════════════
+// NAV
+// ══════════════════════════════════════════════
+const _initialized = new Set();
+let _kdsInterval = null;
+
 function show(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-  document.getElementById(id).classList.add('active'); btn.classList.add('active');
-  if (window.innerWidth <= 768) closeSidebar();
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const sec = document.getElementById(id);
+  if (sec) sec.classList.add('active');
+  if (btn) btn.classList.add('active');
+  closeSidebar();
+
+  if (!_initialized.has(id)) {
+    _initialized.add(id);
+    if (id === 'resumen') initResumen();
+    if (id === 'inventario') initInventario();
+    if (id === 'mesas') initMesas();
+    if (id === 'cocina') initKDS();
+    if (id === 'staff') initStaffChart();
+  }
+  if (id === 'cocina') startKDSClock();
+  else stopKDSClock();
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  // Charts
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('overlay').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════
+// CHARTS
+// ══════════════════════════════════════════════
+const G = '#1D9E75', BL = '#378ADD', AM = '#F59E0B', VI = '#8B5CF6';
+const CHART_DEFAULTS = { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label: ctx => ' $' + ctx.parsed.y.toLocaleString('es-CO') + 'k' } } }, scales:{ x:{ grid:{ display:false }, ticks:{ font:{ size:11 } } }, y:{ grid:{ color:'rgba(0,0,0,.05)' }, ticks:{ font:{ size:11 }, callback: v => '$' + v + 'k' } } } };
+
+function initResumen() {
   new Chart(document.getElementById('chart-revenue'), {
-    type:'bar', data:{ labels:['Lun','Mar','Mié','Jue','Vie','Sáb','Hoy'], datasets:[{data:[620000,540000,710000,480000,890000,1050000,847500], backgroundColor:'#1D9E75', borderRadius:4}] },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ y:{ticks:{callback:v=>'$'+Math.round(v/1000)+'k',font:{size:10}},grid:{color:'#F0F0EA'}}, x:{ticks:{font:{size:10}},grid:{display:false}} } }
+    type:'bar',
+    data:{
+      labels:['Lun','Mar','Mié','Jue','Vie','Sáb','Hoy'],
+      datasets:[{ data:[680,820,740,910,1050,1380,1240], backgroundColor: ctx => ctx.dataIndex===6 ? G : '#E1F5EE', borderRadius:6 }]
+    },
+    options:CHART_DEFAULTS
   });
-  new Chart(document.getElementById('chart-tipos'), {
-    type:'doughnut', data:{labels:['Domicilio','Recoger'],datasets:[{data:[58,42],backgroundColor:['#1D9E75','#378ADD'],borderWidth:0}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'65%'}
+  new Chart(document.getElementById('chart-canales'), {
+    type:'doughnut',
+    data:{
+      labels:['WhatsApp Bot','Domicilio','Mesas QR','POS Manual'],
+      datasets:[{ data:[45,28,18,9], backgroundColor:[G,BL,AM,VI], borderWidth:2, borderColor:'#fff' }]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ font:{ size:11 }, boxWidth:12 } } } }
   });
   new Chart(document.getElementById('chart-platos'), {
-    type:'bar', data:{labels:['Margherita','Carbonara','Prosciutto','Lasagna','Tiramisú'],datasets:[{data:[18,14,12,11,9],backgroundColor:['#1D9E75','#5DCAA5','#9FE1CB','#378ADD','#85B7EB'],borderRadius:4}]},
-    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:10}},grid:{color:'#F0F0EA'}},y:{ticks:{font:{size:10}},grid:{display:false}}}}
-  });
-
-  buildOrders(); buildRes(); buildConvs(); buildMenu(); buildMesas(); buildKitchen(); buildBillingLog(); buildPlans();
-});
-
-function buildOrders() {
-  const rows = [
-    {id:'ORD-A3F1',items:'2x Carbonara, 1x Margherita',type:'domicilio',paid:true,total:'$565k',time:'16:42'},
-    {id:'ORD-B7C2',items:'1x Lasagna, 2x Tiramisú',type:'recoger',paid:true,total:'$440k',time:'16:28'},
-    {id:'ORD-C2D3',items:'3x Margherita, 1x Vino',type:'domicilio',paid:false,total:'$620k',time:'16:15'},
-    {id:'ORD-D9E4',items:'1x Quattro Formaggi',type:'recoger',paid:true,total:'$240k',time:'15:58'},
-  ];
-  document.getElementById('orders-tbody').innerHTML = rows.map(o=>`<tr><td style="font-size:12px;color:var(--muted);font-family:monospace;">${o.id}</td><td style="font-size:12px;">${o.items}</td><td><span class="badge ${o.type==='domicilio'?'b-dom':'b-rec'}">${o.type}</span></td><td><span class="badge ${o.paid?'b-paid':'b-pend'}">${o.paid?'pagado':'pendiente'}</span></td><td style="font-weight:600;">${o.total}</td><td style="color:var(--muted);">${o.time}</td></tr>`).join('');
-}
-function buildRes() {
-  const rows = [{name:'Carlos Mendoza',time:'13:00',guests:4,notes:'Cumpleaños'},{name:'Ana Rodríguez',time:'14:30',guests:2,notes:'Aniversario'},{name:'Pedro Sánchez',time:'20:30',guests:6,notes:'Graduación'}];
-  document.getElementById('res-tbody').innerHTML = rows.map(r=>`<tr><td style="font-weight:600;">${r.name}</td><td>${r.time}</td><td>${r.guests}</td><td style="color:var(--muted);">${r.notes}</td><td><span class="badge b-conf">confirmada</span></td></tr>`).join('');
-}
-function buildConvs() {
-  const convs = [{init:'JA',name:'Juan Aparicio',msg:'Quiero pedir 2 Margheritas para domicilio',time:'hace 3 min'},{init:'SM',name:'Sofía Muñoz',msg:'¿Tienen opciones vegetarianas sin gluten?',time:'hace 12 min'},{init:'CR',name:'Carlos R.',msg:'Confirmo la reservación para el viernes',time:'hace 28 min'}];
-  document.getElementById('convs-list').innerHTML = convs.map(c=>`<div class="conv-row"><div class="conv-av">${c.init}</div><div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;">${c.name}</div><div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.msg}</div></div><div style="font-size:11px;color:var(--muted);white-space:nowrap;">${c.time}</div></div>`).join('');
-}
-function buildMenu() {
-  const items = [{name:'Margherita Clásica',cat:'Pizzas',price:'$175k',on:true},{name:'Spaghetti Carbonara',cat:'Pastas',price:'$195k',on:true},{name:'Prosciutto e Funghi',cat:'Pizzas',price:'$225k',on:true},{name:'Lasagna della Nonna',cat:'Pastas',price:'$220k',on:true},{name:'Tiramisú Clásico',cat:'Postres',price:'$110k',on:true},{name:'Burrata Fresca',cat:'Entradas',price:'$210k',on:false}];
-  document.getElementById('menu-grid').innerHTML = items.map(m=>`<div class="menu-item" style="${m.on?'':'opacity:.55;'}"><div class="menu-name">${m.name}</div><div class="menu-cat">${m.cat}</div><div class="menu-footer"><div class="menu-price">${m.price}</div><div class="avail-toggle ${m.on?'':'off'}" onclick="this.classList.toggle('off');this.closest('.menu-item').style.opacity=this.classList.contains('off')?'.55':'1'"></div></div></div>`).join('');
-}
-function buildMesas() {
-  const mesas = ['Mesa 1','Mesa 2','Mesa 3','Mesa 4','Mesa 5','Mesa 6'];
-  document.getElementById('qr-grid').innerHTML = mesas.map((m, i) => {
-    const tableId = m.toLowerCase().replace(' ', '-');
-    return `<div class="qr-card">
-      <div class="qr-table-name">${m}</div>
-      <div class="qr-id">${tableId}</div>
-      <div id="qr-${i}" style="width:100px;height:100px;margin:0 auto 12px;"></div>
-      <div><a class="qr-btn qr-btn-print" href="#">🖨️ Imprimir</a></div>
-    </div>`;
-  }).join('');
-
-  // Generate real QR codes after DOM is ready
-  mesas.forEach((m, i) => {
-    const tableId = m.toLowerCase().replace(' ', '-');
-    const url = `${window.location.origin}/menu/${tableId}`;
-    try {
-      new QRCode(document.getElementById(`qr-${i}`), {
-        text: url,
-        width: 100,
-        height: 100,
-        colorDark: '#0D1412',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.M
-      });
-    } catch(e) {
-      // fallback SVG if QRCode fails
-      document.getElementById(`qr-${i}`).innerHTML = `<svg width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>`;
-    }
+    type:'bar',
+    data:{
+      labels:['Pizza Margherita','Pasta Carbonara','Risotto Funghi','Lasaña','Vino de la Casa','Tiramisú'],
+      datasets:[{ data:[18,15,11,9,8,7], backgroundColor:G, borderRadius:5 }]
+    },
+    options:{ ...CHART_DEFAULTS, indexAxis:'y', plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label: ctx => ' ' + ctx.parsed.x + ' pedidos' } } }, scales:{ x:{ grid:{ color:'rgba(0,0,0,.05)' }, ticks:{ font:{ size:11 }, callback: v => v + ' uds' } }, y:{ grid:{ display:false }, ticks:{ font:{ size:11 } } } } }
   });
 }
-function buildKitchen() {
-  const orders = [
-    {id:'MESA-A24',table:'Mesa 3',status:'recibido',items:'1x Carbonara · 2x Margherita',elapsed:'2m 14s'},
-    {id:'MESA-B31',table:'Mesa 7',status:'en_preparacion',items:'1x Lasagna · 1x Tiramisú',elapsed:'7m 02s'},
-    {id:'MESA-C45',table:'Mesa 1',status:'listo',items:'2x Prosciutto · 1x Burrata',elapsed:'4m 30s'},
-  ];
-  const colMap = {recibido:'#FAC775',en_preparacion:'#378ADD',listo:'#1D9E75'};
-  const labelMap = {recibido:'🔔 Recibido',en_preparacion:'👨‍🍳 En preparación',listo:'✅ Listo'};
-  document.getElementById('kitchen-board-demo').innerHTML = orders.map(o=>`
-    <div style="background:#1A1A1A;border:1px solid #2A2A2A;border-left:3px solid ${colMap[o.status]};border-radius:12px;padding:1rem;">
-      <div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:3px;">${o.table}</div>
-      <div style="font-size:10px;color:#555;margin-bottom:8px;">${o.id}</div>
-      <div style="font-size:12px;color:#ccc;margin-bottom:10px;">${o.items}</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:10px;padding:2px 7px;background:rgba(29,158,117,.12);color:#1D9E75;border-radius:8px;font-weight:600;">${labelMap[o.status]}</span>
-        <span style="font-size:10px;color:#888;">${o.elapsed}</span>
+
+function initStaffChart() {
+  new Chart(document.getElementById('chart-tips'), {
+    type:'doughnut',
+    data:{
+      labels:['Carlos M.','Diego P.','Sara L.','Valentina R.'],
+      datasets:[{ data:[37500,37500,27500,22500], backgroundColor:[G,BL,AM,VI], borderWidth:2, borderColor:'#fff' }]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right', labels:{ font:{ size:11 }, boxWidth:12, generateLabels: chart => chart.data.labels.map((l,i) => ({ text: l + ' — $' + chart.data.datasets[0].data[i].toLocaleString('es-CO'), fillStyle: chart.data.datasets[0].backgroundColor[i], index:i })) } } } }
+  });
+}
+
+// ══════════════════════════════════════════════
+// POS / CAJA
+// ══════════════════════════════════════════════
+let order = {};
+let posTotal = 0;
+let folioCounter = 852;
+
+function addToOrder(name, emoji, price) {
+  if (!order[name]) order[name] = { emoji, price, qty: 0 };
+  order[name].qty++;
+  renderReceipt();
+}
+
+function removeFromOrder(name) {
+  if (order[name]) {
+    order[name].qty--;
+    if (order[name].qty <= 0) delete order[name];
+  }
+  renderReceipt();
+}
+
+function renderReceipt() {
+  const container = document.getElementById('receipt-items');
+  const empty = document.getElementById('receipt-empty');
+  const items = Object.entries(order);
+  posTotal = items.reduce((s,[,v]) => s + v.price * v.qty, 0);
+
+  if (!items.length) {
+    container.innerHTML = '';
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    container.innerHTML = items.map(([name, v]) =>
+      `<div class="receipt-item">
+        <span class="ri-name">${v.emoji} ${name}</span>
+        <span class="ri-qty">×${v.qty}</span>
+        <button class="ri-del" onclick="removeFromOrder('${name}')">✕</button>
+        <span class="ri-price">$${(v.price * v.qty).toLocaleString('es-CO')}</span>
+      </div>`
+    ).join('');
+  }
+  document.getElementById('receipt-total').textContent = '$' + posTotal.toLocaleString('es-CO');
+}
+
+function processPay(method) {
+  if (!posTotal) { alert('Agrega al menos un producto'); return; }
+  const folio = 'LZT-0' + folioCounter++;
+  document.getElementById('success-method').textContent = 'Pago con ' + method + ' — $' + posTotal.toLocaleString('es-CO') + ' COP';
+  document.getElementById('success-folio').textContent = '🧾 Factura DIAN ' + folio + ' emitida y aceptada';
+  document.getElementById('receipt-success').style.display = 'block';
+  order = {};
+  posTotal = 0;
+  setTimeout(() => {
+    document.getElementById('receipt-success').style.display = 'none';
+    renderReceipt();
+  }, 3500);
+}
+
+function resetPOS() {
+  order = {};
+  posTotal = 0;
+  document.getElementById('receipt-success').style.display = 'none';
+  renderReceipt();
+}
+
+// ══════════════════════════════════════════════
+// INVENTARIO
+// ══════════════════════════════════════════════
+const ITEMS = [
+  { emoji:'🍕', name:'Pizza Margherita', cat:'Principales', stock:12, available:true },
+  { emoji:'🍝', name:'Pasta Carbonara',  cat:'Principales', stock:8,  available:true },
+  { emoji:'🍚', name:'Risotto Funghi',   cat:'Principales', stock:3,  available:true, low:true },
+  { emoji:'🫙', name:'Lasaña Bolognesa', cat:'Principales', stock:4,  available:true, low:true },
+  { emoji:'🥗', name:'Arancini',         cat:'Entradas',    stock:0,  available:false, out:true },
+  { emoji:'🍮', name:'Tiramisú',         cat:'Postres',     stock:9,  available:true },
+  { emoji:'🍷', name:'Vino de la Casa',  cat:'Bebidas',     stock:24, available:true },
+  { emoji:'💧', name:'Agua Mineral',     cat:'Bebidas',     stock:50, available:true },
+  { emoji:'☕', name:'Café Espresso',    cat:'Bebidas',     stock:40, available:true },
+];
+
+function initInventario() {
+  const grid = document.getElementById('inv-grid');
+  grid.innerHTML = ITEMS.map((item, i) => `
+    <div class="inv-card${item.out?' out':item.low?' low':''}" id="inv-${i}">
+      <div class="inv-emoji">${item.emoji}</div>
+      <div class="inv-name">${item.name}</div>
+      <div class="inv-cat">${item.cat}</div>
+      <div class="inv-footer">
+        <span class="inv-stock ${item.out?'out':item.low?'low':'ok'}">${item.out?'Sin stock':item.stock+' uds'}</span>
+        <button class="toggle ${item.available?'on':'off'}" id="tog-${i}" onclick="toggleItem(${i})" title="${item.available?'Disponible':'No disponible'}"></button>
       </div>
     </div>`).join('');
 }
-function buildBillingLog() {
-  const logs = [
-    {order:'ORD-A3F1', prov:'siigo', amount:'$565k', time:'16:42', ok:true},
-    {order:'ORD-B7C2', prov:'siigo', amount:'$440k', time:'16:28', ok:true},
-    {order:'MESA-A24', prov:'siigo', amount:'$370k', time:'16:10', ok:true},
-    {order:'ORD-C2D3', prov:'siigo', amount:'$620k', time:'15:58', ok:false},
-    {order:'MESA-B31', prov:'siigo', amount:'$305k', time:'15:40', ok:true},
-  ];
-  document.getElementById('billing-log-list').innerHTML = logs.map(l=>`
-    <div class="billing-log-row">
-      <div class="bl-order">${l.order}</div>
-      <span class="bl-prov prov-${l.prov}">${l.prov.charAt(0).toUpperCase()+l.prov.slice(1)}</span>
-      <div class="bl-amount">${l.amount}</div>
-      <span class="bl-status ${l.ok?'b-ok b-paid':'b-err'}">${l.ok?'✓ Enviado':'✗ Error'}</span>
-      <div class="bl-time">${l.time}</div>
+
+function toggleItem(i) {
+  ITEMS[i].available = !ITEMS[i].available;
+  const tog = document.getElementById('tog-'+i);
+  tog.classList.toggle('on', ITEMS[i].available);
+  tog.classList.toggle('off', !ITEMS[i].available);
+}
+
+// ══════════════════════════════════════════════
+// MESAS
+// ══════════════════════════════════════════════
+const MESAS_DATA = [
+  { num:1,  status:'libre' },
+  { num:2,  status:'ocupada', since:'1h 20m', order:[['Pizza Margherita x2','$64,000'],['Vino de la Casa x1','$35,000']], total:99000, personas:3 },
+  { num:3,  status:'cuenta',  since:'45m',    order:[['Pasta Carbonara x1','$28,000'],['Risotto Funghi x1','$35,000'],['Agua Mineral x2','$10,000']], total:73000, personas:2 },
+  { num:4,  status:'libre' },
+  { num:5,  status:'ocupada', since:'30m',    order:[['Lasaña Bolognesa x2','$60,000'],['Gaseosa x2','$12,000']], total:72000, personas:2 },
+  { num:6,  status:'libre' },
+  { num:7,  status:'ocupada', since:'2h 10m', order:[['Pizza Margherita x1','$32,000'],['Carbonara x2','$56,000'],['Tiramisú x2','$36,000'],['Vino x2','$70,000']], total:194000, personas:4 },
+  { num:8,  status:'libre' },
+  { num:9,  status:'cuenta',  since:'1h',     order:[['Arancini x3','$45,000'],['Vino x1','$35,000']], total:80000, personas:2 },
+  { num:10, status:'libre' },
+  { num:11, status:'ocupada', since:'20m',    order:[['Tiramisú x2','$36,000'],['Café x2','$16,000']], total:52000, personas:2 },
+  { num:12, status:'libre' },
+  { num:13, status:'libre' },
+  { num:14, status:'cuenta',  since:'1h 30m', order:[['Lasaña x1','$30,000'],['Carbonara x1','$28,000'],['Agua x3','$15,000']], total:73000, personas:3 },
+  { num:15, status:'libre' },
+  { num:16, status:'libre' },
+];
+
+function initMesas() {
+  const grid = document.getElementById('mesas-grid');
+  grid.innerHTML = MESAS_DATA.map(m => `
+    <div class="mesa-card ${m.status}" onclick="${m.status!=='libre'?'showMesa('+m.num+')':''}">
+      <div class="mesa-num">M${m.num}</div>
+      <div class="mesa-status">${m.status==='libre'?'Libre':m.status==='ocupada'?'Ocupada':'Cuenta'}</div>
+      ${m.since?`<div class="mesa-time">Hace ${m.since}</div>`:''}
     </div>`).join('');
 }
-function buildPlans() {
-  const plans = [
-    { name:'Starter', desc:'Empieza a automatizar', price:'$49', period:'/mes', setup:'Setup gratuito', cls:'', btnCls:'outline', btnText:'Empezar gratis',
-      feats:[{c:'feat-g',t:'Bot IA WhatsApp 24/7'},{c:'feat-g',t:'Pedidos domicilio/recoger'},{c:'feat-g',t:'Reservaciones auto'},{c:'feat-g',t:'Dashboard básico'},{c:'feat-off',t:'Sin mesas QR'},{c:'feat-off',t:'Sin conector contable'}],
-      billing: null
-    },
-    { name:'Pro', desc:'WhatsApp + mesas', price:'$99', period:'/mes', setup:'+ $149 setup único', cls:'pop', pill:'MÁS POPULAR', pillCls:'pp-green', btnCls:'', btnText:'Activar',
-      feats:[{c:'feat-g',t:'Todo lo del Starter'},{c:'feat-g',t:'Hasta 15 mesas con QR'},{c:'feat-g',t:'Cocina en vivo (tablet)'},{c:'feat-g',t:'Pagos Wompi'},{c:'feat-g',t:'Mesio Analytics'}],
-      billing: { type:'addon', text:'Conector Contable', sub:'Siigo, Alegra o Loggro', price:'+$19/mes' }
-    },
-    { name:'Business', desc:'Alto volumen', price:'$179', period:'/mes', setup:'+ $249 setup único', cls:'pop-blue', pill:'MÁS COMPLETO', pillCls:'pp-blue', btnCls:'b', btnText:'Activar',
-      feats:[{c:'feat-b',t:'Todo lo del Pro'},{c:'feat-b',t:'Hasta 40 mesas con QR'},{c:'feat-b',t:'Panel de mesero'},{c:'feat-b',t:'Gestión de equipo'},{c:'feat-b',t:'Soporte prioritario'}],
-      billing: { type:'addon', text:'Conector Contable', sub:'Siigo, Alegra o Loggro', price:'+$19/mes' }
-    },
-    { name:'Cadena', desc:'Múltiples sucursales', price:'$299', period:'/mes', setup:'+ $399 setup único', cls:'pop-combo', btnCls:'combo', btnText:'Contactar',
-      feats:[{c:'feat-g',t:'Todo lo del Business'},{c:'feat-g',t:'Hasta 5 sucursales'},{c:'feat-g',t:'Hasta 100 mesas'},{c:'feat-g',t:'Dashboard multi-sucursal'},{c:'feat-g',t:'Onboarding personalizado'}],
-      billing: { type:'included', text:'Conector Contable incluido', sub:'Siigo, Alegra o Loggro' }
-    },
-  ];
 
-  document.getElementById('plans-grid').innerHTML = plans.map(p => {
-    const billingHtml = !p.billing ? '' :
-      p.billing.type === 'addon'
-        ? `<div class="billing-chip-addon"><div class="bc-label"><strong>🔗 ${p.billing.text}</strong>${p.billing.sub}</div><span class="bc-price">${p.billing.price}</span></div>`
-        : `<div class="billing-chip-inc">🔗 <strong>${p.billing.text}</strong> — ${p.billing.sub} · <strong style="margin-left:4px;">Incluido</strong></div>`;
-    return `<div class="plan-demo ${p.cls}">
-      ${p.pill ? `<div class="plan-pill-demo ${p.pillCls}">${p.pill}</div>` : ''}
-      <div class="plan-demo-name">${p.name}</div>
-      <div class="plan-demo-desc">${p.desc}</div>
-      <div class="plan-demo-price ${p.cls==='pop-blue'?'b':''}">${p.price}<span>${p.period}</span></div>
-      <div class="plan-demo-setup">${p.setup}</div>
-      <div class="plan-demo-divider"></div>
-      ${p.feats.map(f=>`<div class="plan-demo-feat"><span class="${f.c}">+</span> ${f.t}</div>`).join('')}
-      ${billingHtml}
-      <a href="/#contacto" class="plan-demo-btn ${p.btnCls}">${p.btnText}</a>
+function showMesa(num) {
+  const m = MESAS_DATA.find(x => x.num === num);
+  if (!m || m.status === 'libre') return;
+  const detail = document.getElementById('mesa-detail');
+  detail.innerHTML = `
+    <div class="mesa-detail-title">Mesa ${num} — ${m.personas} personas</div>
+    <div class="mesa-detail-sub"><span class="badge ${m.status==='cuenta'?'b-cuent':'b-ocup'}">${m.status==='cuenta'?'Esperando cuenta':'Ocupada'}</span> · Hace ${m.since}</div>
+    ${m.order.map(([item,price]) => `<div class="mesa-order-item"><span>${item}</span><span style="font-weight:600">${price}</span></div>`).join('')}
+    <div class="mesa-total"><span>Total</span><span>$${m.total.toLocaleString('es-CO')}</span></div>
+    <div class="mesa-actions">
+      <button class="btn-sm" style="flex:1" onclick="alert('Dividiendo cuenta de mesa ${num}...')">Dividir cuenta</button>
+      <button class="btn-sm primary" style="flex:1" onclick="alert('Cobrando mesa ${num} — DIAN emitirá factura LZT-0852')">Cobrar</button>
     </div>`;
-  }).join('');
 }
+
+// ══════════════════════════════════════════════
+// KDS COCINA
+// ══════════════════════════════════════════════
+let _kdsTickets = [
+  { id:'T-087', mesa:'Mesa 8',  col:'preparando', items:['Pasta Carbonara x2','Vino de la Casa x1'], mins:8 },
+  { id:'T-086', mesa:'Mesa 12', col:'preparando', items:['Risotto Funghi x1','Agua Mineral x2'],    mins:5 },
+  { id:'T-085', mesa:'Mesa 5',  col:'recibido',   items:['Lasaña Bolognesa x2','Gaseosa x2'],       mins:2 },
+  { id:'T-084', mesa:'Mesa 3',  col:'recibido',   items:['Tiramisú x2','Café Espresso x2'],         mins:1 },
+  { id:'T-083', mesa:'Mesa 1',  col:'listo',      items:['Pizza Margherita x1'],                    mins:15 },
+];
+let _kdsCounter = 88;
+
+function initKDS() { renderKDS(); }
+
+function renderKDS() {
+  ['recibido','preparando','listo'].forEach(col => {
+    const el = document.getElementById('col-'+col);
+    const tickets = _kdsTickets.filter(t => t.col === col);
+    document.getElementById('count-'+col).textContent = tickets.length;
+    if (!tickets.length) {
+      el.innerHTML = `<div class="empty-kds">Sin pedidos</div>`;
+      return;
+    }
+    el.innerHTML = tickets.map(t => `
+      <div class="kds-ticket ${t.col}" id="kt-${t.id}">
+        <div class="kds-ticket-head">
+          <span class="kds-mesa">${t.mesa} · #${t.id}</span>
+          <span class="kds-timer${t.mins>10?' warn':''}">${t.mins}m</span>
+        </div>
+        ${t.items.map(i => `<div class="kds-item">${i}</div>`).join('')}
+        ${t.col==='recibido'?`<button class="kds-btn preparar" onclick="kdsMove('${t.id}','preparando')">Iniciar preparación</button>`:''}
+        ${t.col==='preparando'?`<button class="kds-btn marcar" onclick="kdsMove('${t.id}','listo')">Marcar listo ✓</button>`:''}
+      </div>`).join('');
+  });
+}
+
+function kdsMove(id, toCol) {
+  const t = _kdsTickets.find(x => x.id === id);
+  if (t) { t.col = toCol; renderKDS(); }
+}
+
+function addNewTicket() {
+  const mesas = ['Mesa 2','Mesa 6','Mesa 9','Mesa 13','Mesa 16','Domicilio'];
+  const menus = [
+    ['Pizza Margherita x1','Vino de la Casa x1'],
+    ['Pasta Carbonara x2','Agua Mineral x2'],
+    ['Lasaña Bolognesa x1','Tiramisú x1'],
+    ['Risotto Funghi x2','Café x2'],
+  ];
+  _kdsTickets.unshift({
+    id: 'T-0'+_kdsCounter++,
+    mesa: mesas[Math.floor(Math.random()*mesas.length)],
+    col: 'recibido',
+    items: menus[Math.floor(Math.random()*menus.length)],
+    mins: 0,
+  });
+  renderKDS();
+}
+
+function startKDSClock() {
+  _kdsInterval = setInterval(() => {
+    _kdsTickets.forEach(t => { if (t.col !== 'listo') t.mins++; });
+    renderKDS();
+  }, 8000);
+}
+
+function stopKDSClock() {
+  if (_kdsInterval) { clearInterval(_kdsInterval); _kdsInterval = null; }
+}
+
+// ══════════════════════════════════════════════
+// BOOT
+// ══════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  initResumen();
+  _initialized.add('resumen');
+});
 </script>
 </body>
 </html>

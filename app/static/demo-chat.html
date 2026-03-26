@@ -3,209 +3,747 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Demo Mesio Bot PRO</title>
+    <title>Demo Mesio Bot</title>
     <style>
-        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #ece5dd; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        #phone-wrapper { width: 100%; max-width: 400px; height: 100vh; max-height: 850px; background: #e5ddd5; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.2); position: relative; }
-        @media (min-width: 450px) { #phone-wrapper { height: 90vh; border-radius: 20px; overflow: hidden; border: 8px solid #333; } }
-        #header { background: #075e54; color: white; padding: 15px; display: flex; align-items: center; justify-content: space-between; }
-        #scenario-bar { background: #128C7E; padding: 8px; text-align: center; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
-        #scenario-bar button { background: white; border: none; padding: 6px 10px; border-radius: 15px; cursor: pointer; font-size: 0.8em; font-weight: bold; color: #128C7E; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
-        #scenario-bar button:active { transform: scale(0.95); }
-        #chat-window { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); background-size: cover; }
-        .msg { padding: 10px 14px; border-radius: 10px; max-width: 80%; word-wrap: break-word; font-size: 0.95em; line-height: 1.4; position: relative; box-shadow: 0 1px 1px rgba(0,0,0,0.1); white-space: pre-wrap; }
-        .bot { background: #fff; align-self: flex-start; border-top-left-radius: 0; }
-        .user { background: #dcf8c6; align-self: flex-end; border-top-right-radius: 0; }
-        #typing { font-size: 0.8em; color: #666; font-style: italic; display: none; margin: 0 20px 10px 20px; background: rgba(255,255,255,0.8); padding: 5px 10px; border-radius: 10px; align-self: flex-start; }
-        #input-area { display: flex; padding: 10px; background: #f0f0f0; gap: 10px; align-items: center; }
-        #msg-input { flex: 1; padding: 12px 15px; border: none; border-radius: 20px; outline: none; font-size: 1em; }
-        #send-btn { background: #128C7E; color: white; border: none; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 1.2em; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #111b21;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 0;
+        }
+
+        /* ── PHONE SHELL ─────────────────────────────────────── */
+        #shell {
+            width: 100%;
+            max-width: 420px;
+            height: 100vh;
+            max-height: 860px;
+            display: flex;
+            flex-direction: column;
+            background: #0b141a;
+            position: relative;
+            overflow: hidden;
+        }
+        @media (min-width: 460px) {
+            #shell {
+                border-radius: 28px;
+                border: 10px solid #1a1a2e;
+                box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px #333;
+                height: 88vh;
+            }
+        }
+
+        /* ── WHATSAPP HEADER ──────────────────────────────────── */
+        #wa-header {
+            background: #202c33;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #2a3942;
+            flex-shrink: 0;
+        }
+        #wa-avatar {
+            width: 42px; height: 42px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #25d366 0%, #128c7e 100%);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        #wa-info { flex: 1; }
+        #wa-name { color: #e9edef; font-size: 16px; font-weight: 600; }
+        #wa-status { color: #8696a0; font-size: 12px; margin-top: 1px; }
+        #wa-actions { display: flex; gap: 20px; color: #8696a0; font-size: 18px; }
+
+        /* ── SCENARIO BAR ─────────────────────────────────────── */
+        #scenario-bar {
+            background: #1f2c34;
+            padding: 8px 10px;
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            flex-shrink: 0;
+            scrollbar-width: none;
+        }
+        #scenario-bar::-webkit-scrollbar { display: none; }
+        .sc-btn {
+            background: #2a3942;
+            border: none;
+            color: #e9edef;
+            padding: 6px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: background 0.2s, transform 0.1s;
+            flex-shrink: 0;
+        }
+        .sc-btn:hover { background: #3b4a52; }
+        .sc-btn:active { transform: scale(0.95); }
+        .sc-btn.active {
+            background: #00a884;
+            color: #fff;
+        }
+
+        /* ── CHAT BACKGROUND ──────────────────────────────────── */
+        #chat-bg {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 12px 10px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            background-color: #0b141a;
+            background-image:
+                radial-gradient(ellipse at 20% 50%, rgba(18, 140, 126, 0.03) 0%, transparent 60%),
+                url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.015'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            scroll-behavior: smooth;
+        }
+        #chat-bg::-webkit-scrollbar { width: 4px; }
+        #chat-bg::-webkit-scrollbar-track { background: transparent; }
+        #chat-bg::-webkit-scrollbar-thumb { background: #2a3942; border-radius: 2px; }
+
+        /* ── DATE DIVIDER ─────────────────────────────────────── */
+        .date-divider {
+            text-align: center;
+            margin: 8px 0;
+        }
+        .date-divider span {
+            background: #182229;
+            color: #8696a0;
+            font-size: 11px;
+            padding: 4px 12px;
+            border-radius: 8px;
+        }
+
+        /* ── MESSAGES ─────────────────────────────────────────── */
+        .msg-row {
+            display: flex;
+            margin-bottom: 2px;
+        }
+        .msg-row.user { justify-content: flex-end; }
+        .msg-row.bot  { justify-content: flex-start; }
+
+        .bubble {
+            max-width: 78%;
+            padding: 7px 10px 5px;
+            border-radius: 8px;
+            font-size: 13.5px;
+            line-height: 1.45;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+            position: relative;
+            animation: pop-in 0.18s ease-out;
+        }
+        @keyframes pop-in {
+            from { opacity: 0; transform: scale(0.92) translateY(4px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .bubble.bot {
+            background: #202c33;
+            color: #e9edef;
+            border-top-left-radius: 0;
+        }
+        .bubble.user {
+            background: #005c4b;
+            color: #e9edef;
+            border-top-right-radius: 0;
+        }
+        .msg-time {
+            font-size: 10px;
+            color: #8696a0;
+            text-align: right;
+            margin-top: 3px;
+        }
+        .msg-row.user .msg-time::after {
+            content: ' ✓✓';
+            color: #53bdeb;
+        }
+
+        /* ── TYPING INDICATOR ─────────────────────────────────── */
+        #typing-row {
+            display: none;
+            justify-content: flex-start;
+            margin-bottom: 4px;
+            animation: pop-in 0.18s ease-out;
+        }
+        #typing-bubble {
+            background: #202c33;
+            border-radius: 8px;
+            border-top-left-radius: 0;
+            padding: 10px 14px;
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        .dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: #8696a0;
+            animation: bounce 1.2s infinite;
+        }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+            30% { transform: translateY(-5px); opacity: 1; }
+        }
+
+        /* ── QUICK REPLIES ────────────────────────────────────── */
+        #quick-replies {
+            padding: 6px 10px;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            background: #0b141a;
+            flex-shrink: 0;
+            min-height: 0;
+            transition: min-height 0.2s;
+        }
+        .qr-chip {
+            background: #202c33;
+            border: 1px solid #2a3942;
+            color: #00a884;
+            padding: 6px 14px;
+            border-radius: 18px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.15s;
+            white-space: nowrap;
+        }
+        .qr-chip:hover { background: #2a3942; }
+
+        /* ── INPUT BAR ────────────────────────────────────────── */
+        #input-bar {
+            background: #202c33;
+            padding: 8px 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+            border-top: 1px solid #2a3942;
+        }
+        #msg-input {
+            flex: 1;
+            background: #2a3942;
+            border: none;
+            border-radius: 20px;
+            padding: 10px 16px;
+            color: #e9edef;
+            font-size: 14px;
+            outline: none;
+        }
+        #msg-input::placeholder { color: #8696a0; }
+        #send-btn {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            background: #00a884;
+            border: none;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.15s, transform 0.1s;
+        }
+        #send-btn:hover { background: #02be97; }
+        #send-btn:active { transform: scale(0.93); }
+        #send-btn svg { fill: white; width: 22px; height: 22px; }
+
+        /* ── MODULE TOAST ─────────────────────────────────────── */
+        #toast-container {
+            position: absolute;
+            top: 120px;
+            right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 100;
+            pointer-events: none;
+        }
+        .toast {
+            background: rgba(0, 168, 132, 0.92);
+            backdrop-filter: blur(8px);
+            color: #fff;
+            padding: 7px 13px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+            animation: toast-in 0.3s ease-out, toast-out 0.4s ease-in 2.4s forwards;
+            white-space: nowrap;
+        }
+        @keyframes toast-in {
+            from { opacity: 0; transform: translateX(20px) scale(0.9); }
+            to   { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        @keyframes toast-out {
+            from { opacity: 1; transform: translateX(0) scale(1); }
+            to   { opacity: 0; transform: translateX(20px) scale(0.9); }
+        }
     </style>
 </head>
 <body>
-    <div id="phone-wrapper">
-        <div id="header">
-            <div>
-                <b style="font-size: 1.1em;">Mesio Bot 🤖</b><br>
-                <span style="font-size: 0.8em;">en línea</span>
-            </div>
-            <button onclick="startScenario('idle')" style="background: none; border: none; color: white; cursor: pointer; text-decoration: underline; font-size: 0.9em;">Limpiar</button>
+<div id="shell">
+    <!-- HEADER -->
+    <div id="wa-header">
+        <div id="wa-avatar">🍕</div>
+        <div id="wa-info">
+            <div id="wa-name">La Trattoria 🇨🇴</div>
+            <div id="wa-status">en línea</div>
         </div>
-        <div id="scenario-bar">
-            <button onclick="startScenario('delivery')">🛵 Domicilio</button>
-            <button onclick="startScenario('mesa')">🍽️ En Mesa</button>
-            <button onclick="startScenario('reserva')">📅 Reserva</button>
-            <button onclick="startScenario('queja')">🙋‍♂️ Atención</button>
-        </div>
-        <div id="chat-window">
-            <div class="msg bot">¡Hola! Soy el simulador PRO de Mesio. Selecciona un escenario arriba para ver cómo manejo diferentes situaciones de tu restaurante. 👇</div>
-        </div>
-        <div id="typing">Mesio está escribiendo...</div>
-        <div id="input-area">
-            <input type="text" id="msg-input" placeholder="Escribe un mensaje..." onkeypress="if(event.key === 'Enter') sendMsg()">
-            <button id="send-btn" onclick="sendMsg()">➤</button>
+        <div id="wa-actions">
+            <span title="Videollamada">📹</span>
+            <span title="Llamada">📞</span>
+            <span title="Más opciones">⋮</span>
         </div>
     </div>
 
-    <script>
-        const chatWindow = document.getElementById('chat-window');
-        const msgInput = document.getElementById('msg-input');
-        const typingIndicator = document.getElementById('typing');
+    <!-- SCENARIOS -->
+    <div id="scenario-bar">
+        <button class="sc-btn" onclick="loadScenario('delivery')">🛵 Domicilio</button>
+        <button class="sc-btn" onclick="loadScenario('mesa')">📲 Mesa QR</button>
+        <button class="sc-btn" onclick="loadScenario('crm')">🧠 CRM Inteligente</button>
+        <button class="sc-btn" onclick="loadScenario('stock')">🚫 Sin Stock</button>
+        <button class="sc-btn" onclick="loadScenario('loyalty')">⭐ Puntos Loyalty</button>
+    </div>
 
-        let currentScenario = 'idle';
-        let step = 0;
-        let isTyping = false;
+    <!-- CHAT AREA -->
+    <div id="chat-bg">
+        <div class="date-divider"><span>hoy</span></div>
+        <div class="msg-row bot">
+            <div class="bubble bot">
+                👋 ¡Bienvenido al demo de <b>Mesio</b>!<br><br>Selecciona un escenario arriba para ver los módulos en acción.<br><br>Cada flujo muestra una capacidad diferente del sistema 👆
+                <div class="msg-time">ahora</div>
+            </div>
+        </div>
+    </div>
 
-        function appendMsg(text, sender) {
-            const div = document.createElement('div');
-            div.className = 'msg ' + sender;
-            div.innerText = text;
-            chatWindow.appendChild(div);
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
+    <!-- TYPING -->
+    <div id="typing-row">
+        <div id="typing-bubble">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+        </div>
+    </div>
 
-        function sendMsg(overrideText = null) {
-            if (isTyping) return;
-            
-            const text = overrideText || msgInput.value.trim();
-            if (!text) return;
-            
-            if (!overrideText) msgInput.value = '';
-            appendMsg(text, 'user');
-            
-            isTyping = true;
-            typingIndicator.style.display = 'block';
-            chatWindow.scrollTop = chatWindow.scrollHeight;
+    <!-- QUICK REPLIES -->
+    <div id="quick-replies"></div>
 
-            const delay = Math.floor(Math.random() * 1500) + 1000;
+    <!-- INPUT -->
+    <div id="input-bar">
+        <input id="msg-input" type="text" placeholder="Escribe un mensaje..." onkeydown="if(event.key==='Enter')sendMsg()">
+        <button id="send-btn" onclick="sendMsg()">
+            <svg viewBox="0 0 24 24"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817z"/></svg>
+        </button>
+    </div>
 
+    <!-- TOASTS -->
+    <div id="toast-container"></div>
+</div>
+
+<script>
+// ── UTILS ────────────────────────────────────────────────────────
+const chatBg      = document.getElementById('chat-bg');
+const typingRow   = document.getElementById('typing-row');
+const qrBar       = document.getElementById('quick-replies');
+const toastCont   = document.getElementById('toast-container');
+const msgInput    = document.getElementById('msg-input');
+const scBtns      = document.querySelectorAll('.sc-btn');
+
+let busy = false;
+let sc = null;   // current scenario object
+let step = 0;
+
+function nowTime() {
+    const d = new Date();
+    return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+}
+
+function addMsg(text, side) {
+    const row  = document.createElement('div');
+    row.className = 'msg-row ' + side;
+    const bub  = document.createElement('div');
+    bub.className = 'bubble ' + side;
+    bub.innerHTML = text.replace(/\*(.*?)\*/g, '<b>$1</b>') + `<div class="msg-time">${nowTime()}</div>`;
+    row.appendChild(bub);
+    chatBg.appendChild(row);
+    chatBg.scrollTop = chatBg.scrollHeight;
+}
+
+function showTyping() {
+    typingRow.style.display = 'flex';
+    chatBg.scrollTop = chatBg.scrollHeight;
+}
+function hideTyping() {
+    typingRow.style.display = 'none';
+}
+
+function showToast(text) {
+    const t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = text;
+    toastCont.appendChild(t);
+    setTimeout(() => t.remove(), 2900);
+}
+
+function setQuickReplies(chips) {
+    qrBar.innerHTML = '';
+    chips.forEach(c => {
+        const btn = document.createElement('button');
+        btn.className = 'qr-chip';
+        btn.textContent = c;
+        btn.onclick = () => sendMsg(c);
+        qrBar.appendChild(btn);
+    });
+}
+function clearQuickReplies() { qrBar.innerHTML = ''; }
+
+function botSay(text, delay, toasts, chips) {
+    return new Promise(resolve => {
+        setTimeout(() => {
+            showTyping();
+            const d = Math.min(1400, 600 + text.length * 18);
             setTimeout(() => {
-                typingIndicator.style.display = 'none';
-                isTyping = false;
-                const botResponse = getBotResponse(text);
-                appendMsg(botResponse, 'bot');
-            }, delay);
-        }
+                hideTyping();
+                if (toasts) toasts.forEach((t, i) => setTimeout(() => showToast(t), i * 350));
+                addMsg(text, 'bot');
+                if (chips) setQuickReplies(chips); else clearQuickReplies();
+                resolve();
+            }, d);
+        }, delay || 300);
+    });
+}
 
-        function getBotResponse(text) {
-            const lower = text.toLowerCase();
+// ── SCENARIOS ────────────────────────────────────────────────────
 
-            // ─── 1. FLUJO: DOMICILIO (Con Upsell y métodos de pago) ───
-            if (currentScenario === 'delivery') {
-                if (step === 0) {
-                    step++;
-                    return "¡Hola! Claro, te enviamos tu pedido a la Calle 100 #15-20. 🛵\n\n¿Qué te gustaría ordenar hoy? Nuestro plato más vendido es la 'Hamburguesa Mesio Doble'. 🍔";
-                } else if (step === 1) {
-                    step++;
-                    return "¡Anotado! 📝\n\n💡 *Sugerencia del Chef:* Por solo $5,000 adicionales puedes agrandar tus papas y agregar una gaseosa. ¿Te lo agrego al combo?";
-                } else if (step === 2) {
-                    step++;
-                    if (lower.includes("no")) {
-                        return "Perfecto, dejamos la orden sencilla. El total es $28,000 COP.\n\n¿Prefieres pagar con *Efectivo* contra entrega o te genero un *Link de pago* (Nequi/Tarjetas)? 💳💵";
-                    } else {
-                        return "¡Excelente decisión! 🍟🥤 Combo agrandado. El total es $33,000 COP.\n\n¿Prefieres pagar con *Efectivo* contra entrega o te genero un *Link de pago* (Nequi/Tarjetas)? 💳💵";
-                    }
-                } else if (step === 3) {
-                    step = 0;
-                    currentScenario = 'idle';
-                    if (lower.includes("efectivo")) {
-                        return "¡Entendido! Pago en efectivo. 💵 ¿Necesitas que el repartidor lleve cambio de algún billete en específico?\n\n*(El pedido ya fue enviado a cocina. Fin de la demo)*";
-                    } else {
-                        return "¡Genial! Aquí tienes tu link de pago seguro 100% integrado:\n👉 https://wompi.co/demo-pago-mesio\n\nApenas realices el pago, el pedido se enviará automáticamente a cocina. 🧑‍🍳\n\n*(Fin de la demo)*";
-                    }
-                }
-            } 
-            
-            // ─── 2. FLUJO: EN MESA (Con Wifi, mesero y división de cuenta) ───
-            else if (currentScenario === 'mesa') {
-                // Interrupciones globales de la mesa
-                if (lower.includes("wifi") || lower.includes("internet")) {
-                    return "📶 ¡Claro! La red es *Mesio_Guests* y la contraseña es: *mesio2026*";
-                }
-                if (lower.includes("mesero") || lower.includes("ayuda")) {
-                    return "🙋‍♂️ Ya le envié una notificación al mesero de tu zona. Enseguida estará en la Mesa 3 contigo.";
-                }
+const SCENARIOS = {
 
-                if (step === 0) {
-                    step++;
-                    return "¡Hola! Qué gusto tenerte en la Mesa 3. 🍽️\n\nAquí tienes nuestro menú digital interactivo: mesioai.com/menu\n\n¿Ya sabes qué vas a pedir o necesitas que te recomiende algo especial hoy?";
-                } else if (step === 1) {
-                    step++;
-                    return "¡Excelente elección! Acabo de enviar tu pedido a las pantallas de la cocina. 👨‍🍳🔥\n\nTe avisaré por aquí mismo cuando tu orden esté lista. Mientras tanto, si necesitas la clave del *WiFi* o llamar al *mesero*, solo dímelo.";
-                } else if (step === 2) {
-                    if (lower.includes("cuenta") || lower.includes("pagar")) {
-                        step++;
-                        return "¡Claro! El total de tu consumo es $85,000 COP.\n\n¿Te gustaría pagar todo junto, o quieres que les divida la cuenta a ti y a tus acompañantes? 🧾✂️";
-                    } else {
-                        return "¡Sigo aquí! Recuerda que cuando terminen, pueden pedirme la *cuenta* directamente por este chat. 😉";
-                    }
-                } else if (step === 3) {
-                    step = 0;
-                    currentScenario = 'idle';
-                    if (lower.includes("dividi") || lower.includes("separad")) {
-                        return "¡No hay problema! Les he generado enlaces individuales para que cada uno pague lo suyo desde su celular:\n\n👤 Persona 1 ($42,500): https://wompi.co/p1\n👤 Persona 2 ($42,500): https://wompi.co/p2\n\n¡Gracias por visitarnos! *(Fin de la demo)*";
-                    } else {
-                        return "¡Perfecto! Aquí tienes el enlace de pago total: https://wompi.co/total\nO si prefieres, el mesero ya va con el datáfono. 💳\n\n*(Fin de la demo)*";
-                    }
-                }
-            }
-
-            // ─── 3. FLUJO: RESERVAS ───
-            else if (currentScenario === 'reserva') {
-                if (step === 0) {
-                    step++;
-                    return "¡Hola! Será un placer reservar una mesa para ti. 🗓️\n\nPara empezar, ¿para qué fecha y hora te gustaría hacer la reserva?";
-                } else if (step === 1) {
-                    step++;
-                    return "Revisando disponibilidad... ⏳\n\n¡Sí tenemos espacio! ¿Para cuántas personas sería la mesa? ¿Están celebrando alguna ocasión especial? 🎂🍾";
-                } else if (step === 2) {
-                    step = 0;
-                    currentScenario = 'idle';
-                    return "¡Reserva confirmada! ✅\n\nLos esperamos el día acordado. He añadido una nota especial para que nuestro equipo les tenga un detalle de cortesía. ¡Nos vemos pronto!\n\n*(Fin de la demo)*";
-                }
-            }
-
-            // ─── 4. FLUJO: ATENCIÓN AL CLIENTE / QUEJAS ───
-            else if (currentScenario === 'queja') {
-                if (step === 0) {
-                    step++;
-                    return "Hola. Lamento mucho leer esto. Para ayudarte de inmediato, ¿me podrías confirmar si tu inconveniente es con un pedido en curso o con uno ya entregado? 😞";
-                } else if (step === 1) {
-                    step++;
-                    return "Entiendo perfectamente tu molestia y te pido una sincera disculpa. Hubo un retraso inusual en la ruta de nuestro domiciliario debido al clima. 🌧️\n\nAcabo de contactarlo y me confirma que está a 5 minutos de tu ubicación. Para compensar esta mala experiencia, ¿me permites enviarte un cupón del 30% de descuento para tu próxima orden?";
-                } else if (step === 2) {
-                    step = 0;
-                    currentScenario = 'idle';
-                    return "De verdad apreciamos tu paciencia. Aquí tienes tu cupón: *MESIODISCULPAS30* 🎟️\n\nNuevamente disculpas, trabajamos para que esto no vuelva a suceder. ¡Que disfrutes tu comida!\n\n*(Fin de la demo)*";
-                }
-            }
-            
-            // ─── FUERA DE ESCENARIO ───
-            else {
-                if (lower.includes("hola") || lower.includes("buenas")) {
-                    return "¡Hola! 👋 Soy la versión de demostración comercial de Mesio.\n\nPara que veas todo mi potencial, por favor toca uno de los botones arriba ('Domicilio', 'Mesa', 'Reserva' o 'Atención').";
-                }
-                return "Como esta es una demostración, mis respuestas libres están limitadas.\n\nTe invito a probar mis flujos guiados tocando los botones de arriba para ver cómo soluciono ventas, quejas y pedidos. 👆";
-            }
-        }
-
-        function startScenario(type) {
-            chatWindow.innerHTML = '';
-            currentScenario = type;
+    // ── 1. DOMICILIO ─────────────────────────────────────────────
+    delivery: {
+        label: '🛵 Domicilio',
+        start: async () => {
             step = 0;
-            
-            if (type === 'delivery') {
-                sendMsg("Hola, quiero pedir un domicilio a la Calle 100 #15-20");
-            } else if (type === 'mesa') {
-                sendMsg("Hola, acabo de escanear el QR de la Mesa 3.");
-            } else if (type === 'reserva') {
-                sendMsg("Hola, me gustaría reservar una mesa para este fin de semana.");
-            } else if (type === 'queja') {
-                sendMsg("Hola, mi pedido lleva más de 1 hora de retraso y nadie me contesta.");
-            } else {
-                appendMsg('¡Memoria borrada! Toca un botón para iniciar una demo.', 'bot');
+            await botSay(
+                '¡Hola! 👋 Soy *Mesio*, el asistente de *La Trattoria*.\n\n¿Cómo te podemos ayudar hoy?',
+                300, ['✨ Sesión iniciada'], ['🛵 Quiero un domicilio', '🍽️ Info del restaurante']
+            );
+        },
+        reply: async (txt) => {
+            const t = txt.toLowerCase();
+            if (step === 0) {
+                step = 1;
+                await botSay(
+                    '¡Claro! Con mucho gusto. 🛵\n\n¿A qué dirección enviamos el pedido?',
+                    400, null, ['Calle 93 #13-45, Bogotá', 'Carrera 15 #82-12']
+                );
+            } else if (step === 1) {
+                step = 2;
+                await botSay(
+                    `Perfecto, anotamos *${txt}*. 📍\n\nAquí está nuestro menú del día:\n\n🍕 *Pizza Margherita* — $32.000\n🍕 *Pizza Prosciutto* — $38.000\n🍝 *Pasta Carbonara* — $29.000\n🍝 *Pasta Pomodoro* — $25.000\n\n¿Qué deseas ordenar?`,
+                    500, ['✨ Módulo Menú consultado'], ['Pizza Margherita', 'Pasta Carbonara']
+                );
+            } else if (step === 2) {
+                step = 3;
+                const item = t.includes('pizza') ? 'Pizza Margherita ($32.000)' : t.includes('pasta') ? 'Pasta Carbonara ($29.000)' : `"${txt}"`;
+                await botSay(
+                    `¡Excelente elección! 🤌 Anotado: *${item}*.\n\n💡 *Sugerencia:* Agregar *Tiramisu* de postre por solo $12.000 más.\n¿Lo añadimos?`,
+                    500, ['✨ Motor de Upsell activado'], ['Sí, agrega el Tiramisu', 'No gracias']
+                );
+            } else if (step === 3) {
+                step = 4;
+                const upsell = t.includes('sí') || t.includes('si') || t.includes('agrega');
+                const total = upsell ? '$44.000' : '$32.000';
+                await botSay(
+                    `¡Listo! 🧾 Tu resumen:\n\n${upsell ? '🍕 Pizza Margherita — $32.000\n🍮 Tiramisu — $12.000\n' : '🍕 Pizza Margherita — $32.000\n'}\n*Total: ${total} COP*\n\n¿Cómo prefieres pagar?`,
+                    500, null, ['💳 Link de pago (Nequi/PSE)', '💵 Efectivo contraentrega']
+                );
+            } else if (step === 4) {
+                step = 5;
+                if (t.includes('link') || t.includes('nequi') || t.includes('pse')) {
+                    await botSay(
+                        '¡Perfecto! Aquí tu link de pago seguro 🔒:\n\n👉 *pay.wompi.co/trattoria/ord-28471*\n\nEn cuanto confirmes el pago, el pedido entra automáticamente a cocina. 👨‍🍳\n\n*Tiempo estimado: 35 min* 🕐\n\n_(Demo completada — Módulos: Menú, Upsell, Wompi)_',
+                        500, ['✨ Factura DIAN generada', '✨ Wompi link creado']
+                    );
+                } else {
+                    await botSay(
+                        '¡Entendido! Pago en *efectivo*. 💵\n\n¿El repartidor necesita llevar cambio de algún billete específico?\n\n*Tiempo estimado de entrega: 35 min* 🕐\n\n_(Demo completada — Módulos: Menú, Upsell, Pedido)_',
+                        500, ['✨ Pedido enviado a KDS']
+                    );
+                }
+                step = 0;
             }
         }
-    </script>
+    },
+
+    // ── 2. MESA QR ───────────────────────────────────────────────
+    mesa: {
+        label: '📲 Mesa QR',
+        start: async () => {
+            step = 0;
+            addMsg('*[Escaneo de QR — Mesa 7 — La Trattoria]*', 'user');
+            await botSay(
+                '¡Bienvenido a *La Trattoria*! 🍕\n\nEstás en la *Mesa 7*. Soy Mesio, tu asistente digital.\n\n¿Te traigo el menú o ya sabes qué vas a pedir?',
+                400, ['✨ Sesión de mesa iniciada', '✨ Mesa 7 vinculada'], ['Ver menú', 'Ya sé qué quiero', '📶 ¿Clave WiFi?']
+            );
+        },
+        reply: async (txt) => {
+            const t = txt.toLowerCase();
+            if (t.includes('wifi') || t.includes('clave') || t.includes('internet')) {
+                await botSay('📶 ¡Claro! La red es *LaTrattoria_Guests* y la clave es *trattoria2026* 🔑', 300);
+                return;
+            }
+            if (t.includes('mesero') || t.includes('mozo') || t.includes('ayuda')) {
+                await botSay('🙋 ¡Ya avisé al mesero de tu zona! En un momento estará en la *Mesa 7*.', 300, ['✨ Alerta de mesero enviada']);
+                return;
+            }
+            if (step === 0) {
+                step = 1;
+                await botSay(
+                    '¡Aquí el menú de hoy! 🇮🇹\n\n🍕 *Pizza Margherita* — $32.000\n🍕 *Pizza Cuatro Quesos* — $35.000\n🍝 *Pasta Carbonara* — $29.000\n🥗 *Ensalada César* — $22.000\n🍷 *Copa de vino tinto* — $18.000\n\n¿Qué te provoca?',
+                    500, ['✨ Módulo Menú consultado'], ['Pizza Cuatro Quesos', 'Pasta Carbonara', 'Llamar mesero']
+                );
+            } else if (step === 1) {
+                step = 2;
+                await botSay(
+                    `¡Enviado a cocina! 🔥 Tu pedido de *${txt}* ya aparece en la pantalla del chef.\n\nTe avisaré cuando esté listo. Mientras tanto, ¿algo más? ¿una copa de vino? 🍷`,
+                    500, ['✨ Ticket KDS creado'], ['Sí, una copa de vino', 'No por ahora', 'Pedir la cuenta']
+                );
+            } else if (step === 2) {
+                step = 3;
+                if (t.includes('cuenta') || t.includes('pagar')) {
+                    await botSay(
+                        '¡Claro! 🧾 Resumen de tu consumo *Mesa 7*:\n\nPizza Cuatro Quesos — $35.000\nCopa de vino tinto — $18.000\n\n*Total: $53.000 COP*\n\n¿Pagas con link de pago o prefieres que el mesero traiga el datáfono?',
+                        500, ['✨ Factura DIAN generada'], ['Link de pago', 'Datáfono']
+                    );
+                } else {
+                    await botSay(
+                        '¡Perfecto! 🍷 Copa de vino tinto anotada. Cuando quieras la cuenta, solo dime *"cuenta"*.',
+                        400, ['✨ Ítem agregado al ticket']
+                    );
+                    step = 2;
+                }
+            } else if (step === 3) {
+                await botSay(
+                    '¡Gracias por visitarnos! 🥂\n\nEn breve recibirás tu factura electrónica *DIAN* por WhatsApp.\n\n*¡Hasta la próxima!* 👋\n\n_(Demo completada — Módulos: KDS, Mesas, DIAN)_',
+                    500, ['✨ Factura DIAN enviada', '✨ Mesa 7 liberada']
+                );
+                step = 0;
+            }
+        }
+    },
+
+    // ── 3. CRM INTELIGENTE ───────────────────────────────────────
+    crm: {
+        label: '🧠 CRM',
+        start: async () => {
+            step = 0;
+            await botSay(
+                '⏳ _Identificando número…_',
+                300
+            );
+            await botSay(
+                '¡*Juan Diego*! 🎉 ¡Qué gusto tenerte de vuelta en *La Trattoria*!\n\nVi que la semana pasada pediste *Pizza Prosciutto + Pasta Carbonara*. ¿Repetimos ese combo favorito? 😋',
+                600, ['✨ Módulo CRM activado', '✨ Historial consultado'], ['Sí, el mismo combo', 'Quiero probar algo nuevo', 'Ver mis puntos']
+            );
+        },
+        reply: async (txt) => {
+            const t = txt.toLowerCase();
+            if (step === 0) {
+                step = 1;
+                if (t.includes('sí') || t.includes('si') || t.includes('mismo') || t.includes('combo')) {
+                    await botSay(
+                        '¡Perfecto, como siempre! 🤌\n\n*Pizza Prosciutto* + *Pasta Carbonara* = $67.000\n\nComo cliente frecuente tienes *10% de descuento*: *Total $60.300 COP* 🎁\n\n¿A qué dirección enviamos?',
+                        500, ['✨ Descuento CRM aplicado'], ['La misma de siempre — Cra 7 #45-20']
+                    );
+                } else if (t.includes('punto') || t.includes('loyalty')) {
+                    await botSay(
+                        '⭐ *Tus puntos Loyalty*:\n\n🏆 *Puntos acumulados:* 340 pts\n💰 *Equivalencia:* $17.000 COP\n\n¿Quieres canjear puntos en este pedido?',
+                        400, ['✨ Módulo Loyalty consultado'], ['Canjear puntos', 'Seguir acumulando']
+                    );
+                } else {
+                    await botSay(
+                        '¡Genial, exploremos! 🗺️ Hoy tenemos como especiales:\n\n🍄 *Risotto de Hongos Porcini* — $41.000 ← *Nuevo*\n🐟 *Branzino al Forno* — $48.000 ← *Recomendado por el chef*\n\n¿Alguno te llama la atención?',
+                        500, ['✨ Recomendaciones IA generadas'], ['Risotto de Hongos', 'Branzino al Forno']
+                    );
+                }
+            } else if (step === 1) {
+                step = 2;
+                if (t.includes('canjear') || t.includes('puntos')) {
+                    await botSay(
+                        '¡Claro! Se aplicarán *340 pts = $17.000 COP* de descuento. 🎉\n\n¿Qué deseas ordenar hoy?',
+                        400, ['✨ Puntos Loyalty canjeados'], ['Pizza Prosciutto']
+                    );
+                } else {
+                    await botSay(
+                        `¡Excelente elección! Anotado: *${txt}*.\n\nTu pedido está en camino a la cocina. 👨‍🍳\n\n*+68 puntos Loyalty* acumulados en este pedido ⭐\n\n_(Demo completada — Módulos: CRM, Loyalty, Historial)_`,
+                        500, ['✨ Pedido enviado', '✨ Loyalty +68 pts acumulados']
+                    );
+                    step = 0;
+                }
+            } else if (step === 2) {
+                await botSay(
+                    `¡Listo! *${txt}* con descuento de $17.000. Total: $21.000 COP.\n\nEn camino a cocina 🔥\n\n_(Demo completada — Módulos: CRM, Loyalty)_`,
+                    500, ['✨ Pedido enviado', '✨ Puntos canjeados OK']
+                );
+                step = 0;
+            }
+        }
+    },
+
+    // ── 4. SIN STOCK ─────────────────────────────────────────────
+    stock: {
+        label: '🚫 Sin Stock',
+        start: async () => {
+            step = 0;
+            await botSay(
+                '¡Hola! Bienvenido a *La Trattoria*. 🍕\n\n¿Qué te puedo ofrecer hoy?',
+                300, null, ['Pizza Hawaiana', 'Lasagna Bolognesa', 'Ver menú completo']
+            );
+        },
+        reply: async (txt) => {
+            const t = txt.toLowerCase();
+            if (step === 0) {
+                step = 1;
+                if (t.includes('hawai') || t.includes('piña')) {
+                    await botSay(
+                        '😔 ¡Ups! Lamentablemente la *Pizza Hawaiana* está *agotada* por hoy.\n\nPero tengo una alternativa que te va a encantar 👇\n\n🍕 *Pizza Prosciutto e Funghi* — jamón italiano + champiñones + mozzarella\nEs nuestro *plato más vendido* esta semana. ¿Te la anoto?',
+                        600, ['✨ Módulo Inventario consultado', '✨ Alternativa IA sugerida'], ['Sí, esa me la anoto', 'Ver otras opciones']
+                    );
+                } else if (t.includes('lasagna') || t.includes('bolognesa')) {
+                    await botSay(
+                        '😔 La *Lasagna Bolognesa* está temporalmente *sin stock*. El ingrediente fresco llega mañana.\n\n🍝 Te recomiendo la *Pasta Puttanesca* — misma base, igualmente deliciosa y lista en 12 min.\n\n¿La pruebas?',
+                        600, ['✨ Módulo Inventario consultado', '✨ Alternativa IA sugerida'], ['Sí, la Puttanesca', 'Prefiero otra cosa']
+                    );
+                } else {
+                    await botSay(
+                        '¡Claro! Déjame verificar disponibilidad… 🔍\n\n*(Consultando inventario en tiempo real)*',
+                        400, ['✨ Módulo Inventario consultado']
+                    );
+                    setTimeout(async () => {
+                        await botSay(
+                            '✅ Tenemos disponible:\n\n🍕 *Pizza Margherita* — $32.000\n🍕 *Pizza Prosciutto* — $38.000\n🍝 *Pasta Carbonara* — $29.000\n🥗 *Ensalada César* — $22.000\n\n¿Cuál te llama?',
+                            200, null, ['Pizza Margherita', 'Pasta Carbonara']
+                        );
+                    }, 800);
+                    return;
+                }
+            } else if (step === 1) {
+                step = 2;
+                if (t.includes('sí') || t.includes('si') || t.includes('anota') || t.includes('putta') || t.includes('prosciutto')) {
+                    await botSay(
+                        '¡Perfecto! 🤌 Anotado.\n\nEsta disponibilidad se actualiza en tiempo real desde el módulo de *Inventario Pro* — cuando un ingrediente se agota, el bot automáticamente deja de ofrecerlo y sugiere alternativas.\n\n¿A qué dirección enviamos, o es para comer aquí?',
+                        500, ['✨ Inventario actualizado en vivo'], ['Domicilio', 'Comeré aquí']
+                    );
+                } else {
+                    await botSay(
+                        '¡No hay problema! Cuéntame qué te antoja y lo verifico. 🍽️',
+                        300
+                    );
+                    step = 1;
+                }
+            } else if (step === 2) {
+                await botSay(
+                    `¡Listo! *${t.includes('domicilio') ? 'Domicilio' : 'Mesa'}* confirmado. Tu pedido fue a cocina. 🔥\n\n_(Demo completada — Módulo: Inventario Pro + Alternativas IA)_`,
+                    400, ['✨ Pedido enviado a KDS']
+                );
+                step = 0;
+            }
+        }
+    },
+
+    // ── 5. LOYALTY ───────────────────────────────────────────────
+    loyalty: {
+        label: '⭐ Loyalty',
+        start: async () => {
+            step = 0;
+            await botSay(
+                '⏳ _Verificando tu perfil Loyalty…_',
+                300
+            );
+            await botSay(
+                '¡Hola *Camila*! ⭐\n\nTienes *520 puntos* acumulados en *La Trattoria*.\n💰 Equivalen a *$26.000 COP* de descuento.\n\n¿Quieres canjearlos hoy o seguir acumulando?',
+                700, ['✨ Módulo Loyalty activado', '✨ Balance consultado'], ['Canjear mis puntos hoy', 'Seguir acumulando', '¿Cómo gano más puntos?']
+            );
+        },
+        reply: async (txt) => {
+            const t = txt.toLowerCase();
+            if (step === 0) {
+                step = 1;
+                if (t.includes('canjear') || t.includes('descuento')) {
+                    await botSay(
+                        '¡Genial! 🎁 Se aplicarán *$26.000 COP* de descuento en tu próximo pedido.\n\n¿Qué vas a ordenar hoy?',
+                        400, ['✨ Canje de puntos procesado'], ['Pizza Margherita ($32k → $6k)', 'Pasta Carbonara ($29k → $3k)']
+                    );
+                } else if (t.includes('cómo') || t.includes('como') || t.includes('más puntos') || t.includes('mas puntos')) {
+                    await botSay(
+                        '¡Fácil! Así acumulas puntos en *La Trattoria*: 🌟\n\n📌 *1 punto* por cada $100 COP en pedidos\n🎂 *Puntos dobles* en tu cumpleaños\n👥 *+100 pts* por referir a un amigo\n📱 *+50 pts* por dejar reseña en Google\n\n¿Ordenamos algo hoy para seguir acumulando?',
+                        500, null, ['Sí, quiero ordenar', 'Entendido, gracias']
+                    );
+                } else {
+                    await botSay(
+                        '¡Perfecto! Cada compra suma más. 📈\n\nRecuerda: por este pedido ganarás puntos adicionales.\n\n¿Qué te pongo hoy?',
+                        400, null, ['Pizza Margherita', 'Pasta Carbonara']
+                    );
+                }
+            } else if (step === 1) {
+                step = 2;
+                const precio = t.includes('margherita') || t.includes('pizza') ? '$32.000' : '$29.000';
+                const final = t.includes('6k') ? '$6.000' : t.includes('3k') ? '$3.000' : precio;
+                const puntos = Math.floor(Math.random() * 30) + 25;
+                await botSay(
+                    `¡Anotado! 🍕\n\n*${txt}* — ${precio}\n${t.includes('→') ? `Descuento Loyalty: -$26.000\n*Total a pagar: ${final} COP* 🎉` : `*Total: ${precio} COP*`}\n\n+*${puntos} puntos* serán acreditados al confirmar el pago. ⭐\n\nPedido enviado a cocina. 🔥\n\n_(Demo completada — Módulos: Loyalty, Menú, Pedido)_`,
+                    500, ['✨ Pedido enviado', `✨ Loyalty +${puntos} pts pendientes`]
+                );
+                step = 0;
+            }
+        }
+    }
+};
+
+// ── ORCHESTRATION ─────────────────────────────────────────────────
+
+function loadScenario(key) {
+    if (busy) return;
+    // Clear chat
+    chatBg.innerHTML = '<div class="date-divider"><span>hoy</span></div>';
+    clearQuickReplies();
+    hideTyping();
+    step = 0;
+    sc = SCENARIOS[key];
+    // Mark active button
+    scBtns.forEach(b => b.classList.remove('active'));
+    const match = [...scBtns].find(b => b.getAttribute('onclick') === `loadScenario('${key}')`);
+    if (match) match.classList.add('active');
+    // Run
+    sc.start();
+}
+
+async function sendMsg(overrideText) {
+    if (busy) return;
+    const text = overrideText || msgInput.value.trim();
+    if (!text) return;
+    if (!overrideText) msgInput.value = '';
+    clearQuickReplies();
+    addMsg(text, 'user');
+    if (!sc) {
+        await botSay('Selecciona un escenario arriba para comenzar. 👆', 400);
+        return;
+    }
+    busy = true;
+    try {
+        await sc.reply(text);
+    } finally {
+        busy = false;
+    }
+}
+</script>
 </body>
 </html>

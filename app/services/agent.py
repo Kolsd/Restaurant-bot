@@ -407,12 +407,31 @@ async def build_system_prompt(features: dict = None) -> list:
         blocks.append({"type": "text", "text": restrictions})
     return blocks
 
-async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> str:
+async def call_claude(
+    system: list,
+    messages: list,
+    model: str = MODEL_FAST,
+    restaurant_id: int | None = None,
+) -> str:
+    # Verificar límites antes de consumir tokens
+    if restaurant_id is not None:
+        await db.db_check_usage_limits(restaurant_id)
+
     msgs = messages.copy()
     msgs.append({"role": "assistant", "content": "{"})
     response = client.messages.create(
         model=model, max_tokens=1024, system=system, messages=msgs
     )
+
+    # Registrar tokens reales consumidos
+    if restaurant_id is not None:
+        total_tokens = (
+            getattr(response.usage, "input_tokens",  0) +
+            getattr(response.usage, "output_tokens", 0)
+        )
+        if total_tokens > 0:
+            await db.db_increment_token_usage(restaurant_id, total_tokens)
+
     for block in response.content:
         text = _block_attr(block, "text")
         if text:
@@ -803,6 +822,16 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
 
     metodos_bloque = f"\n[MÉTODOS_DE_PAGO:\n{payment_methods_text}]" if payment_methods_text else "\n[MÉTODOS_DE_PAGO: Pregunta al cliente cómo prefiere pagar]"
 
+    # [PUNTOS] — inyección ultra-ligera solo si loyalty está activo y el cliente tiene saldo
+    loyalty_note = ""
+    if feats.get("loyalty") is True or feats.get("loyalty") == "true":
+        balance = await db.db_get_loyalty_balance(restaurant_obj.get("id"), user_phone)
+        if balance:
+            loyalty_note = (
+                f"\n[PUNTOS: {balance['puntos_actuales']} pts"
+                f" | equiv. ${balance['equivalencia_cop']:,} COP]"
+            )
+
     enriched = (
         f"{user_message_clean}"
         f"\n[RESTAURANTE: {restaurant_name}]"
@@ -811,6 +840,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         f"\n[CARRITO: {cart_text}]"
         f"{table_note}"
         f"{metodos_bloque}"
+        f"{loyalty_note}"
         f"{in_transit_note}"
         f"{session_note}"
     )
@@ -828,7 +858,8 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
 
     sys_prompt = await build_system_prompt(feats)
 
-    raw    = await call_claude(sys_prompt, messages, model=MODEL_FAST)
+    raw    = await call_claude(sys_prompt, messages, model=MODEL_FAST,
+                               restaurant_id=restaurant_obj.get("id"))
     parsed = _parse_bot_response(raw)
 
     if parsed is None:

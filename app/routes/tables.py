@@ -11,6 +11,7 @@ from app.services import database as db
 from app.services import billing
 from app.services.agent import trigger_nps
 from app.routes.deps import require_auth, get_current_user, get_current_restaurant
+from app.services import loyalty as loyalty_svc
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -898,6 +899,16 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         customer_nit=body.customer_nit,
         customer_email=body.customer_email,
     )
+
+    # Acumulación de puntos loyalty en background (silenciosa, no bloquea respuesta)
+    import asyncio as _asyncio
+    _asyncio.create_task(loyalty_svc.accrue_on_check(
+        restaurant_id=restaurant["id"],
+        bot_number=restaurant.get("whatsapp_number", ""),
+        base_order_id=base_order_id,
+        check_id=check_id,
+        total_cop=float(check["total"]),
+    ))
 
     return {
         "success":  True,
