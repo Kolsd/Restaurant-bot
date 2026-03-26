@@ -21,6 +21,24 @@ const fmt = (amount) => {
 window._dashHeaders    = headers;
 window._dashRestaurant = restaurant;
 
+function _applyFeatureToggles(feats) {
+  const toggleNav = (sectionId, isEnabled) => {
+    const byId = document.getElementById(`nav-${sectionId}`);
+    if (byId) { byId.style.display = isEnabled ? '' : 'none'; return; }
+    const byOnclick = document.querySelector(`[onclick*="'${sectionId}'"]`);
+    if (byOnclick) byOnclick.style.display = isEnabled ? '' : 'none';
+  };
+  // Core modules — off only when explicitly false (opt-out model, matches agent.py)
+  toggleNav('pedidos',       feats.module_orders       !== false);
+  toggleNav('mesas',         feats.module_tables       !== false);
+  toggleNav('sesiones',      feats.module_tables       !== false);
+  toggleNav('reservaciones', feats.module_reservations !== false);
+  toggleNav('pos',           feats.module_pos          !== false);
+  // Opt-in modules — visible only when explicitly true
+  toggleNav('staff',         feats.staff_tips === true);
+  toggleNav('loyalty',       feats.loyalty    === true);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const nameEl = document.getElementById('sidebar-name');
   if (nameEl) nameEl.textContent = restaurant.name || 'Mi Restaurante';
@@ -28,33 +46,27 @@ document.addEventListener('DOMContentLoaded', () => {
   const roleStr = restaurant.role || 'owner';
   const equipoNav = document.getElementById('nav-equipo');
   if (equipoNav) equipoNav.style.display = (roleStr.includes('owner') || roleStr.includes('admin')) ? '' : 'none';
-  
-  const feats = restaurant.features || {};
 
-  // toggleNav: show/hide a sidebar nav button based on feature flag.
-  // Uses data-section attribute first, falls back to onclick-pattern match.
-  const toggleNav = (sectionId, isEnabled) => {
-    // Prefer explicit id="nav-{sectionId}" if it exists
-    const byId = document.getElementById(`nav-${sectionId}`);
-    if (byId) { byId.style.display = isEnabled ? '' : 'none'; return; }
-    // Fallback: match by onclick text (existing buttons without explicit id)
-    const byOnclick = document.querySelector(`[onclick*="'${sectionId}'"]`);
-    if (byOnclick) byOnclick.style.display = isEnabled ? '' : 'none';
-  };
+  // Apply from localStorage immediately (fast, may be stale)
+  _applyFeatureToggles(restaurant.features || {});
 
-  // Core modules — off only when explicitly false (opt-out model, matches agent.py)
-  toggleNav('pedidos',       feats.module_orders       !== false);
-  toggleNav('mesas',         feats.module_tables       !== false);
-  toggleNav('sesiones',      feats.module_tables       !== false);
-  toggleNav('reservaciones', feats.module_reservations !== false);
-  toggleNav('pos',           feats.module_pos          !== false);
-  // Phase 6 modules — off by default unless explicitly true (opt-in model)
-  toggleNav('staff',         feats.staff_tips === true);
-  toggleNav('loyalty',       feats.loyalty    === true);
+  // Then fetch fresh features from API and re-apply (keeps localStorage in sync)
+  fetch('/api/settings', { headers }).then(r => r.ok ? r.json() : null).then(data => {
+    if (!data) return;
+    const freshFeats = data.features || {};
+    // Update localStorage so next page load is also correct
+    const stored = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+    stored.features = freshFeats;
+    stored.locale   = data.locale   || freshFeats.locale   || stored.locale;
+    stored.currency = data.currency || freshFeats.currency || stored.currency;
+    localStorage.setItem('rb_restaurant', JSON.stringify(stored));
+    window._dashRestaurant = stored;
+    _applyFeatureToggles(freshFeats);
+  }).catch(() => {});
 
   loadMenu();
   refreshAll();
-  setInterval(refreshAll, 30000); 
+  setInterval(refreshAll, 30000);
 });
 
 function updateTime() {

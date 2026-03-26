@@ -25,24 +25,32 @@ async def login(username: str, password: str) -> dict:
     token = secrets.token_hex(32)
     await db.db_save_session(token, username.lower().strip())
 
+    import json as _json
     role = user.get("role", "owner")
     branch_id = user.get("branch_id")
     whatsapp_number = ""
+    features: dict = {}
     try:
         if branch_id:
             restaurant = await db.db_get_restaurant_by_id(branch_id)
             if restaurant:
                 whatsapp_number = restaurant.get("whatsapp_number", "")
+                raw = restaurant.get("features") or {}
+                features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
         else:
             all_restaurants = await db.db_get_all_restaurants()
             for r in all_restaurants:
                 if r["name"].lower().strip() == user["restaurant_name"].lower().strip():
                     whatsapp_number = r.get("whatsapp_number", "")
                     branch_id = r.get("id")
+                    raw = r.get("features") or {}
+                    features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
                     break
             if not whatsapp_number and all_restaurants:
                 whatsapp_number = all_restaurants[0].get("whatsapp_number", "")
                 branch_id = all_restaurants[0].get("id")
+                raw = all_restaurants[0].get("features") or {}
+                features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
     except Exception as e:
         print(f"Warning login: {e}")
 
@@ -55,6 +63,9 @@ async def login(username: str, password: str) -> dict:
             "role": role,
             "branch_id": branch_id,
             "whatsapp_number": whatsapp_number,
+            "features": features,
+            "locale":   features.get("locale",   "es-CO"),
+            "currency": features.get("currency", "COP"),
         },
     }
 
