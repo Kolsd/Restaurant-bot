@@ -33,22 +33,26 @@
     <div class="logo-icon">M</div>
     <div><div class="logo-text" id="sidebar-name">Cargando...</div><div class="logo-sub">Panel de control</div></div>
   </div>
+
+  <div class="nav-group-label">Operaciones</div>
   <button class="nav-item active" onclick="showSection('resumen',this)">📊 Resumen</button>
   <button class="nav-item" onclick="showSection('pedidos',this)">📦 Pedidos</button>
-  <button class="nav-item" onclick="showSection('reservaciones',this)">📅 Reservaciones</button>
+  <button class="nav-item" id="nav-reservaciones" onclick="showSection('reservaciones',this)">📅 Reservaciones</button>
   <button class="nav-item" onclick="showSection('conversaciones',this)">💬 WhatsApp</button>
+
+  <div class="nav-group-label">Restaurante</div>
+  <button class="nav-item" id="nav-mesas" onclick="showSection('mesas',this)">🪑 Salón</button>
   <button class="nav-item" onclick="showSection('menu',this)">🍽️ Menú</button>
-  <button class="nav-item" onclick="showSection('pos',this)">🤖 POS con IA</button>
-  <button class="nav-item" onclick="showSection('mesas',this)">🪑 Mesas & QR</button>
-  <button class="nav-item" id="nav-equipo" onclick="showSection('equipo',this)">👥 Mi Equipo</button>
-  <button class="nav-item" onclick="showSection('sesiones',this)">⏱️ Sesiones</button>
-  <button class="nav-item" onclick="showSection('nps',this)">⭐ NPS</button>
-  <button class="nav-item" onclick="showSection('inventario',this)">📦 Inventario</button>
-  <!-- Phase 6: Staff & Tips — hidden until module is enabled in features -->
-  <button class="nav-item" id="nav-staff" onclick="showSection('staff',this)">👤 Staff & Propinas</button>
+
+  <div class="nav-group-label">Clientes</div>
+  <button class="nav-item" id="nav-nps" onclick="showSection('nps',this)">⭐ NPS</button>
   <button class="nav-item" id="nav-loyalty" onclick="showSection('loyalty',this)">🎁 Fidelización</button>
-  <a href="/settings" style="display:block;text-align:center;margin:8px 12px 4px;padding:8px;background:#f0f0e8;border-radius:8px;font-size:12px;color:#555;text-decoration:none;font-weight:500;">⚙️ Configuración</a>
-  <!-- Connection status badge — managed by ConnectionStatus component in dashboard-components.js -->
+
+  <div class="nav-group-label">Equipo</div>
+  <button class="nav-item" id="nav-staff" onclick="showSection('staff',this)">👤 Staff & Propinas</button>
+  <button class="nav-item" id="nav-equipo" onclick="showSection('equipo',this)">👥 Mi Equipo</button>
+
+  <a href="/settings" style="display:block;margin:12px 4px 4px;padding:8px 12px;background:#f0f0e8;border-radius:8px;font-size:12px;color:#555;text-decoration:none;font-weight:500;">⚙️ Configuración</a>
   <div class="live-badge" id="live-badge">
     <div class="live-dot" id="conn-dot"></div>
     <span id="conn-text">Bot activo 24/7</span>
@@ -150,89 +154,178 @@
     <div class="card"><div class="card-title">Listado de Reservaciones</div><div id="res-container"><div class="empty-state">Cargando...</div></div></div>
   </div>
 
-  <!-- CONVERSACIONES -->
+  <!-- CONVERSACIONES + SESIONES (unificado) -->
   <div id="conversaciones" class="section">
-    <div class="metrics" style="grid-template-columns:repeat(2,1fr);">
-      <div class="metric"><div class="metric-label">Conversaciones activas</div><div class="metric-value" id="c-total">—</div></div>
-      <div class="metric"><div class="metric-label">Mensajes promedio x Cliente</div><div class="metric-value" id="c-avg">—</div></div>
+    <div class="segmented-control" style="margin-bottom:1rem;">
+      <button class="seg-btn active" onclick="switchConvsTab('chat',this)">💬 En vivo</button>
+      <button class="seg-btn" onclick="switchConvsTab('ses',this)">⏱️ Sesiones</button>
     </div>
-    <div class="card">
-      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Conversaciones de WhatsApp</span>
-        <button onclick="cleanupConversations()" style="font-size:11px;padding:4px 10px;border:1px solid #e0e0d8;border-radius:6px;background:none;cursor:pointer;color:#888;">🧹 Limpiar +7 días</button>
+
+    <!-- Panel: Conversaciones activas -->
+    <div id="convs-panel-chat">
+      <div class="metrics" style="grid-template-columns:repeat(2,1fr);">
+        <div class="metric"><div class="metric-label">Conversaciones activas</div><div class="metric-value" id="c-total">—</div></div>
+        <div class="metric"><div class="metric-label">Mensajes promedio x Cliente</div><div class="metric-value" id="c-avg">—</div></div>
       </div>
-      <div id="convs-container"><div class="empty-state">Sin conversaciones aún.</div></div>
+      <div class="card">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Conversaciones de WhatsApp</span>
+          <button onclick="cleanupConversations()" style="font-size:11px;padding:4px 10px;border:1px solid #e0e0d8;border-radius:6px;background:none;cursor:pointer;color:#888;">🧹 Limpiar +7 días</button>
+        </div>
+        <div id="convs-container"><div class="empty-state">Sin conversaciones aún.</div></div>
+      </div>
+    </div>
+
+    <!-- Panel: Sesiones (auditoría) -->
+    <div id="convs-panel-ses" style="display:none;">
+      <div class="metrics" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem;">
+        <div class="metric"><div class="metric-label">Sesiones</div><div class="metric-value" id="ses-total">—</div></div>
+        <div class="metric"><div class="metric-label">Por mesero</div><div class="metric-value" id="ses-waiter" style="color:#BA7517;">—</div><div style="font-size:11px;color:#BA7517;margin-top:4px;">Cierres forzados</div></div>
+        <div class="metric"><div class="metric-label">Por cliente</div><div class="metric-value" id="ses-client">—</div></div>
+        <div class="metric"><div class="metric-label">Por inactividad</div><div class="metric-value" id="ses-inactivity">—</div></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
+        <div style="font-size:13px;color:#888;">Mostrar últimas:</div>
+        <div style="display:flex;gap:4px;background:#fff;border:0.5px solid #e0e0d8;border-radius:8px;padding:3px;">
+          <button class="period-btn active" onclick="setSesionPeriod(24,this)">24h</button>
+          <button class="period-btn" onclick="setSesionPeriod(48,this)">48h</button>
+          <button class="period-btn" onclick="setSesionPeriod(168,this)">7 días</button>
+        </div>
+        <button onclick="loadSessions()" style="font-size:12px;padding:5px 12px;border:1px solid #e0e0d8;border-radius:8px;background:none;cursor:pointer;color:#555;">↻ Actualizar</button>
+      </div>
+      <div id="ses-alert-banner" class="ses-alert-banner">
+        <span style="font-size:1.2rem;">⚠️</span>
+        <div><div style="font-size:13px;font-weight:600;color:#7A4F00;">Hay sesiones cerradas manualmente por meseros</div><div style="font-size:12px;color:#8a6000;margin-top:2px;">Revisa la tabla y toma acción si es necesario.</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Registro de sesiones cerradas (Auditoría)</span>
+          <span id="ses-badge" style="font-size:11px;color:#888;"></span>
+        </div>
+        <div id="sessions-container"><div class="empty-state">Cargando sesiones...</div></div>
+      </div>
     </div>
   </div>
 
-  <!-- MENÚ -->
+  <!-- MENÚ + INVENTARIO (unificado) -->
   <div id="menu" class="section">
-    <div class="card"><div class="card-title">Platos del menú (Disponibilidad)</div><div id="menu-grid"></div></div>
-  </div>
+    <div class="segmented-control" style="margin-bottom:1rem;">
+      <button class="seg-btn active" onclick="switchMenuTab('disp',this)">🍽️ Disponibilidad</button>
+      <button id="nav-menu-inv" class="seg-btn" onclick="switchMenuTab('inv',this)">📦 Inventario</button>
+    </div>
 
-  <!-- POS -->
-  <div id="pos" class="section">
-    <div id="ai-main-insight" class="ai-insight">
-      <div class="ai-insight-header">
-        <span class="ai-spark">✦</span>
-        <span class="ai-insight-title">Mesio IA — Análisis del día</span>
-        <button onclick="loadPOSData(true)" style="margin-left:auto;background:rgba(29,158,117,0.2);border:1px solid rgba(29,158,117,0.4);color:#9FE1CB;font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;">↻ Actualizar</button>
+    <!-- Panel: Disponibilidad del menú -->
+    <div id="menu-panel-disp">
+      <div class="card"><div class="card-title">Platos del menú (Disponibilidad)</div><div id="menu-grid"></div></div>
+    </div>
+
+    <!-- Panel: Inventario -->
+    <div id="menu-panel-inv" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:18px;font-weight:600;">Inventario</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">Gestiona el stock y vincúlalo a platos del menú. Al llegar a 0 se desactivan automáticamente.</div>
+        </div>
+        <button onclick="openCreateInventoryModal()" style="background:#1D9E75;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Agregar producto</button>
       </div>
-      <div class="ai-insight-body" id="ai-main-text"><span class="ai-loading">Analizando métricas...</span></div>
-    </div>
-    <div class="pos-grid3">
-      <div class="pos-metric"><div class="pos-metric-label">Ticket promedio hoy</div><div class="pos-metric-value" id="pos-ticket">—</div><div class="pos-metric-trend trend-up" id="pos-ticket-trend"></div></div>
-      <div class="pos-metric"><div class="pos-metric-label">Hora pico hoy</div><div class="pos-metric-value" id="pos-hora-pico">—</div><div class="pos-metric-trend trend-flat">según pedidos</div></div>
-      <div class="pos-metric"><div class="pos-metric-label">Plato más pedido</div><div class="pos-metric-value" id="pos-top-plato" style="font-size:15px;">—</div><div class="pos-metric-trend trend-up" id="pos-top-sub"></div></div>
-    </div>
-    <div class="pos-grid">
-      <div class="card" style="margin-bottom:0;">
-        <div class="card-title">Predicción de demanda — próximas horas</div>
-        <div id="demand-bars"><div class="pos-metric-label" style="padding:1rem 0;text-align:center;">Generando predicción...</div></div>
-        <div class="ai-insight" style="margin-top:1rem;margin-bottom:0;">
-          <div class="ai-insight-header"><span class="ai-spark">✦</span><span class="ai-insight-title">Recomendación de inventario</span></div>
-          <div class="ai-insight-body" id="ai-stock-text"><span class="ai-loading">Analizando consumo...</span></div>
+      <div id="inventory-alerts-banner" style="display:none;background:#FFF8E6;border:1.5px solid #F0A500;border-radius:10px;padding:.85rem 1.1rem;margin-bottom:1rem;flex-wrap:wrap;gap:8px;align-items:center;">
+        <span style="font-size:1.1rem;">⚠️</span>
+        <div style="font-size:13px;font-weight:600;color:#7A4F00;margin-right:8px;">Productos con stock bajo o agotado:</div>
+        <div id="inventory-alerts-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <input id="inv-search" placeholder="Buscar producto..." oninput="filterInventory()" style="padding:8px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;max-width:320px;outline:none;">
+      </div>
+      <div class="card">
+        <div id="inventory-table-container"><div class="empty-state">Cargando inventario...</div></div>
+      </div>
+      <div style="margin-top:2rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
+          <div>
+            <div style="font-size:15px;font-weight:600;">Escandallos & Food Cost</div>
+            <div style="font-size:12px;color:#888;margin-top:2px;">Define qué ingredientes consume cada plato y calcula su costo de producción automáticamente.</div>
+          </div>
+          <button onclick="openRecipeModal()" style="background:#7B5EA7;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nuevo Escandallo</button>
+        </div>
+        <div class="card">
+          <div id="food-costs-container"><div class="empty-state">Cargando escandallos...</div></div>
         </div>
       </div>
-      <div class="card" style="margin-bottom:0;">
-        <div class="card-title">Sugerencias de venta inteligente (Upsell)</div>
-        <div id="upsell-container"><div class="pos-metric-label" style="padding:1rem 0;text-align:center;">Entrenando modelo...</div></div>
-      </div>
-    </div>
-    <div class="card"><div class="card-title">Pedidos por hora del día</div><div id="hora-dist"></div></div>
-    <div class="card">
-      <div class="card-title">✦ Pregúntale a Mesio IA</div>
-      <p style="font-size:13px;color:#666;margin-bottom:1rem;line-height:1.6;">Hazle cualquier pregunta sobre tu operación — tendencias, precios, personal, promociones.</p>
-      <div class="ask-ai-wrap">
-        <input class="ask-ai-input" id="ai-question" placeholder="Ej: ¿Qué días necesito más personal? ¿Qué promover este fin de semana?" />
-        <button class="ask-ai-btn" onclick="askMesioAI()">Preguntar a Mesio IA →</button>
-        <div class="ai-response" id="ai-response"></div>
-      </div>
     </div>
   </div>
 
-  <!-- MESAS -->
+
+  <!-- SALÓN: MESAS + POS (unificado) -->
   <div id="mesas" class="section">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
-      <div>
-        <div style="font-size:16px;font-weight:600;">Mesas del restaurante</div>
-        <div style="font-size:12px;color:#888;margin-top:2px;">Genera QR por mesa para pedidos híbridos desde WhatsApp</div>
+    <div class="segmented-control" style="margin-bottom:1rem;">
+      <button class="seg-btn active" onclick="switchMesasTab('mesas',this)">🪑 Mesas & QR</button>
+      <button id="nav-mesas-pos" class="seg-btn" onclick="switchMesasTab('pos',this)">🤖 POS con IA</button>
+    </div>
+
+    <!-- Panel: Mesas & QR -->
+    <div id="mesas-panel-mesas">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:16px;font-weight:600;">Mesas del restaurante</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">Genera QR por mesa para pedidos híbridos desde WhatsApp</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="new-table-num" type="number" min="1" max="99" placeholder="Nº mesa" style="width:90px;padding:7px 10px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <input id="new-table-name" type="text" placeholder="Nombre (opcional)" style="width:160px;padding:7px 10px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <button onclick="createTable()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Agregar mesa</button>
+        </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <input id="new-table-num" type="number" min="1" max="99" placeholder="Nº mesa" style="width:90px;padding:7px 10px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-        <input id="new-table-name" type="text" placeholder="Nombre (opcional)" style="width:160px;padding:7px 10px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-        <button onclick="createTable()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Agregar mesa</button>
+      <div class="card" style="margin-bottom:1rem;">
+        <div class="card-title">Panel de cocina en tiempo real</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:13px;color:#555;">Abre el dashboard de cocina en una tablet para ver pedidos de los meseros y la IA.</div>
+          <a href="/cocina" target="_blank" style="white-space:nowrap;background:#1D9E75;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;text-decoration:none;font-weight:500;">Abrir Cocina (KDS) →</a>
+        </div>
+      </div>
+      <div id="tables-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
+        <div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;">Cargando mesas...</div>
       </div>
     </div>
-    <div class="card" style="margin-bottom:1rem;">
-      <div class="card-title">Panel de cocina en tiempo real</div>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div style="font-size:13px;color:#555;">Abre el dashboard de cocina en una tablet para ver pedidos de los meseros y la IA.</div>
-        <a href="/cocina" target="_blank" style="white-space:nowrap;background:#1D9E75;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;text-decoration:none;font-weight:500;">Abrir Cocina (KDS) →</a>
+
+    <!-- Panel: POS con IA -->
+    <div id="mesas-panel-pos" style="display:none;">
+      <div id="ai-main-insight" class="ai-insight">
+        <div class="ai-insight-header">
+          <span class="ai-spark">✦</span>
+          <span class="ai-insight-title">Mesio IA — Análisis del día</span>
+          <button onclick="loadPOSData(true)" style="margin-left:auto;background:rgba(29,158,117,0.2);border:1px solid rgba(29,158,117,0.4);color:#9FE1CB;font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;">↻ Actualizar</button>
+        </div>
+        <div class="ai-insight-body" id="ai-main-text"><span class="ai-loading">Analizando métricas...</span></div>
       </div>
-    </div>
-    <div id="tables-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
-      <div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;">Cargando mesas...</div>
+      <div class="pos-grid3">
+        <div class="pos-metric"><div class="pos-metric-label">Ticket promedio hoy</div><div class="pos-metric-value" id="pos-ticket">—</div><div class="pos-metric-trend trend-up" id="pos-ticket-trend"></div></div>
+        <div class="pos-metric"><div class="pos-metric-label">Hora pico hoy</div><div class="pos-metric-value" id="pos-hora-pico">—</div><div class="pos-metric-trend trend-flat">según pedidos</div></div>
+        <div class="pos-metric"><div class="pos-metric-label">Plato más pedido</div><div class="pos-metric-value" id="pos-top-plato" style="font-size:15px;">—</div><div class="pos-metric-trend trend-up" id="pos-top-sub"></div></div>
+      </div>
+      <div class="pos-grid">
+        <div class="card" style="margin-bottom:0;">
+          <div class="card-title">Predicción de demanda — próximas horas</div>
+          <div id="demand-bars"><div class="pos-metric-label" style="padding:1rem 0;text-align:center;">Generando predicción...</div></div>
+          <div class="ai-insight" style="margin-top:1rem;margin-bottom:0;">
+            <div class="ai-insight-header"><span class="ai-spark">✦</span><span class="ai-insight-title">Recomendación de inventario</span></div>
+            <div class="ai-insight-body" id="ai-stock-text"><span class="ai-loading">Analizando consumo...</span></div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0;">
+          <div class="card-title">Sugerencias de venta inteligente (Upsell)</div>
+          <div id="upsell-container"><div class="pos-metric-label" style="padding:1rem 0;text-align:center;">Entrenando modelo...</div></div>
+        </div>
+      </div>
+      <div class="card"><div class="card-title">Pedidos por hora del día</div><div id="hora-dist"></div></div>
+      <div class="card">
+        <div class="card-title">✦ Pregúntale a Mesio IA</div>
+        <p style="font-size:13px;color:#666;margin-bottom:1rem;line-height:1.6;">Hazle cualquier pregunta sobre tu operación — tendencias, precios, personal, promociones.</p>
+        <div class="ask-ai-wrap">
+          <input class="ask-ai-input" id="ai-question" placeholder="Ej: ¿Qué días necesito más personal? ¿Qué promover este fin de semana?" />
+          <button class="ask-ai-btn" onclick="askMesioAI()">Preguntar a Mesio IA →</button>
+          <div class="ai-response" id="ai-response"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -323,35 +416,6 @@
     </div>
   </div>
 
-  <!-- SESIONES -->
-  <div id="sesiones" class="section">
-    <div class="metrics" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem;">
-      <div class="metric"><div class="metric-label">Sesiones</div><div class="metric-value" id="ses-total">—</div></div>
-      <div class="metric"><div class="metric-label">Por mesero</div><div class="metric-value" id="ses-waiter" style="color:#BA7517;">—</div><div style="font-size:11px;color:#BA7517;margin-top:4px;">Cierres forzados</div></div>
-      <div class="metric"><div class="metric-label">Por cliente</div><div class="metric-value" id="ses-client">—</div></div>
-      <div class="metric"><div class="metric-label">Por inactividad</div><div class="metric-value" id="ses-inactivity">—</div></div>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
-      <div style="font-size:13px;color:#888;">Mostrar últimas:</div>
-      <div style="display:flex;gap:4px;background:#fff;border:0.5px solid #e0e0d8;border-radius:8px;padding:3px;">
-        <button class="period-btn active" onclick="setSesionPeriod(24,this)">24h</button>
-        <button class="period-btn" onclick="setSesionPeriod(48,this)">48h</button>
-        <button class="period-btn" onclick="setSesionPeriod(168,this)">7 días</button>
-      </div>
-      <button onclick="loadSessions()" style="font-size:12px;padding:5px 12px;border:1px solid #e0e0d8;border-radius:8px;background:none;cursor:pointer;color:#555;">↻ Actualizar</button>
-    </div>
-    <div id="ses-alert-banner" class="ses-alert-banner">
-      <span style="font-size:1.2rem;">⚠️</span>
-      <div><div style="font-size:13px;font-weight:600;color:#7A4F00;">Hay sesiones cerradas manualmente por meseros</div><div style="font-size:12px;color:#8a6000;margin-top:2px;">Revisa la tabla y toma acción si es necesario.</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Registro de sesiones cerradas (Auditoría)</span>
-        <span id="ses-badge" style="font-size:11px;color:#888;"></span>
-      </div>
-      <div id="sessions-container"><div class="empty-state">Cargando sesiones...</div></div>
-    </div>
-  </div>
 
   <!-- NPS -->
   <div id="nps" class="section">
@@ -394,41 +458,6 @@
     </div>
   </div>
 
-  <!-- INVENTARIO -->
-  <div id="inventario" class="section">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
-      <div>
-        <div style="font-size:18px;font-weight:600;">Inventario</div>
-        <div style="font-size:12px;color:#888;margin-top:2px;">Gestiona el stock y vincúlalo a platos del menú. Al llegar a 0 se desactivan automáticamente.</div>
-      </div>
-      <button onclick="openCreateInventoryModal()" style="background:#1D9E75;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Agregar producto</button>
-    </div>
-    <div id="inventory-alerts-banner" style="display:none;background:#FFF8E6;border:1.5px solid #F0A500;border-radius:10px;padding:.85rem 1.1rem;margin-bottom:1rem;flex-wrap:wrap;gap:8px;align-items:center;">
-      <span style="font-size:1.1rem;">⚠️</span>
-      <div style="font-size:13px;font-weight:600;color:#7A4F00;margin-right:8px;">Productos con stock bajo o agotado:</div>
-      <div id="inventory-alerts-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
-    </div>
-    <div style="margin-bottom:1rem;">
-      <input id="inv-search" placeholder="Buscar producto..." oninput="filterInventory()" style="padding:8px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;width:100%;max-width:320px;outline:none;">
-    </div>
-    <div class="card">
-      <div id="inventory-table-container"><div class="empty-state">Cargando inventario...</div></div>
-    </div>
-
-    <!-- ESCANDALLOS / FOOD COST -->
-    <div style="margin-top:2rem;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:10px;">
-        <div>
-          <div style="font-size:15px;font-weight:600;">Escandallos & Food Cost</div>
-          <div style="font-size:12px;color:#888;margin-top:2px;">Define qué ingredientes consume cada plato y calcula su costo de producción automáticamente.</div>
-        </div>
-        <button onclick="openRecipeModal()" style="background:#7B5EA7;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nuevo Escandallo</button>
-      </div>
-      <div class="card">
-        <div id="food-costs-container"><div class="empty-state">Cargando escandallos...</div></div>
-      </div>
-    </div>
-  </div>
 
   <!-- STAFF & PROPINAS (Phase 6 — requires staff_tips module) -->
   <div id="staff" class="section" style="display:none;">
