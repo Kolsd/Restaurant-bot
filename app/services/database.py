@@ -174,6 +174,10 @@ async def _legacy_init_db_ddl():
                 phone TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT NOW()
             );
+            CREATE TABLE IF NOT EXISTS processed_wam_ids (
+                wam_id TEXT PRIMARY KEY,
+                received_at TIMESTAMPTZ DEFAULT NOW()
+            );
         """)
         
         migrations = [
@@ -2986,3 +2990,32 @@ async def db_get_phone_for_base_order(base_order_id: str) -> str | None:
             base_order_id,
         )
     return phone
+
+
+async def db_is_duplicate_wam(wam_id: str) -> bool:
+    """
+    Deduplicación idempotente por WAM_ID (WhatsApp Message ID).
+
+    Lógica:
+    - Borra entradas con más de 2 minutos (ventana de reintentos de Meta).
+    - Intenta insertar el wam_id con INSERT ... ON CONFLICT DO NOTHING.
+    - Si el INSERT no devuelve filas → el ID ya existía → duplicado (True).
+    - Si el INSERT devuelve el wam_id → era nuevo → procesar (False).
+
+    Al usar la PK como única constraint, el INSERT es atómico y safe
+    bajo concurrencia multi-worker sin necesidad de locks adicionales.
+    """
+    if not wam_id:
+        return False
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM processed_wam_ids WHERE received_at < NOW() - INTERVAL '2 minutes'"
+        )
+        result = await conn.fetchval(
+            "INSERT INTO processed_wam_ids (wam_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING wam_id",
+            wam_id,
+        )
+        # result is None  → row already existed → duplicate
+        # result is wam_id → freshly inserted   → new message
+        return result is None
