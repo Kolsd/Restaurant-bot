@@ -32,36 +32,63 @@ _matias_token_cache: dict = {"token": None, "expires_at": 0.0}
 
 async def _get_matias_token() -> str:
     """
-    Obtiene (o reutiliza) el Bearer token para MATIAS API (LopezSoft).
-    Cachea el token 23 h para no re-autenticar en cada factura.
-    Variables de entorno: MATIAS_API_USER, MATIAS_API_PASS, MATIAS_AUTH_URL.
+    Devuelve el Bearer token para MATIAS API.
+    Si MATIAS_API_TOKEN está definida la retorna directamente (sin ningún HTTP).
+    En caso contrario realiza login dinámico y cachea el resultado 23 h.
     """
+    # Token estático del panel — retorno inmediato, cero red
+    static = os.getenv("MATIAS_API_TOKEN", "").strip()
+    if static:
+        return static
+
     cache = _matias_token_cache
     if cache["token"] and time.time() < cache["expires_at"]:
         return cache["token"]
 
+    email    = os.getenv("MATIAS_API_USER", "").strip()
+    password = os.getenv("MATIAS_API_PASS", "").strip()
     auth_url = os.getenv(
-        "MATIAS_AUTH_URL", "https://auth-v2.matias-api.com/api/login"
+        "MATIAS_AUTH_URL", "https://api-v2.matias-api.com/api/ubl2.1/login"
     )
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            auth_url,
-            json={
-                "user":     os.getenv("MATIAS_API_USER", ""),
-                "password": os.getenv("MATIAS_API_PASS", ""),
-            },
-            headers={"Content-Type": "application/json"},
+
+    if not email or not password:
+        raise RuntimeError(
+            "MATIAS AUTH: define MATIAS_API_USER y MATIAS_API_PASS en el entorno."
         )
-        resp.raise_for_status()
+
+    req_headers = {
+        "Content-Type": "application/json",
+        "Accept":       "application/json",
+        "User-Agent":   "MesioBot/1.0",
+    }
+    req_body = {"email": email, "password": password}
+
+    print(f"[MATIAS AUTH] POST {auth_url}  headers={list(req_headers.keys())}")
+
+    async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+        resp = await client.post(auth_url, json=req_body, headers=req_headers)
+
+        if resp.status_code not in (200, 201):
+            print(
+                f"[MATIAS AUTH] HTTP {resp.status_code}  url={auth_url}\n"
+                f"  Location : {resp.headers.get('location', '(sin Location)')}\n"
+                f"  Body     : {resp.text[:600]}"
+            )
+            resp.raise_for_status()
+
         data = resp.json()
 
     token = (
-        data.get("token")
-        or data.get("access_token")
+        data.get("access_token")
+        or data.get("token")
+        or (data.get("data") or {}).get("access_token", "")
         or (data.get("data") or {}).get("token", "")
     )
     if not token:
-        raise RuntimeError("MATIAS API: no se recibió token de autenticación")
+        raise RuntimeError(
+            f"MATIAS AUTH: token no encontrado en respuesta. "
+            f"Campos disponibles: {list(data.keys())}"
+        )
 
     cache["token"]      = token
     cache["expires_at"] = time.time() + 82_800  # 23 horas
@@ -821,15 +848,15 @@ class MesioNativeAdapter(BillingAdapter):
             line_sub = price * qty
             line_tax = round(line_sub * tax_pct / 100, 2)
             invoice_lines.append({
-                "unit_measure_id":             70,   # unidad
-                "invoiced_quantity":           qty,
-                "line_extension_amount":       round(line_sub, 2),
-                "free_of_charge_indicator":    False,
-                "description":                 item.get("name", ""),
-                "code":                        str(item.get("id", idx)),
-                "type_item_identification_id": 4,
-                "price_amount":                round(price, 2),
-                "base_quantity":               1,
+                "quantity_units_id":            70,  # 70 = Unidad
+                "type_item_identifications_id": 4,   # 4  = Estándar de industria
+                "invoiced_quantity":            qty,
+                "line_extension_amount":        round(line_sub, 2),
+                "free_of_charge_indicator":     False,
+                "description":                  item.get("name", ""),
+                "code":                         str(item.get("id", idx)),
+                "price_amount":                 round(price, 2),
+                "base_quantity":                1,
                 "tax_totals": [] if tax_pct == 0 else [{
                     "tax_id":        tax_id,
                     "tax_amount":    line_tax,
@@ -848,26 +875,31 @@ class MesioNativeAdapter(BillingAdapter):
                 "taxable_amount": round(subtotal, 2),
             })
 
-        # ── Método de pago DIAN ───────────────────────────────────────
-        pm_map = {"cash": 10, "card": 48, "transfer": 42}
-        payment_method_id = pm_map.get(order.get("payment_method", "cash"), 10)
+        # ── Medios de pago DIAN ───────────────────────────────────────
+        # payment_method_id : forma de pago  (1=Contado, 2=Crédito)
+        # means_payment_id  : medio de pago  (10=Efectivo, 48=Tarjeta, 42=Transferencia)
+        means_map = {"cash": 10, "card": 48, "transfer": 42}
+        means_payment_id = means_map.get(order.get("payment_method", "cash"), 10)
 
         return {
-            "type_document_id":  1,       # FV — Factura de Venta electrónica
-            "prefix":            prefix,
-            "number":            inv_number,
-            "date":              issue_date,
-            "time":              issue_time + "-05:00",
-            "resolution_number": str(os.getenv(
+            "type_document_id":    int(7),  # 7 = Factura electrónica de venta (catálogo MATIAS)
+            "operation_type_id":   int(1),  # 1 = Operación estándar
+            "graphic_representation": int(1),
+            "send_email":          int(1),
+            "prefix":              prefix,
+            "document_number":     inv_number,
+            "date":                issue_date,
+            "time":                issue_time[:8],  # HH:mm:ss sin offset
+            "resolution_number":   str(os.getenv(
                 "DIAN_RESOLUTION", resolution.get("resolution_number", "")
             )),
-            "technical_key":     resolution.get("technical_key", ""),
-            "notes":             order.get("notes", ""),
-            "type_currency_id":  35,      # COP
+            "technical_key":       resolution.get("technical_key", ""),
+            "notes":               order.get("notes", ""),
+            "type_currency_id":    35,      # COP
             "customer": {
-                "identification_number":           customer["nit"],
+                "dni":                             customer["nit"],
                 "dv":                              "0",
-                "name":                            customer["name"],
+                "company_name":                    customer["name"],
                 "phone":                           customer.get("phone", ""),
                 "address":                         "CR 00",
                 "email":                           customer.get("email", "cf@email.com"),
@@ -878,10 +910,17 @@ class MesioNativeAdapter(BillingAdapter):
                 "municipality_id":                 820, # Bogotá
             },
             "payment_form": {
-                "payment_form_id":   1,              # Contado
-                "payment_method_id": payment_method_id,
+                "payment_form_id":   1,              # 1 = Contado
+                "payment_method_id": means_payment_id,
             },
-            "invoice_lines":  invoice_lines,
+            "payments": [{
+                "payment_id":        1,
+                "payment_method_id": 1,              # 1 = Contado
+                "means_payment_id":  means_payment_id,
+                "payment_due_date":  issue_date,     # Contado → misma fecha de emisión
+                "value_paid":        round(total, 2),
+            }],
+            "lines":          invoice_lines,
             "tax_totals":     tax_totals,
             "legal_monetary_totals": {
                 "line_extension_amount":  round(subtotal, 2),
@@ -916,7 +955,8 @@ class MesioNativeAdapter(BillingAdapter):
         prefix        = str(os.getenv("DIAN_PREFIX", resolution.get("prefix", "")))
 
         inv_number = await db.db_get_next_invoice_number(
-            restaurant_id, prefix, start_at=5200
+            restaurant_id, prefix,
+            start_at=int(os.getenv("SANDBOX_INVOICE_START", "5200")),
         )
         full_num = f"{prefix}{inv_number}"
 
@@ -934,7 +974,10 @@ class MesioNativeAdapter(BillingAdapter):
         tax_cents      = round(total_raw * 100) - subtotal_cents
         total_cents    = subtotal_cents + tax_cents
 
-        now        = datetime.utcnow()
+        # DIAN exige hora/fecha en zona Colombia (UTC-5), no en UTC
+        from datetime import timezone, timedelta
+        _co_tz  = timezone(timedelta(hours=-5))
+        now        = datetime.now(_co_tz)
         issue_date = now.strftime("%Y-%m-%d")
         issue_time = now.strftime("%H:%M:%S")
 
@@ -993,27 +1036,59 @@ class MesioNativeAdapter(BillingAdapter):
 
         # Llamar a MATIAS API
         bearer_token = await _get_matias_token()
-        api_base     = os.getenv("MATIAS_API_URL", "https://api-v2.matias-api.com/api/ubl2.1")
-        endpoint     = f"{api_base}/invoice"
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                endpoint,
-                json=ubl_payload,
-                headers={
-                    "Authorization": f"Bearer {bearer_token}",
-                    "Content-Type":  "application/json",
-                },
-            )
-            resp.raise_for_status()
+        # MATIAS_API_URL debe apuntar a la base sin /invoice
+        # Ej: https://api-v2.matias-api.com/api/ubl2.1
+        api_base = os.getenv(
+            "MATIAS_API_URL", "https://api-v2.matias-api.com/api/ubl2.1"
+        ).rstrip("/")
+        endpoint = f"{api_base}/invoice"
+
+        req_headers = {
+            "Authorization": f"Bearer {bearer_token}",
+            "Content-Type":  "application/json",
+            "Accept":        "application/json",
+        }
+
+        # DEBUG — muestra exactamente lo que se envía a MATIAS
+        print(
+            f"[MATIAS INVOICE] POST {endpoint}\n"
+            f"  Authorization : Bearer {bearer_token[:16]}...\n"
+            f"  Accept        : {req_headers['Accept']}\n"
+            f"  Content-Type  : {req_headers['Content-Type']}"
+        )
+        print("[MATIAS INVOICE] Payload UBL 2.1:")
+        print(json.dumps(ubl_payload, indent=2, ensure_ascii=False))
+
+        async with httpx.AsyncClient(
+            timeout=30,
+            follow_redirects=False,   # 302 debe ser error visible, no seguido silenciosamente
+        ) as client:
+            resp = await client.post(endpoint, json=ubl_payload, headers=req_headers)
+
+            # Mostrar respuesta completa si no es 2xx
+            if resp.status_code not in (200, 201):
+                print(
+                    f"[MATIAS INVOICE] HTTP {resp.status_code}\n"
+                    f"  Location : {resp.headers.get('location', '(sin Location)')}\n"
+                    f"  Body     : {resp.text[:800]}"
+                )
+                resp.raise_for_status()
+
             matias_response = resp.json()
 
-        # Extraer los 3 campos DIAN de la respuesta MATIAS
-        # MATIAS v2 puede responder con data anidada o campos a nivel raíz
-        data    = matias_response.get("data") or matias_response
-        cufe    = data.get("cufe") or data.get("CUFE") or data.get("cude", "")
-        pdf_url = data.get("pdf_base64") or data.get("pdf") or data.get("PDF", "")
-        qr_data = data.get("QRStr") or data.get("qr") or data.get("qr_string", "")
+        # Extraer los 3 campos DIAN de la respuesta MATIAS v2
+        resp_data = matias_response.get("data") or {}
+        cufe    = resp_data.get("XmlDocumentKey", "")
+        qr_data = resp_data.get("qrDian", "")
+        pdf_url = resp_data.get("url_invoice_pdf", "")
+
+        print(
+            f"[MATIAS INVOICE] Respuesta exitosa:\n"
+            f"  CUFE    : {cufe}\n"
+            f"  QR      : {qr_data[:80]}{'...' if len(qr_data) > 80 else ''}\n"
+            f"  PDF URL : {pdf_url}"
+        )
 
         # Actualizar fila con los datos definitivos
         await db.db_update_invoice_dian_data(
