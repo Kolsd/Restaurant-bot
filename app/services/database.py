@@ -3,6 +3,26 @@ import asyncpg
 import json
 from datetime import date, datetime, timedelta
 
+
+# ══════════════════════════════════════════════════════════════════════
+# EXCEPCIONES DE NEGOCIO
+# ══════════════════════════════════════════════════════════════════════
+
+class UsageLimitExceeded(Exception):
+    """
+    Se lanza cuando un restaurante supera su límite diario de tokens o facturas.
+    Los límites se configuran en restaurants.features.plan_limits:
+      { "daily_tokens": 100000, "daily_invoices": 50 }
+    """
+    def __init__(self, resource: str, used: int, limit: int):
+        self.resource = resource
+        self.used     = used
+        self.limit    = limit
+        super().__init__(
+            f"Límite diario de {resource} alcanzado: {used:,}/{limit:,}. "
+            "Actualiza tu plan para continuar."
+        )
+
 _pool = None
 
 SESSION_TTL_HOURS = 72  # V-06: tokens expiran en 72 horas
@@ -2020,6 +2040,110 @@ async def db_update_invoice_dian_data(
 
 
 # ══════════════════════════════════════════════════════════════════════
+# SUBSCRIPTION USAGE — consumo diario de tokens y facturas
+# ══════════════════════════════════════════════════════════════════════
+
+_usage_table_ensured = False
+
+async def _ensure_usage_table() -> None:
+    """Crea subscription_usage si no existe (DDL idempotente, ejecuta una vez por proceso)."""
+    global _usage_table_ensured
+    if _usage_table_ensured:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS subscription_usage (
+                id             BIGSERIAL   PRIMARY KEY,
+                restaurant_id  INTEGER     NOT NULL,
+                usage_date     DATE        NOT NULL DEFAULT CURRENT_DATE,
+                total_tokens   INTEGER     NOT NULL DEFAULT 0,
+                total_invoices INTEGER     NOT NULL DEFAULT 0,
+                updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (restaurant_id, usage_date)
+            )
+        """)
+    _usage_table_ensured = True
+
+
+async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
+    """Suma `tokens` al contador diario del restaurante (upsert atómico)."""
+    if tokens <= 0:
+        return
+    await _ensure_usage_table()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens)
+               VALUES ($1, CURRENT_DATE, $2)
+               ON CONFLICT (restaurant_id, usage_date) DO UPDATE
+               SET total_tokens = subscription_usage.total_tokens + $2,
+                   updated_at   = NOW()""",
+            restaurant_id, tokens,
+        )
+
+
+async def db_increment_invoice_usage(restaurant_id: int) -> None:
+    """Incrementa en 1 el contador de facturas diarias del restaurante (upsert atómico)."""
+    await _ensure_usage_table()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO subscription_usage (restaurant_id, usage_date, total_invoices)
+               VALUES ($1, CURRENT_DATE, 1)
+               ON CONFLICT (restaurant_id, usage_date) DO UPDATE
+               SET total_invoices = subscription_usage.total_invoices + 1,
+                   updated_at     = NOW()""",
+            restaurant_id,
+        )
+
+
+async def db_check_usage_limits(restaurant_id: int) -> None:
+    """
+    Verifica que el restaurante no haya superado sus límites diarios.
+    Lee restaurants.features.plan_limits → { daily_tokens, daily_invoices }.
+    Si plan_limits está ausente, no se aplica ningún límite.
+    Lanza UsageLimitExceeded si se superó algún límite.
+    """
+    await _ensure_usage_table()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Leer límites del plan desde features
+        row = await conn.fetchrow(
+            "SELECT features FROM restaurants WHERE id = $1", restaurant_id
+        )
+        if not row:
+            return
+        feats = row["features"] or {}
+        if isinstance(feats, str):
+            try:
+                feats = json.loads(feats)
+            except Exception:
+                feats = {}
+        limits = feats.get("plan_limits") if isinstance(feats, dict) else None
+        if not limits:
+            return  # sin límites configurados → acceso libre
+
+        # Leer consumo del día actual
+        usage = await conn.fetchrow(
+            """SELECT total_tokens, total_invoices
+               FROM subscription_usage
+               WHERE restaurant_id = $1 AND usage_date = CURRENT_DATE""",
+            restaurant_id,
+        )
+        used_tokens   = usage["total_tokens"]   if usage else 0
+        used_invoices = usage["total_invoices"] if usage else 0
+
+        token_limit   = limits.get("daily_tokens")
+        invoice_limit = limits.get("daily_invoices")
+
+        if token_limit and used_tokens >= int(token_limit):
+            raise UsageLimitExceeded("tokens", used_tokens, int(token_limit))
+        if invoice_limit and used_invoices >= int(invoice_limit):
+            raise UsageLimitExceeded("facturas", used_invoices, int(invoice_limit))
+
+
+# ══════════════════════════════════════════════════════════════════════
 # SPLIT CHECKS / PAGOS MIXTOS (FASE 5)
 # ══════════════════════════════════════════════════════════════════════
 
@@ -2568,3 +2692,297 @@ async def db_get_tip_distributions(restaurant_id: int, limit: int = 20) -> list:
             restaurant_id, limit,
         )
     return [_serialize(dict(r)) for r in rows]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# LOYALTY — Modelo Ledger
+# ══════════════════════════════════════════════════════════════════════
+#
+# Modelo de dos tablas:
+#   loyalty_customers  — balance actual exacto por (restaurant_id, phone). O(1) reads.
+#   loyalty_ledger     — registro inmutable de cada movimiento (+acumulación / -canje).
+#
+# Config por restaurante (restaurants.features JSONB):
+#   "loyalty_points_per_1k"  : puntos ganados por cada $1,000 COP pagados (default: 1)
+#   "loyalty_point_value_cop": valor en COP de cada punto al canjear        (default: 10)
+# ══════════════════════════════════════════════════════════════════════
+
+_loyalty_tables_ensured = False
+
+
+async def _ensure_loyalty_tables() -> None:
+    global _loyalty_tables_ensured
+    if _loyalty_tables_ensured:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS loyalty_customers (
+                id             SERIAL PRIMARY KEY,
+                restaurant_id  INTEGER NOT NULL,
+                phone          TEXT    NOT NULL,
+                points_balance INTEGER NOT NULL DEFAULT 0,
+                total_earned   INTEGER NOT NULL DEFAULT 0,
+                total_redeemed INTEGER NOT NULL DEFAULT 0,
+                created_at     TIMESTAMP DEFAULT NOW(),
+                updated_at     TIMESTAMP DEFAULT NOW(),
+                UNIQUE (restaurant_id, phone)
+            );
+            CREATE TABLE IF NOT EXISTS loyalty_ledger (
+                id            BIGSERIAL PRIMARY KEY,
+                restaurant_id INTEGER NOT NULL,
+                phone         TEXT    NOT NULL,
+                delta         INTEGER NOT NULL,
+                reason        TEXT    NOT NULL DEFAULT 'purchase',
+                order_id      TEXT,
+                created_at    TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        for idx in [
+            "CREATE INDEX IF NOT EXISTS idx_loyalty_cust_lookup   ON loyalty_customers (restaurant_id, phone)",
+            "CREATE INDEX IF NOT EXISTS idx_loyalty_ledger_lookup  ON loyalty_ledger    (restaurant_id, phone, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_loyalty_ledger_order   ON loyalty_ledger    (order_id) WHERE order_id IS NOT NULL",
+        ]:
+            try:
+                await conn.execute(idx)
+            except Exception:
+                pass
+    _loyalty_tables_ensured = True
+
+
+async def _loyalty_cfg(conn, restaurant_id: int) -> dict:
+    """
+    Lee loyalty_points_per_1k y loyalty_point_value_cop de restaurants.features.
+    Devuelve defaults seguros si no están configurados.
+    """
+    row = await conn.fetchrow(
+        "SELECT features FROM restaurants WHERE id=$1", restaurant_id
+    )
+    feats = (row["features"] or {}) if row else {}
+    if isinstance(feats, str):
+        try:
+            feats = json.loads(feats)
+        except Exception:
+            feats = {}
+    return {
+        "points_per_1k":   max(1, int(feats.get("loyalty_points_per_1k", 1))),
+        "point_value_cop": max(1, int(feats.get("loyalty_point_value_cop", 10))),
+    }
+
+
+async def db_get_loyalty_balance(restaurant_id: int, phone: str) -> dict | None:
+    """
+    Consulta O(1) del saldo. El bot la consume como herramienta ultra-ligera.
+    Retorna {"puntos_actuales": N, "equivalencia_cop": N*point_value} o None si
+    el cliente no tiene registro de fidelización.
+    """
+    await _ensure_loyalty_tables()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT points_balance FROM loyalty_customers WHERE restaurant_id=$1 AND phone=$2",
+            restaurant_id, _normalize_phone(phone),
+        )
+        if not row:
+            return None
+        cfg = await _loyalty_cfg(conn, restaurant_id)
+        pts = row["points_balance"]
+    return {"puntos_actuales": pts, "equivalencia_cop": pts * cfg["point_value_cop"]}
+
+
+async def db_accrue_loyalty_points(
+    restaurant_id: int,
+    phone: str,
+    order_id: str,
+    total_cop: float,
+) -> int:
+    """
+    Calcula y acumula puntos por una compra pagada. Idempotente: si ya existe
+    una entrada positiva en el ledger para este order_id, no duplica.
+    Retorna los puntos acumulados (0 si ya estaba procesado).
+    """
+    await _ensure_loyalty_tables()
+    clean_phone = _normalize_phone(phone)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        cfg = await _loyalty_cfg(conn, restaurant_id)
+        points = max(1, int(total_cop / 1000) * cfg["points_per_1k"])
+        # Idempotencia: verificar si ya se procesó este order_id
+        existing = await conn.fetchval(
+            "SELECT id FROM loyalty_ledger WHERE restaurant_id=$1 AND order_id=$2 AND delta > 0 LIMIT 1",
+            restaurant_id, order_id,
+        )
+        if existing:
+            return 0
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO loyalty_ledger (restaurant_id, phone, delta, reason, order_id)
+                   VALUES ($1, $2, $3, 'purchase', $4)""",
+                restaurant_id, clean_phone, points, order_id,
+            )
+            await conn.execute(
+                """INSERT INTO loyalty_customers (restaurant_id, phone, points_balance, total_earned)
+                   VALUES ($1, $2, $3, $3)
+                   ON CONFLICT (restaurant_id, phone) DO UPDATE
+                   SET points_balance = loyalty_customers.points_balance + $3,
+                       total_earned   = loyalty_customers.total_earned   + $3,
+                       updated_at     = NOW()""",
+                restaurant_id, clean_phone, points,
+            )
+    return points
+
+
+async def db_redeem_loyalty_points(
+    restaurant_id: int,
+    phone: str,
+    points: int,
+    order_id: str,
+) -> dict:
+    """
+    Canjea puntos contra una compra. Bloquea la fila con FOR UPDATE para
+    evitar race conditions en entornos multi-worker.
+    Retorna {"redeemed": N, "cop_discount": N*point_value, "new_balance": M}.
+    Lanza ValueError si el saldo es insuficiente.
+    """
+    await _ensure_loyalty_tables()
+    if points <= 0:
+        raise ValueError("Los puntos a canjear deben ser positivos")
+    clean_phone = _normalize_phone(phone)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT points_balance FROM loyalty_customers "
+                "WHERE restaurant_id=$1 AND phone=$2 FOR UPDATE",
+                restaurant_id, clean_phone,
+            )
+            current = row["points_balance"] if row else 0
+            if current < points:
+                raise ValueError(
+                    f"Saldo insuficiente: {current} puntos disponibles, "
+                    f"se intentaron canjear {points}"
+                )
+            await conn.execute(
+                """INSERT INTO loyalty_ledger (restaurant_id, phone, delta, reason, order_id)
+                   VALUES ($1, $2, $3, 'redeem', $4)""",
+                restaurant_id, clean_phone, -points, order_id,
+            )
+            new_balance = await conn.fetchval(
+                """UPDATE loyalty_customers
+                   SET points_balance = points_balance  - $3,
+                       total_redeemed = total_redeemed  + $3,
+                       updated_at     = NOW()
+                   WHERE restaurant_id=$1 AND phone=$2
+                   RETURNING points_balance""",
+                restaurant_id, clean_phone, points,
+            )
+            cfg = await _loyalty_cfg(conn, restaurant_id)
+    return {
+        "redeemed":     points,
+        "cop_discount": points * cfg["point_value_cop"],
+        "new_balance":  new_balance,
+    }
+
+
+async def db_adjust_loyalty_points(
+    restaurant_id: int,
+    phone: str,
+    delta: int,
+    reason: str,
+) -> dict:
+    """
+    Ajuste manual (admin). delta puede ser positivo o negativo.
+    No permite dejar el saldo en negativo.
+    """
+    await _ensure_loyalty_tables()
+    clean_phone = _normalize_phone(phone)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if delta < 0:
+                row = await conn.fetchrow(
+                    "SELECT points_balance FROM loyalty_customers "
+                    "WHERE restaurant_id=$1 AND phone=$2 FOR UPDATE",
+                    restaurant_id, clean_phone,
+                )
+                current = row["points_balance"] if row else 0
+                if current + delta < 0:
+                    raise ValueError(
+                        f"El ajuste dejaría el saldo negativo "
+                        f"({current} + {delta} = {current + delta})"
+                    )
+            await conn.execute(
+                """INSERT INTO loyalty_ledger (restaurant_id, phone, delta, reason)
+                   VALUES ($1, $2, $3, $4)""",
+                restaurant_id, clean_phone, delta, reason[:100],
+            )
+            new_balance = await conn.fetchval(
+                """INSERT INTO loyalty_customers
+                       (restaurant_id, phone, points_balance, total_earned, total_redeemed)
+                   VALUES ($1, $2, GREATEST(0, $3), GREATEST(0, $3), 0)
+                   ON CONFLICT (restaurant_id, phone) DO UPDATE
+                   SET points_balance = GREATEST(0, loyalty_customers.points_balance + $3),
+                       total_earned   = CASE WHEN $3 > 0
+                                        THEN loyalty_customers.total_earned + $3
+                                        ELSE loyalty_customers.total_earned END,
+                       total_redeemed = CASE WHEN $3 < 0
+                                        THEN loyalty_customers.total_redeemed + (-$3)
+                                        ELSE loyalty_customers.total_redeemed END,
+                       updated_at     = NOW()
+                   RETURNING points_balance""",
+                restaurant_id, clean_phone, delta,
+            )
+    return {"new_balance": new_balance}
+
+
+async def db_get_loyalty_ledger(
+    restaurant_id: int,
+    phone: str,
+    limit: int = 50,
+) -> list[dict]:
+    """Historial de movimientos de un cliente (para dashboard / POS)."""
+    await _ensure_loyalty_tables()
+    limit = min(limit, 200)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, delta, reason, order_id, created_at
+               FROM loyalty_ledger
+               WHERE restaurant_id=$1 AND phone=$2
+               ORDER BY created_at DESC
+               LIMIT $3""",
+            restaurant_id, _normalize_phone(phone), limit,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_loyalty_stats(restaurant_id: int, limit: int = 100) -> list[dict]:
+    """Top clientes ordenados por saldo (para dashboard de fidelización)."""
+    await _ensure_loyalty_tables()
+    limit = min(limit, 500)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT phone, points_balance, total_earned, total_redeemed, updated_at
+               FROM loyalty_customers
+               WHERE restaurant_id=$1
+               ORDER BY points_balance DESC
+               LIMIT $2""",
+            restaurant_id, limit,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_phone_for_base_order(base_order_id: str) -> str | None:
+    """
+    Obtiene el teléfono del cliente asociado a un ticket de mesa.
+    Busca en table_orders por id directo o por base_order_id de sub-órdenes.
+    Usado por el background task de acumulación de loyalty en caja.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        phone = await conn.fetchval(
+            "SELECT phone FROM table_orders WHERE id=$1 OR base_order_id=$1 LIMIT 1",
+            base_order_id,
+        )
+    return phone

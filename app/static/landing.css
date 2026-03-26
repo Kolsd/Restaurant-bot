@@ -8,6 +8,7 @@
     --gd:      #1DB954;
     --blue:    #378ADD;
     --amber:   #F59E0B;
+    --violet:  #A78BFA;
     --ink:     #0A0A0A;
     --ink2:    #111111;
     --ink3:    #161616;
@@ -131,6 +132,7 @@
   .g-dot { background: var(--g); }
   .b-dot { background: var(--blue); }
   .a-dot { background: var(--amber); }
+  .v-dot { background: var(--violet); }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
   
   /* ── STATS BAR ── */
@@ -475,3 +477,160 @@
   .d1 { transition-delay: .1s; }
   .d2 { transition-delay: .2s; }
   .d3 { transition-delay: .3s; }
+
+  /* ═══════════════════════════════════════════
+     NEW PRICING — Toggle + Packs + Lego
+  ═══════════════════════════════════════════ */
+
+  /* ── Pricing toggle ── */
+  .pricing-toggle {
+    display: flex; justify-content: center; gap: 0;
+    background: var(--ink2); border: 1px solid var(--border2);
+    border-radius: 100px; padding: 5px; width: fit-content;
+    margin: 2.5rem auto 0;
+  }
+  .ptab {
+    background: none; border: none; cursor: pointer;
+    padding: .65rem 1.6rem; border-radius: 100px;
+    font-size: .85rem; font-weight: 600; color: var(--muted);
+    transition: all .2s; white-space: nowrap; display: flex; align-items: center; gap: 6px;
+  }
+  .ptab:hover { color: var(--text); }
+  .ptab-active { background: var(--ink4); color: var(--white); box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  .ptab-lego-icon { font-size: 1rem; color: var(--violet); }
+  .ptab-active .ptab-lego-icon { color: var(--violet); }
+
+  /* ── Packages grid ── */
+  .pricing-view { margin-top: 2.5rem; }
+  .packs-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 1rem; text-align: left;
+  }
+  @media(max-width:960px) { .packs-grid { grid-template-columns: repeat(2,1fr); } }
+  @media(max-width:520px)  { .packs-grid { grid-template-columns: 1fr; } }
+
+  .pack-card {
+    background: var(--ink2); border: 1px solid var(--border2);
+    border-radius: 20px; padding: 1.75rem; position: relative;
+    transition: transform .2s, border-color .2s;
+    display: flex; flex-direction: column;
+  }
+  .pack-card:hover { transform: translateY(-3px); }
+  .pack-card.pack-featured { border-color: rgba(57,255,106,.35); box-shadow: 0 0 40px rgba(57,255,106,.06); }
+  .pack-card.pack-full     { border-color: rgba(245,158,11,.3);  box-shadow: 0 0 40px rgba(245,158,11,.05); }
+
+  .pack-pill {
+    position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+    font-size: .67rem; font-weight: 700; padding: 4px 14px; border-radius: 100px;
+    white-space: nowrap; letter-spacing: .04em;
+  }
+  .pack-pill-g { background: var(--g);    color: #000; }
+  .pack-pill-a { background: var(--amber); color: #000; }
+
+  .pack-name  { font-family: 'Fraunces', serif; font-size: 1.3rem; font-weight: 700; color: var(--white); margin-bottom: 3px; }
+  .pack-desc  { font-size: .77rem; color: var(--muted); margin-bottom: 1.25rem; }
+  .pack-price {
+    font-family: 'Fraunces', serif; font-size: 2.6rem; font-weight: 900;
+    color: var(--g); letter-spacing: -.04em; line-height: 1;
+  }
+  .pack-price span { font-size: .85rem; color: var(--muted); font-family: 'Instrument Sans', sans-serif; font-weight: 400; }
+  .pack-price.pack-price-a { color: var(--amber); }
+  .pack-setup   { font-size: .73rem; color: var(--muted); margin-top: 4px; margin-bottom: 1.25rem; }
+  .pack-divider { height: 1px; background: var(--border); margin: 1.25rem 0; }
+  .pack-feat    { display: flex; align-items: flex-start; gap: 8px; font-size: .79rem; margin-bottom: .5rem; color: var(--text); }
+  .pack-feat.pack-feat-off { color: #444; }
+  .pkf-check { font-weight: 700; flex-shrink: 0; }
+  .pkf-g   { color: var(--g); }
+  .pkf-a   { color: var(--amber); }
+  .pkf-off { color: #333; }
+
+  .pack-btn {
+    display: block; text-align: center; padding: .8rem; border-radius: 100px;
+    font-size: .875rem; font-weight: 600; text-decoration: none;
+    margin-top: auto; padding-top: .8rem; transition: all .2s;
+  }
+  .pb-green  { background: var(--g);    color: #000; } .pb-green:hover  { opacity: .9; transform: translateY(-1px); }
+  .pb-amber  { background: var(--amber); color: #000; } .pb-amber:hover  { opacity: .9; transform: translateY(-1px); }
+  .pb-outline { border: 1px solid var(--border2); color: var(--text); margin-top: auto; }
+  .pb-outline:hover { background: rgba(255,255,255,.04); }
+
+  .pricing-note { text-align: center; font-size: .75rem; color: #444; margin-top: 1.5rem; line-height: 1.6; }
+
+  /* ── Lego builder ── */
+  .lego-wrap {
+    display: grid; grid-template-columns: 1fr 340px;
+    gap: 2rem; align-items: start;
+  }
+  @media(max-width:900px)  { .lego-wrap { grid-template-columns: 1fr; } }
+
+  .lego-base-card {
+    background: var(--ink2); border: 1px solid rgba(57,255,106,.25);
+    border-radius: 16px; padding: 1.5rem 1.75rem; margin-bottom: 1.5rem;
+  }
+  .lego-base-label { font-size: .65rem; font-weight: 700; letter-spacing: .1em; color: var(--g); text-transform: uppercase; margin-bottom: .5rem; }
+  .lego-base-title { font-family: 'Fraunces', serif; font-size: 1.3rem; font-weight: 700; color: var(--white); }
+  .lego-base-desc  { font-size: .8rem; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .lego-base-price {
+    font-family: 'Fraunces', serif; font-size: 2rem; font-weight: 900;
+    color: var(--g); letter-spacing: -.04em; margin-top: .75rem;
+  }
+  .lego-base-price span { font-size: .8rem; color: var(--muted); font-family: 'Instrument Sans', sans-serif; font-weight: 400; }
+
+  .lego-mods-label { font-size: .72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 1rem; }
+
+  .lego-mods-grid { display: flex; flex-direction: column; gap: .6rem; }
+
+  .lego-mod {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--ink2); border: 1px solid var(--border2);
+    border-radius: 12px; padding: .9rem 1.1rem; cursor: pointer;
+    transition: border-color .2s, background .2s, transform .15s;
+    user-select: none;
+  }
+  .lego-mod:hover { border-color: var(--border2); background: var(--ink3); transform: translateX(2px); }
+  .lego-mod.lego-mod-active {
+    border-color: rgba(57,255,106,.4);
+    background: rgba(57,255,106,.05);
+  }
+  .lego-mod-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    opacity: .5; transition: opacity .2s;
+  }
+  .lego-mod-active .lego-mod-dot { opacity: 1; }
+  .lego-mod-body { flex: 1; min-width: 0; }
+  .lego-mod-name { font-size: .875rem; font-weight: 600; color: var(--text); }
+  .lego-mod-sub  { font-size: .72rem; color: var(--muted); margin-top: 1px; }
+  .lego-mod-price {
+    font-family: 'Fraunces', serif; font-size: .95rem; font-weight: 700;
+    color: var(--muted); white-space: nowrap; transition: color .2s;
+  }
+  .lego-mod-active .lego-mod-price { color: var(--g); }
+  .lego-mod-check {
+    width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+    background: rgba(57,255,106,.15); color: var(--g);
+    display: none; align-items: center; justify-content: center;
+    font-size: .7rem; font-weight: 700;
+  }
+  .lego-mod-active .lego-mod-check { display: flex; }
+
+  /* Lego total card */
+  .lego-total-card {
+    background: var(--ink2); border: 1px solid rgba(57,255,106,.2);
+    border-radius: 20px; padding: 1.75rem;
+    position: sticky; top: 80px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.3);
+  }
+  .lego-total-label  { font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: .5rem; }
+  .lego-total-price  { font-family: 'Fraunces', serif; font-size: 2.8rem; font-weight: 900; color: var(--g); letter-spacing: -.04em; line-height: 1; }
+  .lego-total-period { font-size: .78rem; color: var(--muted); margin-bottom: 1.25rem; }
+  .lego-sel-list     { display: flex; flex-direction: column; gap: .35rem; margin-bottom: 1rem; min-height: 40px; }
+  .lego-sel-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: .78rem; color: var(--muted); gap: 8px;
+  }
+  .lego-sel-row span:last-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+  .lego-sel-base { color: var(--muted2); }
+  .lego-sel-base span:last-child { color: var(--g); }
+  .lego-total-divider { height: 1px; background: var(--border); margin: .75rem 0; }
+  .lego-setup-note   { font-size: .75rem; color: var(--muted); }
+  .lego-disclaimer   { font-size: .68rem; color: #444; margin-top: .75rem; text-align: center; line-height: 1.5; }
