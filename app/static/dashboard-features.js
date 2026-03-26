@@ -889,6 +889,9 @@ async function loadTableOrdersSection() {
       }
     });
     const groupedBills = Object.values(billsMap);
+    // Almacenar en window para que markTableInvoiced pueda leer el total y los items
+    window._billsData = {};
+    groupedBills.forEach(b => { window._billsData[b.id] = b; });
 
     // ── 2. Cargar pedidos de domicilio/recoger ──
     const localOffset = new Date().getTimezoneOffset();
@@ -970,7 +973,7 @@ async function loadTableOrdersSection() {
             <td style="font-weight:600;">${b.table_name||'—'}</td>
             <td style="color:#555;font-size:12px;max-width:300px;">${itemsJoined}</td>
             <td style="font-weight:700;color:#6B21A8;">${fmt(b.total)}</td>
-            <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:5px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">Facturar</button></td>
+            <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:5px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">Cobrar</button></td>
           </tr>`;
         });
         html += '</tbody></table><br/>';
@@ -1063,13 +1066,69 @@ async function markTableDelivered(orderId) {
 
 async function markTableInvoiced(orderId) {
   const h = window._dashHeaders;
-  try {
-    const r = await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'factura_entregada' })
-    });
-    if (r.ok) loadTableOrdersSection();
-  } catch(e) { console.error('markTableInvoiced:', e); }
+  const bill = window._billsData?.[orderId];
+  const subtotal = bill?.total || 0;
+
+  // Construir modal de cobro con toggle de cargo de servicio
+  const existingModal = document.getElementById('_svc-modal');
+  if (existingModal) existingModal.remove();
+
+  const fmtLocal = n => '$' + Math.round(Number(n)).toLocaleString('es-CO');
+
+  const overlay = document.createElement('div');
+  overlay.id = '_svc-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:14px;padding:1.5rem;width:340px;box-shadow:0 8px 40px rgba(0,0,0,.18);';
+
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:700;margin-bottom:1rem;">🧾 Cobrar Mesa</div>
+    <div style="font-size:13px;color:#555;margin-bottom:1rem;">Subtotal: <strong>${fmtLocal(subtotal)}</strong></div>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;padding:10px;background:#f5f5f0;border-radius:8px;cursor:pointer;margin-bottom:1rem;">
+      <input type="checkbox" id="_svc-toggle" style="width:16px;height:16px;cursor:pointer;">
+      <span>Incluir Cargo de Servicio (10%)</span>
+    </label>
+    <div id="_svc-total-preview" style="font-size:14px;font-weight:700;color:#1D9E75;margin-bottom:1.25rem;">Total: ${fmtLocal(subtotal)}</div>
+    <div style="display:flex;gap:8px;">
+      <button id="_svc-cancel" style="flex:1;padding:9px;border:1px solid #ddd;border-radius:8px;background:none;cursor:pointer;font-size:13px;">Cancelar</button>
+      <button id="_svc-confirm" style="flex:1;padding:9px;border:none;border-radius:8px;background:#1D9E75;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Confirmar Cobro</button>
+    </div>
+  `;
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  const toggle = document.getElementById('_svc-toggle');
+  const preview = document.getElementById('_svc-total-preview');
+
+  toggle.addEventListener('change', () => {
+    const newTotal = toggle.checked ? subtotal * 1.1 : subtotal;
+    preview.textContent = `Total: ${fmtLocal(newTotal)}${toggle.checked ? ' (incl. 10% servicio)' : ''}`;
+  });
+
+  document.getElementById('_svc-cancel').addEventListener('click', () => overlay.remove());
+
+  document.getElementById('_svc-confirm').addEventListener('click', async () => {
+    const includeService = toggle.checked;
+    overlay.remove();
+    try {
+      if (includeService && subtotal > 0) {
+        const newTotal = Math.round(subtotal * 1.1);
+        const allItems = bill?.items || [];
+        await fetch(`/api/table-orders/${orderId}/adjust`, {
+          method: 'PATCH',
+          headers: { ...h, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: allItems, total: newTotal, service_charge: Math.round(subtotal * 0.1) })
+        });
+      }
+      const r = await fetch(`/api/table-orders/${orderId}/status`, {
+        method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'factura_entregada' })
+      });
+      if (r.ok) loadTableOrdersSection();
+    } catch(e) { console.error('markTableInvoiced:', e); }
+  });
 }
 
 const _origFetchOrders = window.fetchOrders;
