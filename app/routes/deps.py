@@ -43,25 +43,29 @@ def require_module(module_name: str) -> Callable:
     """
     FastAPI dependency factory for module-level access control.
 
-    Usage in a router:
-        @router.get("/endpoint", dependencies=[Depends(require_module("staff_tips"))])
-        async def my_endpoint(): ...
-
-    Or combined with get_current_restaurant to reuse the resolved restaurant:
-        async def my_endpoint(
-            restaurant: dict = Depends(get_current_restaurant),
-            _: None = Depends(require_module("staff_tips")),
-        ): ...
+    Reads features directly from the already-loaded restaurant dict to avoid
+    a second DB round-trip and normalisation mismatches in db_check_module.
+    Accepts both boolean True and the string "true" as enabled values.
 
     Raises:
         401 — if the Bearer token is missing or invalid (via get_current_restaurant).
         403 — if the restaurant exists but does not have the module enabled.
     """
+    import json as _json
+
     async def _check_module(
         restaurant: dict = Depends(get_current_restaurant),
     ) -> None:
-        bot_number = restaurant.get("whatsapp_number", "")
-        has_module = await db.db_check_module(bot_number, module_name)
+        features = restaurant.get("features") or {}
+        if isinstance(features, str):
+            try:
+                features = _json.loads(features)
+            except Exception:
+                features = {}
+        if not isinstance(features, dict):
+            features = {}
+        val = features.get(module_name)
+        has_module = val is True or str(val).lower() == "true"
         if not has_module:
             raise HTTPException(
                 status_code=403,

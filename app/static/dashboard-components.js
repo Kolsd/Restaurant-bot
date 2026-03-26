@@ -164,12 +164,13 @@ const ConnectionStatus = MesioComponent({
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _ROLE_LABELS = {
-  mesero:  'Mesero',
-  cocina:  'Cocina',
-  bar:     'Bar',
-  caja:    'Caja',
-  gerente: 'Gerente',
-  otro:    'Otro',
+  mesero:        'Mesero',
+  cocina:        'Cocina',
+  bar:           'Bar',
+  caja:          'Caja',
+  gerente:       'Gerente',
+  domiciliario:  'Domiciliario',
+  otro:          'Otro',
 };
 
 function _apiHeaders() {

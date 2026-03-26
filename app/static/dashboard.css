@@ -84,6 +84,34 @@ tr:hover td { background: #fafaf8; }
 .legend span { display: flex; align-items: center; gap: 4px; }
 .legend-dot  { width: 10px; height: 10px; border-radius: 2px; }
 
+/* ── SEGMENTED CONTROL (tabs fusionados: Salón, Menú, WhatsApp) ── */
+.segmented-control {
+  display: inline-flex;
+  background: #f0f0e8;
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+.seg-btn {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: #666;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.seg-btn:hover { background: rgba(255,255,255,0.6); color: #333; }
+.seg-btn.active {
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+}
+
 /* ── MENÚ ── */
 .menu-category   { margin-bottom: 8px; border: 0.5px solid #e0e0d8; border-radius: 12px; overflow: hidden; }
 .menu-cat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #fff; cursor: pointer; user-select: none; transition: background .15s; }
