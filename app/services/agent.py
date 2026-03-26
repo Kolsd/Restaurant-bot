@@ -639,6 +639,11 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             # un nuevo mensaje de WhatsApp; la orden se procesa igual en el dashboard.
             _ck  = (table_context["id"], bot_number)
             _now = _time.time()
+            # Purge expired entries to prevent unbounded dict growth
+            if len(_TABLE_CONFIRM_COOLDOWN) > 50:
+                _cutoff = _now - _TABLE_CONFIRM_TTL
+                for _k in [k for k, t in _TABLE_CONFIRM_COOLDOWN.items() if t < _cutoff]:
+                    del _TABLE_CONFIRM_COOLDOWN[_k]
             _last_confirm = _TABLE_CONFIRM_COOLDOWN.get(_ck, 0)
             if sub_number > 1 and (_now - _last_confirm) < _TABLE_CONFIRM_TTL:
                 # Sub-orden dentro del cooldown → silencioso en WhatsApp
