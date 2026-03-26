@@ -66,8 +66,8 @@ async def wompi_webhook(request: Request):
         print("🚨 ALERTA: Intento de webhook de Wompi, pero WOMPI_EVENTS_SECRET no está configurado.", flush=True)
         raise HTTPException(status_code=500, detail="Configuración de pasarela de pagos incompleta")
 
-    body = await request.json()
     body_bytes = await request.body()
+    body = _json.loads(body_bytes)
     signature_header = request.headers.get("x-event-checksum", "")
     
     expected_sig = hashlib.sha256(
@@ -123,9 +123,6 @@ class UpdateOrderStatusRequest(BaseModel):
     status: str
 
 # --- FUNCIONES Y ENDPOINTS DEL DOMICILIARIO ---
-
-class UpdateOrderStatusRequest(BaseModel):
-    status: str
 
 async def send_delivery_notification(phone: str, status: str, bot_number: str = ""):
     """Envía un mensaje automático de WhatsApp según el estado del pedido"""
