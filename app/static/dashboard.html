@@ -45,7 +45,8 @@
   <button class="nav-item" onclick="showSection('nps',this)">⭐ NPS</button>
   <button class="nav-item" onclick="showSection('inventario',this)">📦 Inventario</button>
   <!-- Phase 6: Staff & Tips — hidden until module is enabled in features -->
-  <button class="nav-item" id="nav-staff" onclick="showSection('staff',this)" style="display:none;">👤 Staff & Propinas</button>
+  <button class="nav-item" id="nav-staff" onclick="showSection('staff',this)">👤 Staff & Propinas</button>
+  <button class="nav-item" id="nav-loyalty" onclick="showSection('loyalty',this)">🎁 Fidelización</button>
   <a href="/settings" style="display:block;text-align:center;margin:8px 12px 4px;padding:8px;background:#f0f0e8;border-radius:8px;font-size:12px;color:#555;text-decoration:none;font-weight:500;">⚙️ Configuración</a>
   <!-- Connection status badge — managed by ConnectionStatus component in dashboard-components.js -->
   <div class="live-badge" id="live-badge">
@@ -438,6 +439,34 @@
       </div>
     </div>
     <div id="staff-component"></div>
+  </div>
+
+  <!-- FIDELIZACIÓN (Loyalty — requires loyalty module) -->
+  <div id="loyalty" class="section" style="display:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div style="font-size:18px;font-weight:600;">Programa de Fidelización</div>
+        <div style="font-size:12px;color:#888;margin-top:2px;">Consulta y gestiona los puntos de tus clientes.</div>
+      </div>
+    </div>
+
+    <!-- Buscar cliente -->
+    <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:1.25rem;margin-bottom:1.25rem;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;">🔍 Consultar cliente</div>
+      <div style="display:flex;gap:8px;">
+        <input id="loyalty-phone-input" type="text" placeholder="Número de teléfono..." style="flex:1;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;" onkeydown="if(event.key==='Enter')loyaltyLookup()">
+        <button onclick="loyaltyLookup()" style="background:#1D9E75;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">Buscar</button>
+      </div>
+      <div id="loyalty-lookup-result" style="margin-top:10px;font-size:13px;color:#555;"></div>
+    </div>
+
+    <!-- Top clientes -->
+    <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:1.25rem;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;">🏆 Top clientes por puntos</div>
+      <div id="loyalty-stats-body">
+        <div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;">Cargando...</div>
+      </div>
+    </div>
   </div>
 
 </div><!-- /main -->

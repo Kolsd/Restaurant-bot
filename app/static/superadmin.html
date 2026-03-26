@@ -1249,6 +1249,20 @@ input:checked + .slider::before { transform: translateX(20px); background: var(-
                 </div>
                 <label class="switch"><input type="checkbox" id="feat_wompi"><span class="slider"></span></label>
               </div>
+              <div class="module-toggle">
+                <div class="module-info">
+                  <div class="module-name">👤 Staff & Propinas</div>
+                  <div class="module-desc">Gestión de turnos y corte de propinas</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="feat_staff_tips"><span class="slider"></span></label>
+              </div>
+              <div class="module-toggle">
+                <div class="module-info">
+                  <div class="module-name">🎁 Fidelización</div>
+                  <div class="module-desc">Programa de puntos por compra</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="feat_loyalty"><span class="slider"></span></label>
+              </div>
             </div>
           </div>
 
@@ -1892,7 +1906,7 @@ function openClientModal(id) {
     `<div class="detail-item"><div class="detail-label">${d.label}</div><div class="detail-value">${escHtml(String(d.value))}</div></div>`
   ).join('');
 
-  const featNames = {module_orders:'WA Pedidos',module_tables:'Mesas QR',module_reservations:'Reservaciones',module_pos:'POS IA',wompi_active:'Wompi',module_nps:'NPS',module_inventory:'Inventario'};
+  const featNames = {module_orders:'WA Pedidos',module_tables:'Mesas QR',module_reservations:'Reservaciones',module_pos:'POS IA',wompi_active:'Wompi',module_nps:'NPS',module_inventory:'Inventario',staff_tips:'Staff & Propinas',loyalty:'Fidelización'};
   document.getElementById('modal-modules-section').innerHTML = `<div style="font-size:11px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:.5px;margin-bottom:10px;">MÓDULOS ACTIVOS</div>` +
     Object.entries(featNames).map(([k, v]) => feats[k]
       ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;background:var(--accent-dim);border:1px solid rgba(57,255,106,0.2);border-radius:8px;font-size:12px;color:var(--accent);margin:4px;font-family:'DM Mono',monospace;">${v}</span>`
@@ -1960,6 +1974,8 @@ async function createRestaurant() {
     module_nps: document.getElementById('feat_nps').checked,
     module_inventory: document.getElementById('feat_inventory').checked,
     wompi_active: document.getElementById('feat_wompi').checked,
+    staff_tips: document.getElementById('feat_staff_tips').checked,
+    loyalty: document.getElementById('feat_loyalty').checked,
     // Default values — restaurant can update these in Settings
     timezone: "UTC",
     currency: "USD",
@@ -1991,7 +2007,7 @@ async function createRestaurant() {
 function clearForm() {
   ['r_name','r_wa','r_addr','r_city','r_menu','r_wa_phone_id','r_wa_access_token'].forEach(id => document.getElementById(id).value = '');
   ['feat_orders','feat_tables','feat_reservations','feat_pos'].forEach(id => document.getElementById(id).checked = true);
-  ['feat_nps','feat_inventory','feat_wompi'].forEach(id => document.getElementById(id).checked = false);
+  ['feat_nps','feat_inventory','feat_wompi','feat_staff_tips','feat_loyalty'].forEach(id => document.getElementById(id).checked = false);
 }
 
 async function createUser() {

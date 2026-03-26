@@ -710,6 +710,84 @@ function loadStaffSection() {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// loadLoyaltySection — called by dashboard-core.js when the user navigates to
+// the 'loyalty' section. Loads top customers on each visit.
+// ─────────────────────────────────────────────────────────────────────────────
+function loadLoyaltySection() {
+  _loadLoyaltyStats();
+}
+
+async function _loadLoyaltyStats() {
+  const el = document.getElementById('loyalty-stats-body');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/loyalty/stats?limit=50', { headers: window._dashHeaders });
+    if (!r.ok) { el.innerHTML = '<div style="color:#C0392B;font-size:13px;padding:1rem;">Error al cargar datos.</div>'; return; }
+    const data = await r.json();
+    const rows = data.customers || [];
+    if (!rows.length) {
+      el.innerHTML = '<div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;">Aún no hay clientes con puntos.</div>';
+      return;
+    }
+    const feats = (window._dashRestaurant || {}).features || {};
+    const pointVal = feats.loyalty_point_value_cop || 10;
+    const locale   = (window._dashRestaurant || {}).locale   || 'es-CO';
+    const currency = (window._dashRestaurant || {}).currency || 'COP';
+    const fmtCur = (v) => new Intl.NumberFormat(locale, { style:'currency', currency, minimumFractionDigits: 0 }).format(v);
+    el.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="border-bottom:1px solid #e0e0d8;color:#888;font-size:11px;font-weight:600;text-transform:uppercase;">
+            <th style="text-align:left;padding:6px 8px;">#</th>
+            <th style="text-align:left;padding:6px 8px;">Teléfono</th>
+            <th style="text-align:right;padding:6px 8px;">Puntos</th>
+            <th style="text-align:right;padding:6px 8px;">Equivalencia</th>
+            <th style="text-align:right;padding:6px 8px;">Total ganado</th>
+            <th style="text-align:right;padding:6px 8px;">Total canjeado</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((c, i) => `
+            <tr style="border-bottom:0.5px solid #f0f0e8;">
+              <td style="padding:8px;color:#aaa;">${i + 1}</td>
+              <td style="padding:8px;font-weight:500;">${c.phone}</td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:#1D9E75;">${c.points_balance}</td>
+              <td style="padding:8px;text-align:right;color:#555;">${fmtCur(c.points_balance * pointVal)}</td>
+              <td style="padding:8px;text-align:right;color:#888;">${c.total_earned}</td>
+              <td style="padding:8px;text-align:right;color:#888;">${c.total_redeemed || 0}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) {
+    el.innerHTML = '<div style="color:#C0392B;font-size:13px;padding:1rem;">Error inesperado.</div>';
+  }
+}
+
+async function loyaltyLookup() {
+  const phone = document.getElementById('loyalty-phone-input').value.trim();
+  const out   = document.getElementById('loyalty-lookup-result');
+  if (!phone) return;
+  out.textContent = 'Buscando...';
+  try {
+    const r = await fetch(`/api/loyalty/balance?phone=${encodeURIComponent(phone)}`, { headers: window._dashHeaders });
+    if (r.status === 404) { out.innerHTML = '<span style="color:#C0392B;">Cliente sin registro de fidelización.</span>'; return; }
+    if (!r.ok) { out.innerHTML = '<span style="color:#C0392B;">Error al consultar.</span>'; return; }
+    const d = await r.json();
+    const feats    = (window._dashRestaurant || {}).features || {};
+    const locale   = (window._dashRestaurant || {}).locale   || 'es-CO';
+    const currency = (window._dashRestaurant || {}).currency || 'COP';
+    const fmtCur = (v) => new Intl.NumberFormat(locale, { style:'currency', currency, minimumFractionDigits: 0 }).format(v);
+    out.innerHTML = `
+      <div style="background:#E1F5EE;border-radius:8px;padding:10px 14px;display:inline-flex;gap:24px;align-items:center;">
+        <div><div style="font-size:11px;color:#888;">Puntos actuales</div><div style="font-size:20px;font-weight:700;color:#0F6E56;">${d.puntos_actuales}</div></div>
+        <div><div style="font-size:11px;color:#888;">Equivalencia</div><div style="font-size:16px;font-weight:600;color:#1D9E75;">${fmtCur(d.equivalencia_cop)}</div></div>
+      </div>`;
+  } catch(e) {
+    out.innerHTML = '<span style="color:#C0392B;">Error inesperado.</span>';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Initialize on DOMContentLoaded
 // ─────────────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {

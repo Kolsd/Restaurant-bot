@@ -29,7 +29,10 @@
       "Bash(python tests/run_ai_simulations.py)",
       "Bash(grep -r ANTHROPIC_API_KEY .env*)",
       "Bash(printenv)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -E \"\\\\.\\(py\\)$\")",
+      "Bash(grep:*)",
+      "Bash(ls -la app/routes/*.py)"
     ]
   }
 }
