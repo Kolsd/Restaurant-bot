@@ -56,6 +56,11 @@ class LoginRequest(BaseModel): username: str; password: str
 class CreateUserRequest(BaseModel): username: str; password: str; restaurant_name: str; admin_key: str
 class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
 class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; status: str
+class UpdateRestaurantRequest(BaseModel):
+    admin_key: str; restaurant_id: int
+    name: str = None; address: str = None; whatsapp_number: str = None
+    wa_phone_id: str = None; wa_access_token: str = None
+    features: dict = None; menu: str = None
 class TeamInviteRequest(BaseModel): username: str; password: str; role: str; branch_id: int = None
 class CreateBranchRequest(BaseModel): name: str; whatsapp_number: str = ""; address: str; menu: dict = {}
 
@@ -436,6 +441,100 @@ async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
         response = client.messages.create(model="claude-3-haiku-20240307", max_tokens=4000, temperature=0, system='Extrae menús a JSON puro: {"Categoría": [{"name":"","price":0.0,"description":""}]}', messages=[{"role": "user", "content": messages_content}])
         return {"success": True, "json_menu": json.loads(response.content[0].text.replace("```json","").replace("```","").strip())}
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/api/admin/restaurant/{restaurant_id}")
+async def admin_get_restaurant_detail(restaurant_id: int, admin_key: str):
+    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
+    rest = await db.db_get_restaurant_by_id(restaurant_id)
+    if not rest: raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    wa = rest.get("whatsapp_number", "")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        orders_30d  = await conn.fetchrow(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS rev FROM orders WHERE bot_number=$1 AND created_at >= NOW()-INTERVAL '30 days'", wa)
+        orders_today = await conn.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM orders WHERE bot_number=$1 AND created_at >= CURRENT_DATE", wa)
+        table_30d   = await conn.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM table_orders WHERE created_at >= NOW()-INTERVAL '30 days' AND status NOT IN ('cancelado') AND (SELECT whatsapp_number FROM restaurants WHERE id=table_orders.branch_id OR id=$1 LIMIT 1)=$1", restaurant_id)
+        convs       = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE bot_number=$1", wa)
+        users_cnt   = await conn.fetchval("SELECT COUNT(*) FROM users WHERE branch_id=$1", restaurant_id)
+        invoices_30d = await conn.fetchrow(
+            "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_cents),0) AS total FROM fiscal_invoices WHERE restaurant_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
+            restaurant_id) if await conn.fetchval("SELECT to_regclass('fiscal_invoices')") else None
+        invoices_all = await conn.fetchval(
+            "SELECT COUNT(*) FROM fiscal_invoices WHERE restaurant_id=$1", restaurant_id
+        ) if await conn.fetchval("SELECT to_regclass('fiscal_invoices')") else 0
+        last_order  = await conn.fetchval(
+            "SELECT MAX(created_at) FROM orders WHERE bot_number=$1", wa)
+    return {
+        "restaurant": rest,
+        "stats": {
+            "orders_30d":       int(orders_30d["cnt"])  if orders_30d else 0,
+            "revenue_30d":      float(orders_30d["rev"]) if orders_30d else 0,
+            "orders_today":     int(orders_today["cnt"]) if orders_today else 0,
+            "table_orders_30d": int(table_30d["cnt"])   if table_30d else 0,
+            "active_convs":     int(convs or 0),
+            "users":            int(users_cnt or 0),
+            "invoices_30d":     int(invoices_30d["cnt"]) if invoices_30d else 0,
+            "invoices_all":     int(invoices_all or 0),
+            "last_order":       last_order.isoformat() if last_order else None,
+        }
+    }
+
+@router.post("/api/admin/update-restaurant")
+async def admin_update_restaurant(request: UpdateRestaurantRequest):
+    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
+    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
+    if not rest: raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        if request.name is not None:
+            await conn.execute("UPDATE restaurants SET name=$1 WHERE id=$2", request.name, request.restaurant_id)
+        if request.address is not None:
+            lat, lon, _ = await geocode_address(request.address)
+            await conn.execute("UPDATE restaurants SET address=$1, latitude=$2, longitude=$3 WHERE id=$4",
+                               request.address, lat, lon, request.restaurant_id)
+        if request.whatsapp_number is not None:
+            await conn.execute("UPDATE restaurants SET whatsapp_number=$1 WHERE id=$2", request.whatsapp_number, request.restaurant_id)
+        if request.wa_phone_id is not None:
+            await conn.execute("UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2", request.wa_phone_id, request.restaurant_id)
+        if request.wa_access_token is not None:
+            await conn.execute("UPDATE restaurants SET wa_access_token=$1 WHERE id=$2", request.wa_access_token, request.restaurant_id)
+        if request.features is not None:
+            raw = rest.get("features") or {}
+            current = json.loads(raw) if isinstance(raw, str) else dict(raw)
+            current.update(request.features)
+            await conn.execute("UPDATE restaurants SET features=$1::jsonb WHERE id=$2",
+                               json.dumps(current), request.restaurant_id)
+        if request.menu is not None:
+            try: menu_dict = json.loads(request.menu)
+            except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
+            await conn.execute("UPDATE restaurants SET menu=$1::jsonb WHERE id=$2",
+                               json.dumps(menu_dict), request.restaurant_id)
+    return {"success": True, "restaurant": await db.db_get_restaurant_by_id(request.restaurant_id)}
+
+@router.get("/api/admin/billing-stats")
+async def admin_billing_stats(admin_key: str):
+    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        table_exists = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
+        if not table_exists:
+            return {"stats": []}
+        rows = await conn.fetch("""
+            SELECT fi.restaurant_id, r.name AS restaurant_name,
+                   COUNT(fi.id) AS total_invoices,
+                   COUNT(fi.id) FILTER (WHERE fi.created_at >= NOW()-INTERVAL '30 days') AS invoices_30d,
+                   COUNT(fi.id) FILTER (WHERE fi.dian_status='accepted') AS accepted,
+                   COUNT(fi.id) FILTER (WHERE fi.dian_status='pending')  AS pending,
+                   COALESCE(SUM(fi.total_cents) FILTER (WHERE fi.dian_status='accepted'),0) AS total_billed_cents,
+                   MAX(fi.created_at) AS last_invoice_at
+            FROM fiscal_invoices fi
+            JOIN restaurants r ON r.id = fi.restaurant_id
+            GROUP BY fi.restaurant_id, r.name
+            ORDER BY total_invoices DESC
+        """)
+        return {"stats": [dict(r) for r in rows]}
 
 @router.post("/api/admin/fix-branch-ids")
 async def fix_branch_ids(request: Request):
