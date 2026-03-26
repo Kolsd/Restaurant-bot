@@ -6,7 +6,7 @@ import json
 import pypdf
 from collections import defaultdict
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from pathlib import Path
 from anthropic import Anthropic
@@ -58,6 +58,16 @@ class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_nu
 class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; status: str
 class TeamInviteRequest(BaseModel): username: str; password: str; role: str; branch_id: int = None
 class CreateBranchRequest(BaseModel): name: str; whatsapp_number: str = ""; address: str; menu: dict = {}
+
+# ── SERVICE WORKER (must be served at root scope, not /static/) ───────
+@router.get("/sw.js")
+async def service_worker():
+    content = (STATIC / "sw.js").read_text(encoding="utf-8")
+    return Response(
+        content=content,
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
 
 # ── PÁGINAS PÚBLICAS / AUTENTICADAS ──────────────────────────────────
 @router.get("/login", response_class=HTMLResponse)

@@ -30,15 +30,26 @@ document.addEventListener('DOMContentLoaded', () => {
   if (equipoNav) equipoNav.style.display = (roleStr.includes('owner') || roleStr.includes('admin')) ? '' : 'none';
   
   const feats = restaurant.features || {};
-  const toggleNav = (id, isEnabled) => {
-    const el = document.querySelector(`[onclick*="'${id}'"]`);
-    if (el) el.style.display = isEnabled ? '' : 'none';
+
+  // toggleNav: show/hide a sidebar nav button based on feature flag.
+  // Uses data-section attribute first, falls back to onclick-pattern match.
+  const toggleNav = (sectionId, isEnabled) => {
+    // Prefer explicit id="nav-{sectionId}" if it exists
+    const byId = document.getElementById(`nav-${sectionId}`);
+    if (byId) { byId.style.display = isEnabled ? '' : 'none'; return; }
+    // Fallback: match by onclick text (existing buttons without explicit id)
+    const byOnclick = document.querySelector(`[onclick*="'${sectionId}'"]`);
+    if (byOnclick) byOnclick.style.display = isEnabled ? '' : 'none';
   };
-  toggleNav('pedidos', feats.module_orders !== false);
-  toggleNav('mesas', feats.module_tables !== false);
-  toggleNav('sesiones', feats.module_tables !== false); 
+
+  // Core modules — off only when explicitly false (opt-out model, matches agent.py)
+  toggleNav('pedidos',       feats.module_orders       !== false);
+  toggleNav('mesas',         feats.module_tables       !== false);
+  toggleNav('sesiones',      feats.module_tables       !== false);
   toggleNav('reservaciones', feats.module_reservations !== false);
-  toggleNav('pos', feats.module_pos !== false);
+  toggleNav('pos',           feats.module_pos          !== false);
+  // Phase 6 modules — off by default unless explicitly true (opt-in model)
+  toggleNav('staff',         feats.staff_tips          === true);
 
   loadMenu();
   refreshAll();
@@ -58,7 +69,7 @@ function logout() {
 let currentPeriod = 'today';
 window.customStart = '';
 window.customEnd = '';
-const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones' };
+const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones', staff:'Staff & Propinas' };
 
 function setPeriod(p, btn) {
   currentPeriod = p;
@@ -76,7 +87,7 @@ function showSection(id, btn) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[id] || '';
 
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas', 'nps', 'inventario'];
+  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas', 'nps', 'inventario', 'staff'];
   const periodBar = document.getElementById('period-bar');
   
   if (periodBar) {
@@ -95,6 +106,8 @@ function showSection(id, btn) {
   if (id === 'equipo')     loadBranches();
   if (id === 'sesiones')   loadSessions();
   if (id === 'menu')       loadMenu();
+  // Phase 6: delegate to StaffSection component (defined in dashboard-components.js)
+  if (id === 'staff' && typeof loadStaffSection === 'function') loadStaffSection();
   if (window.innerWidth <= 768) closeSidebar();
 }
 

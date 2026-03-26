@@ -318,8 +318,94 @@ GENERAL RULES
 - When including [LINK_MENU] in the reply, copy it EXACTLY as provided. NEVER shorten, truncate, or modify the URL in any way.
 """
 
-async def build_system_prompt() -> list:
-    return [{"type": "text", "text": _STATIC_SYSTEM, "cache_control": {"type": "ephemeral"}}]
+# ── Module restriction rules ──────────────────────────────────────────────────
+# Each key is the features flag that, when explicitly False, disables the module.
+# Tuple: (human-readable name, [forbidden action strings], short description for bot)
+_MODULE_RULES: dict = {
+    "module_reservations": (
+        "Reservaciones",
+        ["reserve"],
+        "no ofrece sistema de reservas en este momento",
+    ),
+    "module_orders": (
+        "Pedidos a Domicilio / Para Llevar",
+        ["delivery", "pickup"],
+        "no acepta pedidos de domicilio ni para llevar por este canal",
+    ),
+    "module_tables": (
+        "Servicio de Mesas / Salón",
+        ["order"],
+        "no utiliza sistema de mesas — todos los pedidos son externos",
+    ),
+    "staff_tips": (
+        "Sistema de Propinas para Staff",
+        [],
+        "no cuenta con sistema de distribución de propinas activo",
+    ),
+    "loyalty": (
+        "Programa de Lealtad / Puntos",
+        [],
+        "no cuenta con programa de puntos ni recompensas",
+    ),
+}
+
+
+def _build_module_restrictions(features: dict) -> str:
+    """
+    Return a dynamic restriction block to append to the system prompt.
+
+    A module is disabled ONLY when its flag is explicitly set to False.
+    Absent keys and True values are treated as enabled (opt-out model).
+    Returns an empty string if all modules are active (no block appended).
+    """
+    if not features or not isinstance(features, dict):
+        return ""
+
+    lines = []
+    for flag, (module_name, forbidden_actions, description) in _MODULE_RULES.items():
+        if features.get(flag) is False:
+            if forbidden_actions:
+                quoted = " ni ".join(f'action="{a}"' for a in forbidden_actions)
+                action_clause = f" Tienes ESTRICTAMENTE PROHIBIDO usar {quoted}."
+            else:
+                action_clause = ""
+            lines.append(
+                f"RESTRICCIÓN ACTIVA — El restaurante NO cuenta con el módulo de {module_name}: "
+                f"Este restaurante {description}.{action_clause} "
+                f"Si el cliente pregunta por este servicio, respóndele cortésmente "
+                f"que el restaurante no ofrece ese servicio por el momento."
+            )
+
+    if not lines:
+        return ""
+
+    return (
+        "=========================================\n"
+        "RESTRICCIONES DE MÓDULOS INACTIVOS\n"
+        "=========================================\n"
+        + "\n\n".join(lines)
+    )
+
+
+async def build_system_prompt(features: dict = None) -> list:
+    """
+    Build the system prompt block list for Claude.
+
+    Block 0 — _STATIC_SYSTEM: cached with cache_control=ephemeral.
+               Identical for every restaurant → maximum cache hit rate.
+               NEVER modify this block with per-restaurant data.
+
+    Block 1 — Module restrictions (optional): NOT cached.
+               Injected only when one or more feature flags are explicitly False.
+               Empty → block is omitted, keeping the list at length 1.
+    """
+    blocks: list = [
+        {"type": "text", "text": _STATIC_SYSTEM, "cache_control": {"type": "ephemeral"}}
+    ]
+    restrictions = _build_module_restrictions(features or {})
+    if restrictions:
+        blocks.append({"type": "text", "text": restrictions})
+    return blocks
 
 async def call_claude(system: list, messages: list, model: str = MODEL_FAST) -> str:
     msgs = messages.copy()
@@ -639,6 +725,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     google_maps_url = ""
     payment_methods_text = ""
     restaurant_obj = None
+    feats: dict = {}  # resolved features — used for module restrictions in system prompt
 
     all_r = await db.db_get_all_restaurants()
     for r in all_r:
@@ -731,7 +818,15 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     messages = full_history[-(HISTORY_WINDOW * 2):]
     messages.append({"role": "user", "content": enriched})
 
-    sys_prompt = await build_system_prompt()
+    # feats is the final resolved features dict (may be overridden by branch above).
+    # Normalize to dict in case it arrived as a JSON string from asyncpg.
+    if isinstance(feats, str):
+        try:
+            feats = json.loads(feats)
+        except Exception:
+            feats = {}
+
+    sys_prompt = await build_system_prompt(feats)
 
     raw    = await call_claude(sys_prompt, messages, model=MODEL_FAST)
     parsed = _parse_bot_response(raw)

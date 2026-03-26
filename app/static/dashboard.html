@@ -44,8 +44,14 @@
   <button class="nav-item" onclick="showSection('sesiones',this)">⏱️ Sesiones</button>
   <button class="nav-item" onclick="showSection('nps',this)">⭐ NPS</button>
   <button class="nav-item" onclick="showSection('inventario',this)">📦 Inventario</button>
+  <!-- Phase 6: Staff & Tips — hidden until module is enabled in features -->
+  <button class="nav-item" id="nav-staff" onclick="showSection('staff',this)" style="display:none;">👤 Staff & Propinas</button>
   <a href="/settings" style="display:block;text-align:center;margin:8px 12px 4px;padding:8px;background:#f0f0e8;border-radius:8px;font-size:12px;color:#555;text-decoration:none;font-weight:500;">⚙️ Configuración</a>
-  <div class="live-badge"><div class="live-dot"></div>Bot activo 24/7</div>
+  <!-- Connection status badge — managed by ConnectionStatus component in dashboard-components.js -->
+  <div class="live-badge" id="live-badge">
+    <div class="live-dot" id="conn-dot"></div>
+    <span id="conn-text">Bot activo 24/7</span>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════ -->
@@ -423,6 +429,17 @@
     </div>
   </div>
 
+  <!-- STAFF & PROPINAS (Phase 6 — requires staff_tips module) -->
+  <div id="staff" class="section" style="display:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div style="font-size:18px;font-weight:600;">Staff & Propinas</div>
+        <div style="font-size:12px;color:#888;margin-top:2px;">Gestiona tu equipo, registra turnos y realiza el corte de propinas.</div>
+      </div>
+    </div>
+    <div id="staff-component"></div>
+  </div>
+
 </div><!-- /main -->
 
 
@@ -643,9 +660,18 @@
   </div>
 </div>
 
+<script src="/static/offline-sync.js?v=1"></script>
+<script src="/static/dashboard-components.js?v=1"></script>
 <script src="/static/dashboard-core.js?v=3"></script>
 <script src="/static/dashboard-features.js?v=3"></script>
 <script src="/static/dashboard-nps-inventory.js?v=3"></script>
+
+<!-- Offline indicator banner (hidden by default, shown by offline-sync.js) -->
+<div id="offline-indicator" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;font-weight:600;z-index:9999;gap:8px;align-items:center;">
+  <span>Sin conexion — los cambios se guardan localmente</span>
+  <!-- pending-ops-badge: count of ops queued in IndexedDB (managed by offline-sync.js) -->
+  <span id="pending-ops-badge" style="display:none;background:#F59E0B;color:#000;border-radius:50%;padding:2px 7px;font-size:11px;font-weight:700;margin-left:6px;"></span>
+</div>
 
 </body>
 </html>

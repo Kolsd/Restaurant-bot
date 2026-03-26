@@ -17,7 +17,15 @@
       "Bash(python -m pytest tests/test_recipes.py -v)",
       "Bash(python -m pytest tests/ -q)",
       "Bash(python -c \"from app.routes.tables import router; print\\(''OK''\\)\")",
-      "Bash(python -m pytest tests/test_split_checks.py -v)"
+      "Bash(python -m pytest tests/test_split_checks.py -v)",
+      "Bash(pip show:*)",
+      "Bash(python -m pytest tests/test_core.py tests/test_agent.py tests/test_staff.py tests/test_sync.py tests/test_dashboard.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_core.py::test_login_rate_limit tests/test_agent.py::test_execute_action_order_without_table_is_blocked tests/test_sync.py::test_db_sync_batch_dispatches_registered_handler -v --tb=long)",
+      "Bash(python -m pytest tests/test_agent.py::test_execute_action_order_without_table_is_blocked tests/test_sync.py::test_db_sync_batch_dispatches_registered_handler -v --tb=long)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/test_agent.py::test_execute_action_order_with_table_proceeds -v --tb=short)",
+      "Bash(python -m pytest --tb=short -q)",
+      "Bash(python run_sandbox_invoice.py)"
     ]
   }
 }

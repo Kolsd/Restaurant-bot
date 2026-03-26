@@ -43,7 +43,21 @@ async def get_pool():
         )
     return _pool
 
+async def init_pool():
+    """Warm up the asyncpg connection pool. No DDL — use Alembic for schema."""
+    await get_pool()
+
+
 async def init_db():
+    """Deprecated alias for init_pool(). DDL now lives in Alembic migrations."""
+    await init_pool()
+
+
+async def _legacy_init_db_ddl():
+    """
+    LEGACY — kept for reference only. This DDL is now managed by Alembic.
+    Do NOT call this function from startup.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -569,6 +583,37 @@ async def db_get_all_restaurants():
         rows = await conn.fetch("SELECT * FROM restaurants ORDER BY id ASC")
         return [_serialize(dict(r)) for r in rows]
 
+
+async def db_check_module(bot_number: str, module_name: str) -> bool:
+    """
+    Return True if module_name is explicitly enabled (true) in the restaurant's
+    features JSONB column.
+
+    Returns False for:
+      - Restaurant not found for bot_number
+      - Key not present in features
+      - Key present but value is not the boolean true (e.g. false, null, string)
+
+    Query is fully parametrized ($1, $2) — no f-strings, no injection risk.
+
+    Example features structure:
+        {"staff_tips": true, "reservations": true, "delivery": false}
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # ->> extracts the key as TEXT; comparing to 'true' safely handles any
+        # non-boolean value stored in the JSONB without risking a cast error.
+        # COALESCE turns NULL (restaurant not found, or key absent) into false.
+        val = await conn.fetchval(
+            "SELECT COALESCE((features->>$2) = 'true', false) "
+            "FROM restaurants WHERE whatsapp_number=$1",
+            _normalize_phone(bot_number),
+            module_name,
+        )
+    # fetchval returns None when no rows match; bool(None) == False
+    return bool(val)
+
+
 async def db_create_restaurant(name: str, whatsapp_number: str, address: str, menu: dict,
                                 latitude: float = None, longitude: float = None, features: dict = None):
     if features is None: features = {}
@@ -581,6 +626,96 @@ async def db_create_restaurant(name: str, whatsapp_number: str, address: str, me
             SET name=EXCLUDED.name, address=EXCLUDED.address, menu=EXCLUDED.menu,
                 latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, features=EXCLUDED.features
         """, name, whatsapp_number, address, json.dumps(menu), latitude, longitude, json.dumps(features))
+
+# ── OFFLINE SYNC BATCH ───────────────────────────────────────────────
+# Dispatch table for POST /api/sync operations.
+# Keys are the `type` field sent by offline-sync.js.
+# Each handler receives (conn, restaurant_id, op_data) and performs an upsert.
+# New modules (Phase 6+) register handlers here.
+_SYNC_HANDLERS: dict = {}
+
+
+def _register_sync_handler(type_name: str):
+    """Decorator to register a sync handler function."""
+    def decorator(fn):
+        _SYNC_HANDLERS[type_name] = fn
+        return fn
+    return decorator
+
+
+@_register_sync_handler("staff_shift")
+async def _sync_staff_shift(conn, restaurant_id: int, data: dict):
+    """Upsert a staff_shifts record by its client-generated UUID."""
+    await conn.execute(
+        """
+        INSERT INTO staff_shifts
+            (id, staff_id, restaurant_id, clock_in, clock_out, notes)
+        VALUES ($1, $2::uuid, $3, $4::timestamptz, $5::timestamptz, $6)
+        ON CONFLICT (id) DO UPDATE
+            SET clock_out = EXCLUDED.clock_out,
+                notes     = EXCLUDED.notes
+        """,
+        data.get("id"),
+        data.get("staff_id"),
+        restaurant_id,
+        data.get("clock_in"),
+        data.get("clock_out"),
+        data.get("notes", ""),
+    )
+
+
+@_register_sync_handler("staff")
+async def _sync_staff(conn, restaurant_id: int, data: dict):
+    """Upsert a staff record by its client-generated UUID."""
+    await conn.execute(
+        """
+        INSERT INTO staff
+            (id, restaurant_id, name, role, pin, active)
+        VALUES ($1::uuid, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO UPDATE
+            SET name   = EXCLUDED.name,
+                role   = EXCLUDED.role,
+                pin    = EXCLUDED.pin,
+                active = EXCLUDED.active
+        """,
+        data.get("id"),
+        restaurant_id,
+        data.get("name", ""),
+        data.get("role", "staff"),
+        data.get("pin", ""),
+        data.get("active", True),
+    )
+
+
+async def db_sync_batch(restaurant_id: int, operations: list) -> list:
+    """
+    Process a batch of offline operations.
+    Each operation: {id, type, action, data, client_ts}.
+    Returns [{id, status: 'ok'|'error'|'unsupported_type', error?}].
+    All operations use fully parametrized upserts — no f-string SQL.
+    """
+    pool = await get_pool()
+    results = []
+    async with pool.acquire() as conn:
+        for op in operations:
+            op_id   = op.get("id", "unknown")
+            op_type = op.get("type", "")
+            handler = _SYNC_HANDLERS.get(op_type)
+            if handler is None:
+                results.append({
+                    "id":     op_id,
+                    "status": "unsupported_type",
+                    "error":  f"No sync handler registered for type '{op_type}'",
+                })
+                continue
+            try:
+                async with conn.transaction():
+                    await handler(conn, restaurant_id, op.get("data", {}))
+                results.append({"id": op_id, "status": "ok"})
+            except Exception as exc:
+                results.append({"id": op_id, "status": "error", "error": str(exc)})
+    return results
+
 
 async def db_get_menu(whatsapp_number: str):
     pool = await get_pool()
@@ -1819,6 +1954,57 @@ async def db_get_fiscal_invoices(restaurant_id: int, limit: int = 50) -> list:
     return [_serialize(dict(r)) for r in rows]
 
 
+async def db_get_next_invoice_number(
+    restaurant_id: int,
+    prefix: str,
+    start_at: int = 5200,
+) -> int:
+    """
+    Retorna MAX(invoice_number)+1 para el restaurante y prefijo indicados.
+    Devuelve start_at si no existen facturas previas con ese prefijo.
+    NOTA: SELECT no-atómico — apropiado para sandbox. En producción multi-worker
+    usar db_claim_next_invoice_number (UPDATE … RETURNING atómico).
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        val = await conn.fetchval(
+            """SELECT COALESCE(MAX(invoice_number), $3 - 1) + 1
+               FROM fiscal_invoices
+               WHERE restaurant_id = $1 AND prefix = $2""",
+            restaurant_id, prefix, start_at,
+        )
+    return int(val)
+
+
+async def db_update_invoice_dian_data(
+    fiscal_invoice_id: int,
+    cufe: str,
+    pdf_url: str,
+    qr_data: str,
+    dian_response: dict | None = None,
+) -> None:
+    """
+    Almacena los 3 campos DIAN retornados por MATIAS API tras la emisión exitosa:
+    CUFE, URL/base64 del PDF y cadena QR. Actualiza dian_status a 'accepted'.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE fiscal_invoices
+               SET cufe          = $2,
+                   pdf_url       = $3,
+                   qr_data       = $4,
+                   dian_status   = 'accepted',
+                   dian_response = $5::jsonb
+               WHERE id = $1""",
+            fiscal_invoice_id,
+            cufe,
+            pdf_url,
+            qr_data,
+            json.dumps(dian_response) if dian_response else None,
+        )
+
+
 # ══════════════════════════════════════════════════════════════════════
 # SPLIT CHECKS / PAGOS MIXTOS (FASE 5)
 # ══════════════════════════════════════════════════════════════════════
@@ -2052,3 +2238,319 @@ async def db_get_check_ticket(check_id: str) -> dict | None:
     if isinstance(d.get("payments"), str):
         d["payments"] = json.loads(d["payments"])
     return d
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FASE 6 — STAFF, RELOJ CHECADOR Y PROPINAS
+# ══════════════════════════════════════════════════════════════════════
+
+# ── Staff roster ─────────────────────────────────────────────────────
+
+async def db_get_staff(restaurant_id: int) -> list:
+    """Return all active (and inactive) staff members for a restaurant."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id::text, restaurant_id, name, role, active, phone, "
+            "created_at, updated_at FROM staff "
+            "WHERE restaurant_id=$1 ORDER BY name ASC",
+            restaurant_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_create_staff(
+    restaurant_id: int,
+    name: str,
+    role: str,
+    pin_hash: str,
+    phone: str = "",
+) -> dict:
+    """Insert a new staff member. Returns the created row."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO staff (restaurant_id, name, role, pin, phone)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING id::text, restaurant_id, name, role, active, phone,
+                         created_at, updated_at""",
+            restaurant_id, name, role, pin_hash, phone,
+        )
+    return _serialize(dict(row))
+
+
+async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> dict | None:
+    """
+    Update mutable staff fields (name, role, pin, phone, active).
+    Ignores unknown keys. Returns updated row or None if not found.
+    Only updates columns that are explicitly passed in fields.
+    All values are passed as parameters — no f-string SQL.
+    """
+    allowed = {"name", "role", "pin", "phone", "active"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return None
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Build SET clause with positional params starting at $3
+        set_parts = []
+        values = []
+        for i, (col, val) in enumerate(updates.items(), start=3):
+            set_parts.append(f"{col}=${i}")
+            values.append(val)
+
+        sql = (
+            f"UPDATE staff SET {', '.join(set_parts)}, updated_at=NOW() "
+            f"WHERE id=$1::uuid AND restaurant_id=$2 "
+            f"RETURNING id::text, restaurant_id, name, role, active, phone, "
+            f"created_at, updated_at"
+        )
+        row = await conn.fetchrow(sql, staff_id, restaurant_id, *values)
+    return _serialize(dict(row)) if row else None
+
+
+# ── Clock-in / Clock-out ─────────────────────────────────────────────
+
+async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
+    """
+    Open a new shift for staff_id.
+    Raises ValueError if the employee already has an open shift
+    (caught via asyncpg.UniqueViolationError from uq_staff_shifts_one_open).
+    Returns the new shift dict.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                """INSERT INTO staff_shifts (staff_id, restaurant_id)
+                   VALUES ($1::uuid, $2)
+                   RETURNING id::text, staff_id::text, restaurant_id,
+                             clock_in, clock_out, notes, created_at""",
+                staff_id, restaurant_id,
+            )
+            return _serialize(dict(row))
+        except asyncpg.UniqueViolationError:
+            raise ValueError("El empleado ya tiene un turno abierto.")
+
+
+async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
+    """
+    Close the open shift for staff_id.
+    Returns the updated shift, or None if no open shift was found.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE staff_shifts
+               SET clock_out = NOW()
+               WHERE staff_id = $1::uuid
+                 AND restaurant_id = $2
+                 AND clock_out IS NULL
+               RETURNING id::text, staff_id::text, restaurant_id,
+                         clock_in, clock_out, notes, created_at""",
+            staff_id, restaurant_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_get_open_shifts(restaurant_id: int) -> list:
+    """Return all currently open shifts for a restaurant, joined with staff info."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT ss.id::text, ss.staff_id::text, ss.clock_in,
+                      s.name AS staff_name, s.role AS staff_role
+               FROM staff_shifts ss
+               JOIN staff s ON ss.staff_id = s.id
+               WHERE ss.restaurant_id=$1 AND ss.clock_out IS NULL
+               ORDER BY ss.clock_in ASC""",
+            restaurant_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_shifts(
+    restaurant_id: int,
+    date_from: str,
+    date_to: str,
+) -> list:
+    """Return closed and open shifts in [date_from, date_to] with staff name/role."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT ss.id::text, ss.staff_id::text, ss.clock_in, ss.clock_out,
+                      ss.notes,
+                      s.name AS staff_name, s.role AS staff_role,
+                      EXTRACT(EPOCH FROM (
+                          COALESCE(ss.clock_out, NOW()) - ss.clock_in
+                      )) / 3600.0 AS hours_worked
+               FROM staff_shifts ss
+               JOIN staff s ON ss.staff_id = s.id
+               WHERE ss.restaurant_id=$1
+                 AND ss.clock_in >= $2::timestamptz
+                 AND ss.clock_in <  $3::timestamptz
+               ORDER BY ss.clock_in DESC""",
+            restaurant_id, date_from, date_to,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+# ── Tip pool calculation ─────────────────────────────────────────────
+
+async def db_calculate_tip_pool(
+    restaurant_id: int,
+    period_start: str,
+    period_end: str,
+    total_tips: float,
+) -> dict:
+    """
+    Calculate tip distribution for [period_start, period_end].
+
+    Algorithm:
+      1. Read pct_config from restaurants.features->'tip_distribution'.
+         Expected format: {"mesero": 50, "cocina": 30, "bar": 20}
+      2. Find all shifts that overlap the period and compute effective hours
+         within the window (PostgreSQL handles all timestamp math).
+      3. For each configured role: distribute role_pct% of total_tips
+         proportionally to hours worked among employees in that role.
+
+    Returns:
+      {
+        "pct_config": {"mesero": 50, ...},
+        "entries":    [{"staff_id", "name", "role", "hours", "amount", "pct"}],
+        "total_allocated":   float,
+        "total_unallocated": float
+      }
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # 1. Read tip_distribution config — single parametrized query
+        pct_val = await conn.fetchval(
+            "SELECT features->'tip_distribution' FROM restaurants WHERE id=$1",
+            restaurant_id,
+        )
+        pct_config: dict = pct_val if isinstance(pct_val, dict) else {}
+
+        if not pct_config:
+            return {
+                "pct_config": {},
+                "entries": [],
+                "total_allocated": 0.0,
+                "total_unallocated": round(float(total_tips), 2),
+            }
+
+        # 2. Compute effective hours per employee within the period.
+        # LEAST/GREATEST/COALESCE handle partial overlap and open shifts cleanly.
+        rows = await conn.fetch(
+            """
+            SELECT
+                ss.staff_id::text,
+                s.name,
+                s.role,
+                ROUND(
+                    CAST(SUM(
+                        EXTRACT(EPOCH FROM (
+                            LEAST(COALESCE(ss.clock_out, $3::timestamptz), $3::timestamptz)
+                            - GREATEST(ss.clock_in, $2::timestamptz)
+                        ))
+                    ) / 3600.0 AS numeric), 2
+                ) AS effective_hours
+            FROM staff_shifts ss
+            JOIN staff s ON ss.staff_id = s.id
+            WHERE ss.restaurant_id = $1
+              AND ss.clock_in  < $3::timestamptz
+              AND (ss.clock_out > $2::timestamptz OR ss.clock_out IS NULL)
+            GROUP BY ss.staff_id, s.name, s.role
+            HAVING SUM(
+                EXTRACT(EPOCH FROM (
+                    LEAST(COALESCE(ss.clock_out, $3::timestamptz), $3::timestamptz)
+                    - GREATEST(ss.clock_in, $2::timestamptz)
+                ))
+            ) > 0
+            """,
+            restaurant_id, period_start, period_end,
+        )
+
+        # 3. Distribute tips by role
+        entries = []
+        total_allocated = 0.0
+
+        for role, pct in pct_config.items():
+            role_emps = [r for r in rows if r["role"] == role]
+            if not role_emps:
+                continue  # role has no hours in this period — skip
+
+            role_pool = float(total_tips) * (float(pct) / 100.0)
+            total_role_hours = sum(float(r["effective_hours"]) for r in role_emps)
+
+            for emp in role_emps:
+                h = float(emp["effective_hours"])
+                if total_role_hours > 0:
+                    amount = role_pool * (h / total_role_hours)
+                else:
+                    amount = role_pool / len(role_emps)
+
+                entries.append({
+                    "staff_id": emp["staff_id"],
+                    "name":     emp["name"],
+                    "role":     role,
+                    "hours":    float(emp["effective_hours"]),
+                    "amount":   round(amount, 2),
+                    "pct":      pct,
+                })
+                total_allocated += amount
+
+    return {
+        "pct_config":        pct_config,
+        "entries":           entries,
+        "total_allocated":   round(total_allocated, 2),
+        "total_unallocated": round(float(total_tips) - total_allocated, 2),
+    }
+
+
+async def db_save_tip_distribution(
+    restaurant_id: int,
+    period_start: str,
+    period_end: str,
+    total_tips: float,
+    distribution: list,
+    pct_config: dict,
+    created_by: str,
+) -> dict:
+    """Persist a tip distribution cut. Returns the saved row."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO tip_distributions
+               (restaurant_id, period_start, period_end,
+                total_tips, distribution, pct_config, created_by)
+               VALUES ($1, $2::timestamptz, $3::timestamptz,
+                       $4, $5::jsonb, $6::jsonb, $7)
+               RETURNING id::text, restaurant_id, period_start, period_end,
+                         total_tips, distribution, pct_config, created_by, created_at""",
+            restaurant_id,
+            period_start,
+            period_end,
+            float(total_tips),
+            json.dumps(distribution),
+            json.dumps(pct_config),
+            created_by,
+        )
+    return _serialize(dict(row))
+
+
+async def db_get_tip_distributions(restaurant_id: int, limit: int = 20) -> list:
+    """Return recent tip distribution cuts for a restaurant."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id::text, restaurant_id, period_start, period_end,
+                      total_tips, distribution, pct_config, created_by, created_at
+               FROM tip_distributions
+               WHERE restaurant_id=$1
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            restaurant_id, limit,
+        )
+    return [_serialize(dict(r)) for r in rows]

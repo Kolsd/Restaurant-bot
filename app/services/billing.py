@@ -4,6 +4,7 @@ Integración con: Siigo, Alegra, Loggro, Mesio Native (DIAN)
 """
 
 import os
+import time
 import json
 import httpx
 import base64
@@ -20,6 +21,51 @@ def _today_iso() -> str:
 
 def _now_iso() -> str:
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# MATIAS API — token cache (module-level, compartido entre llamadas)
+# ══════════════════════════════════════════════════════════════════════
+
+_matias_token_cache: dict = {"token": None, "expires_at": 0.0}
+
+
+async def _get_matias_token() -> str:
+    """
+    Obtiene (o reutiliza) el Bearer token para MATIAS API (LopezSoft).
+    Cachea el token 23 h para no re-autenticar en cada factura.
+    Variables de entorno: MATIAS_API_USER, MATIAS_API_PASS, MATIAS_AUTH_URL.
+    """
+    cache = _matias_token_cache
+    if cache["token"] and time.time() < cache["expires_at"]:
+        return cache["token"]
+
+    auth_url = os.getenv(
+        "MATIAS_AUTH_URL", "https://auth-v2.matias-api.com/api/login"
+    )
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            auth_url,
+            json={
+                "user":     os.getenv("MATIAS_API_USER", ""),
+                "password": os.getenv("MATIAS_API_PASS", ""),
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    token = (
+        data.get("token")
+        or data.get("access_token")
+        or (data.get("data") or {}).get("token", "")
+    )
+    if not token:
+        raise RuntimeError("MATIAS API: no se recibió token de autenticación")
+
+    cache["token"]      = token
+    cache["expires_at"] = time.time() + 82_800  # 23 horas
+    return token
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -570,6 +616,12 @@ class MesioNativeAdapter(BillingAdapter):
                 f"La resolución DIAN venció el {valid_to}. Renuévala ante la DIAN."
             )
 
+        # ── Despachar a MATIAS API si está configurado ────────────────
+        if os.getenv("MATIAS_API_URL"):
+            return await self._create_invoice_matias(
+                order=order, config=config, resolution=resolution,
+            )
+
         # Reclamar número consecutivo (atómico en PostgreSQL)
         inv_number = await db.db_claim_next_invoice_number(restaurant_id)
 
@@ -724,6 +776,267 @@ class MesioNativeAdapter(BillingAdapter):
             "total":          total_cents / 100,
             "dian_status":    dian_status,
             "provider_mock":  provider_response.get("mock", False),
+        }
+
+    # ── MATIAS API UBL 2.1 ───────────────────────────────────────────
+
+    def _build_matias_ubl21(
+        self,
+        prefix: str,
+        inv_number: int,
+        resolution: dict,
+        config: dict,
+        order: dict,
+        subtotal_cents: int,
+        tax_cents: int,
+        total_cents: int,
+        tax_regime: str,
+        tax_pct: float,
+        customer: dict,
+        issue_date: str,
+        issue_time: str,
+    ) -> dict:
+        """
+        Construye el payload UBL 2.1 compatible con MATIAS API (LopezSoft).
+        Endpoint destino: POST /api/ubl2.1/invoice
+        tax_id: 1=IVA, 4=INC (según tax_regime)
+        """
+        subtotal = subtotal_cents / 100
+        tax_amt  = tax_cents / 100
+        total    = total_cents / 100
+        tax_id   = 4 if tax_regime == "ico" else 1
+
+        # ── Líneas de factura ─────────────────────────────────────────
+        items = order.get("items", [])
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except Exception:
+                items = []
+
+        invoice_lines = []
+        for idx, item in enumerate(items, start=1):
+            price    = float(item.get("price", 0))
+            qty      = int(item.get("quantity", 1))
+            line_sub = price * qty
+            line_tax = round(line_sub * tax_pct / 100, 2)
+            invoice_lines.append({
+                "unit_measure_id":             70,   # unidad
+                "invoiced_quantity":           qty,
+                "line_extension_amount":       round(line_sub, 2),
+                "free_of_charge_indicator":    False,
+                "description":                 item.get("name", ""),
+                "code":                        str(item.get("id", idx)),
+                "type_item_identification_id": 4,
+                "price_amount":                round(price, 2),
+                "base_quantity":               1,
+                "tax_totals": [] if tax_pct == 0 else [{
+                    "tax_id":        tax_id,
+                    "tax_amount":    line_tax,
+                    "percent":       tax_pct,
+                    "taxable_amount": round(line_sub, 2),
+                }],
+            })
+
+        # ── Impuestos globales ────────────────────────────────────────
+        tax_totals = []
+        if tax_pct > 0:
+            tax_totals.append({
+                "tax_id":        tax_id,
+                "tax_amount":    round(tax_amt, 2),
+                "percent":       tax_pct,
+                "taxable_amount": round(subtotal, 2),
+            })
+
+        # ── Método de pago DIAN ───────────────────────────────────────
+        pm_map = {"cash": 10, "card": 48, "transfer": 42}
+        payment_method_id = pm_map.get(order.get("payment_method", "cash"), 10)
+
+        return {
+            "type_document_id":  1,       # FV — Factura de Venta electrónica
+            "prefix":            prefix,
+            "number":            inv_number,
+            "date":              issue_date,
+            "time":              issue_time + "-05:00",
+            "resolution_number": str(os.getenv(
+                "DIAN_RESOLUTION", resolution.get("resolution_number", "")
+            )),
+            "technical_key":     resolution.get("technical_key", ""),
+            "notes":             order.get("notes", ""),
+            "type_currency_id":  35,      # COP
+            "customer": {
+                "identification_number":           customer["nit"],
+                "dv":                              "0",
+                "name":                            customer["name"],
+                "phone":                           customer.get("phone", ""),
+                "address":                         "CR 00",
+                "email":                           customer.get("email", "cf@email.com"),
+                "merchant_registration":           "0000000-00",
+                "type_document_identification_id": 13,  # CC
+                "type_organization_id":            2,   # Persona Natural
+                "type_regime_id":                  2,   # No responsable de IVA
+                "municipality_id":                 820, # Bogotá
+            },
+            "payment_form": {
+                "payment_form_id":   1,              # Contado
+                "payment_method_id": payment_method_id,
+            },
+            "invoice_lines":  invoice_lines,
+            "tax_totals":     tax_totals,
+            "legal_monetary_totals": {
+                "line_extension_amount":  round(subtotal, 2),
+                "tax_exclusive_amount":   round(subtotal, 2),
+                "tax_inclusive_amount":   round(total, 2),
+                "allowance_total_amount": 0.00,
+                "charge_total_amount":    0.00,
+                "payable_amount":         round(total, 2),
+            },
+        }
+
+    async def _create_invoice_matias(
+        self,
+        order: dict,
+        config: dict,
+        resolution: dict,
+    ) -> dict:
+        """
+        Emite la factura electrónica a través de MATIAS API (LopezSoft UBL 2.1).
+        Flujo:
+          1. Obtiene el próximo número de factura (SELECT MAX+1, sandbox-safe).
+          2. Calcula montos fiscales (IVA o INC).
+          3. Construye el payload UBL 2.1.
+          4. Persiste la fila en fiscal_invoices con dian_status='pending'.
+          5. POSTea a MATIAS /api/ubl2.1/invoice.
+          6. Extrae CUFE, PDF y QR de la respuesta.
+          7. Actualiza la fila con los 3 campos DIAN (dian_status='accepted').
+        Variables de entorno: MATIAS_API_URL, MATIAS_API_USER, MATIAS_API_PASS,
+                              DIAN_RESOLUTION, DIAN_PREFIX.
+        """
+        restaurant_id = config["_restaurant_id"]
+        prefix        = str(os.getenv("DIAN_PREFIX", resolution.get("prefix", "")))
+
+        inv_number = await db.db_get_next_invoice_number(
+            restaurant_id, prefix, start_at=5200
+        )
+        full_num = f"{prefix}{inv_number}"
+
+        # Montos fiscales
+        total_raw  = float(order.get("total", 0))
+        tax_regime = config.get("tax_regime", "iva")
+        tax_pct    = float(config.get("tax_percentage", 8.0 if tax_regime == "ico" else 19.0))
+
+        if tax_pct > 0:
+            subtotal_raw = total_raw / (1 + tax_pct / 100)
+        else:
+            subtotal_raw = total_raw
+
+        subtotal_cents = round(subtotal_raw * 100)
+        tax_cents      = round(total_raw * 100) - subtotal_cents
+        total_cents    = subtotal_cents + tax_cents
+
+        now        = datetime.utcnow()
+        issue_date = now.strftime("%Y-%m-%d")
+        issue_time = now.strftime("%H:%M:%S")
+
+        customer_override = order.get("customer", {})
+        customer = {
+            "nit":     customer_override.get("nit", "222222222222"),
+            "name":    customer_override.get("name", "Consumidor Final"),
+            "email":   customer_override.get("email", ""),
+            "id_type": customer_override.get("id_type", "13"),
+        }
+
+        ubl_payload = self._build_matias_ubl21(
+            prefix=prefix,
+            inv_number=inv_number,
+            resolution=resolution,
+            config=config,
+            order=order,
+            subtotal_cents=subtotal_cents,
+            tax_cents=tax_cents,
+            total_cents=total_cents,
+            tax_regime=tax_regime,
+            tax_pct=tax_pct,
+            customer=customer,
+            issue_date=issue_date,
+            issue_time=issue_time,
+        )
+
+        # Persistir en estado pendiente antes de llamar a MATIAS
+        fiscal_id = await db.db_save_fiscal_invoice({
+            "billing_log_id":    None,
+            "restaurant_id":     restaurant_id,
+            "order_id":          order.get("id", ""),
+            "resolution_number": resolution["resolution_number"],
+            "prefix":            prefix,
+            "invoice_number":    inv_number,
+            "issue_date":        issue_date,
+            "issue_time":        issue_time,
+            "subtotal_cents":    subtotal_cents,
+            "tax_regime":        tax_regime,
+            "tax_pct":           tax_pct,
+            "tax_cents":         tax_cents,
+            "total_cents":       total_cents,
+            "cufe":              "",
+            "qr_data":           "",
+            "uuid_dian":         "",
+            "xml_content":       json.dumps(ubl_payload),
+            "pdf_url":           None,
+            "customer_nit":      customer["nit"],
+            "customer_name":     customer["name"],
+            "customer_email":    customer.get("email", ""),
+            "customer_id_type":  customer.get("id_type", "13"),
+            "payment_method":    order.get("payment_method", "cash"),
+            "dian_status":       "pending",
+            "dian_response":     None,
+        })
+
+        # Llamar a MATIAS API
+        bearer_token = await _get_matias_token()
+        api_base     = os.getenv("MATIAS_API_URL", "https://api-v2.matias-api.com/api/ubl2.1")
+        endpoint     = f"{api_base}/invoice"
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                endpoint,
+                json=ubl_payload,
+                headers={
+                    "Authorization": f"Bearer {bearer_token}",
+                    "Content-Type":  "application/json",
+                },
+            )
+            resp.raise_for_status()
+            matias_response = resp.json()
+
+        # Extraer los 3 campos DIAN de la respuesta MATIAS
+        # MATIAS v2 puede responder con data anidada o campos a nivel raíz
+        data    = matias_response.get("data") or matias_response
+        cufe    = data.get("cufe") or data.get("CUFE") or data.get("cude", "")
+        pdf_url = data.get("pdf_base64") or data.get("pdf") or data.get("PDF", "")
+        qr_data = data.get("QRStr") or data.get("qr") or data.get("qr_string", "")
+
+        # Actualizar fila con los datos definitivos
+        await db.db_update_invoice_dian_data(
+            fiscal_invoice_id=fiscal_id,
+            cufe=cufe,
+            pdf_url=pdf_url,
+            qr_data=qr_data,
+            dian_response=matias_response,
+        )
+
+        return {
+            "id":             fiscal_id,
+            "invoice_number": full_num,
+            "cufe":           cufe,
+            "qr_data":        qr_data,
+            "pdf_url":        pdf_url,
+            "subtotal":       subtotal_cents / 100,
+            "tax_regime":     tax_regime,
+            "tax_pct":        tax_pct,
+            "tax":            tax_cents / 100,
+            "total":          total_cents / 100,
+            "dian_status":    "accepted",
+            "provider_mock":  False,
         }
 
     # ── test_connection ───────────────────────────────────────────────
