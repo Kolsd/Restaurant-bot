@@ -1,4 +1,5 @@
-﻿import secrets
+﻿import json as _json
+import secrets
 from passlib.context import CryptContext
 from app.services import database as db
 
@@ -25,7 +26,6 @@ async def login(username: str, password: str) -> dict:
     token = secrets.token_hex(32)
     await db.db_save_session(token, username.lower().strip())
 
-    import json as _json
     role = user.get("role", "owner")
     branch_id = user.get("branch_id")
     whatsapp_number = ""
