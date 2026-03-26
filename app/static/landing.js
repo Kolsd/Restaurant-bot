@@ -36,18 +36,27 @@ document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe
 
 // ── PRIVACY MODAL ─────────────────────────────────────────────────
 function openPrivacy() {
-  document.getElementById('privacy-modal').classList.add('open');
-  document.body.style.overflow = 'hidden';
+  const modal = document.getElementById('privacy-modal');
+  if(modal) {
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
 }
 function closePrivacy() {
-  document.getElementById('privacy-modal').classList.remove('open');
-  document.body.style.overflow = '';
+  const modal = document.getElementById('privacy-modal');
+  if(modal) {
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+  }
 }
 
-// Cerrar modal al hacer clic en el overlay
-document.getElementById('privacy-modal').addEventListener('click', function(e) {
-  if (e.target === this) closePrivacy();
-});
+// Cerrar modal al hacer clic en el overlay (CON VALIDACIÓN)
+const privacyModalEl = document.getElementById('privacy-modal');
+if (privacyModalEl) {
+  privacyModalEl.addEventListener('click', function(e) {
+    if (e.target === this) closePrivacy();
+  });
+}
 
 // Cerrar modal con Escape
 document.addEventListener('keydown', function(e) {
@@ -115,9 +124,12 @@ function updateLegoTotal() {
   setupNote.textContent = '+ $' + setup + ' setup único';
 }
 
-document.querySelectorAll('.lego-mod').forEach(mod => {
-  mod.addEventListener('click', function() {
-    this.classList.toggle('lego-mod-active');
-    updateLegoTotal();
+// Asegurarnos de que el DOM esté listo antes de agregar los eventos a los módulos
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.lego-mod').forEach(mod => {
+    mod.addEventListener('click', function() {
+      this.classList.toggle('lego-mod-active');
+      updateLegoTotal();
+    });
   });
 });
