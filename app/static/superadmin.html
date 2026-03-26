@@ -3,2154 +3,1023 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio HQ — Control Center</title>
+<title>Mesio HQ</title>
 <link rel="icon" type="image/png" href="/static/logo.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
-:root {
-  --bg: #07080a;
-  --surface: #0e1014;
-  --surface2: #13161b;
-  --surface3: #1a1e26;
-  --border: rgba(255,255,255,0.06);
-  --border2: rgba(255,255,255,0.1);
-  --accent: #39FF6A;
-  --accent2: #00C9FF;
-  --accent3: #FF6B6B;
-  --accent-dim: rgba(57,255,106,0.08);
-  --accent2-dim: rgba(0,201,255,0.08);
-  --text: #e8eaf0;
-  --text2: #8b8fa8;
-  --text3: #4a4e62;
-  --danger: #FF6B6B;
-  --warn: #FFB347;
-  --info: #00C9FF;
-  --sidebar-w: 72px;
-  --sidebar-w-open: 240px;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Inter', sans-serif;
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-  font-size: 14px;
-}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f0;color:#111;}
 
-/* ── NOISE TEXTURE ── */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 0;
-}
+/* ── LOGIN ── */
+#login-overlay{position:fixed;inset:0;background:#f5f5f0;display:flex;align-items:center;justify-content:center;z-index:9999;}
+.login-box{background:#fff;border:0.5px solid #e0e0d8;border-radius:16px;padding:2.5rem;width:360px;box-shadow:0 8px 40px rgba(0,0,0,.08);}
+.login-logo{width:44px;height:44px;background:#1D9E75;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;margin-bottom:1.5rem;}
+.login-title{font-size:20px;font-weight:700;margin-bottom:4px;}
+.login-sub{font-size:12px;color:#888;margin-bottom:1.75rem;}
+.login-input{width:100%;padding:10px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;margin-bottom:10px;}
+.login-input:focus{border-color:#1D9E75;}
+.login-btn{width:100%;background:#1D9E75;color:#fff;border:none;padding:11px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;}
+.login-btn:hover{background:#0F6E56;}
+.login-err{color:#C0392B;font-size:12px;margin-top:8px;text-align:center;}
 
-/* ── AUTH ── */
-#auth-screen {
-  position: fixed; inset: 0;
-  background: var(--bg);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 9999;
-}
-.auth-wrap {
-  text-align: center;
-  width: 380px;
-}
-.auth-logo {
-  font-family: 'Syne', sans-serif;
-  font-size: 48px;
-  font-weight: 800;
-  color: var(--accent);
-  letter-spacing: -2px;
-  margin-bottom: 4px;
-  animation: pulse-glow 3s ease-in-out infinite;
-}
-@keyframes pulse-glow {
-  0%, 100% { text-shadow: 0 0 20px rgba(57,255,106,0.3); }
-  50% { text-shadow: 0 0 40px rgba(57,255,106,0.6); }
-}
-.auth-sub {
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  color: var(--text3);
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  margin-bottom: 48px;
-}
-.auth-box {
-  background: var(--surface);
-  border: 1px solid var(--border2);
-  border-radius: 20px;
-  padding: 32px;
-}
-.auth-box input {
-  width: 100%;
-  padding: 14px 18px;
-  background: var(--bg);
-  border: 1px solid var(--border2);
-  color: var(--text);
-  border-radius: 12px;
-  font-size: 15px;
-  text-align: center;
-  font-family: 'DM Mono', monospace;
-  letter-spacing: 2px;
-  margin-bottom: 16px;
-  transition: border-color 0.2s;
-}
-.auth-box input:focus { outline: none; border-color: var(--accent); }
-.auth-btn {
-  width: 100%;
-  padding: 14px;
-  background: var(--accent);
-  color: #000;
-  border: none;
-  border-radius: 12px;
-  font-family: 'Syne', sans-serif;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: opacity 0.2s, transform 0.1s;
-  letter-spacing: 0.5px;
-}
-.auth-btn:hover { opacity: 0.9; }
-.auth-btn:active { transform: scale(0.98); }
-.auth-error { color: var(--danger); font-size: 12px; margin-top: 10px; font-family: 'DM Mono', monospace; }
+/* ── LAYOUT ── */
+#app{display:none;}
+.sidebar{width:220px;background:#fff;border-right:0.5px solid #e0e0d8;height:100vh;position:fixed;top:0;left:0;display:flex;flex-direction:column;padding:1.5rem 1rem;overflow-y:auto;}
+.sidebar-logo{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:0.5px solid #e0e0d8;}
+.logo-icon{width:36px;height:36px;background:#1D9E75;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;}
+.logo-text{font-size:14px;font-weight:700;}
+.logo-sub{font-size:11px;color:#888;}
+.nav-group-label{font-size:10px;font-weight:700;color:#bbb;letter-spacing:.08em;text-transform:uppercase;padding:10px 12px 3px;margin-top:4px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;color:#555;margin-bottom:2px;border:none;background:none;width:100%;text-align:left;}
+.nav-item:hover{background:#f5f5f0;color:#111;}
+.nav-item.active{background:#E1F5EE;color:#0F6E56;font-weight:500;}
+.live-badge{margin-top:auto;padding:8px 12px;background:#E1F5EE;border-radius:8px;font-size:11px;color:#0F6E56;font-weight:600;}
 
-/* ── APP ── */
-#app-screen { display: none; width: 100%; height: 100%; position: relative; z-index: 1; }
+.main{margin-left:220px;padding:1.5rem 2rem;min-height:100vh;}
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;}
+.page-title{font-size:20px;font-weight:700;}
+.logout-btn{font-size:12px;padding:6px 12px;border:1px solid #ddd;border-radius:8px;background:none;cursor:pointer;color:#555;}
 
-/* ── SIDEBAR ── */
-.sidebar {
-  position: fixed;
-  top: 0; left: 0; bottom: 0;
-  width: var(--sidebar-w);
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 24px 0;
-  z-index: 100;
-  transition: width 0.25s cubic-bezier(.4,0,.2,1);
-  overflow: hidden;
-}
-.sidebar:hover {
-  width: var(--sidebar-w-open);
-  align-items: flex-start;
-  padding: 24px 16px;
-}
-.sidebar-logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 32px;
-  padding-left: 4px;
-  white-space: nowrap;
-}
-.sidebar-logo-mark {
-  width: 40px; height: 40px;
-  background: var(--accent-dim);
-  border: 1px solid rgba(57,255,106,0.2);
-  border-radius: 12px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: 'Syne', sans-serif;
-  font-weight: 800;
-  color: var(--accent);
-  font-size: 18px;
-  flex-shrink: 0;
-}
-.sidebar-logo-text {
-  font-family: 'Syne', sans-serif;
-  font-weight: 700;
-  font-size: 18px;
-  color: #fff;
-  letter-spacing: -0.5px;
-}
-.sidebar-logo-sub {
-  font-family: 'DM Mono', monospace;
-  font-size: 10px;
-  color: var(--text3);
-  letter-spacing: 2px;
-}
+.section{display:none;}
+.section.active{display:block;}
 
-.nav-items { display: flex; flex-direction: column; gap: 4px; width: 100%; flex: 1; }
-.nav-btn {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-  color: var(--text2);
-  font-weight: 500;
-  border: none;
-  background: none;
-  width: 100%;
-  text-align: left;
-  font-family: 'Inter', sans-serif;
-  font-size: 14px;
-}
-.nav-btn:hover { background: var(--surface3); color: var(--text); }
-.nav-btn.active { background: var(--accent-dim); color: var(--accent); }
-.nav-btn .icon {
-  width: 40px; height: 40px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px;
-  flex-shrink: 0;
-}
-.nav-label { font-size: 13px; }
-
-.sidebar-footer {
-  margin-top: auto;
-  width: 100%;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-/* ── MAIN ── */
-.main {
-  margin-left: var(--sidebar-w);
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-}
-
-/* ── TOPBAR ── */
-.topbar {
-  padding: 20px 32px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  background: rgba(7,8,10,0.8);
-  backdrop-filter: blur(10px);
-  position: relative;
-  z-index: 10;
-}
-.topbar-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 20px;
-  font-weight: 700;
-  color: #fff;
-}
-.topbar-right { display: flex; align-items: center; gap: 16px; }
-.live-indicator {
-  display: flex; align-items: center; gap: 8px;
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  color: var(--accent);
-  letter-spacing: 1px;
-}
-.live-dot {
-  width: 7px; height: 7px;
-  background: var(--accent);
-  border-radius: 50%;
-  animation: blink 1.5s infinite;
-}
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
-.topbar-time {
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  color: var(--text3);
-}
-
-/* ── CONTENT ── */
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 32px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--surface3) transparent;
-}
-.section { display: none; animation: fadeUp 0.3s ease; }
-.section.active { display: block; }
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-/* ── SECTION HEADER ── */
-.section-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 28px;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.section-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 28px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: -1px;
-  line-height: 1.1;
-}
-.section-sub {
-  font-size: 13px;
-  color: var(--text2);
-  margin-top: 4px;
-}
-
-/* ── KPI CARDS ── */
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 28px;
-}
-.kpi {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 20px 22px;
-  position: relative;
-  overflow: hidden;
-  transition: border-color 0.2s, transform 0.15s;
-  cursor: default;
-}
-.kpi:hover { border-color: var(--border2); transform: translateY(-2px); }
-.kpi::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  background: var(--kpi-color, var(--accent));
-  opacity: 0.6;
-}
-.kpi-label {
-  font-size: 11px;
-  color: var(--text2);
-  font-weight: 500;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-  font-family: 'DM Mono', monospace;
-}
-.kpi-value {
-  font-family: 'Syne', sans-serif;
-  font-size: 32px;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: -1px;
-  line-height: 1;
-  margin-bottom: 8px;
-}
-.kpi-value.accent { color: var(--accent); }
-.kpi-value.info { color: var(--info); }
-.kpi-value.warn { color: var(--warn); }
-.kpi-value.danger { color: var(--danger); }
-.kpi-delta {
-  font-size: 12px;
-  color: var(--text3);
-  display: flex; align-items: center; gap: 4px;
-}
-.kpi-delta.up { color: var(--accent); }
-.kpi-delta.down { color: var(--danger); }
-.kpi-icon {
-  position: absolute;
-  right: 18px; top: 18px;
-  font-size: 22px;
-  opacity: 0.12;
-}
-
-/* ── GRID LAYOUTS ── */
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-.grid-left-heavy { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 20px; }
-.grid-right-heavy { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; margin-bottom: 20px; }
+/* ── MÉTRICAS ── */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:1.5rem;}
+.metric{background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1rem 1.25rem;}
+.metric-label{font-size:12px;color:#888;margin-bottom:6px;}
+.metric-value{font-size:26px;font-weight:700;}
+.metric-sub{font-size:11px;color:#888;margin-top:4px;}
+.metric-green{color:#1D9E75;}
 
 /* ── CARDS ── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 22px 24px;
-  margin-bottom: 20px;
-}
-.card-title {
-  font-family: 'Syne', sans-serif;
-  font-size: 15px;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 16px;
-  display: flex; align-items: center; justify-content: space-between;
-}
-.card-sub { font-size: 12px; color: var(--text2); font-weight: 400; margin-left: 8px; }
+.card{background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;margin-bottom:1.25rem;}
+.card-title{font-size:13px;font-weight:600;color:#555;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;}
 
-/* ── CHART AREA ── */
-.chart-wrap { position: relative; height: 200px; }
-.chart-wrap-sm { position: relative; height: 140px; }
-
-/* ── HEALTH SCORES ── */
-.health-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-}
-.health-item {
-  background: var(--surface2);
-  border-radius: 12px;
-  padding: 16px;
-  text-align: center;
-  border: 1px solid var(--border);
-}
-.health-score {
-  font-family: 'Syne', sans-serif;
-  font-size: 36px;
-  font-weight: 800;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-.health-label { font-size: 11px; color: var(--text2); font-family: 'DM Mono', monospace; letter-spacing: 0.5px; }
-.score-a { color: var(--accent); }
-.score-b { color: var(--info); }
-.score-c { color: var(--warn); }
-.score-d { color: var(--danger); }
-
-/* ── RESTAURANT TABLE ── */
-.data-table-wrap {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-}
-.table-controls {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.search-input {
-  flex: 1;
-  min-width: 200px;
-  padding: 9px 14px;
-  background: var(--bg);
-  border: 1px solid var(--border2);
-  color: var(--text);
-  border-radius: 10px;
-  font-size: 13px;
-  font-family: 'Inter', sans-serif;
-  transition: border-color 0.2s;
-}
-.search-input:focus { outline: none; border-color: var(--accent); }
-.filter-btn {
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--text2);
-  font-size: 12px;
-  cursor: pointer;
-  font-family: 'Inter', sans-serif;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-.filter-btn:hover { background: var(--surface3); color: var(--text); }
-.filter-btn.active { background: var(--accent-dim); color: var(--accent); border-color: rgba(57,255,106,0.3); }
-table { width: 100%; border-collapse: collapse; }
-thead th {
-  padding: 12px 20px;
-  text-align: left;
-  font-size: 11px;
-  font-family: 'DM Mono', monospace;
-  color: var(--text3);
-  letter-spacing: 0.8px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-  background: var(--surface2);
-}
-tbody td {
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-  color: #c8cad8;
-  vertical-align: middle;
-}
-tbody tr:last-child td { border-bottom: none; }
-tbody tr { transition: background 0.1s; cursor: pointer; }
-tbody tr:hover td { background: var(--surface2); }
+/* ── TABLE ── */
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:8px 12px;font-size:11px;color:#888;border-bottom:0.5px solid #e0e0d8;font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+td{padding:10px 12px;border-bottom:0.5px solid #f0f0e8;vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:#fafaf8;}
+.tr-link{cursor:pointer;}
 
 /* ── BADGES ── */
-.badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  font-family: 'DM Mono', monospace;
-  white-space: nowrap;
-}
-.badge::before { content:''; width:5px; height:5px; border-radius:50%; background: currentColor; }
-.badge-active { background: rgba(57,255,106,0.1); color: var(--accent); }
-.badge-suspended { background: rgba(255,107,107,0.1); color: var(--danger); }
-.badge-trial { background: rgba(0,201,255,0.1); color: var(--info); }
-.badge-pending { background: rgba(255,179,71,0.1); color: var(--warn); }
-.module-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  background: var(--surface3);
-  border-radius: 6px;
-  font-size: 11px;
-  color: var(--text2);
-  margin: 2px;
-  font-family: 'DM Mono', monospace;
-}
-
-/* ── MRR CHART SECTION ── */
-.mrr-breakdown {
-  display: flex; gap: 24px;
-  margin-top: 12px;
-}
-.mrr-item { flex: 1; }
-.mrr-label { font-size: 11px; color: var(--text2); font-family: 'DM Mono', monospace; letter-spacing: 0.5px; margin-bottom: 4px; }
-.mrr-val { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; }
-
-/* ── PIPELINE (funnel) ── */
-.pipeline {
-  display: flex;
-  gap: 0;
-  height: 80px;
-  border-radius: 12px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-.pipe-stage {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Syne', sans-serif;
-  font-weight: 700;
-  transition: filter 0.2s;
-  cursor: default;
-  position: relative;
-}
-.pipe-stage:hover { filter: brightness(1.2); }
-.pipe-stage .ps-val { font-size: 24px; color: #fff; }
-.pipe-stage .ps-lbl { font-size: 10px; color: rgba(255,255,255,0.6); font-family: 'DM Mono', monospace; }
-
-/* ── ACTIVITY FEED ── */
-.activity-feed { max-height: 320px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--surface3) transparent; }
-.activity-item {
-  display: flex; align-items: flex-start; gap: 14px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
-  animation: slideIn 0.3s ease;
-}
-@keyframes slideIn { from { opacity:0; transform: translateX(-8px); } to { opacity:1; transform:translateX(0); } }
-.activity-item:last-child { border-bottom: none; }
-.activity-dot {
-  width: 32px; height: 32px;
-  border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-.activity-body { flex: 1; }
-.activity-title { font-size: 13px; color: var(--text); font-weight: 500; margin-bottom: 2px; }
-.activity-meta { font-size: 11px; color: var(--text3); font-family: 'DM Mono', monospace; }
-.activity-time { font-size: 11px; color: var(--text3); font-family: 'DM Mono', monospace; white-space: nowrap; }
-
-/* ── ONBOARDING CHECKLIST ── */
-.checklist { display: flex; flex-direction: column; gap: 8px; }
-.check-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.check-item:hover { border-color: var(--border2); }
-.check-item.done { opacity: 0.5; }
-.check-item.done .check-circle { background: var(--accent); border-color: var(--accent); }
-.check-item.done .check-circle::after { content: '✓'; font-size: 12px; color: #000; font-weight: 700; }
-.check-circle {
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  border: 2px solid var(--border2);
-  flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-}
-.check-text { flex: 1; font-weight: 500; }
-.check-tag { font-size: 10px; font-family: 'DM Mono', monospace; padding: 2px 8px; border-radius: 4px; }
-.tag-ops { background: rgba(0,201,255,0.1); color: var(--info); }
-.tag-sales { background: rgba(57,255,106,0.1); color: var(--accent); }
-.tag-tech { background: rgba(255,179,71,0.1); color: var(--warn); }
-
-/* ── FORMS (Alta) ── */
-.form-section { margin-bottom: 24px; }
-.form-section-title {
-  font-family: 'DM Mono', monospace;
-  font-size: 11px;
-  color: var(--text3);
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  margin-bottom: 14px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-.form-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.form-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text2);
-  font-family: 'DM Mono', monospace;
-  letter-spacing: 0.5px;
-}
-.form-input {
-  padding: 11px 14px;
-  background: var(--bg);
-  border: 1px solid var(--border2);
-  color: var(--text);
-  border-radius: 10px;
-  font-size: 14px;
-  font-family: 'Inter', sans-serif;
-  transition: border-color 0.2s;
-  width: 100%;
-}
-.form-input:focus { outline: none; border-color: var(--accent); }
-.form-input::placeholder { color: var(--text3); }
-select.form-input { cursor: pointer; }
-textarea.form-input {
-  height: 130px;
-  resize: vertical;
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-}
-
-/* ── MODULES TOGGLE ── */
-.modules-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-}
-.module-toggle {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 16px;
-  background: var(--surface2);
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  transition: border-color 0.2s;
-}
-.module-toggle:hover { border-color: var(--border2); }
-.module-info { display: flex; flex-direction: column; gap: 2px; }
-.module-name { font-size: 13px; font-weight: 600; color: var(--text); }
-.module-desc { font-size: 11px; color: var(--text3); }
-.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider {
-  position: absolute; cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--surface3);
-  border: 1px solid var(--border2);
-  transition: .3s; border-radius: 34px;
-}
-.slider::before {
-  position: absolute; content: "";
-  height: 16px; width: 16px; left: 3px; bottom: 3px;
-  background: var(--text3); transition: .3s; border-radius: 50%;
-}
-input:checked + .slider { background: rgba(57,255,106,0.2); border-color: rgba(57,255,106,0.4); }
-input:checked + .slider::before { transform: translateX(20px); background: var(--accent); }
+.badge{font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;}
+.badge-active{background:#E1F5EE;color:#0F6E56;}
+.badge-suspended{background:#FDE8E8;color:#C0392B;}
+.badge-chip{background:#f0f0e8;color:#555;font-size:11px;padding:2px 7px;border-radius:6px;margin:2px;display:inline-block;}
 
 /* ── BUTTONS ── */
-.btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 11px 20px;
-  border-radius: 10px;
-  font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  border: none;
-}
-.btn-primary {
-  background: var(--accent);
-  color: #000;
-}
-.btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
-.btn-primary:active { transform: scale(0.97); }
-.btn-secondary {
-  background: var(--surface3);
-  color: var(--text);
-  border: 1px solid var(--border2);
-}
-.btn-secondary:hover { background: var(--surface2); }
-.btn-danger-soft {
-  background: rgba(255,107,107,0.1);
-  color: var(--danger);
-  border: 1px solid rgba(255,107,107,0.2);
-}
-.btn-danger-soft:hover { background: rgba(255,107,107,0.2); }
-.btn-success-soft {
-  background: rgba(57,255,106,0.08);
-  color: var(--accent);
-  border: 1px solid rgba(57,255,106,0.2);
-}
-.btn-success-soft:hover { background: rgba(57,255,106,0.15); }
-.btn-sm { padding: 7px 12px; font-size: 12px; border-radius: 8px; }
-.btn-crm {
-  background: linear-gradient(135deg, rgba(57,255,106,0.15), rgba(0,201,255,0.15));
-  color: var(--accent);
-  border: 1px solid rgba(57,255,106,0.3);
-}
-.btn-crm:hover { background: linear-gradient(135deg, rgba(57,255,106,0.25), rgba(0,201,255,0.25)); }
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;}
+.btn-primary{background:#1D9E75;color:#fff;}
+.btn-primary:hover{background:#0F6E56;}
+.btn-secondary{background:#fff;color:#555;border:1px solid #e0e0d8;}
+.btn-secondary:hover{background:#f5f5f0;}
+.btn-danger{background:#FDE8E8;color:#C0392B;border:1px solid #f5b7b1;}
+.btn-sm{padding:5px 10px;font-size:12px;}
 
-/* ── AI FILE EXTRACT ── */
-.ai-extract-row {
-  display: flex; gap: 10px; align-items: center;
-  padding: 10px 12px;
-  background: var(--bg);
-  border: 1px solid var(--border2);
-  border-radius: 10px;
-  margin-bottom: 10px;
-}
-.ai-extract-row input[type="file"] {
-  flex: 1; border: none; background: transparent; color: var(--text);
-  font-size: 12px; padding: 0; font-family: 'DM Mono', monospace;
-}
-.btn-ai-extract {
-  padding: 8px 16px;
-  background: rgba(59,130,246,0.2);
-  color: #60a5fa;
-  border: 1px solid rgba(59,130,246,0.3);
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: 'Inter', sans-serif;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.btn-ai-extract:hover { background: rgba(59,130,246,0.3); }
+/* ── FORMS ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+.form-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;}
+.form-full{grid-column:1/-1;}
+label.field-label{font-size:11px;color:#888;display:block;margin-bottom:4px;font-weight:600;}
+.field-input{width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;}
+.field-input:focus{border-color:#1D9E75;}
+textarea.field-input{min-height:140px;resize:vertical;font-family:inherit;}
+select.field-input{cursor:pointer;}
 
-/* ── USERS TABLE ── */
-.user-card {
-  display: flex; align-items: center; gap: 16px;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  transition: background 0.1s;
-  cursor: pointer;
-}
-.user-card:hover { background: var(--surface2); }
-.user-card:last-child { border-bottom: none; }
-.user-avatar {
-  width: 36px; height: 36px;
-  border-radius: 50%;
-  background: var(--surface3);
-  border: 1px solid var(--border2);
-  display: flex; align-items: center; justify-content: center;
-  font-family: 'Syne', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text2);
-  flex-shrink: 0;
-}
-.user-info { flex: 1; }
-.user-name { font-size: 14px; font-weight: 600; color: var(--text); }
-.user-meta { font-size: 12px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 2px; }
-.user-actions { display: flex; gap: 8px; }
+/* ── TOGGLE SWITCH ── */
+.switch{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;}
+.switch input{opacity:0;width:0;height:0;}
+.slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:22px;transition:.3s;}
+.slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s;}
+input:checked+.slider{background:#1D9E75;}
+input:checked+.slider:before{transform:translateX(18px);}
+.module-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid #f0f0e8;}
+.module-row:last-child{border-bottom:none;}
+.module-name{font-size:13px;font-weight:500;}
+.module-desc{font-size:11px;color:#888;margin-top:1px;}
 
-/* ── MODAL (Restaurant Detail) ── */
-.modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.7);
-  backdrop-filter: blur(4px);
-  z-index: 500;
-  display: none; align-items: center; justify-content: center;
-  padding: 24px;
-}
-.modal-overlay.open { display: flex; }
-.modal-box {
-  background: var(--surface);
-  border: 1px solid var(--border2);
-  border-radius: 20px;
-  width: 680px;
-  max-width: 95vw;
-  max-height: 85vh;
-  overflow-y: auto;
-  padding: 28px;
-  box-shadow: 0 40px 80px rgba(0,0,0,0.6);
-  scrollbar-width: thin;
-  scrollbar-color: var(--surface3) transparent;
-}
-.modal-head {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  margin-bottom: 24px;
-}
-.modal-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; color: #fff; }
-.modal-close {
-  background: var(--surface3); border: 1px solid var(--border2);
-  color: var(--text2); width: 32px; height: 32px;
-  border-radius: 8px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 16px; transition: all 0.15s; flex-shrink: 0;
-}
-.modal-close:hover { background: var(--surface2); color: var(--text); }
+/* ── DETAIL PANEL ── */
+#detail-panel{display:none;background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:0;overflow:hidden;margin-bottom:1.25rem;}
+.detail-header{display:flex;align-items:center;gap:12px;padding:1.25rem 1.5rem;border-bottom:0.5px solid #e0e0d8;}
+.detail-avatar{width:42px;height:42px;border-radius:10px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+.detail-name{font-size:16px;font-weight:700;}
+.detail-sub{font-size:12px;color:#888;margin-top:2px;}
+.detail-tabs{display:flex;border-bottom:0.5px solid #e0e0d8;padding:0 1.5rem;}
+.detail-tab{padding:10px 16px;font-size:13px;color:#888;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;}
+.detail-tab.active{color:#1D9E75;border-bottom-color:#1D9E75;}
+.detail-body{padding:1.5rem;}
+.detail-tab-panel{display:none;}
+.detail-tab-panel.active{display:block;}
 
-.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
-.detail-item { padding: 12px 14px; background: var(--surface2); border-radius: 10px; border: 1px solid var(--border); }
-.detail-label { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; letter-spacing: 0.5px; margin-bottom: 4px; }
-.detail-value { font-size: 14px; color: var(--text); font-weight: 500; }
-
-/* ── MINI SPARKLINE ── */
-.spark { display: inline-block; }
-
-/* ── PROGRESS BAR ── */
-.progress-bar-wrap { background: var(--surface3); border-radius: 99px; height: 6px; overflow: hidden; margin-top: 6px; }
-.progress-bar { height: 100%; border-radius: 99px; transition: width 0.8s cubic-bezier(.4,0,.2,1); }
+/* ── SEARCH ── */
+.search-bar{display:flex;gap:10px;margin-bottom:1rem;align-items:center;flex-wrap:wrap;}
+.search-input{padding:8px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;width:260px;}
+.filter-btn{padding:6px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:12px;background:#fff;cursor:pointer;color:#555;}
+.filter-btn.active{background:#1D9E75;color:#fff;border-color:#1D9E75;}
 
 /* ── EMPTY STATE ── */
-.empty-state {
-  text-align: center; padding: 48px 24px;
-  color: var(--text3);
-  font-size: 14px;
-}
-.empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.4; }
+.empty-state{text-align:center;padding:3rem;color:#aaa;font-size:13px;}
 
-/* ── TOAST ── */
-.toast-container {
-  position: fixed; bottom: 24px; right: 24px;
-  display: flex; flex-direction: column; gap: 8px;
-  z-index: 9999;
-}
-.toast {
-  padding: 12px 18px;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 500;
-  animation: toastIn 0.3s ease;
-  display: flex; align-items: center; gap: 10px;
-  min-width: 260px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-}
-@keyframes toastIn { from { opacity:0; transform: translateX(20px); } to { opacity:1; transform:translateX(0); } }
-.toast-success { background: rgba(57,255,106,0.15); border: 1px solid rgba(57,255,106,0.3); color: var(--accent); }
-.toast-error   { background: rgba(255,107,107,0.15); border: 1px solid rgba(255,107,107,0.3); color: var(--danger); }
-.toast-info    { background: rgba(0,201,255,0.12); border: 1px solid rgba(0,201,255,0.3); color: var(--info); }
+/* ── STATS MINI ── */
+.stat-mini{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:1.25rem;}
+.stat-mini-item{background:#f5f5f0;border-radius:8px;padding:10px 14px;flex:1;min-width:100px;}
+.stat-mini-label{font-size:11px;color:#888;margin-bottom:3px;}
+.stat-mini-value{font-size:18px;font-weight:700;}
 
-/* ── RESPONSIVE ── */
-@media (max-width: 900px) {
-  .grid2, .grid3, .grid-left-heavy, .grid-right-heavy { grid-template-columns: 1fr; }
-  .form-grid2, .form-grid3 { grid-template-columns: 1fr; }
+/* ── FEEDBACK ── */
+.feedback-msg{font-size:12px;padding:8px 12px;border-radius:8px;margin-top:10px;display:none;}
+.feedback-msg.ok{background:#E1F5EE;color:#0F6E56;}
+.feedback-msg.err{background:#FDE8E8;color:#C0392B;}
+
+/* ── PLAN BADGES ── */
+.plan-basic{background:#f0f0e8;color:#555;}
+.plan-pro{background:#E6F1FB;color:#185FA5;}
+.plan-premium{background:#EEE8FD;color:#5B21B6;}
+
+@media(max-width:768px){
+  .sidebar{display:none;}
+  .main{margin-left:0;padding:1rem;}
+  .metrics{grid-template-columns:1fr 1fr;}
 }
 </style>
 </head>
 <body>
 
-<!-- ── AUTH ── -->
-<div id="auth-screen">
-  <div class="auth-wrap">
-    <div class="auth-logo">M</div>
-    <div class="auth-sub">Mesio HQ · Control Center</div>
-    <div class="auth-box">
-      <input type="password" id="key_input" placeholder="admin key..." autocomplete="off"
-        onkeydown="if(event.key==='Enter') loginAdmin()">
-      <button class="auth-btn" onclick="loginAdmin()">Acceder</button>
-      <div class="auth-error" id="auth-error"></div>
-    </div>
+<!-- ── LOGIN ───────────────────────────────────────────────────────── -->
+<div id="login-overlay">
+  <div class="login-box">
+    <div class="login-logo">M</div>
+    <div class="login-title">Mesio HQ</div>
+    <div class="login-sub">Panel de administración interno</div>
+    <input class="login-input" id="admin-key-input" type="password" placeholder="Clave de administrador"
+           onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()">Acceder al HQ →</button>
+    <div class="login-err" id="login-err"></div>
   </div>
 </div>
 
-<!-- ── APP ── -->
-<div id="app-screen">
-
-  <!-- SIDEBAR -->
-  <nav class="sidebar" id="sidebar">
+<!-- ── APP ────────────────────────────────────────────────────────── -->
+<div id="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
     <div class="sidebar-logo">
-      <div class="sidebar-logo-mark">M</div>
-      <div>
-        <div class="sidebar-logo-text">Mesio HQ</div>
-        <div class="sidebar-logo-sub">CONTROL CENTER</div>
-      </div>
+      <div class="logo-icon">HQ</div>
+      <div><div class="logo-text">Mesio HQ</div><div class="logo-sub">Admin interno</div></div>
     </div>
-    <div class="nav-items">
-      <button class="nav-btn active" onclick="switchTab('dashboard',this)">
-        <div class="icon">📊</div><span class="nav-label">Dashboard</span>
-      </button>
-      <button class="nav-btn" onclick="switchTab('clients',this)">
-        <div class="icon">🏪</div><span class="nav-label">Restaurantes</span>
-      </button>
-      <button class="nav-btn" onclick="switchTab('new',this)">
-        <div class="icon">➕</div><span class="nav-label">Alta de Cliente</span>
-      </button>
-      <button class="nav-btn" onclick="switchTab('users',this)">
-        <div class="icon">👥</div><span class="nav-label">Usuarios & Accesos</span>
-      </button>
-      <button class="nav-btn" onclick="switchTab('finances',this)">
-        <div class="icon">💰</div><span class="nav-label">Finanzas MRR</span>
-      </button>
-      <button class="nav-btn" onclick="switchTab('ops',this)">
-        <div class="icon">⚙️</div><span class="nav-label">Operaciones</span>
-      </button>
-    </div>
-    <div class="sidebar-footer">
-      <button class="nav-btn btn-crm" onclick="window.location.href='/crm'" id="btn-crm" style="display:none;">
-        <div class="icon">🎯</div><span class="nav-label">CRM Prospectos</span>
-      </button>
-    </div>
-  </nav>
 
-  <!-- MAIN -->
+    <div class="nav-group-label">Principal</div>
+    <button class="nav-item active" id="nav-resumen" onclick="showSection('resumen',this)">🏢 Resumen</button>
+
+    <div class="nav-group-label">Clientes</div>
+    <button class="nav-item" id="nav-restaurantes" onclick="showSection('restaurantes',this)">🍽️ Restaurantes</button>
+    <button class="nav-item" id="nav-nuevo" onclick="showSection('nuevo',this)">➕ Nuevo cliente</button>
+    <button class="nav-item" id="nav-usuarios" onclick="showSection('usuarios',this)">👥 Usuarios</button>
+
+    <div class="nav-group-label">Financiero</div>
+    <button class="nav-item" id="nav-dian" onclick="showSection('dian',this)">📄 DIAN & Folios</button>
+
+    <div style="margin-top:auto;padding-top:1rem;">
+      <button class="btn btn-secondary btn-sm" onclick="doLogout()" style="width:100%;justify-content:center;">Cerrar sesión</button>
+    </div>
+    <div class="live-badge" style="margin-top:8px;">Mesio HQ v2</div>
+  </div>
+
+  <!-- Main -->
   <div class="main">
-    <!-- TOPBAR -->
     <div class="topbar">
-      <div class="topbar-title" id="topbar-title">Dashboard Global</div>
-      <div class="topbar-right">
-        <div class="live-indicator"><div class="live-dot"></div>LIVE</div>
-        <div class="topbar-time" id="clock">--:--:--</div>
+      <div class="page-title" id="hq-page-title">Resumen</div>
+      <div style="font-size:12px;color:#888;" id="hq-time"></div>
+    </div>
+
+    <!-- ══ RESUMEN ══════════════════════════════════════════════════════ -->
+    <div id="resumen" class="section active">
+      <div class="metrics" id="hq-metrics">
+        <div class="metric"><div class="metric-label">🍽️ Restaurantes</div><div class="metric-value" id="kpi-total">—</div><div class="metric-sub" id="kpi-active-sub"></div></div>
+        <div class="metric"><div class="metric-label">📦 Pedidos totales</div><div class="metric-value" id="kpi-orders">—</div><div class="metric-sub">histórico</div></div>
+        <div class="metric"><div class="metric-label">👥 Usuarios</div><div class="metric-value" id="kpi-users">—</div><div class="metric-sub">en todos los restaurantes</div></div>
+        <div class="metric"><div class="metric-label">📄 Folios DIAN</div><div class="metric-value" id="kpi-invoices">—</div><div class="metric-sub" id="kpi-invoices-sub">últimos 30 días</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="card">
+          <div class="card-title">Restaurantes activos</div>
+          <div id="resumen-restaurants-list"><div class="empty-state">Cargando...</div></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Actividad reciente</div>
+          <div id="resumen-activity"><div class="empty-state">Cargando...</div></div>
+        </div>
       </div>
     </div>
 
-    <!-- CONTENT -->
-    <div class="content">
-
-      <!-- ══ DASHBOARD ══ -->
-      <div id="dashboard" class="section active">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Visión general</div>
-            <div class="section-sub">Todo Mesio en un vistazo — actualizado en tiempo real</div>
+    <!-- ══ RESTAURANTES ═════════════════════════════════════════════════ -->
+    <div id="restaurantes" class="section">
+      <!-- Detail panel (shown when a restaurant is selected) -->
+      <div id="detail-panel">
+        <div class="detail-header">
+          <div class="detail-avatar" id="dp-avatar">🍽️</div>
+          <div style="flex:1;">
+            <div class="detail-name" id="dp-name">—</div>
+            <div class="detail-sub" id="dp-sub">—</div>
           </div>
-          <button class="btn btn-secondary btn-sm" onclick="loadStats()">↻ Actualizar</button>
+          <span class="badge" id="dp-status-badge">—</span>
+          <button class="btn btn-secondary btn-sm" onclick="closeDetail()" style="margin-left:12px;">✕ Cerrar</button>
         </div>
 
-        <!-- KPIs Row 1 -->
-        <div class="kpi-grid">
-          <div class="kpi" style="--kpi-color: var(--accent);">
-            <div class="kpi-icon">🏪</div>
-            <div class="kpi-label">Clientes Totales</div>
-            <div class="kpi-value" id="st_total_rest">—</div>
-            <div class="kpi-delta" id="st_total_delta">cargando...</div>
-          </div>
-          <div class="kpi" style="--kpi-color: var(--accent);">
-            <div class="kpi-icon">✅</div>
-            <div class="kpi-label">Clientes Activos</div>
-            <div class="kpi-value accent" id="st_active_rest">—</div>
-            <div class="kpi-delta" id="st_churn_rate">calculando churn...</div>
-          </div>
-          <div class="kpi" style="--kpi-color: var(--info);">
-            <div class="kpi-icon">💵</div>
-            <div class="kpi-label">MRR Estimado</div>
-            <div class="kpi-value info" id="st_mrr">—</div>
-            <div class="kpi-delta up" id="st_mrr_growth">↑ vs mes anterior</div>
-          </div>
-          <div class="kpi" style="--kpi-color: var(--warn);">
-            <div class="kpi-icon">📦</div>
-            <div class="kpi-label">Pedidos Globales</div>
-            <div class="kpi-value" id="st_orders">—</div>
-            <div class="kpi-delta">acumulado histórico</div>
-          </div>
-          <div class="kpi" style="--kpi-color: var(--accent);">
-            <div class="kpi-icon">💬</div>
-            <div class="kpi-label">Mensajes WA Hoy</div>
-            <div class="kpi-value" id="st_msgs_today">—</div>
-            <div class="kpi-delta up" id="st_msgs_delta">en todas las instancias</div>
-          </div>
-          <div class="kpi" style="--kpi-color: var(--danger);">
-            <div class="kpi-icon">⚠️</div>
-            <div class="kpi-label">Clientes en Riesgo</div>
-            <div class="kpi-value danger" id="st_at_risk">—</div>
-            <div class="kpi-delta">sin actividad 7d+</div>
-          </div>
+        <!-- Mini stats -->
+        <div style="padding:1rem 1.5rem 0;" id="dp-stats-row">
+          <div class="stat-mini" id="dp-stats"></div>
         </div>
 
-        <!-- Row 2: Crecimiento + Actividad -->
-        <div class="grid-left-heavy">
-          <div class="card">
-            <div class="card-title">
-              Crecimiento de clientes
-              <span class="card-sub" id="growth-period">último semestre</span>
-            </div>
-            <div class="chart-wrap"><canvas id="chart-growth"></canvas></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Estado de suscripciones</div>
-            <div class="chart-wrap"><canvas id="chart-subs"></canvas></div>
-          </div>
+        <!-- Tabs -->
+        <div class="detail-tabs">
+          <div class="detail-tab active" onclick="switchDetailTab('info',this)">Info</div>
+          <div class="detail-tab" onclick="switchDetailTab('modulos',this)">Módulos</div>
+          <div class="detail-tab" onclick="switchDetailTab('credenciales',this)">Meta / WA</div>
+          <div class="detail-tab" onclick="switchDetailTab('peligroso',this)">Peligroso</div>
         </div>
 
-        <!-- Row 3: MRR Breakdown + Activity -->
-        <div class="grid2">
-          <div class="card">
-            <div class="card-title">MRR por plan</div>
-            <div class="mrr-breakdown" id="mrr-breakdown">
-              <div class="mrr-item"><div class="mrr-label">BÁSICO</div><div class="mrr-val" id="mrr-basic" style="color:var(--text2)">—</div></div>
-              <div class="mrr-item"><div class="mrr-label">PRO</div><div class="mrr-val" id="mrr-pro" style="color:var(--accent)">—</div></div>
-              <div class="mrr-item"><div class="mrr-label">PREMIUM</div><div class="mrr-val" id="mrr-premium" style="color:var(--info)">—</div></div>
+        <div class="detail-body">
+          <!-- Tab: Info -->
+          <div id="dtab-info" class="detail-tab-panel active">
+            <div class="form-grid">
+              <div><label class="field-label">Nombre del restaurante</label><input id="dp-name-input" class="field-input" placeholder="Nombre"></div>
+              <div><label class="field-label">Número WhatsApp (bot)</label><input id="dp-wa-input" class="field-input" placeholder="+57300..."></div>
+              <div class="form-full"><label class="field-label">Dirección</label><input id="dp-addr-input" class="field-input" placeholder="Dirección completa"></div>
+              <div>
+                <label class="field-label">Zona horaria</label>
+                <select id="dp-timezone" class="field-input">
+                  <option value="America/Bogota">América/Bogotá (COT)</option>
+                  <option value="America/Mexico_City">América/México (CST)</option>
+                  <option value="America/Lima">América/Lima (PET)</option>
+                  <option value="America/Santiago">América/Santiago (CLT)</option>
+                  <option value="America/Buenos_Aires">América/Buenos Aires (ART)</option>
+                  <option value="UTC">UTC</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Moneda</label>
+                <select id="dp-currency" class="field-input">
+                  <option value="COP">COP — Peso colombiano</option>
+                  <option value="MXN">MXN — Peso mexicano</option>
+                  <option value="PEN">PEN — Sol peruano</option>
+                  <option value="CLP">CLP — Peso chileno</option>
+                  <option value="USD">USD — Dólar</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Locale</label>
+                <select id="dp-locale" class="field-input">
+                  <option value="es-CO">es-CO (Colombia)</option>
+                  <option value="es-MX">es-MX (México)</option>
+                  <option value="es-PE">es-PE (Perú)</option>
+                  <option value="es-CL">es-CL (Chile)</option>
+                  <option value="en-US">en-US (English)</option>
+                </select>
+              </div>
             </div>
-            <div class="chart-wrap-sm"><canvas id="chart-mrr"></canvas></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Actividad reciente <span class="card-sub">últimas acciones</span></div>
-            <div class="activity-feed" id="activity-feed">
-              <div class="empty-state"><div class="empty-icon">⚡</div>Cargando actividad...</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn btn-primary" onclick="saveRestaurantInfo()">💾 Guardar cambios</button>
+              <div class="feedback-msg" id="info-feedback"></div>
             </div>
           </div>
-        </div>
 
-        <!-- Row 4: Health Scores + Pipeline -->
-        <div class="grid2">
-          <div class="card">
-            <div class="card-title">Health Score de clientes</div>
-            <div class="health-grid" id="health-grid">
-              <div class="health-item"><div class="health-score score-a" id="hs-a">—</div><div class="health-label">SALUDABLE (A)</div></div>
-              <div class="health-item"><div class="health-score score-b" id="hs-b">—</div><div class="health-label">ESTABLE (B)</div></div>
-              <div class="health-item"><div class="health-score score-c" id="hs-c">—</div><div class="health-label">ATENCIÓN (C)</div></div>
-              <div class="health-item"><div class="health-score score-d" id="hs-d">—</div><div class="health-label">CRITICO (D)</div></div>
+          <!-- Tab: Módulos -->
+          <div id="dtab-modulos" class="detail-tab-panel">
+            <div style="font-size:12px;color:#888;margin-bottom:1rem;">Los cambios se aplican inmediatamente. El restaurante ve los módulos activos en su dashboard.</div>
+            <div id="dp-modules-list"></div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:1rem;">
+              <button class="btn btn-primary" onclick="saveModules()">💾 Guardar módulos</button>
+              <div class="feedback-msg" id="modules-feedback"></div>
             </div>
           </div>
-          <div class="card">
-            <div class="card-title">Pipeline de ventas</div>
-            <div class="pipeline" id="pipeline-bar">
-              <div class="pipe-stage" style="background:#1a2d1a;"><div class="ps-val" id="pipe-leads">—</div><div class="ps-lbl">LEADS</div></div>
-              <div class="pipe-stage" style="background:#1a2810;"><div class="ps-val" id="pipe-demo">—</div><div class="ps-lbl">DEMO</div></div>
-              <div class="pipe-stage" style="background:#1e2e0c;"><div class="ps-val" id="pipe-prop">—</div><div class="ps-lbl">PROPUESTA</div></div>
-              <div class="pipe-stage" style="background:rgba(57,255,106,0.2);"><div class="ps-val" id="pipe-close" style="color:var(--accent)">—</div><div class="ps-lbl">CERRADOS</div></div>
-            </div>
-            <div class="chart-wrap-sm"><canvas id="chart-pipeline"></canvas></div>
-          </div>
-        </div>
 
-        <!-- Checklist ops diaria -->
-        <div class="card">
-          <div class="card-title">Checklist operacional del día</div>
-          <div class="checklist" id="daily-checklist">
-            <div class="check-item done" onclick="toggleCheck(this)">
-              <div class="check-circle"></div>
-              <span class="check-text">Revisar clientes nuevos del día anterior</span>
-              <span class="check-tag tag-ops">OPS</span>
+          <!-- Tab: Credenciales Meta / WA -->
+          <div id="dtab-credenciales" class="detail-tab-panel">
+            <div style="background:#FFF8E6;border:1px solid #F0A500;border-radius:8px;padding:10px 14px;font-size:12px;color:#7A4F00;margin-bottom:1rem;">
+              ⚠️ Estas credenciales se guardan en la DB. Cámbialas solo si el cliente actualizó su token de Meta.
             </div>
-            <div class="check-item" onclick="toggleCheck(this)">
-              <div class="check-circle"></div>
-              <span class="check-text">Verificar uptime de instancias WhatsApp</span>
-              <span class="check-tag tag-tech">TECH</span>
+            <div class="form-grid">
+              <div><label class="field-label">WA Phone Number ID</label><input id="dp-phoneid-input" class="field-input" placeholder="ID del número de teléfono"></div>
+              <div><label class="field-label">Meta Access Token</label><input id="dp-token-input" class="field-input" type="password" placeholder="EAA..."></div>
             </div>
-            <div class="check-item" onclick="toggleCheck(this)">
-              <div class="check-circle"></div>
-              <span class="check-text">Seguimiento a prospectos en etapa Demo</span>
-              <span class="check-tag tag-sales">VENTAS</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <button class="btn btn-primary" onclick="saveCredentials()">💾 Actualizar credenciales</button>
+              <div class="feedback-msg" id="creds-feedback"></div>
             </div>
-            <div class="check-item" onclick="toggleCheck(this)">
-              <div class="check-circle"></div>
-              <span class="check-text">Revisar clientes con Health Score D (crítico)</span>
-              <span class="check-tag tag-ops">OPS</span>
+          </div>
+
+          <!-- Tab: Peligroso -->
+          <div id="dtab-peligroso" class="detail-tab-panel">
+            <div style="background:#FDE8E8;border:1px solid #f5b7b1;border-radius:8px;padding:12px 14px;margin-bottom:1.25rem;">
+              <div style="font-size:13px;font-weight:600;color:#C0392B;margin-bottom:6px;">⚠️ Zona peligrosa</div>
+              <div style="font-size:12px;color:#8B0000;">Las acciones aquí no se pueden deshacer fácilmente. Actúa con precaución.</div>
             </div>
-            <div class="check-item" onclick="toggleCheck(this)">
-              <div class="check-circle"></div>
-              <span class="check-text">Registrar conversaciones de ventas en CRM</span>
-              <span class="check-tag tag-sales">VENTAS</span>
-            </div>
-            <div class="check-item" onclick="toggleCheck(this)">
-              <div class="check-circle"></div>
-              <span class="check-text">Revisar errores críticos en logs del servidor</span>
-              <span class="check-tag tag-tech">TECH</span>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:#fff;border:0.5px solid #e0e0d8;border-radius:10px;">
+                <div><div style="font-size:13px;font-weight:500;">Suspender / Activar</div><div style="font-size:12px;color:#888;margin-top:2px;">Cambiar estado de suscripción del restaurante</div></div>
+                <div style="display:flex;gap:8px;">
+                  <button class="btn btn-secondary btn-sm" onclick="setSubStatus('active')">✅ Activar</button>
+                  <button class="btn btn-danger btn-sm" onclick="setSubStatus('suspended')">⛔ Suspender</button>
+                </div>
+              </div>
+              <div style="font-size:12px;color:#888;padding:0 4px;">Estado actual: <strong id="dp-current-status">—</strong></div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- ══ RESTAURANTES ══ -->
-      <div id="clients" class="section">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Directorio de clientes</div>
-            <div class="section-sub">Todos los restaurantes en la plataforma</div>
-          </div>
-          <div style="display:flex;gap:10px;">
-            <button class="btn btn-secondary btn-sm" onclick="loadRestaurants()">↻ Recargar</button>
-            <button class="btn btn-primary btn-sm" onclick="switchTab('new', document.querySelectorAll('.nav-btn')[2])">+ Alta Rápida</button>
-          </div>
+      <!-- Restaurant table -->
+      <div id="restaurants-table-wrap">
+        <div class="search-bar">
+          <input class="search-input" id="rest-search" placeholder="Buscar restaurante..." oninput="filterRestaurants()">
+          <button class="filter-btn active" onclick="setRestFilter('all',this)">Todos</button>
+          <button class="filter-btn" onclick="setRestFilter('active',this)">Activos</button>
+          <button class="filter-btn" onclick="setRestFilter('suspended',this)">Suspendidos</button>
+          <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="showSection('nuevo',document.getElementById('nav-nuevo'))">+ Nuevo</button>
         </div>
-
-        <div class="data-table-wrap">
-          <div class="table-controls">
-            <input class="search-input" id="search-clients" placeholder="Buscar por nombre, WhatsApp..." oninput="filterClients()">
-            <button class="filter-btn active" id="filter-all" onclick="setFilter('all', this)">Todos</button>
-            <button class="filter-btn" id="filter-active" onclick="setFilter('active', this)">Activos</button>
-            <button class="filter-btn" id="filter-suspended" onclick="setFilter('suspended', this)">Suspendidos</button>
-          </div>
+        <div class="card" style="padding:0;overflow:hidden;">
           <table>
             <thead>
               <tr>
-                <th>#</th>
                 <th>Restaurante</th>
                 <th>WhatsApp</th>
                 <th>Módulos</th>
-                <th>Pedidos</th>
-                <th>Health</th>
                 <th>Estado</th>
-                <th>Acción</th>
+                <th>ID</th>
+                <th></th>
               </tr>
             </thead>
-            <tbody id="clients-tbody">
-              <tr><td colspan="8"><div class="empty-state"><div class="empty-icon">🔄</div>Cargando clientes...</div></td></tr>
+            <tbody id="restaurants-tbody">
+              <tr><td colspan="6" class="empty-state">Cargando...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
-
-      <!-- ══ ALTA DE CLIENTE ══ -->
-      <div id="new" class="section">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Alta de cliente</div>
-            <div class="section-sub">Implementa un nuevo restaurante en Mesio</div>
-          </div>
-        </div>
-
-        <div class="card">
-          <!-- Datos básicos -->
-          <div class="form-section">
-            <div class="form-section-title">01 — Datos del restaurante</div>
-            <div class="form-grid2" style="margin-bottom:14px;">
-              <div class="form-group">
-                <label class="form-label">Nombre del restaurante *</label>
-                <input type="text" id="r_name" class="form-input" placeholder="Ej: Pizzería Don Juan">
-              </div>
-              <div class="form-group">
-                <label class="form-label">WhatsApp (con código de país, sin +) *</label>
-                <input type="text" id="r_wa" class="form-input" placeholder="573168191483">
-              </div>
-            </div>
-            <div class="form-grid2">
-              <div class="form-group">
-                <label class="form-label">Dirección física</label>
-                <input type="text" id="r_addr" class="form-input" placeholder="Calle 93 #15-32, Bogotá">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Ciudad</label>
-                <input type="text" id="r_city" class="form-input" placeholder="Bogotá">
-              </div>
-            </div>
-            <div class="form-grid2" style="margin-top:14px;">
-              <div class="form-group">
-                <label class="form-label">Meta Phone ID (Opcional)</label>
-                <input type="text" id="r_wa_phone_id" class="form-input" placeholder="Ej: 15556293573">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Meta Access Token (Opcional)</label>
-                <input type="password" id="r_wa_access_token" class="form-input" placeholder="Token permanente EAAI...">
-              </div>
-              <div class="form-grid3" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
-                <div class="form-group">
-                  <label class="form-label">Zona Horaria *</label>
-                  <select id="r_timezone" class="form-input">
-                    <option value="America/Bogota">Colombia (UTC-5)</option>
-                    <option value="America/New_York">EE. UU. - Este (EST)</option>
-                    <option value="America/Chicago">EE. UU. - Central (CST)</option>
-                    <option value="America/Los_Angeles">EE. UU. - Pacífico (PST)</option>
-                    <option value="America/Mexico_City">México (CDMX)</option>
-                    <option value="Europe/Madrid">España (Madrid)</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Moneda *</label>
-                  <select id="r_currency" class="form-input">
-                    <option value="COP">COP ($)</option>
-                    <option value="USD">USD ($)</option>
-                    <option value="MXN">MXN ($)</option>
-                    <option value="EUR">EUR (€)</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Formato Regional *</label>
-                  <select id="r_locale" class="form-input">
-                    <option value="es-CO">es-CO (Español Col)</option>
-                    <option value="en-US">en-US (Inglés US)</option>
-                    <option value="es-MX">es-MX (Español Mex)</option>
-                    <option value="es-ES">es-ES (Español Esp)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Plan y módulos -->
-          <div class="form-section">
-            <div class="form-section-title">02 — Plan y módulos SaaS</div>
-            <div class="form-group" style="margin-bottom:16px;max-width:300px;">
-              <label class="form-label">Plan de suscripción</label>
-              <select id="r_plan" class="form-input">
-                <option value="basic">Básico — $299k/mes</option>
-                <option value="pro" selected>Pro — $499k/mes</option>
-                <option value="premium">Premium — $799k/mes</option>
-              </select>
-            </div>
-            <div class="modules-grid">
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">🛵 Pedidos WhatsApp</div>
-                  <div class="module-desc">Pedidos y domicilios por WA</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_orders" checked><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">🪑 Mesas & QR</div>
-                  <div class="module-desc">Órdenes desde mesa vía QR</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_tables" checked><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">📅 Reservaciones</div>
-                  <div class="module-desc">Reservas por WhatsApp</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_reservations" checked><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">🧠 POS + IA Analytics</div>
-                  <div class="module-desc">Dashboard avanzado con IA</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_pos" checked><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">⭐ NPS</div>
-                  <div class="module-desc">Encuestas de satisfacción WA</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_nps"><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">📦 Inventario</div>
-                  <div class="module-desc">Control de stock vinculado al menú</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_inventory"><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">💳 Pagos Wompi</div>
-                  <div class="module-desc">Pagos en línea integrados</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_wompi"><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">👤 Staff & Propinas</div>
-                  <div class="module-desc">Gestión de turnos y corte de propinas</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_staff_tips"><span class="slider"></span></label>
-              </div>
-              <div class="module-toggle">
-                <div class="module-info">
-                  <div class="module-name">🎁 Fidelización</div>
-                  <div class="module-desc">Programa de puntos por compra</div>
-                </div>
-                <label class="switch"><input type="checkbox" id="feat_loyalty"><span class="slider"></span></label>
-              </div>
-            </div>
-          </div>
-
-          <!-- Menú -->
-          <div class="form-section">
-            <div class="form-section-title">03 — Menú JSON</div>
-            <div class="ai-extract-row">
-              <input type="file" id="menu_file" accept=".pdf,.png,.jpg,.jpeg">
-              <button class="btn-ai-extract" onclick="parseMenuFile()" id="btn_parse">✨ Extraer con IA</button>
-            </div>
-            <textarea class="form-input" id="r_menu" placeholder='{"Pizzas": [{"name": "Margarita", "price": 25000, "description": "Clásica italiana"}]}'></textarea>
-          </div>
-
-          <div style="display:flex;gap:12px;align-items:center;">
-            <button class="btn btn-primary" onclick="createRestaurant()" style="flex:1;justify-content:center;">
-              Crear e implementar restaurante →
-            </button>
-            <button class="btn btn-secondary" onclick="clearForm()">Limpiar</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ USUARIOS ══ -->
-      <div id="users" class="section">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Usuarios & Accesos</div>
-            <div class="section-sub">Gestiona quién puede entrar al dashboard de cada cliente</div>
-          </div>
-        </div>
-
-        <div class="grid2" style="margin-bottom:0;">
-          <!-- Crear usuario -->
-          <div class="card" style="margin-bottom:0;">
-            <div class="card-title">Crear acceso de admin</div>
-            <div class="form-group" style="margin-bottom:12px;">
-              <label class="form-label">Restaurante</label>
-              <input type="text" id="u_rest" class="form-input" placeholder="Nombre exacto del restaurante">
-            </div>
-            <div class="form-group" style="margin-bottom:12px;">
-              <label class="form-label">Usuario / Email</label>
-              <input type="text" id="u_email" class="form-input" placeholder="admin@restaurante.com">
-            </div>
-            <div class="form-group" style="margin-bottom:20px;">
-              <label class="form-label">Contraseña provisional</label>
-              <input type="text" id="u_pass" class="form-input" placeholder="Genera una contraseña segura">
-            </div>
-            <button class="btn btn-primary" onclick="createUser()" style="width:100%;justify-content:center;">Crear usuario</button>
-          </div>
-
-          <!-- Lista de usuarios recientes -->
-          <div class="card" style="margin-bottom:0; padding:0; overflow:hidden;">
-            <div style="padding:20px 24px 0; font-family:'Syne',sans-serif; font-size:15px; font-weight:700; color:#fff;">
-              Accesos recientes
-            </div>
-            <div id="users-list" style="margin-top:12px;">
-              <div class="empty-state"><div class="empty-icon">👥</div>Cargando usuarios...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══ FINANZAS ══ -->
-      <div id="finances" class="section">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Finanzas & MRR</div>
-            <div class="section-sub">Ingresos recurrentes, proyecciones y churn</div>
-          </div>
-        </div>
-
-        <div class="kpi-grid">
-          <div class="kpi" style="--kpi-color:var(--accent)">
-            <div class="kpi-icon">💵</div>
-            <div class="kpi-label">MRR Actual</div>
-            <div class="kpi-value accent" id="fin-mrr">—</div>
-            <div class="kpi-delta up" id="fin-mrr-growth">↑ +0% vs anterior</div>
-          </div>
-          <div class="kpi" style="--kpi-color:var(--info)">
-            <div class="kpi-icon">📈</div>
-            <div class="kpi-label">ARR Proyectado</div>
-            <div class="kpi-value info" id="fin-arr">—</div>
-            <div class="kpi-delta">MRR × 12</div>
-          </div>
-          <div class="kpi" style="--kpi-color:var(--warn)">
-            <div class="kpi-icon">📉</div>
-            <div class="kpi-label">Churn Rate</div>
-            <div class="kpi-value warn" id="fin-churn">—%</div>
-            <div class="kpi-delta">último mes</div>
-          </div>
-          <div class="kpi" style="--kpi-color:var(--accent)">
-            <div class="kpi-icon">🎯</div>
-            <div class="kpi-label">LTV Promedio</div>
-            <div class="kpi-value" id="fin-ltv">—</div>
-            <div class="kpi-delta">por cliente</div>
-          </div>
-        </div>
-
-        <div class="grid-left-heavy">
-          <div class="card">
-            <div class="card-title">Evolución de MRR <span class="card-sub">últimos 12 meses</span></div>
-            <div class="chart-wrap" style="height:240px;"><canvas id="chart-mrr-history"></canvas></div>
-          </div>
-          <div class="card">
-            <div class="card-title">Ingresos por plan</div>
-            <div class="chart-wrap" style="height:240px;"><canvas id="chart-plan-mix"></canvas></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Desglose de ingresos por cliente</div>
-          <table>
-            <thead>
-              <tr>
-                <th>Restaurante</th>
-                <th>Plan</th>
-                <th>MRR</th>
-                <th>Meses activo</th>
-                <th>LTV</th>
-                <th>Riesgo</th>
-              </tr>
-            </thead>
-            <tbody id="fin-tbody">
-              <tr><td colspan="6"><div class="empty-state"><div class="empty-icon">💰</div>Cargando datos financieros...</div></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ══ OPERACIONES ══ -->
-      <div id="ops" class="section">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Operaciones</div>
-            <div class="section-sub">Estado del sistema, instancias WA y salud de la plataforma</div>
-          </div>
-        </div>
-
-        <div class="kpi-grid">
-          <div class="kpi" style="--kpi-color:var(--accent)">
-            <div class="kpi-icon">🟢</div>
-            <div class="kpi-label">Uptime del servidor</div>
-            <div class="kpi-value accent" id="ops-uptime">99.9%</div>
-            <div class="kpi-delta up">últimos 30 días</div>
-          </div>
-          <div class="kpi" style="--kpi-color:var(--info)">
-            <div class="kpi-icon">📱</div>
-            <div class="kpi-label">Instancias WA activas</div>
-            <div class="kpi-value info" id="ops-wa-active">—</div>
-            <div class="kpi-delta" id="ops-wa-total">de — totales</div>
-          </div>
-          <div class="kpi" style="--kpi-color:var(--warn)">
-            <div class="kpi-icon">⚡</div>
-            <div class="kpi-label">Mensajes / hora</div>
-            <div class="kpi-value" id="ops-msg-rate">—</div>
-            <div class="kpi-delta">promedio última hora</div>
-          </div>
-          <div class="kpi" style="--kpi-color:var(--danger)">
-            <div class="kpi-icon">🚨</div>
-            <div class="kpi-label">Errores críticos</div>
-            <div class="kpi-value danger" id="ops-errors">—</div>
-            <div class="kpi-delta">últimas 24h</div>
-          </div>
-        </div>
-
-        <div class="grid2">
-          <div class="card">
-            <div class="card-title">Estado de instancias WhatsApp</div>
-            <div id="wa-instances-list">
-              <div class="empty-state"><div class="empty-icon">📱</div>Cargando instancias...</div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-title">Actividad del sistema <span class="card-sub">últimas 24h</span></div>
-            <div class="chart-wrap"><canvas id="chart-activity"></canvas></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">Log de errores recientes</div>
-          <div id="error-log">
-            <div class="empty-state"><div class="empty-icon">📋</div>Sin errores críticos recientes</div>
-          </div>
-        </div>
-      </div>
-
-    </div><!-- /content -->
-  </div><!-- /main -->
-
-</div><!-- /app-screen -->
-
-<!-- MODAL detail restaurante -->
-<div class="modal-overlay" id="client-modal" onclick="if(event.target===this)closeModal()">
-  <div class="modal-box">
-    <div class="modal-head">
-      <div>
-        <div class="modal-title" id="modal-rest-name">Restaurante</div>
-        <div style="font-size:13px;color:var(--text2);margin-top:4px;" id="modal-rest-wa">—</div>
-      </div>
-      <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-    <div class="detail-grid" id="modal-detail-grid"></div>
-    <div style="margin-bottom:16px;" id="modal-modules-section"></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;" id="modal-actions"></div>
-  </div>
-</div>
 
-<!-- TOAST CONTAINER -->
-<div class="toast-container" id="toast-container"></div>
+    <!-- ══ NUEVO ═════════════════════════════════════════════════════════ -->
+    <div id="nuevo" class="section">
+      <div class="card">
+        <div class="card-title">Datos del restaurante</div>
+        <div class="form-grid">
+          <div><label class="field-label">Nombre del restaurante *</label><input id="r_name" class="field-input" placeholder="Nombre del negocio"></div>
+          <div><label class="field-label">Número WhatsApp *</label><input id="r_wa" class="field-input" placeholder="+57300..."></div>
+          <div class="form-full"><label class="field-label">Dirección completa *</label><input id="r_addr" class="field-input" placeholder="Calle 93 #15-32, Bogotá"></div>
+          <div><label class="field-label">Ciudad</label><input id="r_city" class="field-input" placeholder="Bogotá"></div>
+          <div>
+            <label class="field-label">Zona horaria</label>
+            <select id="r_tz" class="field-input">
+              <option value="America/Bogota">América/Bogotá</option>
+              <option value="America/Mexico_City">América/México</option>
+              <option value="America/Lima">América/Lima</option>
+              <option value="America/Santiago">América/Santiago</option>
+              <option value="America/Buenos_Aires">América/Buenos Aires</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Moneda</label>
+            <select id="r_currency" class="field-input">
+              <option value="COP">COP — Peso colombiano</option>
+              <option value="MXN">MXN — Peso mexicano</option>
+              <option value="PEN">PEN — Sol peruano</option>
+              <option value="CLP">CLP — Peso chileno</option>
+              <option value="USD">USD — Dólar</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Locale</label>
+            <select id="r_locale" class="field-input">
+              <option value="es-CO">es-CO (Colombia)</option>
+              <option value="es-MX">es-MX (México)</option>
+              <option value="es-PE">es-PE (Perú)</option>
+              <option value="es-CL">es-CL (Chile)</option>
+              <option value="en-US">en-US (English)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Credenciales Meta (opcional)</div>
+        <div class="form-grid">
+          <div><label class="field-label">WA Phone Number ID</label><input id="r_wa_phone_id" class="field-input" placeholder="ID del número"></div>
+          <div><label class="field-label">Meta Access Token</label><input id="r_wa_access_token" class="field-input" type="password" placeholder="EAA..."></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Módulos activos</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+          <div class="module-row" style="padding-right:1rem;">
+            <div><div class="module-name">🛵 Pedidos WhatsApp</div><div class="module-desc">Domicilios y para llevar por WA</div></div>
+            <label class="switch"><input type="checkbox" id="feat_orders" checked><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-left:1rem;">
+            <div><div class="module-name">🪑 Mesas & QR</div><div class="module-desc">Órdenes desde mesa vía QR</div></div>
+            <label class="switch"><input type="checkbox" id="feat_tables" checked><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-right:1rem;">
+            <div><div class="module-name">📅 Reservaciones</div><div class="module-desc">Reservas por WhatsApp</div></div>
+            <label class="switch"><input type="checkbox" id="feat_reservations" checked><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-left:1rem;">
+            <div><div class="module-name">🤖 POS + IA</div><div class="module-desc">Dashboard analítico con IA</div></div>
+            <label class="switch"><input type="checkbox" id="feat_pos" checked><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-right:1rem;">
+            <div><div class="module-name">⭐ NPS</div><div class="module-desc">Encuestas de satisfacción WA</div></div>
+            <label class="switch"><input type="checkbox" id="feat_nps"><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-left:1rem;">
+            <div><div class="module-name">📦 Inventario</div><div class="module-desc">Control de stock vinculado al menú</div></div>
+            <label class="switch"><input type="checkbox" id="feat_inventory"><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-right:1rem;">
+            <div><div class="module-name">💳 Pagos Wompi</div><div class="module-desc">Pagos en línea integrados</div></div>
+            <label class="switch"><input type="checkbox" id="feat_wompi"><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-left:1rem;">
+            <div><div class="module-name">👤 Staff & Propinas</div><div class="module-desc">Turnos y corte de propinas</div></div>
+            <label class="switch"><input type="checkbox" id="feat_staff_tips"><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-right:1rem;">
+            <div><div class="module-name">🎁 Fidelización</div><div class="module-desc">Programa de puntos</div></div>
+            <label class="switch"><input type="checkbox" id="feat_loyalty"><span class="slider"></span></label>
+          </div>
+          <div class="module-row" style="padding-left:1rem;">
+            <div><div class="module-name">📑 DIAN (Factura electrónica)</div><div class="module-desc">Integración con MATIAS API</div></div>
+            <label class="switch"><input type="checkbox" id="feat_dian"><span class="slider"></span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          Menú JSON
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="file" id="menu_file" accept=".pdf,.png,.jpg,.jpeg" style="font-size:12px;">
+            <button class="btn btn-secondary btn-sm" onclick="parseMenuFile()" id="btn_parse">✨ Extraer con IA</button>
+          </div>
+        </div>
+        <textarea id="r_menu" class="field-input" placeholder='{"Pizzas":[{"name":"Margarita","price":25000,"description":"Clásica italiana"}]}'></textarea>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button class="btn btn-primary" onclick="createRestaurant()">Crear e implementar restaurante →</button>
+        <button class="btn btn-secondary" onclick="clearNewForm()">Limpiar</button>
+        <div class="feedback-msg" id="nuevo-feedback"></div>
+      </div>
+    </div>
+
+    <!-- ══ USUARIOS ══════════════════════════════════════════════════════ -->
+    <div id="usuarios" class="section">
+      <div style="display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start;">
+        <div class="card">
+          <div class="card-title">Crear usuario</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <label class="field-label">Restaurante (nombre exacto)</label>
+              <input id="u_rest" class="field-input" list="u-rest-list" placeholder="Nombre del restaurante">
+              <datalist id="u-rest-list"></datalist>
+            </div>
+            <div><label class="field-label">Email / usuario</label><input id="u_email" class="field-input" placeholder="usuario@ejemplo.com"></div>
+            <div><label class="field-label">Contraseña</label><input id="u_pass" class="field-input" type="password" placeholder="Contraseña temporal"></div>
+            <button class="btn btn-primary" onclick="createUser()" style="width:100%;justify-content:center;">Crear usuario</button>
+            <div class="feedback-msg" id="user-feedback"></div>
+          </div>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden;">
+          <div style="padding:1rem 1.25rem;border-bottom:0.5px solid #e0e0d8;display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:13px;font-weight:600;">Todos los usuarios</span>
+            <button class="btn btn-secondary btn-sm" onclick="loadUsers()">↻ Actualizar</button>
+          </div>
+          <table>
+            <thead><tr><th>Usuario</th><th>Restaurante</th><th>Rol</th><th>Sucursal ID</th></tr></thead>
+            <tbody id="users-tbody"><tr><td colspan="4" class="empty-state">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ DIAN & FOLIOS ══════════════════════════════════════════════════ -->
+    <div id="dian" class="section">
+      <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
+        <div class="metric"><div class="metric-label">📄 Folios totales emitidos</div><div class="metric-value" id="dian-total">—</div><div class="metric-sub">histórico</div></div>
+        <div class="metric"><div class="metric-label">✅ Aceptados por DIAN</div><div class="metric-value metric-green" id="dian-accepted">—</div><div class="metric-sub">todas las facturas</div></div>
+        <div class="metric"><div class="metric-label">📆 Últimos 30 días</div><div class="metric-value" id="dian-30d">—</div><div class="metric-sub">folios recientes</div></div>
+      </div>
+
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div style="padding:1rem 1.25rem;border-bottom:0.5px solid #e0e0d8;display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:13px;font-weight:600;">Uso de folios por restaurante</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadDIAN()">↻ Actualizar</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Restaurante</th>
+              <th>Total folios</th>
+              <th>Últimos 30d</th>
+              <th>Aceptados</th>
+              <th>Pendientes</th>
+              <th>Total facturado</th>
+              <th>Última factura</th>
+            </tr>
+          </thead>
+          <tbody id="dian-tbody"><tr><td colspan="7" class="empty-state">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
 
 <script>
-/* ══════════════════════════════
-   CORE STATE
-══════════════════════════════ */
-let GLOBAL_KEY = '';
+// ── Estado global ──────────────────────────────────────────────────────
+let ADMIN_KEY = '';
 let ALL_RESTAURANTS = [];
-let FILTER_STATE = 'all';
-let CHARTS = {};
+let _currentRestFilter = 'all';
+let _currentDetailId = null;
 
-/* ══════════════════════════════
-   CLOCK
-══════════════════════════════ */
-function updateClock() {
-  const now = new Date();
-  document.getElementById('clock').textContent = now.toLocaleTimeString(navigator.language || 'default', {hour12: false});
+const MODULES_CONFIG = [
+  { key:'module_orders',      label:'🛵 Pedidos WhatsApp',     desc:'Domicilios y para llevar por WA', defaultOn:true },
+  { key:'module_tables',      label:'🪑 Mesas & QR',            desc:'Órdenes desde mesa vía QR',       defaultOn:true },
+  { key:'module_reservations',label:'📅 Reservaciones',         desc:'Reservas por WhatsApp',           defaultOn:true },
+  { key:'module_pos',         label:'🤖 POS + IA',              desc:'Dashboard analítico con IA',      defaultOn:true },
+  { key:'module_nps',         label:'⭐ NPS',                   desc:'Encuestas de satisfacción',       defaultOn:false },
+  { key:'module_inventory',   label:'📦 Inventario',            desc:'Control de stock',                defaultOn:false },
+  { key:'wompi_active',       label:'💳 Pagos Wompi',           desc:'Pagos en línea integrados',       defaultOn:false },
+  { key:'staff_tips',         label:'👤 Staff & Propinas',      desc:'Turnos y corte de propinas',      defaultOn:false },
+  { key:'loyalty',            label:'🎁 Fidelización',          desc:'Programa de puntos',              defaultOn:false },
+  { key:'dian_active',        label:'📑 DIAN (Factura electrónica)', desc:'Integración MATIAS API',    defaultOn:false },
+];
+
+// ── Helpers ──────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const fmtNum = n => new Intl.NumberFormat('es-CO').format(Number(n)||0);
+const fmtCOP = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(Number(n)||0);
+const escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const timeSince = iso => {
+  if(!iso) return '—';
+  const d = Math.floor((Date.now()-new Date(iso))/86400000);
+  return d === 0 ? 'hoy' : d === 1 ? 'ayer' : `hace ${d} días`;
+};
+
+function showFeedback(id, msg, ok) {
+  const el = $(id);
+  if(!el) return;
+  el.textContent = msg;
+  el.className = 'feedback-msg ' + (ok?'ok':'err');
+  el.style.display = 'block';
+  setTimeout(()=>el.style.display='none', 3500);
 }
-setInterval(updateClock, 1000);
-updateClock();
 
-/* ══════════════════════════════
-   AUTH
-══════════════════════════════ */
-async function loginAdmin() {
-  const key = document.getElementById('key_input').value.trim();
-  const errEl = document.getElementById('auth-error');
-  if (!key) return;
-  errEl.textContent = '';
+function updateTime() {
+  const el = $('hq-time');
+  if(el) el.textContent = new Date().toLocaleString('es-CO',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+}
+updateTime(); setInterval(updateTime, 60000);
+
+// ── Login ──────────────────────────────────────────────────────────
+async function doLogin() {
+  const key = $('admin-key-input').value.trim();
+  if(!key) return;
   try {
-    const res = await fetch(`/api/admin/stats?admin_key=${key}`);
-    if (res.ok) {
-      GLOBAL_KEY = key;
-      localStorage.setItem('mesio_admin_key', key);
-      document.getElementById('auth-screen').style.display = 'none';
-      const app = document.getElementById('app-screen');
-      app.style.display = 'flex';
-      document.getElementById('btn-crm').style.display = 'flex';
-      const data = await res.json();
-      renderStats(data);
-      loadRestaurants();
-      setupCharts();
-      loadActivity();
-    } else {
-      errEl.textContent = '⚠ Llave incorrecta o acceso denegado';
-    }
-  } catch(e) {
-    errEl.textContent = '⚠ Error de conexión con el servidor';
-  }
+    const r = await fetch(`/api/admin/stats?admin_key=${encodeURIComponent(key)}`);
+    if(!r.ok) { $('login-err').textContent = 'Clave incorrecta'; return; }
+    const data = await r.json();
+    ADMIN_KEY = key;
+    localStorage.setItem('hq_key', key);
+    $('login-overlay').style.display = 'none';
+    $('app').style.display = 'block';
+    renderKPIs(data);
+    loadAll();
+  } catch(e) { $('login-err').textContent = 'Error de conexión'; }
 }
 
-/* Auto-restore key */
-window.addEventListener('DOMContentLoaded', () => {
-  const saved = localStorage.getItem('mesio_admin_key');
-  if (saved) { document.getElementById('key_input').value = saved; loginAdmin(); }
+function doLogout() {
+  localStorage.removeItem('hq_key');
+  location.reload();
+}
+
+// Auto-login si hay clave guardada
+window.addEventListener('DOMContentLoaded', async () => {
+  const saved = localStorage.getItem('hq_key');
+  if(saved) {
+    $('admin-key-input').value = saved;
+    ADMIN_KEY = saved;
+    try {
+      const r = await fetch(`/api/admin/stats?admin_key=${encodeURIComponent(saved)}`);
+      if(r.ok) {
+        const data = await r.json();
+        $('login-overlay').style.display = 'none';
+        $('app').style.display = 'block';
+        renderKPIs(data);
+        loadAll();
+        return;
+      }
+    } catch(e) {}
+    localStorage.removeItem('hq_key');
+  }
 });
 
-/* ══════════════════════════════
-   NAVIGATION
-══════════════════════════════ */
-const tabTitles = {
-  dashboard: 'Dashboard Global',
-  clients: 'Directorio de Clientes',
-  new: 'Alta de Cliente',
-  users: 'Usuarios & Accesos',
-  finances: 'Finanzas & MRR',
-  ops: 'Operaciones'
-};
-function switchTab(id, btn) {
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  if (btn) btn.classList.add('active');
-  document.getElementById('topbar-title').textContent = tabTitles[id] || id;
-  if (id === 'dashboard') loadStats();
-  if (id === 'clients') loadRestaurants();
-  if (id === 'finances') loadFinances();
-  if (id === 'ops') loadOps();
+// ── Sección / nav ──────────────────────────────────────────────────
+const SECTION_TITLES = {resumen:'Resumen',restaurantes:'Restaurantes',nuevo:'Nuevo cliente',usuarios:'Usuarios',dian:'DIAN & Folios'};
+
+function showSection(id, btn) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  $(id).classList.add('active');
+  if(btn) btn.classList.add('active');
+  $('hq-page-title').textContent = SECTION_TITLES[id]||id;
+  if(id==='restaurantes') loadRestaurants();
+  if(id==='usuarios')     loadUsers();
+  if(id==='dian')         loadDIAN();
 }
 
-/* ══════════════════════════════
-   STATS & DASHBOARD
-══════════════════════════════ */
+// ── Load all data ──────────────────────────────────────────────────
+async function loadAll() {
+  await Promise.all([loadRestaurants(), loadStats(), loadDIAN(), loadUsers()]);
+}
+
 async function loadStats() {
   try {
-    const res = await fetch(`/api/admin/stats?admin_key=${GLOBAL_KEY}`);
-    if (res.ok) renderStats(await res.json());
-  } catch(e) {}
+    const r = await fetch(`/api/admin/stats?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    if(r.ok) renderKPIs(await r.json());
+  } catch(e){}
 }
 
-function renderStats(d) {
-  const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
-  set('st_total_rest', d.total_restaurants ?? '—');
-  set('st_active_rest', d.active_restaurants ?? '—');
-  set('st_orders', (d.total_orders ?? 0).toLocaleString(navigator.language || 'default'));
-  set('st_mrr', '$' + ((d.mrr ?? 0) / 1000).toFixed(0) + 'k');
-  set('fin-mrr', '$' + ((d.mrr ?? 0) / 1000).toFixed(0) + 'k');
-  set('fin-arr', '$' + (((d.mrr ?? 0) * 12) / 1000000).toFixed(1) + 'M');
-
-  const total = d.total_restaurants || 1;
-  const active = d.active_restaurants || 0;
-  const churn = ((total - active) / total * 100).toFixed(1);
-  set('st_churn_rate', `Churn: ${churn}%`);
-  set('fin-churn', churn + '%');
-  set('fin-ltv', '$' + (((d.mrr ?? 0) / (total || 1)) * 18 / 1000).toFixed(0) + 'k');
-
-  /* Msgs today simulation */
-  set('st_msgs_today', ((d.total_orders ?? 0) * 6).toLocaleString(navigator.language || 'default'));
-
-  /* At risk */
-  set('st_at_risk', Math.floor((d.total_restaurants ?? 0) * 0.12));
-
-  /* MRR breakdown (simulated tiers) */
-  const mrr = d.mrr ?? 0;
-  set('mrr-basic', '$' + (mrr * 0.25 / 1000).toFixed(0) + 'k');
-  set('mrr-pro', '$' + (mrr * 0.55 / 1000).toFixed(0) + 'k');
-  set('mrr-premium', '$' + (mrr * 0.20 / 1000).toFixed(0) + 'k');
-
-  /* Health scores */
-  const a = Math.floor(active * 0.55);
-  const b = Math.floor(active * 0.28);
-  const c = Math.floor(active * 0.12);
-  const dd = active - a - b - c;
-  set('hs-a', a); set('hs-b', b); set('hs-c', c); set('hs-d', dd);
-
-  /* Pipeline */
-  set('pipe-leads', d.pipeline_leads ?? Math.floor((d.total_restaurants ?? 0) * 0.6));
-  set('pipe-demo', d.pipeline_demo ?? Math.floor((d.total_restaurants ?? 0) * 0.3));
-  set('pipe-prop', d.pipeline_prop ?? Math.floor((d.total_restaurants ?? 0) * 0.15));
-  set('pipe-close', d.pipeline_close ?? d.total_restaurants ?? 0);
-
-  /* Ops */
-  set('ops-wa-active', active);
-  set('ops-wa-total', `de ${d.total_restaurants ?? 0} totales`);
-  set('ops-msg-rate', Math.floor(((d.total_orders ?? 0) * 6) / 24));
-  set('ops-errors', d.critical_errors ?? 0);
-
-  updateCharts(d);
+function renderKPIs(data) {
+  $('kpi-total').textContent   = fmtNum(data.total_restaurants);
+  $('kpi-orders').textContent  = fmtNum(data.total_orders);
+  $('kpi-users').textContent   = fmtNum(data.total_users||'—');
+  $('kpi-active-sub').textContent = `${data.active_restaurants} activos`;
 }
 
-/* ══════════════════════════════
-   CHARTS
-══════════════════════════════ */
-const CHART_DEFAULTS = {
-  color: 'rgba(57,255,106,',
-  color2: 'rgba(0,201,255,',
-  warn: 'rgba(255,179,71,',
-  danger: 'rgba(255,107,107,',
-  gridColor: 'rgba(255,255,255,0.04)',
-  textColor: '#4a4e62',
-  font: { family: 'DM Mono, monospace', size: 11 }
-};
-
-function setupCharts() {
-  Chart.defaults.color = CHART_DEFAULTS.textColor;
-  Chart.defaults.font.family = CHART_DEFAULTS.font.family;
-  Chart.defaults.font.size = CHART_DEFAULTS.font.size;
-
-  const months = ['Oct','Nov','Dic','Ene','Feb','Mar'];
-
-  /* Growth chart */
-  CHARTS.growth = new Chart('chart-growth', {
-    type: 'line',
-    data: {
-      labels: months,
-      datasets: [{
-        label: 'Clientes activos',
-        data: [3, 5, 7, 9, 11, 14],
-        borderColor: '#39FF6A', borderWidth: 2,
-        backgroundColor: 'rgba(57,255,106,0.08)',
-        pointRadius: 4, pointBackgroundColor: '#39FF6A',
-        fill: true, tension: 0.4
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: CHART_DEFAULTS.gridColor }, ticks: { color: CHART_DEFAULTS.textColor } },
-        y: { grid: { color: CHART_DEFAULTS.gridColor }, ticks: { color: CHART_DEFAULTS.textColor, stepSize: 3 }, beginAtZero: true }
-      }
-    }
-  });
-
-  /* Subs donut */
-  CHARTS.subs = new Chart('chart-subs', {
-    type: 'doughnut',
-    data: {
-      labels: ['Activos', 'Trial', 'Suspendidos'],
-      datasets: [{
-        data: [0, 0, 0],
-        backgroundColor: ['rgba(57,255,106,0.7)', 'rgba(0,201,255,0.7)', 'rgba(255,107,107,0.7)'],
-        borderWidth: 0, borderRadius: 4
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, cutout: '70%',
-      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, padding: 14, color: '#8b8fa8' } } }
-    }
-  });
-
-  /* MRR bar */
-  CHARTS.mrr = new Chart('chart-mrr', {
-    type: 'bar',
-    data: {
-      labels: months,
-      datasets: [{
-        data: [1200000, 1800000, 2400000, 3000000, 3800000, 4500000],
-        backgroundColor: months.map((_, i) => i === months.length-1 ? '#39FF6A' : 'rgba(57,255,106,0.25)'),
-        borderRadius: 6, borderWidth: 0
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: CHART_DEFAULTS.textColor } },
-        y: {
-          grid: { color: CHART_DEFAULTS.gridColor },
-          ticks: { color: CHART_DEFAULTS.textColor, callback: v => '$' + (v/1000000).toFixed(1) + 'M' },
-          beginAtZero: true
-        }
-      }
-    }
-  });
-
-  /* Pipeline bar */
-  CHARTS.pipeline = new Chart('chart-pipeline', {
-    type: 'bar',
-    data: {
-      labels: ['Leads','Demo','Propuesta','Cerrados'],
-      datasets: [{
-        data: [0,0,0,0],
-        backgroundColor: ['rgba(57,255,106,0.15)','rgba(57,255,106,0.3)','rgba(57,255,106,0.5)','rgba(57,255,106,0.9)'],
-        borderRadius: 6, borderWidth: 0
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: CHART_DEFAULTS.gridColor }, ticks: { color: CHART_DEFAULTS.textColor }, beginAtZero: true },
-        y: { grid: { display: false }, ticks: { color: CHART_DEFAULTS.textColor } }
-      }
-    }
-  });
-
-  /* MRR History */
-  const mrrMonths = ['Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic','Ene','Feb','Mar'];
-  CHARTS.mrrHistory = new Chart('chart-mrr-history', {
-    type: 'line',
-    data: {
-      labels: mrrMonths,
-      datasets: [{
-        label: 'MRR',
-        data: [800000,1100000,1400000,1700000,2100000,2500000,2900000,3200000,3700000,4000000,4300000,4700000],
-        borderColor: '#39FF6A', borderWidth: 2,
-        backgroundColor: 'rgba(57,255,106,0.06)',
-        pointRadius: 3, pointBackgroundColor: '#39FF6A',
-        fill: true, tension: 0.4
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: CHART_DEFAULTS.gridColor }, ticks: { color: CHART_DEFAULTS.textColor } },
-        y: {
-          grid: { color: CHART_DEFAULTS.gridColor },
-          ticks: { color: CHART_DEFAULTS.textColor, callback: v => '$' + (v/1000000).toFixed(1) + 'M' },
-          beginAtZero: true
-        }
-      }
-    }
-  });
-
-  /* Plan mix */
-  CHARTS.planMix = new Chart('chart-plan-mix', {
-    type: 'pie',
-    data: {
-      labels: ['Básico', 'Pro', 'Premium'],
-      datasets: [{
-        data: [25, 55, 20],
-        backgroundColor: ['rgba(74,78,98,0.8)', 'rgba(57,255,106,0.7)', 'rgba(0,201,255,0.7)'],
-        borderWidth: 0
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 14, color: '#8b8fa8' } } }
-    }
-  });
-
-  /* Activity hours */
-  const hours = Array.from({length: 24}, (_, i) => `${i}h`);
-  CHARTS.activity = new Chart('chart-activity', {
-    type: 'bar',
-    data: {
-      labels: hours,
-      datasets: [{
-        label: 'Mensajes',
-        data: hours.map((_, i) => Math.round(Math.sin(i/24*Math.PI*2)*40 + 50 + Math.random()*20)),
-        backgroundColor: 'rgba(0,201,255,0.25)',
-        borderColor: 'rgba(0,201,255,0.6)',
-        borderWidth: 1, borderRadius: 3
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: CHART_DEFAULTS.textColor, maxRotation: 0 } },
-        y: { grid: { color: CHART_DEFAULTS.gridColor }, ticks: { color: CHART_DEFAULTS.textColor }, beginAtZero: true }
-      }
-    }
-  });
-}
-
-function updateCharts(d) {
-  if (CHARTS.subs) {
-    const active = d.active_restaurants ?? 0;
-    const total = d.total_restaurants ?? 0;
-    const susp = Math.max(0, total - active);
-    CHARTS.subs.data.datasets[0].data = [Math.floor(active*0.85), Math.floor(active*0.15), susp];
-    CHARTS.subs.update('none');
-  }
-  if (CHARTS.pipeline) {
-    const t = d.total_restaurants ?? 0;
-    CHARTS.pipeline.data.datasets[0].data = [
-      d.pipeline_leads ?? Math.floor(t*0.6),
-      d.pipeline_demo ?? Math.floor(t*0.3),
-      d.pipeline_prop ?? Math.floor(t*0.15),
-      d.pipeline_close ?? t
-    ];
-    CHARTS.pipeline.update('none');
-  }
-}
-
-/* ══════════════════════════════
-   RESTAURANTS
-══════════════════════════════ */
+// ── Restaurantes ──────────────────────────────────────────────────
 async function loadRestaurants() {
   try {
-    const res = await fetch(`/api/admin/restaurants?admin_key=${GLOBAL_KEY}`);
-    if (res.ok) {
-      const data = await res.json();
-      ALL_RESTAURANTS = data.restaurants || [];
-      renderTable(ALL_RESTAURANTS);
-      renderFinanceTable(ALL_RESTAURANTS);
-      renderWAInstances(ALL_RESTAURANTS);
-    }
-  } catch(e) {}
+    const r = await fetch(`/api/admin/restaurants?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    if(!r.ok) return;
+    const data = await r.json();
+    ALL_RESTAURANTS = data.restaurants || [];
+    renderRestaurantsTable(ALL_RESTAURANTS);
+    renderResumenRestaurants();
+    populateRestaurantDatalist();
+  } catch(e){}
 }
 
-const planMap = { basic: {label:'Básico', mrr:299000}, pro: {label:'Pro', mrr:499000}, premium: {label:'Premium', mrr:799000} };
+function populateRestaurantDatalist() {
+  const dl = $('u-rest-list');
+  if(!dl) return;
+  dl.innerHTML = ALL_RESTAURANTS.map(r=>`<option value="${escHtml(r.name)}">`).join('');
+}
 
-function renderTable(rests) {
-  const tbody = document.getElementById('clients-tbody');
-  const filter = FILTER_STATE;
-  const search = (document.getElementById('search-clients')?.value || '').toLowerCase();
+function getFeatures(r) {
+  try { return typeof r.features==='string' ? JSON.parse(r.features) : (r.features||{}); }
+  catch(e){ return {}; }
+}
 
-  let filtered = rests.filter(r => {
-    const matchSearch = !search || r.name.toLowerCase().includes(search) || (r.whatsapp_number||'').includes(search);
-    const isActive = r.subscription_status === 'active';
-    const matchFilter = filter === 'all' || (filter === 'active' && isActive) || (filter === 'suspended' && !isActive);
-    return matchSearch && matchFilter;
+function renderModuleChips(feats) {
+  const labels = {module_orders:'WA',module_tables:'QR',module_pos:'POS',module_nps:'NPS',module_inventory:'Inv',wompi_active:'Wompi',staff_tips:'Staff',loyalty:'Fid',dian_active:'DIAN'};
+  return Object.entries(labels).filter(([k])=>feats[k]===true||(feats[k]!==false&&['module_orders','module_tables','module_pos','module_reservations'].includes(k)))
+    .map(([k,v])=>`<span class="badge-chip">${v}</span>`).join('');
+}
+
+function renderRestaurantsTable(list) {
+  const q = ($('rest-search')?.value||'').toLowerCase();
+  const filtered = list.filter(r=>{
+    const matchFilter = _currentRestFilter==='all' || r.subscription_status===_currentRestFilter ||
+      (_currentRestFilter==='suspended' && r.subscription_status!=='active');
+    const matchSearch = !q || r.name.toLowerCase().includes(q) || (r.whatsapp_number||'').includes(q);
+    return matchFilter && matchSearch;
   });
-
-  if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">🔍</div>Sin resultados</div></td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = filtered.map(r => {
-    const isActive = r.subscription_status === 'active';
-    const badge = isActive ? '<span class="badge badge-active">Activo</span>' : '<span class="badge badge-suspended">Suspendido</span>';
-    let feats = '';
-    try {
-      const f = typeof r.features === 'string' ? JSON.parse(r.features) : (r.features || {});
-      if (f.module_orders) feats += '<span class="module-chip">WA</span>';
-      if (f.module_tables) feats += '<span class="module-chip">QR</span>';
-      if (f.module_pos) feats += '<span class="module-chip">POS</span>';
-      if (f.wompi_active) feats += '<span class="module-chip">💳</span>';
-    } catch(e) {}
-    const health = isActive ? ['A','B','A','B','C'][r.id % 5] : 'D';
-    const healthColors = {A:'var(--accent)',B:'var(--info)',C:'var(--warn)',D:'var(--danger)'};
-    const orders = (r.total_orders ?? Math.floor(Math.random()*500)).toLocaleString(navigator.language || 'default');
-    const actionBtn = isActive
-      ? `<button class="btn btn-danger-soft btn-sm" onclick="event.stopPropagation();toggleSub(${r.id},'past_due')">Suspender</button>`
-      : `<button class="btn btn-success-soft btn-sm" onclick="event.stopPropagation();toggleSub(${r.id},'active')">Activar</button>`;
-    return `<tr onclick="openClientModal(${r.id})">
-      <td style="color:var(--text3);font-family:'DM Mono',monospace">#${r.id}</td>
-      <td style="font-weight:600;color:#fff;">${escHtml(r.name)}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--text2);">+${r.whatsapp_number||''}</td>
-      <td>${feats || '<span style="color:var(--text3);font-size:12px;">Básico</span>'}</td>
-      <td style="font-family:'DM Mono',monospace;">${orders}</td>
-      <td><span style="font-family:'Syne',sans-serif;font-weight:700;color:${healthColors[health]}">${health}</span></td>
-      <td>${badge}</td>
-      <td>${actionBtn}</td>
+  const tbody = $('restaurants-tbody');
+  if(!filtered.length){ tbody.innerHTML=`<tr><td colspan="6" class="empty-state">Sin resultados</td></tr>`; return; }
+  tbody.innerHTML = filtered.map(r=>{
+    const feats = getFeatures(r);
+    const active = r.subscription_status==='active';
+    return `<tr class="tr-link" onclick="openDetail(${r.id})">
+      <td><strong>${escHtml(r.name)}</strong></td>
+      <td style="font-size:12px;color:#888;">${escHtml(r.whatsapp_number||'—')}</td>
+      <td>${renderModuleChips(feats)}</td>
+      <td><span class="badge ${active?'badge-active':'badge-suspended'}">${active?'Activo':'Suspendido'}</span></td>
+      <td style="color:#aaa;font-size:12px;">#${r.id}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openDetail(${r.id})">Ver →</button></td>
     </tr>`;
   }).join('');
 }
 
-function filterClients() { renderTable(ALL_RESTAURANTS); }
-function setFilter(f, btn) {
-  FILTER_STATE = f;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+function filterRestaurants() { renderRestaurantsTable(ALL_RESTAURANTS); }
+
+function setRestFilter(f, btn) {
+  _currentRestFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  renderTable(ALL_RESTAURANTS);
+  renderRestaurantsTable(ALL_RESTAURANTS);
 }
 
-/* ══════════════════════════════
-   CLIENT MODAL
-══════════════════════════════ */
-function openClientModal(id) {
-  const r = ALL_RESTAURANTS.find(x => x.id === id);
-  if (!r) return;
-  document.getElementById('modal-rest-name').textContent = r.name;
-  document.getElementById('modal-rest-wa').textContent = '+' + (r.whatsapp_number||'');
-  const isActive = r.subscription_status === 'active';
-
-  let feats = {};
-  try { feats = typeof r.features === 'string' ? JSON.parse(r.features) : (r.features || {}); } catch(e){}
-
-  const details = [
-    { label: 'ID', value: '#' + r.id },
-    { label: 'Estado', value: isActive ? '🟢 Activo' : '🔴 Suspendido' },
-    { label: 'Dirección', value: r.address || '—' },
-    { label: 'Pedidos totales', value: (r.total_orders ?? '—') },
-  ];
-
-  document.getElementById('modal-detail-grid').innerHTML = details.map(d =>
-    `<div class="detail-item"><div class="detail-label">${d.label}</div><div class="detail-value">${escHtml(String(d.value))}</div></div>`
-  ).join('');
-
-  const featNames = {module_orders:'WA Pedidos',module_tables:'Mesas QR',module_reservations:'Reservaciones',module_pos:'POS IA',wompi_active:'Wompi',module_nps:'NPS',module_inventory:'Inventario',staff_tips:'Staff & Propinas',loyalty:'Fidelización'};
-  document.getElementById('modal-modules-section').innerHTML = `<div style="font-size:11px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:.5px;margin-bottom:10px;">MÓDULOS ACTIVOS</div>` +
-    Object.entries(featNames).map(([k, v]) => feats[k]
-      ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;background:var(--accent-dim);border:1px solid rgba(57,255,106,0.2);border-radius:8px;font-size:12px;color:var(--accent);margin:4px;font-family:'DM Mono',monospace;">${v}</span>`
-      : `<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text3);margin:4px;font-family:'DM Mono',monospace;text-decoration:line-through;">${v}</span>`
-    ).join('');
-
-  document.getElementById('modal-actions').innerHTML = isActive
-    ? `<button class="btn btn-danger-soft" onclick="toggleSub(${id},'past_due');closeModal()">Suspender cliente</button>`
-    : `<button class="btn btn-success-soft" onclick="toggleSub(${id},'active');closeModal()">Activar cliente</button>`;
-
-  document.getElementById('client-modal').classList.add('open');
-}
-function closeModal() { document.getElementById('client-modal').classList.remove('open'); }
-
-/* ══════════════════════════════
-   ACTIONS
-══════════════════════════════ */
-async function toggleSub(id, status) {
-  if (!confirm(`¿Cambiar estado a "${status}"?`)) return;
-  try {
-    const res = await fetch('/api/admin/set-subscription', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin_key: GLOBAL_KEY, restaurant_id: id, status })
-    });
-    if (res.ok) {
-      toast(status === 'active' ? 'Cliente activado' : 'Cliente suspendido', status === 'active' ? 'success' : 'error');
-      loadRestaurants(); loadStats();
-    } else toast('Error al actualizar estado', 'error');
-  } catch(e) { toast('Error de conexión', 'error'); }
-}
-
-async function parseMenuFile() {
-  const fi = document.getElementById('menu_file');
-  const btn = document.getElementById('btn_parse');
-  if (!fi.files.length) { toast('Selecciona un archivo primero', 'error'); return; }
-  btn.textContent = '⏳ Analizando...'; btn.disabled = true;
-  const fd = new FormData(); fd.append('file', fi.files[0]);
-  try {
-    const res = await fetch(`/api/admin/parse-menu?admin_key=${GLOBAL_KEY}`, { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.success) {
-      document.getElementById('r_menu').value = JSON.stringify(data.json_menu, null, 2);
-      toast('¡Menú extraído con IA!', 'success');
-    } else toast('Error: ' + (data.detail || data.error), 'error');
-  } catch(e) { toast('Error de conexión con IA', 'error'); }
-  finally { btn.textContent = '✨ Extraer con IA'; btn.disabled = false; }
-}
-
-async function createRestaurant() {
-  const name = document.getElementById('r_name').value.trim();
-  const wa = document.getElementById('r_wa').value.trim();
-  const wa_phone_id = document.getElementById('r_wa_phone_id').value.trim();
-  const wa_access_token = document.getElementById('r_wa_access_token').value.trim();
-  
-  if (!name || !wa) { toast('Nombre y WhatsApp son obligatorios', 'error'); return; }
-  let menuJson = {};
-  try { const raw = document.getElementById('r_menu').value; if (raw.trim()) menuJson = JSON.parse(raw); }
-  catch(e) { toast('El JSON del menú tiene errores', 'error'); return; }
-  
-  const features = {
-    module_orders: document.getElementById('feat_orders').checked,
-    module_tables: document.getElementById('feat_tables').checked,
-    module_reservations: document.getElementById('feat_reservations').checked,
-    module_pos: document.getElementById('feat_pos').checked,
-    module_nps: document.getElementById('feat_nps').checked,
-    module_inventory: document.getElementById('feat_inventory').checked,
-    wompi_active: document.getElementById('feat_wompi').checked,
-    staff_tips: document.getElementById('feat_staff_tips').checked,
-    loyalty: document.getElementById('feat_loyalty').checked,
-    // Default values — restaurant can update these in Settings
-    timezone: "UTC",
-    currency: "USD",
-    locale: "en-US"
-  };
-
-  try {
-    const res = await fetch('/api/admin/create-restaurant', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        admin_key: GLOBAL_KEY, 
-        name, 
-        whatsapp_number: wa.replace(/[+\s]/g,''), 
-        address: document.getElementById('r_addr').value, 
-        menu: JSON.stringify(menuJson), 
-        features,
-        wa_phone_id: wa_phone_id,
-        wa_access_token: wa_access_token
-      })
-    });
-    if (!res.ok) { toast('Error del servidor: ' + await res.text(), 'error'); return; }
-    toast('¡Restaurante creado con éxito!', 'success');
-    clearForm();
-    loadRestaurants(); loadStats();
-    setTimeout(() => switchTab('clients', document.querySelectorAll('.nav-btn')[1]), 1500);
-  } catch(e) { toast('Error de conexión', 'error'); }
-}
-
-function clearForm() {
-  ['r_name','r_wa','r_addr','r_city','r_menu','r_wa_phone_id','r_wa_access_token'].forEach(id => document.getElementById(id).value = '');
-  ['feat_orders','feat_tables','feat_reservations','feat_pos'].forEach(id => document.getElementById(id).checked = true);
-  ['feat_nps','feat_inventory','feat_wompi','feat_staff_tips','feat_loyalty'].forEach(id => document.getElementById(id).checked = false);
-}
-
-async function createUser() {
-  const rest = document.getElementById('u_rest').value.trim();
-  const email = document.getElementById('u_email').value.trim();
-  const pass = document.getElementById('u_pass').value.trim();
-  if (!rest || !email || !pass) { toast('Completa todos los campos', 'error'); return; }
-  try {
-    const res = await fetch('/api/admin/create-user', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin_key: GLOBAL_KEY, restaurant_name: rest, username: email, password: pass })
-    });
-    const data = await res.json();
-    if (data.success) {
-      toast('¡Usuario creado con éxito!', 'success');
-      document.getElementById('u_email').value = '';
-      document.getElementById('u_pass').value = '';
-      renderUserItem(email, rest);
-    } else toast('Error: ' + (data.detail || data.error), 'error');
-  } catch(e) { toast('Error de conexión', 'error'); }
-}
-
-/* ══════════════════════════════
-   FINANCES
-══════════════════════════════ */
-function loadFinances() {
-  if (ALL_RESTAURANTS.length === 0) loadRestaurants();
-  else renderFinanceTable(ALL_RESTAURANTS);
-}
-function renderFinanceTable(rests) {
-  const tbody = document.getElementById('fin-tbody');
-  if (!rests.length) return;
-  const planMRR = { basic: 299000, pro: 499000, premium: 799000 };
-  tbody.innerHTML = rests.map(r => {
-    const isActive = r.subscription_status === 'active';
-    const plan = r.plan || 'pro';
-    const mrr = isActive ? (planMRR[plan] || 499000) : 0;
-    const months = Math.floor(Math.random()*18) + 1;
-    const ltv = mrr * months;
-    const health = ['A','B','A','B','C'][r.id % 5];
-    const riskColors = {A:'var(--accent)',B:'var(--info)',C:'var(--warn)',D:'var(--danger)'};
-    return `<tr>
-      <td style="font-weight:600;color:#fff;">${escHtml(r.name)}</td>
-      <td><span class="module-chip">${(planMap[plan]||planMap.pro).label}</span></td>
-      <td style="font-family:'DM Mono',monospace;color:var(--accent);">$${(mrr/1000).toFixed(0)}k</td>
-      <td style="font-family:'DM Mono',monospace;">${months}m</td>
-      <td style="font-family:'DM Mono',monospace;">$${(ltv/1000).toFixed(0)}k</td>
-      <td><span style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;color:${riskColors[health]}">${health}</span></td>
-    </tr>`;
-  }).join('');
-}
-
-/* ══════════════════════════════
-   OPS
-══════════════════════════════ */
-function loadOps() {
-  if (ALL_RESTAURANTS.length === 0) loadRestaurants();
-  else renderWAInstances(ALL_RESTAURANTS);
-}
-function renderWAInstances(rests) {
-  const container = document.getElementById('wa-instances-list');
-  if (!rests.length) { container.innerHTML = `<div class="empty-state"><div class="empty-icon">📱</div>No hay instancias</div>`; return; }
-  container.innerHTML = rests.slice(0,8).map(r => {
-    const isActive = r.subscription_status === 'active';
-    const status = isActive ? 'var(--accent)' : 'var(--danger)';
-    const label = isActive ? 'Conectado' : 'Desconectado';
-    return `<div class="user-card">
-      <div class="user-avatar" style="background:${isActive ? 'rgba(57,255,106,0.1)' : 'rgba(255,107,107,0.1)'};color:${status};">📱</div>
-      <div class="user-info">
-        <div class="user-name">${escHtml(r.name)}</div>
-        <div class="user-meta">+${r.whatsapp_number||'—'}</div>
+function renderResumenRestaurants() {
+  const el = $('resumen-restaurants-list');
+  const top = ALL_RESTAURANTS.slice(0,8);
+  if(!top.length){ el.innerHTML='<div class="empty-state">Sin restaurantes</div>'; return; }
+  el.innerHTML = top.map(r=>{
+    const active = r.subscription_status==='active';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid #f0f0e8;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:30px;height:30px;border-radius:8px;background:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:13px;">🍽️</div>
+        <div><div style="font-size:13px;font-weight:500;">${escHtml(r.name)}</div><div style="font-size:11px;color:#888;">${escHtml(r.whatsapp_number||'—')}</div></div>
       </div>
-      <span class="badge ${isActive ? 'badge-active' : 'badge-suspended'}">${label}</span>
+      <span class="badge ${active?'badge-active':'badge-suspended'}">${active?'●&nbsp;Activo':'Suspendido'}</span>
+    </div>`;
+  }).join('');
+  // Activity
+  const act = $('resumen-activity');
+  act.innerHTML = ALL_RESTAURANTS.slice(0,6).map(r=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid #f0f0e8;font-size:12px;color:#555;">
+      <span style="font-size:16px;">🍽️</span>
+      <span style="flex:1;">${escHtml(r.name)}</span>
+      <span style="color:#aaa;font-size:11px;">#${r.id}</span>
+    </div>`).join('');
+}
+
+// ── Detail panel ──────────────────────────────────────────────────
+async function openDetail(id) {
+  _currentDetailId = id;
+  const r = ALL_RESTAURANTS.find(x=>x.id===id);
+  if(!r) return;
+  const feats = getFeatures(r);
+  const active = r.subscription_status==='active';
+
+  // Header
+  $('dp-name').textContent = r.name;
+  $('dp-sub').textContent  = r.whatsapp_number || 'Sin número WA';
+  $('dp-status-badge').textContent  = active ? '● Activo' : 'Suspendido';
+  $('dp-status-badge').className    = 'badge ' + (active?'badge-active':'badge-suspended');
+  $('dp-current-status').textContent = r.subscription_status;
+
+  // Info tab
+  $('dp-name-input').value    = r.name||'';
+  $('dp-wa-input').value      = r.whatsapp_number||'';
+  $('dp-addr-input').value    = r.address||'';
+  $('dp-timezone').value      = feats.timezone||'America/Bogota';
+  $('dp-currency').value      = feats.currency||'COP';
+  $('dp-locale').value        = feats.locale||'es-CO';
+  $('dp-phoneid-input').value = r.wa_phone_id||'';
+  $('dp-token-input').value   = '';
+
+  // Modules tab
+  renderDetailModules(feats);
+
+  // Stats
+  $('dp-stats').innerHTML = '<div class="stat-mini-item"><div class="stat-mini-label">Cargando stats...</div></div>';
+
+  // Show panel, reset to info tab
+  $('detail-panel').style.display = 'block';
+  switchDetailTab('info', document.querySelector('.detail-tab'));
+  $('detail-panel').scrollIntoView({behavior:'smooth',block:'start'});
+
+  // Load real stats async
+  try {
+    const sr = await fetch(`/api/admin/restaurant/${id}?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    if(sr.ok) {
+      const sd = await sr.json();
+      const s = sd.stats;
+      $('dp-stats').innerHTML = [
+        {label:'Pedidos 30d', value:fmtNum(s.orders_30d)},
+        {label:'Ingresos 30d', value:fmtCOP(s.revenue_30d)},
+        {label:'Pedidos hoy', value:fmtNum(s.orders_today)},
+        {label:'Conversaciones', value:fmtNum(s.active_convs)},
+        {label:'Folios DIAN', value:fmtNum(s.invoices_all)},
+        {label:'Usuarios', value:fmtNum(s.users)},
+      ].map(x=>`<div class="stat-mini-item"><div class="stat-mini-label">${x.label}</div><div class="stat-mini-value">${x.value}</div></div>`).join('');
+      if(s.last_order) $('dp-sub').textContent = `${r.whatsapp_number||'—'} · último pedido ${timeSince(s.last_order)}`;
+    }
+  } catch(e){}
+}
+
+function closeDetail() {
+  $('detail-panel').style.display = 'none';
+  _currentDetailId = null;
+}
+
+function switchDetailTab(id, btn) {
+  document.querySelectorAll('.detail-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.detail-tab-panel').forEach(p=>p.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  $('dtab-'+id).classList.add('active');
+}
+
+function renderDetailModules(feats) {
+  $('dp-modules-list').innerHTML = MODULES_CONFIG.map(m=>{
+    const on = feats[m.key]===true || (feats[m.key]!==false && m.defaultOn);
+    return `<div class="module-row">
+      <div><div class="module-name">${m.label}</div><div class="module-desc">${m.desc}</div></div>
+      <label class="switch"><input type="checkbox" id="mod-${m.key}" ${on?'checked':''}><span class="slider"></span></label>
     </div>`;
   }).join('');
 }
 
-/* ══════════════════════════════
-   ACTIVITY FEED
-══════════════════════════════ */
-function loadActivity() {
-  const items = [
-    { icon:'🏪', color:'rgba(57,255,106,0.15)', title:'Nuevo restaurante registrado', meta:'Sistema · hace 2 min' },
-    { icon:'📦', color:'rgba(0,201,255,0.12)', title:'Pico de pedidos detectado en cliente #7', meta:'Bot WA · hace 12 min' },
-    { icon:'💬', color:'rgba(255,179,71,0.12)', title:'Prospecto "La Boquería" solicitó demo', meta:'CRM · hace 35 min' },
-    { icon:'✅', color:'rgba(57,255,106,0.15)', title:'Pago mensual procesado — cliente #3', meta:'Facturación · hace 1h' },
-    { icon:'⚠️', color:'rgba(255,107,107,0.12)', title:'Cliente #12 sin actividad hace 8 días', meta:'Health Monitor · hace 2h' },
-    { icon:'🔄', color:'rgba(0,201,255,0.12)', title:'Actualización de menú — Restaurante Osaka', meta:'Dashboard cliente · hace 3h' },
-  ];
-  document.getElementById('activity-feed').innerHTML = items.map(a => `
-    <div class="activity-item">
-      <div class="activity-dot" style="background:${a.color};">${a.icon}</div>
-      <div class="activity-body">
-        <div class="activity-title">${a.title}</div>
-        <div class="activity-meta">${a.meta}</div>
-      </div>
-    </div>`).join('');
+// ── Save detail ────────────────────────────────────────────────────
+async function saveRestaurantInfo() {
+  if(!_currentDetailId) return;
+  const feats = { timezone: $('dp-timezone').value, currency: $('dp-currency').value, locale: $('dp-locale').value };
+  const body = {
+    admin_key: ADMIN_KEY, restaurant_id: _currentDetailId,
+    name:    $('dp-name-input').value.trim() || undefined,
+    address: $('dp-addr-input').value.trim() || undefined,
+    whatsapp_number: $('dp-wa-input').value.trim() || undefined,
+    features: feats,
+  };
+  const r = await fetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if(r.ok) {
+    const d = await r.json();
+    // Update local cache
+    const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
+    if(idx>=0) ALL_RESTAURANTS[idx] = d.restaurant;
+    renderRestaurantsTable(ALL_RESTAURANTS);
+    showFeedback('info-feedback','✅ Guardado correctamente', true);
+  } else {
+    const e = await r.json().catch(()=>({detail:'Error'}));
+    showFeedback('info-feedback','❌ '+(e.detail||'Error'), false);
+  }
 }
 
-/* ══════════════════════════════
-   USERS LIST
-══════════════════════════════ */
-function renderUserItem(email, rest) {
-  const list = document.getElementById('users-list');
-  const initials = email.substring(0,2).toUpperCase();
-  const item = document.createElement('div');
-  item.className = 'user-card';
-  item.innerHTML = `
-    <div class="user-avatar">${initials}</div>
-    <div class="user-info">
-      <div class="user-name">${escHtml(email)}</div>
-      <div class="user-meta">${escHtml(rest)}</div>
-    </div>
-    <span class="badge badge-active">Admin</span>`;
-  if (list.querySelector('.empty-state')) list.innerHTML = '';
-  list.prepend(item);
+async function saveModules() {
+  if(!_currentDetailId) return;
+  const features = {};
+  MODULES_CONFIG.forEach(m=>{ features[m.key] = $('mod-'+m.key)?.checked; });
+  const r = await fetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({admin_key:ADMIN_KEY, restaurant_id:_currentDetailId, features})});
+  if(r.ok) {
+    const d = await r.json();
+    const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
+    if(idx>=0) ALL_RESTAURANTS[idx] = d.restaurant;
+    renderRestaurantsTable(ALL_RESTAURANTS);
+    showFeedback('modules-feedback','✅ Módulos actualizados', true);
+  } else showFeedback('modules-feedback','❌ Error al guardar', false);
 }
 
-/* ══════════════════════════════
-   CHECKLIST
-══════════════════════════════ */
-function toggleCheck(el) {
-  el.classList.toggle('done');
+async function saveCredentials() {
+  if(!_currentDetailId) return;
+  const body = {
+    admin_key: ADMIN_KEY, restaurant_id: _currentDetailId,
+    wa_phone_id:     $('dp-phoneid-input').value.trim() || undefined,
+    wa_access_token: $('dp-token-input').value.trim()   || undefined,
+  };
+  if(!body.wa_phone_id && !body.wa_access_token) { showFeedback('creds-feedback','Sin cambios', true); return; }
+  const r = await fetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(r.ok) showFeedback('creds-feedback','✅ Credenciales actualizadas', true);
+  else showFeedback('creds-feedback','❌ Error', false);
 }
 
-/* ══════════════════════════════
-   TOAST
-══════════════════════════════ */
-function toast(msg, type = 'info') {
-  const icons = { success:'✅', error:'❌', info:'ℹ️' };
-  const container = document.getElementById('toast-container');
-  const el = document.createElement('div');
-  el.className = `toast toast-${type === 'error' ? 'error' : type === 'success' ? 'success' : 'info'}`;
-  el.innerHTML = `<span>${icons[type]||'•'}</span><span>${escHtml(msg)}</span>`;
-  container.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
+async function setSubStatus(status) {
+  if(!_currentDetailId) return;
+  const r = await fetch('/api/admin/set-subscription', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({admin_key:ADMIN_KEY, restaurant_id:_currentDetailId, status})});
+  if(r.ok) {
+    const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
+    if(idx>=0) ALL_RESTAURANTS[idx].subscription_status = status;
+    await openDetail(_currentDetailId);
+    renderRestaurantsTable(ALL_RESTAURANTS);
+  }
 }
 
-/* ══════════════════════════════
-   UTILS
-══════════════════════════════ */
-function escHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// ── Nuevo restaurante ─────────────────────────────────────────────
+async function createRestaurant() {
+  const name  = $('r_name').value.trim();
+  const wa    = $('r_wa').value.trim();
+  const addr  = $('r_addr').value.trim();
+  const menuRaw = $('r_menu').value.trim();
+  if(!name||!wa||!addr) { showFeedback('nuevo-feedback','❌ Nombre, WA y dirección son requeridos', false); return; }
+  let menuJson = '{}';
+  if(menuRaw) { try { JSON.parse(menuRaw); menuJson = menuRaw; } catch(e){ showFeedback('nuevo-feedback','❌ El JSON del menú tiene errores', false); return; } }
+
+  const features = {
+    module_orders:        $('feat_orders').checked,
+    module_tables:        $('feat_tables').checked,
+    module_reservations:  $('feat_reservations').checked,
+    module_pos:           $('feat_pos').checked,
+    module_nps:           $('feat_nps').checked,
+    module_inventory:     $('feat_inventory').checked,
+    wompi_active:         $('feat_wompi').checked,
+    staff_tips:           $('feat_staff_tips').checked,
+    loyalty:              $('feat_loyalty').checked,
+    dian_active:          $('feat_dian').checked,
+    timezone:             $('r_tz').value,
+    currency:             $('r_currency').value,
+    locale:               $('r_locale').value,
+  };
+
+  const body = { admin_key:ADMIN_KEY, name, whatsapp_number:wa, address:addr, menu:menuJson, features,
+    wa_phone_id:$('r_wa_phone_id').value.trim(), wa_access_token:$('r_wa_access_token').value.trim() };
+
+  try {
+    const r = await fetch('/api/admin/create-restaurant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.ok) {
+      showFeedback('nuevo-feedback','✅ Restaurante creado exitosamente', true);
+      clearNewForm();
+      await loadRestaurants();
+    } else {
+      const e = await r.json().catch(()=>({detail:'Error'}));
+      showFeedback('nuevo-feedback','❌ '+(e.detail||'Error'), false);
+    }
+  } catch(e){ showFeedback('nuevo-feedback','❌ Error de conexión', false); }
+}
+
+function clearNewForm() {
+  ['r_name','r_wa','r_addr','r_city','r_menu','r_wa_phone_id','r_wa_access_token'].forEach(id=>{const el=$(id);if(el)el.value='';});
+  ['feat_orders','feat_tables','feat_reservations','feat_pos'].forEach(id=>{const el=$(id);if(el)el.checked=true;});
+  ['feat_nps','feat_inventory','feat_wompi','feat_staff_tips','feat_loyalty','feat_dian'].forEach(id=>{const el=$(id);if(el)el.checked=false;});
+}
+
+async function parseMenuFile() {
+  const file = $('menu_file').files[0];
+  if(!file) { alert('Selecciona un archivo PDF, PNG o JPG'); return; }
+  const btn = $('btn_parse');
+  btn.textContent = '⏳ Extrayendo...'; btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch(`/api/admin/parse-menu?admin_key=${encodeURIComponent(ADMIN_KEY)}`,{method:'POST',body:fd});
+    const d = await r.json();
+    if(d.success) $('r_menu').value = JSON.stringify(d.json_menu, null, 2);
+    else alert('Error al extraer el menú: '+(d.detail||''));
+  } catch(e){ alert('Error inesperado'); }
+  btn.textContent = '✨ Extraer con IA'; btn.disabled = false;
+}
+
+// ── Usuarios ──────────────────────────────────────────────────────
+async function loadUsers() {
+  try {
+    const r = await fetch(`/api/admin/users?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    if(!r.ok) return;
+    const d = await r.json();
+    renderUsersTable(d.users||[]);
+    // Update KPI
+    $('kpi-users').textContent = fmtNum((d.users||[]).length);
+  } catch(e){}
+}
+
+function renderUsersTable(users) {
+  const tbody = $('users-tbody');
+  if(!users.length){ tbody.innerHTML=`<tr><td colspan="4" class="empty-state">Sin usuarios</td></tr>`; return; }
+  tbody.innerHTML = users.map(u=>`<tr>
+    <td><strong>${escHtml(u.username)}</strong></td>
+    <td style="font-size:12px;">${escHtml(u.restaurant_name||'—')}</td>
+    <td><span class="badge-chip">${escHtml(u.role||'owner')}</span></td>
+    <td style="color:#aaa;font-size:12px;">${u.branch_id||'—'}</td>
+  </tr>`).join('');
+}
+
+async function createUser() {
+  const rest  = $('u_rest').value.trim();
+  const email = $('u_email').value.trim();
+  const pass  = $('u_pass').value.trim();
+  if(!rest||!email||!pass){ showFeedback('user-feedback','❌ Todos los campos son requeridos', false); return; }
+  const r = await fetch('/api/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({admin_key:ADMIN_KEY,restaurant_name:rest,username:email,password:pass})});
+  if(r.ok){ showFeedback('user-feedback','✅ Usuario creado', true); $('u_email').value=''; $('u_pass').value=''; loadUsers(); }
+  else { const e=await r.json().catch(()=>({detail:'Error'})); showFeedback('user-feedback','❌ '+(e.detail||'Error'), false); }
+}
+
+// ── DIAN & Folios ─────────────────────────────────────────────────
+async function loadDIAN() {
+  try {
+    const r = await fetch(`/api/admin/billing-stats?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    if(!r.ok) return;
+    const d = await r.json();
+    renderDIAN(d.stats||[]);
+  } catch(e){}
+}
+
+function renderDIAN(stats) {
+  if(!stats.length){
+    $('dian-tbody').innerHTML='<tr><td colspan="7" class="empty-state">Sin folios emitidos aún</td></tr>';
+    $('dian-total').textContent='0'; $('dian-accepted').textContent='0'; $('dian-30d').textContent='0';
+    $('kpi-invoices').textContent='0';
+    return;
+  }
+  const total    = stats.reduce((a,x)=>a+Number(x.total_invoices),0);
+  const accepted = stats.reduce((a,x)=>a+Number(x.accepted),0);
+  const d30      = stats.reduce((a,x)=>a+Number(x.invoices_30d),0);
+  $('dian-total').textContent    = fmtNum(total);
+  $('dian-accepted').textContent = fmtNum(accepted);
+  $('dian-30d').textContent      = fmtNum(d30);
+  $('kpi-invoices').textContent  = fmtNum(d30);
+
+  $('dian-tbody').innerHTML = stats.map(s=>`<tr>
+    <td><strong>${escHtml(s.restaurant_name)}</strong></td>
+    <td>${fmtNum(s.total_invoices)}</td>
+    <td>${fmtNum(s.invoices_30d)}</td>
+    <td><span style="color:#1D9E75;font-weight:600;">${fmtNum(s.accepted)}</span></td>
+    <td>${s.pending>0?`<span style="color:#BA7517;">${fmtNum(s.pending)}</span>`:'0'}</td>
+    <td>${fmtCOP(Number(s.total_billed_cents)/100)}</td>
+    <td style="color:#aaa;font-size:11px;">${s.last_invoice_at?new Date(s.last_invoice_at).toLocaleDateString('es-CO'):'—'}</td>
+  </tr>`).join('');
 }
 </script>
 </body>
