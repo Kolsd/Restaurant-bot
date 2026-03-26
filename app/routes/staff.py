@@ -35,14 +35,14 @@ _MODULE_DEPS = [Depends(require_module("staff_tips"))]
 
 class StaffCreate(BaseModel):
     name:  str              = Field(..., min_length=1, max_length=100)
-    role:  str              = Field("mesero", pattern=r"^(mesero|cocina|bar|caja|gerente|otro)$")
+    role:  str              = Field("mesero", pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
     pin:   str              = Field(..., min_length=4, max_length=8)
     phone: str              = Field("", max_length=30)
 
 
 class StaffUpdate(BaseModel):
     name:   str | None      = Field(None, min_length=1, max_length=100)
-    role:   str | None      = Field(None, pattern=r"^(mesero|cocina|bar|caja|gerente|otro)$")
+    role:   str | None      = Field(None, pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
     pin:    str | None      = Field(None, min_length=4, max_length=8)
     phone:  str | None      = Field(None, max_length=30)
     active: bool | None     = None

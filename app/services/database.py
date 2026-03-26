@@ -200,6 +200,7 @@ async def _legacy_init_db_ddl():
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS google_maps_url TEXT DEFAULT ''",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS wa_phone_id TEXT DEFAULT ''",
             "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS wa_access_token TEXT DEFAULT ''",
+            "CREATE TABLE IF NOT EXISTS processed_wam_ids (wam_id TEXT PRIMARY KEY, received_at TIMESTAMPTZ DEFAULT NOW())",
         ]
         
         for m in migrations:
