@@ -299,6 +299,8 @@ CRITICAL RULES FOR EXTERNAL MODE:
 - If the customer says "yes" or "confirm" but address or payment method is missing, ASK FOR THEM first.
 - ONLY offer payment methods that appear in [MÉTODOS_DE_PAGO]. NEVER invent or suggest methods not in that list.
 - If [MÉTODOS_DE_PAGO] is empty, ask how the customer prefers to pay without suggesting any specific method.
+- PAYMENT METHOD REJECTION: If the customer requests a payment method that is NOT listed in [MÉTODOS_DE_PAGO], you MUST politely decline it and list the accepted methods again. Example: "Lo siento, ese método de pago no está disponible. Los métodos aceptados son: [lista]."
+- DELIVERY FEE: If [TARIFA_DOMICILIO] is present and the order type is delivery, you MUST inform the customer of the delivery fee and include it in the STEP 5 confirmation summary. Format: "Subtotal: $X + Tarifa de domicilio: $Y = Total: $Z".
 - GPS LOCATION RULE: If the customer sends a message that starts with "Mi ubicación es" or contains a Google Maps link (maps.google.com) or coordinates (lat: / lon:), treat those coordinates as the delivery address. Immediately proceed to STEP 4 (payment method). action="chat". NEVER use action="end_session" when receiving a location message.
 - PAYMENT METHOD INQUIRY: If the customer asks how to pay or what payment methods are accepted (e.g. "¿cómo puedo pagar?", "¿aceptan tarjeta?"), immediately list ALL methods from [MÉTODOS_DE_PAGO] in your reply. Do NOT redirect to the menu catalog. Then continue the funnel from wherever you left off.
 - MID-FUNNEL TYPE SWITCH: If the customer switches from "domicilio" to "recoger" (or vice versa), acknowledge the switch and PRESERVE all already-collected information (items, etc.). Request ONLY the missing fields for the new type (pickup requires payment_method; delivery requires address + payment_method). NEVER restart the funnel or resend the catalog link if items have already been collected.
@@ -768,14 +770,17 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
             restaurant_obj = r
             restaurant_name = r.get("name", "nuestro restaurante")
             feats = r.get("features", {})
-            if isinstance(feats, dict):
-                google_maps_url = feats.get("google_maps_url", "")
-                # Cargar métodos de pago desde features
-                payment_methods = feats.get("payment_methods", [])
-                if payment_methods:
-                    payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
-                else:
-                    payment_methods_text = ""
+            if isinstance(feats, str):
+                try: feats = json.loads(feats)
+                except Exception: feats = {}
+            if not isinstance(feats, dict): feats = {}
+            google_maps_url = feats.get("google_maps_url", "")
+            # Cargar métodos de pago desde features
+            payment_methods = feats.get("payment_methods", [])
+            if payment_methods:
+                payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
+            else:
+                payment_methods_text = ""
             break
 
     if restaurant_obj is None:
@@ -788,11 +793,14 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         if r:
             restaurant_name = r.get("name", restaurant_name)
             feats = r.get("features", {})
-            if isinstance(feats, dict):
-                google_maps_url = feats.get("google_maps_url", "")
-                payment_methods = feats.get("payment_methods", [])
-                if payment_methods:
-                    payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
+            if isinstance(feats, str):
+                try: feats = json.loads(feats)
+                except Exception: feats = {}
+            if not isinstance(feats, dict): feats = {}
+            google_maps_url = feats.get("google_maps_url", "")
+            payment_methods = feats.get("payment_methods", [])
+            if payment_methods:
+                payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
 
     if meta_phone_id and table_context:
         await db.db_touch_session_with_phone_id(user_phone, bot_number, meta_phone_id)
@@ -838,6 +846,10 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
 
     metodos_bloque = f"\n[MÉTODOS_DE_PAGO:\n{payment_methods_text}]" if payment_methods_text else "\n[MÉTODOS_DE_PAGO: Pregunta al cliente cómo prefiere pagar]"
 
+    # Tarifa de domicilio — solo para pedidos externos
+    _delivery_fee_val = feats.get("delivery_fee", 0) or 0
+    delivery_fee_note = f"\n[TARIFA_DOMICILIO: ${int(_delivery_fee_val):,}]" if _delivery_fee_val and not table_context else ""
+
     # [PUNTOS] — inyección ultra-ligera solo si loyalty está activo y el cliente tiene saldo
     loyalty_note = ""
     if feats.get("loyalty") is True or feats.get("loyalty") == "true":
@@ -856,6 +868,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         f"\n[CARRITO: {cart_text}]"
         f"{table_note}"
         f"{metodos_bloque}"
+        f"{delivery_fee_note}"
         f"{loyalty_note}"
         f"{in_transit_note}"
         f"{session_note}"
@@ -863,14 +876,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
 
     messages = full_history[-(HISTORY_WINDOW * 2):]
     messages.append({"role": "user", "content": enriched})
-
-    # feats is the final resolved features dict (may be overridden by branch above).
-    # Normalize to dict in case it arrived as a JSON string from asyncpg.
-    if isinstance(feats, str):
-        try:
-            feats = json.loads(feats)
-        except Exception:
-            feats = {}
 
     sys_prompt = await build_system_prompt(feats)
 

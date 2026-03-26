@@ -1,4 +1,5 @@
 import hashlib
+import json
 import uuid
 import os
 import asyncio
@@ -111,9 +112,14 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
         rest_data = await db.db_get_restaurant_by_phone(bot_number)
         delivery_fee = 0
         tz_str = "UTC"
-        if rest_data and isinstance(rest_data.get("features"), dict):
-            delivery_fee = rest_data["features"].get("delivery_fee", 0) if order_type == "domicilio" else 0
-            tz_str = rest_data["features"].get("timezone", "UTC")
+        if rest_data:
+            _raw_feats = rest_data.get("features") or {}
+            if isinstance(_raw_feats, str):
+                try: _raw_feats = json.loads(_raw_feats)
+                except Exception: _raw_feats = {}
+            if not isinstance(_raw_feats, dict): _raw_feats = {}
+            delivery_fee = _raw_feats.get("delivery_fee", 0) if order_type == "domicilio" else 0
+            tz_str = _raw_feats.get("timezone", "UTC")
 
         subtotal = sum(item["subtotal"] for item in cart["items"])
         total = subtotal + delivery_fee
