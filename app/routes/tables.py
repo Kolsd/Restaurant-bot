@@ -739,6 +739,7 @@ class PayCheckBody(BaseModel):
     customer_name: str = "Consumidor Final"
     customer_nit:  str = "222222222"
     customer_email: str = ""
+    service_charge: float = 0.0  # Cargo de servicio en valor absoluto (ej. 10% del subtotal)
 
 
 @router.post("/api/table-orders/{base_order_id}/checks")
@@ -843,13 +844,14 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         )
 
     total_pagado = sum(p.amount for p in body.payments)
-    if total_pagado < float(check["total"]):
+    check_total  = float(check["total"]) + body.service_charge
+    if total_pagado < check_total:
         raise HTTPException(
             status_code=400,
-            detail=f"Pago insuficiente: se requieren ${check['total']:,.0f}, "
+            detail=f"Pago insuficiente: se requieren ${check_total:,.0f}, "
                    f"se recibieron ${total_pagado:,.0f}"
         )
-    change = round(total_pagado - float(check["total"]), 2)
+    change = round(total_pagado - check_total, 2)
 
     # Obtener config de billing
     config = await billing.get_billing_config(restaurant["id"])
@@ -867,7 +869,9 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
 
     order_for_billing = {
         "id":             check_id,
-        "total":          float(check["total"]),
+        "total":          float(check["total"]) + body.service_charge,
+        "subtotal":       float(check["total"]),
+        "service_charge": body.service_charge,
         "items":          items,
         "payment_method": body.payments[0].method if body.payments else "cash",
         "order_ref":      base_order_id,
@@ -913,7 +917,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         bot_number=restaurant.get("whatsapp_number", ""),
         base_order_id=base_order_id,
         check_id=check_id,
-        total_cop=float(check["total"]),
+        total_cop=float(check["total"]) + body.service_charge,
     ))
 
     return {

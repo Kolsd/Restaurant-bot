@@ -8,6 +8,13 @@ from app.services import orders, database as db
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "mesioai.com")
 
+# Anti-spam: evita que el bot confirme cada sub-orden de la misma mesa por WhatsApp.
+# Clave: (table_id, bot_number) → timestamp de la última confirmación enviada.
+# In-process, 4-worker safe: Meta típicamente reintenta en el mismo worker.
+import time as _time
+_TABLE_CONFIRM_COOLDOWN: dict = {}
+_TABLE_CONFIRM_TTL = 300  # 5 minutos
+
 client = Anthropic()
 
 MODEL_FAST    = "claude-haiku-4-5-20251001"
@@ -628,9 +635,23 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
             print(f"🆕 {order_id} ({tag}): {items_summary}", flush=True)
 
+            # Anti-spam: sub-órdenes en la misma mesa dentro de 5 min no generan
+            # un nuevo mensaje de WhatsApp; la orden se procesa igual en el dashboard.
+            _ck  = (table_context["id"], bot_number)
+            _now = _time.time()
+            _last_confirm = _TABLE_CONFIRM_COOLDOWN.get(_ck, 0)
+            if sub_number > 1 and (_now - _last_confirm) < _TABLE_CONFIRM_TTL:
+                # Sub-orden dentro del cooldown → silencioso en WhatsApp
+                print(f"🔇 Anti-spam: confirmación suprimida para {_ck} (cooldown activo)", flush=True)
+                reply = ""
+            else:
+                # Primera orden o cooldown expirado → confirmar y reiniciar timer
+                _TABLE_CONFIRM_COOLDOWN[_ck] = _now
+
             if cart_errors:
                 failed = ", ".join(cart_errors)
-                reply += f" (Nota: No pude agregar '{failed}' porque no aparece exacto en el menú)"
+                if reply:  # solo agrega nota si vamos a responder
+                    reply += f" (Nota: No pude agregar '{failed}' porque no aparece exacto en el menú)"
 
         elif action in ("delivery", "pickup"):
             address        = parsed.get("address", "")

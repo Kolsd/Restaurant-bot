@@ -163,6 +163,37 @@ input:checked + .toggle-slider:before { transform: translateX(16px); }
 .btn-ses-send { background: #1D9E75; color: #fff; border: none; padding: 8px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 500; white-space: nowrap; }
 .btn-ses-alert { background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; padding: 8px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 500; white-space: nowrap; }
 .btn-ses-reopen { background: #E1F5EE; color: #0F6E56; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 500; white-space: nowrap; }
+
+/* ── Button system — used by dashboard-components.js (StaffSection, etc.) ── */
+.btn-sm {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 500;
+  cursor: pointer; border: none; white-space: nowrap;
+  transition: background 0.15s, opacity 0.15s;
+  font-family: inherit;
+}
+.btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: #1D9E75; color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #0F6E56; }
+.btn-outline { background: transparent; color: #444; border: 1px solid #d0d0c8; }
+.btn-outline:hover:not(:disabled) { background: #f5f5f0; color: #111; }
+
+/* ── Staff component container ── */
+#staff-component { padding: 2px 0; }
+#staff-component input,
+#staff-component select {
+  padding: 7px 11px;
+  border: 1px solid #e0e0d8;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  background: #fff;
+}
+#staff-component input:focus,
+#staff-component select:focus { border-color: #1D9E75; }
+#staff-component table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#staff-component tbody tr:hover { background: #fafaf8; }
 .ses-feedback { display: none; font-size: 12px; padding: 7px 11px; border-radius: 7px; }
 .ses-feedback.ok  { background: #E1F5EE; color: #0F6E56; }
 .ses-feedback.err { background: #FEE2E2; color: #991B1B; }
