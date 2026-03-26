@@ -1903,6 +1903,20 @@ async def db_claim_next_invoice_number(restaurant_id: int) -> int:
 
 async def db_save_fiscal_invoice(data: dict) -> int:
     """Persiste la factura electrónica. Devuelve el ID generado."""
+
+    # asyncpg espera date/time nativos, no strings
+    raw_date = data.get("issue_date")
+    issue_date = (
+        datetime.strptime(raw_date[:10], "%Y-%m-%d").date()
+        if isinstance(raw_date, str) else raw_date
+    )
+
+    raw_time = data.get("issue_time")
+    issue_time = (
+        datetime.strptime(raw_time[:8], "%H:%M:%S").time()
+        if isinstance(raw_time, str) else raw_time
+    )
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -1921,7 +1935,7 @@ async def db_save_fiscal_invoice(data: dict) -> int:
             data.get("billing_log_id"),
             data["restaurant_id"], data["order_id"],
             data["resolution_number"], data.get("prefix", ""), data["invoice_number"],
-            data.get("issue_date"), data.get("issue_time"),
+            issue_date, issue_time,
             data["subtotal_cents"], data.get("tax_regime", "iva"),
             data["tax_pct"], data["tax_cents"], data["total_cents"],
             data.get("cufe", ""), data.get("qr_data", ""), data.get("uuid_dian", ""),

@@ -10,11 +10,14 @@ Uso rápido:
 Variables de entorno obligatorias (en .env o en el shell):
     DATABASE_URL            PostgreSQL connection string
     MATIAS_API_URL          https://api-v2.matias-api.com/api/ubl2.1
-    MATIAS_API_USER         usuario sandbox MATIAS
-    MATIAS_API_PASS         contraseña sandbox MATIAS
-    MATIAS_AUTH_URL         https://auth-v2.matias-api.com/api/login
-    DIAN_RESOLUTION         número de resolución  (ej. 18764074347312)
+    MATIAS_API_TOKEN        token estatico del panel de MATIAS (recomendado)
+    DIAN_RESOLUTION         numero de resolucion  (ej. 18764074347312)
     DIAN_PREFIX             prefijo de factura    (ej. LZT)
+
+Alternativa al token estatico (login dinamico):
+    MATIAS_API_USER         email de la cuenta sandbox MATIAS
+    MATIAS_API_PASS         password de la cuenta sandbox MATIAS
+    MATIAS_AUTH_URL         https://api-v2.matias-api.com/api/login
 
 Variables opcionales:
     SANDBOX_RESTAURANT_ID   ID del restaurante en la BD   (default: 1)
@@ -31,6 +34,7 @@ import sys
 import time
 import json
 
+
 # ── Cargar .env si existe ─────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
@@ -44,35 +48,40 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.services import database as db
 from app.services.billing import MesioNativeAdapter, _get_matias_token
+from datetime import date
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Configuración del test
 # ══════════════════════════════════════════════════════════════════════════════
 
-RESTAURANT_ID = int(os.getenv("SANDBOX_RESTAURANT_ID", "1"))
-TAX_REGIME    = os.getenv("SANDBOX_TAX_REGIME", "iva")           # "iva" | "ico"
-TAX_PCT       = float(os.getenv("SANDBOX_TAX_PCT", "19.0"))
+RESTAURANT_ID  = int(os.getenv("SANDBOX_RESTAURANT_ID", "1"))
+TAX_REGIME     = os.getenv("SANDBOX_TAX_REGIME", "iva")          # "iva" | "ico"
+TAX_PCT        = float(os.getenv("SANDBOX_TAX_PCT", "19.0"))
+INVOICE_NUMBER = int(os.getenv("SANDBOX_INVOICE_NUMBER", "5210"))
+
+# order_id único por ejecución para evitar llave duplicada en fiscal_invoices
+_TS = int(time.time())
 
 # Orden falsa — dos productos, total calculado manualmente
 # Precios incluyen IVA/INC (Colombia: precio menú ya lleva impuesto)
 FAKE_ORDER = {
-    "id":             "SANDBOX-TEST-001",
+    "id":             f"SANDBOX-TEST-{INVOICE_NUMBER}-{_TS}",
     "order_type":     "mesa",
-    "total":          60000.0,   # Hamburguesa 25 000 + Coca-Cola 35 000
+    "total":          190.0,     # Límite sandbox MATIAS: máx 224 pesos
     "payment_method": "cash",
     "notes":          "Factura de prueba Sandbox DIAN — Mesio",
     "items": [
         {
             "id":       "P001",
-            "name":     "Hamburguesa Clásica",
+            "name":     "Hamburguesa Clasica",
             "quantity": 1,
-            "price":    25000.0,
+            "price":    100.0,
         },
         {
             "id":       "P002",
             "name":     "Coca-Cola 350 ml",
             "quantity": 1,
-            "price":    35000.0,
+            "price":    90.0,
         },
     ],
     "customer": {
@@ -123,12 +132,12 @@ async def _ensure_resolution() -> dict:
 
     await db.db_upsert_fiscal_resolution(RESTAURANT_ID, {
         "resolution_number": res_number,
-        "resolution_date":   "2023-01-19",
+        "resolution_date":   date(2023, 1, 19),
         "prefix":            os.getenv("DIAN_PREFIX", "LZT"),
         "from_number":       1,
         "to_number":         99999,
-        "valid_from":        "2023-01-19",
-        "valid_to":          "2030-12-31",
+        "valid_from":        date(2023, 1, 19),
+        "valid_to":          date(2030, 1, 19),
         "technical_key":     os.getenv("DIAN_TECHNICAL_KEY", ""),
         "current_number":    0,
         "environment":       "test",
@@ -161,29 +170,38 @@ async def main():
     print(f"\n[2/4] Resolución DIAN  (restaurant_id={RESTAURANT_ID})…")
     resolution = await _ensure_resolution()
 
-    # ── 3. Token MATIAS ───────────────────────────────────────────────────────
+    # ── 3. Token MATIAS (login dinamico) ─────────────────────────────────────
     matias_url = os.getenv("MATIAS_API_URL", "").strip()
-    print("\n[3/4] Autenticación MATIAS API…")
+    auth_url   = os.getenv("MATIAS_AUTH_URL", "https://api-v2.matias-api.com/api/ubl2.1/login")
+    print("\n[3/4] Autenticacion MATIAS API (login dinamico)…")
+    print(f"  Auth URL  : {auth_url}")
+    print(f"  Email     : {os.getenv('MATIAS_API_USER', '(no definido)')}")
+    print(f"  API URL   : {matias_url or '(no definida — modo MOCK)'}")
 
     if not matias_url:
-        print(
-            "  MATIAS_API_URL no definida — la factura se emitirá en MODO MOCK.\n"
-            "  Para el Sandbox real añade MATIAS_API_URL en tu .env y reintenta."
-        )
+        print("  -> Modo MOCK activado. Para el sandbox real define MATIAS_API_URL.")
     else:
-        print(f"  Endpoint : {matias_url}")
         t0 = time.perf_counter()
         token = await _get_matias_token()
         ms = (time.perf_counter() - t0) * 1000
-        print(f"  Token    : {token[:16]}…  ({ms:.0f} ms)")
+        print(f"  Token     : {token[:20]}…  ({ms:.0f} ms)")
 
     # ── 4. Emisión ────────────────────────────────────────────────────────────
+    # Forzar número de factura exacto (soporte MATIAS: rango 5200-5210)
+    forced_number = INVOICE_NUMBER
+
+    _original_get_next = db.db_get_next_invoice_number
+    async def _fixed_invoice_number(*args, **kwargs):
+        return forced_number
+    db.db_get_next_invoice_number = _fixed_invoice_number
+
     print("\n[4/4] Emitiendo factura de prueba…")
-    print(f"  Orden   : {FAKE_ORDER['id']}")
+    print(f"  Nro. factura : {forced_number}  (SANDBOX_INVOICE_NUMBER)")
+    print(f"  Orden        : {FAKE_ORDER['id']}")
     for item in FAKE_ORDER["items"]:
-        print(f"  Item    : {item['name']}  x{item['quantity']}  ${item['price']:,.0f}")
+        print(f"  Item         : {item['name']}  x{item['quantity']}  ${item['price']:,.0f}")
     print(
-        f"  Total   : ${FAKE_ORDER['total']:,.0f}"
+        f"  Total        : ${FAKE_ORDER['total']:,.0f}"
         f"  |  {TAX_REGIME.upper()} {TAX_PCT}%"
     )
 
@@ -197,6 +215,7 @@ async def main():
             resolution=resolution,
         )
     except Exception as exc:
+        db.db_get_next_invoice_number = _original_get_next  # restaurar siempre
         elapsed_ms = (time.perf_counter() - t_start) * 1000
         print(f"\n  ERROR tras {elapsed_ms:.0f} ms")
         print(f"  {type(exc).__name__}: {exc}")
@@ -211,6 +230,8 @@ async def main():
             except Exception:
                 print(response.text[:1200])
         raise SystemExit(1)
+    finally:
+        db.db_get_next_invoice_number = _original_get_next  # restaurar siempre
 
     elapsed_ms = (time.perf_counter() - t_start) * 1000
 
