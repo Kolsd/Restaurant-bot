@@ -13,6 +13,8 @@ from app.routes.tables import router as tables_router
 from app.routes.billing import router as billing_router
 from app.routes.crm import router as crm_router
 from app.routes import nps, inventory
+from app.routes.sync import router as sync_router
+from app.routes.staff import router as staff_router
 from app.services import database as db  # ← FIX: import directo de db
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
@@ -68,21 +70,18 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 async def startup():
-    await db.init_db()
-    await db.db_init_tables()
-    await db.db_init_waiter_alerts()
-    await db.db_init_table_sessions()
-    await db.db_init_nps_inventory()
-    await db.db_init_fiscal_tables()
-    await db.db_init_dish_recipes()
-    await db.db_init_table_checks()
+    # Warm up the connection pool.
+    # All schema migrations are handled by Alembic (run `alembic upgrade head`
+    # before deploying). Do NOT add DDL calls here — with 4 uvicorn workers,
+    # concurrent CREATE TABLE statements cause race conditions on startup.
+    await db.init_pool()
 
     from app.services.scheduler import start_scheduler
     await start_scheduler()
 
     await db.db_cleanup_expired_sessions()
 
-    print("Mesio v5.9 started", flush=True)
+    print("Mesio v6.0 started", flush=True)
 
 
 app.include_router(dashboard_router)
@@ -94,3 +93,5 @@ app.include_router(billing_router)
 app.include_router(crm_router)
 app.include_router(nps.router)
 app.include_router(inventory.router)
+app.include_router(sync_router, prefix="/api")
+app.include_router(staff_router)

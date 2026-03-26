@@ -4,6 +4,6 @@ builder = "nixpacks"
 [deploy]
 # V-13 FIX: 4 workers uvicorn para soportar carga real
 # (Railway Pro recomendado — 8GB RAM, sin límite CPU)
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop"
+startCommand = "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
