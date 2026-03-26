@@ -25,7 +25,11 @@
       "Bash(pip install:*)",
       "Bash(python -m pytest tests/test_agent.py::test_execute_action_order_with_table_proceeds -v --tb=short)",
       "Bash(python -m pytest --tb=short -q)",
-      "Bash(python run_sandbox_invoice.py)"
+      "Bash(python run_sandbox_invoice.py)",
+      "Bash(python tests/run_ai_simulations.py)",
+      "Bash(grep -r ANTHROPIC_API_KEY .env*)",
+      "Bash(printenv)",
+      "Bash(grep -v \"^$\")"
     ]
   }
 }
