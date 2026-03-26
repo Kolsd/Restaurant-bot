@@ -853,11 +853,11 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
 
     # Obtener config de billing
     config = await billing.get_billing_config(restaurant["id"])
-    if not config:
-        raise HTTPException(
-            status_code=400,
-            detail="No hay configuración de facturación. Configura el proveedor primero."
-        )
+    features = restaurant.get("features") or {}
+    if isinstance(features, str):
+        import json as _json
+        features = _json.loads(features)
+    dian_active = features.get("dian_active", False)
 
     # Construir el objeto order para el adaptador de billing
     items = check.get("items", [])
@@ -878,14 +878,20 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         },
     }
 
-    config["_restaurant_id"] = restaurant["id"]
-    provider = config.get("provider", "mesio_native")
-    adapter  = billing.get_adapter(provider)
-
-    try:
-        fiscal = await adapter.create_invoice(order_for_billing, config)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
+    fiscal_invoice_id = None
+    if config and dian_active:
+        # Módulo DIAN activo y configurado: emitir factura electrónica
+        config["_restaurant_id"] = restaurant["id"]
+        provider = config.get("provider", "mesio_native")
+        adapter  = billing.get_adapter(provider)
+        try:
+            fiscal = await adapter.create_invoice(order_for_billing, config)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
+        fiscal_invoice_id = fiscal["id"]
+    else:
+        # Sin módulo DIAN o sin configuración: tirilla POS local (sin factura electrónica)
+        fiscal = {"id": None, "local": True}
 
     payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
 
@@ -894,7 +900,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         base_order_id=base_order_id,
         payments=payments_list,
         change_amount=change,
-        fiscal_invoice_id=fiscal["id"],
+        fiscal_invoice_id=fiscal_invoice_id,
         customer_name=body.customer_name,
         customer_nit=body.customer_nit,
         customer_email=body.customer_email,

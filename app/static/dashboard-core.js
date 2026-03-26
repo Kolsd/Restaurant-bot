@@ -49,7 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
   toggleNav('reservaciones', feats.module_reservations !== false);
   toggleNav('pos',           feats.module_pos          !== false);
   // Phase 6 modules — off by default unless explicitly true (opt-in model)
-  toggleNav('staff',         feats.staff_tips          === true);
+  toggleNav('staff',         feats.staff_tips === true);
+  toggleNav('loyalty',       feats.loyalty    === true);
 
   loadMenu();
   refreshAll();
@@ -69,7 +70,7 @@ function logout() {
 let currentPeriod = 'today';
 window.customStart = '';
 window.customEnd = '';
-const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones', staff:'Staff & Propinas' };
+const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones', staff:'Staff & Propinas', loyalty:'Fidelización' };
 
 function setPeriod(p, btn) {
   currentPeriod = p;
@@ -87,7 +88,7 @@ function showSection(id, btn) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[id] || '';
 
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas', 'nps', 'inventario', 'staff'];
+  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas', 'nps', 'inventario', 'staff', 'loyalty'];
   const periodBar = document.getElementById('period-bar');
   
   if (periodBar) {
@@ -107,7 +108,8 @@ function showSection(id, btn) {
   if (id === 'sesiones')   loadSessions();
   if (id === 'menu')       loadMenu();
   // Phase 6: delegate to StaffSection component (defined in dashboard-components.js)
-  if (id === 'staff' && typeof loadStaffSection === 'function') loadStaffSection();
+  if (id === 'staff'   && typeof loadStaffSection   === 'function') loadStaffSection();
+  if (id === 'loyalty' && typeof loadLoyaltySection === 'function') loadLoyaltySection();
   if (window.innerWidth <= 768) closeSidebar();
 }
 

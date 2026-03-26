@@ -202,6 +202,9 @@ async def get_settings(request: Request):
         "recoger_active": features.get("recoger_active", True),
         "delivery_fee": features.get("delivery_fee", 0),
         "min_order": features.get("min_order", 0),
+        "timezone": features.get("timezone", "America/Bogota"),
+        "currency": features.get("currency", "COP"),
+        "locale": features.get("locale", "es-CO"),
     }
 
 @router.post("/api/settings")
