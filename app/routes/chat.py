@@ -1,13 +1,11 @@
 import os
 import hmac
 import hashlib
-import asyncio
 import httpx
 import traceback
 from collections import defaultdict
-from time import time
-from fastapi import APIRouter, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from app.services.agent import chat, reset_conversation
 from app.services import database as db
@@ -138,113 +136,106 @@ async def _process_message(user_phone: str, user_text: str, bot_number: str,
 
 
 @router.post("/webhook/meta")
-async def meta_webhook(request: Request):
+async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
+    import json as _json
+
     # 1. Leer body ANTES de parsear JSON (necesitamos bytes para la firma)
     raw_body = await request.body()
 
-    # 2. Verificar firma Meta (V-02)
+    # 2. Verificar firma Meta
     signature = request.headers.get("x-hub-signature-256", "")
     if not _verify_meta_signature(raw_body, signature):
         return Response(content="Unauthorized", status_code=401)
 
-    # 3. ACK inmediato a Meta (V-03) — evita reintento por timeout
-    # El procesamiento ocurre en background
     try:
-        import json as _json
         data = _json.loads(raw_body)
     except Exception:
-        return {"status": "ok"}
+        return JSONResponse(content={"status": "ok"})
 
     print("\n--- 📥 NUEVO MENSAJE DE META ---", flush=True)
 
     try:
-        entry = data.get("entry", [{}])[0]
+        entry   = data.get("entry", [{}])[0]
         changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
+        value   = changes.get("value", {})
 
         if "messages" not in value:
-            return {"status": "ok"}
+            return JSONResponse(content={"status": "ok"})
 
         message = value.get("messages", [{}])[0]
         if not message:
-            return {"status": "ok"}
+            return JSONResponse(content={"status": "ok"})
 
-        user_phone = message.get("from", "")
-        msg_type = message.get("type", "text")
+        # 3. Deduplicación por WAM_ID — descarta reintentos de Meta
+        wam_id = message.get("id", "")
+        if wam_id and await db.db_is_duplicate_wam(wam_id):
+            print(f"⚡ WAM duplicado ignorado: {wam_id}", flush=True)
+            return JSONResponse(content={"status": "ok"})
+
+        user_phone    = message.get("from", "")
+        msg_type      = message.get("type", "text")
         raw_bot_number = value.get("metadata", {}).get("display_phone_number", "")
-        bot_number = _normalize_number(raw_bot_number)
-        phone_id = value.get("metadata", {}).get("phone_number_id", "")
-        
-        # --- Obtener credenciales dinámicas desde PostgreSQL ---
+        bot_number    = _normalize_number(raw_bot_number)
+        phone_id      = value.get("metadata", {}).get("phone_number_id", "")
+
+        # 4. Credenciales dinámicas desde PostgreSQL
         restaurant = await db.db_get_restaurant_by_phone(bot_number)
         if restaurant and restaurant.get("wa_access_token"):
             access_token = restaurant["wa_access_token"]
-            # Si el restaurante tiene un phone_id guardado lo usamos, si no, usamos el del webhook
             phone_id = restaurant.get("wa_phone_id") or phone_id
         else:
-            # Fallback seguro: Si el cliente aún no tiene credenciales propias,
-            # usamos las globales de Railway para que tus clientes actuales no se rompan
             access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
-        # -------------------------------------------------------
-        # 4. Rate limiting (V-05)
+
+        # 5. Ruta CRM — procesamiento inline (no requiere IA)
         crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
-        
         if crm_phone_id and phone_id == crm_phone_id:
             from app.routes.crm import register_inbound_from_prospect
-            wa_msg_id = message.get("id", "")
-            
             if msg_type == "location":
                 loc = message.get("location", {})
-                lat = loc.get("latitude")
-                lon = loc.get("longitude")
-                user_text = f"📍 Ubicación compartida: lat:{lat} lon:{lon}"
+                user_text = f"📍 Ubicación compartida: lat:{loc.get('latitude')} lon:{loc.get('longitude')}"
             else:
                 user_text = message.get("text", {}).get("body", "")
-            
             if user_text and user_phone:
                 print(f"💬 [CRM Inbound] De: {user_phone} | ID: {phone_id}", flush=True)
-                # Registra la interacción en el CRM de prospectos (incluso los retrasados)
-                await register_inbound_from_prospect(user_phone, user_text, wa_msg_id)
+                await register_inbound_from_prospect(user_phone, user_text, wam_id)
                 print("👤 Mensaje del CRM guardado en BD exitosamente", flush=True)
-            return {"status": "ok"}
+            return JSONResponse(content={"status": "ok"})
 
-
+        # 6. Rate limiting
         is_limited = await _is_rate_limited(user_phone)
         if user_phone and is_limited:
-            print(f"🚫 Rate limit activado para bot: {user_phone}", flush=True)
-            return {"status": "ok"}
-            
+            print(f"🚫 Rate limit activado para: {user_phone}", flush=True)
+            return JSONResponse(content={"status": "ok"})
+
+        # 7. Extraer texto del mensaje
         if msg_type == "location":
             loc = message.get("location", {})
-            lat = loc.get("latitude")
-            lon = loc.get("longitude")
+            lat, lon = loc.get("latitude"), loc.get("longitude")
             maps_url = f"https://maps.google.com/?q={lat},{lon}"
             user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
         elif msg_type == "interactive":
-            # Handle button replies (e.g. NPS skip button)
-            interactive = message.get("interactive", {})
-            button_reply = interactive.get("button_reply", {})
+            button_reply = message.get("interactive", {}).get("button_reply", {})
             user_text = button_reply.get("id", "") or button_reply.get("title", "")
         else:
             user_text = message.get("text", {}).get("body", "")
 
         if not user_text or not user_phone:
-            return {"status": "ok"}
+            return JSONResponse(content={"status": "ok"})
 
-        print(f"💬 [Bot Inbound] De: {user_phone} | Para Bot: {bot_number} | ID: {phone_id}", flush=True)
+        print(f"💬 [Bot Inbound] De: {user_phone} | Bot: {bot_number} | WAM: {wam_id}", flush=True)
         print(f"📝 Texto: {user_text[:200]}", flush=True)
 
-        # 6. Disparar background task (V-03 fix: no bloqueamos el handler)
-        asyncio.create_task(
-            _process_message(user_phone, user_text, bot_number, phone_id, access_token)
+        # 8. Encolar procesamiento en segundo plano — respuesta llega ANTES que la IA
+        background_tasks.add_task(
+            _process_message, user_phone, user_text, bot_number, phone_id, access_token
         )
 
     except Exception:
         print(f"❌ ERROR CRÍTICO EN WEBHOOK:\n{traceback.format_exc()}", flush=True)
 
-    # 7. Retornar 200 inmediatamente — Meta no reintenta
-    print("--------------------------------\n", flush=True)
-    return {"status": "ok"}
+    # 9. ACK inmediato a Meta (<200ms) — evita reintentos
+    print("✅ 200 OK enviado a Meta\n--------------------------------\n", flush=True)
+    return JSONResponse(content={"status": "received"})
 
 @router.post("/webhook/twilio")
 async def twilio_webhook(request: Request):
