@@ -11,6 +11,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   width: 220px; background: #fff; border-right: 0.5px solid #e0e0d8;
   height: 100vh; position: fixed; top: 0; left: 0;
   display: flex; flex-direction: column; padding: 1.5rem 1rem;
+  overflow-y: auto;
+}
+.nav-group-label {
+  font-size: 10px; font-weight: 700; color: #bbb; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 10px 12px 3px; margin-top: 4px;
 }
 .sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 0.5px solid #e0e0d8; }
 .logo-icon { width: 36px; height: 36px; background: #1D9E75; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 14px; flex-shrink: 0; }

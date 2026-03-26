@@ -28,15 +28,20 @@ function _applyFeatureToggles(feats) {
     const byOnclick = document.querySelector(`[onclick*="'${sectionId}'"]`);
     if (byOnclick) byOnclick.style.display = isEnabled ? '' : 'none';
   };
-  // Core modules — off only when explicitly false (opt-out model, matches agent.py)
+  // Core modules — opt-out model (hidden only when explicitly false)
   toggleNav('pedidos',       feats.module_orders       !== false);
-  toggleNav('mesas',         feats.module_tables       !== false);
-  toggleNav('sesiones',      feats.module_tables       !== false);
   toggleNav('reservaciones', feats.module_reservations !== false);
-  toggleNav('pos',           feats.module_pos          !== false);
+  toggleNav('mesas',         feats.module_tables       !== false);
+  // POS tab inside Salón — hide the tab button if module_pos is explicitly false
+  const posTab = document.getElementById('nav-mesas-pos');
+  if (posTab) posTab.style.display = feats.module_pos !== false ? '' : 'none';
+  // Inventario tab inside Menú — hide if module_inventory is explicitly false
+  const invTab = document.getElementById('nav-menu-inv');
+  if (invTab) invTab.style.display = feats.module_inventory !== false ? '' : 'none';
   // Opt-in modules — visible only when explicitly true
-  toggleNav('staff',         feats.staff_tips === true);
-  toggleNav('loyalty',       feats.loyalty    === true);
+  toggleNav('nps',     feats.module_nps  === true);
+  toggleNav('staff',   feats.staff_tips  === true);
+  toggleNav('loyalty', feats.loyalty     === true);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -82,7 +87,7 @@ function logout() {
 let currentPeriod = 'today';
 window.customStart = '';
 window.customEnd = '';
-const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', pos:'POS con IA', mesas:'Mesas & QR', equipo:'Mi Equipo', sesiones:'Sesiones', staff:'Staff & Propinas', loyalty:'Fidelización' };
+const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', mesas:'Salón', equipo:'Mi Equipo', nps:'NPS', staff:'Staff & Propinas', loyalty:'Fidelización' };
 
 function setPeriod(p, btn) {
   currentPeriod = p;
@@ -100,7 +105,7 @@ function showSection(id, btn) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[id] || '';
 
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'sesiones', 'mesas', 'nps', 'inventario', 'staff', 'loyalty'];
+  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'mesas', 'nps', 'staff', 'loyalty'];
   const periodBar = document.getElementById('period-bar');
   
   if (periodBar) {
@@ -114,15 +119,43 @@ function showSection(id, btn) {
     }
   }
 
-  if (id === 'pos')        loadPOSData();
-  if (id === 'mesas')      loadTables();
-  if (id === 'equipo')     loadBranches();
-  if (id === 'sesiones')   loadSessions();
-  if (id === 'menu')       loadMenu();
-  // Phase 6: delegate to StaffSection component (defined in dashboard-components.js)
+  // Salón: always load tables; load POS only if that tab is active
+  if (id === 'mesas') {
+    loadTables();
+    const posPanel = document.getElementById('mesas-panel-pos');
+    if (posPanel && posPanel.style.display !== 'none') loadPOSData();
+  }
+  if (id === 'equipo')   loadBranches();
+  if (id === 'menu')     loadMenu();
   if (id === 'staff'   && typeof loadStaffSection   === 'function') loadStaffSection();
   if (id === 'loyalty' && typeof loadLoyaltySection === 'function') loadLoyaltySection();
   if (window.innerWidth <= 768) closeSidebar();
+}
+
+// ── Tab switchers para secciones unificadas ──────────────────────────────────
+
+function switchConvsTab(id, btn) {
+  document.querySelectorAll('#conversaciones .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('convs-panel-chat').style.display = id === 'chat' ? '' : 'none';
+  document.getElementById('convs-panel-ses').style.display  = id === 'ses'  ? '' : 'none';
+  if (id === 'ses') loadSessions();
+}
+
+function switchMenuTab(id, btn) {
+  document.querySelectorAll('#menu .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('menu-panel-disp').style.display = id === 'disp' ? '' : 'none';
+  document.getElementById('menu-panel-inv').style.display  = id === 'inv'  ? '' : 'none';
+  if (id === 'inv') { loadInventory(); if (typeof loadFoodCosts === 'function') loadFoodCosts(); }
+}
+
+function switchMesasTab(id, btn) {
+  document.querySelectorAll('#mesas .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('mesas-panel-mesas').style.display = id === 'mesas' ? '' : 'none';
+  document.getElementById('mesas-panel-pos').style.display   = id === 'pos'   ? '' : 'none';
+  if (id === 'pos') loadPOSData();
 }
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('mobile-overlay').classList.toggle('open'); }
