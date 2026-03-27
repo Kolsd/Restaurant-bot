@@ -1210,10 +1210,28 @@ async function loadStaff() {
   }
 }
 
+async function loadStaff() {
+  const h = window._dashHeaders;
+  const container = document.getElementById('staff-component');
+  if (!container) return;
+
+  try {
+    const r = await fetch('/api/staff', { headers: h });
+    if (!r.ok) throw new Error('Error HTTP: ' + r.status);
+    const data = await r.json();
+    const staffList = data.staff || [];
+    renderStaff(staffList);
+  } catch(e) {
+    console.error('Error loadStaff:', e);
+    // Mostramos el error exacto en pantalla para debuggear más fácil si vuelve a fallar
+    container.innerHTML = `<div class="empty-state">Error al cargar el equipo: ${e.message}</div>`;
+  }
+}
+
 function renderStaff(staffList) {
   const container = document.getElementById('staff-component');
   
-  // Filtrar solo los activos
+  // 1. Filtramos solo los activos
   const activeStaff = staffList.filter(s => s.active !== false);
 
   if (activeStaff.length === 0) {
@@ -1224,19 +1242,24 @@ function renderStaff(staffList) {
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">';
   
   activeStaff.forEach(s => {
-    // PROTECCIÓN MÁXIMA: Sanitizar los roles vengan como vengan de la DB
-    let rolesStr = 'mesero';
+    // 2. PROTECCIÓN MÁXIMA: Convertir roles a un Array real, venga como venga de Postgres
+    let rolesArray = [];
     if (Array.isArray(s.roles)) {
-      rolesStr = s.roles.join(',');
+      rolesArray = s.roles;
     } else if (typeof s.roles === 'string') {
-      // Si la DB lo manda como string "{mesero,caja}", le quitamos las llaves
-      rolesStr = s.roles.replace(/[{}]/g, '');
+      // Si llega como string "{mesero,caja}", quitamos las llaves y separamos por coma
+      rolesArray = s.roles.replace(/[{}]/g, '').split(',');
     } else if (s.role) {
-      rolesStr = s.role;
+      rolesArray = [s.role];
+    } else {
+      rolesArray = ['mesero'];
     }
-    
-    // formatRoles procesa el string limpio y lo convierte en los badges visuales
-    const badgesHtml = formatRoles(rolesStr);
+
+    // 3. Construimos las etiquetas (badges) usando .map() en lugar de .forEach()
+    const badgesHtml = rolesArray.map(r => r.trim()).filter(Boolean).map(r => {
+       return `<span style="background:#EEEDFE; color:#534AB7; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:600; margin-right:4px; display:inline-block; margin-top:4px; text-transform:capitalize;">${r}</span>`;
+    }).join('');
+
     const inicial = s.name ? s.name.charAt(0).toUpperCase() : '?';
     
     html += `
