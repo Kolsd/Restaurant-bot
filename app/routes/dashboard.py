@@ -78,8 +78,7 @@ def check_role_permission(user: dict, allowed_roles: list):
         return True
     # Verificamos si el rol específico del staff está permitido
     return any(r in user_role for r in allowed_roles)
-
-
+    
 # ── SERVICE WORKER (must be served at root scope, not /static/) ───────
 @router.get("/sw.js")
 async def service_worker():
@@ -94,11 +93,7 @@ async def service_worker():
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(): return (STATIC / "login.html").read_text(encoding="utf-8")
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(request: Request):
-    user = await get_current_user(request) # 🛡️ Forzamos autenticación
-    if not check_role_permission(user, []): # Solo admin/owner/gerente
-        raise HTTPException(status_code=403, detail="Acceso denegado al Dashboard")
-    return (STATIC / "dashboard.html").read_text(encoding="utf-8")
+async def dashboard_page(): return (STATIC / "dashboard.html").read_text(encoding="utf-8")
 @router.get("/demo", response_class=HTMLResponse)
 async def demo_page(): return (STATIC / "dashboard-demo.html").read_text(encoding="utf-8")
 @router.get("/landing", response_class=HTMLResponse)
@@ -123,20 +118,11 @@ async def public_restaurant_info(id: int):
     return {"name": restaurant.get("name", "")}
 
 @router.get("/mesero", response_class=HTMLResponse)
-async def mesero_page(request: Request):
-    user = await get_current_user(request)
-    if not check_role_permission(user, ["mesero"]):
-        raise HTTPException(status_code=403, detail="Acceso denegado a Meseros")
-    return (STATIC / "mesero.html").read_text(encoding="utf-8")
-
+async def mesero_page(): return (STATIC / "mesero.html").read_text(encoding="utf-8")
 @router.get("/caja", response_class=HTMLResponse)
-async def caja_page(request: Request):
-    user = await get_current_user(request)
-    if not check_role_permission(user, ["caja"]):
-        raise HTTPException(status_code=403, detail="Acceso denegado a Caja")
+async def caja_page(): 
     p = STATIC / "caja.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
-
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page():
     return (STATIC / "crm.html").read_text(encoding="utf-8")  
@@ -203,21 +189,15 @@ async def billing_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
 
 @router.get("/domiciliario", response_class=HTMLResponse)
-async def domiciliario_page(request: Request):
-    user = await get_current_user(request)
-    if not check_role_permission(user, ["domiciliario"]):
-        raise HTTPException(status_code=403, detail="Acceso denegado a Domicilios")
+async def domiciliario_page():
     p = STATIC / "domiciliario.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No encontrado</h1>", status_code=404) 
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)    
 
 # ── SETTINGS ─────────────────────────────────────────────────────────
 @router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
-    user = await get_current_user(request)
-    # Configuración es EXCLUSIVA de Admins/Owners
-    if not any(r in str(user.get("role", "")) for r in ["owner", "admin"]):
-        raise HTTPException(status_code=403, detail="Solo administradores pueden ver ajustes")
-    return (STATIC / "settings.html").read_text(encoding="utf-8")
+async def settings_page():
+    p = STATIC / "settings.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Settings no disponible</h1>")
 
 @router.get("/api/settings")
 async def get_settings(request: Request):
