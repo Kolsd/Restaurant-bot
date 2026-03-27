@@ -347,7 +347,7 @@ async def verify_role_for_page(request: Request, page: str):
         raise HTTPException(status_code=403, detail={"redirect": redirect_to})
 
     return {"ok": True}
-    
+
 @router.get("/api/geocode")
 async def geocode_endpoint(address: str):
     lat, lon, display = await geocode_address(address)
@@ -527,10 +527,18 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         raise HTTPException(status_code=403, detail="No autorizado")
 
     branch_id = body.branch_id if "owner" in role else creator.get("branch_id")
+    
+    # 🛡️ FIX: Si el owner no envía ID, asumimos que es la Casa Matriz
+    if not branch_id and "owner" in role:
+        all_r = await db.db_get_all_restaurants()
+        if all_r:
+            branch_id = all_r[0]["id"]
+
     if not branch_id:
         raise HTTPException(status_code=400, detail="Sucursal requerida")
+        
     branch = await db.db_get_restaurant_by_id(branch_id)
-
+    
     # Admin/Gerente → dashboard user account (password login)
     if body.role in ("admin", "gerente"):
         if not body.password:
