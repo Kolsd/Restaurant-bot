@@ -3,42 +3,50 @@
    app/static/dashboard-core.js
 ═══════════════════════════════════════════════════ */
 
+// 1. Carga de credenciales e identidad
 const token = localStorage.getItem('rb_token');
-const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":"Mi Restaurante"}');
+const restaurantData = localStorage.getItem('rb_restaurant');
 
-// 1. Verificación de Token
-if (!token) window.location.href = '/login';
+// Si no hay token, fuera de aquí inmediatamente
+if (!token) {
+    window.location.href = '/login';
+}
 
-// 🛡️ 2. GUARDIÁN DE SEGURIDAD (PROTECCIÓN DE ROLES)
+const restaurant = JSON.parse(restaurantData || '{}');
+
+// 🛡️ 2. GUARDIÁN DE SEGURIDAD ULTRA-ESTRICTO
 (function securityGuard() {
-    const path = window.location.pathname;
-    const roleStr = (restaurant.role || '').toLowerCase();
-    const roles = roleStr.split(',').map(r => r.trim());
-
-    // Definimos jerarquías
-    const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
-    const isStaff = !isAdmin && roles.length > 0;
-
-    // REGLA: Si es STAFF e intenta entrar a zonas administrativas (/dashboard o /settings)
-    if (isStaff && (path.includes('/dashboard') || path.includes('/settings'))) {
-        console.warn("Acceso denegado: Redirigiendo a zona operativa.");
-        
-        // Redirigir según su rol principal
-        if (roles.includes('mesero'))      window.location.href = '/mesero';
-        else if (roles.includes('cocina')) window.location.href = '/cocina';
-        else if (roles.includes('bar'))    window.location.href = '/bar';
-        else if (roles.includes('caja'))   window.location.href = '/caja';
-        else if (roles.includes('domiciliario')) window.location.href = '/domiciliario';
-        else window.location.href = '/staff'; // Fallback al portal
-        return;
-    }
+    const path = window.location.pathname.toLowerCase();
     
-    // REGLA: Si un usuario con un rol operativo intenta entrar a otro operativo 
-    // (Ej: Mesero intentando entrar a /cocina), el backend (API) lo bloqueará, 
-    // pero aquí podemos añadir redirección visual si lo deseas en el futuro.
+    // IMPORTANTE: NO usamos default 'owner'. Si no hay rol, no hay acceso.
+    const rawRole = (restaurant.role || '').toLowerCase();
+    const roles = rawRole.split(',').map(r => r.trim()).filter(Boolean);
+
+    const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
+    
+    // Si la base de datos o el storage están vacíos, por seguridad tratamos como NO admin
+    console.log("🔐 Verificando acceso para roles:", roles, "en ruta:", path);
+
+    // REGLA 1: Solo Admins/Owners entran al Dashboard y Ajustes
+    if (path.includes('/dashboard') || path.includes('/settings')) {
+        if (!isAdmin) {
+            console.error("🚫 Acceso administrativo denegado.");
+            // Si tiene algún rol operativo, lo mandamos a su sitio
+            if (roles.includes('mesero')) window.location.href = '/mesero';
+            else if (roles.includes('cocina')) window.location.href = '/cocina';
+            else if (roles.includes('caja')) window.location.href = '/caja';
+            else window.location.href = '/staff'; // Fallback total
+            return;
+        }
+    }
+
+    // REGLA 2: Si el Admin intenta entrar a una vista operativa, lo dejamos (opcional)
+    // Pero si un Cocinero intenta entrar a /caja, lo bloqueamos
+    if (path.includes('/caja') && !roles.includes('caja') && !isAdmin) {
+        window.location.href = '/staff';
+    }
 })();
 
-// Continuación del archivo original...
 const headers = { 'Authorization': 'Bearer ' + token };
 const _locale = restaurant.locale || 'en-US';
 const _currency = restaurant.currency || 'USD';
