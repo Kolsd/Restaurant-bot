@@ -1097,25 +1097,38 @@ const StaffSection = MesioComponent({
 
   render(state, el) {
     el.textContent = '';
+
+    // 🛡️ 1. CREAMOS LA CABECERA DINÁMICA (Para que no aparezca doble)
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;';
     
-    // 🛡️ CONTROL DE BOTONES EN LA CABECERA
-    const btnAdmin = document.getElementById('btn-staff-add-admin');
-    const select = document.getElementById('global-branch-select');
+    const info = document.createElement('div');
+    info.innerHTML = `<h2 style="margin:0;font-size:18px;">Staff & Propinas</h2><div style="font-size:12px;color:#888;">Gestiona tu equipo y accesos al dashboard.</div>`;
     
-    if (btnAdmin && select) {
-        // Si hay una sucursal seleccionada (no es matriz), mostramos "+ Añadir Admin"
-        const isBranch = select.value !== 'matriz';
-        btnAdmin.style.display = isBranch ? 'block' : 'none';
-    }
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;align-items:center;';
+
+    // 🛡️ 2. BOTÓN DE ADMIN (Siempre visible para el Owner)
+    const btnAdmin = _makeBtn('+ Añadir Admin', 'btn-sm btn-outline', () => openStaffAdminModal());
+    btnAdmin.style.cssText += 'background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;font-weight:600;';
+    
+    // 🛡️ 3. BOTÓN DE EMPLEADO OPERATIVO (El que sí funciona)
+    const btnStaff = _makeBtn('+ Nuevo Empleado', 'btn-sm btn-primary', () => _openStaffModal(StaffSection));
+
+    actions.appendChild(btnAdmin);
+    actions.appendChild(btnStaff);
+    header.appendChild(info);
+    header.appendChild(actions);
+    el.appendChild(header);
 
     if (state.loading) {
       const msg = document.createElement('div');
-      msg.className   = 'empty-state';
+      msg.className = 'empty-state';
       msg.textContent = 'Cargando equipo...';
       el.appendChild(msg);
       return;
     }
-
+    
     if (state.error) {
       const msg = document.createElement('div');
       msg.className   = 'empty-state';
