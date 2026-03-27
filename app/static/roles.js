@@ -1,4 +1,3 @@
-// ── Función global de logout — disponible para todos los HTMLs ──
 function doStaffLogout() {
     const staffRestaurantId = localStorage.getItem('rb_staff_restaurant_id');
     localStorage.clear();
@@ -9,7 +8,6 @@ function doStaffLogout() {
     }
 }
 
-// ── Verificación de rol + construcción de barra de navegación ──
 (async function() {
     const token = localStorage.getItem('rb_token');
     if (!token) { window.location.href = '/login'; return; }
@@ -21,8 +19,6 @@ function doStaffLogout() {
             headers: { 'Authorization': 'Bearer ' + token }
         });
 
-        const body = await res.json();
-
         if (res.status === 401) {
             localStorage.clear();
             window.location.href = '/login';
@@ -30,19 +26,13 @@ function doStaffLogout() {
         }
 
         if (res.status === 403) {
-            const redirect = (body.detail && body.detail.redirect) || '/staff';
-            window.location.href = redirect;
+            const body = await res.json();
+            window.location.href = (body.detail && body.detail.redirect) || '/staff';
             return;
         }
 
-        // 200 — acceso permitido
-        console.log('rb_restaurant:', localStorage.getItem('rb_restaurant'));
-        console.log('rb_role:', localStorage.getItem('rb_role'));
         _buildRoleNav();
-
-    } catch (e) {
-        console.warn('Error verificando rol:', e);
-    }
+    } catch (e) { console.warn('Error verificando rol:', e); }
 
     function _buildRoleNav() {
         const ROLE_META = {
@@ -53,38 +43,37 @@ function doStaffLogout() {
             domiciliario: { icon: '🛵', label: 'Domicilios',  url: '/domiciliario' },
         };
     
-        const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-        let roleStr = restaurant.role || localStorage.getItem('rb_role') || '';
-    
-        // ✅ FIX: si el role es un JSON array string, parsearlo
+        const rawRole = localStorage.getItem('rb_role') || '';
         let roles = [];
         try {
-            const parsed = JSON.parse(roleStr);
-            if (Array.isArray(parsed)) {
-                roles = parsed;
-            } else {
-                roles = roleStr.split(',').map(r => r.trim());
-            }
+            const parsed = JSON.parse(rawRole);
+            roles = Array.isArray(parsed) ? parsed : rawRole.split(',').map(r => r.trim());
         } catch(e) {
-            roles = roleStr.split(',').map(r => r.trim());
+            roles = rawRole.split(',').map(r => r.trim());
         }
-    
-        // Limpiar comillas y espacios que puedan venir de Postgres
-        roles = roles
-            .map(r => r.replace(/["\[\]\s]/g, '').trim())
-            .filter(r => ROLE_META[r]);
-    
-        if (roles.length <= 1) return;
+        roles = roles.map(r => r.replace(/["\[\]\s]/g, '').trim());
     
         const navEl = document.getElementById('dynamic-role-nav');
         if (!navEl) return;
     
         navEl.style.display = 'flex';
         navEl.innerHTML = '';
-    
         const currentPath = window.location.pathname;
+
+        if (roles.includes('owner') || roles.includes('admin')) {
+            const active = (p) => currentPath === p ? 'active' : '';
+            navEl.innerHTML += `<a href="/dashboard" class="role-btn ${active('/dashboard')}">📊 Dashboard</a>`;
+            navEl.innerHTML += `<a href="/mesero" class="role-btn ${active('/mesero')}">🍽️ Mesero</a>`;
+            navEl.innerHTML += `<a href="/caja" class="role-btn ${active('/caja')}">💰 Caja</a>`;
+            navEl.innerHTML += `<a href="/cocina" class="role-btn ${active('/cocina')}">👨‍🍳 Cocina</a>`;
+            navEl.innerHTML += `<a href="/bar" class="role-btn ${active('/bar')}">🍹 Bar</a>`;
+            return;
+        }
     
-        roles.forEach(role => {
+        const validRoles = roles.filter(r => ROLE_META[r]);
+        if (validRoles.length <= 1) return;
+
+        validRoles.forEach(role => {
             const meta = ROLE_META[role];
             const a = document.createElement('a');
             a.href = meta.url;

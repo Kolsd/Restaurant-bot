@@ -202,15 +202,15 @@ function renderBranches(branches) {
           <div style="font-size:15px;font-weight:600;">${b.name}</div>
           <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${b.whatsapp_number||'N/A'}</span>${b.address||''}</div>
         </div>
-        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Agregar miembro</button>
+        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Añadir Admin</button>
       </div>
       <div id="users-branch-${b.id}" style="padding:.75rem 1.25rem;"><div style="font-size:11px;color:#aaa;">Cargando...</div></div>
     </div>`).join('');
 
   branches.forEach(b => loadBranchUsers(b.id));
 
-  const rest = window._dashRestaurant;
-  const role = (rest && rest.role) || 'owner';
+  const rest = window._dashRestaurant || {};
+  const role = localStorage.getItem('rb_role') || '';
   if (role.includes('owner')) {
     branches.forEach(b => {
       const header = document.querySelector('[data-branch-id="' + b.id + '"]');
@@ -225,36 +225,7 @@ function renderBranches(branches) {
   }
 }
 
-// Función de renderizado para multi-rol (soporta roles de users y staff)
-function formatRoles(roleStr) {
-  if (!roleStr) return '';
-  const roleColors = {
-    owner:'#1D9E75', admin:'#185FA5',
-    cashier:'#BA7517', cook:'#854F0B', waiter:'#534AB7',
-    // staff roles
-    mesero:'#534AB7', caja:'#BA7517', cocina:'#854F0B',
-    domiciliario:'#0F6E56', gerente:'#185FA5', bar:'#7B3FA0', otro:'#888',
-  };
-  const roleBg = {
-    owner:'#E1F5EE', admin:'#E6F1FB',
-    cashier:'#FFF8E6', cook:'#FAEEDA', waiter:'#EEEDFE',
-    mesero:'#EEEDFE', caja:'#FFF8E6', cocina:'#FAEEDA',
-    domiciliario:'#E1F5EE', gerente:'#E6F1FB', bar:'#F3E8FF', otro:'#f0f0e8',
-  };
-  const roleLabels = {
-    owner:'Dueño', admin:'Admin',
-    cashier:'Cajero', cook:'Cocinero', waiter:'Mesero',
-    mesero:'Mesero', caja:'Cajero', cocina:'Cocinero',
-    domiciliario:'Domiciliario', gerente:'Gerente', bar:'Bar', otro:'Otro',
-  };
-
-  return roleStr.split(',').map(r => r.trim()).filter(Boolean).map(r => {
-    const c = roleColors[r] || '#555';
-    const b = roleBg[r] || '#f0f0e8';
-    const l = roleLabels[r] || r;
-    return `<span style="background:${b}; color:${c}; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:600; margin-right:4px; display:inline-block; margin-top:4px;">${l}</span>`;
-  }).join('');
-}
+function formatRoles(roleStr) { return ''; } // Ya no es necesaria aquí pero la dejamos vacía por si acaso
 
 async function loadBranchUsers(branchId) {
   const h = window._dashHeaders;
@@ -264,19 +235,18 @@ async function loadBranchUsers(branchId) {
     const users = ((await r.json()).users || []).filter(u => u.branch_id == branchId);
     const el = document.getElementById('users-branch-' + branchId);
     if (!el) return;
-    if (!users.length) { el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0;">Sin miembros asignados</div>'; return; }
+    if (!users.length) { el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0;">Sin administradores asignados</div>'; return; }
 
     el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:12px;">' +
       users.map(u => {
         const displayName = u.display_name || u.username || '?';
-        const roleLabel   = u.role === 'gerente' ? '👔 Gerente' : '🛡️ Administrador';
         return `
         <div style="display:flex;align-items:center;gap:12px;background:#f8f8f5;border-radius:8px;padding:8px 12px;width:100%;max-width:340px;justify-content:space-between;border:1px solid #f0f0e8;">
           <div style="display:flex;align-items:center;gap:10px;">
             <div style="width:34px;height:34px;border-radius:50%;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#555;">${displayName[0].toUpperCase()}</div>
             <div>
               <div style="font-size:13px;font-weight:600;color:#333;">${displayName}</div>
-              <div style="font-size:11px;color:#888;margin-top:2px;">${roleLabel}</div>
+              <div style="font-size:11px;color:#888;margin-top:2px;">🛡️ Administrador</div>
             </div>
           </div>
           <button onclick="deleteUser('${u.username}')" style="background:#FDE8E8;border:none;color:#C0392B;border-radius:6px;font-size:16px;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">×</button>
@@ -403,24 +373,8 @@ function openInviteModal(branchId, branchName) {
   document.getElementById('modal-branch-name').textContent = branchName;
   document.getElementById('invite-username').value = '';
   document.getElementById('invite-password').value = '';
-  const pinField   = document.getElementById('invite-pin');
-  const phoneField = document.getElementById('invite-phone');
-  if (pinField)   pinField.value   = '';
-  if (phoneField) phoneField.value = '';
-
-  // Mis Sucursales: default Admin, siempre contraseña (nunca PIN)
-  selectedRoles = new Set(['admin']);
+  if (document.getElementById('invite-phone')) document.getElementById('invite-phone').value = '';
   document.getElementById('invite-role').value = 'admin';
-
-  document.querySelectorAll('#modal-invite .role-card').forEach(c => {
-    if (c.getAttribute('data-role') === 'admin') c.classList.add('active');
-    else c.classList.remove('active');
-  });
-
-  const pwdField = document.getElementById('invite-password');
-  if (pwdField) pwdField.style.display = '';
-  if (pinField) pinField.style.display = 'none';
-
   document.getElementById('modal-invite').style.display = 'flex';
 }
 
@@ -432,22 +386,17 @@ function closeInviteModal() {
 async function sendInvite() {
   const h        = window._dashHeaders;
   const username = document.getElementById('invite-username').value.trim();
-  const role     = document.getElementById('invite-role').value;
-  const isAdmin  = role === 'admin' || role === 'gerente';
   const password = document.getElementById('invite-password').value.trim();
-  const pin      = (document.getElementById('invite-pin') || {}).value?.trim() || '';
   const phone    = (document.getElementById('invite-phone') || {}).value?.trim() || '';
 
-  if (!username) { alert('El nombre es obligatorio'); return; }
-  if (isAdmin && !password) { alert('La contraseña es obligatoria para administrador'); return; }
-  if (!isAdmin && pin.length < 4) { alert('El PIN debe tener al menos 4 dígitos'); return; }
+  if (!username || !password) { alert('El usuario y la contraseña son obligatorios.'); return; }
 
   try {
     const r = await fetch('/api/team/invite', {
       method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, pin, phone, role, branch_id: currentBranchId }),
+      body: JSON.stringify({ username, password, pin: '', phone, role: 'admin', branch_id: currentBranchId }),
     });
-    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Miembro creado exitosamente!'); }
+    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Admin creado exitosamente!'); }
     else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo crear')); }
   } catch(e) {}
 }
