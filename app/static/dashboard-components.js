@@ -1315,9 +1315,16 @@ window.openStaffAdminModal = function() {
   const select = document.getElementById('staff-branch-select');
   const val = select.value;
   const branchName = select.options[select.selectedIndex].text.replace('🏠 ', '').replace('📍 ', '');
-  const branchId = val === 'matriz' ? null : parseInt(val);
+  
+  // 🛡️ EL FIX: Obtenemos el ID real. Si es matriz, usamos el ID del restaurante principal.
+  let targetBranchId;
+  if (val === 'matriz') {
+      const mainRest = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+      targetBranchId = mainRest.id;
+  } else {
+      targetBranchId = parseInt(val);
+  }
 
-  // Creamos el modal dinámicamente para asegurar que siempre funcione
   const old = document.getElementById('_admin-invite-modal');
   if (old) old.remove();
 
@@ -1356,65 +1363,61 @@ window.openStaffAdminModal = function() {
   document.getElementById('btn-inv-cancel').onclick = () => overlay.remove();
   
   document.getElementById('btn-inv-submit').onclick = async () => {
-    const username = document.getElementById('inv-admin-username').value.trim();
-    const password = document.getElementById('inv-admin-password').value.trim();
-    const phone    = document.getElementById('inv-admin-phone').value.trim();
-    const errEl    = document.getElementById('inv-admin-error');
+      const username = document.getElementById('inv-admin-username').value.trim();
+      const password = document.getElementById('inv-admin-password').value.trim();
+      const phone    = document.getElementById('inv-admin-phone').value.trim();
+      const errEl    = document.getElementById('inv-admin-error');
 
-    if (!username || !password) { errEl.textContent = 'El usuario y la contraseña son obligatorios.'; return; }
+      if (!username || !password) { errEl.textContent = 'El usuario y la contraseña son obligatorios.'; return; }
 
-    const btn = document.getElementById('btn-inv-submit');
-    btn.disabled = true;
-    btn.textContent = 'Creando...';
+      const btn = document.getElementById('btn-inv-submit');
+      btn.disabled = true;
+      btn.textContent = 'Creando...';
 
-    try {
-        // 🛡️ CORRECCIÓN CLAVE: Forzamos el Content-Type para que FastAPI entienda el JSON
-        const headers = { 
-            'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 
-            'Content-Type': 'application/json' 
-        };
-        
-        // 🛡️ Creamos el payload base
-        const payload = { username, password, role: 'admin' };
-            
-        // 🛡️ Solo enviamos el branch_id si de verdad es un número (es decir, NO es la matriz)
-        if (branchId) {
-            payload.branch_id = branchId;
-        }
-        
-        if (phone) {
-            payload.phone = phone;
-        }
+      try {
+          const headers = { 
+              'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 
+              'Content-Type': 'application/json' 
+          };
+          
+          // 🛡️ Siempre enviamos un targetBranchId válido (sea la matriz o la sucursal)
+          const payload = { 
+              username, 
+              password, 
+              role: 'admin', 
+              branch_id: targetBranchId 
+          };
+          if (phone) payload.phone = phone;
 
-        const r = await fetch('/api/team/invite', {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(payload),
-        });
-        
-        if (r.ok) {
-            document.getElementById('_admin-invite-modal').remove();
-            alert('¡Administrador creado exitosamente!');
-        } else {
-            const e = await r.json();
-            let errorMsg = 'No se pudo crear';
-            
-            if (e.detail) {
-                if (Array.isArray(e.detail)) {
-                    errorMsg = e.detail.map(err => `${err.loc[err.loc.length-1]}: ${err.msg}`).join(', ');
-                } else {
-                    errorMsg = e.detail;
-                }
-            }
-            
-            errEl.textContent = 'Error: ' + errorMsg;
-            btn.disabled = false;
-            btn.textContent = 'Crear administrador';
-        }
-    } catch(e) {
-        errEl.textContent = 'Error de conexión';
-        btn.disabled = false;
-        btn.textContent = 'Crear administrador';
-    }
+          const r = await fetch('/api/team/invite', {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify(payload),
+          });
+          
+          if (r.ok) {
+              overlay.remove();
+              alert('¡Administrador creado exitosamente!');
+          } else {
+              const e = await r.json();
+              let errorMsg = 'No se pudo crear';
+              
+              if (e.detail) {
+                  if (Array.isArray(e.detail)) {
+                      errorMsg = e.detail.map(err => `${err.loc[err.loc.length-1]}: ${err.msg}`).join(', ');
+                  } else {
+                      errorMsg = e.detail;
+                  }
+              }
+              
+              errEl.textContent = 'Error: ' + errorMsg;
+              btn.disabled = false;
+              btn.textContent = 'Crear administrador';
+          }
+      } catch(e) {
+          errEl.textContent = 'Error de conexión';
+          btn.disabled = false;
+          btn.textContent = 'Crear administrador';
+      }
   };
 };
