@@ -1165,6 +1165,12 @@ async function loadStaff() {
   const container = document.getElementById('staff-component');
   if (!container) return;
 
+  // 🛡️ 1. Cargamos el selector de sucursales para el formulario de "Invitar"
+  // Esto evita el error de "not defined"
+  if (typeof _loadStaffBranchesSelect === 'function') {
+    _loadStaffBranchesSelect();
+  }
+
   try {
     const r = await fetch('/api/staff', { headers: h });
     if (!r.ok) throw new Error('Error HTTP: ' + r.status);
@@ -1173,8 +1179,32 @@ async function loadStaff() {
     renderStaff(staffList);
   } catch(e) {
     console.error('Error loadStaff:', e);
-    // Mostramos el error exacto en pantalla para debuggear más fácil si vuelve a fallar
     container.innerHTML = `<div class="empty-state">Error al cargar el equipo: ${e.message}</div>`;
+  }
+}
+
+async function _loadStaffBranchesSelect() {
+  const select = document.getElementById('invite-branch-id');
+  if (!select) return;
+
+  try {
+    const r = await fetch('/api/team/branches', { headers: window._dashHeaders });
+    if (r.ok) {
+      const data = await r.json();
+      const branches = data.branches || [];
+      
+      // Opción por defecto
+      select.innerHTML = '<option value="">— Casa Matriz —</option>';
+      
+      branches.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.name;
+        select.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    console.error('Error _loadStaffBranchesSelect:', e);
   }
 }
 
@@ -1324,3 +1354,31 @@ document.addEventListener('DOMContentLoaded', () => {
       loadStaff();
   }
 });
+
+/**
+ * 🛡️ FIX: Carga las sucursales disponibles en el selector del formulario de Staff
+ */
+async function _loadStaffBranchesSelect() {
+  const select = document.getElementById('invite-branch-id');
+  if (!select) return;
+
+  try {
+    const r = await fetch('/api/team/branches', { headers: window._dashHeaders });
+    if (r.ok) {
+      const data = await r.json();
+      const branches = data.branches || [];
+      
+      // Limpiamos y añadimos la opción por defecto (Matriz)
+      select.innerHTML = '<option value="">— Casa Matriz —</option>';
+      
+      branches.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.name;
+        select.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    console.error('Error al cargar el selector de sucursales en Staff:', e);
+  }
+}
