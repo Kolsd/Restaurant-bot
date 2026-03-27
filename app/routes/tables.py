@@ -47,7 +47,7 @@ async def get_table_wa_number(table: dict) -> str:
         return matriz.get("whatsapp_number", "")
         
     return wa_number
-    
+
 class TableRequest(BaseModel):
     number: int
     name: str = ""
@@ -56,12 +56,25 @@ class TableRequest(BaseModel):
 @router.get("/api/tables")
 async def get_tables(request: Request):
     user = await get_current_user(request)
-    return {"tables": await db.db_get_tables(branch_id=user.get("branch_id"))}
+    branch_id = user.get("branch_id")
+    
+    # 🛡️ FILTRO GLOBAL: Leer el selector del Topbar
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+        
+    return {"tables": await db.db_get_tables(branch_id=branch_id)}
 
 @router.post("/api/tables")
 async def create_table(request: Request, body: TableRequest):
     user = await get_current_user(request)
     branch_id = body.branch_id or user.get("branch_id")
+    
+    # 🛡️ FILTRO GLOBAL: Asegurar que se cree en la sucursal actual
+    branch_header = request.headers.get("X-Branch-ID")
+    if not body.branch_id and branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+        
     table_id = f"{f'b{branch_id}-' if branch_id else ''}mesa-{body.number}"
     name = body.name or f"Mesa {body.number}"
     await db.db_create_table(table_id, body.number, name, branch_id=branch_id)
@@ -273,6 +286,7 @@ async def update_delivery_order_status(request: Request, order_id: str):
     return {"success": True}
 
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
+
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None, station: str = None):
     """
@@ -283,15 +297,21 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
     """
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
+    
+    # 🛡️ FILTRO GLOBAL
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         if status:
             if branch_id:
+                # 🚫 Eliminamos el OR t.branch_id IS NULL para evitar que se cuelen mesas de otras sucursales
                 rows = await conn.fetch(
                     """SELECT o.* FROM table_orders o
                        LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                       WHERE o.status = $1 AND (t.branch_id = $2 OR t.branch_id IS NULL)
+                       WHERE o.status = $1 AND t.branch_id = $2
                        ORDER BY o.created_at ASC""", status, branch_id)
             else:
                 rows = await conn.fetch(
@@ -302,7 +322,7 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
                     """SELECT o.* FROM table_orders o
                        LEFT JOIN restaurant_tables t ON o.table_id = t.id
                        WHERE o.status NOT IN ('factura_entregada','cancelado')
-                       AND (t.branch_id = $1 OR t.branch_id IS NULL)
+                       AND t.branch_id = $1
                        ORDER BY o.created_at ASC""", branch_id)
             else:
                 rows = await conn.fetch(
@@ -323,12 +343,10 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
             d['updated_at'] = d['updated_at'].isoformat() + 'Z'
         result.append(d)
 
-    # Filtro por estación (post-fetch: ≤30 órdenes activas en producción)
     if station:
         result = [r for r in result if r.get("station", "all") in (station, "all")]
 
     return {"orders": result}
-
 
 @router.get("/api/table-orders/{order_id}/ticket")
 async def get_order_ticket(request: Request, order_id: str):
@@ -620,13 +638,16 @@ async def get_tables_status(request: Request):
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
     
+    # 🛡️ FILTRO GLOBAL
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+        
     tables = await db.db_get_tables(branch_id=branch_id)
     
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # Buscamos qué mesas están hablando con el bot
         active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status='active'")
-        # Buscamos qué mesas tienen pedidos en curso
         pending_orders = await conn.fetch("SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado')")
         
     session_map = {s['table_id'] for s in active_sessions}
@@ -636,14 +657,13 @@ async def get_tables_status(request: Request):
             order_map[o['table_id']] = []
         order_map[o['table_id']].append(o['status'])
         
-    # Armamos la respuesta consolidada para el frontend
     for t in tables:
         tid = t['id']
         t['bot_active'] = tid in session_map
         t['pending_orders'] = order_map.get(tid, [])
         
     return {"tables": tables}
-
+    
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
     """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""

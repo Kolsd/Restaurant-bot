@@ -195,21 +195,25 @@ function renderBranches(branches) {
   if (!container) return;
   if (!branches.length) { container.innerHTML = '<div class="empty-state">No hay sucursales.</div>'; return; }
   
-  container.innerHTML = branches.map(b => `
+  container.innerHTML = branches.map(b => {
+    // 🛡️ FIX VISUAL: Cortamos el identificador interno (_b...) para que solo se vea el número
+    const cleanWa = (b.whatsapp_number || 'N/A').split('_b')[0];
+    
+    return `
     <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;margin-bottom:12px;overflow:hidden;">
       <div data-branch-id="${b.id}" style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
         <div>
           <div style="font-size:15px;font-weight:600;">${b.name}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${b.whatsapp_number||'N/A'}</span>${b.address||''}</div>
+          <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${cleanWa}</span>${b.address||''}</div>
         </div>
         <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Añadir Admin</button>
       </div>
       <div id="users-branch-${b.id}" style="padding:.75rem 1.25rem;"><div style="font-size:11px;color:#aaa;">Cargando...</div></div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   branches.forEach(b => loadBranchUsers(b.id));
 
-  const rest = window._dashRestaurant || {};
   const role = localStorage.getItem('rb_role') || '';
   if (role.includes('owner')) {
     branches.forEach(b => {
