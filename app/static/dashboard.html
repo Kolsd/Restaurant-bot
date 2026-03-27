@@ -456,8 +456,9 @@
         <div style="font-size:18px;font-weight:600;">Staff & Propinas</div>
         <div style="font-size:12px;color:#888;margin-top:2px;">Gestiona tu equipo, registra turnos y realiza el corte de propinas.</div>
       </div>
+      <button onclick="openCreateStaffModal()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nuevo Empleado</button>
     </div>
-    <div id="staff-component"></div>
+    <div id="staff-component"><div class="empty-state">Cargando equipo...</div></div>
   </div>
 
   <!-- FIDELIZACIÓN (Loyalty — requires loyalty module) -->
@@ -719,6 +720,38 @@
   <span>Sin conexion — los cambios se guardan localmente</span>
   <!-- pending-ops-badge: count of ops queued in IndexedDB (managed by offline-sync.js) -->
   <span id="pending-ops-badge" style="display:none;background:#F59E0B;color:#000;border-radius:50%;padding:2px 7px;font-size:11px;font-weight:700;margin-left:6px;"></span>
+</div>
+
+<div id="modal-staff-create" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:#fff;border-radius:16px;width:400px;max-width:95vw;padding:1.75rem;box-shadow:0 24px 64px rgba(0,0,0,.18);">
+    <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">👤 Nuevo Empleado Operativo</div>
+    
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Nombre del empleado</label>
+      <input id="staff-create-name" placeholder="Ej: Carlos" style="width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">Roles (puedes seleccionar varios)</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;" id="staff-create-roles">
+        <label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" value="mesero" checked> Mesero</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" value="cocina"> Cocina</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" value="bar"> Bar</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" value="caja"> Caja</label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:4px;"><input type="checkbox" value="domiciliario"> Domiciliario</label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">PIN de Acceso (Mínimo 4 dígitos)</label>
+      <input id="staff-create-pin" type="password" inputmode="numeric" placeholder="Ej: 1234" maxlength="8" style="width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;">
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closeCreateStaffModal()" style="padding:9px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
+      <button onclick="submitCreateStaff()" style="background:#1D9E75;color:#fff;border:none;padding:9px 20px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Guardar</button>
+    </div>
+  </div>
 </div>
 
 </body>
