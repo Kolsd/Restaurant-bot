@@ -12,8 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const roleNavContainer = document.getElementById('dynamic-role-nav');
     if (!roleNavContainer) return;
   
-    // Leer el rol guardado durante el login
-    const rawRole = localStorage.getItem('rb_role') || 'owner';
+// 🛡️ FIX: Eliminamos el fallback 'owner'. Si no hay rol, se queda vacío.
+    const rawRole = localStorage.getItem('rb_role') || '';
     const roles = rawRole.toLowerCase().split(',');
     
     // Saber en qué página estamos actualmente

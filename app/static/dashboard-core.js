@@ -75,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const nameEl = document.getElementById('sidebar-name');
   if (nameEl) nameEl.textContent = restaurant.name || 'Mi Restaurante';
 
-  const roleStr = restaurant.role || 'owner';
+  const roleStr = (restaurant.role || '');
   const equipoNav = document.getElementById('nav-equipo');
   if (equipoNav) equipoNav.style.display = (roleStr.includes('owner') || roleStr.includes('admin')) ? '' : 'none';
 
