@@ -327,7 +327,12 @@ async def verify_role_for_page(request: Request, page: str):
     except HTTPException:
         raise HTTPException(status_code=401, detail="Token inválido o expirado")
 
+    # LOG TEMPORAL
+    print(f"DEBUG verify-role: user={user}, page={page}", flush=True)
+
     user_roles = {r.strip().lower() for r in (user.get("role") or "").split(",") if r.strip()}
+
+    print(f"DEBUG verify-role: user_roles={user_roles}", flush=True)
 
     if user_roles & _ADMIN_ROLES:
         return {"ok": True}
@@ -342,7 +347,7 @@ async def verify_role_for_page(request: Request, page: str):
         raise HTTPException(status_code=403, detail={"redirect": redirect_to})
 
     return {"ok": True}
-
+    
 @router.get("/api/geocode")
 async def geocode_endpoint(address: str):
     lat, lon, display = await geocode_address(address)
