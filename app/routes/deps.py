@@ -20,11 +20,29 @@ async def require_auth(request: Request) -> str:
 async def get_current_user(request: Request) -> dict:
     """Returns the authenticated user dict or raises 401."""
     username = await require_auth(request)
-    user = await db.db_get_user(username)
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
 
+    # Si es un empleado operativo, lo buscamos en la tabla staff
+    if username.startswith("staff:"):
+        staff_id = username.split(":", 1)[1]
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            # Usamos id::text para evitar conflictos de tipo UUID/INT
+            query = "SELECT restaurant_id, role FROM staff WHERE id::text = $1"
+            staff_member = await conn.fetchrow(query, str(staff_id))
+            if staff_member:
+                # Construimos un dict compatible con lo que espera el sistema
+                return {
+                    "username": username,
+                    "branch_id": staff_member["restaurant_id"],
+                    "role": staff_member["role"]
+                }
+    else:
+        # Si es un admin/gerente normal, lo buscamos en users
+        user = await db.db_get_user(username)
+        if user:
+            return user
+
+    raise HTTPException(status_code=401, detail="User not found")
 
 async def get_current_restaurant(request: Request) -> dict:
     """Returns the restaurant for the authenticated user or raises 403."""
