@@ -1213,7 +1213,7 @@ async function loadStaff() {
 function renderStaff(staffList) {
   const container = document.getElementById('staff-component');
   
-  // Filtrar solo los activos (opcional, o mostrar todos)
+  // Filtrar solo los activos
   const activeStaff = staffList.filter(s => s.active !== false);
 
   if (activeStaff.length === 0) {
@@ -1221,12 +1221,23 @@ function renderStaff(staffList) {
     return;
   }
 
-  // Usamos un Grid CSS directo en línea para las tarjetas
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">';
   
   activeStaff.forEach(s => {
-    const rolesStr = s.roles ? s.roles.join(',') : (s.role || 'mesero');
-    const badgesHtml = formatRoles(rolesStr); // Reutilizamos tu función formatRoles
+    // PROTECCIÓN MÁXIMA: Sanitizar los roles vengan como vengan de la DB
+    let rolesStr = 'mesero';
+    if (Array.isArray(s.roles)) {
+      rolesStr = s.roles.join(',');
+    } else if (typeof s.roles === 'string') {
+      // Si la DB lo manda como string "{mesero,caja}", le quitamos las llaves
+      rolesStr = s.roles.replace(/[{}]/g, '');
+    } else if (s.role) {
+      rolesStr = s.role;
+    }
+    
+    // formatRoles procesa el string limpio y lo convierte en los badges visuales
+    const badgesHtml = formatRoles(rolesStr);
+    const inicial = s.name ? s.name.charAt(0).toUpperCase() : '?';
     
     html += `
       <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.02);">
@@ -1234,7 +1245,7 @@ function renderStaff(staffList) {
         
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
           <div style="width:40px;height:40px;border-radius:50%;background:#f0f0e8;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#555;">
-            ${s.name.charAt(0).toUpperCase()}
+            ${inicial}
           </div>
           <div>
             <div style="font-size:15px;font-weight:600;color:#222;">${s.name}</div>
