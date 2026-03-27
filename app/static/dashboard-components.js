@@ -1271,46 +1271,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── FUNCIONES GLOBALES PARA EL DROPDOWN DE SUCURSALES ──
 
-async function _loadStaffBranchesSelect() {
-  const select = document.getElementById('staff-branch-select');
-  const adminBtn = document.getElementById('btn-staff-add-admin');
-  if (!select) return;
-  
-  try {
-      const r = await fetch('/api/team/branches', { headers: { Authorization: `Bearer ${localStorage.getItem('rb_token')}` } });
-      if (r.ok) {
-          const data = await r.json();
-          const branches = data.branches || [];
-          
-          select.innerHTML = '<option value="matriz">🏠 Casa Matriz</option>';
-          branches.forEach(b => {
-              const opt = document.createElement('option');
-              opt.value = b.id;
-              opt.textContent = `📍 ${b.name}`;
-              select.appendChild(opt);
-          });
-          
-          select.style.display = 'block';
-          if (adminBtn) adminBtn.style.display = 'block';
-      }
-  } catch(e) { console.error('Error cargando sucursales para staff', e); }
-}
-
-window.changeStaffBranch = async function() {
-  // Al cambiar el select, el _apiHeaders mandará el nuevo X-Branch-ID
-  // Recargamos el componente para que pida los datos de la nueva sucursal
-  StaffSection.setState({ loading: true });
-  try {
-      const [rosterData, shiftsData] = await Promise.all([
-          _staffFetch(''),
-          _staffFetch('/open-shifts'),
-      ]);
-      StaffSection.setState({ staff: rosterData.staff, shifts: shiftsData.shifts, loading: false });
-  } catch (err) {
-      StaffSection.setState({ loading: false, error: err.message });
-  }
-};
-
 window.openStaffAdminModal = function() {
   const select = document.getElementById('staff-branch-select');
   const val = select.value;

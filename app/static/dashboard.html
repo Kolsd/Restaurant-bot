@@ -69,6 +69,8 @@
       <div class="sync-badge" id="sync-badge">Sincronizando datos...</div>
     </div>
     <div class="topbar-right">
+      <select id="global-branch-select" onchange="changeGlobalBranch()" style="display:none;padding:6px 12px;border:1px solid #1D9E75;border-radius:8px;font-size:13px;background:#E1F5EE;color:#0F6E56;font-weight:600;outline:none;cursor:pointer;margin-right:12px;"></select>
+      
       <div style="font-size:12px;color:#777;font-weight:500;" id="current-time"></div>
       <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
     </div>
@@ -447,19 +449,17 @@
   <div id="staff" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
       <div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="font-size:18px;font-weight:600;">Staff & Propinas</div>
-          <select id="staff-branch-select" onchange="changeStaffBranch()" style="display:none;padding:6px 12px;border:1px solid #1D9E75;border-radius:8px;font-size:13px;background:#E1F5EE;color:#0F6E56;font-weight:600;outline:none;cursor:pointer;"></select>
-        </div>
+        <div style="font-size:18px;font-weight:600;">Staff & Propinas</div>
         <div style="font-size:12px;color:#888;margin-top:2px;">Gestiona tu equipo, registra turnos y realiza el corte de propinas.</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <button id="btn-staff-add-admin" onclick="openStaffAdminModal()" style="display:none;background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;">+ Añadir Admin a esta sucursal</button>
+        <button onclick="openCreateStaffModal()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nuevo Empleado</button>
       </div>
     </div>
     <div id="staff-component"><div class="empty-state">Cargando equipo...</div></div>
   </div>
-
+  
   <!-- FIDELIZACIÓN (Loyalty — requires loyalty module) -->
   <div id="loyalty" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">

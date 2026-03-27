@@ -538,7 +538,7 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         raise HTTPException(status_code=400, detail="Sucursal requerida")
         
     branch = await db.db_get_restaurant_by_id(branch_id)
-    
+
     # Admin/Gerente → dashboard user account (password login)
     if body.role in ("admin", "gerente"):
         if not body.password:
@@ -780,60 +780,51 @@ from datetime import datetime, timedelta
 
 async def get_dashboard_filters(request: Request, period: str, custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
     """Ayudante para filtrar por sucursal y rango exacto, calculando el 'Hoy' dinámicamente"""
-    # 🛡️ FIX: Usamos la función centralizada que ya sabe distinguir entre Staff y Admin
     user = await get_current_user(request)
-    
-    # Si por alguna razón extrema no hay usuario, lanzamos el error antes de que falle el .get()
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado o sesión expirada")
     
     branch_id = user.get("branch_id")
-    bot_number = None
     
+    # 🛡️ MAGIA GLOBAL: Leer el selector del Topbar para el Owner
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+
+    bot_number = None
     if branch_id:
         r = await db.db_get_restaurant_by_id(branch_id)
         if r: 
             bot_number = r.get("whatsapp_number")
     else:
-        # Si es un Admin de la Matrix, intentamos obtener el restaurante principal
-        # pero con un seguro por si la base de datos está vacía
         all_r = await db.db_get_all_restaurants()
         if all_r:
-            # Si el usuario es Staff de la matrix, su restaurant_id está en su dict
             target_id = user.get("restaurant_id") or all_r[0].get("id")
             restaurant = await db.db_get_restaurant_by_id(target_id)
             if restaurant:
                 branch_id = restaurant["id"]
                 bot_number = restaurant.get("whatsapp_number")
 
-    # 1. Calculamos la hora local EXACTA del usuario
+    # Calculamos la hora local exacta...
     now_utc = datetime.utcnow()
     now_local = now_utc - timedelta(minutes=tz_offset)
-    
-    # 2. Definimos los límites del día
     end_local = now_local + timedelta(days=1)
     end_local = end_local.replace(hour=0, minute=0, second=0, microsecond=0)
     
     if period == "custom" and custom_start and custom_end:
         start_local = datetime.strptime(custom_start, "%Y-%m-%d")
         end_local = datetime.strptime(custom_end, "%Y-%m-%d") + timedelta(days=1)
-    elif period == "week": 
-        start_local = now_local - timedelta(days=7)
-    elif period == "month": 
-        start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    elif period == "semester": 
-        start_local = now_local - timedelta(days=180)
-    elif period == "year": 
-        start_local = now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-    else: # 'today'
-        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week": start_local = now_local - timedelta(days=7)
+    elif period == "month": start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == "semester": start_local = now_local - timedelta(days=180)
+    elif period == "year": start_local = now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else: start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # 3. Devolvemos los límites a UTC para la DB
     start_date = start_local + timedelta(minutes=tz_offset)
     end_date = end_local + timedelta(minutes=tz_offset)
     
     return branch_id, bot_number, start_date, end_date
-    
+
 @router.get("/api/dashboard/orders")
 async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
     branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
@@ -1039,19 +1030,10 @@ async def get_dashboard_conversations(request: Request):
 
 @router.get("/api/dashboard/menu")
 async def get_dashboard_menu(request: Request):
-    username = await require_auth(request)
-    user = await db.db_get_user(username)
-    
-    wa_number = ""
-    if user and user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r: wa_number = r.get("whatsapp_number", wa_number)
-    else:
-        all_r = await db.db_get_all_restaurants()
-        if all_r: wa_number = all_r[0].get("whatsapp_number", wa_number)
-        
-    menu = await db.db_get_menu(wa_number) or {}
-    return {"menu": menu}    
+    # Ahora el menú también respeta el selector de la sucursal
+    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    menu = await db.db_get_menu(bot_number) or {}
+    return {"menu": menu}
 
 @router.get("/api/table-sessions/{session_id}/history")
 async def get_session_history(request: Request, session_id: int):
