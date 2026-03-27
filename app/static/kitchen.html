@@ -297,7 +297,7 @@ async function loadOrders() {
     const { orders: deliveryOrders = [] } = r2.ok ? await r2.json() : { orders: [] };
 
     const normalizedDelivery = deliveryOrders
-      .filter(o => !['entregado', 'cancelado'].includes(o.status))
+      .filter(o => !['en_camino', 'en_puerta', 'entregado', 'cancelado'].includes(o.status))
       .map(o => ({
         id: o.id,
         table_name: o.order_type === 'domicilio'
@@ -313,7 +313,7 @@ async function loadOrders() {
         original_id: o.id,
       }));
 
-    const orders = [...tableOrders, ...normalizedDelivery];
+    const orders = [...tableOrders, ...normalizedDelivery.filter(o => o.status !== null)];
 
     const curIds = new Set(orders.map(o => o.id));
     for (const id of curIds) {
@@ -342,12 +342,11 @@ async function loadOrders() {
 }
 
 function mapDeliveryStatus(s) {
-  // Cuando el bot confirma, debe entrar a la primera columna para alertar al cocinero
   if (s === 'confirmado') return 'recibido';
   if (s === 'en_preparacion') return 'en_preparacion';
-  // en_puerta = ya fue entregado al domiciliario; no regresar a recibido
-  if (s === 'listo' || s === 'en_camino' || s === 'en_puerta') return 'listo';
-  return 'recibido';
+  if (s === 'listo') return 'listo';
+  // en_camino / en_puerta / entregado: ya salieron de cocina — no deben aparecer
+  return null;
 }
 
 loadOrders();

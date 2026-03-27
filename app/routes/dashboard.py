@@ -389,27 +389,13 @@ async def list_team_users(request: Request, branch_id: int = None):
     else:
         raise HTTPException(status_code=403, detail="No autorizado")
 
+    # Mis Sucursales: solo admins y gerentes de la tabla users (CERO staff operativo)
+    admin_roles = {"admin", "gerente", "owner"}
+    filtered = [u for u in filtered if any(r.strip() in admin_roles for r in (u.get("role") or "").split(","))]
     for u in filtered:
         u["source"] = "user"
 
-    # Merge staff members for the branch into the combined team view
-    staff_members = []
-    if effective_branch:
-        raw_staff = await db.db_get_team_staff_by_branch(effective_branch)
-        for s in raw_staff:
-            roles_list = s.get("roles") or [s.get("role", "mesero")]
-            staff_members.append({
-                "username": s["id"],          # staff UUID used as key for delete
-                "display_name": s["name"],
-                "role": ",".join(roles_list),
-                "branch_id": effective_branch,
-                "phone": s.get("phone", ""),
-                "source": "staff",
-                "staff_id": s["id"],
-                "active": s.get("active", True),
-            })
-
-    return {"users": filtered + staff_members}
+    return {"users": filtered}
 
 
 @router.post("/api/team/invite")

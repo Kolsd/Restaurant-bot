@@ -268,24 +268,18 @@ async function loadBranchUsers(branchId) {
 
     el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:12px;">' +
       users.map(u => {
-        const isStaff    = u.source === 'staff';
         const displayName = u.display_name || u.username || '?';
-        const deleteId   = u.staff_id || u.username;
-        const avatarBg   = isStaff ? '#E1F5EE' : '#e0e0d8';
-        const avatarColor = isStaff ? '#0F6E56' : '#555';
-        const badge      = isStaff
-          ? '<span style="font-size:9px;background:#E1F5EE;color:#0F6E56;padding:1px 5px;border-radius:4px;font-weight:600;margin-left:4px;">STAFF</span>'
-          : '<span style="font-size:9px;background:#E6F1FB;color:#185FA5;padding:1px 5px;border-radius:4px;font-weight:600;margin-left:4px;">DASHBOARD</span>';
+        const roleLabel   = u.role === 'gerente' ? '👔 Gerente' : '🛡️ Administrador';
         return `
         <div style="display:flex;align-items:center;gap:12px;background:#f8f8f5;border-radius:8px;padding:8px 12px;width:100%;max-width:340px;justify-content:space-between;border:1px solid #f0f0e8;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:34px;height:34px;border-radius:50%;background:${avatarBg};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:${avatarColor};">${displayName[0].toUpperCase()}</div>
+            <div style="width:34px;height:34px;border-radius:50%;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#555;">${displayName[0].toUpperCase()}</div>
             <div>
-              <div style="font-size:13px;font-weight:600;color:#333;">${displayName}${badge}</div>
-              <div>${formatRoles(u.role)}</div>
+              <div style="font-size:13px;font-weight:600;color:#333;">${displayName}</div>
+              <div style="font-size:11px;color:#888;margin-top:2px;">${roleLabel}</div>
             </div>
           </div>
-          <button onclick="deleteUser('${deleteId}')" style="background:#FDE8E8;border:none;color:#C0392B;border-radius:6px;font-size:16px;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">×</button>
+          <button onclick="deleteUser('${u.username}')" style="background:#FDE8E8;border:none;color:#C0392B;border-radius:6px;font-size:16px;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">×</button>
         </div>`;
       }).join('') + '</div>';
   } catch(e) {}

@@ -2252,6 +2252,27 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
     return d
 
 
+async def db_get_staff_by_name_global(name: str) -> dict | None:
+    """Busca un miembro de staff activo por nombre (sin filtrar por restaurante).
+    Usado por el login unificado cuando el usuario no existe en la tabla users."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin "
+            "FROM staff WHERE LOWER(name)=LOWER($1) AND active=true "
+            "ORDER BY restaurant_id LIMIT 1",
+            name,
+        )
+    if not row:
+        return None
+    d = dict(row)
+    roles_list = d.get("roles") or []
+    if not roles_list and d.get("role"):
+        roles_list = [d["role"]]
+    d["roles"] = roles_list
+    return d
+
+
 async def db_create_staff(
     restaurant_id: int,
     name: str,
