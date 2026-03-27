@@ -14,7 +14,7 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 
@@ -51,6 +51,12 @@ class StaffUpdate(BaseModel):
     password: str | None       = Field(None, min_length=4, max_length=100)
     phone:    str | None       = Field(None, max_length=30)
     active:   bool | None      = None
+
+
+class StaffPinLoginRequest(BaseModel):
+    restaurant_id: int
+    name: str = Field(..., min_length=1, max_length=100)
+    pin:  str = Field(..., min_length=4, max_length=100)
 
 
 def _staff_redirect(roles: list) -> str:
