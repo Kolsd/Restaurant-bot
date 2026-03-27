@@ -1160,38 +1160,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── GESTIÓN DE STAFF OPERATIVO (ROSTER) ─────────────────────────────────
 
-async function loadStaff() {
-  const h = window._dashHeaders;
-  const container = document.getElementById('staff-component');
-  if (!container) return;
-
-  // 🛡️ 1. Cargamos el selector de sucursales para el formulario (evita errores)
-  if (typeof _loadStaffBranchesSelect === 'function') {
-    _loadStaffBranchesSelect();
-  }
-
-  // 🛡️ 2. Dibujamos el encabezado con el botón CORRECTO
-  container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h2 style="margin:0;font-size:18px;">Equipo y Administradores</h2>
-      <button onclick="openInviteModal()" style="background:#1D9E75;color:#fff;border:none;padding:10px 20px;border-radius:10px;font-weight:600;cursor:pointer;">
-        + Añadir Admin
-      </button>
-    </div>
-    <div id="staff-list-container"><div class="empty-state">Cargando equipo...</div></div>
-  `;
-
-  try {
-    const r = await fetch('/api/staff', { headers: h });
-    if (!r.ok) throw new Error('Error HTTP: ' + r.status);
-    const data = await r.json();
-    renderStaff(data.staff || []);
-  } catch(e) {
-    console.error('Error loadStaff:', e);
-    document.getElementById('staff-list-container').innerHTML = 
-      `<div class="empty-state">Error al cargar el equipo: ${e.message}</div>`;
-  }
-}
 
 async function _loadStaffBranchesSelect() {
   const select = document.getElementById('invite-branch-id');
@@ -1216,51 +1184,6 @@ async function _loadStaffBranchesSelect() {
   } catch (e) {
     console.error('Error _loadStaffBranchesSelect:', e);
   }
-}
-
-function renderStaff(staffList) {
-  const container = document.getElementById('staff-list-container');
-  if (!container) return;
-
-  if (staffList.length === 0) {
-    container.innerHTML = '<div class="empty-state">No hay miembros en el equipo todavía.</div>';
-    return;
-  }
-
-  let html = `
-    <div style="background:#fff;border:1px solid #e0e0d8;border-radius:12px;overflow:hidden;">
-      <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead>
-          <tr style="background:#fafaf7;border-bottom:1px solid #e0e0d8;text-align:left;">
-            <th style="padding:12px 15px;">Usuario</th>
-            <th style="padding:12px 15px;">Rol</th>
-            <th style="padding:12px 15px;">Sucursal</th>
-            <th style="padding:12px 15px;">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>`;
-
-  staffList.forEach(u => {
-    const roleLabel = u.role === 'owner' ? 'Dueño' : (u.role === 'admin' ? 'Admin' : u.role);
-    const branchName = u.branch_name || (u.role === 'owner' ? 'Todas (Matriz)' : 'No asignada');
-    
-    html += `
-      <tr style="border-bottom:1px solid #f0f0e8;">
-        <td style="padding:12px 15px;">
-          <div style="font-weight:600;">${u.username}</div>
-        </td>
-        <td style="padding:12px 15px;">
-          <span style="background:#f0f0e8;padding:2px 8px;border-radius:5px;font-size:11px;">${roleLabel}</span>
-        </td>
-        <td style="padding:12px 15px;color:#666;">${branchName}</td>
-        <td style="padding:12px 15px;">
-          ${u.role !== 'owner' ? `<button onclick="deleteUser('${u.username}')" style="color:#E24B4A;background:none;border:none;cursor:pointer;font-size:12px;">Eliminar</button>` : '—'}
-        </td>
-      </tr>`;
-  });
-
-  html += '</tbody></table></div>';
-  container.innerHTML = html;
 }
 
 function openCreateStaffModal() {
@@ -1342,18 +1265,6 @@ async function deleteStaff(id, name) {
   }
 }
 
-// Asegurarnos de que se cargue al iniciar si estamos en la pestaña
-// Puedes atar esto a tu función showSection del dashboard-core.js
-document.addEventListener('DOMContentLoaded', () => {
-  // Solo intentamos cargar si el contenedor existe
-  if(document.getElementById('staff-component')) {
-      loadStaff();
-  }
-});
-
-/**
- * 🛡️ FIX: Carga las sucursales disponibles en el selector del formulario de Staff
- */
 async function _loadStaffBranchesSelect() {
   const select = document.getElementById('invite-branch-id');
   if (!select) return;

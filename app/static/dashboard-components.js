@@ -211,8 +211,8 @@ function _apiHeaders() {
   const token = localStorage.getItem('rb_token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   
-  // 🛡️ Inyectar ID de sucursal si el owner seleccionó una en el dropdown
-  const branchSelect = document.getElementById('staff-branch-select');
+  // 🛡️ FIX: Usar el ID correcto del selector global
+  const branchSelect = document.getElementById('global-branch-select'); 
   if (branchSelect && branchSelect.value && branchSelect.value !== 'matriz') {
       headers['X-Branch-ID'] = branchSelect.value;
   }
@@ -1097,6 +1097,16 @@ const StaffSection = MesioComponent({
 
   render(state, el) {
     el.textContent = '';
+    
+    // 🛡️ CONTROL DE BOTONES EN LA CABECERA
+    const btnAdmin = document.getElementById('btn-staff-add-admin');
+    const select = document.getElementById('global-branch-select');
+    
+    if (btnAdmin && select) {
+        // Si hay una sucursal seleccionada (no es matriz), mostramos "+ Añadir Admin"
+        const isBranch = select.value !== 'matriz';
+        btnAdmin.style.display = isBranch ? 'block' : 'none';
+    }
 
     if (state.loading) {
       const msg = document.createElement('div');
