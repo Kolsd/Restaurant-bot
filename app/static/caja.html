@@ -396,10 +396,7 @@ const reqHeaders = { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token
 let _billsCache = {}; // id → bill object, used by Ajustar Factura modal
 let _adjBill = null;
 
-function doLogout() {
-  localStorage.clear();
-  window.location.href = '/login';
-}
+function doLogout() { doStaffLogout(); }
 
 // Reloj en tiempo real
 setInterval(() => {

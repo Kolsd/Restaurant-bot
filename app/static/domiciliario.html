@@ -181,10 +181,7 @@ const token = localStorage.getItem('rb_token');
 
         const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
-        function logout() {
-            localStorage.clear();
-            window.location.href = '/login';
-        }
+        function doLogout() { doStaffLogout(); }
         
         // --- 2. Lógica de Pestañas ---
         function switchTab(tabId, element) {

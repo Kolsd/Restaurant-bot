@@ -253,10 +253,7 @@ const fmt = (amount) => {
     }).format(Number(amount));
 };
 
-function doLogout() {
-  localStorage.clear();
-  window.location.href = '/login';
-}
+function doLogout() { doStaffLogout(); }
 
 function switchTab(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));

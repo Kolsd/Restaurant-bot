@@ -171,7 +171,6 @@ const ROLE_META = {
   otro:         { icon: '🔧', label: 'Panel',         url: '/mesero',       bg: '#F3F4F6', color: '#555555' },
 };
 
-// Read restaurant ID from URL ?r=123
 const urlParams    = new URLSearchParams(window.location.search);
 const restaurantId = urlParams.get('r');
 
@@ -229,7 +228,7 @@ async function doStaffLogin() {
   }
   
   try {
-    const res  = await fetch('/api/staff/pin-login', {
+    const res = await fetch('/api/staff/pin-login', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ 
@@ -246,10 +245,9 @@ async function doStaffLogin() {
       return;
     }
 
-    // 1. Guardar la sesión y token
     localStorage.setItem('rb_token', data.token);
-    
-    // 2. SANITIZAR LOS ROLES (El escudo anti-Postgres)
+
+    // Sanitizar roles
     let rolesArr = [];
     if (Array.isArray(data.roles)) {
       rolesArr = data.roles;
@@ -258,19 +256,28 @@ async function doStaffLogin() {
     } else {
       rolesArr = ['mesero'];
     }
-    
     localStorage.setItem('rb_role', rolesArr.join(','));
-    
-    // 3. Dejamos un registro básico del restaurante
-    localStorage.setItem('rb_restaurant', JSON.stringify({ id: parseInt(restaurantId) }));
 
-    // Redirección si se coló un admin
+    // ✅ FIX: guardar restaurant con role y branch_id para que la barra de roles funcione
+    localStorage.setItem('rb_restaurant', JSON.stringify({
+      id:             parseInt(restaurantId),
+      branch_id:      parseInt(restaurantId),
+      role:           rolesArr.join(','),
+      name:           data.restaurant?.name || '',
+      whatsapp_number: data.restaurant?.whatsapp_number || '',
+      locale:         data.restaurant?.locale || 'es-CO',
+      currency:       data.restaurant?.currency || 'COP',
+      features:       data.restaurant?.features || {},
+    }));
+
+    // ✅ FIX: guardar el restaurantId para usarlo en el logout
+    localStorage.setItem('rb_staff_restaurant_id', restaurantId);
+
     if (rolesArr.includes('owner') || rolesArr.includes('admin') || rolesArr.includes('gerente')) {
       window.location.href = '/dashboard';
       return;
     }
 
-    // Filtramos los roles válidos usando nuestro array limpio
     const opRoles = rolesArr.filter(r => ROLE_META[r]);
 
     if (opRoles.length === 0) {
@@ -283,11 +290,10 @@ async function doStaffLogin() {
       return;
     }
 
-    // Multi-rol
     showRoleSelector(data.name || name, opRoles);
 
   } catch (e) {
-    console.error("Error real de JS:", e); // Añadimos esto para ver el error real si vuelve a fallar
+    console.error("Error:", e);
     showError('Error de sistema al procesar el login. Revisa la consola.');
   } finally {
     btn.disabled    = false;
@@ -309,8 +315,8 @@ function showRoleSelector(name, roles) {
     const meta = ROLE_META[role];
     if (!meta) return;
     const tile = document.createElement('a');
-    tile.href       = meta.url;
-    tile.className  = 'role-tile';
+    tile.href      = meta.url;
+    tile.className = 'role-tile';
     tile.style.cssText = 'background:' + meta.bg + ';color:' + meta.color + ';';
 
     const icon = document.createElement('span');
@@ -326,6 +332,7 @@ function showRoleSelector(name, roles) {
     grid.appendChild(tile);
   });
 }
+
 </script>
 </body>
 </html>
