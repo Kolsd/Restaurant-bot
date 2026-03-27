@@ -1356,37 +1356,54 @@ window.openStaffAdminModal = function() {
   document.getElementById('btn-inv-cancel').onclick = () => overlay.remove();
   
   document.getElementById('btn-inv-submit').onclick = async () => {
-      const username = document.getElementById('inv-admin-username').value.trim();
-      const password = document.getElementById('inv-admin-password').value.trim();
-      const phone    = document.getElementById('inv-admin-phone').value.trim();
-      const errEl    = document.getElementById('inv-admin-error');
+    const username = document.getElementById('inv-admin-username').value.trim();
+    const password = document.getElementById('inv-admin-password').value.trim();
+    const phone    = document.getElementById('inv-admin-phone').value.trim();
+    const errEl    = document.getElementById('inv-admin-error');
 
-      if (!username || !password) { errEl.textContent = 'El usuario y la contraseña son obligatorios.'; return; }
+    if (!username || !password) { errEl.textContent = 'El usuario y la contraseña son obligatorios.'; return; }
 
-      const btn = document.getElementById('btn-inv-submit');
-      btn.disabled = true;
-      btn.textContent = 'Creando...';
+    const btn = document.getElementById('btn-inv-submit');
+    btn.disabled = true;
+    btn.textContent = 'Creando...';
 
-      try {
-          const h = window._dashHeaders || { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
-          const r = await fetch('/api/team/invite', {
-              method: 'POST',
-              headers: h,
-              body: JSON.stringify({ username, password, pin: '', phone, role: 'admin', branch_id: branchId }),
-          });
-          if (r.ok) {
-              overlay.remove();
-              alert('¡Admin creado exitosamente!');
-          } else {
-              const e = await r.json();
-              errEl.textContent = 'Error: ' + (e.detail || 'No se pudo crear');
-              btn.disabled = false;
-              btn.textContent = 'Crear administrador';
-          }
-      } catch(e) {
-          errEl.textContent = 'Error de conexión';
-          btn.disabled = false;
-          btn.textContent = 'Crear administrador';
-      }
+    try {
+        const h = window._dashHeaders || { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
+        
+        // 🛡️ Preparamos el payload sin enviar 'pin' si está vacío
+        const payload = { username, password, role: 'admin', branch_id: branchId };
+        if (phone) payload.phone = phone;
+
+        const r = await fetch('/api/team/invite', {
+            method: 'POST',
+            headers: h,
+            body: JSON.stringify(payload),
+        });
+        
+        if (r.ok) {
+            overlay.remove();
+            alert('¡Administrador creado exitosamente!');
+        } else {
+            const e = await r.json();
+            let errorMsg = 'No se pudo crear';
+            
+            // 🛡️ Traductor de errores de validación de FastAPI
+            if (e.detail) {
+                if (Array.isArray(e.detail)) {
+                    errorMsg = e.detail.map(err => `${err.loc[err.loc.length-1]}: ${err.msg}`).join(', ');
+                } else {
+                    errorMsg = e.detail;
+                }
+            }
+            
+            errEl.textContent = 'Error: ' + errorMsg;
+            btn.disabled = false;
+            btn.textContent = 'Crear administrador';
+        }
+    } catch(e) {
+        errEl.textContent = 'Error de conexión';
+        btn.disabled = false;
+        btn.textContent = 'Crear administrador';
+    }
   };
 };
