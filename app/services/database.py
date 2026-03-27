@@ -411,12 +411,25 @@ async def db_get_restaurant_by_id(restaurant_id: int):
         row = await conn.fetchrow("SELECT * FROM restaurants WHERE id=$1", restaurant_id)
         return _serialize(dict(row)) if row else None
 
-async def db_get_all_restaurants():
+async def db_get_all_restaurants(parent_id: int = None):
+    """
+    Si se pasa parent_id, solo devuelve las sucursales de ese padre.
+    Si no, devuelve todos los restaurantes principales.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM restaurants ORDER BY id ASC")
+        if parent_id:
+            # Solo devuelve hijos reales
+            rows = await conn.fetch(
+                "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name ASC", 
+                parent_id
+            )
+        else:
+            # Devuelve solo los que no tienen padre (Matrices)
+            rows = await conn.fetch(
+                "SELECT * FROM restaurants WHERE parent_restaurant_id IS NULL ORDER BY id ASC"
+            )
         return [_serialize(dict(r)) for r in rows]
-
 
 async def db_check_module(bot_number: str, module_name: str) -> bool:
     """
@@ -575,6 +588,25 @@ async def db_update_subscription(restaurant_id: int, new_status: str):
     async with pool.acquire() as conn:
         await conn.execute("UPDATE restaurants SET subscription_status=$2 WHERE id=$1", restaurant_id, new_status)
 
+async def db_delete_branch(branch_id: int, owner_restaurant_id: int) -> bool:
+    """
+    Borra una sucursal SOLO si es hija del restaurante que hace la petición.
+    Jamás permite borrar un restaurante que no tenga parent_restaurant_id.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # El WHERE asegura que:
+        # 1. El ID coincida.
+        # 2. El padre sea el restaurante del usuario actual (seguridad).
+        # 3. parent_restaurant_id NO sea NULL (protección contra borrar la matriz).
+        result = await conn.execute(
+            """DELETE FROM restaurants 
+               WHERE id = $1 
+               AND parent_restaurant_id = $2 
+               AND parent_restaurant_id IS NOT NULL""",
+            branch_id, owner_restaurant_id
+        )
+        return result != "DELETE 0"
 
 # ── MENU AVAILABILITY ────────────────────────────────────────────────
 async def db_get_menu_availability():
