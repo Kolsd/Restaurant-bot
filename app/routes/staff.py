@@ -102,35 +102,48 @@ class TipCutRequest(BaseModel):
 
 @router.get("", dependencies=_MODULE_DEPS)
 async def list_staff(
+    request: Request,
     restaurant: dict = Depends(get_current_restaurant),
 ):
-    """Return all staff members (active and inactive) for the restaurant."""
-    staff = await db.db_get_staff(restaurant["id"])
+    """Retorna el staff filtrado por la sucursal seleccionada en el selector global."""
+    # 🛡️ FILTRO GLOBAL: Si el Owner seleccionó una sucursal, usamos ese ID
+    branch_id = restaurant["id"]
+    branch_header = request.headers.get("X-Branch-ID")
+    
+    if branch_header and branch_header.isdigit():
+        # Como get_current_restaurant ya validó el acceso, 
+        # podemos confiar en el ID del header si el usuario es Owner/Admin
+        branch_id = int(branch_header)
+
+    staff = await db.db_get_staff(branch_id)
     return {"staff": staff}
 
 
 @router.post("", dependencies=_MODULE_DEPS, status_code=201)
 async def create_staff(
+    request: Request,
     body: StaffCreate,
     restaurant: dict = Depends(get_current_restaurant),
 ):
-    """Create a new staff member. Password is bcrypt-hashed before storage."""
+    """Crea un empleado en la sucursal que el Owner tenga seleccionada."""
+    branch_id = restaurant["id"]
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit():
+        branch_id = int(branch_header)
+
     pin_hash = _pwd_ctx.hash(body.password)
-    # If caller provides roles array, validate and use it; otherwise derive from role
     roles = [r.strip().lower() for r in body.roles if r.strip()] if body.roles else [body.role.strip().lower()]
-    if not roles:
-        roles = [body.role]
+    
     member = await db.db_create_staff(
-        restaurant_id=restaurant["id"],
+        restaurant_id=branch_id, # 🚀 Se guarda en la sucursal correcta
         name=body.name,
-        role=roles[0],
+        role=roles[0] if roles else "mesero",
         pin_hash=pin_hash,
         phone=body.phone,
-        roles=roles,
+        roles=roles or ["mesero"],
     )
     return {"staff": member}
-
-
+    
 @router.post("/pin-login", status_code=200)
 async def staff_pin_login(body: StaffPinLoginRequest):
     member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)

@@ -1165,21 +1165,31 @@ async function loadStaff() {
   const container = document.getElementById('staff-component');
   if (!container) return;
 
-  // 🛡️ 1. Cargamos el selector de sucursales para el formulario de "Invitar"
-  // Esto evita el error de "not defined"
+  // 🛡️ 1. Cargamos el selector de sucursales para el formulario (evita errores)
   if (typeof _loadStaffBranchesSelect === 'function') {
     _loadStaffBranchesSelect();
   }
+
+  // 🛡️ 2. Dibujamos el encabezado con el botón CORRECTO
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h2 style="margin:0;font-size:18px;">Equipo y Administradores</h2>
+      <button onclick="openInviteModal()" style="background:#1D9E75;color:#fff;border:none;padding:10px 20px;border-radius:10px;font-weight:600;cursor:pointer;">
+        + Añadir Admin
+      </button>
+    </div>
+    <div id="staff-list-container"><div class="empty-state">Cargando equipo...</div></div>
+  `;
 
   try {
     const r = await fetch('/api/staff', { headers: h });
     if (!r.ok) throw new Error('Error HTTP: ' + r.status);
     const data = await r.json();
-    const staffList = data.staff || [];
-    renderStaff(staffList);
+    renderStaff(data.staff || []);
   } catch(e) {
     console.error('Error loadStaff:', e);
-    container.innerHTML = `<div class="empty-state">Error al cargar el equipo: ${e.message}</div>`;
+    document.getElementById('staff-list-container').innerHTML = 
+      `<div class="empty-state">Error al cargar el equipo: ${e.message}</div>`;
   }
 }
 
@@ -1209,61 +1219,47 @@ async function _loadStaffBranchesSelect() {
 }
 
 function renderStaff(staffList) {
-  const container = document.getElementById('staff-component');
-  
-  // 1. Filtramos solo los activos
-  const activeStaff = staffList.filter(s => s.active !== false);
+  const container = document.getElementById('staff-list-container');
+  if (!container) return;
 
-  if (activeStaff.length === 0) {
-    container.innerHTML = '<div class="empty-state">No hay empleados operativos registrados.</div>';
+  if (staffList.length === 0) {
+    container.innerHTML = '<div class="empty-state">No hay miembros en el equipo todavía.</div>';
     return;
   }
 
-  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">';
-  
-  activeStaff.forEach(s => {
-    // 2. PROTECCIÓN MÁXIMA: Convertir roles a un Array real, venga como venga de Postgres
-    let rolesArray = [];
-    if (Array.isArray(s.roles)) {
-      rolesArray = s.roles;
-    } else if (typeof s.roles === 'string') {
-      // Si llega como string "{mesero,caja}", quitamos las llaves y separamos por coma
-      rolesArray = s.roles.replace(/[{}]/g, '').split(',');
-    } else if (s.role) {
-      rolesArray = [s.role];
-    } else {
-      rolesArray = ['mesero'];
-    }
+  let html = `
+    <div style="background:#fff;border:1px solid #e0e0d8;border-radius:12px;overflow:hidden;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:#fafaf7;border-bottom:1px solid #e0e0d8;text-align:left;">
+            <th style="padding:12px 15px;">Usuario</th>
+            <th style="padding:12px 15px;">Rol</th>
+            <th style="padding:12px 15px;">Sucursal</th>
+            <th style="padding:12px 15px;">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>`;
 
-    // 3. Construimos las etiquetas (badges) usando .map() en lugar de .forEach()
-    const badgesHtml = rolesArray.map(r => r.trim()).filter(Boolean).map(r => {
-       return `<span style="background:#EEEDFE; color:#534AB7; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:600; margin-right:4px; display:inline-block; margin-top:4px; text-transform:capitalize;">${r}</span>`;
-    }).join('');
-
-    const inicial = s.name ? s.name.charAt(0).toUpperCase() : '?';
+  staffList.forEach(u => {
+    const roleLabel = u.role === 'owner' ? 'Dueño' : (u.role === 'admin' ? 'Admin' : u.role);
+    const branchName = u.branch_name || (u.role === 'owner' ? 'Todas (Matriz)' : 'No asignada');
     
     html += `
-      <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.02);">
-        <button onclick="deleteStaff('${s.id}', '${s.name}')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;line-height:1;">&times;</button>
-        
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-          <div style="width:40px;height:40px;border-radius:50%;background:#f0f0e8;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#555;">
-            ${inicial}
-          </div>
-          <div>
-            <div style="font-size:15px;font-weight:600;color:#222;">${s.name}</div>
-            <div style="font-size:11px;color:#888;">PIN Configurado</div>
-          </div>
-        </div>
-        
-        <div style="min-height:30px;">
-          ${badgesHtml}
-        </div>
-      </div>
-    `;
+      <tr style="border-bottom:1px solid #f0f0e8;">
+        <td style="padding:12px 15px;">
+          <div style="font-weight:600;">${u.username}</div>
+        </td>
+        <td style="padding:12px 15px;">
+          <span style="background:#f0f0e8;padding:2px 8px;border-radius:5px;font-size:11px;">${roleLabel}</span>
+        </td>
+        <td style="padding:12px 15px;color:#666;">${branchName}</td>
+        <td style="padding:12px 15px;">
+          ${u.role !== 'owner' ? `<button onclick="deleteUser('${u.username}')" style="color:#E24B4A;background:none;border:none;cursor:pointer;font-size:12px;">Eliminar</button>` : '—'}
+        </td>
+      </tr>`;
   });
-  
-  html += '</div>';
+
+  html += '</tbody></table></div>';
   container.innerHTML = html;
 }
 

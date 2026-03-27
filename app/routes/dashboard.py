@@ -524,26 +524,35 @@ _STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "o
 async def list_team_users(request: Request, branch_id: int = None):
     user = await get_current_user(request)
     role = user.get("role", "owner")
-    all_users = await db.db_get_all_users()
+    
+    # 🛡️ PRIORIDAD DE FILTRO: 
+    # 1. Parámetro URL -> 2. Header X-Branch-ID -> 3. ID del usuario
+    if not branch_id:
+        branch_header = request.headers.get("X-Branch-ID")
+        if branch_header and branch_header.isdigit() and "owner" in role:
+            branch_id = int(branch_header)
+        else:
+            branch_id = user.get("branch_id")
 
-    if "owner" in role:
-        filtered = [u for u in all_users if u.get("branch_id") == branch_id] if branch_id else all_users
-        effective_branch = branch_id
-    elif "admin" in role and user.get("branch_id"):
-        filtered = [u for u in all_users if u.get("branch_id") == user["branch_id"]]
-        effective_branch = user["branch_id"]
-    else:
-        raise HTTPException(status_code=403, detail="No autorizado")
+    if not branch_id:
+        return {"users": []}
 
-    # Mis Sucursales: solo admins y gerentes de la tabla users (CERO staff operativo)
-    admin_roles = {"admin", "gerente", "owner"}
-    filtered = [u for u in filtered if any(r.strip() in admin_roles for r in (u.get("role") or "").split(","))]
-    for u in filtered:
-        u["source"] = "user"
-
-    return {"users": filtered}
-
-
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        # 🔍 Consulta SQL estricta con JOIN para traer el nombre de la sede
+        rows = await conn.fetch("""
+            SELECT u.username, u.role, u.branch_id, r.name as branch_name 
+            FROM users u
+            LEFT JOIN restaurants r ON u.branch_id = r.id
+            WHERE u.branch_id = $1
+            ORDER BY u.created_at DESC
+        """, branch_id)
+        
+        staff_list = [dict(r) for r in rows]
+        for u in staff_list: u["source"] = "user"
+        
+        return {"users": staff_list}
+                
 @router.post("/api/team/invite")
 async def team_invite(request: Request, body: TeamInviteRequest):
     from passlib.context import CryptContext as _CC
