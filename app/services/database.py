@@ -2203,12 +2203,53 @@ async def db_get_staff(restaurant_id: int) -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id::text, restaurant_id, name, role, active, phone, "
+            "SELECT id::text, restaurant_id, name, role, roles, active, phone, "
             "created_at, updated_at FROM staff "
             "WHERE restaurant_id=$1 ORDER BY name ASC",
             restaurant_id,
         )
     return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_team_staff_by_branch(restaurant_id: int) -> list:
+    """Return staff formatted for the Mi Equipo unified team view."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id::text, name, role, roles, phone, active "
+            "FROM staff WHERE restaurant_id=$1 ORDER BY name ASC",
+            restaurant_id,
+        )
+    result = []
+    for r in rows:
+        d = dict(r)
+        roles_list = d.get("roles") or []
+        if not roles_list and d.get("role"):
+            roles_list = [d["role"]]
+        d["roles"] = roles_list
+        d["source"] = "staff"
+        d["branch_id"] = restaurant_id
+        result.append(d)
+    return result
+
+
+async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | None:
+    """Return a staff member's record including pin hash for PIN authentication."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin "
+            "FROM staff WHERE restaurant_id=$1 AND LOWER(name)=LOWER($2) AND active=true",
+            restaurant_id, name,
+        )
+    if not row:
+        return None
+    d = dict(row)
+    roles_list = d.get("roles") or []
+    if not roles_list and d.get("role"):
+        roles_list = [d["role"]]
+    d["roles"] = roles_list
+    return d
 
 
 async def db_create_staff(
@@ -2217,31 +2258,38 @@ async def db_create_staff(
     role: str,
     pin_hash: str,
     phone: str = "",
+    roles: list = None,
 ) -> dict:
     """Insert a new staff member. Returns the created row."""
+    if roles is None:
+        roles = [role] if role else []
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO staff (restaurant_id, name, role, pin, phone)
-               VALUES ($1, $2, $3, $4, $5)
-               RETURNING id::text, restaurant_id, name, role, active, phone,
+            """INSERT INTO staff (restaurant_id, name, role, pin, phone, roles)
+               VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+               RETURNING id::text, restaurant_id, name, role, roles, active, phone,
                          created_at, updated_at""",
-            restaurant_id, name, role, pin_hash, phone,
+            restaurant_id, name, role, pin_hash, phone, json.dumps(roles),
         )
     return _serialize(dict(row))
 
 
 async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> dict | None:
     """
-    Update mutable staff fields (name, role, pin, phone, active).
+    Update mutable staff fields (name, role, roles, pin, phone, active).
     Ignores unknown keys. Returns updated row or None if not found.
     Only updates columns that are explicitly passed in fields.
     All values are passed as parameters — no f-string SQL.
     """
-    allowed = {"name", "role", "pin", "phone", "active"}
+    allowed = {"name", "role", "roles", "pin", "phone", "active"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return None
+
+    # Serialize roles list to JSON string for JSONB column
+    if "roles" in updates and isinstance(updates["roles"], list):
+        updates["roles"] = json.dumps(updates["roles"])
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -2249,13 +2297,14 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
         set_parts = []
         values = []
         for i, (col, val) in enumerate(updates.items(), start=3):
-            set_parts.append(f"{col}=${i}")
+            cast = "::jsonb" if col == "roles" else ""
+            set_parts.append(f"{col}=${i}{cast}")
             values.append(val)
 
         sql = (
             f"UPDATE staff SET {', '.join(set_parts)}, updated_at=NOW() "
             f"WHERE id=$1::uuid AND restaurant_id=$2 "
-            f"RETURNING id::text, restaurant_id, name, role, active, phone, "
+            f"RETURNING id::text, restaurant_id, name, role, roles, active, phone, "
             f"created_at, updated_at"
         )
         row = await conn.fetchrow(sql, staff_id, restaurant_id, *values)

@@ -11,6 +11,7 @@ Layer rules:
   - Raw SQL lives exclusively in database.py.
 """
 import json
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,6 +26,8 @@ router = APIRouter(prefix="/api/staff", tags=["staff"])
 # bcrypt context — 12 rounds is a good default for PIN hashing
 _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+_VALID_ROLES = {"mesero", "cocina", "bar", "caja", "gerente", "domiciliario", "otro"}
+
 # All endpoints share these two dependencies:
 #   • get_current_restaurant — resolves + returns the restaurant dict
 #   • require_module         — raises 403 if staff_tips is not enabled
@@ -36,6 +39,7 @@ _MODULE_DEPS = [Depends(require_module("staff_tips"))]
 class StaffCreate(BaseModel):
     name:  str              = Field(..., min_length=1, max_length=100)
     role:  str              = Field("mesero", pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
+    roles: list[str]        = Field(default_factory=list)
     pin:   str              = Field(..., min_length=4, max_length=8)
     phone: str              = Field("", max_length=30)
 
@@ -43,9 +47,28 @@ class StaffCreate(BaseModel):
 class StaffUpdate(BaseModel):
     name:   str | None      = Field(None, min_length=1, max_length=100)
     role:   str | None      = Field(None, pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
+    roles:  list[str] | None = None
     pin:    str | None      = Field(None, min_length=4, max_length=8)
     phone:  str | None      = Field(None, max_length=30)
     active: bool | None     = None
+
+
+class StaffPinLoginRequest(BaseModel):
+    restaurant_id: int
+    name: str = Field(..., min_length=1, max_length=100)
+    pin: str  = Field(..., min_length=4, max_length=8)
+
+
+def _staff_redirect(roles: list) -> str:
+    """Return the best landing page URL for the given role set."""
+    if "gerente" in roles:
+        return "/dashboard"
+    if "cocina" in roles:
+        return "/cocina"
+    if "domiciliario" in roles:
+        return "/domiciliario"
+    # mesero, caja, bar, otro → POS / dashboard
+    return "/dashboard"
 
 
 class ClockInRequest(BaseModel):
@@ -85,14 +108,48 @@ async def create_staff(
 ):
     """Create a new staff member. PIN is bcrypt-hashed before storage."""
     pin_hash = _pwd_ctx.hash(body.pin)
+    # If caller provides roles array, validate and use it; otherwise derive from role
+    roles = [r for r in body.roles if r in _VALID_ROLES] if body.roles else [body.role]
+    if not roles:
+        roles = [body.role]
     member = await db.db_create_staff(
         restaurant_id=restaurant["id"],
         name=body.name,
-        role=body.role,
+        role=roles[0],
         pin_hash=pin_hash,
         phone=body.phone,
+        roles=roles,
     )
     return {"staff": member}
+
+
+@router.post("/pin-login", status_code=200)
+async def staff_pin_login(body: StaffPinLoginRequest):
+    """
+    Authenticate a staff member by PIN.
+
+    No Bearer token required — this is the login endpoint for staff.
+    Returns a session token + redirect URL based on the employee's roles.
+    The token is valid for the same TTL as dashboard sessions (72 h).
+    """
+    member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)
+    if not member:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    if not _pwd_ctx.verify(body.pin, member["pin"]):
+        raise HTTPException(status_code=401, detail="PIN incorrecto.")
+
+    token = secrets.token_hex(32)
+    # Store session with a staff-prefixed username so require_auth works
+    # without colliding with dashboard user accounts.
+    await db.db_save_session(token, f"staff:{member['id']}")
+
+    roles = member.get("roles") or [member.get("role", "mesero")]
+    return {
+        "token": token,
+        "roles": roles,
+        "name": member["name"],
+        "redirect": _staff_redirect(roles),
+    }
 
 
 @router.put("/{staff_id}", dependencies=_MODULE_DEPS)
@@ -106,6 +163,11 @@ async def update_staff(
 
     if "pin" in patch:
         patch["pin"] = _pwd_ctx.hash(patch["pin"])
+
+    if "roles" in patch:
+        patch["roles"] = [r for r in patch["roles"] if r in _VALID_ROLES]
+        if patch["roles"] and "role" not in patch:
+            patch["role"] = patch["roles"][0]
 
     if not patch:
         raise HTTPException(status_code=422, detail="No fields to update.")

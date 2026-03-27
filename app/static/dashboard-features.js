@@ -166,7 +166,7 @@ async function deleteTable(tableId) {
 // ── MI EQUIPO ─────────────────────────────────────────────────────────
 let allBranches = [];
 let currentBranchId = null;
-let selectedRoles = new Set(['waiter']); // Set para guardar los multiroles
+let selectedRoles = new Set(['mesero']); // Set para guardar los multiroles
 
 async function loadBranches() {
   const h = window._dashHeaders;
@@ -202,7 +202,7 @@ function renderBranches(branches) {
           <div style="font-size:15px;font-weight:600;">${b.name}</div>
           <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${b.whatsapp_number||'N/A'}</span>${b.address||''}</div>
         </div>
-        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Agregar usuario</button>
+        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Agregar miembro</button>
       </div>
       <div id="users-branch-${b.id}" style="padding:.75rem 1.25rem;"><div style="font-size:11px;color:#aaa;">Cargando...</div></div>
     </div>`).join('');
@@ -225,18 +225,34 @@ function renderBranches(branches) {
   }
 }
 
-// Función de renderizado para multi-rol
+// Función de renderizado para multi-rol (soporta roles de users y staff)
 function formatRoles(roleStr) {
   if (!roleStr) return '';
-  const roleColors = { owner:'#1D9E75', admin:'#185FA5', cashier:'#BA7517', cook:'#854F0B', waiter:'#534AB7' };
-  const roleBg     = { owner:'#E1F5EE', admin:'#E6F1FB', cashier:'#FFF8E6', cook:'#FAEEDA', waiter:'#EEEDFE' };
-  const roleLabels = { owner:'Dueño', admin:'Admin', cashier:'Cajero', cook:'Cocinero', waiter:'Mesero' };
-  
-  return roleStr.split(',').map(r => {
-      const c = roleColors[r] || '#555';
-      const b = roleBg[r] || '#f0f0e8';
-      const l = roleLabels[r] || r;
-      return `<span style="background:${b}; color:${c}; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:600; margin-right:4px; display:inline-block; margin-top:4px;">${l}</span>`;
+  const roleColors = {
+    owner:'#1D9E75', admin:'#185FA5',
+    cashier:'#BA7517', cook:'#854F0B', waiter:'#534AB7',
+    // staff roles
+    mesero:'#534AB7', caja:'#BA7517', cocina:'#854F0B',
+    domiciliario:'#0F6E56', gerente:'#185FA5', bar:'#7B3FA0', otro:'#888',
+  };
+  const roleBg = {
+    owner:'#E1F5EE', admin:'#E6F1FB',
+    cashier:'#FFF8E6', cook:'#FAEEDA', waiter:'#EEEDFE',
+    mesero:'#EEEDFE', caja:'#FFF8E6', cocina:'#FAEEDA',
+    domiciliario:'#E1F5EE', gerente:'#E6F1FB', bar:'#F3E8FF', otro:'#f0f0e8',
+  };
+  const roleLabels = {
+    owner:'Dueño', admin:'Admin',
+    cashier:'Cajero', cook:'Cocinero', waiter:'Mesero',
+    mesero:'Mesero', caja:'Cajero', cocina:'Cocinero',
+    domiciliario:'Domiciliario', gerente:'Gerente', bar:'Bar', otro:'Otro',
+  };
+
+  return roleStr.split(',').map(r => r.trim()).filter(Boolean).map(r => {
+    const c = roleColors[r] || '#555';
+    const b = roleBg[r] || '#f0f0e8';
+    const l = roleLabels[r] || r;
+    return `<span style="background:${b}; color:${c}; padding:3px 8px; border-radius:6px; font-size:10px; font-weight:600; margin-right:4px; display:inline-block; margin-top:4px;">${l}</span>`;
   }).join('');
 }
 
@@ -248,20 +264,30 @@ async function loadBranchUsers(branchId) {
     const users = ((await r.json()).users || []).filter(u => u.branch_id == branchId);
     const el = document.getElementById('users-branch-' + branchId);
     if (!el) return;
-    if (!users.length) { el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0;">Sin usuarios asignados</div>'; return; }
-    
+    if (!users.length) { el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:4px 0;">Sin miembros asignados</div>'; return; }
+
     el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:12px;">' +
-      users.map(u => `
-        <div style="display:flex;align-items:center;gap:12px;background:#f8f8f5;border-radius:8px;padding:8px 12px; width:100%; max-width:320px; justify-content:space-between; border: 1px solid #f0f0e8;">
-          <div style="display:flex; align-items:center; gap:10px;">
-              <div style="width:34px;height:34px;border-radius:50%;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#555;">${(u.username||'?')[0].toUpperCase()}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:#333;">${u.username}</div>
-                <div>${formatRoles(u.role)}</div>
-              </div>
+      users.map(u => {
+        const isStaff    = u.source === 'staff';
+        const displayName = u.display_name || u.username || '?';
+        const deleteId   = u.staff_id || u.username;
+        const avatarBg   = isStaff ? '#E1F5EE' : '#e0e0d8';
+        const avatarColor = isStaff ? '#0F6E56' : '#555';
+        const badge      = isStaff
+          ? '<span style="font-size:9px;background:#E1F5EE;color:#0F6E56;padding:1px 5px;border-radius:4px;font-weight:600;margin-left:4px;">STAFF</span>'
+          : '<span style="font-size:9px;background:#E6F1FB;color:#185FA5;padding:1px 5px;border-radius:4px;font-weight:600;margin-left:4px;">DASHBOARD</span>';
+        return `
+        <div style="display:flex;align-items:center;gap:12px;background:#f8f8f5;border-radius:8px;padding:8px 12px;width:100%;max-width:340px;justify-content:space-between;border:1px solid #f0f0e8;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="width:34px;height:34px;border-radius:50%;background:${avatarBg};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:${avatarColor};">${displayName[0].toUpperCase()}</div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#333;">${displayName}${badge}</div>
+              <div>${formatRoles(u.role)}</div>
+            </div>
           </div>
-          <button onclick="deleteUser('${u.username}')" style="background:#FDE8E8; border:none; color:#C0392B; border-radius:6px; font-size:16px; cursor:pointer; width:28px; height:28px; display:flex; align-items:center; justify-content:center;">×</button>
-        </div>`).join('') + '</div>';
+          <button onclick="deleteUser('${deleteId}')" style="background:#FDE8E8;border:none;color:#C0392B;border-radius:6px;font-size:16px;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">×</button>
+        </div>`;
+      }).join('') + '</div>';
   } catch(e) {}
 }
 
@@ -338,33 +364,43 @@ async function createBranch() {
   } catch(e) {}
 }
 
-// ── LÓGICA MULTIROL MEJORADA ──
+// ── LÓGICA MULTIROL ──
 function toggleRole(role, el) {
-  if (role === 'admin') {
-    // Si elige Admin, se limpia el resto y solo queda Admin
+  const isAdminRole = role === 'admin';
+  const pwdField = document.getElementById('invite-password');
+  const pinField = document.getElementById('invite-pin');
+
+  if (isAdminRole) {
+    // Admin exclusivo: limpia todos y selecciona solo admin
     selectedRoles = new Set(['admin']);
     document.querySelectorAll('#modal-invite .role-card').forEach(c => c.classList.remove('active'));
     el.classList.add('active');
+    // Admin requiere contraseña, no PIN
+    if (pwdField) pwdField.style.display = '';
+    if (pinField) pinField.style.display = 'none';
   } else {
-    // Si elige cualquier otro, y Admin estaba seleccionado, se desmarca Admin
+    // Si admin estaba activo, se desmarca al elegir rol operativo
     if (selectedRoles.has('admin')) {
       selectedRoles.delete('admin');
       const adminCard = document.querySelector('#modal-invite .role-card[data-role="admin"]');
       if (adminCard) adminCard.classList.remove('active');
     }
-    
-    // Toggle normal para los roles operativos
+
+    // Toggle para roles operativos (multi-rol)
     if (selectedRoles.has(role)) {
-      if (selectedRoles.size === 1) return; // Evita dejar al usuario sin roles
+      if (selectedRoles.size === 1) return; // Al menos un rol siempre
       selectedRoles.delete(role);
       el.classList.remove('active');
     } else {
       selectedRoles.add(role);
       el.classList.add('active');
     }
+
+    // Roles operativos usan PIN
+    if (pwdField) pwdField.style.display = 'none';
+    if (pinField) pinField.style.display = '';
   }
-  
-  // Guardamos en el input oculto para enviarlo a la API
+
   document.getElementById('invite-role').value = Array.from(selectedRoles).join(',');
 }
 
@@ -373,15 +409,24 @@ function openInviteModal(branchId, branchName) {
   document.getElementById('modal-branch-name').textContent = branchName;
   document.getElementById('invite-username').value = '';
   document.getElementById('invite-password').value = '';
-  
+  const pinField   = document.getElementById('invite-pin');
+  const phoneField = document.getElementById('invite-phone');
+  if (pinField)   pinField.value   = '';
+  if (phoneField) phoneField.value = '';
+
   // Reiniciar a "Mesero" por defecto al abrir el modal
-  selectedRoles = new Set(['waiter']);
-  document.getElementById('invite-role').value = 'waiter';
-  
+  selectedRoles = new Set(['mesero']);
+  document.getElementById('invite-role').value = 'mesero';
+
   document.querySelectorAll('#modal-invite .role-card').forEach(c => {
-    if (c.getAttribute('data-role') === 'waiter') c.classList.add('active');
+    if (c.getAttribute('data-role') === 'mesero') c.classList.add('active');
     else c.classList.remove('active');
   });
+
+  // Roles operativos usan PIN, admin usa contraseña
+  const pwdField = document.getElementById('invite-password');
+  if (pwdField) pwdField.style.display = 'none';
+  if (pinField) pinField.style.display = '';
 
   document.getElementById('modal-invite').style.display = 'flex';
 }
@@ -392,19 +437,25 @@ function closeInviteModal() {
 }
 
 async function sendInvite() {
-  const h = window._dashHeaders;
+  const h        = window._dashHeaders;
   const username = document.getElementById('invite-username').value.trim();
+  const role     = document.getElementById('invite-role').value;
+  const isAdmin  = role === 'admin';
   const password = document.getElementById('invite-password').value.trim();
-  const role     = document.getElementById('invite-role').value; // Ej: "waiter,cashier"
-  
-  if (!username || !password) { alert('Usuario y contraseña son obligatorios'); return; }
+  const pin      = (document.getElementById('invite-pin') || {}).value?.trim() || '';
+  const phone    = (document.getElementById('invite-phone') || {}).value?.trim() || '';
+
+  if (!username) { alert('El nombre es obligatorio'); return; }
+  if (isAdmin && !password) { alert('La contraseña es obligatoria para administrador'); return; }
+  if (!isAdmin && pin.length < 4) { alert('El PIN debe tener al menos 4 dígitos'); return; }
+
   try {
     const r = await fetch('/api/team/invite', {
-      method:'POST', headers:{ ...h,'Content-Type':'application/json' },
-      body: JSON.stringify({ username, password, role, branch_id: currentBranchId })
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, pin, phone, role, branch_id: currentBranchId }),
     });
-    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Usuario creado exitosamente!'); }
-    else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo crear')); }
+    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Miembro creado exitosamente!'); }
+    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo crear')); }
   } catch(e) {}
 }
 
@@ -417,12 +468,12 @@ async function deleteBranch(id, name) {
   } catch(e) {}
 }
 
-async function deleteUser(username) {
-  if (!confirm('Eliminar usuario "' + username + '"?')) return;
+async function deleteUser(userId) {
+  if (!confirm('Eliminar miembro "' + userId + '"?')) return;
   try {
-    const r = await fetch('/api/team/users/' + encodeURIComponent(username), { method:'DELETE', headers: window._dashHeaders });
+    const r = await fetch('/api/team/users/' + encodeURIComponent(userId), { method:'DELETE', headers: window._dashHeaders });
     if (r.ok) loadBranches();
-    else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo eliminar')); }
+    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo eliminar')); }
   } catch(e) {}
 }
 
