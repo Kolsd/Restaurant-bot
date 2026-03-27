@@ -193,9 +193,10 @@ async def get_delivery_orders(request: Request):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT * FROM orders 
-               WHERE order_type IN ('domicilio','recoger') 
-               AND created_at >= NOW() - INTERVAL '24 hours' 
+            """SELECT * FROM orders
+               WHERE order_type IN ('domicilio','recoger')
+               AND created_at >= NOW() - INTERVAL '24 hours'
+               AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
                ORDER BY created_at DESC"""
         )
 

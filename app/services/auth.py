@@ -57,6 +57,7 @@ async def login(username: str, password: str) -> dict:
     return {
         "success": True,
         "token": token,
+        "role": role,
         "restaurant": {
             "name": user["restaurant_name"],
             "username": username,
