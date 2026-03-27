@@ -3,53 +3,40 @@
    app/static/dashboard-core.js
 ═══════════════════════════════════════════════════ */
 
-// 1. Carga de credenciales e identidad
 const token = localStorage.getItem('rb_token');
-const restaurantData = localStorage.getItem('rb_restaurant');
+const restaurantStr = localStorage.getItem('rb_restaurant');
 
-// Si no hay token, fuera de aquí inmediatamente
+// 1. Verificación de Token
 if (!token) {
     window.location.href = '/login';
 }
 
-const restaurant = JSON.parse(restaurantData || '{}');
+const restaurant = JSON.parse(restaurantStr || '{}');
+const path = window.location.pathname.toLowerCase();
 
-// 🛡️ 2. GUARDIÁN DE SEGURIDAD ULTRA-ESTRICTO
-(function securityGuard() {
-    const path = window.location.pathname.toLowerCase();
-    
-    // IMPORTANTE: NO usamos default 'owner'. Si no hay rol, no hay acceso.
-    const rawRole = (restaurant.role || '').toLowerCase();
-    const roles = rawRole.split(',').map(r => r.trim()).filter(Boolean);
+// 🛡️ 2. GUARDIÁN DE SEGURIDAD (EJECUCIÓN INMEDIATA)
+const rawRole = (restaurant.role || '').toLowerCase();
+const roles = rawRole.split(',').map(r => r.trim()).filter(Boolean);
+const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
 
-    const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
-    
-    // Si la base de datos o el storage están vacíos, por seguridad tratamos como NO admin
-    console.log("🔐 Verificando acceso para roles:", roles, "en ruta:", path);
+console.log("🔐 Seguridad Mesio - Roles detectados:", roles);
 
-    // REGLA 1: Solo Admins/Owners entran al Dashboard y Ajustes
-    if (path.includes('/dashboard') || path.includes('/settings')) {
-        if (!isAdmin) {
-            console.error("🚫 Acceso administrativo denegado.");
-            // Si tiene algún rol operativo, lo mandamos a su sitio
-            if (roles.includes('mesero')) window.location.href = '/mesero';
-            else if (roles.includes('cocina')) window.location.href = '/cocina';
-            else if (roles.includes('caja')) window.location.href = '/caja';
-            else window.location.href = '/staff'; // Fallback total
-            return;
-        }
+// REGLA DE ORO: Si no eres admin y estás en zona administrativa, ¡FUERA!
+if (path.includes('/dashboard') || path.includes('/settings')) {
+    if (!isAdmin) {
+        alert("Acceso Restringido: No tienes permisos administrativos.");
+        if (roles.includes('mesero')) window.location.href = '/mesero';
+        else if (roles.includes('cocina')) window.location.href = '/cocina';
+        else if (roles.includes('bar')) window.location.href = '/bar';
+        else if (roles.includes('caja')) window.location.href = '/caja';
+        else window.location.href = '/staff';
     }
+}
 
-    // REGLA 2: Si el Admin intenta entrar a una vista operativa, lo dejamos (opcional)
-    // Pero si un Cocinero intenta entrar a /caja, lo bloqueamos
-    if (path.includes('/caja') && !roles.includes('caja') && !isAdmin) {
-        window.location.href = '/staff';
-    }
-})();
-
+// 3. Configuración de entorno
 const headers = { 'Authorization': 'Bearer ' + token };
-const _locale = restaurant.locale || 'en-US';
-const _currency = restaurant.currency || 'USD';
+const _locale = restaurant.locale || 'es-CO';
+const _currency = restaurant.currency || 'COP';
 
 const fmt = (amount) => {
     return new Intl.NumberFormat(_locale, {
