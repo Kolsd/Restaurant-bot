@@ -1096,39 +1096,32 @@ const StaffSection = MesioComponent({
   },
 
   render(state, el) {
-    el.textContent = '';
+    el.textContent = ''; // Limpiamos el contenedor
 
-    // 🛡️ 1. CREAMOS LA CABECERA DINÁMICA (Para que no aparezca doble)
-    const header = document.createElement('div');
-    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;';
-    
-    const info = document.createElement('div');
-    info.innerHTML = `<h2 style="margin:0;font-size:18px;">Staff & Propinas</h2><div style="font-size:12px;color:#888;">Gestiona tu equipo y accesos al dashboard.</div>`;
-    
+    // 🛡️ 1. CONTENEDOR DE ACCIONES (Solo los botones necesarios)
     const actions = document.createElement('div');
-    actions.style.cssText = 'display:flex;gap:8px;align-items:center;';
+    actions.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:20px;';
 
-    // 🛡️ 2. BOTÓN DE ADMIN (Siempre visible para el Owner)
-    const btnAdmin = _makeBtn('+ Añadir Admin', 'btn-sm btn-outline', () => openStaffAdminModal());
-    btnAdmin.style.cssText += 'background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;font-weight:600;';
+    // 🛡️ 2. ÚNICO BOTÓN: AÑADIR ADMIN
+    // Este botón abre el modal que permite elegir entre sucursal o matriz
+    const btnAdmin = _makeBtn('+ Añadir Admin', 'btn-sm btn-outline', () => {
+        if (typeof window.openStaffAdminModal === 'function') {
+            window.openStaffAdminModal();
+        }
+    });
+    btnAdmin.style.cssText += 'background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;font-weight:600;padding:10px 20px;border-radius:10px;';
     
-    // 🛡️ 3. BOTÓN DE EMPLEADO OPERATIVO (El que sí funciona)
-    const btnStaff = _makeBtn('+ Nuevo Empleado', 'btn-sm btn-primary', () => _openStaffModal(StaffSection));
-
     actions.appendChild(btnAdmin);
-    actions.appendChild(btnStaff);
-    header.appendChild(info);
-    header.appendChild(actions);
-    el.appendChild(header);
+    el.appendChild(actions);
 
     if (state.loading) {
       const msg = document.createElement('div');
       msg.className = 'empty-state';
-      msg.textContent = 'Cargando equipo...';
+      msg.textContent = 'Cargando lista de equipo...';
       el.appendChild(msg);
       return;
     }
-    
+      
     if (state.error) {
       const msg = document.createElement('div');
       msg.className   = 'empty-state';
