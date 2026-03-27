@@ -993,24 +993,44 @@ async function createUser() {
     return; 
   }
   
-  const r = await fetch('/api/admin/create-user',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-        admin_key: ADMIN_KEY,
-        restaurant_id: parseInt(restId), 
-        username: email,
-        password: pass
-    })
-  });
-  
-  if(r.ok){ 
-    showFeedback('user-feedback','✅ Usuario creado', true); 
-    $('u_email').value=''; $('u_pass').value=''; 
-    loadUsers(); 
-  } else { 
-    const e = await r.json().catch(()=>({detail:'Error'})); 
-    showFeedback('user-feedback','❌ '+(e.detail||'Error'), false); 
+  const payload = {
+    admin_key: ADMIN_KEY,
+    restaurant_id: parseInt(restId), 
+    username: email,
+    password: pass
+  };
+
+  try {
+    const r = await fetch('/api/admin/create-user',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    
+    const data = await r.json();
+
+    if(r.ok){ 
+      showFeedback('user-feedback','✅ Usuario creado', true); 
+      $('u_email').value=''; $('u_pass').value=''; 
+      loadUsers(); 
+    } else { 
+      // 🛡️ Lógica mejorada para evitar el [object Object]
+      let errorMsg = 'Error del servidor';
+      
+      if (data.detail) {
+        if (Array.isArray(data.detail)) {
+          // Es un error de validación 422 (Pydantic)
+          errorMsg = data.detail.map(e => `${e.loc[1]}: ${e.msg}`).join(', ');
+        } else {
+          // Es un error común (HTTPException)
+          errorMsg = data.detail;
+        }
+      }
+      
+      showFeedback('user-feedback','❌ ' + errorMsg, false); 
+    }
+  } catch(e) {
+    showFeedback('user-feedback','❌ Error de conexión', false);
   }
 }
 
