@@ -31,14 +31,14 @@ _VALID_ROLES = {"mesero", "cocina", "bar", "caja", "gerente", "domiciliario", "o
 # All endpoints share these two dependencies:
 #   • get_current_restaurant — resolves + returns the restaurant dict
 #   • require_module         — raises 403 if staff_tips is not enabled
-_MODULE_DEPS = [Depends(require_module("staff_tips"))]
 
+_MODULE_DEPS = [Depends(require_module("staff_tips"))]
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
 class StaffCreate(BaseModel):
     name:     str       = Field(..., min_length=1, max_length=100)
-    role:     str       = Field("mesero", pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
+    role:     str       = Field("mesero", min_length=1, max_length=50) # 🔓 Quitamos el pattern restrictivo
     roles:    list[str] = Field(default_factory=list)
     password: str       = Field(..., min_length=4, max_length=100)
     phone:    str       = Field("", max_length=30)
@@ -46,12 +46,11 @@ class StaffCreate(BaseModel):
 
 class StaffUpdate(BaseModel):
     name:     str | None       = Field(None, min_length=1, max_length=100)
-    role:     str | None       = Field(None, pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
+    role:     str | None       = Field(None, min_length=1, max_length=50) # 🔓 Quitamos el pattern restrictivo
     roles:    list[str] | None = None
     password: str | None       = Field(None, min_length=4, max_length=100)
     phone:    str | None       = Field(None, max_length=30)
     active:   bool | None      = None
-
 
 class StaffPinLoginRequest(BaseModel):
     restaurant_id: int
@@ -118,7 +117,7 @@ async def create_staff(
     """Create a new staff member. Password is bcrypt-hashed before storage."""
     pin_hash = _pwd_ctx.hash(body.password)
     # If caller provides roles array, validate and use it; otherwise derive from role
-    roles = [r for r in body.roles if r in _VALID_ROLES] if body.roles else [body.role]
+    roles = [r.strip().lower() for r in body.roles if r.strip()] if body.roles else [body.role.strip().lower()]
     if not roles:
         roles = [body.role]
     member = await db.db_create_staff(
@@ -180,7 +179,7 @@ async def update_staff(
         patch["pin"] = _pwd_ctx.hash(patch.pop("password"))
 
     if "roles" in patch:
-        patch["roles"] = [r for r in patch["roles"] if r in _VALID_ROLES]
+        patch["roles"] = [r.strip().lower() for r in patch["roles"] if r.strip()]
         if patch["roles"] and "role" not in patch:
             patch["role"] = patch["roles"][0]
 

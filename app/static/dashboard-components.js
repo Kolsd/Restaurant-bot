@@ -172,6 +172,8 @@ const _ROLE_LABELS = {
   bar:          'Bar',
   caja:         'Caja',
   domiciliario: 'Domiciliario',
+  admin:        'Administrador',
+  owner:        'Dueño'
 };
 
 const _ROLE_META = {
@@ -180,7 +182,30 @@ const _ROLE_META = {
   bar:          { icon: '🍹', bg: '#F0E6FF', color: '#6B21A8' },
   caja:         { icon: '💰', bg: '#FFF8E6', color: '#BA7517' },
   domiciliario: { icon: '🛵', bg: '#E3F2FD', color: '#1565C0' },
+  admin:        { icon: '🛡️', bg: '#E6F1FB', color: '#185FA5' },
+  owner:        { icon: '👑', bg: '#E1F5EE', color: '#1D9E75' }
 };
+
+function getDynamicRoleMeta(roleKey) {
+  if (_ROLE_META[roleKey]) return _ROLE_META[roleKey];
+  // Genera un color consistente basado en el string
+  const colors = [
+    { bg: '#F3E8FF', color: '#7C3AED' }, // Morado
+    { bg: '#FCE8F3', color: '#BE185D' }, // Rosa
+    { bg: '#E0F2FE', color: '#1D4ED8' }, // Azul
+    { bg: '#FEF3C7', color: '#B45309' }, // Ambar
+    { bg: '#F3F4F6', color: '#4B5563' }  // Gris
+  ];
+  let hash = 0;
+  for(let i = 0; i < roleKey.length; i++) hash = roleKey.charCodeAt(i) + ((hash << 5) - hash);
+  return { icon: '🏷️', ...colors[Math.abs(hash) % colors.length] };
+}
+
+function getDynamicRoleLabel(roleKey) {
+  if (_ROLE_LABELS[roleKey]) return _ROLE_LABELS[roleKey];
+  // Capitaliza la primera letra del rol inventado
+  return roleKey.charAt(0).toUpperCase() + roleKey.slice(1);
+}
 
 function _apiHeaders() {
   const token = localStorage.getItem('rb_token') || '';
@@ -246,7 +271,8 @@ function _initials(name) {
 function _avatarEl(member) {
   const roles   = (member.roles && member.roles.length) ? member.roles : [member.role];
   const primary = roles[0] || 'otro';
-  const meta    = _ROLE_META[primary] || _ROLE_META.otro;
+  // ✅ Usamos el generador dinámico de colores
+  const meta    = getDynamicRoleMeta(primary);
   const el      = document.createElement('div');
   el.textContent = _initials(member.name);
   el.style.cssText = `width:46px;height:46px;border-radius:12px;background:${meta.bg};
@@ -269,13 +295,11 @@ function _openStaffModal(self, existing = null) {
   const box = document.createElement('div');
   box.style.cssText = 'background:#fff;border-radius:20px;padding:2rem;width:520px;max-width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.2);';
 
-  // Title
   const title = document.createElement('div');
   title.textContent = isEdit ? 'Editar empleado' : 'Nuevo empleado operativo';
   title.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:1.5rem;color:#111;';
   box.appendChild(title);
 
-  // ── Name field
   const nameLabel = document.createElement('div');
   nameLabel.textContent = 'Nombre completo';
   nameLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
@@ -285,7 +309,6 @@ function _openStaffModal(self, existing = null) {
   nameIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
   box.appendChild(nameIn);
 
-  // ── Phone field
   const phoneLabel = document.createElement('div');
   phoneLabel.textContent = 'Teléfono (opcional)';
   phoneLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
@@ -295,97 +318,111 @@ function _openStaffModal(self, existing = null) {
   phoneIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
   box.appendChild(phoneIn);
 
-  // ── Role selector
   const roleLabel = document.createElement('div');
-  roleLabel.textContent = 'Roles — selecciona uno o varios:';
+  roleLabel.textContent = 'Roles del empleado';
   roleLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;';
   box.appendChild(roleLabel);
 
-  const OPERATIVE_ROLES = [
-    ['mesero',       '🍽️', 'Mesero'],
-    ['caja',         '💰', 'Cajero'],
-    ['cocina',       '👨‍🍳', 'Cocina'],
-    ['domiciliario', '🛵', 'Domiciliario'],
-    ['bar',          '🍹', 'Bar'],
-  ];
-
-  let existingRoles = ['mesero'];
-  if (existing) {
-    if (Array.isArray(existing.roles)) {
-      existingRoles = existing.roles;
-    } else if (typeof existing.roles === 'string') {
-      existingRoles = existing.roles.replace(/[{}]/g, '').split(',').map(r => r.trim());
-    } else if (existing.role) {
-      existingRoles = [existing.role];
-    }
-  }
-  const selectedRoles = new Set(existingRoles);
+  // ✅ INPUT DINÁMICO PARA ROLES
+  const roleInputWrap = document.createElement('div');
+  roleInputWrap.style.cssText = 'display:flex;gap:8px;margin-bottom:12px;';
   
+  const customRoleIn = _makeInput('Escribe un rol (ej: Hostess) y presiona Enter...');
+  customRoleIn.style.cssText += 'flex:1;font-size:13px;padding:8px 12px;';
+  
+  const addRoleBtn = _makeBtn('Añadir', 'btn-sm btn-outline', () => addRoleChip(customRoleIn.value));
+  addRoleBtn.style.padding = '0 12px';
+  
+  roleInputWrap.appendChild(customRoleIn);
+  roleInputWrap.appendChild(addRoleBtn);
+  box.appendChild(roleInputWrap);
+
   const rolesGrid = document.createElement('div');
-  rolesGrid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:1rem;';
-
-  OPERATIVE_ROLES.forEach(([role, icon, lbl]) => {
-    const meta   = _ROLE_META[role] || _ROLE_META.otro;
-    const active = selectedRoles.has(role);
-    const card   = document.createElement('div');
-    card.style.cssText = `border:2px solid ${active ? meta.color : '#e0e0d8'};
-      background:${active ? meta.bg : '#fafafa'};border-radius:11px;padding:10px 6px;
-      text-align:center;cursor:pointer;transition:all .15s;user-select:none;`;
-
-    const iconEl  = document.createElement('div');
-    iconEl.textContent = icon;
-    iconEl.style.cssText = 'font-size:20px;margin-bottom:4px;';
-
-    const labelEl = document.createElement('div');
-    labelEl.textContent = lbl;
-    labelEl.style.cssText = `font-size:11px;font-weight:700;color:${active ? meta.color : '#999'};`;
-
-    card.appendChild(iconEl);
-    card.appendChild(labelEl);
-
-    card.addEventListener('click', () => {
-      if (selectedRoles.has(role)) {
-        if (selectedRoles.size === 1) return; // keep at least one
-        selectedRoles.delete(role);
-        card.style.borderColor  = '#e0e0d8';
-        card.style.background   = '#fafafa';
-        labelEl.style.color     = '#999';
-      } else {
-        selectedRoles.add(role);
-        card.style.borderColor  = meta.color;
-        card.style.background   = meta.bg;
-        labelEl.style.color     = meta.color;
-      }
-    });
-
-    rolesGrid.appendChild(card);
-  });
+  rolesGrid.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:1rem;';
   box.appendChild(rolesGrid);
 
-  // ── Password / PIN
+  // Inicializar roles existentes o sugerir básicos
+  let currentRoles = new Set();
+  if (existing) {
+    let rArr = [];
+    if (Array.isArray(existing.roles)) rArr = existing.roles;
+    else if (typeof existing.roles === 'string') rArr = existing.roles.replace(/[{}]/g, '').split(',');
+    else if (existing.role) rArr = [existing.role];
+    rArr.forEach(r => { if(r.trim()) currentRoles.add(r.trim().toLowerCase()); });
+  }
+  if(currentRoles.size === 0) currentRoles.add('mesero');
+
+  // Rellenar visualmente los chips
+  function renderRoleChips() {
+    rolesGrid.innerHTML = '';
+    currentRoles.forEach(roleKey => {
+      const meta = getDynamicRoleMeta(roleKey);
+      const label = getDynamicRoleLabel(roleKey);
+      
+      const chip = document.createElement('div');
+      chip.style.cssText = `background:${meta.bg};color:${meta.color};border:1px solid ${meta.color};
+        padding:4px 10px;border-radius:16px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer;`;
+      chip.innerHTML = `<span>${meta.icon} ${label}</span><span style="font-size:14px;line-height:1;">×</span>`;
+      
+      chip.addEventListener('click', () => {
+        if(currentRoles.size > 1) {
+            currentRoles.delete(roleKey);
+            renderRoleChips();
+        } else {
+            alert('El empleado debe tener al menos un rol.');
+        }
+      });
+      rolesGrid.appendChild(chip);
+    });
+  }
+
+  function addRoleChip(rawVal) {
+    const val = rawVal.trim().toLowerCase();
+    if(val && val !== 'admin' && val !== 'owner') {
+        currentRoles.add(val);
+        customRoleIn.value = '';
+        renderRoleChips();
+    } else if(val === 'admin' || val === 'owner') {
+        alert('Los roles administrativos se gestionan desde "Mis Sucursales".');
+        customRoleIn.value = '';
+    }
+  }
+
+  customRoleIn.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter') { e.preventDefault(); addRoleChip(customRoleIn.value); }
+  });
+
+  // Sugerencias rápidas
+  const suggestions = document.createElement('div');
+  suggestions.style.cssText = 'font-size:11px;color:#888;margin-bottom:1.5rem;display:flex;gap:8px;flex-wrap:wrap;align-items:center;';
+  suggestions.innerHTML = '<span>Sugerencias:</span>';
+  ['mesero', 'cocina', 'bar', 'caja'].forEach(sug => {
+      const s = document.createElement('span');
+      s.textContent = '+ ' + getDynamicRoleLabel(sug);
+      s.style.cssText = 'cursor:pointer;color:#185FA5;text-decoration:underline;';
+      s.onclick = () => addRoleChip(sug);
+      suggestions.appendChild(s);
+  });
+  box.appendChild(suggestions);
+  
+  renderRoleChips();
+
   const pinLabel = document.createElement('div');
-  pinLabel.textContent = isEdit
-    ? 'Nueva contraseña (dejar vacío para no cambiar)'
-    : 'Contraseña (mínimo 4 caracteres)';
+  pinLabel.textContent = isEdit ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña / PIN (mínimo 4 caracteres)';
   pinLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
   box.appendChild(pinLabel);
   const pinIn = _makeInput(isEdit ? '(sin cambio)' : 'Mínimo 4 caracteres', 'password');
   pinIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
   box.appendChild(pinIn);
 
-  // ── Error
   const errMsg = document.createElement('div');
   errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-bottom:10px;min-height:16px;';
   box.appendChild(errMsg);
 
-  // ── Buttons
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex;gap:8px;';
 
-  const submitBtn = _makeBtn(
-    isEdit ? 'Guardar cambios' : 'Crear empleado',
-    'btn-sm btn-primary',
-    async () => {
+  const submitBtn = _makeBtn(isEdit ? 'Guardar cambios' : 'Crear empleado', 'btn-sm btn-primary', async () => {
       errMsg.textContent = '';
       const name  = nameIn.value.trim();
       const pin   = pinIn.value.trim();
@@ -393,31 +430,30 @@ function _openStaffModal(self, existing = null) {
 
       if (!name) { errMsg.textContent = 'El nombre es obligatorio.'; return; }
       if (!isEdit && pin.length < 4) { errMsg.textContent = 'La contraseña debe tener al menos 4 caracteres.'; return; }
-      if (isEdit  && pin.length > 0 && pin.length < 4) { errMsg.textContent = 'La nueva contraseña debe tener al menos 4 caracteres.'; return; }
+      if (currentRoles.size === 0) { errMsg.textContent = 'Añade al menos un rol.'; return; }
 
-      submitBtn.disabled    = true;
+      submitBtn.disabled = true;
       submitBtn.textContent = isEdit ? 'Guardando...' : 'Creando...';
       try {
-        const roles = Array.from(selectedRoles);
+        const rolesArr = Array.from(currentRoles);
         if (isEdit) {
-          const patch = { name, roles, role: roles[0], phone };
+          const patch = { name, roles: rolesArr, role: rolesArr[0], phone };
           if (pin) patch.password = pin;
           await _staffFetch(`/${existing.id}`, { method: 'PUT', body: JSON.stringify(patch) });
         } else {
           await _staffFetch('', {
             method: 'POST',
-            body: JSON.stringify({ name, role: roles[0], roles, password: pin, phone }),
+            body: JSON.stringify({ name, role: rolesArr[0], roles: rolesArr, password: pin, phone }),
           });
         }
         overlay.remove();
         await _reloadRoster(self);
       } catch (e) {
-        errMsg.textContent    = e.message;
-        submitBtn.disabled    = false;
+        errMsg.textContent = e.message;
+        submitBtn.disabled = false;
         submitBtn.textContent = isEdit ? 'Guardar cambios' : 'Crear empleado';
       }
-    },
-  );
+  });
 
   const cancelBtn = _makeBtn('Cancelar', 'btn-sm btn-outline', () => overlay.remove());
 
@@ -580,12 +616,14 @@ function _renderRosterTab(state, el, self) {
       rolesArray.forEach(r => {
         const cleanRole = r.trim();
         if (!cleanRole) return;
-        const meta  = _ROLE_META[cleanRole] || _ROLE_META.otro;
+        // ✅ Usamos el generador dinámico de colores y etiquetas
+        const meta  = getDynamicRoleMeta(cleanRole);
         const badge = document.createElement('span');
-        badge.textContent = _ROLE_LABELS[cleanRole] || cleanRole;
+        badge.textContent = getDynamicRoleLabel(cleanRole);
         badge.style.cssText = `background:${meta.bg};color:${meta.color};padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;`;
         badgeRow.appendChild(badge);
       });
+      
       info.appendChild(badgeRow);
 
       if (member.phone) {
