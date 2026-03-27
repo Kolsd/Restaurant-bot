@@ -343,9 +343,10 @@ async function loadOrders() {
 
 function mapDeliveryStatus(s) {
   // Cuando el bot confirma, debe entrar a la primera columna para alertar al cocinero
-  if (s === 'confirmado') return 'recibido'; 
+  if (s === 'confirmado') return 'recibido';
   if (s === 'en_preparacion') return 'en_preparacion';
-  if (s === 'listo' || s === 'en_camino') return 'listo';
+  // en_puerta = ya fue entregado al domiciliario; no regresar a recibido
+  if (s === 'listo' || s === 'en_camino' || s === 'en_puerta') return 'listo';
   return 'recibido';
 }
 

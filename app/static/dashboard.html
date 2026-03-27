@@ -376,40 +376,56 @@
 
     <!-- Modal invitar usuario — dentro de equipo para contexto, position:fixed lo saca del flujo -->
     <div id="modal-invite" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;">
-      <div style="background:#fff;border-radius:16px;padding:2rem;width:420px;max-width:90vw;">
-        <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar usuario a <span id="modal-branch-name" style="color:#1D9E75;"></span></div>
+      <div style="background:#fff;border-radius:16px;padding:2rem;width:460px;max-width:92vw;max-height:90vh;overflow-y:auto;">
+        <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar miembro a <span id="modal-branch-name" style="color:#1D9E75;"></span></div>
         <div style="display:flex;flex-direction:column;gap:10px;">
-          <input id="invite-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <div style="font-size:13px;color:#555;margin-top:4px;font-weight:600;">Nivel de acceso:</div>
-          <input type="hidden" id="invite-role" value="waiter">
+          <input id="invite-username" placeholder="Nombre completo" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <!-- Contraseña — solo visible para Administrador -->
+          <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;display:none;">
+          <!-- PIN — visible para roles operativos -->
+          <input id="invite-pin" type="password" inputmode="numeric" placeholder="PIN (4 dígitos)" maxlength="8" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <input id="invite-phone" placeholder="Teléfono (opcional)" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <div style="font-size:13px;color:#555;margin-top:4px;font-weight:600;">Rol (puedes elegir varios):</div>
+          <input type="hidden" id="invite-role" value="mesero">
           <div class="role-card" data-role="admin" onclick="toggleRole('admin', this)" style="margin-bottom:8px;padding:10px;">
             <div style="font-size:22px;margin-bottom:2px;">🛡️</div>
             <div style="font-weight:600;font-size:13px;color:#111;">Administrador</div>
-            <div style="font-size:11px;color:#888;margin-top:2px;">Control total de la sucursal</div>
+            <div style="font-size:11px;color:#888;margin-top:2px;">Control total del dashboard — requiere contraseña</div>
           </div>
-          <div style="display:flex;align-items:center;margin:8px 0;">
+          <div style="display:flex;align-items:center;margin:4px 0;">
             <div style="flex:1;height:1px;background:#e0e0d8;"></div>
-            <div style="font-size:10px;color:#888;padding:0 10px;font-weight:600;">O ROLES OPERATIVOS</div>
+            <div style="font-size:10px;color:#888;padding:0 10px;font-weight:600;">ROLES OPERATIVOS (multi-rol)</div>
             <div style="flex:1;height:1px;background:#e0e0d8;"></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px;">
-            <div class="role-card active" data-role="waiter" onclick="toggleRole('waiter', this)" style="padding:10px 4px;">
+            <div class="role-card active" data-role="mesero" onclick="toggleRole('mesero', this)" style="padding:10px 4px;">
               <div style="font-size:22px;margin-bottom:2px;">🍽️</div>
               <div style="font-weight:600;font-size:12px;color:#111;">Mesero</div>
             </div>
-            <div class="role-card" data-role="cashier" onclick="toggleRole('cashier', this)" style="padding:10px 4px;">
+            <div class="role-card" data-role="caja" onclick="toggleRole('caja', this)" style="padding:10px 4px;">
               <div style="font-size:22px;margin-bottom:2px;">💰</div>
               <div style="font-weight:600;font-size:12px;color:#111;">Cajero</div>
             </div>
-            <div class="role-card" data-role="cook" onclick="toggleRole('cook', this)" style="padding:10px 4px;">
+            <div class="role-card" data-role="cocina" onclick="toggleRole('cocina', this)" style="padding:10px 4px;">
               <div style="font-size:22px;margin-bottom:2px;">👨‍🍳</div>
-              <div style="font-weight:600;font-size:12px;color:#111;">Cocina</div>
+              <div style="font-weight:600;font-size:12px;color:#111;">Cocinero</div>
+            </div>
+            <div class="role-card" data-role="domiciliario" onclick="toggleRole('domiciliario', this)" style="padding:10px 4px;">
+              <div style="font-size:22px;margin-bottom:2px;">🛵</div>
+              <div style="font-weight:600;font-size:12px;color:#111;">Domiciliario</div>
+            </div>
+            <div class="role-card" data-role="gerente" onclick="toggleRole('gerente', this)" style="padding:10px 4px;">
+              <div style="font-size:22px;margin-bottom:2px;">👔</div>
+              <div style="font-weight:600;font-size:12px;color:#111;">Gerente</div>
+            </div>
+            <div class="role-card" data-role="bar" onclick="toggleRole('bar', this)" style="padding:10px 4px;">
+              <div style="font-size:22px;margin-bottom:2px;">🍹</div>
+              <div style="font-weight:600;font-size:12px;color:#111;">Bar</div>
             </div>
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:1.25rem;">
-          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear usuario</button>
+          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear miembro</button>
           <button onclick="closeInviteModal()" style="padding:10px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
         </div>
       </div>
