@@ -134,13 +134,6 @@ async def create_staff(
 
 @router.post("/pin-login", status_code=200)
 async def staff_pin_login(body: StaffPinLoginRequest):
-    """
-    Authenticate a staff member by PIN.
-
-    No Bearer token required — this is the login endpoint for staff.
-    Returns a session token + redirect URL based on the employee's roles.
-    The token is valid for the same TTL as dashboard sessions (72 h).
-    """
     member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)
     if not member:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
@@ -148,18 +141,31 @@ async def staff_pin_login(body: StaffPinLoginRequest):
         raise HTTPException(status_code=401, detail="PIN incorrecto.")
 
     token = secrets.token_hex(32)
-    # Store session with a staff-prefixed username so require_auth works
-    # without colliding with dashboard user accounts.
     await db.db_save_session(token, f"staff:{member['id']}")
 
     roles = member.get("roles") or [member.get("role", "mesero")]
-    return {
-        "token": token,
-        "roles": roles,
-        "name": member["name"],
-        "redirect": _staff_redirect(roles),
-    }
 
+    # ✅ FIX: traer datos del restaurante para guardar en localStorage
+    restaurant_data = await db.db_get_restaurant_by_id(body.restaurant_id)
+    raw_features = restaurant_data.get("features") or {} if restaurant_data else {}
+    if isinstance(raw_features, str):
+        import json as _j
+        try: raw_features = _j.loads(raw_features)
+        except: raw_features = {}
+
+    return {
+        "token":    token,
+        "roles":    roles,
+        "name":     member["name"],
+        "redirect": _staff_redirect(roles),
+        "restaurant": {
+            "name":             restaurant_data.get("name", "") if restaurant_data else "",
+            "whatsapp_number":  restaurant_data.get("whatsapp_number", "") if restaurant_data else "",
+            "locale":           raw_features.get("locale", "es-CO"),
+            "currency":         raw_features.get("currency", "COP"),
+            "features":         raw_features,
+        }
+    }
 
 @router.put("/{staff_id}", dependencies=_MODULE_DEPS)
 async def update_staff(
