@@ -52,21 +52,38 @@ function doStaffLogout() {
             caja:         { icon: '💰', label: 'Caja',        url: '/caja'         },
             domiciliario: { icon: '🛵', label: 'Domicilios',  url: '/domiciliario' },
         };
-
+    
         const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-        const roleStr = restaurant.role || localStorage.getItem('rb_role') || '';
-        const roles = roleStr.split(',').map(r => r.trim()).filter(r => ROLE_META[r]);
-
+        let roleStr = restaurant.role || localStorage.getItem('rb_role') || '';
+    
+        // ✅ FIX: si el role es un JSON array string, parsearlo
+        let roles = [];
+        try {
+            const parsed = JSON.parse(roleStr);
+            if (Array.isArray(parsed)) {
+                roles = parsed;
+            } else {
+                roles = roleStr.split(',').map(r => r.trim());
+            }
+        } catch(e) {
+            roles = roleStr.split(',').map(r => r.trim());
+        }
+    
+        // Limpiar comillas y espacios que puedan venir de Postgres
+        roles = roles
+            .map(r => r.replace(/["\[\]\s]/g, '').trim())
+            .filter(r => ROLE_META[r]);
+    
         if (roles.length <= 1) return;
-
+    
         const navEl = document.getElementById('dynamic-role-nav');
         if (!navEl) return;
-
+    
         navEl.style.display = 'flex';
         navEl.innerHTML = '';
-
+    
         const currentPath = window.location.pathname;
-
+    
         roles.forEach(role => {
             const meta = ROLE_META[role];
             const a = document.createElement('a');
