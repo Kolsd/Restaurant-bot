@@ -37,26 +37,20 @@ _MODULE_DEPS = [Depends(require_module("staff_tips"))]
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
 class StaffCreate(BaseModel):
-    name:  str              = Field(..., min_length=1, max_length=100)
-    role:  str              = Field("mesero", pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
-    roles: list[str]        = Field(default_factory=list)
-    pin:   str              = Field(..., min_length=4, max_length=8)
-    phone: str              = Field("", max_length=30)
+    name:     str       = Field(..., min_length=1, max_length=100)
+    role:     str       = Field("mesero", pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
+    roles:    list[str] = Field(default_factory=list)
+    password: str       = Field(..., min_length=4, max_length=100)
+    phone:    str       = Field("", max_length=30)
 
 
 class StaffUpdate(BaseModel):
-    name:   str | None      = Field(None, min_length=1, max_length=100)
-    role:   str | None      = Field(None, pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
-    roles:  list[str] | None = None
-    pin:    str | None      = Field(None, min_length=4, max_length=8)
-    phone:  str | None      = Field(None, max_length=30)
-    active: bool | None     = None
-
-
-class StaffPinLoginRequest(BaseModel):
-    restaurant_id: int
-    name: str = Field(..., min_length=1, max_length=100)
-    pin: str  = Field(..., min_length=4, max_length=8)
+    name:     str | None       = Field(None, min_length=1, max_length=100)
+    role:     str | None       = Field(None, pattern=r"^(mesero|cocina|bar|caja|gerente|domiciliario|otro)$")
+    roles:    list[str] | None = None
+    password: str | None       = Field(None, min_length=4, max_length=100)
+    phone:    str | None       = Field(None, max_length=30)
+    active:   bool | None      = None
 
 
 def _staff_redirect(roles: list) -> str:
@@ -106,8 +100,8 @@ async def create_staff(
     body: StaffCreate,
     restaurant: dict = Depends(get_current_restaurant),
 ):
-    """Create a new staff member. PIN is bcrypt-hashed before storage."""
-    pin_hash = _pwd_ctx.hash(body.pin)
+    """Create a new staff member. Password is bcrypt-hashed before storage."""
+    pin_hash = _pwd_ctx.hash(body.password)
     # If caller provides roles array, validate and use it; otherwise derive from role
     roles = [r for r in body.roles if r in _VALID_ROLES] if body.roles else [body.role]
     if not roles:
@@ -161,8 +155,8 @@ async def update_staff(
     """Update mutable staff fields. PIN is re-hashed if provided."""
     patch = body.model_dump(exclude_none=True)
 
-    if "pin" in patch:
-        patch["pin"] = _pwd_ctx.hash(patch["pin"])
+    if "password" in patch:
+        patch["pin"] = _pwd_ctx.hash(patch.pop("password"))
 
     if "roles" in patch:
         patch["roles"] = [r for r in patch["roles"] if r in _VALID_ROLES]
@@ -178,7 +172,61 @@ async def update_staff(
     return {"staff": updated}
 
 
-# ── Clock-in / Clock-out ─────────────────────────────────────────────────────
+@router.delete("/{staff_id}", dependencies=_MODULE_DEPS, status_code=200)
+async def delete_staff(
+    staff_id: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Elimina permanentemente un empleado del roster."""
+    deleted = await db.db_delete_staff(staff_id, restaurant["id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    return {"success": True}
+
+
+# ── Self clock-in / clock-out (para operativos autenticados via token) ────────
+# No necesita get_current_restaurant — resuelve restaurant_id desde la tabla staff.
+
+@router.post("/self/clock-in", status_code=200)
+async def self_clock_in(request: Request):
+    """El operativo registra su propia entrada usando su Bearer token."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    session_key = await db.db_get_session(token)
+    if not session_key or not session_key.startswith("staff:"):
+        raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
+    staff_id = session_key[6:]
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    try:
+        shift = await db.db_clock_in(staff_id, row["restaurant_id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"shift": shift}
+
+
+@router.post("/self/clock-out", status_code=200)
+async def self_clock_out(request: Request):
+    """El operativo registra su propia salida usando su Bearer token."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    session_key = await db.db_get_session(token)
+    if not session_key or not session_key.startswith("staff:"):
+        raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
+    staff_id = session_key[6:]
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    shift = await db.db_clock_out(staff_id, row["restaurant_id"])
+    if not shift:
+        raise HTTPException(status_code=404, detail="No hay turno abierto para este empleado.")
+    return {"shift": shift}
+
+
+# ── Clock-in / Clock-out (admin/dashboard — requiere get_current_restaurant) ──
 
 @router.post("/clock-in", dependencies=_MODULE_DEPS)
 async def clock_in(

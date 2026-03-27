@@ -17,9 +17,50 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
 
 async def login(username: str, password: str) -> dict:
+    # ── Intento 1: tabla users (admin / gerente / owner) ──────────────────────
     user = await db.db_get_user(username)
     if not user:
-        return {"success": False, "error": "Usuario no encontrado"}
+        # ── Intento 2: tabla staff (operativos con contraseña) ────────────────
+        candidates = await db.db_get_staff_candidates_by_name(username)
+        member = next((c for c in candidates if verify_password(password, c["pin"])), None)
+        if not member:
+            return {"success": False, "error": "Usuario o contraseña incorrectos"}
+
+        token = secrets.token_hex(32)
+        await db.db_save_session(token, f"staff:{member['id']}")
+
+        roles     = member.get("roles") or [member.get("role", "mesero")]
+        role      = ",".join(roles)
+        branch_id = member.get("restaurant_id")
+        whatsapp_number = ""
+        features: dict = {}
+        try:
+            if branch_id:
+                restaurant = await db.db_get_restaurant_by_id(branch_id)
+                if restaurant:
+                    whatsapp_number = restaurant.get("whatsapp_number", "")
+                    raw = restaurant.get("features") or {}
+                    features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except Exception as e:
+            print(f"Warning login staff: {e}")
+
+        return {
+            "success":  True,
+            "token":    token,
+            "role":     role,
+            "staff_id": member["id"],
+            "restaurant": {
+                "name":             member["name"],
+                "username":         member["name"],
+                "role":             role,
+                "branch_id":        branch_id,
+                "whatsapp_number":  whatsapp_number,
+                "features":         features,
+                "locale":           features.get("locale",   "es-CO"),
+                "currency":         features.get("currency", "COP"),
+            },
+        }
+
     if not verify_password(password, user["password_hash"]):
         return {"success": False, "error": "Contraseña incorrecta"}
 
