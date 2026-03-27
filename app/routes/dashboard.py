@@ -523,23 +523,17 @@ _STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "o
 @router.get("/api/team/users")
 async def list_team_users(request: Request, branch_id: int = None):
     user = await get_current_user(request)
-    role = user.get("role", "owner")
     
-    # 🛡️ PRIORIDAD DE FILTRO: 
-    # 1. Parámetro URL -> 2. Header X-Branch-ID -> 3. ID del usuario
-    if not branch_id:
-        branch_header = request.headers.get("X-Branch-ID")
-        if branch_header and branch_header.isdigit() and "owner" in role:
-            branch_id = int(branch_header)
-        else:
-            branch_id = user.get("branch_id")
-
-    if not branch_id:
-        return {"users": []}
+    # 🛡️ FILTRO GLOBAL: Leer cabecera X-Branch-ID
+    branch_header = request.headers.get("X-Branch-ID")
+    if not branch_id and branch_header and branch_header.isdigit():
+        branch_id = int(branch_header)
+    elif not branch_id:
+        branch_id = user.get("branch_id")
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # 🔍 Consulta SQL estricta con JOIN para traer el nombre de la sede
+        # 🔍 Consulta estricta por branch_id
         rows = await conn.fetch("""
             SELECT u.username, u.role, u.branch_id, r.name as branch_name 
             FROM users u
@@ -547,12 +541,8 @@ async def list_team_users(request: Request, branch_id: int = None):
             WHERE u.branch_id = $1
             ORDER BY u.created_at DESC
         """, branch_id)
-        
-        staff_list = [dict(r) for r in rows]
-        for u in staff_list: u["source"] = "user"
-        
-        return {"users": staff_list}
-                
+        return {"users": [dict(r) for r in rows]}
+
 @router.post("/api/team/invite")
 async def team_invite(request: Request, body: TeamInviteRequest):
     from passlib.context import CryptContext as _CC
