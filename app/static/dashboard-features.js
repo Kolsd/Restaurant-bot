@@ -1197,26 +1197,6 @@ async function loadStaff() {
 
   try {
     const r = await fetch('/api/staff', { headers: h });
-    if (!r.ok) {
-      container.innerHTML = '<div class="empty-state">Error al cargar el equipo.</div>';
-      return;
-    }
-    const data = await r.json();
-    const staffList = data.staff || [];
-    renderStaff(staffList);
-  } catch(e) {
-    console.error('Error loadStaff:', e);
-    container.innerHTML = '<div class="empty-state">Error de conexión.</div>';
-  }
-}
-
-async function loadStaff() {
-  const h = window._dashHeaders;
-  const container = document.getElementById('staff-component');
-  if (!container) return;
-
-  try {
-    const r = await fetch('/api/staff', { headers: h });
     if (!r.ok) throw new Error('Error HTTP: ' + r.status);
     const data = await r.json();
     const staffList = data.staff || [];
