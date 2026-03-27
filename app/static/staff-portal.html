@@ -220,49 +220,64 @@ async function doStaffLogin() {
   btn.disabled    = true;
   btn.textContent = 'Verificando...';
 
+  if (!restaurantId) {
+    showError('Falta el ID del restaurante en la URL (ej: ?r=5).');
+    btn.disabled = false;
+    btn.textContent = 'Ingresar';
+    return;
+  }
+
   try {
-    const res  = await fetch('/api/auth/login', {
+    const res  = await fetch('/api/staff/pin-login', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ username: name, password: pin }),
+      body:    JSON.stringify({ 
+        restaurant_id: parseInt(restaurantId), 
+        name: name, 
+        pin: pin 
+      }),
     });
+    
     const data = await res.json();
 
-    if (!res.ok || !data.success) {
-      showError(data.detail || data.error || 'Nombre o contraseña incorrectos.');
+    if (!res.ok) {
+      showError(data.detail || 'Nombre o contraseña incorrectos.');
       return;
     }
 
-    // Persist session
-    localStorage.setItem('rb_token',      data.token);
-    localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant || {}));
-    if (data.staff_id) localStorage.setItem('rb_staff_id', data.staff_id);
-    else               localStorage.removeItem('rb_staff_id');
+    // 1. Guardar la sesión y token
+    localStorage.setItem('rb_token', data.token);
+    
+    // 2. Guardar los roles (el endpoint los devuelve como un Array)
+    const rolesArr = data.roles || ['mesero'];
+    localStorage.setItem('rb_role', rolesArr.join(','));
+    
+    // 3. Dejamos un registro básico del restaurante para las otras pantallas
+    localStorage.setItem('rb_restaurant', JSON.stringify({ id: parseInt(restaurantId) }));
 
-    const roleStr = (data.role || data.restaurant?.role || 'mesero').toLowerCase();
-    localStorage.setItem('rb_role', roleStr);
-    const roles = roleStr.split(',').map(r => r.trim()).filter(Boolean);
-
-    // Admin/owner always go to dashboard
-    if (roles.some(r => ['owner', 'admin'].includes(r))) {
+    // Si por error se coló un admin, lo mandamos al dashboard
+    if (rolesArr.includes('owner') || rolesArr.includes('admin') || rolesArr.includes('gerente')) {
       window.location.href = '/dashboard';
       return;
     }
 
-    const opRoles = roles.filter(r => ROLE_META[r]);
+    // Filtramos los roles válidos para mostrar las opciones (mesero, cocina, caja, etc.)
+    const opRoles = rolesArr.filter(r => ROLE_META[r]);
 
     if (opRoles.length === 0) {
-      window.location.href = '/dashboard';
+      // Si no tiene rol válido, lo mandamos a la ruta por defecto del backend
+      window.location.href = data.redirect || '/mesero';
       return;
     }
 
     if (opRoles.length === 1) {
+      // Si solo tiene 1 rol, lo mandamos directo a su pantalla
       window.location.href = ROLE_META[opRoles[0]].url;
       return;
     }
 
-    // Multi-role → show selector
-    showRoleSelector(name, opRoles);
+    // Si tiene múltiples roles (Multi-rol) → le mostramos los botones
+    showRoleSelector(data.name || name, opRoles);
 
   } catch (e) {
     showError('Error de conexión. Intenta de nuevo.');
