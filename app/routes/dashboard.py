@@ -536,7 +536,7 @@ async def delete_branch(branch_id: int, request: Request):
         await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
         
     return {"success": True}
-    
+
 @router.post("/api/admin/parse-menu")
 async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
     if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
@@ -684,27 +684,38 @@ async def fix_conversations_bot_number(request: Request):
 from datetime import datetime, timedelta
 
 async def get_dashboard_filters(request: Request, period: str, custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    """Ayudante para filtrar por sucursal y rango exacto, calculando el 'Hoy' dinámicamente según la zona horaria del cliente"""
-    username = await require_auth(request)
-    user = await db.db_get_user(username)
+    """Ayudante para filtrar por sucursal y rango exacto, calculando el 'Hoy' dinámicamente"""
+    # 🛡️ FIX: Usamos la función centralizada que ya sabe distinguir entre Staff y Admin
+    user = await get_current_user(request)
+    
+    # Si por alguna razón extrema no hay usuario, lanzamos el error antes de que falle el .get()
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado o sesión expirada")
     
     branch_id = user.get("branch_id")
     bot_number = None
+    
     if branch_id:
         r = await db.db_get_restaurant_by_id(branch_id)
-        if r: bot_number = r.get("whatsapp_number")
+        if r: 
+            bot_number = r.get("whatsapp_number")
     else:
+        # Si es un Admin de la Matrix, intentamos obtener el restaurante principal
+        # pero con un seguro por si la base de datos está vacía
         all_r = await db.db_get_all_restaurants()
         if all_r:
-            branch_id = all_r[0].get("id")
-            bot_number = all_r[0].get("whatsapp_number")
-    
-    # 1. Calculamos la hora local EXACTA del usuario que está viendo la pantalla
+            # Si el usuario es Staff de la matrix, su restaurant_id está en su dict
+            target_id = user.get("restaurant_id") or all_r[0].get("id")
+            restaurant = await db.db_get_restaurant_by_id(target_id)
+            if restaurant:
+                branch_id = restaurant["id"]
+                bot_number = restaurant.get("whatsapp_number")
+
+    # 1. Calculamos la hora local EXACTA del usuario
     now_utc = datetime.utcnow()
-    # En JS, getTimezoneOffset() devuelve minutos positivos para zonas al Oeste (ej. 300 para UTC-5)
     now_local = now_utc - timedelta(minutes=tz_offset)
     
-    # 2. Definimos los límites del día en SU hora local
+    # 2. Definimos los límites del día
     end_local = now_local + timedelta(days=1)
     end_local = end_local.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -722,12 +733,12 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     else: # 'today'
         start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # 3. Devolvemos los límites nuevamente a UTC para que la base de datos filtre correctamente
+    # 3. Devolvemos los límites a UTC para la DB
     start_date = start_local + timedelta(minutes=tz_offset)
     end_date = end_local + timedelta(minutes=tz_offset)
     
     return branch_id, bot_number, start_date, end_date
-
+    
 @router.get("/api/dashboard/orders")
 async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
     branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
