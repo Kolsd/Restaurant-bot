@@ -313,19 +313,36 @@ async function createBranch() {
   const address = document.getElementById('branch-address').value.trim();
   const lat     = document.getElementById('branch-lat').value;
   const lon     = document.getElementById('branch-lon').value;
+  
   if (!name)    { alert('El nombre es obligatorio'); return; }
   if (!address) { alert('Ingresa la dirección'); return; }
+  
   try {
     const body = { name, whatsapp_number:'', address, menu:{} };
     if (lat && lon) { body.latitude = parseFloat(lat); body.longitude = parseFloat(lon); }
-    const r = await fetch('/api/team/branches', { method:'POST', headers:{ ...h,'Content-Type':'application/json' }, body:JSON.stringify(body) });
+    
+    const r = await fetch('/api/team/branches', { 
+        method:'POST', 
+        headers:{ ...h,'Content-Type':'application/json' }, 
+        body:JSON.stringify(body) 
+    });
+    
     if (r.ok) {
       document.getElementById('create-branch-form').style.display = 'none';
       ['branch-name','branch-address','branch-lat','branch-lon'].forEach(id => { document.getElementById(id).value = ''; });
       document.getElementById('branch-map-preview').style.display = 'none';
+      
+      // 🛡️ RECARGAMOS LA VISTA Y EL DROPDOWN GLOBAL DE ARRIBA
       loadBranches();
-    } else { const e = await r.json(); alert('Error: ' + (e.detail||'No se pudo crear')); }
-  } catch(e) {}
+      if (typeof loadGlobalBranches === 'function') loadGlobalBranches();
+      
+    } else { 
+        const e = await r.json(); 
+        alert('Error: ' + (e.detail||'No se pudo crear')); 
+    }
+  } catch(e) {
+      console.error(e);
+  }
 }
 
 // ── LÓGICA MULTIROL ──
