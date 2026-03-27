@@ -47,7 +47,7 @@ async def get_table_wa_number(table: dict) -> str:
         return matriz.get("whatsapp_number", "")
         
     return wa_number
-
+    
 class TableRequest(BaseModel):
     number: int
     name: str = ""
@@ -576,25 +576,17 @@ async def update_order_status(request: Request, order_id: str):
 
     return {"success": True, "order_id": order_id, "status": status}
 
-# --- Asegúrate de que se vea así ---
-
 @router.get("/cocina", response_class=HTMLResponse)
-async def kitchen_display(request: Request):
-    user = await get_current_user(request)
-    user_role = str(user.get("role", "")).lower()
-    if not any(r in user_role for r in ["cocina", "owner", "admin", "gerente"]):
-        raise HTTPException(status_code=403, detail="Acceso denegado a Cocina")
+async def kitchen_display():
     return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
 
 @router.get("/bar", response_class=HTMLResponse)
-async def bar_display(request: Request):
-    user = await get_current_user(request)
-    user_role = str(user.get("role", "")).lower()
-    if not any(r in user_role for r in ["bar", "owner", "admin", "gerente"]):
-        raise HTTPException(status_code=403, detail="Acceso denegado a Bar")
+async def bar_display():
     p = STATIC / "bar.html"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="bar.html no encontrado en static/")
     return HTMLResponse(p.read_text(encoding="utf-8"))
-    
+
 # ── MÓDULO PUNTO DE VENTA (POS) PARA MESEROS ─────────────────────────
 
 class ManualOrderRequest(BaseModel):

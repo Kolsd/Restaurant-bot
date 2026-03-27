@@ -3,10 +3,42 @@
    app/static/dashboard-core.js
 ═══════════════════════════════════════════════════ */
 
-const token      = localStorage.getItem('rb_token');
+const token = localStorage.getItem('rb_token');
 const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{"name":"Mi Restaurante"}');
+
+// 1. Verificación de Token
 if (!token) window.location.href = '/login';
 
+// 🛡️ 2. GUARDIÁN DE SEGURIDAD (PROTECCIÓN DE ROLES)
+(function securityGuard() {
+    const path = window.location.pathname;
+    const roleStr = (restaurant.role || '').toLowerCase();
+    const roles = roleStr.split(',').map(r => r.trim());
+
+    // Definimos jerarquías
+    const isAdmin = roles.some(r => ['owner', 'admin', 'gerente'].includes(r));
+    const isStaff = !isAdmin && roles.length > 0;
+
+    // REGLA: Si es STAFF e intenta entrar a zonas administrativas (/dashboard o /settings)
+    if (isStaff && (path.includes('/dashboard') || path.includes('/settings'))) {
+        console.warn("Acceso denegado: Redirigiendo a zona operativa.");
+        
+        // Redirigir según su rol principal
+        if (roles.includes('mesero'))      window.location.href = '/mesero';
+        else if (roles.includes('cocina')) window.location.href = '/cocina';
+        else if (roles.includes('bar'))    window.location.href = '/bar';
+        else if (roles.includes('caja'))   window.location.href = '/caja';
+        else if (roles.includes('domiciliario')) window.location.href = '/domiciliario';
+        else window.location.href = '/staff'; // Fallback al portal
+        return;
+    }
+    
+    // REGLA: Si un usuario con un rol operativo intenta entrar a otro operativo 
+    // (Ej: Mesero intentando entrar a /cocina), el backend (API) lo bloqueará, 
+    // pero aquí podemos añadir redirección visual si lo deseas en el futuro.
+})();
+
+// Continuación del archivo original...
 const headers = { 'Authorization': 'Bearer ' + token };
 const _locale = restaurant.locale || 'en-US';
 const _currency = restaurant.currency || 'USD';
