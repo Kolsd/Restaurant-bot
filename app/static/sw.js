@@ -10,14 +10,11 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v1';
+const CACHE_VERSION  = 'v2';  // ← incrementar para limpiar el caché viejo
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
-// Pages and assets to pre-cache on install (app shell).
 const SHELL_ASSETS = [
   '/dashboard',
-  '/caja',
-  '/mesero',
   '/login',
   '/settings',
   '/static/dashboard.css',
@@ -55,11 +52,23 @@ self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Only handle same-origin requests.
   if (url.origin !== self.location.origin) return;
 
-  // API calls: always network-only.
+  // API calls: siempre network-only.
   if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  // roles.js: siempre network-only, nunca cachear.
+  if (url.pathname === '/static/roles.js') {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  // Páginas de staff: siempre network-first, sin fallback a caché.
+  const staffPages = ['/mesero', '/caja', '/bar', '/cocina', '/domiciliario'];
+  if (staffPages.includes(url.pathname)) {
     event.respondWith(fetch(request));
     return;
   }
@@ -78,7 +87,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // HTML pages: network-first, fall back to cached shell.
+  // HTML pages: network-first, fallback a caché.
   event.respondWith(
     fetch(request)
       .then(res => {
