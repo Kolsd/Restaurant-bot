@@ -576,11 +576,12 @@ async def update_order_status(request: Request, order_id: str):
 
     return {"success": True, "order_id": order_id, "status": status}
 
-@router.get("/cocina", response_class=HTMLResponse)@router.get("/cocina", response_class=HTMLResponse)
+# --- Asegúrate de que se vea así ---
+
+@router.get("/cocina", response_class=HTMLResponse)
 async def kitchen_display(request: Request):
     user = await get_current_user(request)
     user_role = str(user.get("role", "")).lower()
-    # Permitir a cocina, dueños o administradores
     if not any(r in user_role for r in ["cocina", "owner", "admin", "gerente"]):
         raise HTTPException(status_code=403, detail="Acceso denegado a Cocina")
     return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
@@ -593,7 +594,7 @@ async def bar_display(request: Request):
         raise HTTPException(status_code=403, detail="Acceso denegado a Bar")
     p = STATIC / "bar.html"
     return HTMLResponse(p.read_text(encoding="utf-8"))
-
+    
 # ── MÓDULO PUNTO DE VENTA (POS) PARA MESEROS ─────────────────────────
 
 class ManualOrderRequest(BaseModel):
