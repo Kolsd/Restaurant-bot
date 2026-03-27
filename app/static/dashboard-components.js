@@ -1368,26 +1368,28 @@ window.openStaffAdminModal = function() {
     btn.textContent = 'Creando...';
 
     try {
-        const h = window._dashHeaders || { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
+        // 🛡️ CORRECCIÓN CLAVE: Forzamos el Content-Type para que FastAPI entienda el JSON
+        const headers = { 
+            'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 
+            'Content-Type': 'application/json' 
+        };
         
-        // 🛡️ Preparamos el payload sin enviar 'pin' si está vacío
         const payload = { username, password, role: 'admin', branch_id: branchId };
         if (phone) payload.phone = phone;
 
         const r = await fetch('/api/team/invite', {
             method: 'POST',
-            headers: h,
+            headers: headers, // Usamos los headers con Content-Type
             body: JSON.stringify(payload),
         });
         
         if (r.ok) {
-            overlay.remove();
+            document.getElementById('_admin-invite-modal').remove();
             alert('¡Administrador creado exitosamente!');
         } else {
             const e = await r.json();
             let errorMsg = 'No se pudo crear';
             
-            // 🛡️ Traductor de errores de validación de FastAPI
             if (e.detail) {
                 if (Array.isArray(e.detail)) {
                     errorMsg = e.detail.map(err => `${err.loc[err.loc.length-1]}: ${err.msg}`).join(', ');
