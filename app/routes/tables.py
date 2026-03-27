@@ -289,41 +289,26 @@ async def update_delivery_order_status(request: Request, order_id: str):
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None, station: str = None):
-    """
-    Devuelve órdenes de mesa activas.
-    station: 'kitchen' → muestra station IN ('kitchen','all')
-             'bar'     → muestra station IN ('bar','all')
-             None      → todas (usado por Caja y facturación)
-    """
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
     
-    # 🛡️ FILTRO GLOBAL
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
+        # 🛡️ Filtro directo por o.branch_id (ya no dependemos solo del JOIN de la mesa)
         if status:
-            if branch_id:
-                # 🚫 Eliminamos el OR t.branch_id IS NULL para evitar que se cuelen mesas de otras sucursales
-                rows = await conn.fetch(
-                    """SELECT o.* FROM table_orders o
-                       LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                       WHERE o.status = $1 AND t.branch_id = $2
-                       ORDER BY o.created_at ASC""", status, branch_id)
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at ASC", status)
+            rows = await conn.fetch(
+                "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
+                status, branch_id
+            )
         else:
-            if branch_id:
-                rows = await conn.fetch(
-                    """SELECT o.* FROM table_orders o
-                       LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                       WHERE o.status NOT IN ('factura_entregada','cancelado')
-                       AND t.branch_id = $1
-                       ORDER BY o.created_at ASC""", branch_id)
+            rows = await conn.fetch(
+                "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
+                branch_id
+            )
             else:
                 rows = await conn.fetch(
                     """SELECT * FROM table_orders
@@ -594,8 +579,9 @@ class ManualOrderRequest(BaseModel):
     items:      list
     total:      int
     notes:      str = ""
-    station:    str = "all"  # 'kitchen' | 'bar' | 'all'
-
+    station:    str = "all"
+    branch_id:  int = None  # 🛡️ Agregamos branch_id al modelo
+    
 @router.get("/api/pos/menu")
 async def get_pos_menu(request: Request):
     """Devuelve el menú del restaurante para pintarlo en el POS del mesero"""
@@ -684,22 +670,21 @@ async def adjust_table_bill(request: Request, base_order_id: str):
 
 @router.post("/api/pos/order")
 async def pos_manual_order(request: Request, body: ManualOrderRequest):
-    """Recibe la orden manual tocada en pantalla por el mesero y la manda a cocina"""
     await require_auth(request)
+    user = await get_current_user(request)
     
-    # Generamos un ID único con prefijo 'pos-' para identificar que fue manual
+    # 🛡️ RESOLUCIÓN DE SUCURSAL
+    # Si viene en el body lo usamos, si no, usamos el del usuario (mesero/admin)
+    branch_id = body.branch_id or user.get("branch_id")
+    
     order_id = f"pos-{str(uuid.uuid4())[:8]}"
-    phone = "manual" # Como es manual, no hay celular del cliente atado al inicio
-    
-    # 👇 LA MAGIA ESTÁ AQUÍ: Verificamos si la mesa ya tiene una orden activa
+    phone = "manual"
     base_id = await db.db_get_base_order_id(body.table_id)
     
     if base_id:
-        # Es una adición (sub-orden) a una cuenta que ya existe
         final_base_id = base_id
         sub_num = await db.db_get_next_sub_number(base_id)
     else:
-        # Es el primer pedido de la mesa
         final_base_id = order_id
         sub_num = 1
 
@@ -714,7 +699,8 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
         "total":         body.total,
         "base_order_id": final_base_id,
         "sub_number":    sub_num,
-        "station":       body.station,  # Mesero indica destino: 'kitchen'|'bar'|'all'
+        "station":       body.station,
+        "branch_id":     branch_id
     }
 
     await db.db_save_table_order(order)

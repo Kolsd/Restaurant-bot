@@ -760,17 +760,24 @@ async def db_save_table_order(order: dict):
         await conn.execute("""
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
-                 base_order_id, sub_number, station)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                 base_order_id, sub_number, station, branch_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
             ON CONFLICT (id) DO UPDATE SET
-                items=EXCLUDED.items, status=EXCLUDED.status,
-                notes=EXCLUDED.notes, total=EXCLUDED.total, updated_at=NOW()
+                items=EXCLUDED.items, 
+                status=EXCLUDED.status,
+                notes=EXCLUDED.notes, 
+                total=EXCLUDED.total,
+                branch_id=EXCLUDED.branch_id,
+                updated_at=NOW()
         """, order['id'], order['table_id'], order['table_name'], order['phone'],
             json.dumps(order['items']),
-            order.get('status', 'recibido'), order.get('notes', ''), order.get('total', 0),
+            order.get('status', 'recibido'), 
+            order.get('notes', ''), 
+            order.get('total', 0),
             order.get('base_order_id'),
             order.get('sub_number', 1),
-            order.get('station', 'all'))
+            order.get('station', 'all'),
+            order.get('branch_id')) # 🛡️ Parámetro $12: Grabado con éxito
 
 async def db_get_base_order_status(base_order_id: str) -> str | None:
     """Returns the status of the base order record itself (not sub-orders)."""
