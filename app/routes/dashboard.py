@@ -53,7 +53,7 @@ async def geocode_address(address: str) -> tuple:
     return None, None, None
 
 class LoginRequest(BaseModel): username: str; password: str
-class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: str; admin_key: str
+class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str
 class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
 class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; status: str
 class UpdateRestaurantRequest(BaseModel):
