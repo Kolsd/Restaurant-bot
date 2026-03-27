@@ -16,7 +16,6 @@ async def require_auth(request: Request) -> str:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return username
 
-
 async def get_current_user(request: Request) -> dict:
     """Returns the authenticated user dict or raises 401."""
     username = await require_auth(request)
@@ -26,14 +25,14 @@ async def get_current_user(request: Request) -> dict:
         staff_id = username.split(":", 1)[1]
         pool = await db.get_pool()
         async with pool.acquire() as conn:
-            # Usamos id::text para evitar conflictos de tipo UUID/INT
             query = "SELECT restaurant_id, role FROM staff WHERE id::text = $1"
             staff_member = await conn.fetchrow(query, str(staff_id))
             if staff_member:
-                # Construimos un dict compatible con lo que espera el sistema
+                # IMPORTANTE: branch_id es None para que vea las mesas del restaurante principal
                 return {
                     "username": username,
-                    "branch_id": staff_member["restaurant_id"],
+                    "branch_id": None, 
+                    "restaurant_id": staff_member["restaurant_id"],
                     "role": staff_member["role"]
                 }
     else:
@@ -44,16 +43,28 @@ async def get_current_user(request: Request) -> dict:
 
     raise HTTPException(status_code=401, detail="User not found")
 
+
 async def get_current_restaurant(request: Request) -> dict:
     """Returns the restaurant for the authenticated user or raises 403."""
     user = await get_current_user(request)
+    
+    # 1. Si es Gerente de una sucursal específica
     if user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
         if r:
             return r
+            
+    # 2. Si es Staff operativo (resuelve su restaurante principal exacto)
+    if user.get("restaurant_id"):
+        r = await db.db_get_restaurant_by_id(user["restaurant_id"])
+        if r:
+            return r
+            
+    # 3. Fallback para el Admin (toma el restaurante base)
     all_r = await db.db_get_all_restaurants()
     if all_r:
         return all_r[0]
+        
     raise HTTPException(status_code=403, detail="Restaurant not found")
 
 
