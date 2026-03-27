@@ -36,7 +36,6 @@ async def get_current_user(request: Request) -> dict:
                 is_main_restaurant = staff_member["parent_restaurant_id"] is None
                 mapped_branch_id = None if is_main_restaurant else staff_member["restaurant_id"]
 
-                # roles puede llegar como lista, string JSON, o None
                 raw_roles = staff_member["roles"]
                 if isinstance(raw_roles, list):
                     roles_list = raw_roles
@@ -49,7 +48,6 @@ async def get_current_user(request: Request) -> dict:
                 else:
                     roles_list = []
 
-                # Fallback al campo role simple si roles está vacío
                 if not roles_list and staff_member["role"]:
                     roles_list = [staff_member["role"]]
 
@@ -61,20 +59,12 @@ async def get_current_user(request: Request) -> dict:
                     "restaurant_id": staff_member["restaurant_id"],
                     "role": combined_role
                 }
-    else:
-        user = await db.db_get_user(username)
-        if user:
-            return user
+
+    user = await db.db_get_user(username)
+    if user:
+        return user
 
     raise HTTPException(status_code=401, detail="User not found")
-
-    else:
-        user = await db.db_get_user(username)
-        if user:
-            return user
-
-    raise HTTPException(status_code=401, detail="User not found")
-
 
 async def get_current_restaurant(request: Request) -> dict:
     """Returns the restaurant for the authenticated user or raises 403."""
