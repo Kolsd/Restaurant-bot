@@ -209,7 +209,14 @@ function getDynamicRoleLabel(roleKey) {
 
 function _apiHeaders() {
   const token = localStorage.getItem('rb_token') || '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  
+  // 🛡️ Inyectar ID de sucursal si el owner seleccionó una en el dropdown
+  const branchSelect = document.getElementById('staff-branch-select');
+  if (branchSelect && branchSelect.value && branchSelect.value !== 'matriz') {
+      headers['X-Branch-ID'] = branchSelect.value;
+  }
+  return headers;
 }
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
@@ -1138,6 +1145,12 @@ const StaffSection = MesioComponent({
 
   async onMount(self) {
     try {
+      // ⬇️ Carga las sucursales en el select si es Dueño
+      const role = (localStorage.getItem('rb_role') || '').toLowerCase();
+      if (role.includes('owner')) {
+          await _loadStaffBranchesSelect();
+      }
+      
       const [rosterData, shiftsData] = await Promise.all([
         _staffFetch(''),
         _staffFetch('/open-shifts'),
@@ -1255,3 +1268,61 @@ document.addEventListener('DOMContentLoaded', () => {
   // Mount connection status — targets #conn-dot and #conn-text inside #live-badge
   ConnectionStatus.mount('#live-badge');
 });
+
+// ── FUNCIONES GLOBALES PARA EL DROPDOWN DE SUCURSALES ──
+
+async function _loadStaffBranchesSelect() {
+  const select = document.getElementById('staff-branch-select');
+  const adminBtn = document.getElementById('btn-staff-add-admin');
+  if (!select) return;
+  
+  try {
+      const r = await fetch('/api/team/branches', { headers: { Authorization: `Bearer ${localStorage.getItem('rb_token')}` } });
+      if (r.ok) {
+          const data = await r.json();
+          const branches = data.branches || [];
+          
+          select.innerHTML = '<option value="matriz">🏠 Casa Matriz</option>';
+          branches.forEach(b => {
+              const opt = document.createElement('option');
+              opt.value = b.id;
+              opt.textContent = `📍 ${b.name}`;
+              select.appendChild(opt);
+          });
+          
+          select.style.display = 'block';
+          if (adminBtn) adminBtn.style.display = 'block';
+      }
+  } catch(e) { console.error('Error cargando sucursales para staff', e); }
+}
+
+window.changeStaffBranch = async function() {
+  // Al cambiar el select, el _apiHeaders mandará el nuevo X-Branch-ID
+  // Recargamos el componente para que pida los datos de la nueva sucursal
+  StaffSection.setState({ loading: true });
+  try {
+      const [rosterData, shiftsData] = await Promise.all([
+          _staffFetch(''),
+          _staffFetch('/open-shifts'),
+      ]);
+      StaffSection.setState({ staff: rosterData.staff, shifts: shiftsData.shifts, loading: false });
+  } catch (err) {
+      StaffSection.setState({ loading: false, error: err.message });
+  }
+};
+
+window.openStaffAdminModal = function() {
+  const select = document.getElementById('staff-branch-select');
+  const val = select.value;
+  const text = select.options[select.selectedIndex].text.replace('🏠 ', '').replace('📍 ', '');
+  
+  // Si elige Casa Matriz, el ID de sucursal es null (el backend lo asocia a la matriz)
+  const branchId = val === 'matriz' ? null : parseInt(val);
+  
+  // Reutilizamos el modal de invitaciones existente de dashboard-features.js
+  if(typeof openInviteModal === 'function') {
+      openInviteModal(branchId, text);
+  } else {
+      alert('Error: No se pudo cargar el modal de creación de admins.');
+  }
+};

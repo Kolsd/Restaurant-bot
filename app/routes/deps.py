@@ -82,13 +82,24 @@ async def get_current_restaurant(request: Request) -> dict:
         if r:
             return r
             
-    # 3. Fallback para el Admin (toma el restaurante base)
+    # 3. Fallback para el Owner/Admin
     all_r = await db.db_get_all_restaurants()
     if all_r:
-        return all_r[0]
+        main_rest = all_r[0]
+        
+        # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sucursal
+        branch_header = request.headers.get("X-Branch-ID")
+        if branch_header and branch_header.isdigit():
+            target_id = int(branch_header)
+            target_rest = await db.db_get_restaurant_by_id(target_id)
+            # Verifica rigurosamente que sea realmente una sucursal de esta matriz
+            if target_rest and target_rest.get("parent_restaurant_id") == main_rest["id"]:
+                return target_rest
+                
+        return main_rest
         
     raise HTTPException(status_code=403, detail="Restaurant not found")
-
+    
 
 def require_module(module_name: str) -> Callable:
     """
