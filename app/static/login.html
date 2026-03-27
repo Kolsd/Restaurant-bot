@@ -88,40 +88,51 @@ async function doLogin() {
       
       const roles = userRole.split(','); 
 
-      // 1. Administrador/Owner
-      if (roles.includes('owner') || roles.includes('admin')) {
+      // helpers de roles
+      const hasRole = (...names) => names.some(n => roles.includes(n));
+
+      // 1. Administrador/Owner → dashboard total
+      if (hasRole('owner', 'admin')) {
         window.location.href = '/dashboard';
         return;
       }
 
-      // 2. Si solo tiene 1 rol
+      // 2. Si solo tiene 1 rol → redirige directo
       if (roles.length === 1) {
-        if (roles[0] === 'cook') window.location.href = '/cocina';
-        else if (roles[0] === 'waiter') window.location.href = '/mesero';
-        else if (roles[0] === 'cashier') window.location.href = '/caja';
-        else if (roles[0] === 'delivery' || roles[0] === 'domiciliario') window.location.href = '/domiciliario';
-        else window.location.href = '/dashboard';
+        const r = roles[0];
+        if (r === 'cook'   || r === 'cocina'  || r === 'cocinero')    window.location.href = '/cocina';
+        else if (r === 'waiter' || r === 'mesero')                     window.location.href = '/mesero';
+        else if (r === 'cashier'|| r === 'cajero' || r === 'caja')     window.location.href = '/caja';
+        else if (r === 'delivery'|| r === 'domiciliario')              window.location.href = '/domiciliario';
+        else if (r === 'bar')                                          window.location.href = '/bar';
+        else /* gerente, otros */                                      window.location.href = '/dashboard';
         return;
       }
 
-      // 3. Multirol
+      // 3. Multirol → selector de rol
       document.getElementById('login-form').style.display = 'none';
       document.getElementById('role-selector').style.display = 'block';
 
       const selector = document.getElementById('role-buttons');
       selector.innerHTML = '';
 
-      if (roles.includes('waiter')) {
+      if (hasRole('gerente')) {
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/dashboard'" style="background:#F0E6FF; color:#6B21A8;">📊 Entrar al Dashboard</button>`;
+      }
+      if (hasRole('waiter', 'mesero')) {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/mesero'" style="background:#E1F5EE; color:#0F6E56;">🍽️ Entrar como Mesero</button>`;
       }
-      if (roles.includes('cashier')) {
+      if (hasRole('cashier', 'cajero', 'caja')) {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/caja'" style="background:#FFF8E6; color:#BA7517;">💰 Entrar a Caja</button>`;
       }
-      if (roles.includes('cook')) {
+      if (hasRole('cook', 'cocina', 'cocinero')) {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/cocina'" style="background:#FAEEDA; color:#854F0B;">👨‍🍳 Entrar a Cocina</button>`;
       }
-      if (roles.includes('delivery') || roles.includes('domiciliario')) {
+      if (hasRole('delivery', 'domiciliario')) {
         selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/domiciliario'" style="background:#E3F2FD; color:#1565C0;">🛵 Entrar a Domicilios</button>`;
+      }
+      if (hasRole('bar')) {
+        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/bar'" style="background:#FEF3C7; color:#92400E;">🍹 Entrar a Bar</button>`;
       }
 
     } else {

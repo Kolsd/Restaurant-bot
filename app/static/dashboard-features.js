@@ -366,7 +366,7 @@ async function createBranch() {
 
 // ── LÓGICA MULTIROL ──
 function toggleRole(role, el) {
-  const isAdminRole = role === 'admin';
+  const isAdminRole = role === 'admin' || role === 'gerente';
   const pwdField = document.getElementById('invite-password');
   const pinField = document.getElementById('invite-pin');
 
