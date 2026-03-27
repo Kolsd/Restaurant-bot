@@ -61,7 +61,13 @@ class UpdateRestaurantRequest(BaseModel):
     name: str = None; address: str = None; whatsapp_number: str = None
     wa_phone_id: str = None; wa_access_token: str = None
     features: dict = None; menu: str = None
-class TeamInviteRequest(BaseModel): username: str; password: str; role: str; branch_id: int = None
+class TeamInviteRequest(BaseModel):
+    username: str
+    password: str = ""
+    pin: str = ""
+    role: str = "mesero"
+    phone: str = ""
+    branch_id: int = None
 class CreateBranchRequest(BaseModel): name: str; whatsapp_number: str = ""; address: str; menu: dict = {}
 
 # ── SERVICE WORKER (must be served at root scope, not /static/) ───────
@@ -365,47 +371,119 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
 
 
+_STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "otro"}
+
+
 @router.get("/api/team/users")
 async def list_team_users(request: Request, branch_id: int = None):
     user = await get_current_user(request)
     role = user.get("role", "owner")
     all_users = await db.db_get_all_users()
+
     if "owner" in role:
-        return {"users": [u for u in all_users if u.get("branch_id") == branch_id] if branch_id else all_users}
-    if "admin" in role and user.get("branch_id"):
-        return {"users": [u for u in all_users if u.get("branch_id") == user["branch_id"]]}
-    raise HTTPException(status_code=403, detail="No autorizado")
+        filtered = [u for u in all_users if u.get("branch_id") == branch_id] if branch_id else all_users
+        effective_branch = branch_id
+    elif "admin" in role and user.get("branch_id"):
+        filtered = [u for u in all_users if u.get("branch_id") == user["branch_id"]]
+        effective_branch = user["branch_id"]
+    else:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    for u in filtered:
+        u["source"] = "user"
+
+    # Merge staff members for the branch into the combined team view
+    staff_members = []
+    if effective_branch:
+        raw_staff = await db.db_get_team_staff_by_branch(effective_branch)
+        for s in raw_staff:
+            roles_list = s.get("roles") or [s.get("role", "mesero")]
+            staff_members.append({
+                "username": s["id"],          # staff UUID used as key for delete
+                "display_name": s["name"],
+                "role": ",".join(roles_list),
+                "branch_id": effective_branch,
+                "phone": s.get("phone", ""),
+                "source": "staff",
+                "staff_id": s["id"],
+                "active": s.get("active", True),
+            })
+
+    return {"users": filtered + staff_members}
 
 
 @router.post("/api/team/invite")
 async def team_invite(request: Request, body: TeamInviteRequest):
+    from passlib.context import CryptContext as _CC
+    _pin_ctx = _CC(schemes=["bcrypt"], deprecated="auto")
+
     creator = await get_current_user(request)
     role = creator.get("role", "owner")
-    if "owner" not in role and "admin" not in role: raise HTTPException(status_code=403, detail="No autorizado")
-    
+    if "owner" not in role and "admin" not in role:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
     branch_id = body.branch_id if "owner" in role else creator.get("branch_id")
-    if not branch_id: raise HTTPException(status_code=400, detail="Sucursal requerida")
+    if not branch_id:
+        raise HTTPException(status_code=400, detail="Sucursal requerida")
     branch = await db.db_get_restaurant_by_id(branch_id)
-    
-    success = await db.db_create_user(body.username, hash_password(body.password), branch["name"], role=body.role, branch_id=branch_id, parent_user=creator["username"])
-    if not success: raise HTTPException(status_code=400, detail="Usuario ya existe")
+
+    # Admin role → dashboard user account (password login)
+    if body.role == "admin":
+        if not body.password:
+            raise HTTPException(status_code=400, detail="Contraseña requerida para administrador")
+        success = await db.db_create_user(
+            body.username, hash_password(body.password), branch["name"],
+            role="admin", branch_id=branch_id, parent_user=creator["username"],
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail="Usuario ya existe")
+    else:
+        # Operational roles → staff table with PIN
+        if not body.pin:
+            raise HTTPException(status_code=400, detail="PIN requerido para este rol")
+        if len(body.pin) < 4:
+            raise HTTPException(status_code=400, detail="El PIN debe tener al menos 4 dígitos")
+        roles = [r.strip() for r in body.role.split(",") if r.strip() in _STAFF_ROLES]
+        if not roles:
+            roles = ["mesero"]
+        pin_hash = _pin_ctx.hash(body.pin)
+        await db.db_create_staff(
+            restaurant_id=branch_id,
+            name=body.username,
+            role=roles[0],
+            pin_hash=pin_hash,
+            phone=body.phone,
+            roles=roles,
+        )
+
     return {"success": True}
 
 
-@router.delete("/api/team/users/{username}")
-async def delete_user(username: str, request: Request):
+@router.delete("/api/team/users/{user_id}")
+async def delete_user(user_id: str, request: Request):
     creator = await get_current_user(request)
     role = creator.get("role", "owner")
-    target = await db.db_get_user(username)
-    if not target: raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    
-    if "admin" in role and "owner" not in role and target.get("branch_id") != creator.get("branch_id"):
+    if "owner" not in role and "admin" not in role:
         raise HTTPException(status_code=403, detail="No autorizado")
-    elif "owner" not in role and "admin" not in role:
-        raise HTTPException(status_code=403, detail="No autorizado")
-        
+
+    # Try dashboard user first
+    target = await db.db_get_user(user_id)
+    if target:
+        if "admin" in role and "owner" not in role and target.get("branch_id") != creator.get("branch_id"):
+            raise HTTPException(status_code=403, detail="No autorizado")
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM users WHERE username=$1", user_id.lower().strip())
+        return {"success": True}
+
+    # Try staff member by UUID
     pool = await db.get_pool()
-    async with pool.acquire() as conn: await conn.execute("DELETE FROM users WHERE username=$1", username.lower().strip())
+    async with pool.acquire() as conn:
+        deleted = await conn.fetchval(
+            "DELETE FROM staff WHERE id=$1::uuid RETURNING id", user_id
+        )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return {"success": True}
 
 
