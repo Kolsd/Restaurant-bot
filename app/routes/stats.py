@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request, HTTPException, Query
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_restaurant
+from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -26,24 +26,45 @@ def get_date_range(period: str, tz_str: str):
     elif period == "semester": return str(today.replace(month=1 if today.month <= 6 else 7, day=1)), str(today)
     elif period == "year": return str(today.replace(month=1, day=1)), str(today)
     return str(today), str(today)
+
+async def filter_conversations_for_branch(conversations: list, branch_id: int, bot_number: str) -> list:
+    """Si el usuario es de una sucursal, solo muestra los chats de sus mesas."""
+    if not branch_id or not conversations:
+        return conversations
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        # Buscamos los teléfonos con sesiones activas en las mesas de ESTA sucursal
+        rows = await conn.fetch("""
+            SELECT DISTINCT ts.phone 
+            FROM table_sessions ts
+            JOIN restaurant_tables rt ON ts.table_id = rt.id
+            WHERE rt.branch_id = $1 AND ts.bot_number = $2
+        """, branch_id, bot_number)
+        allowed_phones = {r["phone"] for r in rows}
+    
+    # Devolvemos solo los chats que coincidan con esos teléfonos
+    return [c for c in conversations if c.get("phone") in allowed_phones]    
     
 # =====================================================================
 # ENDPOINT MAESTRO (SYNC)
 # =====================================================================
 @router.get("/api/dashboard/sync")
 async def dashboard_sync(request: Request, period: str = Query("today")):
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period, get_tz(restaurant))
 
     orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
-    # FIX: ahora filtra conversaciones por el rango de fechas del período seleccionado
-    conversations = await db.db_get_all_conversations(
+    
+    all_convs = await db.db_get_all_conversations(
         bot_number=bot_number,
         date_from=date_from,
         date_to=date_to
     )
+    conversations = await filter_conversations_for_branch(all_convs, user.get("branch_id"), bot_number)
 
     paid    = [o for o in orders if o["paid"]]
     pending = [o for o in orders if not o["paid"]]
@@ -114,6 +135,7 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
 
 @router.get("/api/dashboard/stats")
 async def dashboard_stats(request: Request, period: str = Query("today")):
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period, get_tz(restaurant))
@@ -122,12 +144,13 @@ async def dashboard_stats(request: Request, period: str = Query("today")):
     paid         = [o for o in orders if o["paid"]]
     pending      = [o for o in orders if not o["paid"]]
     reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
-    # FIX: filtra conversaciones por período
-    conversations = await db.db_get_all_conversations(
+    
+    all_convs = await db.db_get_all_conversations(
         bot_number=bot_number,
         date_from=date_from,
         date_to=date_to
     )
+    conversations = await filter_conversations_for_branch(all_convs, user.get("branch_id"), bot_number)
 
     return {
         "period": period, "date_from": date_from, "date_to": date_to,
@@ -169,15 +192,16 @@ async def dashboard_orders(request: Request, period: str = Query("today")):
         })
     return {"orders": result}
 
-@router.get("/api/dashboard/reservations")
-async def dashboard_reservations(request: Request, period: str = Query("today")):
+@router.get("/api/dashboard/conversations")
+async def dashboard_conversations(request: Request):
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    return {
-        "reservations": await db.db_get_reservations_range(
-            *get_date_range(period),
-            bot_number=restaurant["whatsapp_number"]
-        )
-    }
+    bot_number = restaurant["whatsapp_number"]
+    
+    all_convs = await db.db_get_all_conversations(bot_number=bot_number)
+    conversations = await filter_conversations_for_branch(all_convs, user.get("branch_id"), bot_number)
+    
+    return {"conversations": conversations}
 
 @router.get("/api/dashboard/conversations")
 async def dashboard_conversations(request: Request):
