@@ -1188,3 +1188,155 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadTableOrdersSection, 15000);
 });
 
+// ── GESTIÓN DE STAFF OPERATIVO (ROSTER) ─────────────────────────────────
+
+async function loadStaff() {
+  const h = window._dashHeaders;
+  const container = document.getElementById('staff-component');
+  if (!container) return;
+
+  try {
+    const r = await fetch('/api/staff', { headers: h });
+    if (!r.ok) {
+      container.innerHTML = '<div class="empty-state">Error al cargar el equipo.</div>';
+      return;
+    }
+    const data = await r.json();
+    const staffList = data.staff || [];
+    renderStaff(staffList);
+  } catch(e) {
+    console.error('Error loadStaff:', e);
+    container.innerHTML = '<div class="empty-state">Error de conexión.</div>';
+  }
+}
+
+function renderStaff(staffList) {
+  const container = document.getElementById('staff-component');
+  
+  // Filtrar solo los activos (opcional, o mostrar todos)
+  const activeStaff = staffList.filter(s => s.active !== false);
+
+  if (activeStaff.length === 0) {
+    container.innerHTML = '<div class="empty-state">No hay empleados operativos registrados.</div>';
+    return;
+  }
+
+  // Usamos un Grid CSS directo en línea para las tarjetas
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">';
+  
+  activeStaff.forEach(s => {
+    const rolesStr = s.roles ? s.roles.join(',') : (s.role || 'mesero');
+    const badgesHtml = formatRoles(rolesStr); // Reutilizamos tu función formatRoles
+    
+    html += `
+      <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.02);">
+        <button onclick="deleteStaff('${s.id}', '${s.name}')" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;line-height:1;">&times;</button>
+        
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+          <div style="width:40px;height:40px;border-radius:50%;background:#f0f0e8;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#555;">
+            ${s.name.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div style="font-size:15px;font-weight:600;color:#222;">${s.name}</div>
+            <div style="font-size:11px;color:#888;">PIN Configurado</div>
+          </div>
+        </div>
+        
+        <div style="min-height:30px;">
+          ${badgesHtml}
+        </div>
+      </div>
+    `;
+  });
+  
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function openCreateStaffModal() {
+  document.getElementById('staff-create-name').value = '';
+  document.getElementById('staff-create-pin').value = '';
+  // Resetear checkboxes (dejar solo mesero)
+  document.querySelectorAll('#staff-create-roles input[type="checkbox"]').forEach(cb => {
+    cb.checked = cb.value === 'mesero';
+  });
+  document.getElementById('modal-staff-create').style.display = 'flex';
+}
+
+function closeCreateStaffModal() {
+  document.getElementById('modal-staff-create').style.display = 'none';
+}
+
+async function submitCreateStaff() {
+  const h = window._dashHeaders;
+  const name = document.getElementById('staff-create-name').value.trim();
+  const pin = document.getElementById('staff-create-pin').value.trim();
+  
+  // Recoger los roles seleccionados
+  const selectedRoles = [];
+  document.querySelectorAll('#staff-create-roles input[type="checkbox"]:checked').forEach(cb => {
+    selectedRoles.push(cb.value);
+  });
+
+  if (!name) { alert('Ingresa el nombre del empleado.'); return; }
+  if (selectedRoles.length === 0) { alert('Selecciona al menos un rol.'); return; }
+  if (pin.length < 4) { alert('El PIN debe tener al menos 4 dígitos.'); return; }
+
+  try {
+    // El backend espera el PIN en el campo "password" según tu pydantic model
+    const payload = {
+      name: name,
+      roles: selectedRoles,
+      role: selectedRoles[0], // fallback
+      password: pin,
+      phone: ""
+    };
+
+    const r = await fetch('/api/staff', {
+      method: 'POST',
+      headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (r.ok) {
+      closeCreateStaffModal();
+      loadStaff(); // Recargar el grid
+    } else {
+      const e = await r.json();
+      alert('Error al crear empleado: ' + (e.detail || r.statusText));
+    }
+  } catch(e) {
+    console.error(e);
+    alert('Error de conexión.');
+  }
+}
+
+async function deleteStaff(id, name) {
+  if (!confirm(`¿Estás seguro de que deseas eliminar a ${name}?`)) return;
+  
+  const h = window._dashHeaders;
+  try {
+    const r = await fetch('/api/staff/' + id, {
+      method: 'DELETE',
+      headers: h
+    });
+    
+    if (r.ok) {
+      loadStaff();
+    } else {
+      const e = await r.json();
+      alert('Error al eliminar: ' + (e.detail || r.statusText));
+    }
+  } catch(e) {
+    alert('Error de conexión.');
+  }
+}
+
+// Asegurarnos de que se cargue al iniciar si estamos en la pestaña
+// Puedes atar esto a tu función showSection del dashboard-core.js
+document.addEventListener('DOMContentLoaded', () => {
+  // Solo intentamos cargar si el contenedor existe
+  if(document.getElementById('staff-component')) {
+      loadStaff();
+  }
+});
