@@ -624,12 +624,15 @@ function setCustomPeriod(btn) {
 }
 
 // ── GESTIÓN GLOBAL DE SUCURSALES (TOPBAR) ──
-async function loadGlobalBranches() {
-  const role = localStorage.getItem('rb_role') || '';
+/* ═══════════════════════════════════════════════════
+   SELECTOR GLOBAL DE SUCURSALES (TOPBAR)
+═══════════════════════════════════════════════════ */
+window.loadGlobalBranches = async function() {
+  // Aseguramos leer el rol en minúsculas para que nunca falle
+  const role = (localStorage.getItem('rb_role') || '').toLowerCase();
   if (!role.includes('owner')) return;
   
   const select = document.getElementById('global-branch-select');
-  const adminBtn = document.getElementById('btn-staff-add-admin');
   if (!select) return;
   
   try {
@@ -637,7 +640,8 @@ async function loadGlobalBranches() {
       if (r.ok) {
           const data = await r.json();
           const branches = data.branches || [];
-          if(branches.length === 0) return; // Si no tiene sucursales, no mostramos el dropdown
+          
+          if(branches.length === 0) return; // Si no hay sucursales, se queda oculto
 
           select.innerHTML = '<option value="matriz">🏠 Casa Matriz</option>';
           branches.forEach(b => {
@@ -647,11 +651,43 @@ async function loadGlobalBranches() {
               select.appendChild(opt);
           });
           
+          // Mantiene seleccionada la sucursal en la que estabas si recargas la página
+          if (window._dashHeaders['X-Branch-ID']) {
+              select.value = window._dashHeaders['X-Branch-ID'];
+          }
+          
+          // ¡Muestra el botón!
           select.style.display = 'block';
-          if (adminBtn) adminBtn.style.display = 'block';
       }
   } catch(e) { console.error('Error cargando sucursales globales', e); }
-}
+};
+
+window.changeGlobalBranch = function() {
+  const select = document.getElementById('global-branch-select');
+  if (select && select.value && select.value !== 'matriz') {
+      window._dashHeaders['X-Branch-ID'] = select.value;
+  } else {
+      delete window._dashHeaders['X-Branch-ID'];
+  }
+  
+  // Recargar todas las vistas
+  refreshAll();
+  if(typeof loadMenu === 'function') loadMenu();
+  if(typeof loadTables === 'function') loadTables();
+  if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
+  
+  const staffActive = document.getElementById('staff')?.classList.contains('active');
+  if(staffActive && typeof loadStaffSection === 'function') loadStaffSection();
+};
+
+// 🛡️ EL GATILLO AUTOMÁTICO: Esto obliga al navegador a cargar el botón SIEMPRE al iniciar
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        if (typeof window.loadGlobalBranches === 'function') {
+            window.loadGlobalBranches();
+        }
+    }, 300); // Un pequeño retraso de 300ms para asegurar que tu token de sesión ya esté listo
+});
 
 window.changeGlobalBranch = function() {
   const select = document.getElementById('global-branch-select');
