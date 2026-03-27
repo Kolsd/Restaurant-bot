@@ -30,17 +30,24 @@ def _can_send_entregado_notif(phone: str) -> bool:
     return False
 
 async def get_table_wa_number(table: dict) -> str:
+    """Busca el WhatsApp del restaurante al que pertenece la mesa de forma robusta."""
     wa_number = ""
-    if table.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(table["branch_id"])
+    # 1. Intentamos por el ID de sucursal de la mesa
+    bid = table.get("branch_id")
+    if bid:
+        r = await db.db_get_restaurant_by_id(bid)
         if r:
-            wa_number = r.get("whatsapp_number", wa_number)
-    else:
-        all_r = await db.db_get_all_restaurants()
-        if all_r:
-            wa_number = all_r[0].get("whatsapp_number", wa_number)
+            return r.get("whatsapp_number", "")
+            
+    # 2. Si no tiene ID (Mesa de matriz), buscamos el restaurante principal
+    all_r = await db.db_get_all_restaurants()
+    if all_r:
+        # Filtramos para encontrar la Matriz (el que no tiene padre)
+        matriz = next((res for res in all_r if not res.get("parent_restaurant_id")), all_r[0])
+        return matriz.get("whatsapp_number", "")
+        
     return wa_number
-
+    
 class TableRequest(BaseModel):
     number: int
     name: str = ""
