@@ -477,13 +477,14 @@ input:checked+.slider:before{transform:translateX(18px);}
     <!-- ══ USUARIOS ══════════════════════════════════════════════════════ -->
     <div id="usuarios" class="section">
       <div style="display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start;">
-        <div class="card">
+        <d<div class="card">
           <div class="card-title">Crear usuario</div>
           <div style="display:flex;flex-direction:column;gap:10px;">
             <div>
-              <label class="field-label">Restaurante (nombre exacto)</label>
-              <input id="u_rest" class="field-input" list="u-rest-list" placeholder="Nombre del restaurante">
-              <datalist id="u-rest-list"></datalist>
+              <label class="field-label">Restaurante</label>
+              <select id="u_rest_id" class="field-input">
+                <option value="">Selecciona un restaurante...</option>
+              </select>
             </div>
             <div><label class="field-label">Email / usuario</label><input id="u_email" class="field-input" placeholder="usuario@ejemplo.com"></div>
             <div><label class="field-label">Contraseña</label><input id="u_pass" class="field-input" type="password" placeholder="Contraseña temporal"></div>
@@ -672,10 +673,12 @@ async function loadRestaurants() {
   } catch(e){}
 }
 
+// Actualizamos el llenado de la lista para que sea un SELECT
 function populateRestaurantDatalist() {
-  const dl = $('u-rest-list');
-  if(!dl) return;
-  dl.innerHTML = ALL_RESTAURANTS.map(r=>`<option value="${escHtml(r.name)}">`).join('');
+  const select = $('u_rest_id');
+  if(!select) return;
+  select.innerHTML = '<option value="">Selecciona un restaurante...</option>' + 
+    ALL_RESTAURANTS.map(r => `<option value="${r.id}">${escHtml(r.name)} (#${r.id})</option>`).join('');
 }
 
 function getFeatures(r) {
@@ -964,26 +967,51 @@ async function loadUsers() {
   } catch(e){}
 }
 
+// Actualizamos la tabla para añadir el botón eliminar
 function renderUsersTable(users) {
   const tbody = $('users-tbody');
-  if(!users.length){ tbody.innerHTML=`<tr><td colspan="4" class="empty-state">Sin usuarios</td></tr>`; return; }
+  if(!users.length){ tbody.innerHTML=`<tr><td colspan="5" class="empty-state">Sin usuarios</td></tr>`; return; }
   tbody.innerHTML = users.map(u=>`<tr>
     <td><strong>${escHtml(u.username)}</strong></td>
     <td style="font-size:12px;">${escHtml(u.restaurant_name||'—')}</td>
     <td><span class="badge-chip">${escHtml(u.role||'owner')}</span></td>
-    <td style="color:#aaa;font-size:12px;">${u.branch_id||'—'}</td>
+    <td style="color:#aaa;font-size:12px;">#${u.branch_id||'—'}</td>
+    <td style="text-align:right;">
+      <button class="btn btn-danger btn-sm" onclick="deleteGlobalUser('${u.username}')">Eliminar</button>
+    </td>
   </tr>`).join('');
 }
 
+// Modificamos la creación para enviar el ID
 async function createUser() {
-  const rest  = $('u_rest').value.trim();
-  const email = $('u_email').value.trim();
-  const pass  = $('u_pass').value.trim();
-  if(!rest||!email||!pass){ showFeedback('user-feedback','❌ Todos los campos son requeridos', false); return; }
-  const r = await fetch('/api/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({admin_key:ADMIN_KEY,restaurant_name:rest,username:email,password:pass})});
-  if(r.ok){ showFeedback('user-feedback','✅ Usuario creado', true); $('u_email').value=''; $('u_pass').value=''; loadUsers(); }
-  else { const e=await r.json().catch(()=>({detail:'Error'})); showFeedback('user-feedback','❌ '+(e.detail||'Error'), false); }
+  const restId = $('u_rest_id').value;
+  const email  = $('u_email').value.trim();
+  const pass   = $('u_pass').value.trim();
+  
+  if(!restId || !email || !pass){ 
+    showFeedback('user-feedback','❌ Todos los campos son requeridos', false); 
+    return; 
+  }
+  
+  const r = await fetch('/api/admin/create-user',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+        admin_key: ADMIN_KEY,
+        restaurant_id: parseInt(restId), 
+        username: email,
+        password: pass
+    })
+  });
+  
+  if(r.ok){ 
+    showFeedback('user-feedback','✅ Usuario creado', true); 
+    $('u_email').value=''; $('u_pass').value=''; 
+    loadUsers(); 
+  } else { 
+    const e = await r.json().catch(()=>({detail:'Error'})); 
+    showFeedback('user-feedback','❌ '+(e.detail||'Error'), false); 
+  }
 }
 
 // ── DIAN & Folios ─────────────────────────────────────────────────
@@ -1021,6 +1049,25 @@ function renderDIAN(stats) {
     <td style="color:#aaa;font-size:11px;">${s.last_invoice_at?new Date(s.last_invoice_at).toLocaleDateString('es-CO'):'—'}</td>
   </tr>`).join('');
 }
+
+// Nueva función para borrar usuarios
+async function deleteGlobalUser(username) {
+  if(!confirm(`¿Estás seguro de eliminar permanentemente al usuario ${username}?`)) return;
+  
+  try {
+    const r = await fetch(`/api/admin/delete-user?admin_key=${encodeURIComponent(ADMIN_KEY)}&username=${encodeURIComponent(username)}`, {
+      method:'POST'
+    });
+    if(r.ok) {
+      loadUsers();
+    } else {
+      alert('No se pudo eliminar el usuario.');
+    }
+  } catch(e) {
+    alert('Error de conexión.');
+  }
+}
+
 </script>
 </body>
 </html>
