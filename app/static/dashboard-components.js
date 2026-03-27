@@ -230,147 +230,273 @@ async function _staffFetch(path, opts = {}) {
 
 // ── Tab renderers ───────────────────────────────────────────────────────────
 
-function _renderRosterTab(state, el, self) {
-  // ── Add staff form ────────────────────────────────────────────────────────
-  const formWrap = document.createElement('div');
-  formWrap.style.cssText = 'background:#f8f8f5;border:1px solid #e0e0d8;border-radius:10px;padding:1rem;margin-bottom:1.25rem;';
+// ── Role badge colors ────────────────────────────────────────────────────────
+const _BADGE_COLORS = {
+  mesero:       ['#E1F5EE', '#0F6E56'],
+  cocina:       ['#FEF3C7', '#92400E'],
+  caja:         ['#FFF8E6', '#BA7517'],
+  bar:          ['#F0E6FF', '#6B21A8'],
+  domiciliario: ['#E3F2FD', '#1565C0'],
+  gerente:      ['#F3E8FF', '#7C3AED'],
+  otro:         ['#F3F4F6', '#555555'],
+};
 
-  const formTitle = document.createElement('div');
-  formTitle.textContent = 'Agregar empleado';
-  formTitle.style.cssText = 'font-size:14px;font-weight:600;margin-bottom:.75rem;';
-  formWrap.appendChild(formTitle);
+// ── Add-employee modal (rebuilt fresh on each open) ──────────────────────────
+function _openStaffAddModal(self) {
+  const old = document.getElementById('_staff-add-modal');
+  if (old) old.remove();
 
-  const nameIn  = _makeInput('Nombre completo');
-  const roleIn  = _makeSelect(Object.entries(_ROLE_LABELS), 'mesero');
-  const pinIn   = _makeInput('PIN (4–8 dígitos)', 'password');
+  const overlay = document.createElement('div');
+  overlay.id = '_staff-add-modal';
+  overlay.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:16px;padding:2rem;width:480px;max-width:92vw;max-height:90vh;overflow-y:auto;';
+
+  // Title
+  const title = document.createElement('div');
+  title.textContent = 'Nuevo empleado operativo';
+  title.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:1.25rem;';
+  box.appendChild(title);
+
+  // Name
+  const nameIn = _makeInput('Nombre completo');
+  nameIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:10px;';
+  box.appendChild(nameIn);
+
+  // Role label
+  const roleLabel = document.createElement('div');
+  roleLabel.textContent = 'Rol(es) — puedes elegir varios:';
+  roleLabel.style.cssText = 'font-size:13px;font-weight:600;color:#555;margin-bottom:8px;';
+  box.appendChild(roleLabel);
+
+  // Role toggle grid
+  const rolesGrid = document.createElement('div');
+  rolesGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;';
+
+  const operativeRoles = [
+    ['mesero', '🍽️', 'Mesero'],
+    ['caja', '💰', 'Cajero'],
+    ['cocina', '👨‍🍳', 'Cocina'],
+    ['domiciliario', '🛵', 'Domiciliario'],
+    ['bar', '🍹', 'Bar'],
+    ['otro', '🔧', 'Otro'],
+  ];
+
+  const selectedRoles = new Set(['mesero']);
+
+  operativeRoles.forEach(([role, icon, label]) => {
+    const card = document.createElement('div');
+    const isActive = selectedRoles.has(role);
+    card.style.cssText = `border:1.5px solid ${isActive ? '#1D9E75' : '#e0e0d8'};background:${isActive ? '#f0faf7' : '#fff'};
+      border-radius:10px;padding:10px 4px;text-align:center;cursor:pointer;transition:all .15s;`;
+
+    const iconEl = document.createElement('div');
+    iconEl.textContent = icon;
+    iconEl.style.cssText = 'font-size:22px;margin-bottom:2px;';
+
+    const labelEl = document.createElement('div');
+    labelEl.textContent = label;
+    labelEl.style.cssText = 'font-weight:600;font-size:12px;color:#111;';
+
+    card.appendChild(iconEl);
+    card.appendChild(labelEl);
+
+    card.addEventListener('click', () => {
+      if (selectedRoles.has(role)) {
+        if (selectedRoles.size === 1) return;
+        selectedRoles.delete(role);
+        card.style.borderColor = '#e0e0d8';
+        card.style.background = '#fff';
+      } else {
+        selectedRoles.add(role);
+        card.style.borderColor = '#1D9E75';
+        card.style.background = '#f0faf7';
+      }
+    });
+
+    rolesGrid.appendChild(card);
+  });
+  box.appendChild(rolesGrid);
+
+  // PIN
+  const pinIn = _makeInput('PIN (4–8 dígitos)', 'password');
+  pinIn.setAttribute('inputmode', 'numeric');
+  pinIn.setAttribute('maxlength', '8');
+  pinIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:10px;';
+  box.appendChild(pinIn);
+
+  // Phone
   const phoneIn = _makeInput('Teléfono (opcional)');
+  phoneIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:10px;';
+  box.appendChild(phoneIn);
 
-  const row1 = document.createElement('div');
-  row1.style.cssText = _rowStyle();
-  row1.appendChild(nameIn);
-  row1.appendChild(roleIn);
-  formWrap.appendChild(row1);
-
-  const row2 = document.createElement('div');
-  row2.style.cssText = _rowStyle();
-  row2.appendChild(pinIn);
-  row2.appendChild(phoneIn);
-  formWrap.appendChild(row2);
-
+  // Error
   const errMsg = document.createElement('div');
-  errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-top:4px;min-height:16px;';
-  formWrap.appendChild(errMsg);
+  errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-bottom:8px;min-height:16px;';
+  box.appendChild(errMsg);
 
-  const addBtn = _makeBtn('+ Agregar', 'btn-sm btn-primary', async () => {
+  // Buttons
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;';
+
+  const submitBtn = _makeBtn('Crear empleado', 'btn-sm btn-primary', async () => {
     errMsg.textContent = '';
-    const name  = nameIn.value.trim();
-    const pin   = pinIn.value.trim();
-    if (!name)            { errMsg.textContent = 'El nombre es obligatorio.'; return; }
-    if (pin.length < 4)   { errMsg.textContent = 'El PIN debe tener al menos 4 dígitos.'; return; }
+    const name = nameIn.value.trim();
+    const pin  = pinIn.value.trim();
+    if (!name)              { errMsg.textContent = 'El nombre es obligatorio.'; return; }
+    if (pin.length < 4)     { errMsg.textContent = 'El PIN debe tener al menos 4 dígitos.'; return; }
     if (!/^\d+$/.test(pin)) { errMsg.textContent = 'El PIN debe ser solo dígitos.'; return; }
 
-    addBtn.disabled = true;
-    addBtn.textContent = 'Guardando...';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Guardando...';
     try {
+      const roles = Array.from(selectedRoles);
       await _staffFetch('', {
         method: 'POST',
-        body: JSON.stringify({
-          name, role: roleIn.value, pin, phone: phoneIn.value.trim(),
-        }),
+        body: JSON.stringify({ name, role: roles[0], roles, pin, phone: phoneIn.value.trim() }),
       });
-      nameIn.value = ''; pinIn.value = ''; phoneIn.value = '';
+      overlay.remove();
       await _reloadRoster(self);
-    } catch (e) {
+    } catch(e) {
       errMsg.textContent = e.message;
     } finally {
-      addBtn.disabled = false;
-      addBtn.textContent = '+ Agregar';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Crear empleado';
     }
   });
-  formWrap.appendChild(addBtn);
-  el.appendChild(formWrap);
 
-  // ── Staff list ────────────────────────────────────────────────────────────
+  const cancelBtn = _makeBtn('Cancelar', 'btn-sm btn-outline', () => overlay.remove());
+
+  btnRow.appendChild(submitBtn);
+  btnRow.appendChild(cancelBtn);
+  box.appendChild(btnRow);
+  overlay.appendChild(box);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+
+// ── Roster tab — Card grid layout ────────────────────────────────────────────
+function _renderRosterTab(state, el, self) {
+  // Header row
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;';
+
+  const headerInfo = document.createElement('div');
+  headerInfo.style.cssText = 'font-size:13px;color:#888;';
+  const activeCount = state.staff.filter(s => s.active).length;
+  headerInfo.textContent = `${activeCount} activo${activeCount !== 1 ? 's' : ''} · ${state.staff.length} total`;
+
+  const newBtn = _makeBtn('+ Nuevo empleado', 'btn-sm btn-primary', () => _openStaffAddModal(self));
+
+  header.appendChild(headerInfo);
+  header.appendChild(newBtn);
+  el.appendChild(header);
+
   if (!state.staff.length) {
     const empty = document.createElement('div');
     empty.className   = 'empty-state';
-    empty.textContent = 'No hay empleados registrados.';
+    empty.textContent = 'No hay empleados registrados. Agrega el primero con el botón de arriba.';
     el.appendChild(empty);
     return;
   }
 
-  const tableWrap = document.createElement('div');
-  tableWrap.className = 'card';
-  tableWrap.style.overflowX = 'auto';
+  // Cards grid — active first
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;';
 
-  const tbl = document.createElement('table');
-  tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+  const sorted = [...state.staff].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
 
-  // header
-  const thead = document.createElement('thead');
-  const hrow  = document.createElement('tr');
-  ['Nombre', 'Rol', 'Teléfono', 'Estado', 'Acciones'].forEach(h => {
-    const th = document.createElement('th');
-    th.textContent = h;
-    th.style.cssText = 'text-align:left;padding:8px 10px;border-bottom:1px solid #e0e0d8;color:#888;font-weight:500;';
-    hrow.appendChild(th);
-  });
-  thead.appendChild(hrow);
-  tbl.appendChild(thead);
+  sorted.forEach(member => {
+    const card = document.createElement('div');
+    card.style.cssText = `background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:1.25rem;
+      transition:box-shadow .15s;${member.active ? '' : 'opacity:0.55;'}`;
 
-  const tbody = document.createElement('tbody');
-  state.staff.forEach(member => {
-    const tr = document.createElement('tr');
+    // Name + status dot
+    const nameRow = document.createElement('div');
+    nameRow.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;';
 
-    const tdName = document.createElement('td');
-    tdName.textContent = member.name;
-    tdName.style.padding = '9px 10px';
+    const nameEl = document.createElement('div');
+    nameEl.textContent = member.name;
+    nameEl.style.cssText = 'font-size:15px;font-weight:600;color:#111;';
 
-    const tdRole = document.createElement('td');
-    tdRole.textContent = _ROLE_LABELS[member.role] || member.role;
-    tdRole.style.padding = '9px 10px';
+    const statusDot = document.createElement('span');
+    statusDot.textContent = member.active ? '● Activo' : '○ Inactivo';
+    statusDot.style.cssText = `font-size:10px;font-weight:600;white-space:nowrap;margin-top:3px;
+      ${member.active ? 'color:#16A34A;' : 'color:#9CA3AF;'}`;
 
-    const tdPhone = document.createElement('td');
-    tdPhone.textContent = member.phone || '—';
-    tdPhone.style.padding = '9px 10px';
+    nameRow.appendChild(nameEl);
+    nameRow.appendChild(statusDot);
+    card.appendChild(nameRow);
 
-    const tdStatus = document.createElement('td');
-    tdStatus.style.padding = '9px 10px';
-    const badge = document.createElement('span');
-    badge.textContent = member.active ? 'Activo' : 'Inactivo';
-    badge.style.cssText = member.active
-      ? 'background:#DCFCE7;color:#16A34A;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;'
-      : 'background:#F3F4F6;color:#9CA3AF;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;';
-    tdStatus.appendChild(badge);
+    // Role badges (multi-rol aware)
+    const badgeRow = document.createElement('div');
+    badgeRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;';
+    const roles = (member.roles && member.roles.length) ? member.roles : [member.role];
+    roles.forEach(r => {
+      const badge = document.createElement('span');
+      badge.textContent = _ROLE_LABELS[r] || r;
+      const [bg, color] = _BADGE_COLORS[r] || ['#f0f0f0', '#555'];
+      badge.style.cssText = `background:${bg};color:${color};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;`;
+      badgeRow.appendChild(badge);
+    });
+    card.appendChild(badgeRow);
 
-    const tdActions = document.createElement('td');
-    tdActions.style.padding = '9px 10px';
+    // Phone (optional)
+    if (member.phone) {
+      const phoneEl = document.createElement('div');
+      phoneEl.textContent = '📞 ' + member.phone;
+      phoneEl.style.cssText = 'font-size:11px;color:#888;margin-bottom:8px;';
+      card.appendChild(phoneEl);
+    }
+
+    // Action buttons
+    const actRow = document.createElement('div');
+    actRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid #f0f0e8;padding-top:10px;margin-top:4px;';
+
+    if (member.active) {
+      const ciBtn = _makeBtn('▶ Entrada', 'btn-sm btn-primary', async () => {
+        ciBtn.disabled = true;
+        try {
+          await _staffFetch('/clock-in', { method: 'POST', body: JSON.stringify({ staff_id: member.id }) });
+          ciBtn.textContent = '✓ OK';
+          setTimeout(() => { ciBtn.textContent = '▶ Entrada'; ciBtn.disabled = false; }, 1500);
+        } catch(e) { alert(e.message); ciBtn.disabled = false; }
+      });
+
+      const coBtn = _makeBtn('■ Salida', 'btn-sm btn-outline', async () => {
+        coBtn.disabled = true;
+        try {
+          await _staffFetch('/clock-out', { method: 'POST', body: JSON.stringify({ staff_id: member.id }) });
+          coBtn.textContent = '✓ OK';
+          setTimeout(() => { coBtn.textContent = '■ Salida'; coBtn.disabled = false; }, 1500);
+        } catch(e) { alert(e.message); coBtn.disabled = false; }
+      });
+
+      actRow.appendChild(ciBtn);
+      actRow.appendChild(coBtn);
+    }
+
     const toggleBtn = _makeBtn(
-      member.active ? 'Desactivar' : 'Activar',
-      'btn-sm ' + (member.active ? 'btn-outline' : 'btn-primary'),
+      member.active ? 'Desactivar' : 'Reactivar',
+      'btn-sm btn-outline',
       async () => {
         toggleBtn.disabled = true;
         try {
-          await _staffFetch(`/${member.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ active: !member.active }),
-          });
+          await _staffFetch(`/${member.id}`, { method: 'PUT', body: JSON.stringify({ active: !member.active }) });
           await _reloadRoster(self);
-        } catch (e) {
-          alert(e.message);
-        } finally {
-          toggleBtn.disabled = false;
-        }
+        } catch(e) { alert(e.message); toggleBtn.disabled = false; }
       },
     );
-    tdActions.appendChild(toggleBtn);
+    actRow.appendChild(toggleBtn);
+    card.appendChild(actRow);
 
-    [tdName, tdRole, tdPhone, tdStatus, tdActions].forEach(td => tr.appendChild(td));
-    tbody.appendChild(tr);
+    grid.appendChild(card);
   });
-  tbl.appendChild(tbody);
-  tableWrap.appendChild(tbl);
-  el.appendChild(tableWrap);
+
+  el.appendChild(grid);
 }
 
 

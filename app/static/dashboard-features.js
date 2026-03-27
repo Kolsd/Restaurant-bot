@@ -414,19 +414,18 @@ function openInviteModal(branchId, branchName) {
   if (pinField)   pinField.value   = '';
   if (phoneField) phoneField.value = '';
 
-  // Reiniciar a "Mesero" por defecto al abrir el modal
-  selectedRoles = new Set(['mesero']);
-  document.getElementById('invite-role').value = 'mesero';
+  // Mis Sucursales: default Admin, siempre contraseña (nunca PIN)
+  selectedRoles = new Set(['admin']);
+  document.getElementById('invite-role').value = 'admin';
 
   document.querySelectorAll('#modal-invite .role-card').forEach(c => {
-    if (c.getAttribute('data-role') === 'mesero') c.classList.add('active');
+    if (c.getAttribute('data-role') === 'admin') c.classList.add('active');
     else c.classList.remove('active');
   });
 
-  // Roles operativos usan PIN, admin usa contraseña
   const pwdField = document.getElementById('invite-password');
-  if (pwdField) pwdField.style.display = 'none';
-  if (pinField) pinField.style.display = '';
+  if (pwdField) pwdField.style.display = '';
+  if (pinField) pinField.style.display = 'none';
 
   document.getElementById('modal-invite').style.display = 'flex';
 }
@@ -440,7 +439,7 @@ async function sendInvite() {
   const h        = window._dashHeaders;
   const username = document.getElementById('invite-username').value.trim();
   const role     = document.getElementById('invite-role').value;
-  const isAdmin  = role === 'admin';
+  const isAdmin  = role === 'admin' || role === 'gerente';
   const password = document.getElementById('invite-password').value.trim();
   const pin      = (document.getElementById('invite-pin') || {}).value?.trim() || '';
   const phone    = (document.getElementById('invite-phone') || {}).value?.trim() || '';

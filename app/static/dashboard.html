@@ -50,7 +50,7 @@
 
   <div class="nav-group-label">Equipo</div>
   <button class="nav-item" id="nav-staff" onclick="showSection('staff',this)">👤 Staff & Propinas</button>
-  <button class="nav-item" id="nav-equipo" onclick="showSection('equipo',this)">👥 Mi Equipo</button>
+  <button class="nav-item" id="nav-equipo" onclick="showSection('equipo',this)">🏢 Mis Sucursales</button>
 
   <a href="/settings" style="display:block;margin:12px 4px 4px;padding:8px 12px;background:#f0f0e8;border-radius:8px;font-size:12px;color:#555;text-decoration:none;font-weight:500;">⚙️ Configuración</a>
   <div class="live-badge" id="live-badge">
@@ -332,7 +332,7 @@
   <!-- EQUIPO -->
   <div id="equipo" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
-      <div><div style="font-size:18px;font-weight:600;">Mi Equipo</div><div style="font-size:12px;color:#888;margin-top:2px;">Gestiona sucursales y accesos de personal (Multirol)</div></div>
+      <div><div style="font-size:18px;font-weight:600;">Mis Sucursales</div><div style="font-size:12px;color:#888;margin-top:2px;">Gestiona tus sucursales y asigna acceso al dashboard a gerentes y administradores</div></div>
       <button onclick="showCreateBranch()" id="btn-create-branch" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">+ Nueva sucursal</button>
     </div>
     <div id="create-branch-form" style="display:none;background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;margin-bottom:1.25rem;">
@@ -379,50 +379,23 @@
       <div style="background:#fff;border-radius:16px;padding:2rem;width:460px;max-width:92vw;max-height:90vh;overflow-y:auto;">
         <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar miembro a <span id="modal-branch-name" style="color:#1D9E75;"></span></div>
         <div style="display:flex;flex-direction:column;gap:10px;">
-          <input id="invite-username" placeholder="Nombre completo" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <!-- Contraseña — solo visible para Administrador -->
-          <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;display:none;">
-          <!-- PIN — visible para roles operativos -->
-          <input id="invite-pin" type="password" inputmode="numeric" placeholder="PIN (4 dígitos)" maxlength="8" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <input id="invite-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <!-- Contraseña — siempre visible en Mis Sucursales (admin/gerente) -->
+          <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <!-- PIN — nunca visible aquí; solo lo usan los operativos desde Staff & Propinas -->
+          <input id="invite-pin" type="password" inputmode="numeric" placeholder="PIN (4 dígitos)" maxlength="8" style="display:none;">
           <input id="invite-phone" placeholder="Teléfono (opcional)" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <div style="font-size:13px;color:#555;margin-top:4px;font-weight:600;">Rol (puedes elegir varios):</div>
-          <input type="hidden" id="invite-role" value="mesero">
-          <div class="role-card" data-role="admin" onclick="toggleRole('admin', this)" style="margin-bottom:8px;padding:10px;">
+          <div style="font-size:13px;color:#555;margin-top:4px;font-weight:600;">Rol de acceso al dashboard:</div>
+          <input type="hidden" id="invite-role" value="admin">
+          <div class="role-card active" data-role="admin" onclick="toggleRole('admin', this)" style="margin-bottom:4px;padding:10px;">
             <div style="font-size:22px;margin-bottom:2px;">🛡️</div>
             <div style="font-weight:600;font-size:13px;color:#111;">Administrador</div>
-            <div style="font-size:11px;color:#888;margin-top:2px;">Control total del dashboard — requiere contraseña</div>
+            <div style="font-size:11px;color:#888;margin-top:2px;">Control total — acceso a todas las sucursales</div>
           </div>
-          <div style="display:flex;align-items:center;margin:4px 0;">
-            <div style="flex:1;height:1px;background:#e0e0d8;"></div>
-            <div style="font-size:10px;color:#888;padding:0 10px;font-weight:600;">ROLES OPERATIVOS (multi-rol)</div>
-            <div style="flex:1;height:1px;background:#e0e0d8;"></div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px;">
-            <div class="role-card active" data-role="mesero" onclick="toggleRole('mesero', this)" style="padding:10px 4px;">
-              <div style="font-size:22px;margin-bottom:2px;">🍽️</div>
-              <div style="font-weight:600;font-size:12px;color:#111;">Mesero</div>
-            </div>
-            <div class="role-card" data-role="caja" onclick="toggleRole('caja', this)" style="padding:10px 4px;">
-              <div style="font-size:22px;margin-bottom:2px;">💰</div>
-              <div style="font-weight:600;font-size:12px;color:#111;">Cajero</div>
-            </div>
-            <div class="role-card" data-role="cocina" onclick="toggleRole('cocina', this)" style="padding:10px 4px;">
-              <div style="font-size:22px;margin-bottom:2px;">👨‍🍳</div>
-              <div style="font-weight:600;font-size:12px;color:#111;">Cocinero</div>
-            </div>
-            <div class="role-card" data-role="domiciliario" onclick="toggleRole('domiciliario', this)" style="padding:10px 4px;">
-              <div style="font-size:22px;margin-bottom:2px;">🛵</div>
-              <div style="font-weight:600;font-size:12px;color:#111;">Domiciliario</div>
-            </div>
-            <div class="role-card" data-role="gerente" onclick="toggleRole('gerente', this)" style="padding:10px 4px;">
-              <div style="font-size:22px;margin-bottom:2px;">👔</div>
-              <div style="font-weight:600;font-size:12px;color:#111;">Gerente</div>
-              <div style="font-size:10px;color:#888;margin-top:2px;">Requiere contraseña</div>
-            </div>
-            <div class="role-card" data-role="bar" onclick="toggleRole('bar', this)" style="padding:10px 4px;">
-              <div style="font-size:22px;margin-bottom:2px;">🍹</div>
-              <div style="font-weight:600;font-size:12px;color:#111;">Bar</div>
-            </div>
+          <div class="role-card" data-role="gerente" onclick="toggleRole('gerente', this)" style="padding:10px;">
+            <div style="font-size:22px;margin-bottom:2px;">👔</div>
+            <div style="font-weight:600;font-size:13px;color:#111;">Gerente</div>
+            <div style="font-size:11px;color:#888;margin-top:2px;">Acceso al dashboard filtrado por su sucursal</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:1.25rem;">
