@@ -227,7 +227,7 @@ async function doStaffLogin() {
     btn.textContent = 'Ingresar';
     return;
   }
-
+  
   try {
     const res  = await fetch('/api/staff/pin-login', {
       method:  'POST',
@@ -249,39 +249,46 @@ async function doStaffLogin() {
     // 1. Guardar la sesión y token
     localStorage.setItem('rb_token', data.token);
     
-    // 2. Guardar los roles (el endpoint los devuelve como un Array)
-    const rolesArr = data.roles || ['mesero'];
+    // 2. SANITIZAR LOS ROLES (El escudo anti-Postgres)
+    let rolesArr = [];
+    if (Array.isArray(data.roles)) {
+      rolesArr = data.roles;
+    } else if (typeof data.roles === 'string') {
+      rolesArr = data.roles.replace(/[{}]/g, '').split(',').map(r => r.trim());
+    } else {
+      rolesArr = ['mesero'];
+    }
+    
     localStorage.setItem('rb_role', rolesArr.join(','));
     
-    // 3. Dejamos un registro básico del restaurante para las otras pantallas
+    // 3. Dejamos un registro básico del restaurante
     localStorage.setItem('rb_restaurant', JSON.stringify({ id: parseInt(restaurantId) }));
 
-    // Si por error se coló un admin, lo mandamos al dashboard
+    // Redirección si se coló un admin
     if (rolesArr.includes('owner') || rolesArr.includes('admin') || rolesArr.includes('gerente')) {
       window.location.href = '/dashboard';
       return;
     }
 
-    // Filtramos los roles válidos para mostrar las opciones (mesero, cocina, caja, etc.)
+    // Filtramos los roles válidos usando nuestro array limpio
     const opRoles = rolesArr.filter(r => ROLE_META[r]);
 
     if (opRoles.length === 0) {
-      // Si no tiene rol válido, lo mandamos a la ruta por defecto del backend
       window.location.href = data.redirect || '/mesero';
       return;
     }
 
     if (opRoles.length === 1) {
-      // Si solo tiene 1 rol, lo mandamos directo a su pantalla
       window.location.href = ROLE_META[opRoles[0]].url;
       return;
     }
 
-    // Si tiene múltiples roles (Multi-rol) → le mostramos los botones
+    // Multi-rol
     showRoleSelector(data.name || name, opRoles);
 
   } catch (e) {
-    showError('Error de conexión. Intenta de nuevo.');
+    console.error("Error real de JS:", e); // Añadimos esto para ver el error real si vuelve a fallar
+    showError('Error de sistema al procesar el login. Revisa la consola.');
   } finally {
     btn.disabled    = false;
     btn.textContent = 'Ingresar';
