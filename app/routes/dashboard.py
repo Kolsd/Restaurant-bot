@@ -479,15 +479,35 @@ async def list_team_branches(request: Request):
 @router.post("/api/team/branches")
 async def create_branch(request: Request, body: CreateBranchRequest):
     user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"): raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
+    if "owner" not in user.get("role", "owner"): 
+        raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
+        
     wa_number = body.whatsapp_number.strip()
+    all_r = await db.db_get_all_restaurants()
+    
+    # 🛡️ Obtenemos el ID de la Casa Matriz
+    my_restaurant_id = user.get("branch_id")
+    if not my_restaurant_id:
+        my_restaurant_id = all_r[0]["id"] if all_r else None
+        
     if not wa_number:
-        all_r = await db.db_get_all_restaurants()
         wa_number = all_r[0]["whatsapp_number"] + f"_b{len(all_r)+1}" if all_r else ""
+        
     lat, lon, display = await geocode_address(body.address)
+    
+    # 1. Crea el restaurante
     await db.db_create_restaurant(body.name, wa_number, body.address, body.menu, lat, lon)
+    
+    # 2. 🛡️ FIX: Vincula la nueva sucursal como hija de la matriz
+    if my_restaurant_id:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE restaurants SET parent_restaurant_id = $1 WHERE whatsapp_number = $2",
+                my_restaurant_id, wa_number
+            )
+            
     return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
-
 
 _STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "otro"}
 
