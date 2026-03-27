@@ -364,10 +364,28 @@ async def admin_set_subscription(request: SetSubscriptionRequest):
 async def list_team_branches(request: Request):
     user = await get_current_user(request)
     role = user.get("role", "owner")
-    if "owner" in role: return {"branches": await db.db_get_all_restaurants()}
+    
+    # Obtenemos el ID del restaurante del usuario actual
+    my_restaurant_id = user.get("branch_id")
+    if not my_restaurant_id:
+        all_r = await db.db_get_all_restaurants()
+        my_restaurant_id = all_r[0]["id"] if all_r else None
+
+    if "owner" in role:
+        # 🛡️ FIX: Solo listamos los restaurantes cuyo PADRE sea mi ID. 
+        # Esto hace que las sucursales aparezcan en 0 si no has creado hijos.
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name ASC", 
+                my_restaurant_id
+            )
+            return {"branches": [db._serialize(dict(r)) for r in rows]}
+            
     if "admin" in role and user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
         return {"branches": [r] if r else []}
+        
     raise HTTPException(status_code=403, detail="No autorizado")
 
 
@@ -489,15 +507,36 @@ async def delete_user(user_id: str, request: Request):
 @router.delete("/api/team/branches/{branch_id}")
 async def delete_branch(branch_id: int, request: Request):
     user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"): raise HTTPException(status_code=403, detail="Solo el dueño puede eliminar sucursales")
+    if "owner" not in user.get("role", "owner"): 
+        raise HTTPException(status_code=403, detail="Solo el dueño puede eliminar sucursales")
+    
+    # Obtenemos mi ID principal
+    my_main_id = user.get("branch_id")
+    if not my_main_id:
+        all_r = await db.db_get_all_restaurants()
+        my_main_id = all_r[0]["id"] if all_r else None
+
+    # 🛡️ ESCUDO ANTI-SUICIDIO: Si intentas borrarte a ti mismo, el sistema te detiene.
+    if branch_id == my_main_id:
+        raise HTTPException(status_code=400, detail="No puedes eliminar la Casa Matriz desde aquí.")
+
     pool = await db.get_pool()
     async with pool.acquire() as conn: 
-        # FIX: Eliminamos primero a todos los usuarios que pertenecen a esta sucursal
-        await conn.execute("DELETE FROM users WHERE branch_id=$1", branch_id)
-        # Luego eliminamos la sucursal
-        await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
-    return {"success": True}
+        # 🛡️ SEGUNDO FILTRO: Aseguramos que el restaurante a borrar sea REALMENTE una sucursal nuestra
+        is_my_branch = await conn.fetchval(
+            "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
+            branch_id, my_main_id
+        )
+        if not is_my_branch:
+            raise HTTPException(status_code=404, detail="La sucursal no existe o no pertenece a tu cuenta.")
 
+        # Eliminamos usuarios de la sucursal
+        await conn.execute("DELETE FROM users WHERE branch_id=$1", branch_id)
+        # Eliminamos la sucursal
+        await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
+        
+    return {"success": True}
+    
 @router.post("/api/admin/parse-menu")
 async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
     if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
