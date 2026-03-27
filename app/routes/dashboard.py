@@ -53,7 +53,7 @@ async def geocode_address(address: str) -> tuple:
     return None, None, None
 
 class LoginRequest(BaseModel): username: str; password: str
-class CreateUserRequest(BaseModel): username: str; password: str; restaurant_name: str; admin_key: str
+class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: str; admin_key: str
 class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
 class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; status: str
 class UpdateRestaurantRequest(BaseModel):
@@ -320,10 +320,37 @@ async def admin_get_restaurants(admin_key: str):
 
 @router.post("/api/admin/create-user")
 async def admin_create_user(request: CreateUserRequest):
-    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
-    result = await create_user(request.username, request.password, request.restaurant_name)
-    if not result["success"]: raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    if request.admin_key != os.getenv("ADMIN_KEY"): 
+        raise HTTPException(status_code=403, detail="Clave incorrecta")
+    
+    # 🛡️ Obtenemos el restaurante por ID para asegurar el vínculo
+    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
+    if not rest: 
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    
+    # Creamos el usuario owner amarrado al branch_id
+    success = await db.db_create_user(
+        username=request.username, 
+        password_hash=hash_password(request.password), 
+        restaurant_name=rest["name"],
+        role="owner",
+        branch_id=request.restaurant_id
+    )
+    
+    if not success: 
+        raise HTTPException(status_code=400, detail="El usuario ya existe")
+    return {"success": True}
+
+# 🗑️ NUEVO: Endpoint para borrar usuarios desde el SuperAdmin
+@router.post("/api/admin/delete-user")
+async def admin_delete_user(admin_key: str, username: str):
+    if admin_key != os.getenv("ADMIN_KEY"): 
+        raise HTTPException(status_code=403, detail="No autorizado")
+    
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM users WHERE username=$1", username.lower().strip())
+    return {"success": True}
 
 @router.get("/api/admin/users")
 async def admin_list_users(admin_key: str = ""):
