@@ -289,31 +289,29 @@ async def update_delivery_order_status(request: Request, order_id: str):
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None, station: str = None):
+    """Devuelve órdenes de mesa filtradas por sucursal y estado."""
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
     
+    # 🛡️ FILTRO GLOBAL: Leer el selector del Topbar
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # 🛡️ Filtro directo por o.branch_id (ya no dependemos solo del JOIN de la mesa)
         if status:
+            # Filtro por estado y sucursal
             rows = await conn.fetch(
-                "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
+                "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC", 
                 status, branch_id
             )
         else:
+            # Filtro solo por sucursal (excluyendo cerrados)
             rows = await conn.fetch(
-                "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
+                "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC", 
                 branch_id
             )
-            else:
-                rows = await conn.fetch(
-                    """SELECT * FROM table_orders
-                       WHERE status NOT IN ('factura_entregada','cancelado')
-                       ORDER BY created_at ASC""")
 
     import json as _json
     result = []
@@ -324,8 +322,6 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
             except: pass
         if d.get('created_at') and hasattr(d['created_at'], 'isoformat'):
             d['created_at'] = d['created_at'].isoformat() + 'Z'
-        if d.get('updated_at') and hasattr(d['updated_at'], 'isoformat'):
-            d['updated_at'] = d['updated_at'].isoformat() + 'Z'
         result.append(d)
 
     if station:
