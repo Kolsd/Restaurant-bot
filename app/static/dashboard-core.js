@@ -670,14 +670,15 @@ window.changeGlobalBranch = function() {
       delete window._dashHeaders['X-Branch-ID'];
   }
   
-  // Recargar todas las vistas
   refreshAll();
   if(typeof loadMenu === 'function') loadMenu();
   if(typeof loadTables === 'function') loadTables();
   if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
   
-  const staffActive = document.getElementById('staff')?.classList.contains('active');
-  if(staffActive && typeof loadStaffSection === 'function') loadStaffSection();
+  // 🛡️ ESTA LÍNEA ES CLAVE: Recarga el NPS con el nuevo Header
+  if(typeof loadNPS === 'function') {
+      loadNPS();
+  }
 };
 
 // 🛡️ EL GATILLO AUTOMÁTICO: Esto obliga al navegador a cargar el botón SIEMPRE al iniciar

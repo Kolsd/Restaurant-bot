@@ -12,8 +12,10 @@ let npsChart  = null;
 
 async function loadNPS() {
   const h = window._dashHeaders;
-  const periodBtns = document.querySelectorAll('#nps .period-btn');
-
+  // 🛡️ Limpiamos el score actual para dar feedback visual de carga
+  const scoreEl = document.getElementById('nps-score-display');
+  if (scoreEl) scoreEl.innerHTML = '<div style="text-align:center;color:#888;padding:2rem;">Cargando sucursal...</div>';
+  
   try {
     const [rStats, rResponses] = await Promise.all([
       fetch(`/api/nps/stats?period=${npsPeriod}`, { headers: h }),
