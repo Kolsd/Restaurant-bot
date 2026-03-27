@@ -60,15 +60,24 @@ class StaffPinLoginRequest(BaseModel):
 
 
 def _staff_redirect(roles: list) -> str:
-    """Return the best landing page URL for the given role set."""
+    """Return the best landing page URL for the given role set.
+    For multi-role staff the frontend handles selection; this is used
+    only for single-role redirects from /api/staff/pin-login.
+    """
     if "gerente" in roles:
         return "/dashboard"
     if "cocina" in roles:
         return "/cocina"
     if "domiciliario" in roles:
         return "/domiciliario"
-    # mesero, caja, bar, otro → POS / dashboard
-    return "/dashboard"
+    if "mesero" in roles:
+        return "/mesero"
+    if "caja" in roles:
+        return "/caja"
+    if "bar" in roles:
+        return "/bar"
+    # otro / unknown → staff portal (will handle redirect there)
+    return "/staff"
 
 
 class ClockInRequest(BaseModel):

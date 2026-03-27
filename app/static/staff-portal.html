@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Acceso del Equipo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(160deg, #0a5c44 0%, #1D9E75 60%, #25c48f 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 22px;
+    padding: 2.5rem 2rem 2rem;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.2);
+  }
+
+  /* ── Login view ── */
+  .header { text-align: center; margin-bottom: 2rem; }
+  .logo {
+    width: 60px; height: 60px;
+    background: #1D9E75;
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 24px;
+    margin: 0 auto 1.25rem;
+    box-shadow: 0 4px 16px rgba(29,158,117,.35);
+  }
+  h1 { font-size: 22px; font-weight: 700; color: #111; }
+  .restaurant-name { font-size: 15px; font-weight: 600; color: #1D9E75; margin-top: 4px; }
+  .sub { font-size: 13px; color: #999; margin-top: 6px; }
+
+  .field { margin-bottom: 1.1rem; }
+  label { font-size: 12px; font-weight: 600; color: #666; display: block; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+  input {
+    width: 100%; padding: 12px 14px;
+    border: 1.5px solid #e8e8e0;
+    border-radius: 11px;
+    font-size: 15px; color: #111;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    background: #fafaf8;
+  }
+  input:focus {
+    border-color: #1D9E75;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(29,158,117,0.12);
+  }
+
+  .btn-primary {
+    width: 100%; padding: 14px;
+    background: #1D9E75; color: #fff;
+    border: none; border-radius: 11px;
+    font-size: 15px; font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    margin-top: 4px;
+    letter-spacing: 0.01em;
+  }
+  .btn-primary:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
+  .btn-primary:active:not(:disabled) { transform: translateY(0); }
+  .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .error {
+    font-size: 13px; color: #c0392b;
+    background: #fdf0ef;
+    border: 1px solid #f5c6c6;
+    border-radius: 9px;
+    padding: 10px 14px;
+    margin-bottom: 1rem;
+  }
+
+  /* ── Role selector ── */
+  #role-view { display: none; }
+  .welcome-text { font-size: 20px; font-weight: 700; color: #111; margin-bottom: 6px; }
+  .choose-text  { font-size: 13px; color: #999; margin-bottom: 1.5rem; }
+
+  .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .role-tile {
+    display: block;
+    padding: 1.3rem 1rem;
+    border-radius: 14px;
+    text-align: center;
+    cursor: pointer;
+    text-decoration: none;
+    border: 2px solid transparent;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .role-tile:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+  }
+  .role-tile .tile-icon { font-size: 30px; margin-bottom: 6px; display: block; }
+  .role-tile .tile-name { font-size: 13px; font-weight: 700; display: block; }
+
+  .btn-ghost {
+    width: 100%; padding: 11px;
+    background: none; color: #aaa;
+    border: 1.5px solid #e8e8e0;
+    border-radius: 11px;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; margin-top: 14px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .btn-ghost:hover { background: #f5f5f0; color: #555; }
+
+  .footer { text-align: center; font-size: 11px; color: #bbb; margin-top: 1.75rem; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <!-- LOGIN VIEW -->
+  <div id="login-view">
+    <div class="header">
+      <div class="logo">M</div>
+      <h1>Acceso del equipo</h1>
+      <div id="restaurant-name-el" class="restaurant-name" style="display:none;"></div>
+      <div class="sub">Ingresa con tu nombre y contraseña</div>
+    </div>
+
+    <div id="error-msg" class="error" style="display:none;"></div>
+
+    <div class="field">
+      <label>Nombre</label>
+      <input type="text" id="staff-name" placeholder="Tu nombre completo" autocomplete="name"
+             inputmode="text" />
+    </div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input type="password" id="staff-pin" placeholder="••••••••"
+             onkeydown="if(event.key==='Enter') doStaffLogin()" />
+    </div>
+
+    <button class="btn-primary" id="login-btn" onclick="doStaffLogin()">Ingresar</button>
+  </div>
+
+  <!-- ROLE SELECTOR VIEW -->
+  <div id="role-view">
+    <div style="text-align:center; margin-bottom:1.5rem;">
+      <div class="logo">M</div>
+      <div class="welcome-text" id="welcome-name">¡Bienvenido!</div>
+      <div class="choose-text">¿A qué área vas a entrar hoy?</div>
+    </div>
+    <div class="role-grid" id="role-grid"></div>
+    <button class="btn-ghost" onclick="doLogout()">Cambiar usuario</button>
+  </div>
+
+  <div class="footer">Mesio · Powered by Claude AI</div>
+</div>
+
+<script>
+const ROLE_META = {
+  mesero:       { icon: '🍽️', label: 'Mesero',      url: '/mesero',       bg: '#E1F5EE', color: '#0F6E56' },
+  cocina:       { icon: '👨‍🍳', label: 'Cocina',       url: '/cocina',       bg: '#FEF3C7', color: '#92400E' },
+  bar:          { icon: '🍹', label: 'Bar',           url: '/bar',          bg: '#F0E6FF', color: '#6B21A8' },
+  caja:         { icon: '💰', label: 'Caja',          url: '/caja',         bg: '#FFF8E6', color: '#BA7517' },
+  domiciliario: { icon: '🛵', label: 'Domicilios',    url: '/domiciliario', bg: '#E3F2FD', color: '#1565C0' },
+  gerente:      { icon: '📊', label: 'Dashboard',     url: '/dashboard',    bg: '#F3E8FF', color: '#7C3AED' },
+  otro:         { icon: '🔧', label: 'Panel',         url: '/mesero',       bg: '#F3F4F6', color: '#555555' },
+};
+
+// Read restaurant ID from URL ?r=123
+const urlParams    = new URLSearchParams(window.location.search);
+const restaurantId = urlParams.get('r');
+
+if (restaurantId) {
+  fetch('/api/public/restaurant-info?id=' + encodeURIComponent(restaurantId))
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && data.name) {
+        const el = document.getElementById('restaurant-name-el');
+        el.textContent = data.name;
+        el.style.display = 'block';
+        document.title = data.name + ' — Acceso del Equipo';
+      }
+    })
+    .catch(() => {});
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function doLogout() {
+  localStorage.removeItem('rb_token');
+  localStorage.removeItem('rb_role');
+  localStorage.removeItem('rb_staff_id');
+  localStorage.removeItem('rb_restaurant');
+  document.getElementById('role-view').style.display  = 'none';
+  document.getElementById('login-view').style.display = '';
+  document.getElementById('error-msg').style.display  = 'none';
+  document.getElementById('staff-name').value = '';
+  document.getElementById('staff-pin').value  = '';
+  document.getElementById('staff-name').focus();
+}
+
+async function doStaffLogin() {
+  const name  = document.getElementById('staff-name').value.trim();
+  const pin   = document.getElementById('staff-pin').value;
+  const btn   = document.getElementById('login-btn');
+
+  document.getElementById('error-msg').style.display = 'none';
+
+  if (!name) { showError('Por favor ingresa tu nombre.'); return; }
+  if (!pin)  { showError('Por favor ingresa tu contraseña.'); return; }
+
+  btn.disabled    = true;
+  btn.textContent = 'Verificando...';
+
+  try {
+    const res  = await fetch('/api/auth/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ username: name, password: pin }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      showError(data.detail || data.error || 'Nombre o contraseña incorrectos.');
+      return;
+    }
+
+    // Persist session
+    localStorage.setItem('rb_token',      data.token);
+    localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant || {}));
+    if (data.staff_id) localStorage.setItem('rb_staff_id', data.staff_id);
+    else               localStorage.removeItem('rb_staff_id');
+
+    const roleStr = (data.role || data.restaurant?.role || 'mesero').toLowerCase();
+    localStorage.setItem('rb_role', roleStr);
+    const roles = roleStr.split(',').map(r => r.trim()).filter(Boolean);
+
+    // Admin/owner always go to dashboard
+    if (roles.some(r => ['owner', 'admin'].includes(r))) {
+      window.location.href = '/dashboard';
+      return;
+    }
+
+    const opRoles = roles.filter(r => ROLE_META[r]);
+
+    if (opRoles.length === 0) {
+      window.location.href = '/dashboard';
+      return;
+    }
+
+    if (opRoles.length === 1) {
+      window.location.href = ROLE_META[opRoles[0]].url;
+      return;
+    }
+
+    // Multi-role → show selector
+    showRoleSelector(name, opRoles);
+
+  } catch (e) {
+    showError('Error de conexión. Intenta de nuevo.');
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = 'Ingresar';
+  }
+}
+
+function showRoleSelector(name, roles) {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('role-view').style.display  = '';
+
+  const firstName = name.split(' ')[0];
+  document.getElementById('welcome-name').textContent = '¡Hola, ' + firstName + '!';
+
+  const grid = document.getElementById('role-grid');
+  grid.innerHTML = '';
+
+  roles.forEach(role => {
+    const meta = ROLE_META[role];
+    if (!meta) return;
+    const tile = document.createElement('a');
+    tile.href       = meta.url;
+    tile.className  = 'role-tile';
+    tile.style.cssText = 'background:' + meta.bg + ';color:' + meta.color + ';';
+
+    const icon = document.createElement('span');
+    icon.className   = 'tile-icon';
+    icon.textContent = meta.icon;
+
+    const lbl = document.createElement('span');
+    lbl.className   = 'tile-name';
+    lbl.textContent = meta.label;
+
+    tile.appendChild(icon);
+    tile.appendChild(lbl);
+    grid.appendChild(tile);
+  });
+}
+</script>
+</body>
+</html>

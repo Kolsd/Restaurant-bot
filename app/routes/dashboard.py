@@ -95,6 +95,19 @@ async def root_redirect(): return (STATIC / "landing.html").read_text(encoding="
 async def superadmin_page():
     p = STATIC / "superadmin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>")
+@router.get("/staff", response_class=HTMLResponse)
+async def staff_portal_page():
+    p = STATIC / "staff-portal.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Portal no disponible</h1>")
+
+@router.get("/api/public/restaurant-info")
+async def public_restaurant_info(id: int):
+    """Return the restaurant name for a given restaurant ID (public, read-only)."""
+    restaurant = await db.db_get_restaurant_by_id(id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    return {"name": restaurant.get("name", "")}
+
 @router.get("/mesero", response_class=HTMLResponse)
 async def mesero_page(): return (STATIC / "mesero.html").read_text(encoding="utf-8")
 @router.get("/caja", response_class=HTMLResponse)
