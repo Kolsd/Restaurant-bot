@@ -467,9 +467,41 @@ async def list_team_branches(request: Request):
         return {"branches": [db._serialize(dict(r)) for r in rows]}
 
 @router.post("/api/team/branches")
-@router.post("/api/team/branches")
-@router.post("/api/team/branches")
 async def create_branch(request: Request, body: CreateBranchRequest):
+    import time # Por si acaso no está importado globalmente
+    
+    user = await get_current_user(request)
+    if "owner" not in user.get("role", "owner"): 
+        raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
+        
+    my_restaurant_id = user.get("branch_id")
+    if not my_restaurant_id:
+        raise HTTPException(status_code=400, detail="Error de integridad: Tu usuario no tiene asignado un branch_id (Matriz) en la BD.")
+
+    pool = await db.get_pool()
+    wa_number = body.whatsapp_number.strip()
+    
+    async with pool.acquire() as conn:
+        if not wa_number:
+            matriz_wa = await conn.fetchval("SELECT whatsapp_number FROM restaurants WHERE id = $1", my_restaurant_id)
+            # 🛡️ FIX MÁXIMO: Usamos un timestamp único en lugar de contar. 
+            # Ejemplo: 573213199637_b1711567890
+            wa_number = f"{matriz_wa}_b{int(time.time())}"
+            
+    lat, lon, display = await geocode_address(body.address)
+    
+    # 1. Crea la sucursal (Al ser un wa_number único, jamás sobreescribirá otra)
+    await db.db_create_restaurant(body.name, wa_number, body.address, body.menu, lat, lon)
+    
+    # 2. Vincula la sucursal a la matriz
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE restaurants SET parent_restaurant_id = $1 WHERE whatsapp_number = $2",
+            my_restaurant_id, wa_number
+        )
+            
+    return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
+    
     user = await get_current_user(request)
     if "owner" not in user.get("role", "owner"): 
         raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
