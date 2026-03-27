@@ -35,7 +35,9 @@ function doStaffLogout() {
             return;
         }
 
-        // 200 — acceso permitido, construir barra de roles si es multirol
+        // 200 — acceso permitido
+        console.log('rb_restaurant:', localStorage.getItem('rb_restaurant'));
+        console.log('rb_role:', localStorage.getItem('rb_role'));
         _buildRoleNav();
 
     } catch (e) {
