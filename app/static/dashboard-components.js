@@ -319,10 +319,8 @@ function _openStaffAddModal(self) {
   });
   box.appendChild(rolesGrid);
 
-  // PIN
-  const pinIn = _makeInput('PIN (4–8 dígitos)', 'password');
-  pinIn.setAttribute('inputmode', 'numeric');
-  pinIn.setAttribute('maxlength', '8');
+  // Contraseña
+  const pinIn = _makeInput('Contraseña (mínimo 4 caracteres)', 'password');
   pinIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:10px;';
   box.appendChild(pinIn);
 
@@ -345,8 +343,7 @@ function _openStaffAddModal(self) {
     const name = nameIn.value.trim();
     const pin  = pinIn.value.trim();
     if (!name)              { errMsg.textContent = 'El nombre es obligatorio.'; return; }
-    if (pin.length < 4)     { errMsg.textContent = 'El PIN debe tener al menos 4 dígitos.'; return; }
-    if (!/^\d+$/.test(pin)) { errMsg.textContent = 'El PIN debe ser solo dígitos.'; return; }
+    if (pin.length < 4) { errMsg.textContent = 'La contraseña debe tener al menos 4 caracteres.'; return; }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Guardando...';
@@ -354,7 +351,7 @@ function _openStaffAddModal(self) {
       const roles = Array.from(selectedRoles);
       await _staffFetch('', {
         method: 'POST',
-        body: JSON.stringify({ name, role: roles[0], roles, pin, phone: phoneIn.value.trim() }),
+        body: JSON.stringify({ name, role: roles[0], roles, password: pin, phone: phoneIn.value.trim() }),
       });
       overlay.remove();
       await _reloadRoster(self);
@@ -454,7 +451,7 @@ function _renderRosterTab(state, el, self) {
 
     // Action buttons
     const actRow = document.createElement('div');
-    actRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid #f0f0e8;padding-top:10px;margin-top:4px;';
+    actRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid #f0f0e8;padding-top:10px;margin-top:4px;align-items:center;';
 
     if (member.active) {
       const ciBtn = _makeBtn('▶ Entrada', 'btn-sm btn-primary', async () => {
@@ -490,7 +487,24 @@ function _renderRosterTab(state, el, self) {
         } catch(e) { alert(e.message); toggleBtn.disabled = false; }
       },
     );
+
+    // Spacer para empujar el delete a la derecha
+    const spacer = document.createElement('div');
+    spacer.style.flex = '1';
+
+    const delBtn = _makeBtn('🗑', 'btn-sm btn-danger', async () => {
+      if (!confirm(`¿Eliminar permanentemente a ${member.name}? Esta acción no se puede deshacer.`)) return;
+      delBtn.disabled = true;
+      try {
+        await _staffFetch(`/${member.id}`, { method: 'DELETE' });
+        await _reloadRoster(self);
+      } catch(e) { alert(e.message); delBtn.disabled = false; }
+    });
+    delBtn.title = 'Eliminar empleado';
+
     actRow.appendChild(toggleBtn);
+    actRow.appendChild(spacer);
+    actRow.appendChild(delBtn);
     card.appendChild(actRow);
 
     grid.appendChild(card);

@@ -2252,25 +2252,26 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
     return d
 
 
-async def db_get_staff_by_name_global(name: str) -> dict | None:
-    """Busca un miembro de staff activo por nombre (sin filtrar por restaurante).
-    Usado por el login unificado cuando el usuario no existe en la tabla users."""
+async def db_get_staff_candidates_by_name(name: str) -> list:
+    """Retorna todos los staff activos con ese nombre (multi-restaurante).
+    El caller verifica el PIN contra cada candidato para resolver colisiones."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        rows = await conn.fetch(
             "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin "
             "FROM staff WHERE LOWER(name)=LOWER($1) AND active=true "
-            "ORDER BY restaurant_id LIMIT 1",
+            "ORDER BY restaurant_id",
             name,
         )
-    if not row:
-        return None
-    d = dict(row)
-    roles_list = d.get("roles") or []
-    if not roles_list and d.get("role"):
-        roles_list = [d["role"]]
-    d["roles"] = roles_list
-    return d
+    result = []
+    for row in rows:
+        d = dict(row)
+        roles_list = d.get("roles") or []
+        if not roles_list and d.get("role"):
+            roles_list = [d["role"]]
+        d["roles"] = roles_list
+        result.append(d)
+    return result
 
 
 async def db_create_staff(
@@ -2330,6 +2331,17 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
         )
         row = await conn.fetchrow(sql, staff_id, restaurant_id, *values)
     return _serialize(dict(row)) if row else None
+
+
+async def db_delete_staff(staff_id: str, restaurant_id: int) -> bool:
+    """Elimina permanentemente un miembro de staff. Retorna True si se eliminó."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM staff WHERE id=$1::uuid AND restaurant_id=$2",
+            staff_id, restaurant_id,
+        )
+    return result.split()[-1] != "0"  # "DELETE N" → True si N > 0
 
 
 # ── Clock-in / Clock-out ─────────────────────────────────────────────

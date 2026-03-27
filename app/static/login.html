@@ -32,8 +32,8 @@
     <h1>Bienvenido</h1>
     <p class="sub">Ingresa a tu panel de control</p>
     <div class="error" id="error-msg"></div>
-    <label>Usuario / Correo</label>
-    <input type="text" id="username" placeholder="usuario@restaurante.com" />
+    <label>Email o Nombre de Empleado</label>
+    <input type="text" id="username" placeholder="usuario@email.com o Nombre" />
     <label>Contraseña</label>
     <input type="password" id="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" />
     <button onclick="doLogin()">Ingresar</button>
@@ -79,6 +79,8 @@ async function doLogin() {
     if (data.success) {
       localStorage.setItem('rb_token', data.token);
       localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
+      if (data.staff_id) localStorage.setItem('rb_staff_id', data.staff_id);
+      else localStorage.removeItem('rb_staff_id');
       
       const roleStr = data.restaurant.role || 'owner';
       const userRole = data.role ? data.role.toLowerCase() : roleStr;
