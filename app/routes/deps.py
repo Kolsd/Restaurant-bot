@@ -25,13 +25,24 @@ async def get_current_user(request: Request) -> dict:
         staff_id = username.split(":", 1)[1]
         pool = await db.get_pool()
         async with pool.acquire() as conn:
-            query = "SELECT restaurant_id, role FROM staff WHERE id::text = $1"
+            # Hacemos un JOIN con la tabla restaurants para saber si es sede principal o sucursal
+            query = """
+                SELECT s.restaurant_id, s.role, r.parent_restaurant_id 
+                FROM staff s
+                JOIN restaurants r ON s.restaurant_id = r.id
+                WHERE s.id::text = $1
+            """
             staff_member = await conn.fetchrow(query, str(staff_id))
+            
             if staff_member:
-                # IMPORTANTE: branch_id es None para que vea las mesas del restaurante principal
+                # Si no tiene "padre", es la sede principal -> branch_id = None
+                # Si tiene "padre", es una sucursal -> branch_id = su propio restaurant_id
+                is_main_restaurant = staff_member["parent_restaurant_id"] is None
+                mapped_branch_id = None if is_main_restaurant else staff_member["restaurant_id"]
+                
                 return {
                     "username": username,
-                    "branch_id": None, 
+                    "branch_id": mapped_branch_id, 
                     "restaurant_id": staff_member["restaurant_id"],
                     "role": staff_member["role"]
                 }
@@ -42,7 +53,7 @@ async def get_current_user(request: Request) -> dict:
             return user
 
     raise HTTPException(status_code=401, detail="User not found")
-
+    
 
 async def get_current_restaurant(request: Request) -> dict:
     """Returns the restaurant for the authenticated user or raises 403."""
