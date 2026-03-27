@@ -427,13 +427,13 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         raise HTTPException(status_code=400, detail="Sucursal requerida")
     branch = await db.db_get_restaurant_by_id(branch_id)
 
-    # Admin role → dashboard user account (password login)
-    if body.role == "admin":
+    # Admin/Gerente → dashboard user account (password login)
+    if body.role in ("admin", "gerente"):
         if not body.password:
-            raise HTTPException(status_code=400, detail="Contraseña requerida para administrador")
+            raise HTTPException(status_code=400, detail="Contraseña requerida para administrador o gerente")
         success = await db.db_create_user(
             body.username, hash_password(body.password), branch["name"],
-            role="admin", branch_id=branch_id, parent_user=creator["username"],
+            role=body.role, branch_id=branch_id, parent_user=creator["username"],
         )
         if not success:
             raise HTTPException(status_code=400, detail="Usuario ya existe")
