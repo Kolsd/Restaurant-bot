@@ -451,9 +451,7 @@ async def admin_set_subscription(request: SetSubscriptionRequest):
 @router.get("/api/team/branches")
 async def list_team_branches(request: Request):
     user = await get_current_user(request)
-    role = user.get("role", "owner")
-    
-    if "owner" not in role:
+    if "owner" not in user.get("role", "owner"):
         raise HTTPException(status_code=403, detail="Acceso restringido a dueños")
     
     my_restaurant_id = user.get("branch_id")
@@ -463,18 +461,12 @@ async def list_team_branches(request: Request):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name ASC", 
+            "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY id ASC", 
             my_restaurant_id
         )
         return {"branches": [db._serialize(dict(r)) for r in rows]}
-            
-    if "admin" in role and user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        return {"branches": [r] if r else []}
-        
-    raise HTTPException(status_code=403, detail="No autorizado")
 
-
+@router.post("/api/team/branches")
 @router.post("/api/team/branches")
 @router.post("/api/team/branches")
 async def create_branch(request: Request, body: CreateBranchRequest):
@@ -482,10 +474,9 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     if "owner" not in user.get("role", "owner"): 
         raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
         
-    # 🛡️ CONFIANZA ABSOLUTA EN EL ID DE LA BASE DE DATOS
     my_restaurant_id = user.get("branch_id")
     if not my_restaurant_id:
-        raise HTTPException(status_code=400, detail="Tu usuario no tiene un branch_id asignado en la base de datos.")
+        raise HTTPException(status_code=400, detail="Error de integridad: Tu usuario no tiene asignado un branch_id (Matriz) en la BD.")
 
     pool = await db.get_pool()
     wa_number = body.whatsapp_number.strip()
@@ -498,10 +489,10 @@ async def create_branch(request: Request, body: CreateBranchRequest):
             
     lat, lon, display = await geocode_address(body.address)
     
-    # 1. Crea el restaurante
+    # 1. Crea la sucursal
     await db.db_create_restaurant(body.name, wa_number, body.address, body.menu, lat, lon)
     
-    # 2. Vincula la sucursal como hija de la matriz
+    # 2. VINCULACIÓN DIRECTA AL PADRE EN LA BD
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE restaurants SET parent_restaurant_id = $1 WHERE whatsapp_number = $2",
@@ -802,10 +793,10 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     
-    # 🛡️ 1. Tomamos el ID real de tu cuenta
+    # 1. Tomamos tu ID real de la base de datos
     branch_id = user.get("branch_id")
     
-    # 🛡️ 2. Si cambiaste el dropdown global, lo sobreescribimos
+    # 2. Si el selector global de arriba envía un ID distinto, lo aplicamos
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
