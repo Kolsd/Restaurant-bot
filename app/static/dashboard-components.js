@@ -1314,15 +1314,79 @@ window.changeStaffBranch = async function() {
 window.openStaffAdminModal = function() {
   const select = document.getElementById('staff-branch-select');
   const val = select.value;
-  const text = select.options[select.selectedIndex].text.replace('🏠 ', '').replace('📍 ', '');
-  
-  // Si elige Casa Matriz, el ID de sucursal es null (el backend lo asocia a la matriz)
+  const branchName = select.options[select.selectedIndex].text.replace('🏠 ', '').replace('📍 ', '');
   const branchId = val === 'matriz' ? null : parseInt(val);
+
+  // Creamos el modal dinámicamente para asegurar que siempre funcione
+  const old = document.getElementById('_admin-invite-modal');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = '_admin-invite-modal';
+  overlay.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff;border-radius:16px;padding:2rem;width:460px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.2);';
+
+  box.innerHTML = `
+      <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar administrador a <span style="color:#1D9E75;">${branchName}</span></div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <input id="inv-admin-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+        <input id="inv-admin-password" type="password" placeholder="Contraseña" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+        <input id="inv-admin-phone" placeholder="Teléfono (opcional)" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+        
+        <div style="font-size:13px;color:#555;margin-top:4px;font-weight:600;">Rol de acceso al dashboard:</div>
+        
+        <div style="margin-bottom:4px;padding:10px;border:1px solid #1D9E75;background:#E1F5EE;border-radius:11px;cursor:default;">
+          <div style="font-size:22px;margin-bottom:2px;">🛡️</div>
+          <div style="font-weight:600;font-size:13px;color:#111;">Administrador</div>
+          <div style="font-size:11px;color:#888;margin-top:2px;">Control total del dashboard de esta sucursal.</div>
+        </div>
+      </div>
+      <div id="inv-admin-error" style="color:#C0392B;font-size:12px;margin-top:10px;min-height:16px;"></div>
+      <div style="display:flex;gap:8px;margin-top:1.25rem;">
+        <button id="btn-inv-submit" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear administrador</button>
+        <button id="btn-inv-cancel" style="padding:10px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
+      </div>
+  `;
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  document.getElementById('btn-inv-cancel').onclick = () => overlay.remove();
   
-  // Reutilizamos el modal de invitaciones existente de dashboard-features.js
-  if(typeof openInviteModal === 'function') {
-      openInviteModal(branchId, text);
-  } else {
-      alert('Error: No se pudo cargar el modal de creación de admins.');
-  }
+  document.getElementById('btn-inv-submit').onclick = async () => {
+      const username = document.getElementById('inv-admin-username').value.trim();
+      const password = document.getElementById('inv-admin-password').value.trim();
+      const phone    = document.getElementById('inv-admin-phone').value.trim();
+      const errEl    = document.getElementById('inv-admin-error');
+
+      if (!username || !password) { errEl.textContent = 'El usuario y la contraseña son obligatorios.'; return; }
+
+      const btn = document.getElementById('btn-inv-submit');
+      btn.disabled = true;
+      btn.textContent = 'Creando...';
+
+      try {
+          const h = window._dashHeaders || { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
+          const r = await fetch('/api/team/invite', {
+              method: 'POST',
+              headers: h,
+              body: JSON.stringify({ username, password, pin: '', phone, role: 'admin', branch_id: branchId }),
+          });
+          if (r.ok) {
+              overlay.remove();
+              alert('¡Admin creado exitosamente!');
+          } else {
+              const e = await r.json();
+              errEl.textContent = 'Error: ' + (e.detail || 'No se pudo crear');
+              btn.disabled = false;
+              btn.textContent = 'Crear administrador';
+          }
+      } catch(e) {
+          errEl.textContent = 'Error de conexión';
+          btn.disabled = false;
+          btn.textContent = 'Crear administrador';
+      }
+  };
 };
