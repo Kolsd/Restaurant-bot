@@ -622,3 +622,54 @@ function setCustomPeriod(btn) {
   btn.classList.add('active');
   refreshAll();
 }
+
+// ── GESTIÓN GLOBAL DE SUCURSALES (TOPBAR) ──
+async function loadGlobalBranches() {
+  const role = localStorage.getItem('rb_role') || '';
+  if (!role.includes('owner')) return;
+  
+  const select = document.getElementById('global-branch-select');
+  const adminBtn = document.getElementById('btn-staff-add-admin');
+  if (!select) return;
+  
+  try {
+      const r = await fetch('/api/team/branches', { headers: window._dashHeaders });
+      if (r.ok) {
+          const data = await r.json();
+          const branches = data.branches || [];
+          if(branches.length === 0) return; // Si no tiene sucursales, no mostramos el dropdown
+
+          select.innerHTML = '<option value="matriz">🏠 Casa Matriz</option>';
+          branches.forEach(b => {
+              const opt = document.createElement('option');
+              opt.value = b.id;
+              opt.textContent = `📍 ${b.name}`;
+              select.appendChild(opt);
+          });
+          
+          select.style.display = 'block';
+          if (adminBtn) adminBtn.style.display = 'block';
+      }
+  } catch(e) { console.error('Error cargando sucursales globales', e); }
+}
+
+window.changeGlobalBranch = function() {
+  const select = document.getElementById('global-branch-select');
+  if (select && select.value && select.value !== 'matriz') {
+      window._dashHeaders['X-Branch-ID'] = select.value;
+  } else {
+      delete window._dashHeaders['X-Branch-ID']; // Vuelve a la matriz
+  }
+  
+  // Recargar TODAS las secciones activas con el nuevo filtro
+  refreshAll();
+  if(typeof loadMenu === 'function') loadMenu();
+  if(typeof loadTables === 'function') loadTables();
+  if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
+  
+  const staffActive = document.getElementById('staff')?.classList.contains('active');
+  if(staffActive && typeof loadStaffSection === 'function') loadStaffSection();
+  
+  const loyaltyActive = document.getElementById('loyalty')?.classList.contains('active');
+  if(loyaltyActive && typeof loadLoyaltySection === 'function') loadLoyaltySection();
+};
