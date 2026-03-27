@@ -35,16 +35,12 @@ async def save_nps_response(request: Request, body: NPSResponse):
 
 @router.get("/api/nps/stats")
 async def get_nps_stats(request: Request, period: str = "month"):
-    """Estadísticas NPS filtradas por sucursal exacta"""
     restaurant = await get_current_restaurant(request)
-    
-    # 🛡️ LEER SELECTOR GLOBAL: Obtenemos el bot_number real de la sucursal seleccionada
-    # (get_current_restaurant ya maneja la lógica de X-Branch-ID internamente)
+    # get_current_restaurant ya nos da el objeto correcto basado en X-Branch-ID
     bot_number = restaurant["whatsapp_number"]
-    
     stats = await db.db_get_nps_stats(bot_number, period)
     return stats
-
+    
 
 @router.get("/api/nps/responses")
 async def get_nps_responses(request: Request, period: str = "month", limit: int = 50):

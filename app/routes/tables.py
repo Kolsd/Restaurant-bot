@@ -542,47 +542,54 @@ async def update_order_status(request: Request, order_id: str):
     # ── B. CERRAR MESA (Limpia BD, despide, NO emite factura) ──
     elif status in ("cerrar_mesa", "factura_entregada"):
         base_id = order.get("base_order_id") if order.get("base_order_id") else order_id
- 
-        await db.db_close_table_bill(base_id)  # status en BD = factura_entregada
+        await db.db_close_table_bill(base_id) 
  
         if phone:
-            # ── Resolver bot_number y restaurant_name para NPS ANTES de enviar ──
+            # 🛡️ RESOLUCIÓN DE SUCURSAL PARA NPS
+            # Buscamos la mesa para saber a qué sucursal pertenece
+            table_info = await db.db_get_table_by_id(order.get("table_id"))
+            branch_id = table_info.get("branch_id") if table_info else None
+            
             bot_num = ""
             rest_name = ""
-            if session_data and session_data.get("bot_number"):
-                bot_num = session_data["bot_number"]
+            
+            # Si la mesa pertenece a una sucursal, obtenemos su alias único (_b...)
+            if branch_id:
+                branch_res = await db.db_get_restaurant_by_id(branch_id)
+                if branch_res:
+                    bot_num = branch_res.get("whatsapp_number", "")
+                    rest_name = branch_res.get("name", "")
+            
+            # Si no hay sucursal o no se encontró, usamos los datos de la sesión (Matriz)
+            if not bot_num and session_data:
+                bot_num = session_data.get("bot_number", "")
                 try:
                     rest = await db.db_get_restaurant_by_bot_number(bot_num)
-                    if rest:
-                        rest_name = rest.get("name", "")
-                except Exception:
-                    pass
+                    rest_name = rest.get("name", "") if rest else ""
+                except Exception: pass
 
+            # Enviar despedida
             msg = "Tu mesa ha sido cerrada. ¡Gracias por visitarnos, esperamos verte pronto!"
             await send_wa_msg(phone, msg, db_phone_id)
 
-            # ── Disparar NPS y enviar pregunta interactiva (con botón "No calificar") ──
+            # 🚀 DISPARAR NPS CON EL ID DE SUCURSAL CORRECTO
             if bot_num:
                 await trigger_nps(phone, bot_num, rest_name)
                 nps_label = rest_name or "nuestro restaurante"
                 await send_wa_interactive_nps(phone, nps_label, db_phone_id)
 
+            # Limpieza de sesión... (el resto del código sigue igual)
             try:
-                if session_data and session_data.get("bot_number"):
-                    await db.db_close_session(phone, session_data["bot_number"], "factura_entregada", username)
-
                 async with pool.acquire() as conn:
-                    # 👇 AQUÍ ESTÁ EL CAMBIO IMPORTANTÍSIMO: status = 'closed'
                     await conn.execute(
                         "UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = $2 WHERE phone = $1 AND closed_at IS NULL",
                         phone, username
                     )
                     await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
                     await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
-                print(f"🧹 CHAT, CARRITO E HISTORIAL BORRADOS DEFINITIVAMENTE PARA: {phone}")
             except Exception as e:
                 print(f"Error limpiando BD tras cerrar mesa: {e}")
- 
+
         return {"success": True, "order_id": order_id, "status": "factura_entregada"}
         
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
