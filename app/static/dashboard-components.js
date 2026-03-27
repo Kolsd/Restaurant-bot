@@ -1374,12 +1374,21 @@ window.openStaffAdminModal = function() {
             'Content-Type': 'application/json' 
         };
         
-        const payload = { username, password, role: 'admin', branch_id: branchId };
-        if (phone) payload.phone = phone;
+        // 🛡️ Creamos el payload base
+        const payload = { username, password, role: 'admin' };
+            
+        // 🛡️ Solo enviamos el branch_id si de verdad es un número (es decir, NO es la matriz)
+        if (branchId) {
+            payload.branch_id = branchId;
+        }
+        
+        if (phone) {
+            payload.phone = phone;
+        }
 
         const r = await fetch('/api/team/invite', {
             method: 'POST',
-            headers: headers, // Usamos los headers con Content-Type
+            headers: headers,
             body: JSON.stringify(payload),
         });
         
