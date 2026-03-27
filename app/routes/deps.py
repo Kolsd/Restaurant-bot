@@ -22,30 +22,34 @@ async def get_current_user(request: Request) -> dict:
 
     # Si es un empleado operativo, lo buscamos en la tabla staff
     if username.startswith("staff:"):
-        staff_id = username.split(":", 1)[1]
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            # Hacemos un JOIN con la tabla restaurants para saber si es sede principal o sucursal
-            query = """
-                SELECT s.restaurant_id, s.role, r.parent_restaurant_id 
-                FROM staff s
-                JOIN restaurants r ON s.restaurant_id = r.id
-                WHERE s.id::text = $1
-            """
-            staff_member = await conn.fetchrow(query, str(staff_id))
+    staff_id = username.split(":", 1)[1]
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        query = """
+            SELECT s.restaurant_id, s.role, s.roles, r.parent_restaurant_id 
+            FROM staff s
+            JOIN restaurants r ON s.restaurant_id = r.id
+            WHERE s.id::text = $1
+        """
+        staff_member = await conn.fetchrow(query, str(staff_id))
+        
+        if staff_member:
+            is_main_restaurant = staff_member["parent_restaurant_id"] is None
+            mapped_branch_id = None if is_main_restaurant else staff_member["restaurant_id"]
             
-            if staff_member:
-                # Si no tiene "padre", es la sede principal -> branch_id = None
-                # Si tiene "padre", es una sucursal -> branch_id = su propio restaurant_id
-                is_main_restaurant = staff_member["parent_restaurant_id"] is None
-                mapped_branch_id = None if is_main_restaurant else staff_member["restaurant_id"]
-                
-                return {
-                    "username": username,
-                    "branch_id": mapped_branch_id, 
-                    "restaurant_id": staff_member["restaurant_id"],
-                    "role": staff_member["role"]
-                }
+            # Resolver todos los roles del staff
+            roles_list = staff_member["roles"] or []
+            if not roles_list and staff_member["role"]:
+                roles_list = [staff_member["role"]]
+            combined_role = ",".join(roles_list) if roles_list else (staff_member["role"] or "")
+            
+            return {
+                "username": username,
+                "branch_id": mapped_branch_id,
+                "restaurant_id": staff_member["restaurant_id"],
+                "role": combined_role
+            }
+            
     else:
         # Si es un admin/gerente normal, lo buscamos en users
         user = await db.db_get_user(username)
