@@ -94,7 +94,7 @@ header { background:#111; border-bottom:1px solid #222; padding:1rem 1.5rem; dis
       <div class="live-dot"></div>
       <span class="live-text">En vivo</span>
       <span class="time" id="clock"></span>
-      <button class="btn-logout" onclick="localStorage.removeItem('rb_token'); window.location.href='/login';">Salir</button>
+      <button class="btn-logout" onclick=doStaffLogout();">Salir</button>
     </div>
   </header>
 
@@ -351,6 +351,10 @@ function mapDeliveryStatus(s) {
 
 loadOrders();
 setInterval(loadOrders, 5000);
+
+function doLogout() { doStaffLogout(); }
+
+
 </script>
 </body>
 </html>
