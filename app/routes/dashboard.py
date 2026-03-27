@@ -446,28 +446,27 @@ async def admin_set_subscription(request: SetSubscriptionRequest):
     await db.db_update_subscription(request.restaurant_id, request.status)
     return {"success": True}
 
-# ── TEAM / BRANCHES ───────────────────────────────────────────────────
+# ── TEAM / BRANCHES ──────────────────────────────────────────────────
+
 @router.get("/api/team/branches")
 async def list_team_branches(request: Request):
     user = await get_current_user(request)
     role = user.get("role", "owner")
     
-    # Obtenemos el ID del restaurante del usuario actual
+    if "owner" not in role:
+        raise HTTPException(status_code=403, detail="Acceso restringido a dueños")
+    
     my_restaurant_id = user.get("branch_id")
     if not my_restaurant_id:
-        all_r = await db.db_get_all_restaurants()
-        my_restaurant_id = all_r[0]["id"] if all_r else None
+        return {"branches": []}
 
-    if "owner" in role:
-        # 🛡️ FIX: Solo listamos los restaurantes cuyo PADRE sea mi ID. 
-        # Esto hace que las sucursales aparezcan en 0 si no has creado hijos.
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name ASC", 
-                my_restaurant_id
-            )
-            return {"branches": [db._serialize(dict(r)) for r in rows]}
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name ASC", 
+            my_restaurant_id
+        )
+        return {"branches": [db._serialize(dict(r)) for r in rows]}
             
     if "admin" in role and user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
@@ -477,35 +476,37 @@ async def list_team_branches(request: Request):
 
 
 @router.post("/api/team/branches")
+@router.post("/api/team/branches")
 async def create_branch(request: Request, body: CreateBranchRequest):
     user = await get_current_user(request)
     if "owner" not in user.get("role", "owner"): 
         raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
         
-    wa_number = body.whatsapp_number.strip()
-    all_r = await db.db_get_all_restaurants()
-    
-    # 🛡️ Obtenemos el ID de la Casa Matriz
+    # 🛡️ CONFIANZA ABSOLUTA EN EL ID DE LA BASE DE DATOS
     my_restaurant_id = user.get("branch_id")
     if not my_restaurant_id:
-        my_restaurant_id = all_r[0]["id"] if all_r else None
-        
-    if not wa_number:
-        wa_number = all_r[0]["whatsapp_number"] + f"_b{len(all_r)+1}" if all_r else ""
-        
+        raise HTTPException(status_code=400, detail="Tu usuario no tiene un branch_id asignado en la base de datos.")
+
+    pool = await db.get_pool()
+    wa_number = body.whatsapp_number.strip()
+    
+    async with pool.acquire() as conn:
+        if not wa_number:
+            matriz_wa = await conn.fetchval("SELECT whatsapp_number FROM restaurants WHERE id = $1", my_restaurant_id)
+            count = await conn.fetchval("SELECT COUNT(*) FROM restaurants WHERE parent_restaurant_id = $1", my_restaurant_id)
+            wa_number = f"{matriz_wa}_b{count + 1}"
+            
     lat, lon, display = await geocode_address(body.address)
     
     # 1. Crea el restaurante
     await db.db_create_restaurant(body.name, wa_number, body.address, body.menu, lat, lon)
     
-    # 2. 🛡️ FIX: Vincula la nueva sucursal como hija de la matriz
-    if my_restaurant_id:
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE restaurants SET parent_restaurant_id = $1 WHERE whatsapp_number = $2",
-                my_restaurant_id, wa_number
-            )
+    # 2. Vincula la sucursal como hija de la matriz
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE restaurants SET parent_restaurant_id = $1 WHERE whatsapp_number = $2",
+            my_restaurant_id, wa_number
+        )
             
     return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
 
@@ -548,11 +549,9 @@ async def team_invite(request: Request, body: TeamInviteRequest):
 
     branch_id = body.branch_id if "owner" in role else creator.get("branch_id")
     
-    # 🛡️ FIX: Si el owner no envía ID, asumimos que es la Casa Matriz
+    # 🛡️ Si no manda ID, usamos el ID real de su cuenta
     if not branch_id and "owner" in role:
-        all_r = await db.db_get_all_restaurants()
-        if all_r:
-            branch_id = all_r[0]["id"]
+        branch_id = creator.get("branch_id")
 
     if not branch_id:
         raise HTTPException(status_code=400, detail="Sucursal requerida")
@@ -799,14 +798,14 @@ async def fix_conversations_bot_number(request: Request):
 from datetime import datetime, timedelta
 
 async def get_dashboard_filters(request: Request, period: str, custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    """Ayudante para filtrar por sucursal y rango exacto, calculando el 'Hoy' dinámicamente"""
     user = await get_current_user(request)
     if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado o sesión expirada")
+        raise HTTPException(status_code=401, detail="Usuario no encontrado")
     
+    # 🛡️ 1. Tomamos el ID real de tu cuenta
     branch_id = user.get("branch_id")
     
-    # 🛡️ MAGIA GLOBAL: Leer el selector del Topbar para el Owner
+    # 🛡️ 2. Si cambiaste el dropdown global, lo sobreescribimos
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
@@ -816,16 +815,7 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
         r = await db.db_get_restaurant_by_id(branch_id)
         if r: 
             bot_number = r.get("whatsapp_number")
-    else:
-        all_r = await db.db_get_all_restaurants()
-        if all_r:
-            target_id = user.get("restaurant_id") or all_r[0].get("id")
-            restaurant = await db.db_get_restaurant_by_id(target_id)
-            if restaurant:
-                branch_id = restaurant["id"]
-                bot_number = restaurant.get("whatsapp_number")
 
-    # Calculamos la hora local exacta...
     now_utc = datetime.utcnow()
     now_local = now_utc - timedelta(minutes=tz_offset)
     end_local = now_local + timedelta(days=1)
