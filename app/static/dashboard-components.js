@@ -151,26 +151,39 @@ const ConnectionStatus = MesioComponent({
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// StaffSection — Phase 6: Staff roster, clock-in/out, tip cut
+// StaffSection — Roster, Turnos & Propinas
 //
 // State shape:
 //   {
-//     loading: bool,
-//     staff:   [...],        // from GET /api/staff
-//     shifts:  [...],        // open shifts, from GET /api/staff/open-shifts
-//     tipPreview: null | {...},  // result of POST /api/staff/tip-cut
-//     tab: 'roster' | 'shifts' | 'tips',
+//     loading:    bool,
+//     staff:      [...],          // GET /api/staff
+//     shifts:     [...],          // GET /api/staff/open-shifts  (includes staff_id)
+//     tipPreview: null | {...},   // result of POST /api/staff/tip-cut
+//     tab:        'roster' | 'shifts' | 'tips',
+//     filter:     'all' | role,   // active role filter chip
+//     search:     string,         // name search term
+//     error:      string | null,
 //   }
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _ROLE_LABELS = {
-  mesero:        'Mesero',
-  cocina:        'Cocina',
-  bar:           'Bar',
-  caja:          'Caja',
-  gerente:       'Gerente',
-  domiciliario:  'Domiciliario',
-  otro:          'Otro',
+  mesero:       'Mesero',
+  cocina:       'Cocina',
+  bar:          'Bar',
+  caja:         'Caja',
+  gerente:      'Gerente',
+  domiciliario: 'Domiciliario',
+  otro:         'Otro',
+};
+
+const _ROLE_META = {
+  mesero:       { icon: '🍽️', bg: '#E1F5EE', color: '#0F6E56' },
+  cocina:       { icon: '👨‍🍳', bg: '#FEF3C7', color: '#92400E' },
+  bar:          { icon: '🍹', bg: '#F0E6FF', color: '#6B21A8' },
+  caja:         { icon: '💰', bg: '#FFF8E6', color: '#BA7517' },
+  domiciliario: { icon: '🛵', bg: '#E3F2FD', color: '#1565C0' },
+  gerente:      { icon: '📊', bg: '#F3E8FF', color: '#7C3AED' },
+  otro:         { icon: '🔧', bg: '#F3F4F6', color: '#555555' },
 };
 
 function _apiHeaders() {
@@ -178,7 +191,7 @@ function _apiHeaders() {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 
-// ── helpers — all DOM writes use textContent / createElement ────────────────
+// ── DOM helpers ───────────────────────────────────────────────────────────────
 
 function _makeBtn(label, cls, onClick) {
   const b = document.createElement('button');
@@ -214,7 +227,7 @@ function _rowStyle() {
   return 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;';
 }
 
-// ── Async API calls ─────────────────────────────────────────────────────────
+// ── API calls ─────────────────────────────────────────────────────────────────
 
 async function _staffFetch(path, opts = {}) {
   const res = await fetch('/api/staff' + path, {
@@ -228,90 +241,119 @@ async function _staffFetch(path, opts = {}) {
   return res.json();
 }
 
-// ── Tab renderers ───────────────────────────────────────────────────────────
+// ── Avatar helpers ────────────────────────────────────────────────────────────
 
-// ── Role badge colors ────────────────────────────────────────────────────────
-const _BADGE_COLORS = {
-  mesero:       ['#E1F5EE', '#0F6E56'],
-  cocina:       ['#FEF3C7', '#92400E'],
-  caja:         ['#FFF8E6', '#BA7517'],
-  bar:          ['#F0E6FF', '#6B21A8'],
-  domiciliario: ['#E3F2FD', '#1565C0'],
-  gerente:      ['#F3E8FF', '#7C3AED'],
-  otro:         ['#F3F4F6', '#555555'],
-};
+function _initials(name) {
+  return name.split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?';
+}
 
-// ── Add-employee modal (rebuilt fresh on each open) ──────────────────────────
-function _openStaffAddModal(self) {
-  const old = document.getElementById('_staff-add-modal');
+function _avatarEl(member) {
+  const roles   = (member.roles && member.roles.length) ? member.roles : [member.role];
+  const primary = roles[0] || 'otro';
+  const meta    = _ROLE_META[primary] || _ROLE_META.otro;
+  const el      = document.createElement('div');
+  el.textContent = _initials(member.name);
+  el.style.cssText = `width:46px;height:46px;border-radius:12px;background:${meta.bg};
+    color:${meta.color};font-size:15px;font-weight:800;display:flex;align-items:center;
+    justify-content:center;flex-shrink:0;letter-spacing:-0.5px;`;
+  return el;
+}
+
+// ── Add / Edit modal ──────────────────────────────────────────────────────────
+
+function _openStaffModal(self, existing = null) {
+  const isEdit = !!existing;
+  const old    = document.getElementById('_staff-modal');
   if (old) old.remove();
 
   const overlay = document.createElement('div');
-  overlay.id = '_staff-add-modal';
-  overlay.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;';
+  overlay.id = '_staff-modal';
+  overlay.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;align-items:center;justify-content:center;padding:1rem;';
 
   const box = document.createElement('div');
-  box.style.cssText = 'background:#fff;border-radius:16px;padding:2rem;width:480px;max-width:92vw;max-height:90vh;overflow-y:auto;';
+  box.style.cssText = 'background:#fff;border-radius:20px;padding:2rem;width:520px;max-width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.2);';
 
   // Title
   const title = document.createElement('div');
-  title.textContent = 'Nuevo empleado operativo';
-  title.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:1.25rem;';
+  title.textContent = isEdit ? 'Editar empleado' : 'Nuevo empleado operativo';
+  title.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:1.5rem;color:#111;';
   box.appendChild(title);
 
-  // Name
-  const nameIn = _makeInput('Nombre completo');
-  nameIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:10px;';
+  // ── Name field
+  const nameLabel = document.createElement('div');
+  nameLabel.textContent = 'Nombre completo';
+  nameLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
+  box.appendChild(nameLabel);
+  const nameIn = _makeInput('Nombre del empleado');
+  if (existing) nameIn.value = existing.name;
+  nameIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
   box.appendChild(nameIn);
 
-  // Role label
+  // ── Phone field
+  const phoneLabel = document.createElement('div');
+  phoneLabel.textContent = 'Teléfono (opcional)';
+  phoneLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
+  box.appendChild(phoneLabel);
+  const phoneIn = _makeInput('Ej: 3001234567');
+  if (existing) phoneIn.value = existing.phone || '';
+  phoneIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
+  box.appendChild(phoneIn);
+
+  // ── Role selector
   const roleLabel = document.createElement('div');
-  roleLabel.textContent = 'Rol(es) — puedes elegir varios:';
-  roleLabel.style.cssText = 'font-size:13px;font-weight:600;color:#555;margin-bottom:8px;';
+  roleLabel.textContent = 'Roles — selecciona uno o varios:';
+  roleLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;';
   box.appendChild(roleLabel);
 
-  // Role toggle grid
-  const rolesGrid = document.createElement('div');
-  rolesGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;';
-
-  const operativeRoles = [
-    ['mesero', '🍽️', 'Mesero'],
-    ['caja', '💰', 'Cajero'],
-    ['cocina', '👨‍🍳', 'Cocina'],
+  const OPERATIVE_ROLES = [
+    ['mesero',       '🍽️', 'Mesero'],
+    ['caja',         '💰', 'Cajero'],
+    ['cocina',       '👨‍🍳', 'Cocina'],
     ['domiciliario', '🛵', 'Domiciliario'],
-    ['bar', '🍹', 'Bar'],
-    ['otro', '🔧', 'Otro'],
+    ['bar',          '🍹', 'Bar'],
+    ['gerente',      '📊', 'Gerente'],
+    ['otro',         '🔧', 'Otro'],
   ];
 
-  const selectedRoles = new Set(['mesero']);
+  const existingRoles  = existing
+    ? ((existing.roles && existing.roles.length) ? existing.roles : [existing.role])
+    : ['mesero'];
+  const selectedRoles  = new Set(existingRoles);
 
-  operativeRoles.forEach(([role, icon, label]) => {
-    const card = document.createElement('div');
-    const isActive = selectedRoles.has(role);
-    card.style.cssText = `border:1.5px solid ${isActive ? '#1D9E75' : '#e0e0d8'};background:${isActive ? '#f0faf7' : '#fff'};
-      border-radius:10px;padding:10px 4px;text-align:center;cursor:pointer;transition:all .15s;`;
+  const rolesGrid = document.createElement('div');
+  rolesGrid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:1rem;';
 
-    const iconEl = document.createElement('div');
+  OPERATIVE_ROLES.forEach(([role, icon, lbl]) => {
+    const meta   = _ROLE_META[role] || _ROLE_META.otro;
+    const active = selectedRoles.has(role);
+    const card   = document.createElement('div');
+    card.style.cssText = `border:2px solid ${active ? meta.color : '#e0e0d8'};
+      background:${active ? meta.bg : '#fafafa'};border-radius:11px;padding:10px 6px;
+      text-align:center;cursor:pointer;transition:all .15s;user-select:none;`;
+
+    const iconEl  = document.createElement('div');
     iconEl.textContent = icon;
-    iconEl.style.cssText = 'font-size:22px;margin-bottom:2px;';
+    iconEl.style.cssText = 'font-size:20px;margin-bottom:4px;';
 
     const labelEl = document.createElement('div');
-    labelEl.textContent = label;
-    labelEl.style.cssText = 'font-weight:600;font-size:12px;color:#111;';
+    labelEl.textContent = lbl;
+    labelEl.style.cssText = `font-size:11px;font-weight:700;color:${active ? meta.color : '#999'};`;
 
     card.appendChild(iconEl);
     card.appendChild(labelEl);
 
     card.addEventListener('click', () => {
       if (selectedRoles.has(role)) {
-        if (selectedRoles.size === 1) return;
+        if (selectedRoles.size === 1) return; // keep at least one
         selectedRoles.delete(role);
-        card.style.borderColor = '#e0e0d8';
-        card.style.background = '#fff';
+        card.style.borderColor  = '#e0e0d8';
+        card.style.background   = '#fafafa';
+        labelEl.style.color     = '#999';
       } else {
         selectedRoles.add(role);
-        card.style.borderColor = '#1D9E75';
-        card.style.background = '#f0faf7';
+        card.style.borderColor  = meta.color;
+        card.style.background   = meta.bg;
+        labelEl.style.color     = meta.color;
       }
     });
 
@@ -319,205 +361,340 @@ function _openStaffAddModal(self) {
   });
   box.appendChild(rolesGrid);
 
-  // Contraseña
-  const pinIn = _makeInput('Contraseña (mínimo 4 caracteres)', 'password');
-  pinIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:10px;';
+  // ── Password / PIN
+  const pinLabel = document.createElement('div');
+  pinLabel.textContent = isEdit
+    ? 'Nueva contraseña (dejar vacío para no cambiar)'
+    : 'Contraseña (mínimo 4 caracteres)';
+  pinLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
+  box.appendChild(pinLabel);
+  const pinIn = _makeInput(isEdit ? '(sin cambio)' : 'Mínimo 4 caracteres', 'password');
+  pinIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
   box.appendChild(pinIn);
 
-  // Phone
-  const phoneIn = _makeInput('Teléfono (opcional)');
-  phoneIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:10px;';
-  box.appendChild(phoneIn);
-
-  // Error
+  // ── Error
   const errMsg = document.createElement('div');
-  errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-bottom:8px;min-height:16px;';
+  errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-bottom:10px;min-height:16px;';
   box.appendChild(errMsg);
 
-  // Buttons
+  // ── Buttons
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex;gap:8px;';
 
-  const submitBtn = _makeBtn('Crear empleado', 'btn-sm btn-primary', async () => {
-    errMsg.textContent = '';
-    const name = nameIn.value.trim();
-    const pin  = pinIn.value.trim();
-    if (!name)              { errMsg.textContent = 'El nombre es obligatorio.'; return; }
-    if (pin.length < 4) { errMsg.textContent = 'La contraseña debe tener al menos 4 caracteres.'; return; }
+  const submitBtn = _makeBtn(
+    isEdit ? 'Guardar cambios' : 'Crear empleado',
+    'btn-sm btn-primary',
+    async () => {
+      errMsg.textContent = '';
+      const name  = nameIn.value.trim();
+      const pin   = pinIn.value.trim();
+      const phone = phoneIn.value.trim();
 
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Guardando...';
-    try {
-      const roles = Array.from(selectedRoles);
-      await _staffFetch('', {
-        method: 'POST',
-        body: JSON.stringify({ name, role: roles[0], roles, password: pin, phone: phoneIn.value.trim() }),
-      });
-      overlay.remove();
-      await _reloadRoster(self);
-    } catch(e) {
-      errMsg.textContent = e.message;
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Crear empleado';
-    }
-  });
+      if (!name) { errMsg.textContent = 'El nombre es obligatorio.'; return; }
+      if (!isEdit && pin.length < 4) { errMsg.textContent = 'La contraseña debe tener al menos 4 caracteres.'; return; }
+      if (isEdit  && pin.length > 0 && pin.length < 4) { errMsg.textContent = 'La nueva contraseña debe tener al menos 4 caracteres.'; return; }
+
+      submitBtn.disabled    = true;
+      submitBtn.textContent = isEdit ? 'Guardando...' : 'Creando...';
+      try {
+        const roles = Array.from(selectedRoles);
+        if (isEdit) {
+          const patch = { name, roles, role: roles[0], phone };
+          if (pin) patch.password = pin;
+          await _staffFetch(`/${existing.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+        } else {
+          await _staffFetch('', {
+            method: 'POST',
+            body: JSON.stringify({ name, role: roles[0], roles, password: pin, phone }),
+          });
+        }
+        overlay.remove();
+        await _reloadRoster(self);
+      } catch (e) {
+        errMsg.textContent    = e.message;
+        submitBtn.disabled    = false;
+        submitBtn.textContent = isEdit ? 'Guardar cambios' : 'Crear empleado';
+      }
+    },
+  );
 
   const cancelBtn = _makeBtn('Cancelar', 'btn-sm btn-outline', () => overlay.remove());
 
   btnRow.appendChild(submitBtn);
   btnRow.appendChild(cancelBtn);
   box.appendChild(btnRow);
-  overlay.appendChild(box);
 
+  overlay.appendChild(box);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
+  setTimeout(() => nameIn.focus(), 50);
 }
 
+// ── Roster tab ────────────────────────────────────────────────────────────────
 
-// ── Roster tab — Card grid layout ────────────────────────────────────────────
 function _renderRosterTab(state, el, self) {
-  // Header row
-  const header = document.createElement('div');
-  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;';
+  const onShiftIds = new Set((state.shifts || []).map(s => s.staff_id));
 
-  const headerInfo = document.createElement('div');
-  headerInfo.style.cssText = 'font-size:13px;color:#888;';
-  const activeCount = state.staff.filter(s => s.active).length;
-  headerInfo.textContent = `${activeCount} activo${activeCount !== 1 ? 's' : ''} · ${state.staff.length} total`;
+  // ── Stats banner
+  const statsBar = document.createElement('div');
+  statsBar.style.cssText = 'display:flex;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap;';
 
-  const newBtn = _makeBtn('+ Nuevo empleado', 'btn-sm btn-primary', () => _openStaffAddModal(self));
+  const activeCount  = state.staff.filter(s => s.active).length;
+  const onShiftCount = state.staff.filter(s => onShiftIds.has(s.id)).length;
 
-  header.appendChild(headerInfo);
-  header.appendChild(newBtn);
-  el.appendChild(header);
+  [
+    ['Total',    state.staff.length, '#F3F4F6', '#555555'],
+    ['Activos',  activeCount,        '#E1F5EE', '#0F6E56'],
+    ['En turno', onShiftCount,       '#EFF6FF', '#1D4ED8'],
+  ].forEach(([label, count, bg, color]) => {
+    const pill = document.createElement('div');
+    pill.style.cssText = `background:${bg};border-radius:10px;padding:8px 18px;display:flex;align-items:center;gap:8px;`;
+    const num  = document.createElement('span');
+    num.textContent = count;
+    num.style.cssText = `font-size:22px;font-weight:800;color:${color};`;
+    const lbl  = document.createElement('span');
+    lbl.textContent = label;
+    lbl.style.cssText = 'font-size:12px;color:#888;';
+    pill.appendChild(num);
+    pill.appendChild(lbl);
+    statsBar.appendChild(pill);
+  });
+  el.appendChild(statsBar);
 
-  if (!state.staff.length) {
-    const empty = document.createElement('div');
-    empty.className   = 'empty-state';
-    empty.textContent = 'No hay empleados registrados. Agrega el primero con el botón de arriba.';
-    el.appendChild(empty);
-    return;
+  // ── Search + add button
+  const topRow = document.createElement('div');
+  topRow.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;';
+
+  const searchIn = document.createElement('input');
+  searchIn.type        = 'text';
+  searchIn.placeholder = 'Buscar empleado...';
+  searchIn.value       = state.search || '';
+  searchIn.style.cssText = 'flex:1;min-width:160px;padding:8px 12px;border:1px solid #e0e0d8;border-radius:9px;font-size:13px;outline:none;';
+  searchIn.addEventListener('input', () => self.setState({ search: searchIn.value }));
+  topRow.appendChild(searchIn);
+
+  const addBtn = _makeBtn('+ Nuevo empleado', 'btn-sm btn-primary', () => _openStaffModal(self));
+  topRow.appendChild(addBtn);
+  el.appendChild(topRow);
+
+  // ── Role filter chips
+  const chips = document.createElement('div');
+  chips.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1.25rem;';
+
+  const FILTER_CHIPS = [
+    ['all',          'Todos'],
+    ['mesero',       '🍽️ Mesero'],
+    ['cocina',       '👨‍🍳 Cocina'],
+    ['bar',          '🍹 Bar'],
+    ['caja',         '💰 Caja'],
+    ['domiciliario', '🛵 Domiciliario'],
+    ['gerente',      '📊 Gerente'],
+    ['otro',         '🔧 Otro'],
+  ];
+
+  const activeFilter = state.filter || 'all';
+  FILTER_CHIPS.forEach(([id, label]) => {
+    const active = activeFilter === id;
+    const chip   = document.createElement('button');
+    chip.textContent = label;
+    chip.style.cssText = `padding:5px 13px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;
+      border:1px solid ${active ? '#1D9E75' : '#e0e0d8'};
+      background:${active ? '#1D9E75' : '#fff'};
+      color:${active ? '#fff' : '#666'};`;
+    chip.addEventListener('click', () => self.setState({ filter: id }));
+    chips.appendChild(chip);
+  });
+  el.appendChild(chips);
+
+  // ── Filter + search
+  const searchTerm = (state.search || '').toLowerCase().trim();
+  let visible = [...state.staff].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
+  if (activeFilter !== 'all') {
+    visible = visible.filter(m => {
+      const roles = (m.roles && m.roles.length) ? m.roles : [m.role];
+      return roles.includes(activeFilter);
+    });
+  }
+  if (searchTerm) {
+    visible = visible.filter(m => m.name.toLowerCase().includes(searchTerm));
   }
 
-  // Cards grid — active first
-  const grid = document.createElement('div');
-  grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;';
+  if (!visible.length) {
+    const empty = document.createElement('div');
+    empty.className   = 'empty-state';
+    empty.textContent = state.staff.length === 0
+      ? 'No hay empleados aún. Crea el primero con el botón + Nuevo empleado.'
+      : 'Ningún empleado coincide con el filtro aplicado.';
+    el.appendChild(empty);
+  } else {
+    // ── Card grid
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:12px;';
 
-  const sorted = [...state.staff].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
-
-  sorted.forEach(member => {
-    const card = document.createElement('div');
-    card.style.cssText = `background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:1.25rem;
-      transition:box-shadow .15s;${member.active ? '' : 'opacity:0.55;'}`;
-
-    // Name + status dot
-    const nameRow = document.createElement('div');
-    nameRow.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;';
-
-    const nameEl = document.createElement('div');
-    nameEl.textContent = member.name;
-    nameEl.style.cssText = 'font-size:15px;font-weight:600;color:#111;';
-
-    const statusDot = document.createElement('span');
-    statusDot.textContent = member.active ? '● Activo' : '○ Inactivo';
-    statusDot.style.cssText = `font-size:10px;font-weight:600;white-space:nowrap;margin-top:3px;
-      ${member.active ? 'color:#16A34A;' : 'color:#9CA3AF;'}`;
-
-    nameRow.appendChild(nameEl);
-    nameRow.appendChild(statusDot);
-    card.appendChild(nameRow);
-
-    // Role badges (multi-rol aware)
-    const badgeRow = document.createElement('div');
-    badgeRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;';
-    const roles = (member.roles && member.roles.length) ? member.roles : [member.role];
-    roles.forEach(r => {
-      const badge = document.createElement('span');
-      badge.textContent = _ROLE_LABELS[r] || r;
-      const [bg, color] = _BADGE_COLORS[r] || ['#f0f0f0', '#555'];
-      badge.style.cssText = `background:${bg};color:${color};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;`;
-      badgeRow.appendChild(badge);
-    });
-    card.appendChild(badgeRow);
-
-    // Phone (optional)
-    if (member.phone) {
-      const phoneEl = document.createElement('div');
-      phoneEl.textContent = '📞 ' + member.phone;
-      phoneEl.style.cssText = 'font-size:11px;color:#888;margin-bottom:8px;';
-      card.appendChild(phoneEl);
-    }
-
-    // Action buttons
-    const actRow = document.createElement('div');
-    actRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid #f0f0e8;padding-top:10px;margin-top:4px;align-items:center;';
-
-    if (member.active) {
-      const ciBtn = _makeBtn('▶ Entrada', 'btn-sm btn-primary', async () => {
-        ciBtn.disabled = true;
-        try {
-          await _staffFetch('/clock-in', { method: 'POST', body: JSON.stringify({ staff_id: member.id }) });
-          ciBtn.textContent = '✓ OK';
-          setTimeout(() => { ciBtn.textContent = '▶ Entrada'; ciBtn.disabled = false; }, 1500);
-        } catch(e) { alert(e.message); ciBtn.disabled = false; }
+    visible.forEach(member => {
+      const card = document.createElement('div');
+      card.style.cssText = `background:#fff;border:1px solid #e8e8e0;border-radius:16px;padding:1.25rem;
+        transition:box-shadow .15s,border-color .15s;${member.active ? '' : 'opacity:0.55;'}`;
+      card.addEventListener('mouseenter', () => {
+        card.style.boxShadow  = '0 4px 18px rgba(0,0,0,0.08)';
+        card.style.borderColor = '#d4d4cc';
+      });
+      card.addEventListener('mouseleave', () => {
+        card.style.boxShadow  = '';
+        card.style.borderColor = '#e8e8e0';
       });
 
-      const coBtn = _makeBtn('■ Salida', 'btn-sm btn-outline', async () => {
-        coBtn.disabled = true;
-        try {
-          await _staffFetch('/clock-out', { method: 'POST', body: JSON.stringify({ staff_id: member.id }) });
-          coBtn.textContent = '✓ OK';
-          setTimeout(() => { coBtn.textContent = '■ Salida'; coBtn.disabled = false; }, 1500);
-        } catch(e) { alert(e.message); coBtn.disabled = false; }
+      // ── Top row: avatar | info | status
+      const topDiv = document.createElement('div');
+      topDiv.style.cssText = 'display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;';
+
+      topDiv.appendChild(_avatarEl(member));
+
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:0;';
+
+      const nameEl = document.createElement('div');
+      nameEl.textContent = member.name;
+      nameEl.style.cssText = 'font-size:14px;font-weight:700;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;';
+      info.appendChild(nameEl);
+
+      // Role badges
+      const badgeRow = document.createElement('div');
+      badgeRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;';
+      const roles = (member.roles && member.roles.length) ? member.roles : [member.role];
+      roles.forEach(r => {
+        const meta  = _ROLE_META[r] || _ROLE_META.otro;
+        const badge = document.createElement('span');
+        badge.textContent = _ROLE_LABELS[r] || r;
+        badge.style.cssText = `background:${meta.bg};color:${meta.color};padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;`;
+        badgeRow.appendChild(badge);
       });
+      info.appendChild(badgeRow);
 
-      actRow.appendChild(ciBtn);
-      actRow.appendChild(coBtn);
-    }
+      if (member.phone) {
+        const phoneEl = document.createElement('div');
+        phoneEl.textContent = member.phone;
+        phoneEl.style.cssText = 'font-size:11px;color:#bbb;margin-top:4px;';
+        info.appendChild(phoneEl);
+      }
+      topDiv.appendChild(info);
 
-    const toggleBtn = _makeBtn(
-      member.active ? 'Desactivar' : 'Reactivar',
-      'btn-sm btn-outline',
-      async () => {
-        toggleBtn.disabled = true;
+      // Status chip
+      const isOnShift = onShiftIds.has(member.id);
+      const chip = document.createElement('div');
+      chip.style.cssText = `flex-shrink:0;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;
+        background:${isOnShift ? '#E1F5EE' : '#f5f5f0'};
+        color:${isOnShift ? '#0F6E56' : (member.active ? '#aaa' : '#ccc')};
+        border:1px solid ${isOnShift ? '#A7F3D0' : '#e8e8e0'};`;
+      chip.textContent = isOnShift ? '● En turno' : (member.active ? '○ Libre' : '○ Inactivo');
+      topDiv.appendChild(chip);
+      card.appendChild(topDiv);
+
+      // ── Action row
+      const actRow = document.createElement('div');
+      actRow.style.cssText = 'display:flex;gap:5px;align-items:center;border-top:1px solid #f2f2ea;padding-top:10px;flex-wrap:wrap;';
+
+      if (member.active) {
+        if (!isOnShift) {
+          const ciBtn = _makeBtn('▶ Entrada', 'btn-sm btn-primary', async () => {
+            ciBtn.disabled = true;
+            try {
+              await _staffFetch('/clock-in', { method: 'POST', body: JSON.stringify({ staff_id: member.id }) });
+              await _reloadRoster(self);
+            } catch (e) { alert(e.message); ciBtn.disabled = false; }
+          });
+          actRow.appendChild(ciBtn);
+        } else {
+          const coBtn = _makeBtn('■ Salida', 'btn-sm btn-outline', async () => {
+            coBtn.disabled = true;
+            try {
+              await _staffFetch('/clock-out', { method: 'POST', body: JSON.stringify({ staff_id: member.id }) });
+              await _reloadRoster(self);
+            } catch (e) { alert(e.message); coBtn.disabled = false; }
+          });
+          actRow.appendChild(coBtn);
+        }
+      }
+
+      const editBtn = _makeBtn('✏ Editar', 'btn-sm btn-outline', () => _openStaffModal(self, member));
+      actRow.appendChild(editBtn);
+
+      const spacer = document.createElement('div');
+      spacer.style.flex = '1';
+      actRow.appendChild(spacer);
+
+      const toggleBtn = _makeBtn(
+        member.active ? 'Desactivar' : 'Reactivar',
+        'btn-sm btn-outline',
+        async () => {
+          toggleBtn.disabled = true;
+          try {
+            await _staffFetch(`/${member.id}`, { method: 'PUT', body: JSON.stringify({ active: !member.active }) });
+            await _reloadRoster(self);
+          } catch (e) { alert(e.message); toggleBtn.disabled = false; }
+        },
+      );
+      actRow.appendChild(toggleBtn);
+
+      const delBtn = _makeBtn('🗑', 'btn-sm btn-danger', async () => {
+        if (!confirm(`¿Eliminar permanentemente a ${member.name}? Esta acción no se puede deshacer.`)) return;
+        delBtn.disabled = true;
         try {
-          await _staffFetch(`/${member.id}`, { method: 'PUT', body: JSON.stringify({ active: !member.active }) });
+          await _staffFetch(`/${member.id}`, { method: 'DELETE' });
           await _reloadRoster(self);
-        } catch(e) { alert(e.message); toggleBtn.disabled = false; }
-      },
-    );
+        } catch (e) { alert(e.message); delBtn.disabled = false; }
+      });
+      delBtn.title = 'Eliminar empleado';
+      actRow.appendChild(delBtn);
 
-    // Spacer para empujar el delete a la derecha
-    const spacer = document.createElement('div');
-    spacer.style.flex = '1';
-
-    const delBtn = _makeBtn('🗑', 'btn-sm btn-danger', async () => {
-      if (!confirm(`¿Eliminar permanentemente a ${member.name}? Esta acción no se puede deshacer.`)) return;
-      delBtn.disabled = true;
-      try {
-        await _staffFetch(`/${member.id}`, { method: 'DELETE' });
-        await _reloadRoster(self);
-      } catch(e) { alert(e.message); delBtn.disabled = false; }
+      card.appendChild(actRow);
+      grid.appendChild(card);
     });
-    delBtn.title = 'Eliminar empleado';
 
-    actRow.appendChild(toggleBtn);
-    actRow.appendChild(spacer);
-    actRow.appendChild(delBtn);
-    card.appendChild(actRow);
+    el.appendChild(grid);
+  }
 
-    grid.appendChild(card);
+  // ── Share portal link
+  const shareBar = document.createElement('div');
+  shareBar.style.cssText = 'margin-top:1.75rem;background:#f8f8f5;border:1px dashed #ccc;border-radius:13px;padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;';
+
+  const shareInfo = document.createElement('div');
+  const shareTitle = document.createElement('div');
+  shareTitle.textContent = '🔗 Portal de acceso para tu equipo';
+  shareTitle.style.cssText = 'font-size:13px;font-weight:700;color:#555;';
+  const shareDesc = document.createElement('div');
+  shareDesc.textContent = 'Comparte este enlace para que tu equipo ingrese con su nombre y contraseña.';
+  shareDesc.style.cssText = 'font-size:12px;color:#999;margin-top:2px;';
+  shareInfo.appendChild(shareTitle);
+  shareInfo.appendChild(shareDesc);
+
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = 'Copiar enlace';
+  copyBtn.style.cssText = 'padding:8px 16px;background:#1D9E75;color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;';
+  copyBtn.addEventListener('click', () => {
+    const rest = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+    const rid  = rest.branch_id || '';
+    const url  = window.location.origin + '/staff' + (rid ? '?r=' + rid : '');
+    navigator.clipboard.writeText(url).then(() => {
+      copyBtn.textContent = '✓ ¡Copiado!';
+      setTimeout(() => { copyBtn.textContent = 'Copiar enlace'; }, 2200);
+    }).catch(() => {
+      prompt('Copia este enlace para tu equipo:', url);
+    });
   });
 
-  el.appendChild(grid);
+  shareBar.appendChild(shareInfo);
+  shareBar.appendChild(copyBtn);
+  el.appendChild(shareBar);
 }
 
 
+// ── Shifts tab ────────────────────────────────────────────────────────────────
+
 function _renderShiftsTab(state, el, self) {
-  // ── Clock-in/out panel ────────────────────────────────────────────────────
+  // Clock-in/out panel
   const panel = document.createElement('div');
-  panel.style.cssText = 'background:#f8f8f5;border:1px solid #e0e0d8;border-radius:10px;padding:1rem;margin-bottom:1.25rem;';
+  panel.style.cssText = 'background:#f8f8f5;border:1px solid #e0e0d8;border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.25rem;';
 
   const panelTitle = document.createElement('div');
   panelTitle.textContent = 'Registrar entrada / salida';
@@ -528,7 +705,7 @@ function _renderShiftsTab(state, el, self) {
   if (!activeStaff.length) {
     const msg = document.createElement('div');
     msg.className   = 'empty-state';
-    msg.textContent = 'No hay empleados activos. Agrega empleados en la pestana Roster.';
+    msg.textContent = 'No hay empleados activos. Agrega empleados en la pestaña Roster.';
     panel.appendChild(msg);
     el.appendChild(panel);
   } else {
@@ -542,14 +719,11 @@ function _renderShiftsTab(state, el, self) {
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;gap:8px;margin-top:.75rem;';
 
-    const ciBtn = _makeBtn('Entrada (Clock In)', 'btn-sm btn-primary', async () => {
+    const ciBtn = _makeBtn('▶ Entrada', 'btn-sm btn-primary', async () => {
       errMsg.textContent = '';
       ciBtn.disabled = true;
       try {
-        await _staffFetch('/clock-in', {
-          method: 'POST',
-          body: JSON.stringify({ staff_id: staffSel.value }),
-        });
+        await _staffFetch('/clock-in', { method: 'POST', body: JSON.stringify({ staff_id: staffSel.value }) });
         await _reloadShifts(self);
       } catch (e) {
         errMsg.textContent = e.message;
@@ -558,14 +732,11 @@ function _renderShiftsTab(state, el, self) {
       }
     });
 
-    const coBtn = _makeBtn('Salida (Clock Out)', 'btn-sm btn-outline', async () => {
+    const coBtn = _makeBtn('■ Salida', 'btn-sm btn-outline', async () => {
       errMsg.textContent = '';
       coBtn.disabled = true;
       try {
-        await _staffFetch('/clock-out', {
-          method: 'POST',
-          body: JSON.stringify({ staff_id: staffSel.value }),
-        });
+        await _staffFetch('/clock-out', { method: 'POST', body: JSON.stringify({ staff_id: staffSel.value }) });
         await _reloadShifts(self);
       } catch (e) {
         errMsg.textContent = e.message;
@@ -582,7 +753,7 @@ function _renderShiftsTab(state, el, self) {
     el.appendChild(panel);
   }
 
-  // ── Open shifts table ─────────────────────────────────────────────────────
+  // Open shifts
   const openTitle = document.createElement('div');
   openTitle.textContent = 'Turnos abiertos ahora';
   openTitle.style.cssText = 'font-size:14px;font-weight:600;margin-bottom:.75rem;';
@@ -600,7 +771,7 @@ function _renderShiftsTab(state, el, self) {
   tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
   const thead = document.createElement('thead');
   const hrow  = document.createElement('tr');
-  ['Empleado', 'Rol', 'Entrada'].forEach(h => {
+  ['Empleado', 'Rol', 'Entrada', 'Tiempo'].forEach(h => {
     const th = document.createElement('th');
     th.textContent = h;
     th.style.cssText = 'text-align:left;padding:8px 10px;border-bottom:1px solid #e0e0d8;color:#888;font-weight:500;';
@@ -610,15 +781,22 @@ function _renderShiftsTab(state, el, self) {
   tbl.appendChild(thead);
 
   const tbody = document.createElement('tbody');
+  const now   = Date.now();
   state.shifts.forEach(sh => {
     const tr    = document.createElement('tr');
     const tdN   = document.createElement('td');
     const tdR   = document.createElement('td');
     const tdIn  = document.createElement('td');
+    const tdDur = document.createElement('td');
     tdN.textContent  = sh.staff_name;
     tdR.textContent  = _ROLE_LABELS[sh.staff_role] || sh.staff_role;
-    tdIn.textContent = new Date(sh.clock_in).toLocaleString();
-    [tdN, tdR, tdIn].forEach(td => {
+    tdIn.textContent = new Date(sh.clock_in).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+    const diffH = (now - new Date(sh.clock_in).getTime()) / 3600000;
+    tdDur.textContent = diffH < 1
+      ? Math.round(diffH * 60) + ' min'
+      : diffH.toFixed(1) + ' h';
+    tdDur.style.cssText = 'color:#1D9E75;font-weight:600;';
+    [tdN, tdR, tdIn, tdDur].forEach(td => {
       td.style.padding = '9px 10px';
       tr.appendChild(td);
     });
@@ -626,25 +804,25 @@ function _renderShiftsTab(state, el, self) {
   });
   tbl.appendChild(tbody);
 
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.style.overflowX = 'auto';
-  card.appendChild(tbl);
-  el.appendChild(card);
+  const tableCard = document.createElement('div');
+  tableCard.className    = 'card';
+  tableCard.style.overflowX = 'auto';
+  tableCard.appendChild(tbl);
+  el.appendChild(tableCard);
 }
 
 
+// ── Tips tab ──────────────────────────────────────────────────────────────────
+
 function _renderTipsTab(state, el, self) {
-  // ── Tip cut form ──────────────────────────────────────────────────────────
   const formWrap = document.createElement('div');
-  formWrap.style.cssText = 'background:#f8f8f5;border:1px solid #e0e0d8;border-radius:10px;padding:1rem;margin-bottom:1.25rem;';
+  formWrap.style.cssText = 'background:#f8f8f5;border:1px solid #e0e0d8;border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.25rem;';
 
   const formTitle = document.createElement('div');
   formTitle.textContent = 'Corte de propinas';
   formTitle.style.cssText = 'font-size:14px;font-weight:600;margin-bottom:.75rem;';
   formWrap.appendChild(formTitle);
 
-  // Default period: today 00:00 → now
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const now = new Date();
@@ -654,11 +832,11 @@ function _renderTipsTab(state, el, self) {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
-  const fromIn   = _makeInput('Inicio del período', 'datetime-local', toLocalInput(todayStart));
-  const toIn     = _makeInput('Fin del período',    'datetime-local', toLocalInput(now));
-  const totalIn  = _makeInput('Total propinas ($)',  'number');
-  totalIn.min    = '0';
-  totalIn.step   = '0.01';
+  const fromIn  = _makeInput('Inicio del período', 'datetime-local', toLocalInput(todayStart));
+  const toIn    = _makeInput('Fin del período',    'datetime-local', toLocalInput(now));
+  const totalIn = _makeInput('Total propinas ($)',  'number');
+  totalIn.min   = '0';
+  totalIn.step  = '0.01';
 
   const row1 = document.createElement('div');
   row1.style.cssText = _rowStyle();
@@ -677,7 +855,7 @@ function _renderTipsTab(state, el, self) {
     if (!fromIn.value || !toIn.value) { errMsg.textContent = 'Selecciona el período.'; return; }
     if (isNaN(total) || total < 0)    { errMsg.textContent = 'Ingresa el total de propinas.'; return; }
 
-    cutBtn.disabled = true;
+    cutBtn.disabled    = true;
     cutBtn.textContent = 'Calculando...';
     try {
       const data = await _staffFetch('/tip-cut', {
@@ -692,14 +870,13 @@ function _renderTipsTab(state, el, self) {
     } catch (e) {
       errMsg.textContent = e.message;
     } finally {
-      cutBtn.disabled = false;
+      cutBtn.disabled    = false;
       cutBtn.textContent = 'Calcular y guardar corte';
     }
   });
   formWrap.appendChild(cutBtn);
   el.appendChild(formWrap);
 
-  // ── Preview results ───────────────────────────────────────────────────────
   const preview = state.tipPreview;
   if (preview && preview.entries && preview.entries.length) {
     const resWrap = document.createElement('div');
@@ -726,14 +903,13 @@ function _renderTipsTab(state, el, self) {
     const tbody = document.createElement('tbody');
     preview.entries.forEach(e => {
       const tr = document.createElement('tr');
-      const cells = [
+      [
         e.name,
         _ROLE_LABELS[e.role] || e.role,
         e.hours.toFixed(1) + ' h',
         e.pct + '%',
         '$' + e.amount.toLocaleString('es-CO', { minimumFractionDigits: 2 }),
-      ];
-      cells.forEach(txt => {
+      ].forEach(txt => {
         const td = document.createElement('td');
         td.textContent   = txt;
         td.style.padding = '9px 10px';
@@ -746,7 +922,7 @@ function _renderTipsTab(state, el, self) {
 
     const totals = document.createElement('div');
     totals.style.cssText = 'margin-top:.75rem;font-size:12px;color:#888;display:flex;gap:16px;';
-    const alloc = document.createElement('span');
+    const alloc   = document.createElement('span');
     alloc.textContent = 'Distribuido: $' + preview.total_allocated.toLocaleString('es-CO', { minimumFractionDigits: 2 });
     const unalloc = document.createElement('span');
     unalloc.textContent = 'Sin asignar: $' + preview.total_unallocated.toLocaleString('es-CO', { minimumFractionDigits: 2 });
@@ -758,11 +934,14 @@ function _renderTipsTab(state, el, self) {
 }
 
 
-// ── Data reload helpers ─────────────────────────────────────────────────────
+// ── Data reload helpers ───────────────────────────────────────────────────────
 
 async function _reloadRoster(self) {
-  const data = await _staffFetch('');
-  self.setState({ staff: data.staff, loading: false });
+  const [rosterData, shiftsData] = await Promise.all([
+    _staffFetch(''),
+    _staffFetch('/open-shifts'),
+  ]);
+  self.setState({ staff: rosterData.staff, shifts: shiftsData.shifts, loading: false });
 }
 
 async function _reloadShifts(self) {
@@ -771,10 +950,19 @@ async function _reloadShifts(self) {
 }
 
 
-// ── Main component ──────────────────────────────────────────────────────────
+// ── Main StaffSection component ───────────────────────────────────────────────
 
 const StaffSection = MesioComponent({
-  state: { loading: true, staff: [], shifts: [], tipPreview: null, tab: 'roster', error: null },
+  state: {
+    loading:    true,
+    staff:      [],
+    shifts:     [],
+    tipPreview: null,
+    tab:        'roster',
+    filter:     'all',
+    search:     '',
+    error:      null,
+  },
 
   render(state, el) {
     el.textContent = '';
@@ -797,27 +985,26 @@ const StaffSection = MesioComponent({
       return;
     }
 
-    // ── Tab bar ───────────────────────────────────────────────────────────
+    // Tab bar
     const tabBar = document.createElement('div');
-    tabBar.style.cssText = 'display:flex;gap:4px;margin-bottom:1.25rem;border-bottom:1px solid #e0e0d8;';
+    tabBar.style.cssText = 'display:flex;gap:2px;margin-bottom:1.5rem;border-bottom:1px solid #e0e0d8;';
 
-    const tabs = [
-      ['roster', 'Roster'],
-      ['shifts', 'Turnos'],
-      ['tips',   'Propinas'],
-    ];
-    tabs.forEach(([id, label]) => {
+    [
+      ['roster', '👥  Roster'],
+      ['shifts', '⏱  Turnos'],
+      ['tips',   '💸  Propinas'],
+    ].forEach(([id, label]) => {
       const btn = document.createElement('button');
       btn.textContent = label;
-      btn.style.cssText = `padding:8px 16px;border:none;background:none;cursor:pointer;font-size:13px;
-        border-bottom:2px solid ${state.tab === id ? '#1D9E75' : 'transparent'};
-        color:${state.tab === id ? '#1D9E75' : '#555'};font-weight:${state.tab === id ? '600' : '400'};`;
+      const active = state.tab === id;
+      btn.style.cssText = `padding:9px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:${active ? '600' : '400'};
+        color:${active ? '#1D9E75' : '#666'};border-bottom:2px solid ${active ? '#1D9E75' : 'transparent'};
+        margin-bottom:-1px;transition:color .15s;`;
       btn.addEventListener('click', () => StaffSection.setState({ tab: id }));
       tabBar.appendChild(btn);
     });
     el.appendChild(tabBar);
 
-    // ── Active tab content ────────────────────────────────────────────────
     const content = document.createElement('div');
     if (state.tab === 'roster') _renderRosterTab(state, content, StaffSection);
     if (state.tab === 'shifts') _renderShiftsTab(state, content, StaffSection);
@@ -842,7 +1029,7 @@ const StaffSection = MesioComponent({
 // ─────────────────────────────────────────────────────────────────────────────
 // loadStaffSection — called by dashboard-core.js when the user navigates to
 // the 'staff' section. Mounts StaffSection into #staff-component on first
-// visit; subsequent calls refresh open shifts data.
+// visit; subsequent calls refresh all data.
 // ─────────────────────────────────────────────────────────────────────────────
 let _staffMounted = false;
 
@@ -854,8 +1041,7 @@ function loadStaffSection() {
     _staffMounted = true;
     StaffSection.mount('#staff-component');
   } else {
-    // Refresh open shifts each time the user revisits the tab
-    _reloadShifts(StaffSection);
+    _reloadRoster(StaffSection);
   }
 }
 
