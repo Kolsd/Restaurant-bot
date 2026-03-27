@@ -171,9 +171,7 @@ const _ROLE_LABELS = {
   cocina:       'Cocina',
   bar:          'Bar',
   caja:         'Caja',
-  gerente:      'Gerente',
   domiciliario: 'Domiciliario',
-  otro:         'Otro',
 };
 
 const _ROLE_META = {
@@ -182,8 +180,6 @@ const _ROLE_META = {
   bar:          { icon: '🍹', bg: '#F0E6FF', color: '#6B21A8' },
   caja:         { icon: '💰', bg: '#FFF8E6', color: '#BA7517' },
   domiciliario: { icon: '🛵', bg: '#E3F2FD', color: '#1565C0' },
-  gerente:      { icon: '📊', bg: '#F3E8FF', color: '#7C3AED' },
-  otro:         { icon: '🔧', bg: '#F3F4F6', color: '#555555' },
 };
 
 function _apiHeaders() {
@@ -311,8 +307,6 @@ function _openStaffModal(self, existing = null) {
     ['cocina',       '👨‍🍳', 'Cocina'],
     ['domiciliario', '🛵', 'Domiciliario'],
     ['bar',          '🍹', 'Bar'],
-    ['gerente',      '📊', 'Gerente'],
-    ['otro',         '🔧', 'Otro'],
   ];
 
   let existingRoles = ['mesero'];
@@ -495,8 +489,6 @@ function _renderRosterTab(state, el, self) {
     ['bar',          '🍹 Bar'],
     ['caja',         '💰 Caja'],
     ['domiciliario', '🛵 Domiciliario'],
-    ['gerente',      '📊 Gerente'],
-    ['otro',         '🔧 Otro'],
   ];
 
   const activeFilter = state.filter || 'all';
@@ -595,7 +587,7 @@ function _renderRosterTab(state, el, self) {
         badgeRow.appendChild(badge);
       });
       info.appendChild(badgeRow);
-      
+
       if (member.phone) {
         const phoneEl = document.createElement('div');
         phoneEl.textContent = member.phone;

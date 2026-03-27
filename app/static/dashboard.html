@@ -377,29 +377,23 @@
     <!-- Modal invitar usuario — dentro de equipo para contexto, position:fixed lo saca del flujo -->
     <div id="modal-invite" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;">
       <div style="background:#fff;border-radius:16px;padding:2rem;width:460px;max-width:92vw;max-height:90vh;overflow-y:auto;">
-        <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar miembro a <span id="modal-branch-name" style="color:#1D9E75;"></span></div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:1.25rem;">Agregar administrador a <span id="modal-branch-name" style="color:#1D9E75;"></span></div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <input id="invite-username" placeholder="Email o usuario" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <!-- Contraseña — siempre visible en Mis Sucursales (admin/gerente) -->
-          <input id="invite-password" type="password" placeholder="Contraseña temporal" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
-          <!-- PIN — nunca visible aquí; solo lo usan los operativos desde Staff & Propinas -->
-          <input id="invite-pin" type="password" inputmode="numeric" placeholder="PIN (4 dígitos)" maxlength="8" style="display:none;">
+          <input id="invite-password" type="password" placeholder="Contraseña" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
           <input id="invite-phone" placeholder="Teléfono (opcional)" style="padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          
           <div style="font-size:13px;color:#555;margin-top:4px;font-weight:600;">Rol de acceso al dashboard:</div>
           <input type="hidden" id="invite-role" value="admin">
-          <div class="role-card active" data-role="admin" onclick="toggleRole('admin', this)" style="margin-bottom:4px;padding:10px;">
+          
+          <div class="role-card active" style="margin-bottom:4px;padding:10px;border-color:#1D9E75;background:#E1F5EE;cursor:default;">
             <div style="font-size:22px;margin-bottom:2px;">🛡️</div>
             <div style="font-weight:600;font-size:13px;color:#111;">Administrador</div>
-            <div style="font-size:11px;color:#888;margin-top:2px;">Control total — acceso a todas las sucursales</div>
-          </div>
-          <div class="role-card" data-role="gerente" onclick="toggleRole('gerente', this)" style="padding:10px;">
-            <div style="font-size:22px;margin-bottom:2px;">👔</div>
-            <div style="font-weight:600;font-size:13px;color:#111;">Gerente</div>
-            <div style="font-size:11px;color:#888;margin-top:2px;">Acceso al dashboard filtrado por su sucursal</div>
+            <div style="font-size:11px;color:#888;margin-top:2px;">Control total del dashboard de esta sucursal.</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:1.25rem;">
-          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear miembro</button>
+          <button onclick="sendInvite()" style="flex:1;background:#1D9E75;color:#fff;border:none;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear administrador</button>
           <button onclick="closeInviteModal()" style="padding:10px 16px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
         </div>
       </div>
