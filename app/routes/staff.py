@@ -54,10 +54,8 @@ class StaffUpdate(BaseModel):
 
 
 class StaffPinLoginRequest(BaseModel):
-    restaurant_id: int
-    name: str = Field(..., min_length=1, max_length=100)
-    pin:  str = Field(..., min_length=4, max_length=100)
-
+    username: str
+    password: str
 
 def _staff_redirect(roles: list) -> str:
     """Return the best landing page URL for the given role set.
