@@ -177,20 +177,7 @@ const token = localStorage.getItem('rb_token');
             }).format(Number(amount));
         };
 
-        if (!token) {
-            window.location.href = '/login';
-        } else {
-            const canAccess = roles.includes('owner') || 
-                              roles.includes('admin') || 
-                              roles.includes('delivery') || 
-                              roles.includes('domiciliario');
-            if (!canAccess) {
-                if (roles.includes('waiter')) window.location.href = '/mesero';
-                else if (roles.includes('cook')) window.location.href = '/cocina';
-                else if (roles.includes('cashier')) window.location.href = '/caja';
-                else window.location.href = '/dashboard';
-            }
-        }
+        if (!token) { window.location.href = '/login'; }
 
         const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 

@@ -119,6 +119,7 @@ async def public_restaurant_info(id: int):
 
 @router.get("/mesero", response_class=HTMLResponse)
 async def mesero_page(): return (STATIC / "mesero.html").read_text(encoding="utf-8")
+
 @router.get("/caja", response_class=HTMLResponse)
 async def caja_page(): 
     p = STATIC / "caja.html"
@@ -296,6 +297,51 @@ async def auth_logout(request: Request):
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     await logout(token)
     return {"success": True}
+
+# ↓ PEGA AQUÍ EL ENDPOINT NUEVO ↓
+
+_ADMIN_ROLES = {"owner", "admin", "gerente"}
+_ROLE_REDIRECT = {
+    "mesero":       "/mesero",
+    "cocina":       "/cocina",
+    "caja":         "/caja",
+    "bar":          "/bar",
+    "domiciliario": "/domiciliario",
+}
+
+@router.get("/api/auth/verify-role")
+async def verify_role_for_page(request: Request, page: str):
+    _PAGE_ROLES = {
+        "mesero":       {"mesero"},
+        "caja":         {"caja", "cashier"},
+        "domiciliario": {"domiciliario", "delivery"},
+        "cocina":       {"cocina"},
+        "bar":          {"bar"},
+        "dashboard":    _ADMIN_ROLES,
+        "settings":     _ADMIN_ROLES,
+        "billing":      _ADMIN_ROLES,
+    }
+
+    try:
+        user = await get_current_user(request)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+
+    user_roles = {r.strip().lower() for r in (user.get("role") or "").split(",") if r.strip()}
+
+    if user_roles & _ADMIN_ROLES:
+        return {"ok": True}
+
+    allowed = _PAGE_ROLES.get(page, set())
+    if not (user_roles & allowed):
+        redirect_to = "/staff"
+        for role in user_roles:
+            if role in _ROLE_REDIRECT:
+                redirect_to = _ROLE_REDIRECT[role]
+                break
+        raise HTTPException(status_code=403, detail={"redirect": redirect_to})
+
+    return {"ok": True}
 
 @router.get("/api/geocode")
 async def geocode_endpoint(address: str):

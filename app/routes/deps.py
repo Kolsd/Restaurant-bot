@@ -53,7 +53,7 @@ async def get_current_user(request: Request) -> dict:
             return user
 
     raise HTTPException(status_code=401, detail="User not found")
-    
+
 
 async def get_current_restaurant(request: Request) -> dict:
     """Returns the restaurant for the authenticated user or raises 403."""
@@ -113,3 +113,81 @@ def require_module(module_name: str) -> Callable:
             )
 
     return _check_module
+
+# Al final del archivo, después de las funciones existentes
+
+ROLE_PAGE_MAP = {
+    "/mesero":      {"mesero"},
+    "/caja":        {"caja", "cashier"},
+    "/domiciliario":{"domiciliario", "delivery"},
+    "/cocina":      {"cocina"},
+    "/bar":         {"bar"},
+    "/dashboard":   {"owner", "admin", "gerente"},
+    "/settings":    {"owner", "admin", "gerente"},
+    "/billing":     {"owner", "admin", "gerente"},
+    "/staff":       {"owner", "admin", "gerente"},
+}
+
+ADMIN_ROLES = {"owner", "admin", "gerente"}
+
+def _extract_roles(role_str: str) -> set:
+    return {r.strip().lower() for r in (role_str or "").split(",") if r.strip()}
+
+async def require_page_access(request: Request, path: str):
+    """
+    Verifica token + rol para servir una página HTML protegida.
+    Redirige a /login si no hay token, a /staff si no tiene el rol.
+    """
+    from app.services.auth import verify_token
+    from app.services import database as db
+
+    token = None
+    # Buscar token en cookie o header
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.replace("Bearer ", "")
+    # Las páginas HTML no mandan Authorization header — el token vive en localStorage
+    # así que para rutas de página, devolvemos el HTML y dejamos que el JS valide
+    # PERO: podemos leer una cookie si existe
+    token = request.cookies.get("rb_token") or token
+
+    allowed_roles = ROLE_PAGE_MAP.get(path, set())
+    if not allowed_roles:
+        return None  # ruta sin restricción definida, dejar pasar
+
+    if not token:
+        return None  # sin cookie, el JS en el HTML hará el redirect
+
+    username = await verify_token(token)
+    if not username:
+        return None
+
+    # Obtener rol del usuario
+    if username.startswith("staff:"):
+        staff_id = username.replace("staff:", "")
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT role, roles FROM staff WHERE id=$1::uuid", staff_id
+            )
+        if not row:
+            return None
+        roles_list = row.get("roles") or []
+        if not roles_list and row.get("role"):
+            roles_list = [row["role"]]
+        user_roles = {r.lower() for r in roles_list}
+    else:
+        user = await db.db_get_user(username)
+        if not user:
+            return None
+        user_roles = _extract_roles(user.get("role", ""))
+
+    # Admin siempre puede entrar a todo
+    if user_roles & ADMIN_ROLES:
+        return None  # permitir
+
+    # Verificar si tiene algún rol permitido para esta página
+    if not (user_roles & allowed_roles):
+        raise HTTPException(status_code=403, detail="Rol no autorizado para esta página")
+
+    return None
