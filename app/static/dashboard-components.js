@@ -774,7 +774,7 @@ async function _reloadShifts(self) {
 // ── Main component ──────────────────────────────────────────────────────────
 
 const StaffSection = MesioComponent({
-  state: { loading: true, staff: [], shifts: [], tipPreview: null, tab: 'roster' },
+  state: { loading: true, staff: [], shifts: [], tipPreview: null, tab: 'roster', error: null },
 
   render(state, el) {
     el.textContent = '';
@@ -783,6 +783,16 @@ const StaffSection = MesioComponent({
       const msg = document.createElement('div');
       msg.className   = 'empty-state';
       msg.textContent = 'Cargando equipo...';
+      el.appendChild(msg);
+      return;
+    }
+
+    if (state.error) {
+      const msg = document.createElement('div');
+      msg.className   = 'empty-state';
+      msg.textContent = state.error.includes('403') || state.error.toLowerCase().includes('módulo')
+        ? 'El módulo Staff & Propinas no está activo para este restaurante.'
+        : `Error al cargar el equipo: ${state.error}`;
       el.appendChild(msg);
       return;
     }
@@ -822,8 +832,8 @@ const StaffSection = MesioComponent({
         _staffFetch('/open-shifts'),
       ]);
       self.setState({ staff: rosterData.staff, shifts: shiftsData.shifts, loading: false });
-    } catch {
-      self.setState({ loading: false });
+    } catch (err) {
+      self.setState({ loading: false, error: err.message });
     }
   },
 });
