@@ -365,14 +365,19 @@ function _openStaffModal(self, existing = null) {
   selectedChipsContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:1.5rem;';
   box.appendChild(selectedChipsContainer);
 
-  // ESTADO Y LÓGICA DE UI
+  // 🛡️ LIMPIEZA EXTREMA DE ROLES EXISTENTES PARA EVITAR DUPLICADOS
   let currentRoles = new Set();
   if (existing) {
     let rArr = [];
     if (Array.isArray(existing.roles)) rArr = existing.roles;
-    else if (typeof existing.roles === 'string') rArr = existing.roles.replace(/[{}]/g, '').split(',');
+    else if (typeof existing.roles === 'string') rArr = existing.roles.split(',');
     else if (existing.role) rArr = [existing.role];
-    rArr.forEach(r => { if(r.trim()) currentRoles.add(r.trim().toLowerCase()); });
+    
+    rArr.forEach(r => {
+        // Quitamos comillas, llaves y espacios fantasma de la DB
+        const cleanRole = r.replace(/["\[\]{}]/g, '').trim().toLowerCase();
+        if(cleanRole) currentRoles.add(cleanRole);
+    });
   }
   if(currentRoles.size === 0) currentRoles.add('mesero');
 
@@ -416,10 +421,9 @@ function _openStaffModal(self, existing = null) {
           cardsGrid.appendChild(card);
       });
 
-      // 2. Mostrar/Ocultar el input personalizado
       customRoleWrap.style.display = showCustomInput ? 'block' : 'none';
 
-      // 3. Dibujar chips (etiquetas) seleccionadas
+      // 2. Dibujar etiquetas (Chips)
       selectedChipsContainer.innerHTML = '';
       currentRoles.forEach(roleKey => {
           const meta = getDynamicRoleMeta(roleKey);
@@ -451,9 +455,12 @@ function _openStaffModal(self, existing = null) {
   }
 
   function addRoleChip(rawVal) {
-      const val = rawVal.trim().toLowerCase();
+      const val = rawVal.replace(/["\[\]{}]/g, '').trim().toLowerCase();
       if(val && val !== 'admin' && val !== 'owner' && val !== 'otro') {
-          currentRoles.add(val);
+          // Evitamos que añadan duplicados escribiendo en el input
+          if(!currentRoles.has(val)) {
+              currentRoles.add(val);
+          }
           customRoleIn.value = '';
           updateUI();
       } else if(val === 'admin' || val === 'owner') {
