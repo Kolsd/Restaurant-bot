@@ -75,8 +75,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const roleStr = (restaurant.role || '');
   const equipoNav = document.getElementById('nav-equipo');
-  if (equipoNav) equipoNav.style.display = (roleStr.includes('owner') || roleStr.includes('admin')) ? '' : 'none';
-
+  if (equipoNav) {
+    equipoNav.style.display = rawRole.includes('owner') ? '' : 'none';
+  }
   // Apply from localStorage immediately (fast, may be stale)
   _applyFeatureToggles(restaurant.features || {});
 
