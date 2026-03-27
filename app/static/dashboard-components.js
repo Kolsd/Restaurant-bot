@@ -315,11 +315,18 @@ function _openStaffModal(self, existing = null) {
     ['otro',         '🔧', 'Otro'],
   ];
 
-  const existingRoles  = existing
-    ? ((existing.roles && existing.roles.length) ? existing.roles : [existing.role])
-    : ['mesero'];
-  const selectedRoles  = new Set(existingRoles);
-
+  let existingRoles = ['mesero'];
+  if (existing) {
+    if (Array.isArray(existing.roles)) {
+      existingRoles = existing.roles;
+    } else if (typeof existing.roles === 'string') {
+      existingRoles = existing.roles.replace(/[{}]/g, '').split(',').map(r => r.trim());
+    } else if (existing.role) {
+      existingRoles = [existing.role];
+    }
+  }
+  const selectedRoles = new Set(existingRoles);
+  
   const rolesGrid = document.createElement('div');
   rolesGrid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:1rem;';
 
@@ -511,8 +518,12 @@ function _renderRosterTab(state, el, self) {
   let visible = [...state.staff].sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
   if (activeFilter !== 'all') {
     visible = visible.filter(m => {
-      const roles = (m.roles && m.roles.length) ? m.roles : [m.role];
-      return roles.includes(activeFilter);
+      let rolesArr = [];
+      if (Array.isArray(m.roles)) rolesArr = m.roles;
+      else if (typeof m.roles === 'string') rolesArr = m.roles.replace(/[{}]/g, '').split(',');
+      else if (m.role) rolesArr = [m.role];
+      
+      return rolesArr.map(r => r.trim()).includes(activeFilter);
     });
   }
   if (searchTerm) {
@@ -559,18 +570,32 @@ function _renderRosterTab(state, el, self) {
       info.appendChild(nameEl);
 
       // Role badges
+      // Role badges
       const badgeRow = document.createElement('div');
       badgeRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;';
-      const roles = (member.roles && member.roles.length) ? member.roles : [member.role];
-      roles.forEach(r => {
-        const meta  = _ROLE_META[r] || _ROLE_META.otro;
+      
+      let rolesArray = [];
+      if (Array.isArray(member.roles)) {
+        rolesArray = member.roles;
+      } else if (typeof member.roles === 'string') {
+        rolesArray = member.roles.replace(/[{}]/g, '').split(',');
+      } else if (member.role) {
+        rolesArray = [member.role];
+      } else {
+        rolesArray = ['mesero'];
+      }
+
+      rolesArray.forEach(r => {
+        const cleanRole = r.trim();
+        if (!cleanRole) return;
+        const meta  = _ROLE_META[cleanRole] || _ROLE_META.otro;
         const badge = document.createElement('span');
-        badge.textContent = _ROLE_LABELS[r] || r;
+        badge.textContent = _ROLE_LABELS[cleanRole] || cleanRole;
         badge.style.cssText = `background:${meta.bg};color:${meta.color};padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;`;
         badgeRow.appendChild(badge);
       });
       info.appendChild(badgeRow);
-
+      
       if (member.phone) {
         const phoneEl = document.createElement('div');
         phoneEl.textContent = member.phone;
