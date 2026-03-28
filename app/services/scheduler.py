@@ -59,25 +59,30 @@ async def _process_stale_session(session: dict):
         has_order       = session.get("has_order", False)
         db_phone_id     = session.get("meta_phone_id")
 
+        # 🛡️ FIX MULTI-WORKER: Intentamos marcar la sesión en la base de datos PRIMERO.
+        # Si retorna False, significa que otro worker ya lo hizo en el mismo milisegundo.
+        warned = await db.db_mark_session_warned(session["id"])
+        if not warned:
+            return
+
         if order_delivered:
             msg = (
-                f"Hi! We hope you enjoyed your meal at {table_name}. "
-                f"Whenever you're ready, you can request the bill or call the waiter. It was a pleasure serving you!"
+                f"¡Hola! Esperamos que hayas disfrutado tu comida en {table_name}. "
+                f"Cuando estés listo, puedes pedir la cuenta o llamar al mesero por aquí. ¡Es un placer atenderte!"
             )
         elif not has_order:
             msg = (
-                f"Hi! We're still here if you need anything at {table_name}. "
-                f"Can I help you with something or show you the menu?"
+                f"¡Hola! Seguimos por aquí si necesitas algo en {table_name}. "
+                f"¿Te ayudo con algo o te muestro el menú?"
             )
         else:
             msg = (
-                f"Hi! Is everything alright at {table_name}? "
-                f"Let us know if you need anything else."
+                f"¡Hola! ¿Todo bien en {table_name}? "
+                f"Avísanos si necesitas algo más."
             )
 
         sent = await _send_whatsapp(phone, msg, bot_number, db_phone_id)
         if sent:
-            await db.db_mark_session_warned(session["id"])
             await _create_inactivity_alert(session)
             print(f"Scheduler: inactivity warning sent to {phone} ({table_name})", flush=True)
 
@@ -90,18 +95,23 @@ async def _process_closeable_session(session: dict):
         table_name = session.get("table_name", "tu mesa")
         db_phone_id = session.get("meta_phone_id")
 
-        await _send_whatsapp(
-            phone,
-            f"Goodbye! It was a pleasure serving you at {table_name}. We hope to see you again soon!",
-            bot_number,
-            db_phone_id
-        )
-
-        await db.db_close_session(
+        # 🛡️ FIX MULTI-WORKER: Intentamos cerrar la sesión en la base de datos ANTES
+        # de mandar el WhatsApp. Si retorna None, otro worker ganó la carrera.
+        closed_session = await db.db_close_session(
             phone=phone,
             bot_number=bot_number,
             reason="inactivity_timeout",
-            closed_by_username=""
+            closed_by_username="system"
+        )
+
+        if not closed_session:
+            return  # Otro worker ya la cerró
+
+        await _send_whatsapp(
+            phone,
+            f"Tu sesión en {table_name} ha sido cerrada por inactividad. ¡Fue un placer atenderte, esperamos verte pronto! 👋",
+            bot_number,
+            db_phone_id
         )
 
         pool = await db.get_pool()
