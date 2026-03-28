@@ -2007,19 +2007,17 @@ async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) ->
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if branch_id:
+        if branch_id is not None:
             rows = await conn.fetch(
-                """SELECT o.* FROM table_orders o
-                   LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                   WHERE (o.id = $1 OR o.base_order_id = $1)
-                     AND (t.branch_id = $2 OR t.branch_id IS NULL)
-                   ORDER BY o.created_at ASC""",
+                """SELECT * FROM table_orders
+                   WHERE (id = $1 OR base_order_id = $1) AND branch_id = $2
+                   ORDER BY created_at ASC""",
                 base_order_id, branch_id
             )
         else:
             rows = await conn.fetch(
                 """SELECT * FROM table_orders
-                   WHERE id=$1 OR base_order_id=$1
+                   WHERE id = $1 OR base_order_id = $1
                    ORDER BY created_at ASC""",
                 base_order_id
             )
