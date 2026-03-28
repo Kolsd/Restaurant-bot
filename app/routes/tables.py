@@ -96,16 +96,26 @@ async def get_tables(request: Request):
     """Devuelve las mesas de la sucursal actual para pintarlas en el dashboard."""
     await require_auth(request)
     user = await get_current_user(request)
-    branch_id = user.get("branch_id")
     
-    # 🛡️ Filtro global para leer qué sucursal seleccionó el dueño
+    # Por defecto, asumimos el branch_id del usuario (útil para meseros/gerentes)
+    branch_id = user.get("branch_id")
+    is_main = branch_id is None
+    
+    # 🛡️ Si el dueño usa el selector del Topbar:
     branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        branch_id = int(branch_header)
+    if "owner" in user.get("role", "") or "admin" in user.get("role", ""):
+        if branch_header and branch_header.isdigit():
+            # Eligió una sucursal específica
+            branch_id = int(branch_header)
+            is_main = False
+        else:
+            # No hay header (eligió "Casa Matriz")
+            branch_id = None
+            is_main = True
         
-    tables = await db.db_get_tables(branch_id=branch_id)
+    tables = await db.db_get_tables(branch_id=branch_id, is_main=is_main)
     return {"tables": tables}
-
+    
 @router.post("/api/tables")
 async def create_table(request: Request):
     """Crea una mesa automáticamente sin pedir número ni nombre manual."""
@@ -671,7 +681,7 @@ async def get_tables_status(request: Request):
         t['pending_orders'] = order_map.get(tid, [])
         
     return {"tables": tables}
-        
+
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
     """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""

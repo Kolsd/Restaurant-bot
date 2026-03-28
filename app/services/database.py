@@ -751,17 +751,24 @@ async def db_init_tables():
             except Exception: pass
 
 async def db_get_tables(branch_id: int = None, is_main: bool = False):
+    """
+    Devuelve las mesas.
+    Si is_main es True, trae SOLO las mesas de la matriz (branch_id IS NULL).
+    Si branch_id tiene un número, trae SOLO las de esa sucursal.
+    Si ambas son False/None, trae TODAS las mesas.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         if is_main:
-            # Fiel a tu arquitectura: La matriz tiene branch_id en NULL
+            # Es la Matriz. Obligamos a buscar branch_id IS NULL
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id IS NULL ORDER BY number")
         elif branch_id is not None:
-            # Es una sucursal específica
+            # Es una sucursal. Buscamos su ID específico
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id=$1 ORDER BY number", branch_id)
         else:
-            # Fallback (trae todas)
+            # Modo Admin Global: Trae todo
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE ORDER BY number")
+            
         return [_serialize(dict(r)) for r in rows]
 
 async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None):
