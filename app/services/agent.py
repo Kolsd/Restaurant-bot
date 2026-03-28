@@ -52,20 +52,19 @@ def _block_attr(block, attr: str):
     return getattr(block, attr, None)
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
-    tid_match = re.search(r'(?:\[table_id:|Ref:\s*)([a-zA-Z0-9\-]+)', message, re.IGNORECASE)
+    # 1. Retrocompatibilidad: table_id explícito en el mensaje (QR viejos)
+    tid_match = re.search(r'\[(?:table_id|t):([^\]]+)\]', message)
     if tid_match:
         table_id = tid_match.group(1).strip()
         table = await db.db_get_table_by_id(table_id)
         if table:
-            # Si el cliente venía de una mesa vieja (prueba anterior), cerramos esa sesión
             session = await db.db_get_active_session(phone, bot_number)
             if session and session.get("table_id") != table["id"]:
                 await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
-            
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             return table
 
-    # 2. PRIORIDAD MEDIA: Si no mandó QR nuevo, buscamos si ya está sentado en una mesa (sesión activa)
+    # 2. Sesión activa existente
     session = await db.db_get_active_session(phone, bot_number)
     if session and session.get("table_id"):
         table = await db.db_get_table_by_id(session["table_id"])
@@ -73,43 +72,51 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_touch_session(phone, bot_number)
             return table
 
-    # 3. PRIORIDAD BAJA: Inferir mesa por texto (ej: el cliente escribe "estoy en la mesa 1")
-    branch_id    = None
+    # Resolver branch_id desde el restaurante del bot_number (sin depender del mensaje)
+    _rest = await db.db_get_restaurant_by_bot_number(bot_number)
+    branch_id = None
+    if _rest and _rest.get("parent_restaurant_id") is not None:
+        branch_id = _rest.get("id")  # Es sucursal
+
+    # Override por marker explícito (backward compat)
     branch_match = re.search(r'\[branch=(\d+)\]', message)
     if branch_match:
-        branch_id = branch_match.group(1)
+        branch_id = int(branch_match.group(1))
 
-    clean_message = re.sub(r'https?://\S+', '', message)
+    clean_message = re.sub(r'\[.*?\]', '', re.sub(r'https?://\S+', '', message)).strip()
+
+    # 3. Inferir por número de mesa ("Mesa 3", "estoy en la 3", etc.)
     m = re.search(r'Mesa\s+(\d+)', clean_message, re.IGNORECASE)
     if not m:
         m = re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', clean_message, re.IGNORECASE)
-
     if m:
         number = m.group(1)
-        if branch_id:
-            table_id = f"b{branch_id}-mesa-{number}"
-            table    = await db.db_get_table_by_id(table_id)
-            if table:
-                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-                return table
-        else:
-            table_id = f"mesa-{number}"
-            table    = await db.db_get_table_by_id(table_id)
-            if table:
-                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-                return table
+        table_id = f"b{branch_id}-mesa-{number}" if branch_id is not None else f"mesa-{number}"
+        table = await db.db_get_table_by_id(table_id)
+        if table:
+            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+            return table
 
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT * FROM restaurant_tables WHERE number=$1 AND active=TRUE LIMIT 1",
-                    int(number)
+    # 4. Buscar por nombre exacto de mesa en el restaurante (mesas con nombres personalizados)
+    if clean_message:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            if branch_id is not None:
+                rows = await conn.fetch(
+                    "SELECT * FROM restaurant_tables WHERE branch_id=$1 AND active=TRUE",
+                    branch_id
                 )
-            if row:
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM restaurant_tables WHERE branch_id IS NULL AND active=TRUE"
+                )
+        clean_lower = clean_message.lower()
+        for row in rows:
+            if row["name"].lower() in clean_lower:
                 table = dict(row)
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                 return table
-                
+
     return None
 
 async def get_session_state(phone: str, bot_number: str) -> dict:

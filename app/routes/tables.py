@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 import httpx
@@ -47,6 +48,46 @@ async def get_table_wa_number(table: dict) -> str:
         return matriz.get("whatsapp_number", "")
         
     return wa_number
+
+async def _get_restaurant_for_table(table_id: str | None, session_data: dict | None) -> dict:
+    """Resuelve el restaurante/sucursal a partir de la mesa o la sesión activa."""
+    if table_id:
+        table = await db.db_get_table_by_id(table_id)
+        if table:
+            bid = table.get("branch_id")
+            if bid:
+                r = await db.db_get_restaurant_by_id(bid)
+                if r:
+                    return r
+    if session_data and session_data.get("bot_number"):
+        r = await db.db_get_restaurant_by_bot_number(session_data["bot_number"])
+        if r:
+            return r
+    all_r = await db.db_get_all_restaurants()
+    return all_r[0] if all_r else {}
+
+async def _farewell_and_nps(
+    phone: str,
+    table_id: str | None,
+    session_data: dict | None,
+    db_phone_id: str | None,
+    username: str,
+) -> None:
+    """Envía despedida + NPS, luego cierra sesión y limpia conversación/carrito."""
+    rest = await _get_restaurant_for_table(table_id, session_data)
+    bot_num   = rest.get("whatsapp_number", "")
+    rest_name = rest.get("name", "nuestro restaurante")
+
+    await send_wa_msg(phone, "Tu mesa ha sido cerrada. ¡Gracias por visitarnos! 😊", db_phone_id)
+
+    if bot_num:
+        asyncio.create_task(trigger_nps(phone, bot_num, rest_name))
+        asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))
+
+    sess_bot = (session_data.get("bot_number") if session_data else None) or bot_num
+    if sess_bot:
+        await db.db_close_session(phone, sess_bot, "factura_entregada", username)
+    await db.db_cleanup_after_checkout(phone)
 
 class TableRequest(BaseModel):
     number: int
@@ -100,7 +141,7 @@ async def public_menu_context(table_id: str):
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
 
     wa_number = await get_table_wa_number(table)
-    wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
+    wa_msg = f"Hola! Estoy en {table['name']}"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
     menu = await db.db_get_menu(wa_number) or {}
@@ -528,55 +569,20 @@ async def update_order_status(request: Request, order_id: str):
 
     if status == "generar_factura":
         base_id = order.get("base_order_id") or order_id
-        pool2 = await db.get_pool()
-        async with pool2.acquire() as conn:
-            await conn.execute(
-                "UPDATE table_orders SET status='factura_generada', updated_at=NOW() WHERE (id=$1 OR base_order_id=$1) AND status NOT IN ('cancelado','factura_entregada')",
-                base_id
+        await db.db_mark_factura_generada(base_id)
+        if phone and phone != "manual":
+            await send_wa_msg(
+                phone,
+                f"🧾 Estamos preparando tu factura de {table_name}. En un momento te la llevamos.",
+                db_phone_id
             )
         return {"success": True, "order_id": order_id, "status": "factura_generada"}
 
     if status in ("cerrar_mesa", "factura_entregada"):
         base_id = order.get("base_order_id") or order_id
         await db.db_close_table_bill(base_id)
- 
         if phone and phone != "manual":
-            # 🛡️ RESOLUCIÓN DE SUCURSAL
-            bot_num = ""
-            rest_name = ""
-            
-            # Usamos el table_id que ahora sí viene en el SELECT
-            table_info = await db.db_get_table_by_id(order.get("table_id"))
-            branch_id = table_info.get("branch_id") if table_info else None
-            
-            if branch_id:
-                branch_res = await db.db_get_restaurant_by_id(branch_id)
-                if branch_res:
-                    bot_num = branch_res.get("whatsapp_number", "")
-                    rest_name = branch_res.get("name", "")
-            
-            if not bot_num and session_data:
-                bot_num = session_data.get("bot_number", "")
-                rest_name = "nuestro restaurante"
-
-            # Enviar despedida
-            await send_wa_msg(phone, "Tu mesa ha sido cerrada. ¡Gracias por visitarnos!", db_phone_id)
-
-            # 🚀 DISPARAR NPS
-            if bot_num:
-                await trigger_nps(phone, bot_num, rest_name)
-                await send_wa_interactive_nps(phone, rest_name, db_phone_id)
-            try:
-                async with pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'factura_entregada', closed_by_username = $2 WHERE phone = $1 AND closed_at IS NULL",
-                        phone, username
-                    )
-                    await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
-                    await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
-            except Exception as e:
-                print(f"Error limpiando BD tras cerrar mesa: {e}")
-
+            await _farewell_and_nps(phone, order.get("table_id"), session_data, db_phone_id, username)
         return {"success": True, "order_id": order_id, "status": "factura_entregada"}
         
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
@@ -949,8 +955,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
     )
 
     # Acumulación de puntos loyalty en background (silenciosa, no bloquea respuesta)
-    import asyncio as _asyncio
-    _asyncio.create_task(loyalty_svc.accrue_on_check(
+    asyncio.create_task(loyalty_svc.accrue_on_check(
         restaurant_id=restaurant["id"],
         bot_number=restaurant.get("whatsapp_number", ""),
         base_order_id=base_order_id,
@@ -958,18 +963,15 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         total_cop=float(check["total"]) + body.service_charge,
     ))
 
-    if order_for_billing.get("customer") and order_for_billing["payment_method"] != "manual":
-        # Intentamos disparar la encuesta al teléfono que pagó o al de la orden
-        target_phone = order_for_billing["customer"].get("phone") or check.get("phone")
-        if target_phone and target_phone != "manual":
-            # Obtenemos datos de la sucursal actual
-            bot_num = restaurant.get("whatsapp_number", "")
-            rest_name = restaurant.get("name", "nuestro restaurante")
-            
-            # Disparo en segundo plano para no ralentizar la respuesta de la caja
-            import asyncio
-            asyncio.create_task(trigger_nps(target_phone, bot_num, rest_name))
-            asyncio.create_task(send_wa_interactive_nps(target_phone, rest_name, None))
+    # Si todos los checks están pagados, la mesa quedó en 'factura_entregada'.
+    # Disparar goodbye + NPS + limpiar sesión.
+    order_row = await db.db_get_first_table_order(base_order_id)
+    if order_row and order_row["status"] == "factura_entregada":
+        customer_phone = order_row.get("phone")
+        if customer_phone and customer_phone != "manual":
+            sess = await db.db_get_open_session_by_phone(customer_phone)
+            session_phone_id = sess.get("meta_phone_id") if sess else None
+            await _farewell_and_nps(customer_phone, order_row.get("table_id"), sess, session_phone_id, "caja")
 
     return {
         "success":  True,
