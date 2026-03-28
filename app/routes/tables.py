@@ -31,23 +31,20 @@ def _can_send_entregado_notif(phone: str) -> bool:
     return False
 
 async def get_table_wa_number(table: dict) -> str:
-    """Busca el WhatsApp del restaurante al que pertenece la mesa de forma robusta."""
     wa_number = ""
-    # 1. Intentamos por el ID de sucursal de la mesa
     bid = table.get("branch_id")
     if bid:
         r = await db.db_get_restaurant_by_id(bid)
-        if r:
-            return r.get("whatsapp_number", "")
+        if r: wa_number = r.get("whatsapp_number", "")
             
-    # 2. Si no tiene ID (Mesa de matriz), buscamos el restaurante principal
-    all_r = await db.db_get_all_restaurants()
-    if all_r:
-        # Filtramos para encontrar la Matriz (el que no tiene padre)
-        matriz = next((res for res in all_r if not res.get("parent_restaurant_id")), all_r[0])
-        return matriz.get("whatsapp_number", "")
+    if not wa_number:
+        all_r = await db.db_get_all_restaurants()
+        if all_r:
+            matriz = next((res for res in all_r if not res.get("parent_restaurant_id")), all_r[0])
+            wa_number = matriz.get("whatsapp_number", "")
         
-    return wa_number
+    # 🛡️ Limpiamos el sufijo _b para que el enlace wa.me sea válido
+    return wa_number.split("_b")[0] if wa_number else ""
 
 async def _get_restaurant_for_table(table_id: str | None, session_data: dict | None) -> dict:
     """Resuelve el restaurante/sucursal a partir de la mesa o la sesión activa."""
@@ -66,27 +63,23 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
     all_r = await db.db_get_all_restaurants()
     return all_r[0] if all_r else {}
 
-async def _farewell_and_nps(
-    phone: str,
-    table_id: str | None,
-    session_data: dict | None,
-    db_phone_id: str | None,
-    username: str,
-) -> None:
-    """Envía despedida + NPS, luego cierra sesión y limpia conversación/carrito."""
+async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, db_phone_id: str | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
-    bot_num   = rest.get("whatsapp_number", "")
+    
+    # 🛡️ Usamos el bot_number limpio para que coincida con el webhook de Meta
+    raw_bot_num = rest.get("whatsapp_number", "")
+    clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
+    final_bot_num = (session_data.get("bot_number") if session_data else None) or clean_bot_num
+    
     rest_name = rest.get("name", "nuestro restaurante")
 
     await send_wa_msg(phone, "Tu mesa ha sido cerrada. ¡Gracias por visitarnos! 😊", db_phone_id)
 
-    if bot_num:
-        asyncio.create_task(trigger_nps(phone, bot_num, rest_name))
+    if final_bot_num:
+        asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
         asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))
-
-    sess_bot = (session_data.get("bot_number") if session_data else None) or bot_num
-    if sess_bot:
-        await db.db_mark_session_nps_pending(phone, sess_bot)
+        await db.db_mark_session_nps_pending(phone, final_bot_num)
+        
     await db.db_cleanup_after_checkout(phone)
 
 # ── MESAS ────────────────────────────────────────────────────────────
@@ -694,7 +687,7 @@ async def get_tables_status(request: Request):
         t['pending_orders'] = order_map.get(tid, [])
         
     return {"tables": tables}
-    
+
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
     """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""
