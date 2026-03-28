@@ -750,12 +750,17 @@ async def db_init_tables():
             try: await conn.execute(idx_sql)
             except Exception: pass
 
-async def db_get_tables(branch_id: int = None):
+async def db_get_tables(branch_id: int = None, is_main: bool = False):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if branch_id is not None:
+        if is_main:
+            # Fiel a tu arquitectura: La matriz tiene branch_id en NULL
+            rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id IS NULL ORDER BY number")
+        elif branch_id is not None:
+            # Es una sucursal específica
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id=$1 ORDER BY number", branch_id)
         else:
+            # Fallback (trae todas)
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE ORDER BY number")
         return [_serialize(dict(r)) for r in rows]
 

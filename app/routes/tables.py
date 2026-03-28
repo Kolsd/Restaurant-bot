@@ -124,7 +124,7 @@ async def delete_table(request: Request, table_id: str):
     await require_auth(request)
     await db.db_delete_table(table_id)
     return {"success": True}
-    
+
 @router.get("/menu/{table_id}", response_class=HTMLResponse)
 async def menu_page(table_id: str):
     p = STATIC / "html" / "menu.html"
@@ -634,30 +634,24 @@ async def get_pos_menu(request: Request):
 @router.get("/api/pos/tables-status")
 async def get_tables_status(request: Request):
     """Devuelve todas las mesas y su estado actual (ideal para pintar el mapa)"""
-    user = await get_current_user(request)
-    branch_id = user.get("branch_id")
+    await require_auth(request)
     
-    # 🛡️ FILTRO GLOBAL
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        branch_id = int(branch_header)
+    # 1. Resolución de contexto inteligente
+    restaurant = await get_current_restaurant(request)
+    is_main = restaurant.get("parent_restaurant_id") is None
+    branch_id = None if is_main else restaurant["id"]
         
-    tables = await db.db_get_tables(branch_id=branch_id)
+    tables = await db.db_get_tables(branch_id=branch_id, is_main=is_main)
 
-    role = user.get("role", "")
-    is_admin = any(r in role for r in ("owner", "admin", "gerente"))
-
-    pool = await db.get_pool()
+    pool = await get_pool()
     async with pool.acquire() as conn:
         active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
-        if branch_id is not None:
+        
+        # 2. Separar las órdenes pendientes según arquitectura
+        if not is_main:
             pending_orders = await conn.fetch(
                 "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
                 branch_id
-            )
-        elif is_admin:
-            pending_orders = await conn.fetch(
-                "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado')"
             )
         else:
             pending_orders = await conn.fetch(
@@ -677,7 +671,7 @@ async def get_tables_status(request: Request):
         t['pending_orders'] = order_map.get(tid, [])
         
     return {"tables": tables}
-    
+        
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
     """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""
