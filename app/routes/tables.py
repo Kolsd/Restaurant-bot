@@ -140,7 +140,7 @@ async def create_table(request: Request):
     new_table = await db.db_auto_create_table(restaurant_id, is_main)
     
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
-    
+
 @router.delete("/api/tables/{table_id}")
 async def delete_table(request: Request, table_id: str):
     """Elimina una mesa por su ID."""
@@ -666,9 +666,9 @@ async def get_tables_status(request: Request):
         
     tables = await db.db_get_tables(branch_id=branch_id, is_main=is_main)
 
-    pool = await get_pool()
+    pool = await db.get_pool()
     async with pool.acquire() as conn:
-        active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
+            active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
         
         # 2. Separar las órdenes pendientes según arquitectura
         if not is_main:
