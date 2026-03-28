@@ -101,6 +101,26 @@
         <input type="number" id="min-order" placeholder="0" min="0" step="1000">
       </div>
     </div>
+    <div style="margin-top:12px;">
+      <label>Cobertura de domicilio (km)</label>
+      <input type="number" id="delivery-radius" placeholder="5" min="1" max="50" step="1">
+    </div>
+  </div>
+
+  <!-- Ubicación de la sucursal -->
+  <div class="card">
+    <div class="card-title">📍 Ubicación de la sucursal</div>
+    <p style="font-size:12px;color:#888;margin-bottom:1rem;">Coordenadas GPS del local. Se usan para enrutar pedidos de domicilio a la sucursal más cercana.</p>
+    <div class="grid2">
+      <div>
+        <label>Latitud</label>
+        <input type="number" id="branch-lat" placeholder="4.6097" step="0.0001">
+      </div>
+      <div>
+        <label>Longitud</label>
+        <input type="number" id="branch-lon" placeholder="-74.0817" step="0.0001">
+      </div>
+    </div>
   </div>
 
   <!-- Google Maps -->
@@ -163,7 +183,12 @@
 <script>
 const token = localStorage.getItem('rb_token');
 if (!token) window.location.href = '/login';
-const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+const rb = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+const headers = {
+  'Authorization': 'Bearer ' + token,
+  'Content-Type': 'application/json',
+  ...(rb.id ? { 'X-Branch-ID': String(rb.id) } : {})
+};
 
 let paymentMethods = [];
 
@@ -180,10 +205,13 @@ async function loadSettings() {
     document.getElementById('toggle-upsell').checked    = d.upsell_active !== false;
     document.getElementById('delivery-fee').value       = d.delivery_fee || 0;
     document.getElementById('min-order').value          = d.min_order || 0;
+    document.getElementById('delivery-radius').value   = d.delivery_radius_km || 5;
     document.getElementById('maps-url').value           = d.google_maps_url || '';
     document.getElementById('config-timezone').value = d.timezone || 'UTC';
     document.getElementById('config-currency').value = d.currency || 'USD';
     document.getElementById('config-locale').value   = d.locale || 'en-US';
+    document.getElementById('branch-lat').value = d.latitude || '';
+    document.getElementById('branch-lon').value = d.longitude || '';
   } catch(e) { console.error(e); }
 }
 
@@ -220,17 +248,20 @@ async function saveSettings() {
   btn.textContent = 'Guardando...'; btn.disabled = true;
   try {
     const body = {
-      payment_methods:  paymentMethods,
-      bot_active:       document.getElementById('toggle-bot').checked,
-      domicilio_active: document.getElementById('toggle-domicilio').checked,
-      recoger_active:   document.getElementById('toggle-recoger').checked,
-      upsell_active:    document.getElementById('toggle-upsell').checked,
-      delivery_fee:     parseInt(document.getElementById('delivery-fee').value) || 0,
-      min_order:        parseInt(document.getElementById('min-order').value) || 0,
-      google_maps_url:  document.getElementById('maps-url').value.trim(),
-      timezone:         document.getElementById('config-timezone').value,
-      currency:         document.getElementById('config-currency').value,
-      locale:           document.getElementById('config-locale').value
+      payment_methods:   paymentMethods,
+      bot_active:        document.getElementById('toggle-bot').checked,
+      domicilio_active:  document.getElementById('toggle-domicilio').checked,
+      recoger_active:    document.getElementById('toggle-recoger').checked,
+      upsell_active:     document.getElementById('toggle-upsell').checked,
+      delivery_fee:      parseInt(document.getElementById('delivery-fee').value) || 0,
+      min_order:         parseInt(document.getElementById('min-order').value) || 0,
+      delivery_radius_km: parseFloat(document.getElementById('delivery-radius').value) || 5,
+      google_maps_url:   document.getElementById('maps-url').value.trim(),
+      timezone:          document.getElementById('config-timezone').value,
+      currency:          document.getElementById('config-currency').value,
+      locale:            document.getElementById('config-locale').value,
+      latitude:          document.getElementById('branch-lat').value || null,
+      longitude:         document.getElementById('branch-lon').value || null
     };
     const r = await fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify(body) });
     const fb = document.getElementById('feedback');

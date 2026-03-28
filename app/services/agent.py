@@ -492,7 +492,8 @@ def _parse_bot_response(raw: str) -> dict | None:
     return None
 
 async def execute_action(parsed: dict, phone: str, bot_number: str,
-                         table_context: dict | None, session_state: dict) -> str:
+                         table_context: dict | None, session_state: dict,
+                         full_history: list = None, restaurant_obj: dict = None) -> str:
     action = parsed.get("action", "chat")
     items  = parsed.get("items", [])
     reply  = parsed.get("reply", "")
@@ -681,8 +682,30 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 await orders.clear_cart(phone, bot_number)
                 return reply
 
+            # For delivery: try to route to nearest branch by GPS location
+            effective_bot_number = bot_number
+            if action == "delivery" and restaurant_obj and not restaurant_obj.get("parent_restaurant_id"):
+                history_to_scan = (full_history or [])[-10:]
+                lat_lon_match = None
+                for msg in reversed(history_to_scan):
+                    content = msg.get("content", "") if isinstance(msg.get("content"), str) else ""
+                    m = re.search(r'lat:([-\d.]+),?\s*lon:([-\d.]+)', content)
+                    if m:
+                        lat_lon_match = (float(m.group(1)), float(m.group(2)))
+                        break
+                if lat_lon_match:
+                    customer_lat, customer_lon = lat_lon_match
+                    parent_id = restaurant_obj.get("id")
+                    try:
+                        nearest = await db.db_find_nearest_branch(customer_lat, customer_lon, parent_id)
+                        if nearest:
+                            effective_bot_number = nearest["whatsapp_number"]
+                            print(f"📍 Delivery routed to branch '{nearest['name']}' ({effective_bot_number})", flush=True)
+                    except Exception as _e:
+                        print(f"⚠️ Error routing delivery by GPS: {_e}", flush=True)
+
             order_type = "domicilio" if action == "delivery" else "recoger"
-            res = await orders.create_order(phone, order_type, address, notes, bot_number, payment_method)
+            res = await orders.create_order(phone, order_type, address, notes, effective_bot_number, payment_method)
 
             if res.get("blocked_in_transit"):
                 return "Tu pedido ya va en camino 🛵 No es posible agregar más items a ese pedido. Si deseas hacer un pedido nuevo, dímelo y te ayudo a iniciar uno desde cero."
@@ -691,7 +714,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 order = res["order"]
                 await db.db_save_order(order)
                 try:
-                    await db.db_deduct_inventory_for_order(bot_number, order.get("items", []))
+                    await db.db_deduct_inventory_for_order(effective_bot_number, order.get("items", []))
                 except Exception as e:
                     print(f"⚠️ Error descontando inventario: {e}", flush=True)
 
@@ -754,6 +777,7 @@ HISTORY_WINDOW = 5
 
 async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
     user_message_clean = _sanitize_user_input(user_message)
+    user_message_clean = re.sub(r'\s*\[(?:table_id|t):[^\]]+\]', '', user_message_clean).strip()
 
     nps_key = _nps_key(user_phone, bot_number)
 
@@ -923,7 +947,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         print(f"❌ JSON inválido. Raw: {raw[:120]}", flush=True)
         assistant_message = "Lo siento, hubo un problema. ¿Puedes repetir tu pedido?"
     else:
-        assistant_message = await execute_action(parsed, user_phone, bot_number, table_context, session_state)
+        assistant_message = await execute_action(parsed, user_phone, bot_number, table_context, session_state, full_history=full_history, restaurant_obj=restaurant_obj)
         assistant_message = assistant_message.replace("[LINK_MENU]", menu_url)
 
     nps_interactive = None
@@ -951,7 +975,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
             }
         }
 
-    full_history.append({"role": "user",      "content": user_message})
+    full_history.append({"role": "user",      "content": user_message_clean})
     full_history.append({"role": "assistant", "content": assistant_message})
     await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])
 

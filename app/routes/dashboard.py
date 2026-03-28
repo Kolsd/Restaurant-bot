@@ -14,7 +14,7 @@ import httpx
 
 from app.services.auth import login, logout, create_user, get_users, hash_password
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_user
+from app.routes.deps import require_auth, get_current_user, get_current_restaurant
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -202,15 +202,7 @@ async def settings_page():
 
 @router.get("/api/settings")
 async def get_settings(request: Request):
-    user = await get_current_user(request)
-    branch_id = user.get("branch_id")
-    if not branch_id:
-        all_r = await db.db_get_all_restaurants()
-        if not all_r:
-            raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-        restaurant = all_r[0]
-    else:
-        restaurant = await db.db_get_restaurant_by_id(branch_id)
+    restaurant = await get_current_restaurant(request)
 
     raw_features = restaurant.get("features", {}) or {}
     if isinstance(raw_features, str):
@@ -236,24 +228,20 @@ async def get_settings(request: Request):
         "recoger_active": features.get("recoger_active", True),
         "delivery_fee": features.get("delivery_fee", 0),
         "min_order": features.get("min_order", 0),
+        "delivery_radius_km": features.get("delivery_radius_km", 5),
         "timezone": features.get("timezone", "America/Bogota"),
         "currency": features.get("currency", "COP"),
         "locale": features.get("locale", "es-CO"),
+        "latitude": restaurant.get("latitude"),
+        "longitude": restaurant.get("longitude"),
     }
 
 @router.post("/api/settings")
 async def save_settings(request: Request):
     import json as _json
-    user = await get_current_user(request)
+    restaurant = await get_current_restaurant(request)
     body = await request.json()
-    branch_id = user.get("branch_id")
-    if not branch_id:
-        all_r = await db.db_get_all_restaurants()
-        if not all_r:
-            raise HTTPException(status_code=404, detail="No hay restaurante")
-        branch_id = all_r[0]["id"]
 
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
     raw_features = restaurant.get("features", {}) or {}
     if isinstance(raw_features, str):
         try:
@@ -266,7 +254,7 @@ async def save_settings(request: Request):
     updatable = [
         "payment_methods", "google_maps_url", "bot_active",
         "upsell_active", "domicilio_active", "recoger_active",
-        "delivery_fee", "min_order", "delivery_message",
+        "delivery_fee", "min_order", "delivery_radius_km", "delivery_message",
         "pickup_message", "welcome_message",
         "timezone", "currency", "locale"
     ]
@@ -278,8 +266,12 @@ async def save_settings(request: Request):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
-            _json.dumps(current_features), branch_id
+            _json.dumps(current_features), restaurant["id"]
         )
+        if "latitude" in body and body["latitude"] is not None:
+            await conn.execute("UPDATE restaurants SET latitude=$1 WHERE id=$2", float(body["latitude"]), restaurant["id"])
+        if "longitude" in body and body["longitude"] is not None:
+            await conn.execute("UPDATE restaurants SET longitude=$1 WHERE id=$2", float(body["longitude"]), restaurant["id"])
     return {"success": True, "features": current_features}
 
 # ── AUTH ──────────────────────────────────────────────────────────────

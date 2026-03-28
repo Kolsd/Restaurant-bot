@@ -431,6 +431,34 @@ async def db_get_all_restaurants(parent_id: int = None):
             )
         return [_serialize(dict(r)) for r in rows]
 
+async def db_find_nearest_branch(customer_lat: float, customer_lon: float, parent_id: int) -> dict | None:
+    """Finds the nearest branch to the customer's location within its delivery_radius_km.
+    Uses the Haversine formula via PostgreSQL.
+    Returns the nearest branch within coverage, or None if no branch covers that area."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, whatsapp_number, latitude, longitude,
+                   features->>'delivery_radius_km' AS radius_km,
+                   (
+                     6371 * acos(
+                       cos(radians($1)) * cos(radians(latitude::float))
+                       * cos(radians(longitude::float) - radians($2))
+                       + sin(radians($1)) * sin(radians(latitude::float))
+                     )
+                   ) AS distance_km
+            FROM restaurants
+            WHERE parent_restaurant_id = $3
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY distance_km ASC
+        """, customer_lat, customer_lon, parent_id)
+        for r in rows:
+            radius = float(r["radius_km"] or 5.0)
+            if r["distance_km"] is not None and r["distance_km"] <= radius:
+                return _serialize(dict(r))
+    return None
+
 async def db_check_module(bot_number: str, module_name: str) -> bool:
     """
     Return True if module_name is explicitly enabled (true) in the restaurant's
