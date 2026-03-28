@@ -184,6 +184,11 @@
 
             text += `\n*Total aproximado:* ${formatMoney(total)}\n\n¿Me confirmas la orden?`;
 
+            // ✅ FIX: Inyectamos el ID de la mesa silenciosamente al final del mensaje
+            if (tableId) {
+                text += `\n[table_id:${tableId}]`;
+            }
+
             const encodedText = encodeURIComponent(text);
             window.location.href = `https://wa.me/${botNumber}?text=${encodedText}`;
         }
