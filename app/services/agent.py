@@ -52,6 +52,21 @@ def _block_attr(block, attr: str):
     return getattr(block, attr, None)
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
+    # 1. PRIORIDAD MÁXIMA: Detectar table_id explícito enviado por QR o catálogo
+    tid_match = re.search(r'\[table_id:([^\]]+)\]', message)
+    if tid_match:
+        table_id = tid_match.group(1).strip()
+        table = await db.db_get_table_by_id(table_id)
+        if table:
+            # Si el cliente venía de una mesa vieja (prueba anterior), cerramos esa sesión
+            session = await db.db_get_active_session(phone, bot_number)
+            if session and session.get("table_id") != table["id"]:
+                await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
+            
+            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+            return table
+
+    # 2. PRIORIDAD MEDIA: Si no mandó QR nuevo, buscamos si ya está sentado en una mesa (sesión activa)
     session = await db.db_get_active_session(phone, bot_number)
     if session and session.get("table_id"):
         table = await db.db_get_table_by_id(session["table_id"])
@@ -59,21 +74,12 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_touch_session(phone, bot_number)
             return table
 
-    # Detectar table_id explícito enviado por catalog.html
-    tid_match = re.search(r'\[table_id:([^\]]+)\]', message)
-    if tid_match:
-        table_id = tid_match.group(1).strip()
-        table = await db.db_get_table_by_id(table_id)
-        if table:
-            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-            return table
-
+    # 3. PRIORIDAD BAJA: Inferir mesa por texto (ej: el cliente escribe "estoy en la mesa 1")
     branch_id    = None
     branch_match = re.search(r'\[branch=(\d+)\]', message)
     if branch_match:
         branch_id = branch_match.group(1)
 
-    # Limpiar URLs antes de buscar mesa para evitar falsos positivos (?mesa=Barra)
     clean_message = re.sub(r'https?://\S+', '', message)
     m = re.search(r'Mesa\s+(\d+)', clean_message, re.IGNORECASE)
     if not m:
@@ -104,8 +110,9 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 table = dict(row)
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                 return table
+                
     return None
-
+    
 async def get_session_state(phone: str, bot_number: str) -> dict:
     session = await db.db_get_active_session(phone, bot_number)
     if not session:
