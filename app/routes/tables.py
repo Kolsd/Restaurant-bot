@@ -292,26 +292,52 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
     """Devuelve órdenes de mesa filtradas por sucursal y estado."""
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
-    
+
     # 🛡️ FILTRO GLOBAL: Leer el selector del Topbar
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
 
+    # Detectar si el usuario es admin/owner (puede ver todas las sucursales)
+    role = user.get("role", "")
+    is_admin = any(r in role for r in ("owner", "admin", "gerente"))
+
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        if status:
-            # Filtro por estado y sucursal
-            rows = await conn.fetch(
-                "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC", 
-                status, branch_id
-            )
+        if branch_id is not None:
+            # Sucursal específica: filtro exacto
+            if status:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
+                    status, branch_id
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
+                    branch_id
+                )
+        elif is_admin:
+            # Owner/admin sin sucursal seleccionada: ve todas
+            if status:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status = $1 ORDER BY created_at ASC",
+                    status
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC"
+                )
         else:
-            # Filtro solo por sucursal (excluyendo cerrados)
-            rows = await conn.fetch(
-                "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC", 
-                branch_id
-            )
+            # Staff en restaurante principal (branch_id IS NULL = restaurante matriz)
+            if status:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id IS NULL ORDER BY created_at ASC",
+                    status
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id IS NULL ORDER BY created_at ASC"
+                )
 
     import json as _json
     result = []
@@ -342,13 +368,11 @@ async def get_order_ticket(request: Request, order_id: str):
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        if branch_id:
+        if branch_id is not None:
             rows = await conn.fetch(
-                """SELECT o.* FROM table_orders o
-                   LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                   WHERE (o.id = $1 OR o.base_order_id = $1)
-                   AND (t.branch_id = $2 OR t.branch_id IS NULL)
-                   ORDER BY o.created_at ASC""",
+                """SELECT * FROM table_orders
+                   WHERE (id = $1 OR base_order_id = $1) AND branch_id = $2
+                   ORDER BY created_at ASC""",
                 order_id, branch_id)
         else:
             rows = await conn.fetch(
@@ -607,11 +631,26 @@ async def get_tables_status(request: Request):
         branch_id = int(branch_header)
         
     tables = await db.db_get_tables(branch_id=branch_id)
-    
+
+    role = user.get("role", "")
+    is_admin = any(r in role for r in ("owner", "admin", "gerente"))
+
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status='active'")
-        pending_orders = await conn.fetch("SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado')")
+        if branch_id is not None:
+            pending_orders = await conn.fetch(
+                "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
+                branch_id
+            )
+        elif is_admin:
+            pending_orders = await conn.fetch(
+                "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado')"
+            )
+        else:
+            pending_orders = await conn.fetch(
+                "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id IS NULL"
+            )
         
     session_map = {s['table_id'] for s in active_sessions}
     order_map = {}
