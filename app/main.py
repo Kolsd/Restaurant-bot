@@ -23,7 +23,7 @@ APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 app = FastAPI(
     title="Mesio",
     description="AI assistant for restaurants",
-    version="5.9.0",
+    version="6.1.0",
     docs_url=None,
     redoc_url=None,
 )

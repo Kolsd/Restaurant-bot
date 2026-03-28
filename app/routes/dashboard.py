@@ -82,7 +82,7 @@ def check_role_permission(user: dict, allowed_roles: list):
 # ── SERVICE WORKER (must be served at root scope, not /static/) ───────
 @router.get("/sw.js")
 async def service_worker():
-    content = (STATIC / "sw.js").read_text(encoding="utf-8")
+    content = (STATIC / "js" / "sw.js").read_text(encoding="utf-8")
     return Response(
         content=content,
         media_type="application/javascript",
@@ -91,22 +91,22 @@ async def service_worker():
 
 # ── PÁGINAS PÚBLICAS / AUTENTICADAS ──────────────────────────────────
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(): return (STATIC / "login.html").read_text(encoding="utf-8")
+async def login_page(): return (STATIC / "html" / "login.html").read_text(encoding="utf-8")
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(): return (STATIC / "dashboard.html").read_text(encoding="utf-8")
+async def dashboard_page(): return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")
 @router.get("/demo", response_class=HTMLResponse)
-async def demo_page(): return (STATIC / "dashboard-demo.html").read_text(encoding="utf-8")
+async def demo_page(): return (STATIC / "html" / "dashboard-demo.html").read_text(encoding="utf-8")
 @router.get("/landing", response_class=HTMLResponse)
-async def landing_page(): return (STATIC / "landing.html").read_text(encoding="utf-8")
+async def landing_page(): return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
 @router.get("/", response_class=HTMLResponse)
-async def root_redirect(): return (STATIC / "landing.html").read_text(encoding="utf-8")
+async def root_redirect(): return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
 @router.get("/superadmin", response_class=HTMLResponse)
 async def superadmin_page():
-    p = STATIC / "superadmin.html"
+    p = STATIC / "html" / "superadmin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>")
 @router.get("/staff", response_class=HTMLResponse)
 async def staff_portal_page():
-    p = STATIC / "staff-portal.html"
+    p = STATIC / "html" / "staff-portal.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Portal no disponible</h1>")
 
 @router.get("/api/public/restaurant-info")
@@ -118,19 +118,19 @@ async def public_restaurant_info(id: int):
     return {"name": restaurant.get("name", "")}
 
 @router.get("/mesero", response_class=HTMLResponse)
-async def mesero_page(): return (STATIC / "mesero.html").read_text(encoding="utf-8")
+async def mesero_page(): return (STATIC / "html" / "mesero.html").read_text(encoding="utf-8")
 
 @router.get("/caja", response_class=HTMLResponse)
 async def caja_page(): 
-    p = STATIC / "caja.html"
+    p = STATIC / "html" / "caja.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page():
-    return (STATIC / "crm.html").read_text(encoding="utf-8")  
+    return (STATIC / "html" / "crm.html").read_text(encoding="utf-8")  
 
 @router.get("/demo-chat", response_class=HTMLResponse)
 async def demo_chat_bot_page(): 
-    p = STATIC / "demo-chat.html"
+    p = STATIC / "html" / "demo-chat.html"
     if p.exists():
         return HTMLResponse(p.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Falta el archivo demo-chat.html en la carpeta static</h1>", status_code=404)
@@ -138,7 +138,7 @@ async def demo_chat_bot_page():
 @router.get("/catalog", response_class=HTMLResponse)
 async def catalog_page():
     # Renderiza el frontend del carrito/catálogo móvil
-    p = STATIC / "catalog.html"
+    p = STATIC / "html" / "catalog.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Catálogo no disponible</h1>")
 
 @router.get("/api/public/menu/{bot_number}")
@@ -177,27 +177,27 @@ async def get_public_menu(bot_number: str):
         
 @router.get("/privacidad", response_class=HTMLResponse)
 async def privacidad_page(): 
-    return (STATIC / "privacidad.html").read_text(encoding="utf-8")
+    return (STATIC / "html" / "privacidad.html").read_text(encoding="utf-8")
 
 @router.get("/terminos", response_class=HTMLResponse)
 async def terminos_page(): 
-    return (STATIC / "terminos.html").read_text(encoding="utf-8")
+    return (STATIC / "html" / "terminos.html").read_text(encoding="utf-8")
 
 # ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
 @router.get("/billing", response_class=HTMLResponse)
 async def billing_page():
-    p = STATIC / "billing.html"
+    p = STATIC / "html" / "billing.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Billing no disponible</h1>")
 
 @router.get("/domiciliario", response_class=HTMLResponse)
 async def domiciliario_page():
-    p = STATIC / "domiciliario.html"
+    p = STATIC / "html" / "domiciliario.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)    
 
 # ── SETTINGS ─────────────────────────────────────────────────────────
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page():
-    p = STATIC / "settings.html"
+    p = STATIC / "html" / "settings.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Settings no disponible</h1>")
 
 @router.get("/api/settings")
