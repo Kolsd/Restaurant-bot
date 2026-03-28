@@ -1109,6 +1109,7 @@ const StaffSection = MesioComponent({
     btnAdmin.style.cssText += 'background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;font-weight:600;padding:10px 18px;border-radius:10px;';
 
     // Botón para Empleados Operativos (PIN)
+    const btnStaff = _makeBtn('+ Nuevo Empleado', 'btn-sm btn-primary', () => _openStaffModal(StaffSection));
     btnStaff.style.cssText += 'padding:10px 18px;border-radius:10px;';
 
     headerActions.appendChild(btnAdmin);
