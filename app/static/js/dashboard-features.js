@@ -136,23 +136,30 @@ async function loadTables() {
 
 async function createTable() {
   const h = window._dashHeaders;
-  const num  = parseInt(document.getElementById('new-table-num').value);
-  const name = document.getElementById('new-table-name').value.trim();
-  if (!num || num < 1) { alert('Ingresa un número de mesa válido'); return; }
+  
+  // Ya no leemos inputs manuales, el backend asigna el ID inteligentemente
   try {
     const r = await fetch('/api/tables', {
-      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ number: num, name: name || 'Mesa ' + num })
+      method: 'POST', 
+      headers: { ...h, 'Content-Type': 'application/json' }
+      // Hemos eliminado el body. El backend sabe quién es el usuario y qué sucursal es.
     });
+    
     if (r.ok) {
-      document.getElementById('new-table-num').value = '';
-      document.getElementById('new-table-name').value = '';
-      loadTables();
+      // Si los inputs viejos siguen en tu HTML (dashboard.html), los limpiamos y ocultamos para no confundir
+      const inputNum = document.getElementById('new-table-num');
+      const inputName = document.getElementById('new-table-name');
+      if (inputNum) { inputNum.value = ''; inputNum.style.display = 'none'; }
+      if (inputName) { inputName.value = ''; inputName.style.display = 'none'; }
+      
+      loadTables(); // Refresca la cuadrícula de mesas con la nueva ya creada
     } else {
       const err = await r.json().catch(() => ({}));
-      alert('Error: ' + (err.detail || r.status));
+      alert('Error al crear mesa: ' + (err.detail || r.status));
     }
-  } catch(e) { alert('Error de conexión'); }
+  } catch(e) { 
+    alert('Error de conexión al intentar crear la mesa.'); 
+  }
 }
 
 async function deleteTable(tableId) {

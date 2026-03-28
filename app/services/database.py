@@ -125,7 +125,7 @@ async def db_init_nps_inventory():
         ]:
             try: await conn.execute(idx_sql)
             except Exception: pass
-            
+
         # Migraciones de columnas nuevas en tablas existentes
         for col_sql in [
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
@@ -767,6 +767,47 @@ async def db_create_table(table_id: str, number: int, name: str, branch_id: int 
             VALUES ($1,$2,$3,$4,TRUE)
             ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, name=EXCLUDED.name, branch_id=EXCLUDED.branch_id, active=TRUE
         """, table_id, number, name, branch_id)
+
+async def db_auto_create_table(restaurant_id: int, is_main_restaurant: bool) -> dict:
+    """
+    Crea una mesa automáticamente buscando el primer número disponible.
+    El nombre será {restaurant_id}-{numero}. (Ej. "1-1", "2-1").
+    Reutiliza automáticamente los números de las mesas que hayan sido borradas.
+    """
+    branch_id = None if is_main_restaurant else restaurant_id
+    
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # 1. Obtener todos los números actualmente en uso (ignorando los borrados)
+        if branch_id is None:
+            rows = await conn.fetch("SELECT number FROM restaurant_tables WHERE branch_id IS NULL AND active=TRUE")
+        else:
+            rows = await conn.fetch("SELECT number FROM restaurant_tables WHERE branch_id=$1 AND active=TRUE", branch_id)
+            
+        used_numbers = {r["number"] for r in rows}
+        
+        # 2. Buscar el primer "hueco" disponible (si se borró la 2, la próxima será la 2)
+        new_number = 1
+        while new_number in used_numbers:
+            new_number += 1
+            
+        # 3. Armar el nombre limpio que verá el usuario y el bot
+        table_name = f"{restaurant_id}-{new_number}"
+        table_id = f"table-{restaurant_id}-{new_number}"
+        
+        # 4. Insertar o reactivar si el ID ya existía en la base de datos
+        await conn.execute("""
+            INSERT INTO restaurant_tables (id, number, name, branch_id, active)
+            VALUES ($1, $2, $3, $4, TRUE)
+            ON CONFLICT (id) DO UPDATE SET active=TRUE, name=EXCLUDED.name, number=EXCLUDED.number
+        """, table_id, new_number, table_name, branch_id)
+        
+        return {
+            "id": table_id, 
+            "number": new_number, 
+            "name": table_name, 
+            "branch_id": branch_id
+        }
 
 async def db_delete_table(table_id: str):
     pool = await get_pool()
