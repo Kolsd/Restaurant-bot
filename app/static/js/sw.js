@@ -17,12 +17,12 @@ const SHELL_ASSETS = [
   '/dashboard',
   '/login',
   '/settings',
-  '/static/dashboard.css',
-  '/static/dashboard-core.js',
-  '/static/dashboard-features.js',
-  '/static/dashboard-nps-inventory.js',
-  '/static/offline-sync.js',
-  '/static/logo.png',
+  '/static/css/dashboard.css',
+  '/static/js/dashboard-core.js',
+  '/static/js/dashboard-features.js',
+  '/static/js/dashboard-nps-inventory.js',
+  '/static/js/offline-sync.js',
+  '/static/img/logo.png',
 ];
 
 // ── Install ──────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ self.addEventListener('fetch', event => {
   }
 
   // roles.js: siempre network-only, nunca cachear.
-  if (url.pathname === '/static/roles.js') {
+  if (url.pathname === '/static/js/roles.js') {
     event.respondWith(fetch(request));
     return;
   }

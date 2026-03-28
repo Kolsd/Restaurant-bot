@@ -36,7 +36,19 @@
       "Bash(find /c/Users/miguel.diaz/Documents/Mesio/Restaurant-bot -name alembic -o -name migrations -o -name *.sql)",
       "Bash(python -c \"from app.routes.tables import router; from app.services.database import db_get_order_ticket_data; print\\(''OK''\\)\")",
       "Bash(python -c \"from app.routes.tables import router; from app.services.agent import chat, detect_table_context; print\\(''OK''\\)\")",
-      "Bash(python -c \"import ast, sys; files = [''app/routes/tables.py'',''app/services/agent.py'',''app/routes/stats.py'',''app/routes/dashboard.py'',''app/services/database.py'']; [print\\(f''OK: {f}''\\) or None for f in files if ast.parse\\(open\\(f\\).read\\(\\)\\)]\")"
+      "Bash(python -c \"import ast, sys; files = [''app/routes/tables.py'',''app/services/agent.py'',''app/routes/stats.py'',''app/routes/dashboard.py'',''app/services/database.py'']; [print\\(f''OK: {f}''\\) or None for f in files if ast.parse\\(open\\(f\\).read\\(\\)\\)]\")",
+      "Bash(find C:Usersmiguel.diazDocumentsMesioRestaurant-bot -type f -name *.py -o -type f -name *.html -o -type f -name *.js -o -type f -name *.css -o -type f \\\\\\(-name *.toml -o -name *.txt -o -name *.cfg -o -name *.env* -o -name Dockerfile -o -name railway* \\\\\\))",
+      "Bash(find . -not -path ./.git/* -not -path ./.claude/* -type f)",
+      "Bash(find . -not -path './.git/*' -not -path './.claude/*' -not -path '*/__pycache__/*' -type f -exec ls -lhS {})",
+      "Bash(sort -k2)",
+      "Bash(BASE=\"C:\\\\Users\\\\miguel.diaz\\\\Documents\\\\Mesio\\\\Restaurant-bot\\\\app\\\\static\")",
+      "Bash(mkdir -p \"$BASE/html\" \"$BASE/js\" \"$BASE/css\" \"$BASE/img\")",
+      "Bash(mv \"$BASE\"/*.html \"$BASE/html/\")",
+      "Bash(mv \"$BASE\"/*.js \"$BASE/js/\")",
+      "Bash(mv \"$BASE\"/*.css \"$BASE/css/\")",
+      "Bash(mv \"$BASE/logo.png\" \"$BASE/img/logo.png\")",
+      "Bash(python3:*)",
+      "Bash(python:*)"
     ]
   }
 }

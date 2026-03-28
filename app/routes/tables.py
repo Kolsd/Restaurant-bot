@@ -129,7 +129,7 @@ async def delete_table(request: Request, table_id: str):
 
 @router.get("/menu/{table_id}", response_class=HTMLResponse)
 async def menu_page(table_id: str):
-    p = STATIC / "menu.html"
+    p = STATIC / "html" / "menu.html"
     if not p.exists():
         raise HTTPException(status_code=404, detail="menu.html no encontrado en static/")
     return HTMLResponse(p.read_text(encoding="utf-8"))
@@ -596,11 +596,11 @@ async def update_order_status(request: Request, order_id: str):
 
 @router.get("/cocina", response_class=HTMLResponse)
 async def kitchen_display():
-    return HTMLResponse((STATIC / "kitchen.html").read_text(encoding="utf-8"))
+    return HTMLResponse((STATIC / "html" / "kitchen.html").read_text(encoding="utf-8"))
 
 @router.get("/bar", response_class=HTMLResponse)
 async def bar_display():
-    p = STATIC / "bar.html"
+    p = STATIC / "html" / "bar.html"
     if not p.exists():
         raise HTTPException(status_code=404, detail="bar.html no encontrado en static/")
     return HTMLResponse(p.read_text(encoding="utf-8"))
