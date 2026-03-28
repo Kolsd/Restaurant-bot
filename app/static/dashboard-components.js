@@ -1096,32 +1096,34 @@ const StaffSection = MesioComponent({
   },
 
   render(state, el) {
-    el.textContent = ''; // Limpiamos el contenedor
+    el.textContent = ''; // Limpia todo el contenido previo
 
-    // 🛡️ 1. CONTENEDOR DE ACCIONES (Solo los botones necesarios)
-    const actions = document.createElement('div');
-    actions.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:20px;';
+    // 🛡️ 1. CREACIÓN DE LA CABECERA ÚNICA (Solo botones, sin título duplicado)
+    const headerActions = document.createElement('div');
+    headerActions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-bottom:20px;';
 
-    // 🛡️ 2. ÚNICO BOTÓN: AÑADIR ADMIN
-    // Este botón abre el modal que permite elegir entre sucursal o matriz
+    // Botón para Administradores (Password)
     const btnAdmin = _makeBtn('+ Añadir Admin', 'btn-sm btn-outline', () => {
-        if (typeof window.openStaffAdminModal === 'function') {
-            window.openStaffAdminModal();
-        }
+        if (typeof window.openStaffAdminModal === 'function') window.openStaffAdminModal();
     });
-    btnAdmin.style.cssText += 'background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;font-weight:600;padding:10px 20px;border-radius:10px;';
-    
-    actions.appendChild(btnAdmin);
-    el.appendChild(actions);
+    btnAdmin.style.cssText += 'background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;font-weight:600;padding:10px 18px;border-radius:10px;';
+
+    // Botón para Empleados Operativos (PIN)
+    const btnStaff = _makeBtn('+ Nuevo Empleado', 'btn-sm btn-primary', () => _openStaffModal(StaffSection));
+    btnStaff.style.cssText += 'padding:10px 18px;border-radius:10px;';
+
+    headerActions.appendChild(btnAdmin);
+    headerActions.appendChild(btnStaff);
+    el.appendChild(headerActions);
 
     if (state.loading) {
       const msg = document.createElement('div');
       msg.className = 'empty-state';
-      msg.textContent = 'Cargando lista de equipo...';
+      msg.textContent = 'Cargando equipo...';
       el.appendChild(msg);
       return;
     }
-      
+    
     if (state.error) {
       const msg = document.createElement('div');
       msg.className   = 'empty-state';
@@ -1288,11 +1290,17 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── FUNCIONES GLOBALES PARA EL DROPDOWN DE SUCURSALES ──
 
 window.openStaffAdminModal = function() {
-  const select = document.getElementById('staff-branch-select');
+  // 🛡️ FIX: Usar el selector global real del Topbar
+  const select = document.getElementById('global-branch-select');
+  if (!select) {
+      alert("Error: No se encontró el selector de sucursales.");
+      return;
+  }
+  
   const val = select.value;
   const branchName = select.options[select.selectedIndex].text.replace('🏠 ', '').replace('📍 ', '');
   
-  // 🛡️ EL FIX: Obtenemos el ID real. Si es matriz, usamos el ID del restaurante principal.
+  // Obtenemos el ID real para la invitación
   let targetBranchId;
   if (val === 'matriz') {
       const mainRest = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
