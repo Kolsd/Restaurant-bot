@@ -1124,7 +1124,7 @@ async def db_mark_session_nps_pending(phone: str, bot_number: str) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE table_sessions SET status='nps_pending', closed_by='factura_entregada' "
+            "UPDATE table_sessions SET status='nps_pending', closed_by='factura_entregada', last_activity=NOW() "
             "WHERE phone=$1 AND bot_number=$2 AND status='active'",
             phone, bot_number
         )
@@ -1140,10 +1140,15 @@ async def db_close_session(phone: str, bot_number: str, reason: str = "manual", 
         """, phone, bot_number, reason, closed_by_username)
         return _serialize(dict(row)) if row else None
 
-async def db_mark_session_warned(session_id: int):
+async def db_mark_session_warned(session_id: int) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE table_sessions SET inactivity_warned=TRUE WHERE id=$1", session_id)
+        # El AND inactivity_warned=FALSE asegura que solo 1 worker pueda hacer el UPDATE
+        result = await conn.execute(
+            "UPDATE table_sessions SET inactivity_warned=TRUE WHERE id=$1 AND inactivity_warned=FALSE", 
+            session_id
+        )
+        return result == "UPDATE 1"
 
 async def db_get_stale_sessions() -> list:
     pool = await get_pool()
@@ -1161,7 +1166,7 @@ async def db_get_closeable_sessions() -> list:
         rows = await conn.fetch("""
             SELECT * FROM table_sessions WHERE
             (status='active' AND inactivity_warned=TRUE AND last_activity < NOW() - INTERVAL '5 minutes')
-            OR (status='nps_pending' AND last_activity < NOW() - INTERVAL '10 minutes')
+            OR (status='nps_pending' AND last_activity < NOW() - INTERVAL '5 minutes')
         """)
         return [_serialize(dict(r)) for r in rows]
 

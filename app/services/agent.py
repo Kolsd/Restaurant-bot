@@ -812,17 +812,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         pass
 
     if nps_key in _nps_state:
-        nps_restaurant_name = ""
-        nps_google_maps_url = ""
-        r = await db.db_get_restaurant_by_bot_number(bot_number)
-        if r:
-            nps_restaurant_name = r.get("name", "")
-            feats_r = r.get("features", {})
-            if isinstance(feats_r, str):
-                try: feats_r = json.loads(feats_r)
-                except Exception: feats_r = {}
-            nps_google_maps_url = feats_r.get("google_maps_url", "") if isinstance(feats_r, dict) else ""
-
+        # ... (código existente para buscar el nombre del restaurante y url)
         nps_reply = await _handle_nps_flow(
             user_phone, bot_number, user_message_clean,
             nps_restaurant_name, nps_google_maps_url
