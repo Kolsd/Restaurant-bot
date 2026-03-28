@@ -776,24 +776,28 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     if nps_key in _nps_state:
         nps_restaurant_name = ""
         nps_google_maps_url = ""
-        all_r = await db.db_get_all_restaurants()
-        for r in all_r:
-            if r.get("whatsapp_number") == bot_number:
-                nps_restaurant_name = r.get("name", "")
-                nps_google_maps_url = r.get("features", {}).get("google_maps_url", "") if isinstance(r.get("features"), dict) else ""
-                break
+        r = await db.db_get_restaurant_by_bot_number(bot_number)
+        if r:
+            nps_restaurant_name = r.get("name", "")
+            feats_r = r.get("features", {})
+            if isinstance(feats_r, str):
+                try: feats_r = json.loads(feats_r)
+                except Exception: feats_r = {}
+            nps_google_maps_url = feats_r.get("google_maps_url", "") if isinstance(feats_r, dict) else ""
 
         nps_reply = await _handle_nps_flow(
             user_phone, bot_number, user_message_clean,
             nps_restaurant_name, nps_google_maps_url
         )
-        # Always return — never fall through to LLM when in NPS flow
-        reply_msg = nps_reply or "Por favor responde con un número del 1 al 5 ⭐"
-        full_history = await db.db_get_history(user_phone, bot_number)
-        full_history.append({"role": "user",      "content": user_message})
-        full_history.append({"role": "assistant", "content": reply_msg})
-        await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])
-        return {"message": reply_msg}
+        # NPS completado (o skipped) → cerrar sesión nps_pending
+        nps_done = nps_key not in _nps_state
+        if nps_done:
+            try:
+                await db.db_close_session(user_phone, bot_number, "nps_completed", "")
+            except Exception:
+                pass
+        # No guardar en conversations — el chat NPS no debe aparecer en el dashboard
+        return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
 
     table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
@@ -801,31 +805,23 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     restaurant_name = "nuestro restaurante"
     google_maps_url = ""
     payment_methods_text = ""
-    restaurant_obj = None
     feats: dict = {}  # resolved features — used for module restrictions in system prompt
 
-    all_r = await db.db_get_all_restaurants()
-    for r in all_r:
-        if r.get("whatsapp_number") == bot_number:
-            restaurant_obj = r
-            restaurant_name = r.get("name", "nuestro restaurante")
-            feats = r.get("features", {})
-            if isinstance(feats, str):
-                try: feats = json.loads(feats)
-                except Exception: feats = {}
-            if not isinstance(feats, dict): feats = {}
-            google_maps_url = feats.get("google_maps_url", "")
-            # Cargar métodos de pago desde features
-            payment_methods = feats.get("payment_methods", [])
-            if payment_methods:
-                payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
-            else:
-                payment_methods_text = ""
-            break
-
+    restaurant_obj = await db.db_get_restaurant_by_bot_number(bot_number)
     if restaurant_obj is None:
         print(f"⚠️ Bot number {bot_number} no está asociado a ningún restaurante.", flush=True)
         return {"message": ""}
+
+    restaurant_name = restaurant_obj.get("name", "nuestro restaurante")
+    feats = restaurant_obj.get("features", {})
+    if isinstance(feats, str):
+        try: feats = json.loads(feats)
+        except Exception: feats = {}
+    if not isinstance(feats, dict): feats = {}
+    google_maps_url = feats.get("google_maps_url", "")
+    payment_methods = feats.get("payment_methods", [])
+    if payment_methods:
+        payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
 
     # Buscar por branch_id si hay contexto de mesa
     if table_context and table_context.get("branch_id"):

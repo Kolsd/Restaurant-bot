@@ -86,7 +86,7 @@ async def _farewell_and_nps(
 
     sess_bot = (session_data.get("bot_number") if session_data else None) or bot_num
     if sess_bot:
-        await db.db_close_session(phone, sess_bot, "factura_entregada", username)
+        await db.db_mark_session_nps_pending(phone, sess_bot)
     await db.db_cleanup_after_checkout(phone)
 
 class TableRequest(BaseModel):
@@ -651,7 +651,7 @@ async def get_tables_status(request: Request):
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status='active'")
+        active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
         if branch_id is not None:
             pending_orders = await conn.fetch(
                 "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
