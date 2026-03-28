@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v6';  // ← incrementar para limpiar el caché viejo
+const CACHE_VERSION  = 'v7';  // ← incrementar para limpiar el caché viejo
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
