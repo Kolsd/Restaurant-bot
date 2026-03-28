@@ -91,31 +91,20 @@ async def _farewell_and_nps(
 
 @router.post("/api/tables")
 async def create_table(request: Request):
-    # 1. get_current_restaurant resuelve mágicamente si estamos en Matriz o Sucursal
-    # (Lee el header X-Branch-ID automáticamente si eres el dueño)
+    """
+    Crea una mesa automáticamente sin pedir número ni nombre manual.
+    Usa db_auto_create_table para buscar el primer hueco disponible y 
+    formatear el nombre como {ID_Restaurante}-{Numero}.
+    """
+    # 1. get_current_restaurant resuelve si estamos en Matriz o Sucursal
     restaurant = await get_current_restaurant(request)
     is_main = restaurant.get("parent_restaurant_id") is None
     
-    # 2. Llamamos a la creación automática que busca el primer "hueco" disponible
+    # 2. Llamamos a la creación automática
     new_table = await db.db_auto_create_table(restaurant["id"], is_main)
     
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
     
-@router.post("/api/tables")
-async def create_table(request: Request, body: TableRequest):
-    user = await get_current_user(request)
-    branch_id = body.branch_id or user.get("branch_id")
-    
-    # 🛡️ FILTRO GLOBAL: Asegurar que se cree en la sucursal actual
-    branch_header = request.headers.get("X-Branch-ID")
-    if not body.branch_id and branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        branch_id = int(branch_header)
-        
-    table_id = f"{f'b{branch_id}-' if branch_id else ''}mesa-{body.number}"
-    name = body.name or f"Mesa {body.number}"
-    await db.db_create_table(table_id, body.number, name, branch_id=branch_id)
-    return {"success": True, "table_id": table_id, "name": name}
-
 @router.delete("/api/tables/{table_id}")
 async def delete_table(request: Request, table_id: str):
     await require_auth(request)
