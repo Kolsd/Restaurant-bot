@@ -89,23 +89,18 @@ async def _farewell_and_nps(
         await db.db_mark_session_nps_pending(phone, sess_bot)
     await db.db_cleanup_after_checkout(phone)
 
-class TableRequest(BaseModel):
-    number: int
-    name: str = ""
-    branch_id: int = None
-
-@router.get("/api/tables")
-async def get_tables(request: Request):
-    user = await get_current_user(request)
-    branch_id = user.get("branch_id")
+@router.post("/api/tables")
+async def create_table(request: Request):
+    # 1. get_current_restaurant resuelve mágicamente si estamos en Matriz o Sucursal
+    # (Lee el header X-Branch-ID automáticamente si eres el dueño)
+    restaurant = await get_current_restaurant(request)
+    is_main = restaurant.get("parent_restaurant_id") is None
     
-    # 🛡️ FILTRO GLOBAL: Leer el selector del Topbar
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        branch_id = int(branch_header)
-        
-    return {"tables": await db.db_get_tables(branch_id=branch_id)}
-
+    # 2. Llamamos a la creación automática que busca el primer "hueco" disponible
+    new_table = await db.db_auto_create_table(restaurant["id"], is_main)
+    
+    return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
+    
 @router.post("/api/tables")
 async def create_table(request: Request, body: TableRequest):
     user = await get_current_user(request)

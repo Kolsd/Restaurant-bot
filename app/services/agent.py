@@ -52,7 +52,7 @@ def _block_attr(block, attr: str):
     return getattr(block, attr, None)
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
-    # 1. Retrocompatibilidad: table_id explícito en el mensaje (por si hay QRs viejos impresos)
+    # 1. Retrocompatibilidad: table_id explícito (por si hay QRs viejos físicos)
     tid_match = re.search(r'\[(?:table_id|t):([^\]]+)\]', message)
     if tid_match:
         table_id = tid_match.group(1).strip()
@@ -64,7 +64,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             return table
 
-    # 2. Sesión activa existente: Si ya sabemos dónde está, no buscamos de nuevo
+    # 2. Sesión activa existente: Si ya sabemos dónde está, respetamos la sesión
     session = await db.db_get_active_session(phone, bot_number)
     if session and session.get("table_id"):
         table = await db.db_get_table_by_id(session["table_id"])
@@ -72,50 +72,64 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_touch_session(phone, bot_number)
             return table
 
-    # Limpiamos el mensaje de URLs o formatos extraños para analizar el texto limpio
     clean_message = re.sub(r'\[.*?\]', '', re.sub(r'https?://\S+', '', message)).strip()
     clean_lower = clean_message.lower()
 
-    # 3. Intentar extraer el número de la mesa del texto (ej. "Estoy en la mesa 3")
-    m = re.search(r'(?:mesa|table|estoy en la)\s*#?\s*(\d+)', clean_lower, re.IGNORECASE)
-    num_mesa = int(m.group(1)) if m else None
+    # 3. Detectar formato mágico (Ej: "estoy en la 1-1", "Mesa 1-1", "Mesa 5")
+    m = re.search(r'(?:mesa|table|estoy en(?: la)?)\s*#?\s*(\d+(?:-\d+)?)', clean_lower, re.IGNORECASE)
+    if not m:
+        return None
+        
+    extracted_val = m.group(1)
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # Obtener el restaurante base del bot
         bot_rest = await conn.fetchrow(
             "SELECT id, parent_restaurant_id FROM restaurants WHERE whatsapp_number = $1", bot_number
         )
         if not bot_rest:
             return None
 
-        # Definir la matriz de la franquicia (si el bot es sucursal, buscar su matriz; si no, es la matriz)
         root_id = bot_rest["parent_restaurant_id"] if bot_rest["parent_restaurant_id"] else bot_rest["id"]
 
-        # 4. Obtener todas las mesas de la matriz Y de TODAS sus sucursales
-        # (Esto es súper rápido gracias al índice que agregaremos en database.py)
-        query = """
-            SELECT t.* FROM restaurant_tables t
-            LEFT JOIN restaurants r ON t.branch_id = r.id
-            WHERE t.active = TRUE 
-              AND (t.branch_id IS NULL OR t.branch_id = $1 OR r.parent_restaurant_id = $1)
-        """
-        all_tables = await conn.fetch(query, root_id)
+        if "-" in extracted_val:
+            # ── FORMATO NUEVO Y EXACTO: "RestauranteID-Mesa" (ej: "1-5") ──
+            r_id_str, t_num_str = extracted_val.split("-")
+            r_id = int(r_id_str)
+            t_num = int(t_num_str)
 
-        # 5. Primera pasada: Match exacto por número (Si el usuario dijo "Mesa 3")
-        if num_mesa is not None:
+            # Validar por seguridad que el restaurante extraído pertenece a nuestra franquicia
+            valid_rest = await conn.fetchval(
+                "SELECT id FROM restaurants WHERE id = $1 AND (id = $2 OR parent_restaurant_id = $2)",
+                r_id, root_id
+            )
+            
+            if valid_rest:
+                b_id = None if r_id == root_id else r_id
+                # Búsqueda directa con IS NOT DISTINCT FROM (maneja el NULL de la matriz impecablemente)
+                row = await conn.fetchrow(
+                    "SELECT * FROM restaurant_tables WHERE branch_id IS NOT DISTINCT FROM $1 AND number = $2 AND active = TRUE",
+                    b_id, t_num
+                )
+                if row:
+                    table = dict(row)
+                    await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                    return table
+        else:
+            # ── FORMATO LEGACY (Fallback): "Mesa 3" sin prefijo ──
+            num_mesa = int(extracted_val)
+            query = """
+                SELECT t.* FROM restaurant_tables t
+                LEFT JOIN restaurants r ON t.branch_id = r.id
+                WHERE t.active = TRUE 
+                  AND (t.branch_id IS NULL OR t.branch_id = $1 OR r.parent_restaurant_id = $1)
+            """
+            all_tables = await conn.fetch(query, root_id)
             for row in all_tables:
                 if row["number"] == num_mesa:
                     table = dict(row)
                     await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                     return table
-        
-        # 6. Segunda pasada (Fallback): Match por nombre exacto ("Mesa VIP", "Barra 1")
-        for row in all_tables:
-            if row["name"].lower() in clean_lower:
-                table = dict(row)
-                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-                return table
 
     return None
 
