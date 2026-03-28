@@ -141,7 +141,7 @@ async def public_menu_context(table_id: str):
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
 
     wa_number = await get_table_wa_number(table)
-    wa_msg = f"Hola! Estoy en {table['name']}"
+    wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
     menu = await db.db_get_menu(wa_number) or {}

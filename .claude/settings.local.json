@@ -35,7 +35,8 @@
       "Bash(ls -la app/routes/*.py)",
       "Bash(find /c/Users/miguel.diaz/Documents/Mesio/Restaurant-bot -name alembic -o -name migrations -o -name *.sql)",
       "Bash(python -c \"from app.routes.tables import router; from app.services.database import db_get_order_ticket_data; print\\(''OK''\\)\")",
-      "Bash(python -c \"from app.routes.tables import router; from app.services.agent import chat, detect_table_context; print\\(''OK''\\)\")"
+      "Bash(python -c \"from app.routes.tables import router; from app.services.agent import chat, detect_table_context; print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast, sys; files = [''app/routes/tables.py'',''app/services/agent.py'',''app/routes/stats.py'',''app/routes/dashboard.py'',''app/services/database.py'']; [print\\(f''OK: {f}''\\) or None for f in files if ast.parse\\(open\\(f\\).read\\(\\)\\)]\")"
     ]
   }
 }

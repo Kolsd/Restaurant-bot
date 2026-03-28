@@ -46,6 +46,15 @@ async def filter_conversations_for_branch(conversations: list, branch_id: int, b
     # Devolvemos solo los chats que coincidan con esos teléfonos
     return [c for c in conversations if c.get("phone") in allowed_phones]    
     
+async def _get_effective_bot_number(restaurant: dict) -> str:
+    """For branches: returns the parent's WhatsApp number (where messages are actually stored).
+    For parent restaurants: returns their own WhatsApp number."""
+    if restaurant.get("parent_restaurant_id"):
+        parent = await db.db_get_restaurant_by_id(restaurant["parent_restaurant_id"])
+        if parent and parent.get("whatsapp_number"):
+            return parent["whatsapp_number"]
+    return restaurant.get("whatsapp_number", "")
+
 # =====================================================================
 # ENDPOINT MAESTRO (SYNC)
 # =====================================================================
@@ -63,16 +72,17 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period, get_tz(restaurant))
     branch_id = _resolve_branch_id(user, restaurant)
+    effective_bot = await _get_effective_bot_number(restaurant)
 
     orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
 
     all_convs = await db.db_get_all_conversations(
-        bot_number=bot_number,
+        bot_number=effective_bot,
         date_from=date_from,
         date_to=date_to
     )
-    conversations = await filter_conversations_for_branch(all_convs, branch_id, bot_number)
+    conversations = await filter_conversations_for_branch(all_convs, branch_id, effective_bot)
 
     paid    = [o for o in orders if o["paid"]]
     pending = [o for o in orders if not o["paid"]]
@@ -147,18 +157,19 @@ async def dashboard_stats(request: Request, period: str = Query("today")):
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period, get_tz(restaurant))
+    effective_bot = await _get_effective_bot_number(restaurant)
 
     orders       = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     paid         = [o for o in orders if o["paid"]]
     pending      = [o for o in orders if not o["paid"]]
     reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
-    
+
     all_convs = await db.db_get_all_conversations(
-        bot_number=bot_number,
+        bot_number=effective_bot,
         date_from=date_from,
         date_to=date_to
     )
-    conversations = await filter_conversations_for_branch(all_convs, _resolve_branch_id(user, restaurant), bot_number)
+    conversations = await filter_conversations_for_branch(all_convs, _resolve_branch_id(user, restaurant), effective_bot)
 
     return {
         "period": period, "date_from": date_from, "date_to": date_to,
@@ -204,11 +215,11 @@ async def dashboard_orders(request: Request, period: str = Query("today")):
 async def dashboard_conversations(request: Request):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    bot_number = restaurant["whatsapp_number"]
     branch_id = _resolve_branch_id(user, restaurant)
+    effective_bot = await _get_effective_bot_number(restaurant)
 
-    all_convs = await db.db_get_all_conversations(bot_number=bot_number)
-    conversations = await filter_conversations_for_branch(all_convs, branch_id, bot_number)
+    all_convs = await db.db_get_all_conversations(bot_number=effective_bot)
+    conversations = await filter_conversations_for_branch(all_convs, branch_id, effective_bot)
 
     return {"conversations": conversations}
 
