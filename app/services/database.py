@@ -882,6 +882,40 @@ async def db_close_table_bill(base_order_id: str) -> bool:
         result = await conn.execute("UPDATE table_orders SET status='factura_entregada', updated_at=NOW() WHERE (base_order_id=$1 OR id=$1) AND status NOT IN ('cancelado')", base_order_id)
         return result != "UPDATE 0"
 
+async def db_mark_factura_generada(base_order_id: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE table_orders SET status='factura_generada', updated_at=NOW() "
+            "WHERE (id=$1 OR base_order_id=$1) AND status NOT IN ('cancelado','factura_entregada')",
+            base_order_id
+        )
+
+async def db_get_first_table_order(base_order_id: str) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT phone, table_id, status FROM table_orders "
+            "WHERE (id=$1 OR base_order_id=$1) ORDER BY created_at ASC LIMIT 1",
+            base_order_id
+        )
+    return _serialize(dict(row)) if row else None
+
+async def db_cleanup_after_checkout(phone: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM conversations WHERE phone=$1", phone)
+        await conn.execute("DELETE FROM carts WHERE phone=$1", phone)
+
+async def db_get_open_session_by_phone(phone: str) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM table_sessions WHERE phone=$1 AND closed_at IS NULL ORDER BY started_at DESC LIMIT 1",
+            phone
+        )
+    return _serialize(dict(row)) if row else None
+
 async def db_has_pending_invoice(phone: str) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
