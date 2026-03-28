@@ -120,14 +120,27 @@ async def get_tables(request: Request):
 async def create_table(request: Request):
     """Crea una mesa automáticamente sin pedir número ni nombre manual."""
     await require_auth(request)
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
+    
+    restaurant_id = restaurant["id"]
     is_main = restaurant.get("parent_restaurant_id") is None
     
+    # 🛡️ Forzamos la lectura del selector de sucursales igual que en el GET
+    # Esto asegura que la mesa se cree donde el dueño está mirando
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and ("owner" in user.get("role", "") or "admin" in user.get("role", "")):
+        branch_id = int(branch_header)
+        branch_rest = await db.db_get_restaurant_by_id(branch_id)
+        if branch_rest:
+            restaurant_id = branch_id
+            is_main = False
+    
     # Llama a la creación automática que hicimos en database.py
-    new_table = await db.db_auto_create_table(restaurant["id"], is_main)
+    new_table = await db.db_auto_create_table(restaurant_id, is_main)
     
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
-
+    
 @router.delete("/api/tables/{table_id}")
 async def delete_table(request: Request, table_id: str):
     """Elimina una mesa por su ID."""
