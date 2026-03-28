@@ -52,8 +52,7 @@ def _block_attr(block, attr: str):
     return getattr(block, attr, None)
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
-    # 1. PRIORIDAD MÁXIMA: Detectar table_id explícito enviado por QR o catálogo
-    tid_match = re.search(r'\[table_id:([^\]]+)\]', message)
+    tid_match = re.search(r'(?:\[table_id:|Ref:\s*)([a-zA-Z0-9\-]+)', message, re.IGNORECASE)
     if tid_match:
         table_id = tid_match.group(1).strip()
         table = await db.db_get_table_by_id(table_id)
@@ -112,7 +111,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 return table
                 
     return None
-    
+
 async def get_session_state(phone: str, bot_number: str) -> dict:
     session = await db.db_get_active_session(phone, bot_number)
     if not session:

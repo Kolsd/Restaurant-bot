@@ -100,7 +100,7 @@ async def public_menu_context(table_id: str):
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
 
     wa_number = await get_table_wa_number(table)
-    wa_msg = f"Hola! Estoy en {table['name']} [table_id:{table['id']}]"
+    wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
     menu = await db.db_get_menu(wa_number) or {}
@@ -526,7 +526,15 @@ async def update_order_status(request: Request, order_id: str):
                     db_phone_id = session_data.get("meta_phone_id")
             except Exception: pass
 
-    # ... (bloque de generar_factura igual) ...
+    if status == "generar_factura":
+        base_id = order.get("base_order_id") or order_id
+        pool2 = await db.get_pool()
+        async with pool2.acquire() as conn:
+            await conn.execute(
+                "UPDATE table_orders SET status='factura_generada', updated_at=NOW() WHERE (id=$1 OR base_order_id=$1) AND status NOT IN ('cancelado','factura_entregada')",
+                base_id
+            )
+        return {"success": True, "order_id": order_id, "status": "factura_generada"}
 
     if status in ("cerrar_mesa", "factura_entregada"):
         base_id = order.get("base_order_id") or order_id

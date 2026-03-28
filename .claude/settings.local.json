@@ -34,7 +34,8 @@
       "Bash(grep:*)",
       "Bash(ls -la app/routes/*.py)",
       "Bash(find /c/Users/miguel.diaz/Documents/Mesio/Restaurant-bot -name alembic -o -name migrations -o -name *.sql)",
-      "Bash(python -c \"from app.routes.tables import router; from app.services.database import db_get_order_ticket_data; print\\(''OK''\\)\")"
+      "Bash(python -c \"from app.routes.tables import router; from app.services.database import db_get_order_ticket_data; print\\(''OK''\\)\")",
+      "Bash(python -c \"from app.routes.tables import router; from app.services.agent import chat, detect_table_context; print\\(''OK''\\)\")"
     ]
   }
 }
