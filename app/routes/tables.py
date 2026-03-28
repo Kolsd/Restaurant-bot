@@ -89,28 +89,42 @@ async def _farewell_and_nps(
         await db.db_mark_session_nps_pending(phone, sess_bot)
     await db.db_cleanup_after_checkout(phone)
 
+# ── MESAS ────────────────────────────────────────────────────────────
+
+@router.get("/api/tables")
+async def get_tables(request: Request):
+    """Devuelve las mesas de la sucursal actual para pintarlas en el dashboard."""
+    await require_auth(request)
+    user = await get_current_user(request)
+    branch_id = user.get("branch_id")
+    
+    # 🛡️ Filtro global para leer qué sucursal seleccionó el dueño
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+        
+    tables = await db.db_get_tables(branch_id=branch_id)
+    return {"tables": tables}
+
 @router.post("/api/tables")
 async def create_table(request: Request):
-    """
-    Crea una mesa automáticamente sin pedir número ni nombre manual.
-    Usa db_auto_create_table para buscar el primer hueco disponible y 
-    formatear el nombre como {ID_Restaurante}-{Numero}.
-    """
-    # 1. get_current_restaurant resuelve si estamos en Matriz o Sucursal
+    """Crea una mesa automáticamente sin pedir número ni nombre manual."""
+    await require_auth(request)
     restaurant = await get_current_restaurant(request)
     is_main = restaurant.get("parent_restaurant_id") is None
     
-    # 2. Llamamos a la creación automática
+    # Llama a la creación automática que hicimos en database.py
     new_table = await db.db_auto_create_table(restaurant["id"], is_main)
     
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
 
 @router.delete("/api/tables/{table_id}")
 async def delete_table(request: Request, table_id: str):
+    """Elimina una mesa por su ID."""
     await require_auth(request)
     await db.db_delete_table(table_id)
     return {"success": True}
-
+    
 @router.get("/menu/{table_id}", response_class=HTMLResponse)
 async def menu_page(table_id: str):
     p = STATIC / "html" / "menu.html"
