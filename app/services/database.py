@@ -1042,6 +1042,15 @@ async def db_session_mark_delivered(phone: str, bot_number: str, total: int = 0)
     async with pool.acquire() as conn:
         await conn.execute("UPDATE table_sessions SET order_delivered=TRUE, last_activity=NOW(), total_spent=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number, total)
 
+async def db_mark_session_nps_pending(phone: str, bot_number: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE table_sessions SET status='nps_pending', closed_by='factura_entregada' "
+            "WHERE phone=$1 AND bot_number=$2 AND status='active'",
+            phone, bot_number
+        )
+
 async def db_close_session(phone: str, bot_number: str, reason: str = "manual", closed_by_username: str = "") -> dict | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1049,7 +1058,7 @@ async def db_close_session(phone: str, bot_number: str, reason: str = "manual", 
             UPDATE table_sessions
             SET status='closed', closed_at=NOW(), closed_by=$3, closed_by_username=$4,
                 summary=jsonb_build_object('close_reason',$3::text,'closed_by_user',$4::text)
-            WHERE phone=$1 AND bot_number=$2 AND status='active' RETURNING *
+            WHERE phone=$1 AND bot_number=$2 AND status IN ('active','nps_pending') RETURNING *
         """, phone, bot_number, reason, closed_by_username)
         return _serialize(dict(row)) if row else None
 
@@ -1071,7 +1080,11 @@ async def db_get_stale_sessions() -> list:
 async def db_get_closeable_sessions() -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM table_sessions WHERE status='active' AND inactivity_warned=TRUE AND last_activity < NOW() - INTERVAL '5 minutes'")
+        rows = await conn.fetch("""
+            SELECT * FROM table_sessions WHERE
+            (status='active' AND inactivity_warned=TRUE AND last_activity < NOW() - INTERVAL '5 minutes')
+            OR (status='nps_pending' AND last_activity < NOW() - INTERVAL '10 minutes')
+        """)
         return [_serialize(dict(r)) for r in rows]
 
 async def db_get_closed_sessions(bot_number: str, hours: int = 24) -> list:

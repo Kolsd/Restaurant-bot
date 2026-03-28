@@ -49,22 +49,30 @@ async def filter_conversations_for_branch(conversations: list, branch_id: int, b
 # =====================================================================
 # ENDPOINT MAESTRO (SYNC)
 # =====================================================================
+def _resolve_branch_id(user: dict, restaurant: dict) -> int | None:
+    """Devuelve el branch_id correcto para filtrado: del usuario o, si el restaurante
+    es una sucursal, de su propio ID."""
+    return user.get("branch_id") or (
+        restaurant["id"] if restaurant.get("parent_restaurant_id") else None
+    )
+
 @router.get("/api/dashboard/sync")
 async def dashboard_sync(request: Request, period: str = Query("today")):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period, get_tz(restaurant))
+    branch_id = _resolve_branch_id(user, restaurant)
 
     orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
-    
+
     all_convs = await db.db_get_all_conversations(
         bot_number=bot_number,
         date_from=date_from,
         date_to=date_to
     )
-    conversations = await filter_conversations_for_branch(all_convs, user.get("branch_id"), bot_number)
+    conversations = await filter_conversations_for_branch(all_convs, branch_id, bot_number)
 
     paid    = [o for o in orders if o["paid"]]
     pending = [o for o in orders if not o["paid"]]
@@ -150,7 +158,7 @@ async def dashboard_stats(request: Request, period: str = Query("today")):
         date_from=date_from,
         date_to=date_to
     )
-    conversations = await filter_conversations_for_branch(all_convs, user.get("branch_id"), bot_number)
+    conversations = await filter_conversations_for_branch(all_convs, _resolve_branch_id(user, restaurant), bot_number)
 
     return {
         "period": period, "date_from": date_from, "date_to": date_to,
@@ -197,22 +205,12 @@ async def dashboard_conversations(request: Request):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
-    
-    all_convs = await db.db_get_all_conversations(bot_number=bot_number)
-    conversations = await filter_conversations_for_branch(all_convs, user.get("branch_id"), bot_number)
-    
-    return {"conversations": conversations}
+    branch_id = _resolve_branch_id(user, restaurant)
 
-@router.get("/api/dashboard/conversations")
-async def dashboard_conversations(request: Request):
-    # Este endpoint muestra TODAS las conversaciones activas sin filtro de fecha
-    # (se usa en la pestaña WhatsApp, no en el resumen)
-    restaurant = await get_current_restaurant(request)
-    return {
-        "conversations": await db.db_get_all_conversations(
-            bot_number=restaurant["whatsapp_number"]
-        )
-    }
+    all_convs = await db.db_get_all_conversations(bot_number=bot_number)
+    conversations = await filter_conversations_for_branch(all_convs, branch_id, bot_number)
+
+    return {"conversations": conversations}
 
 @router.get("/api/dashboard/chart")
 async def dashboard_chart(request: Request, period: str = Query("week")):
