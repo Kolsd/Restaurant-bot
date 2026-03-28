@@ -1016,3 +1016,4 @@ async def delete_check(request: Request, base_order_id: str, check_id: str):
             detail="No se puede eliminar: el check no existe o ya fue procesado"
         )
     return {"success": True}
+    
