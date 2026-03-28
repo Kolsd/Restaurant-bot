@@ -119,16 +119,13 @@ async def db_init_nps_inventory():
 
         # Índices (ignoramos si ya existen)
         for idx_sql in [
-            "CREATE INDEX IF NOT EXISTS idx_nps_bot_number ON nps_responses(bot_number, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_inventory_restaurant ON inventory(restaurant_id)",
-            "CREATE INDEX IF NOT EXISTS idx_inv_history ON inventory_history(inventory_id, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_nps_waiting_phone ON nps_waiting(phone, bot_number)",
+            "CREATE INDEX IF NOT EXISTS idx_table_orders_base    ON table_orders(base_order_id)",
+            "CREATE INDEX IF NOT EXISTS idx_table_orders_station ON table_orders(station)",
+            "CREATE INDEX IF NOT EXISTS idx_rest_tables_lookup   ON restaurant_tables(number, branch_id)", # <-- ÍNDICE NUEVO DE RENDIMIENTO
         ]:
-            try:
-                await conn.execute(idx_sql)
-            except Exception:
-                pass
-
+            try: await conn.execute(idx_sql)
+            except Exception: pass
+            
         # Migraciones de columnas nuevas en tablas existentes
         for col_sql in [
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
