@@ -275,16 +275,18 @@ async def db_get_history(phone: str, bot_number: str = "") -> list:
             return h if isinstance(h, list) else json.loads(h)
         return []
 
-async def db_save_history(phone: str, bot_number: str, history: list):
+async def db_save_history(phone: str, bot_number: str, history: list, branch_id: int = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # 🛡️ Agregamos branch_id al INSERT y al UPDATE
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, history, updated_at)
-            VALUES ($1,$2,$3,NOW())
-            ON CONFLICT (phone, bot_number) DO UPDATE SET history=EXCLUDED.history, updated_at=NOW()
-        """, phone, bot_number, json.dumps(history[-20:]))
+            INSERT INTO conversations (phone, bot_number, history, branch_id, updated_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (phone, bot_number) 
+            DO UPDATE SET history=EXCLUDED.history, branch_id=EXCLUDED.branch_id, updated_at=NOW()
+        """, phone, bot_number, json.dumps(history[-20:]), branch_id)
 
-async def db_get_all_conversations(bot_number: str = None, date_from: str = None, date_to: str = None):
+async def db_get_all_conversations(bot_number: str = None, branch_id: int = None, date_from: str = None, date_to: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
         conditions = []
@@ -295,6 +297,13 @@ async def db_get_all_conversations(bot_number: str = None, date_from: str = None
             conditions.append(f"bot_number = ${idx}")
             params.append(bot_number)
             idx += 1
+
+        if branch_id is not None:
+            conditions.append(f"branch_id = ${idx}")
+            params.append(branch_id)
+            idx += 1
+        elif bot_number: # Si es el owner viendo la matriz
+            conditions.append("branch_id IS NULL")
 
         if date_from:
             conditions.append(f"created_at >= ${idx}")

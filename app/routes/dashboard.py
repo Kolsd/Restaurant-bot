@@ -1004,16 +1004,33 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
 
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
-    # FIX: Ahora desempaquetamos 4 valores en lugar de 3
-    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    # 🛡️ 1. Ahora SÍ extraemos el branch_id (ya no usamos '_')
+    branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
     
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         query = "SELECT * FROM conversations"
+        conditions = []
         params = []
+        idx = 1
+        
         if bot_number:
-            query += " WHERE bot_number = $1"
+            conditions.append(f"bot_number = ${idx}")
             params.append(bot_number)
+            idx += 1
+            
+        # 🛡️ 2. FILTRO ESTRICTO DE SUCURSAL
+        if branch_id is not None:
+            # Si el usuario seleccionó una sucursal, traemos SOLO los chats de esa sucursal
+            conditions.append(f"branch_id = ${idx}")
+            params.append(branch_id)
+            idx += 1
+        elif bot_number:
+            # Si seleccionó la Matriz, traemos solo los chats que tengan branch_id en NULL
+            conditions.append("branch_id IS NULL")
+            
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
             
         query += " ORDER BY updated_at DESC"
         rows = await conn.fetch(query, *params)
@@ -1035,7 +1052,7 @@ async def get_dashboard_conversations(request: Request):
             "last_updated": r["updated_at"].isoformat() + "Z"
         })
     return {"conversations": convs}
-
+    
 @router.get("/api/dashboard/menu")
 async def get_dashboard_menu(request: Request):
     # Ahora el menú también respeta el selector de la sucursal
