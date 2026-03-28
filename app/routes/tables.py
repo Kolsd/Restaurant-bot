@@ -668,7 +668,7 @@ async def get_tables_status(request: Request):
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-            active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
+        active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
         
         # 2. Separar las órdenes pendientes según arquitectura
         if not is_main:
@@ -694,7 +694,7 @@ async def get_tables_status(request: Request):
         t['pending_orders'] = order_map.get(tid, [])
         
     return {"tables": tables}
-
+    
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
     """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""
@@ -1016,4 +1016,3 @@ async def delete_check(request: Request, base_order_id: str, check_id: str):
             detail="No se puede eliminar: el check no existe o ya fue procesado"
         )
     return {"success": True}
-    
