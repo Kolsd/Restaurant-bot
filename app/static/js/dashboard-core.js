@@ -667,18 +667,22 @@ window.changeGlobalBranch = function() {
   if (select && select.value && select.value !== 'matriz') {
       window._dashHeaders['X-Branch-ID'] = select.value;
   } else {
-      delete window._dashHeaders['X-Branch-ID'];
+      delete window._dashHeaders['X-Branch-ID']; // Vuelve a la matriz
   }
   
+  // Recargar TODAS las secciones activas con el nuevo filtro
   refreshAll();
   if(typeof loadMenu === 'function') loadMenu();
   if(typeof loadTables === 'function') loadTables();
   if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
   
-  // 🛡️ ESTA LÍNEA ES CLAVE: Recarga el NPS con el nuevo Header
-  if(typeof loadNPS === 'function') {
-      loadNPS();
-  }
+  const staffActive = document.getElementById('staff')?.classList.contains('active');
+  if(staffActive && typeof loadStaff === 'function') loadStaff();
+  
+  if(typeof loadNPS === 'function') loadNPS();
+
+  // 🛡️ AGREGAR ESTO: Fuerza a recargar los chats al cambiar de sucursal
+  if(typeof loadConversations === 'function') loadConversations();
 };
 
 // 🛡️ EL GATILLO AUTOMÁTICO: Esto obliga al navegador a cargar el botón SIEMPRE al iniciar

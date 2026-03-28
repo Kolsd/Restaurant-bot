@@ -981,8 +981,17 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
 
     full_history.append({"role": "user",      "content": user_message_clean})
     full_history.append({"role": "assistant", "content": assistant_message})
-    await db.db_save_history(user_phone, bot_number, full_history[-(HISTORY_WINDOW * 2 + 2):])
-
+    
+    # 🛡️ Determinamos la sucursal para guardar el historial en el Dashboard correcto
+    branch_id = table_context.get("branch_id") if table_context else None
+    
+    await db.db_save_history(
+        user_phone, 
+        bot_number, 
+        full_history[-(HISTORY_WINDOW * 2 + 2):], 
+        branch_id=branch_id  # <--- Pasamos la sucursal detectada
+    )
+    
     result_payload = {"message": assistant_message}
     if nps_interactive:
         result_payload["interactive"] = nps_interactive

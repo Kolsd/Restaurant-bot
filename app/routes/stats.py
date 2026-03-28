@@ -212,15 +212,26 @@ async def dashboard_orders(request: Request, period: str = Query("today")):
     return {"orders": result}
 
 @router.get("/api/dashboard/conversations")
-async def dashboard_conversations(request: Request):
+async def get_conversations(request: Request):
+    await require_auth(request)
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    branch_id = _resolve_branch_id(user, restaurant)
-    effective_bot = await _get_effective_bot_number(restaurant)
+    
+    bot_number = restaurant.get("whatsapp_number", "")
+    
+    # 🛡️ 1. Detectar si es matriz o gerente
+    is_main = restaurant.get("parent_restaurant_id") is None
+    branch_id = None if is_main else restaurant["id"]
+    
+    # 🛡️ 2. Leer el selector del Topbar (Igual que en las mesas)
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and any(r in user.get("role", "") for r in ["owner", "admin"]):
+        branch_id = int(branch_header)
+        is_main = False
 
-    all_convs = await db.db_get_all_conversations(bot_number=effective_bot)
-    conversations = await filter_conversations_for_branch(all_convs, branch_id, effective_bot)
-
+    # 3. Llamamos a la base de datos pasando el branch_id
+    conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
+    
     return {"conversations": conversations}
 
 @router.get("/api/dashboard/chart")
