@@ -52,7 +52,7 @@ def _block_attr(block, attr: str):
     return getattr(block, attr, None)
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
-    # 1. Retrocompatibilidad: table_id explícito en el mensaje (QR viejos)
+    # 1. Retrocompatibilidad: table_id explícito en el mensaje (por si hay QRs viejos impresos)
     tid_match = re.search(r'\[(?:table_id|t):([^\]]+)\]', message)
     if tid_match:
         table_id = tid_match.group(1).strip()
@@ -64,7 +64,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             return table
 
-    # 2. Sesión activa existente
+    # 2. Sesión activa existente: Si ya sabemos dónde está, no buscamos de nuevo
     session = await db.db_get_active_session(phone, bot_number)
     if session and session.get("table_id"):
         table = await db.db_get_table_by_id(session["table_id"])
@@ -72,46 +72,46 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             await db.db_touch_session(phone, bot_number)
             return table
 
-    # Resolver branch_id desde el restaurante del bot_number (sin depender del mensaje)
-    _rest = await db.db_get_restaurant_by_bot_number(bot_number)
-    branch_id = None
-    if _rest and _rest.get("parent_restaurant_id") is not None:
-        branch_id = _rest.get("id")  # Es sucursal
-
-    # Override por marker explícito (backward compat)
-    branch_match = re.search(r'\[branch=(\d+)\]', message)
-    if branch_match:
-        branch_id = int(branch_match.group(1))
-
+    # Limpiamos el mensaje de URLs o formatos extraños para analizar el texto limpio
     clean_message = re.sub(r'\[.*?\]', '', re.sub(r'https?://\S+', '', message)).strip()
+    clean_lower = clean_message.lower()
 
-    # 3. Inferir por número de mesa ("Mesa 3", "estoy en la 3", etc.)
-    m = re.search(r'Mesa\s+(\d+)', clean_message, re.IGNORECASE)
-    if not m:
-        m = re.search(r'(?:estoy en|mesa|table)[\s-]*(\d+)', clean_message, re.IGNORECASE)
-    if m:
-        number = m.group(1)
-        table_id = f"b{branch_id}-mesa-{number}" if branch_id is not None else f"mesa-{number}"
-        table = await db.db_get_table_by_id(table_id)
-        if table:
-            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-            return table
+    # 3. Intentar extraer el número de la mesa del texto (ej. "Estoy en la mesa 3")
+    m = re.search(r'(?:mesa|table|estoy en la)\s*#?\s*(\d+)', clean_lower, re.IGNORECASE)
+    num_mesa = int(m.group(1)) if m else None
 
-    # 4. Buscar por nombre exacto de mesa en el restaurante (mesas con nombres personalizados)
-    if clean_message:
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            if branch_id is not None:
-                rows = await conn.fetch(
-                    "SELECT * FROM restaurant_tables WHERE branch_id=$1 AND active=TRUE",
-                    branch_id
-                )
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM restaurant_tables WHERE branch_id IS NULL AND active=TRUE"
-                )
-        clean_lower = clean_message.lower()
-        for row in rows:
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        # Obtener el restaurante base del bot
+        bot_rest = await conn.fetchrow(
+            "SELECT id, parent_restaurant_id FROM restaurants WHERE whatsapp_number = $1", bot_number
+        )
+        if not bot_rest:
+            return None
+
+        # Definir la matriz de la franquicia (si el bot es sucursal, buscar su matriz; si no, es la matriz)
+        root_id = bot_rest["parent_restaurant_id"] if bot_rest["parent_restaurant_id"] else bot_rest["id"]
+
+        # 4. Obtener todas las mesas de la matriz Y de TODAS sus sucursales
+        # (Esto es súper rápido gracias al índice que agregaremos en database.py)
+        query = """
+            SELECT t.* FROM restaurant_tables t
+            LEFT JOIN restaurants r ON t.branch_id = r.id
+            WHERE t.active = TRUE 
+              AND (t.branch_id IS NULL OR t.branch_id = $1 OR r.parent_restaurant_id = $1)
+        """
+        all_tables = await conn.fetch(query, root_id)
+
+        # 5. Primera pasada: Match exacto por número (Si el usuario dijo "Mesa 3")
+        if num_mesa is not None:
+            for row in all_tables:
+                if row["number"] == num_mesa:
+                    table = dict(row)
+                    await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                    return table
+        
+        # 6. Segunda pasada (Fallback): Match por nombre exacto ("Mesa VIP", "Barra 1")
+        for row in all_tables:
             if row["name"].lower() in clean_lower:
                 table = dict(row)
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
