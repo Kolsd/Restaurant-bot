@@ -104,7 +104,7 @@ async def create_table(request: Request):
     new_table = await db.db_auto_create_table(restaurant["id"], is_main)
     
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
-    
+
 @router.delete("/api/tables/{table_id}")
 async def delete_table(request: Request, table_id: str):
     await require_auth(request)
@@ -985,4 +985,3 @@ async def delete_check(request: Request, base_order_id: str, check_id: str):
             detail="No se puede eliminar: el check no existe o ya fue procesado"
         )
     return {"success": True}
-
