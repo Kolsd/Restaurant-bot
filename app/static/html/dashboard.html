@@ -7,6 +7,8 @@
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="/static/css/dashboard.css">
 <style>
   .role-card { border: 1.5px solid #e0e0d8; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fff; user-select: none; position: relative; overflow: hidden; }
@@ -342,27 +344,18 @@
         <input id="branch-wa" type="hidden" value="">
         <div style="grid-column:1/-1;display:flex;gap:8px;align-items:flex-start;">
           <input id="branch-address" placeholder="Dirección (ej: Calle 93 #15-32, Bogotá)" style="flex:1;padding:8px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;" onkeydown="if(event.key==='Enter'){event.preventDefault();validateAddress();}">
-          <button onclick="validateAddress()" style="background:#185FA5;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:500;">📍 Validar</button>
+          <button onclick="validateAddress()" style="background:#185FA5;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:500;">📍 Buscar en mapa</button>
         </div>
       </div>
-      <div id="branch-map-preview" style="display:none;margin-bottom:12px;border:0.5px solid #e0e0d8;border-radius:10px;overflow:hidden;">
-        <div style="background:#E6F1FB;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <div><div style="font-size:11px;font-weight:600;color:#185FA5;">📍 Ubicación encontrada</div><div id="branch-address-display" style="font-size:11px;color:#444;margin-top:2px;"></div></div>
-          <a id="branch-maps-link" href="#" target="_blank" style="font-size:11px;padding:4px 10px;background:#185FA5;color:#fff;border-radius:6px;text-decoration:none;white-space:nowrap;">Ver en Maps ↗</a>
-        </div>
-        <div style="padding:10px 12px;background:#f8f8f5;"><div style="font-size:11px;color:#888;display:flex;gap:16px;"><span>🌐 Lat: <strong id="branch-lat-display">—</strong></span><span>🌐 Lon: <strong id="branch-lon-display">—</strong></span></div></div>
+      
+      <div style="margin-bottom:12px;">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">Arrastra el marcador rojo para ajustar la ubicación exacta:</div>
+        <div id="interactive-map" style="height: 240px; width: 100%; border-radius: 8px; border: 1px solid #e0e0d8; z-index: 1;"></div>
       </div>
-      <div id="branch-map-error" style="display:none;background:#FDE8E8;color:#C0392B;padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;">
-        <div id="branch-error-text"></div>
-        <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(192,57,43,.2);">
-          <div style="font-size:11px;margin-bottom:6px;color:#842029;">Ingresa coordenadas manualmente desde <a href="https://maps.google.com" target="_blank" style="color:#185FA5;">Google Maps</a></div>
-          <div style="display:flex;gap:8px;">
-            <input id="branch-lat-manual" placeholder="Latitud (ej: 4.6789)" type="number" step="any" style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;" oninput="applyManualCoords()">
-            <input id="branch-lon-manual" placeholder="Longitud (ej: -74.0567)" type="number" step="any" style="flex:1;padding:6px 10px;border:1px solid #e0a0a0;border-radius:6px;font-size:12px;" oninput="applyManualCoords()">
-          </div>
-        </div>
-      </div>
-      <input type="hidden" id="branch-lat" value=""><input type="hidden" id="branch-lon" value="">
+      
+      <input type="hidden" id="branch-lat" value="">
+      <input type="hidden" id="branch-lon" value="">
+      
       <div style="display:flex;gap:8px;">
         <button onclick="createBranch()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">Crear sucursal</button>
         <button onclick="document.getElementById('create-branch-form').style.display='none'" style="background:none;border:1px solid #e0e0d8;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cancelar</button>
