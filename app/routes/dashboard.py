@@ -68,7 +68,13 @@ class TeamInviteRequest(BaseModel):
     role: str = "mesero"
     phone: str = ""
     branch_id: int = None
-class CreateBranchRequest(BaseModel): name: str; whatsapp_number: str = ""; address: str; menu: dict = {}
+class CreateBranchRequest(BaseModel): 
+    name: str
+    whatsapp_number: str = ""
+    address: str
+    menu: dict = {}
+    latitude: float = None
+    longitude: float = None
 
 # --- Función de apoyo para validar roles ---
 def check_role_permission(user: dict, allowed_roles: list):
@@ -297,7 +303,7 @@ async def save_settings(request: Request):
             pass # Ignoramos errores de formato en coordenadas para no tumbar el servidor
 
     return {"success": True, "features": current_features}
-    
+
 # ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
 async def auth_login(request: Request, body: LoginRequest):
@@ -497,9 +503,9 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     wa_number = body.whatsapp_number.strip()
     
     async with pool.acquire() as conn:
-        # 🛡️ 1. Obtenemos el WhatsApp y el MENÚ de la Casa Matriz para clonarlo
+        # 🛡️ 1. Obtenemos el WhatsApp, MENÚ y FEATURES de la Casa Matriz
         matriz_row = await conn.fetchrow(
-            "SELECT whatsapp_number, menu FROM restaurants WHERE id = $1", 
+            "SELECT whatsapp_number, menu, features FROM restaurants WHERE id = $1", 
             my_restaurant_id
         )
         
@@ -509,22 +515,39 @@ async def create_branch(request: Request, body: CreateBranchRequest):
         if not wa_number:
             wa_number = f"{matriz_row['whatsapp_number']}_b{int(time.time())}"
         
-        # El menú heredado
+        # 🧬 Herencia de Menú y Features
         menu_heredado = matriz_row['menu'] or {}
-            
-    lat, lon, display = await geocode_address(body.address)
+        features_heredado = matriz_row['features'] or {}
+        
+        # Aseguramos que features sea un diccionario (json) y no un string
+        if isinstance(features_heredado, str):
+            import json
+            try:
+                features_heredado = json.loads(features_heredado)
+            except:
+                features_heredado = {}
+
+    # 🛡️ 2. Priorizamos las coordenadas exactas que vienen del mapa interactivo
+    lat = body.latitude
+    lon = body.longitude
+    display = ""
     
-    # 2. Creamos la sucursal inyectándole el menú del padre de una vez
+    # Solo si el mapa falló o no se envió lat/lon, intentamos geocodificar como plan B
+    if lat is None or lon is None:
+        lat, lon, display = await geocode_address(body.address)
+    
+    # 🛡️ 3. Creamos la sucursal inyectándole menú, features y coordenadas
     await db.db_create_restaurant(
-        body.name, 
-        wa_number, 
-        body.address, 
-        menu_heredado, # 🧬 Aquí ocurre la herencia
-        lat, 
-        lon
+        name=body.name, 
+        whatsapp_number=wa_number, 
+        address=body.address, 
+        menu=menu_heredado,
+        latitude=lat, 
+        longitude=lon,
+        features=features_heredado
     )
     
-    # 3. Vinculación jerárquica
+    # 4. Vinculación jerárquica
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE restaurants SET parent_restaurant_id = $1 WHERE whatsapp_number = $2",
@@ -532,7 +555,7 @@ async def create_branch(request: Request, body: CreateBranchRequest):
         )
             
     return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
-
+    
 _STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "otro"}
 
 
