@@ -628,7 +628,6 @@ function setCustomPeriod(btn) {
    SELECTOR GLOBAL DE SUCURSALES (TOPBAR)
 ═══════════════════════════════════════════════════ */
 window.loadGlobalBranches = async function() {
-  // Aseguramos leer el rol en minúsculas para que nunca falle
   const role = (localStorage.getItem('rb_role') || '').toLowerCase();
   if (!role.includes('owner')) return;
   
@@ -641,9 +640,12 @@ window.loadGlobalBranches = async function() {
           const data = await r.json();
           const branches = data.branches || [];
           
-          if(branches.length === 0) return; // Si no hay sucursales, se queda oculto
+          if(branches.length === 0) return;
 
           select.innerHTML = '<option value="matriz">🏠 Casa Matriz</option>';
+          // 🛡️ AÑADIMOS LA OPCIÓN "TODAS"
+          select.innerHTML += '<option value="all">🌐 Todas las Sucursales</option>';
+          
           branches.forEach(b => {
               const opt = document.createElement('option');
               opt.value = b.id;
@@ -651,40 +653,49 @@ window.loadGlobalBranches = async function() {
               select.appendChild(opt);
           });
           
-          // Mantiene seleccionada la sucursal en la que estabas si recargas la página
           if (window._dashHeaders['X-Branch-ID']) {
               select.value = window._dashHeaders['X-Branch-ID'];
           }
-          
-          // ¡Muestra el botón!
           select.style.display = 'block';
       }
-  } catch(e) { console.error('Error cargando sucursales globales', e); }
+  } catch(e) { console.error('Error cargando sucursales', e); }
 };
 
 window.changeGlobalBranch = function() {
   const select = document.getElementById('global-branch-select');
-  if (select && select.value && select.value !== 'matriz') {
-      window._dashHeaders['X-Branch-ID'] = select.value;
+  const val = select ? select.value : '';
+
+  // 🛡️ BLOQUEO INTELIGENTE: Protegemos Menú y Salón si elige "Todas"
+  if (val === 'all') {
+      const activeSection = document.querySelector('.section.active')?.id;
+      if (activeSection === 'menu' || activeSection === 'mesas') {
+          alert("Para gestionar el Menú o el Salón, debes seleccionar una sucursal específica o la Casa Matriz.");
+          select.value = 'matriz';
+          return window.changeGlobalBranch();
+      }
+      window._dashHeaders['X-Branch-ID'] = 'all';
+  } else if (val === 'matriz') {
+      window._dashHeaders['X-Branch-ID'] = 'matriz';
+  } else if (val) {
+      window._dashHeaders['X-Branch-ID'] = val;
   } else {
-      delete window._dashHeaders['X-Branch-ID']; // Vuelve a la matriz
+      delete window._dashHeaders['X-Branch-ID'];
   }
   
-  // Recargar TODAS las secciones activas con el nuevo filtro
+  // Recargar todo
   refreshAll();
   if(typeof loadMenu === 'function') loadMenu();
   if(typeof loadTables === 'function') loadTables();
   if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
   
   const staffActive = document.getElementById('staff')?.classList.contains('active');
-  if(staffActive && typeof loadStaff === 'function') loadStaff();
+  if(staffActive && typeof loadStaffSection === 'function') loadStaffSection();
   
+  const loyaltyActive = document.getElementById('loyalty')?.classList.contains('active');
+  if(loyaltyActive && typeof loadLoyaltySection === 'function') loadLoyaltySection();
+
   if(typeof loadNPS === 'function') loadNPS();
-
-  // 🛡️ AGREGAR ESTO: Fuerza a recargar los chats al cambiar de sucursal
-  if(typeof loadConversations === 'function') loadConversations();
 };
-
 // 🛡️ EL GATILLO AUTOMÁTICO: Esto obliga al navegador a cargar el botón SIEMPRE al iniciar
 window.addEventListener('load', () => {
     setTimeout(() => {

@@ -800,19 +800,23 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     
-    # 1. Tomamos tu ID real de la base de datos
     branch_id = user.get("branch_id")
-    
-    # 2. Si el selector global de arriba envía un ID distinto, lo aplicamos
     branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+    
+    # 🛡️ CAPTURAMOS "ALL"
+    if branch_header == "all" and "owner" in user.get("role", ""):
+        branch_id = "all"
+    elif branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
 
     bot_number = None
-    if branch_id:
+    if branch_id and branch_id != "all":
         r = await db.db_get_restaurant_by_id(branch_id)
-        if r: 
-            bot_number = r.get("whatsapp_number")
+        if r: bot_number = r.get("whatsapp_number")
+    elif branch_id == "all":
+        # Si es all, buscamos el bot de la matriz para usarlo como referencia
+        r = await db.db_get_restaurant_by_id(user.get("branch_id"))
+        if r: bot_number = r.get("whatsapp_number")
 
     now_utc = datetime.utcnow()
     now_local = now_utc - timedelta(minutes=tz_offset)
@@ -1006,10 +1010,7 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
 async def get_dashboard_conversations(request: Request):
     branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
     
-    # 🛡️ FIX CLAVE: Limpiamos el número del bot quitando el sufijo "_b10"
-    # para que coincida exactamente con cómo se guardó en la base de datos desde Meta.
-    if bot_number:
-        bot_number = bot_number.split("_b")[0]
+    if bot_number: bot_number = bot_number.split("_b")[0]
     
     pool = await db.get_pool()
     async with pool.acquire() as conn:
@@ -1023,8 +1024,10 @@ async def get_dashboard_conversations(request: Request):
             params.append(bot_number)
             idx += 1
             
-        # 🛡️ FILTRO ESTRICTO DE SUCURSAL
-        if branch_id is not None:
+        # 🛡️ LA MAGIA DEL "ALL" PARA WHATSAPP
+        if branch_id == "all":
+            pass # Sin filtro extra, trae todo
+        elif branch_id is not None:
             conditions.append(f"branch_id = ${idx}")
             params.append(branch_id)
             idx += 1
@@ -1054,7 +1057,7 @@ async def get_dashboard_conversations(request: Request):
             "last_updated": r["updated_at"].isoformat() + "Z"
         })
     return {"conversations": convs}
-        
+    
 @router.get("/api/dashboard/menu")
 async def get_dashboard_menu(request: Request):
     # Ahora el menú también respeta el selector de la sucursal
