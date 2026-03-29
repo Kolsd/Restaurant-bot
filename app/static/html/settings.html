@@ -182,26 +182,27 @@
 </div>
 
 <script>
-const token = localStorage.getItem('rb_token');
-if (!token) window.location.href = '/login';
-
-// 🛡️ Leer la sucursal activa desde sessionStorage (si existe)
-let activeBranchId = sessionStorage.getItem('rb_active_branch_id');
-const headers = {
-  'Authorization': 'Bearer ' + token,
-  'Content-Type': 'application/json'
-};
-
-// Si el usuario seleccionó una sucursal específica en el dashboard, la aplicamos aquí.
-// Si seleccionó "all" o no hay selección, usamos la casa matriz.
-if (activeBranchId && activeBranchId !== 'all' && activeBranchId !== 'matriz') {
-    headers['X-Branch-ID'] = String(activeBranchId);
-}
-
-let paymentMethods = [];
-let settingsMap = null;
-let settingsMarker = null;
-
+  const token = localStorage.getItem('rb_token');
+  if (!token) window.location.href = '/login';
+  
+  // 🛡️ LA MAGIA DE LA URL: Leemos el ID directamente del link
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlBranchId = urlParams.get('branch_id');
+  
+  const headers = {
+    'Authorization': 'Bearer ' + token,
+    'Content-Type': 'application/json'
+  };
+  
+  // Si la URL trae un ID, se lo inyectamos al backend para que traiga esos datos
+  if (urlBranchId) {
+      headers['X-Branch-ID'] = urlBranchId;
+  }
+  
+  let paymentMethods = [];
+  let settingsMap = null;
+  let settingsMarker = null;
+  
 // ── LÓGICA DEL MAPA ──
 function initSettingsMap(lat, lon) {
     const defaultLat = parseFloat(lat) || 4.6097;
