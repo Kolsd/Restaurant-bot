@@ -415,16 +415,10 @@ async function saveSettings() {
   btn.textContent = '💾 Guardar configuración'; btn.disabled = false;
 }
 
-// Para que mantenga la sucursal seleccionada al navegar de Dashboard a Settings
 document.addEventListener('DOMContentLoaded', () => {
-    // Si venimos del dashboard, intentamos leer la sucursal seleccionada
-    if (!activeBranchId) {
-        // En tu app actual el header X-Branch-ID vive en window._dashHeaders, 
-        // pero como es otra página, lo leeremos de sessionStorage si existe.
-        // Haremos que dashboard.js lo guarde al cambiar (paso extra opcional).
-    }
     loadSettings();
 });
+
 </script>
 </body>
 </html>
