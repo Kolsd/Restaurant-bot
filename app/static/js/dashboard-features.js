@@ -302,25 +302,39 @@ function showCreateBranch() {
   }
 }
 
-// 🪄 Función mágica que convierte el Pin del mapa en una dirección de texto
+// 🪄 Función que traduce la coordenada a una dirección CORTA y limpia
 async function updatePinLocation(latlng) {
-    // Guardamos las coordenadas ocultas
-    document.getElementById('branch-lat').value = latlng.lat;
-    document.getElementById('branch-lon').value = latlng.lng;
-    
-    try {
-        // Pedimos a OpenStreetMap que traduzca la coordenada a texto
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`);
-        if (res.ok) {
-            const data = await res.json();
-            if (data && data.display_name) {
-                // Auto-rellena el campo de dirección
-                document.getElementById('branch-address').value = data.display_name;
-            }
-        }
-    } catch (e) {
-        console.error("Error obteniendo el texto de la dirección:", e);
-    }
+  document.getElementById('branch-lat').value = latlng.lat;
+  document.getElementById('branch-lon').value = latlng.lng;
+  
+  try {
+      // Añadimos &addressdetails=1 para que nos dé las partes separadas
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}&addressdetails=1`);
+      if (res.ok) {
+          const data = await res.json();
+          if (data && data.address) {
+              const a = data.address;
+              
+              // Extraemos solo lo útil: Calle, Número, Barrio, Ciudad
+              const street = a.road || a.pedestrian || a.path || '';
+              const number = a.house_number || '';
+              const hood   = a.neighbourhood || a.suburb || '';
+              const city   = a.city || a.town || a.county || '';
+              
+              // Armamos una dirección comercial natural
+              let cleanAddress = `${street} ${number}`.trim();
+              if (hood) cleanAddress += `, ${hood}`;
+              if (city) cleanAddress += `, ${city}`;
+              
+              // Limpiamos comas extra y lo ponemos en el input
+              document.getElementById('branch-address').value = cleanAddress.replace(/^,|,$/g, '').trim() || data.display_name;
+          } else if (data && data.display_name) {
+              document.getElementById('branch-address').value = data.display_name;
+          }
+      }
+  } catch (e) {
+      console.error("Error obteniendo el texto de la dirección:", e);
+  }
 }
 
 // 🔍 Buscador de texto directo a OpenStreetMap (Más robusto)
