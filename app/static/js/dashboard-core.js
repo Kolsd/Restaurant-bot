@@ -655,9 +655,6 @@ function setCustomPeriod(btn) {
   refreshAll();
 }
 
-/* ═══════════════════════════════════════════════════
-   SELECTOR GLOBAL DE SUCURSALES (TOPBAR)
-═══════════════════════════════════════════════════ */
 window.loadGlobalBranches = async function() {
   const role = (localStorage.getItem('rb_role') || '').toLowerCase();
   if (!role.includes('owner')) return;
@@ -666,6 +663,12 @@ window.loadGlobalBranches = async function() {
   if (!select) return;
   
   try {
+      // 🛡️ Antes de hacer peticiones, recuperamos la memoria si existe
+      const savedBranch = sessionStorage.getItem('rb_active_branch_id');
+      if (savedBranch) {
+          window._dashHeaders['X-Branch-ID'] = savedBranch;
+      }
+
       const r = await fetch('/api/team/branches', { headers: window._dashHeaders });
       if (r.ok) {
           const data = await r.json();
@@ -683,6 +686,7 @@ window.loadGlobalBranches = async function() {
               select.appendChild(opt);
           });
           
+          // Asignar el valor visual en el selector
           if (window._dashHeaders['X-Branch-ID']) {
               select.value = window._dashHeaders['X-Branch-ID'];
           }
@@ -694,8 +698,7 @@ window.loadGlobalBranches = async function() {
 window.changeGlobalBranch = function() {
   const select = document.getElementById('global-branch-select');
   const val = select ? select.value : '';
-  sessionStorage.setItem('rb_active_branch_id', val);
-  
+
   // 🛡️ BLOQUEO INTELIGENTE CON MODAL ELEGANTE
   if (val === 'all') {
       const activeSection = document.querySelector('.section.active')?.id;
@@ -717,7 +720,9 @@ window.changeGlobalBranch = function() {
       delete window._dashHeaders['X-Branch-ID'];
   }
   
+  // 🛡️ AQUÍ ESTÁ LA MAGIA: Guardamos en memoria para settings.html
   sessionStorage.setItem('rb_active_branch_id', val);
+  
   refreshAll();
   if(typeof loadMenu === 'function') loadMenu();
   if(typeof loadTables === 'function') loadTables();
