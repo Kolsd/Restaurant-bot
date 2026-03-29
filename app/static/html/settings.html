@@ -232,6 +232,11 @@ function initSettingsMap(lat, lon) {
         settingsMarker.setLatLng([defaultLat, defaultLon]);
         setTimeout(() => settingsMap.invalidateSize(), 200);
     }
+
+setTimeout(() => {
+    settingsMap.invalidateSize();
+}, 500);
+
 }
 
 async function updateSettingsPin(latlng) {
