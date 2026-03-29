@@ -503,9 +503,10 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     wa_number = body.whatsapp_number.strip()
     
     async with pool.acquire() as conn:
-        # 🛡️ 1. Obtenemos el WhatsApp, MENÚ y FEATURES de la Casa Matriz
+        # 🛡️ 1. Obtenemos TODOS los datos vitales de la Casa Matriz
+        # (Incluyendo las credenciales de Meta API)
         matriz_row = await conn.fetchrow(
-            "SELECT whatsapp_number, menu, features FROM restaurants WHERE id = $1", 
+            "SELECT whatsapp_number, menu, features, wa_phone_id, wa_access_token FROM restaurants WHERE id = $1", 
             my_restaurant_id
         )
         
@@ -513,30 +514,27 @@ async def create_branch(request: Request, body: CreateBranchRequest):
             raise HTTPException(status_code=404, detail="No se encontró la Casa Matriz.")
 
         if not wa_number:
+            # 🛡️ EXPLICACIÓN DEL SUFIJO: 
+            # Se necesita obligatoriamente para que Postgres no sobreescriba la Casa Matriz,
+            # ya que la columna whatsapp_number tiene un ON CONFLICT UNIQUE.
             wa_number = f"{matriz_row['whatsapp_number']}_b{int(time.time())}"
         
-        # 🧬 Herencia de Menú y Features
         menu_heredado = matriz_row['menu'] or {}
         features_heredado = matriz_row['features'] or {}
         
-        # Aseguramos que features sea un diccionario (json) y no un string
         if isinstance(features_heredado, str):
             import json
-            try:
-                features_heredado = json.loads(features_heredado)
-            except:
-                features_heredado = {}
+            try: features_heredado = json.loads(features_heredado)
+            except: features_heredado = {}
 
-    # 🛡️ 2. Priorizamos las coordenadas exactas que vienen del mapa interactivo
     lat = body.latitude
     lon = body.longitude
     display = ""
     
-    # Solo si el mapa falló o no se envió lat/lon, intentamos geocodificar como plan B
     if lat is None or lon is None:
         lat, lon, display = await geocode_address(body.address)
     
-    # 🛡️ 3. Creamos la sucursal inyectándole menú, features y coordenadas
+    # 🛡️ 2. Creamos la sucursal inyectándole menú, features y coordenadas
     await db.db_create_restaurant(
         name=body.name, 
         whatsapp_number=wa_number, 
@@ -547,15 +545,23 @@ async def create_branch(request: Request, body: CreateBranchRequest):
         features=features_heredado
     )
     
-    # 4. Vinculación jerárquica
+    # 🛡️ 3. Vinculación jerárquica y herencia de credenciales de Meta
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE restaurants SET parent_restaurant_id = $1 WHERE whatsapp_number = $2",
-            my_restaurant_id, wa_number
+        await conn.execute("""
+            UPDATE restaurants 
+            SET parent_restaurant_id = $1,
+                wa_phone_id = $3,
+                wa_access_token = $4
+            WHERE whatsapp_number = $2
+        """, 
+        my_restaurant_id, 
+        wa_number, 
+        matriz_row.get('wa_phone_id', ''), 
+        matriz_row.get('wa_access_token', '')
         )
             
     return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
-    
+        
 _STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "otro"}
 
 
