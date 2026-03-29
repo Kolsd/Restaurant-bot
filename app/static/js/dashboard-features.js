@@ -267,6 +267,7 @@ async function loadBranchUsers(branchId) {
 }
 
 // 🗺️ LÓGICA DEL MAPA INTERACTIVO
+// 🗺️ LÓGICA DEL MAPA INTERACTIVO (MEJORADA)
 let locationMap = null;
 let locationMarker = null;
 
@@ -274,7 +275,6 @@ function showCreateBranch() {
   document.getElementById('create-branch-form').style.display = 'block';
   document.getElementById('branch-name').focus();
   
-  // Inicializar mapa si no existe
   if (!locationMap) {
       // Centramos por defecto en Colombia (Bogotá)
       const defaultLat = 4.6097; 
@@ -285,51 +285,75 @@ function showCreateBranch() {
           attribution: '© OpenStreetMap'
       }).addTo(locationMap);
 
-      // Crear el PIN arrastrable
       locationMarker = L.marker([defaultLat, defaultLon], { draggable: true }).addTo(locationMap);
 
-      // Cuando el usuario arrastra el pin, guardamos las coordenadas
+      // 1. Cuando se arrastra el pin
       locationMarker.on('dragend', function (e) {
-          const pos = locationMarker.getLatLng();
-          document.getElementById('branch-lat').value = pos.lat;
-          document.getElementById('branch-lon').value = pos.lng;
+          updatePinLocation(locationMarker.getLatLng());
+      });
+
+      // 2. Mover el pin con solo hacer CLIC en el mapa
+      locationMap.on('click', function(e) {
+          locationMarker.setLatLng(e.latlng);
+          updatePinLocation(e.latlng);
       });
   } else {
-      // Necesario para que Leaflet re-calcule el tamaño si el div estaba oculto
       setTimeout(() => locationMap.invalidateSize(), 200);
   }
 }
 
+// 🪄 Función mágica que convierte el Pin del mapa en una dirección de texto
+async function updatePinLocation(latlng) {
+    // Guardamos las coordenadas ocultas
+    document.getElementById('branch-lat').value = latlng.lat;
+    document.getElementById('branch-lon').value = latlng.lng;
+    
+    try {
+        // Pedimos a OpenStreetMap que traduzca la coordenada a texto
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.display_name) {
+                // Auto-rellena el campo de dirección
+                document.getElementById('branch-address').value = data.display_name;
+            }
+        }
+    } catch (e) {
+        console.error("Error obteniendo el texto de la dirección:", e);
+    }
+}
+
+// 🔍 Buscador de texto directo a OpenStreetMap (Más robusto)
 async function validateAddress() {
-  const h = window._dashHeaders;
-  const address = document.getElementById('branch-address').value.trim();
-  if (!address) { alert('Ingresa una dirección primero'); return; }
+  const addressInput = document.getElementById('branch-address').value.trim();
+  if (!addressInput) { alert('Ingresa una dirección primero'); return; }
   
   const btn = document.querySelector('[onclick="validateAddress()"]');
   const prev = btn.textContent;
   btn.textContent = 'Buscando...'; btn.disabled = true;
   
   try {
-    const r = await fetch('/api/geocode?address=' + encodeURIComponent(address), { headers: h });
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressInput)}&limit=1`);
     if (r.ok) {
-      const d = await r.json();
-      
-      // Guardar coordenadas
-      document.getElementById('branch-lat').value = d.latitude;
-      document.getElementById('branch-lon').value = d.longitude;
-      
-      // 📍 Mover el mapa y el PIN a la nueva dirección
-      if (locationMap && locationMarker) {
-          const newPos = new L.LatLng(d.latitude, d.longitude);
-          locationMap.setView(newPos, 16); // Acercamos el zoom
-          locationMarker.setLatLng(newPos);
+      const data = await r.json();
+      if (data && data.length > 0) {
+          const lat = parseFloat(data[0].lat);
+          const lon = parseFloat(data[0].lon);
+          
+          document.getElementById('branch-lat').value = lat;
+          document.getElementById('branch-lon').value = lon;
+          
+          if (locationMap && locationMarker) {
+              const newPos = new L.LatLng(lat, lon);
+              locationMap.setView(newPos, 16);
+              locationMarker.setLatLng(newPos);
+          }
+      } else {
+          alert('❌ No se encontró la dirección exacta. Por favor, haz clic directamente en el mapa para ubicar el marcador.');
       }
-      
-    } else {
-      alert('❌ No se encontró la dirección exacta. Por favor arrastra el pin rojo en el mapa hasta tu restaurante.');
     }
   } catch(e) {
-    alert('❌ Error de conexión al buscar la dirección.');
+    alert('❌ Error de red al buscar. Usa el clic en el mapa.');
   } finally { 
     btn.textContent = prev; btn.disabled = false; 
   }
