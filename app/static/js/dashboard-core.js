@@ -743,3 +743,17 @@ window.addEventListener('load', () => {
         }
     }, 300); // Un pequeño retraso de 300ms para asegurar que tu token de sesión ya esté listo
 });
+
+// 🚀 NAVEGACIÓN SEGURA POR URL A SETTINGS
+window.goToSettings = function() {
+  const select = document.getElementById('global-branch-select');
+  const val = select ? select.value : '';
+  
+  // Si tiene una sucursal específica (no 'all' y no 'matriz'), armamos la URL con el ID
+  if (val && val !== 'all' && val !== 'matriz') {
+      window.location.href = '/settings?branch_id=' + val;
+  } else {
+      // Si está en 'matriz' o 'all', lo mandamos a la configuración de la matriz por defecto
+      window.location.href = '/settings'; 
+  }
+};
