@@ -387,6 +387,7 @@ function applyManualCoords() {
   }
 }
 
+// 🚀 CREAR SUCURSAL (VERSIÓN LIMPIA)
 async function createBranch() {
   const h = window._dashHeaders;
   const name    = document.getElementById('branch-name').value.trim();
@@ -399,7 +400,10 @@ async function createBranch() {
   
   try {
     const body = { name, whatsapp_number:'', address, menu:{} };
-    if (lat && lon) { body.latitude = parseFloat(lat); body.longitude = parseFloat(lon); }
+    if (lat && lon) { 
+        body.latitude = parseFloat(lat); 
+        body.longitude = parseFloat(lon); 
+    }
     
     const r = await fetch('/api/team/branches', { 
         method:'POST', 
@@ -408,11 +412,15 @@ async function createBranch() {
     });
     
     if (r.ok) {
+      // 1. Ocultamos el formulario
       document.getElementById('create-branch-form').style.display = 'none';
-      ['branch-name','branch-address','branch-lat','branch-lon'].forEach(id => { document.getElementById(id).value = ''; });
-      document.getElementById('branch-map-preview').style.display = 'none';
       
-      // 🛡️ RECARGAMOS LA VISTA Y EL DROPDOWN GLOBAL DE ARRIBA
+      // 2. Limpiamos los campos
+      ['branch-name','branch-address','branch-lat','branch-lon'].forEach(id => { 
+          document.getElementById(id).value = ''; 
+      });
+      
+      // 3. Recargamos la vista de sucursales
       loadBranches();
       if (typeof loadGlobalBranches === 'function') loadGlobalBranches();
       
@@ -421,7 +429,8 @@ async function createBranch() {
         alert('Error: ' + (e.detail||'No se pudo crear')); 
     }
   } catch(e) {
-      console.error(e);
+      console.error("Error al crear la sucursal:", e);
+      alert('❌ Error de conexión.');
   }
 }
 
