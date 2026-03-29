@@ -326,7 +326,7 @@ STEP 2 — METHOD: Ask if they want Delivery or Pickup. action="chat"
 STEP 3 — ADDRESS (only if delivery): Ask for the full delivery address. If the customer shares GPS location, use it. action="chat"
 STEP 4 — PAYMENT METHOD: List EVERY payment method from [MÉTODOS_DE_PAGO] explicitly in your reply (e.g. "Puedes pagar con: • Efectivo • Tarjeta débito"). Then ask which one the customer prefers. action="chat"
 STEP 5 — CONFIRM: Summarize the order, address, and payment method. Ask for explicit confirmation. action="chat"
-STEP 6 — CREATE ORDER: Only after confirmation. action="delivery" or action="pickup". Include 'address' and 'payment_method'.
+STEP 6 — CREATE ORDER: Only after confirmation. action="delivery" or action="pickup". Include 'address' and 'payment_method'. If the payment method requires transfer (e.g., Nequi, Daviplata, Transferencia), you MUST include the exact payment instructions from [INSTRUCCIONES_PAGO] in your reply and kindly ask the customer to send the payment receipt/screenshot here.
 
 CRITICAL RULES FOR EXTERNAL MODE:
 - NEVER use action="delivery" or action="pickup" without a confirmed address (if applicable) AND payment_method.
@@ -824,13 +824,14 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
                 pass
         
         return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
-        
+
     table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
 
     restaurant_name = "nuestro restaurante"
     google_maps_url = ""
     payment_methods_text = ""
+    inst_text = ""
     feats: dict = {}  # resolved features — used for module restrictions in system prompt
 
     restaurant_obj = await db.db_get_restaurant_by_bot_number(bot_number)
@@ -848,6 +849,10 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     payment_methods = feats.get("payment_methods", [])
     if payment_methods:
         payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
+        
+    payment_instructions = feats.get("payment_instructions", {})
+    if payment_instructions:
+        inst_text = "\n[INSTRUCCIONES_PAGO:\n" + "\n".join(f"• {k}: {v}" for k, v in payment_instructions.items()) + "]"
 
     # Buscar por branch_id si hay contexto de mesa
     if table_context and table_context.get("branch_id"):
@@ -930,6 +935,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         f"\n[CARRITO: {cart_text}]"
         f"{table_note}"
         f"{metodos_bloque}"
+        f"{inst_text}"
         f"{delivery_fee_note}"
         f"{loyalty_note}"
         f"{in_transit_note}"

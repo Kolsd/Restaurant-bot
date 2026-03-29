@@ -139,9 +139,17 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; }
 .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.5rem; }
 
+/* ── NUEVOS ESTILOS PARA LAS PESTAÑAS (TABS) ── */
+.segmented-control { display:flex; gap:4px; margin-bottom:1.5rem; background:#E4E4E7; border-radius:10px; padding:4px; width:fit-content; flex-wrap:wrap; }
+.seg-btn { padding:8px 20px; border-radius:8px; border:none; font-size:13px; font-weight:600; cursor:pointer; transition: all 0.2s; position:relative; }
+.seg-btn.active { background:#fff; color:#18181B; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+.seg-btn:not(.active) { background:transparent; color:#71717A; }
+.badge-tab { background:#EF4444; color:#fff; border-radius:10px; padding:2px 6px; font-size:10px; margin-left:6px; display:inline-block; }
+
 /* ── TICKET DE CAJA ── */
 .ticket-card { background: #fff; border: 1px solid #E4E4E7; border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.02); display: flex; flex-direction: column; transition: transform 0.2s; border-top: 4px solid #7C3AED; }
 .ticket-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px rgba(0,0,0,0.05); }
+.ticket-card.domicilio { border-top: 4px solid #F59E0B; } /* Estilo especial Domicilios */
 .t-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px dashed #E4E4E7; padding-bottom: 1rem; margin-bottom: 1rem; }
 .t-table { font-size: 1.25rem; font-weight: 800; color: #18181B; }
 .t-time { font-size: 11px; color: #71717A; background: #F4F4F5; padding: 4px 8px; border-radius: 6px; font-weight: 600; }
@@ -158,9 +166,22 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 .btn-pay { width: 100%; background: #18181B; color: #fff; border: none; padding: 14px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .btn-pay:hover { background: #27272A; }
 .btn-pay:active { transform: scale(0.98); }
+.btn-confirm-dom { width: 100%; background: #1D9E75; color: #fff; border: none; padding: 14px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top:10px; transition: background 0.2s;}
+.btn-confirm-dom:hover { background: #0F6E56; }
 
 .empty-state { grid-column: 1 / -1; text-align: center; padding: 4rem 2rem; background: #fff; border: 2px dashed #E4E4E7; border-radius: 16px; color: #A1A1AA; }
 .empty-state h3 { font-size: 1.25rem; color: #71717A; margin-bottom: 8px; }
+
+/* ── CHATS (ESTILOS NUEVOS) ── */
+.conv-row { display:flex; gap:12px; padding:1rem; border-bottom:1px solid #E4E4E7; cursor:pointer; align-items:center; background:#fff; border-radius:12px; margin-bottom:8px; transition: background 0.2s; }
+.conv-row:hover { background:#F4F4F5; }
+.conv-avatar { width:40px; height:40px; border-radius:50%; background:#E4E4E7; display:flex; align-items:center; justify-content:center; font-weight:700; color:#555; flex-shrink: 0;}
+.chat-input { flex:1; padding:10px 15px; border-radius:20px; border:1px solid #E4E4E7; outline:none; font-size:14px; }
+.msg-bubble { margin-bottom: 10px; display: flex; flex-direction: column; }
+.msg-bubble.user { align-items: flex-end; }
+.bubble { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.4; word-wrap: break-word; }
+.bubble.bot { background: #E4E4E7; color: #111; border-top-left-radius: 2px; }
+.bubble.user { background: #DCF8C6; color: #111; border-top-right-radius: 2px; }
 
 /* ── BOTÓN AJUSTAR FACTURA ── */
 .btn-adjust { width: 100%; background: none; color: #7C3AED; border: 1.5px solid #DDD6FE; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
@@ -283,16 +304,33 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 </header>
 
 <div class="main">
-  <div class="section-title">
-    Cuentas por Cobrar
-    <span style="font-size:14px; color:#71717A; font-weight:500;" id="total-pending">0 cuentas pendientes</span>
+  <div class="segmented-control">
+    <button id="tab-mesas" class="seg-btn active" onclick="switchTab('mesas')">🪑 Mesas</button>
+    <button id="tab-domicilios" class="seg-btn" onclick="switchTab('domicilios')">🛵 Domicilios <span id="badge-dom" class="badge-tab" style="display:none;">0</span></button>
+    <button id="tab-chats" class="seg-btn" onclick="switchTab('chats')">💬 WhatsApp Comprobantes <span id="badge-chat" class="badge-tab" style="display:none;">0</span></button>
   </div>
-  <div class="board" id="board">
-    <div class="empty-state">Cargando caja...</div>
+
+  <div id="view-mesas">
+      <div class="section-title">
+        Cuentas por Cobrar
+        <span style="font-size:14px; color:#71717A; font-weight:500;" id="total-pending">0 cuentas pendientes</span>
+      </div>
+      <div class="board" id="board">
+        <div class="empty-state">Cargando caja...</div>
+      </div>
+  </div>
+
+  <div id="view-domicilios" style="display:none;">
+    <div class="section-title">Domicilios Pendientes de Confirmación</div>
+    <div class="board" id="board-domicilios"><div class="empty-state">Cargando domicilios...</div></div>
+  </div>
+
+  <div id="view-chats" style="display:none;">
+    <div class="section-title">Chats de WhatsApp (Validar Pagos)</div>
+    <div id="inbox-list"><div class="empty-state">Cargando chats...</div></div>
   </div>
 </div>
 
-<!-- MODAL AJUSTAR FACTURA -->
 <div class="modal-overlay" id="adj-modal" onclick="if(event.target===this)closeAdjModal()">
   <div class="modal-box">
     <div class="modal-header">
@@ -312,7 +350,6 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   </div>
 </div>
 
-<!-- ══ MODAL: DIVIDIR CUENTA ══ -->
 <div class="sp-overlay" id="split-modal" onclick="if(event.target===this)closeSplitModal()">
   <div class="sp-box">
     <div class="sp-head">
@@ -321,7 +358,6 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
     </div>
     <div class="sp-body">
 
-      <!-- Fase 1: asignar ítems -->
       <div id="split-phase-1">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;flex-wrap:wrap;gap:8px;">
           <div style="font-size:12px;color:#71717A;">Asigna los ítems a cada cuenta. La suma por plato debe igualar lo pedido.</div>
@@ -339,7 +375,6 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
         </div>
       </div>
 
-      <!-- Fase 2: lista de checks para cobrar -->
       <div id="split-phase-2" style="display:none;">
         <div style="font-size:13px;color:#71717A;margin-bottom:1rem;">División creada. Cobra cada cuenta por separado.</div>
         <div id="split-checks-list"></div>
@@ -356,7 +391,6 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   </div>
 </div>
 
-<!-- ══ MODAL: COBRAR CHECK ══ -->
 <div class="sp-overlay" id="pay-modal" onclick="if(event.target===this)closePayModal()">
   <div class="pay-box">
     <div class="sp-head">
@@ -390,11 +424,27 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   </div>
 </div>
 
+<div class="sp-overlay" id="chat-modal" onclick="if(event.target===this)closeChatModal()">
+  <div class="sp-box" style="width: 500px; height: 80vh;">
+    <div class="sp-head">
+      <h3 id="chat-modal-title">Chat de WhatsApp</h3>
+      <button class="modal-close" onclick="closeChatModal()">✕</button>
+    </div>
+    <div class="sp-body" id="chat-modal-msgs" style="background: #efeae2; display: flex; flex-direction: column;"></div>
+    <div class="sp-foot" style="align-items: center; border-top: 1px solid #E4E4E7; background:#fff; padding:1rem;">
+      <input type="text" id="chat-reply-input" class="chat-input" placeholder="Escribe un mensaje..." onkeydown="if(event.key==='Enter')sendManualReply()">
+      <button onclick="sendManualReply()" style="background:#1D9E75;color:#fff;border:none;padding:10px 20px;border-radius:20px;cursor:pointer;font-weight:600;margin-left:10px;">Enviar</button>
+    </div>
+  </div>
+</div>
+
+
 <script src="/static/js/roles.js"></script>
 <script>
 const reqHeaders = { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
 let _billsCache = {}; // id → bill object, used by Ajustar Factura modal
 let _adjBill = null;
+let currentChatPhone = null;
 
 function doLogout() { doStaffLogout(); }
 
@@ -417,6 +467,21 @@ const fmt = (amount) => {
         minimumFractionDigits: ['COP', 'CLP', 'PYG', 'JPY'].includes(_currency) ? 0 : 2
     }).format(Number(amount));
 };
+
+// ── NAVEGACIÓN TABS ──
+function switchTab(tabId) {
+  document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tabId).classList.add('active');
+  
+  document.getElementById('view-mesas').style.display = 'none';
+  document.getElementById('view-domicilios').style.display = 'none';
+  document.getElementById('view-chats').style.display = 'none';
+  
+  document.getElementById('view-' + tabId).style.display = 'block';
+  
+  if (tabId === 'chats') loadChats();
+  if (tabId === 'domicilios') loadDomicilios();
+}
 
 async function printFactura(billId) {
   const bill = _billsCache[billId];
@@ -551,7 +616,6 @@ async function loadCajaOrders() {
     _billsCache = {}; // refresh cache
     pendingBills.forEach(b => { _billsCache[b.id] = b; });
     
-    // --- (A partir de aquí es exactamente tu mismo código de renderizado) ---
     document.getElementById('total-pending').textContent = `${pendingBills.length} cuenta${pendingBills.length !== 1 ? 's' : ''} pendiente${pendingBills.length !== 1 ? 's' : ''}`;
 
     const board = document.getElementById('board');
@@ -702,8 +766,6 @@ function addSplitCheck() {
 
 function removeSplitCheck(n) {
   if (_splitCheckN <= 1) return;
-  // Move qty from removed column back to 0 for all rows, then shift columns
-  // Simplest: just decrement and re-render (user re-enters)
   _splitCheckN--;
   _renderSplitTable();
 }
@@ -979,13 +1041,11 @@ async function processPayment() {
       const change = data.change || 0;
       fb.textContent = `✅ Pago registrado. CUFE: ${(data.fiscal?.cufe||'').slice(0,16)}...${change > 0 ? ` Cambio: ${fmt(change)}` : ''}`;
 
-      // Si venimos de la fase 2 del split modal, actualizar el check en _splitChecks
       const updIdx = _splitChecks.findIndex(c => c.id === _payCheckId);
       if (updIdx >= 0) {
         _splitChecks[updIdx].status = 'invoiced';
         setTimeout(() => { closePayModal(); _renderSplitChecks(); }, 1800);
       } else {
-        // Cobrar Todo → cerrar ambos modales y recargar
         setTimeout(() => { closePayModal(); loadCajaOrders(); }, 1800);
       }
     } else {
@@ -1072,9 +1132,6 @@ ${cufeHtml}
   win.onload = () => { win.print(); };
 }
 
-// Inicializar config de billing en el arranque de la página
-loadBillingConfig();
-
 // ── MODAL AJUSTAR FACTURA ──
 
 function openAdjModal(billId) {
@@ -1154,9 +1211,135 @@ async function submitAdjuste() {
   }
 }
 
-// Iniciar polling
+// ── DOMICILIOS PENDIENTES ──
+async function loadDomicilios() {
+  try {
+    const r = await fetch('/api/delivery/orders', { headers: reqHeaders });
+    if (!r.ok) return;
+    const { orders = [] } = await r.json();
+    
+    const pendientes = orders.filter(o => o.status === 'pendiente');
+    
+    const badge = document.getElementById('badge-dom');
+    if (pendientes.length > 0) { badge.textContent = pendientes.length; badge.style.display = 'inline-block'; }
+    else { badge.style.display = 'none'; }
+
+    const board = document.getElementById('board-domicilios');
+    if (pendientes.length === 0) { board.innerHTML = '<div class="empty-state">No hay domicilios por confirmar.</div>'; return; }
+
+    board.innerHTML = pendientes.map(o => {
+      let itemsStr = "Sin items";
+      try {
+        const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+        itemsStr = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}x ${i.name}`).join('<br>') : String(o.items);
+      } catch(e) {}
+      
+      return `
+      <div class="ticket-card domicilio">
+        <div class="t-header">
+          <div class="t-table">${o.type === 'domicilio' ? '🛵 Domicilio' : '🛍️ Recoger'}</div>
+          <div style="font-size:12px;color:#888;">${o.phone}</div>
+        </div>
+        <div style="font-size:13px;margin-bottom:10px;">${itemsStr}</div>
+        <div style="background:#F4F4F5;padding:8px;border-radius:8px;font-size:12px;margin-bottom:10px;">
+           <strong>Pago:</strong> ${o.payment_method || 'No definido'} <br>
+           <strong>Dirección:</strong> ${o.address || 'N/A'}
+        </div>
+        <div class="t-total-row"><span class="t-total-label">Total</span><span class="t-total-val" style="color:#F59E0B;">${fmt(o.total)}</span></div>
+        <button class="btn-confirm-dom" onclick="confirmarDomicilio('${o.id}')">✅ Confirmar Pago / Enviar a Cocina</button>
+      </div>`
+    }).join('');
+  } catch(e) {}
+}
+
+async function confirmarDomicilio(id) {
+    if(!confirm("¿Confirmar pedido y enviarlo a la cocina?")) return;
+    try {
+        await fetch(`/api/delivery/orders/${id}/status`, {
+            method: 'PATCH', headers: reqHeaders, body: JSON.stringify({status: 'confirmado'})
+        });
+        loadDomicilios();
+    } catch(e) {}
+}
+
+// ── WHATSAPP CHATS ──
+async function loadChats() {
+    try {
+        const r = await fetch('/api/dashboard/conversations', { headers: reqHeaders });
+        if (!r.ok) return;
+        const data = await r.json();
+        const convs = data.conversations || [];
+        
+        const badge = document.getElementById('badge-chat');
+        if (convs.length > 0) { badge.textContent = convs.length; badge.style.display = 'inline-block'; }
+        else { badge.style.display = 'none'; }
+
+        const list = document.getElementById('inbox-list');
+        if (convs.length === 0) { list.innerHTML = '<div class="empty-state">No hay chats activos.</div>'; return; }
+
+        list.innerHTML = convs.map(c => `
+            <div class="conv-row" onclick="openChatModal('${c.phone}')">
+                <div class="conv-avatar">${c.phone.slice(-4)}</div>
+                <div style="flex:1;">
+                    <div style="font-weight:700;font-size:14px;">${c.phone}</div>
+                    <div style="color:#71717A;font-size:12px;">${c.preview}</div>
+                </div>
+            </div>
+        `).join('');
+    } catch(e) {}
+}
+
+async function openChatModal(phone) {
+    currentChatPhone = phone;
+    document.getElementById('chat-modal-title').textContent = "Chat " + phone;
+    document.getElementById('chat-modal').classList.add('open');
+    document.getElementById('chat-modal-msgs').innerHTML = 'Cargando...';
+    
+    try {
+        const r = await fetch('/api/conversations/' + encodeURIComponent(phone), { headers: reqHeaders });
+        const d = await r.json();
+        const msgs = d.history || [];
+        const container = document.getElementById('chat-modal-msgs');
+        
+        container.innerHTML = msgs.map(m => {
+            const isUser = m.role === 'user';
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            return `<div class="msg-bubble ${isUser ? 'user' : ''}"><div class="bubble ${isUser ? 'user' : 'bot'}">${content}</div></div>`;
+        }).join('');
+        container.scrollTop = container.scrollHeight;
+    } catch(e) {}
+}
+
+function closeChatModal() {
+    document.getElementById('chat-modal').classList.remove('open');
+    currentChatPhone = null;
+}
+
+async function sendManualReply() {
+    const input = document.getElementById('chat-reply-input');
+    const msg = input.value.trim();
+    if(!msg || !currentChatPhone) return;
+    input.value = '';
+    try {
+        await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
+            method: 'POST', headers: reqHeaders, body: JSON.stringify({ message: msg })
+        });
+        openChatModal(currentChatPhone); // recargar
+    } catch(e) {}
+}
+
+// Iniciar polling (solo recargamos chats si estamos en esa pestaña)
 loadCajaOrders();
-setInterval(loadCajaOrders, 5000);
+loadDomicilios();
+
+setInterval(() => {
+  loadCajaOrders();
+  loadDomicilios();
+  if (document.getElementById('view-chats').style.display !== 'none') {
+      loadChats();
+  }
+}, 5000);
+
 </script>
 </body>
 </html>

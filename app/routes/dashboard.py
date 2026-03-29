@@ -237,6 +237,7 @@ async def get_settings(request: Request):
         "address": restaurant.get("address", ""),
         "features": features,
         "payment_methods": features.get("payment_methods", []),
+        "payment_instructions": features.get("payment_instructions", {}), # 🛡️ NUEVA LÍNEA
         "google_maps_url": features.get("google_maps_url", ""),
         "bot_active": features.get("bot_active", True),
         "upsell_active": features.get("upsell_active", True),
@@ -252,7 +253,6 @@ async def get_settings(request: Request):
         "longitude": restaurant.get("longitude"),
     }
 
-@router.post("/api/settings")
 @router.post("/api/settings")
 async def save_settings(request: Request):
     import json as _json
@@ -275,7 +275,7 @@ async def save_settings(request: Request):
     current_features = _json.loads(raw_features) if isinstance(raw_features, str) else dict(raw_features)
 
     updatable = [
-        "payment_methods", "google_maps_url", "bot_active",
+        "payment_methods", "payment_instructions", "google_maps_url", "bot_active",
         "upsell_active", "domicilio_active", "recoger_active",
         "delivery_fee", "min_order", "delivery_radius_km", "delivery_message",
         "pickup_message", "welcome_message",
