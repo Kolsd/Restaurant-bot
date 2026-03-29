@@ -24,16 +24,27 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 # ── AUTH HELPER ───────────────────────────────────────────────────────
 
 async def _get_restaurant_id(user: dict) -> int:
+    # 1. Si es un empleado (Staff con PIN), ya tiene el ID directo
+    if "restaurant_id" in user:
+        return user["restaurant_id"]
+        
+    # 2. Si es un Admin/Dueño, usamos su branch_id
     if user.get("branch_id"):
         return user["branch_id"]
-    all_r = await db.db_get_all_restaurants()
-    for r in all_r:
-        if r["name"].lower().strip() == user["restaurant_name"].lower().strip():
-            return r["id"]
-    if all_r:
-        return all_r[0]["id"]
+        
+    # 3. Fallback original (por si es una cuenta muy vieja sin branch_id)
+    restaurant_name = user.get("restaurant_name")
+    if not restaurant_name:
+        raise HTTPException(status_code=400, detail="Usuario sin restaurante asignado")
+        
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, name FROM restaurants")
+        for r in rows:
+            if r["name"].lower().strip() == restaurant_name.lower().strip():
+                return r["id"]
+                
     raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
 
 # ── MODELOS ──────────────────────────────────────────────────────────
 

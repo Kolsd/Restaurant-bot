@@ -173,7 +173,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 "subtotal":      subtotal,
                 "delivery_fee":  0,  # already charged on base order
                 "total":         subtotal,
-                "status":        "confirmado",
+                "status":        "pendiente",
                 "paid":          False,
                 "created_at":    datetime.now(ZoneInfo(tz_str)).isoformat(),
                 "bot_number":    bot_number,
@@ -198,7 +198,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             "subtotal":      subtotal,
             "delivery_fee":  delivery_fee,
             "total":         total,
-            "status":        "confirmado",
+            "status":        "pendiente",
             "paid":          False,
             "created_at":    datetime.now(ZoneInfo(tz_str)).isoformat(),
             "bot_number":    bot_number,
