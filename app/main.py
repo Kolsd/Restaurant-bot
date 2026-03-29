@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from pathlib import Path
 from starlette.responses import RedirectResponse
 from app.routes.chat import router as chat_router
-from app.routes.orders import router as orders_router
+from app.routes.orders_routes import router as orders_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
