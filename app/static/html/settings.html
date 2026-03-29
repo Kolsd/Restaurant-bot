@@ -6,6 +6,9 @@
 <title>Mesio — Configuración</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; margin: 0; padding: 2rem; color: #111; }
   .container { max-width: 700px; margin: 0 auto; }
@@ -48,7 +51,6 @@
     <h1>⚙️ Configuración del restaurante</h1>
   </div>
 
-  <!-- Métodos de pago -->
   <div class="card">
     <div class="card-title">💳 Métodos de pago aceptados</div>
     <p style="font-size:12px;color:#888;margin-bottom:1rem;">El bot informará estos métodos al cliente durante el flujo de domicilio/recoger.</p>
@@ -67,7 +69,6 @@
     </div>
   </div>
 
-  <!-- Módulos activos -->
   <div class="card">
     <div class="card-title">🔧 Módulos del bot</div>
     <div class="toggle-row">
@@ -88,7 +89,6 @@
     </div>
   </div>
 
-  <!-- Precios y costos -->
   <div class="card">
     <div class="card-title">💰 Precios y costos</div>
     <div class="grid2">
@@ -107,30 +107,31 @@
     </div>
   </div>
 
-  <!-- Ubicación de la sucursal -->
   <div class="card">
     <div class="card-title">📍 Ubicación de la sucursal</div>
-    <p style="font-size:12px;color:#888;margin-bottom:1rem;">Coordenadas GPS del local. Se usan para enrutar pedidos de domicilio a la sucursal más cercana.</p>
-    <div class="grid2">
-      <div>
-        <label>Latitud</label>
-        <input type="number" id="branch-lat" placeholder="4.6097" step="0.0001">
+    <p style="font-size:12px;color:#888;margin-bottom:1rem;">Dirección y coordenadas GPS del local. Se usan para enrutar pedidos de domicilio a la sucursal más cercana.</p>
+    
+    <div style="margin-bottom:1.5rem;">
+      <label>Dirección</label>
+      <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;">
+        <input type="text" id="set-address" placeholder="Ej: Calle 93 #15-32, Bogotá" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();validateSettingsAddress();}">
+        <button onclick="validateSettingsAddress()" type="button" style="background:#185FA5;color:#fff;border:none;padding:9px 16px;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap;font-weight:500;">📍 Buscar en mapa</button>
       </div>
-      <div>
-        <label>Longitud</label>
-        <input type="number" id="branch-lon" placeholder="-74.0817" step="0.0001">
-      </div>
+      
+      <div style="font-size:12px;color:#888;margin-bottom:6px;">Haz clic en el mapa para ajustar la ubicación exacta:</div>
+      <div id="settings-map" style="height: 250px; width: 100%; border-radius: 8px; border: 1px solid #e0e0d8; z-index: 1;"></div>
+      
+      <input type="hidden" id="branch-lat" value="">
+      <input type="hidden" id="branch-lon" value="">
     </div>
   </div>
 
-  <!-- Google Maps -->
   <div class="card">
     <div class="card-title">📍 Google Maps (reseñas NPS)</div>
     <label>Enlace de tu negocio en Google Maps (para clientes satisfechos)</label>
     <input type="url" id="maps-url" placeholder="https://g.page/r/...">
   </div>
 
-  <!-- Regionalización -->
   <div class="card">
     <div class="card-title">🌐 Regionalización</div>
     <div class="grid2">
@@ -183,14 +184,110 @@
 <script>
 const token = localStorage.getItem('rb_token');
 if (!token) window.location.href = '/login';
-const rb = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+
+// 🛡️ Leer la sucursal activa desde sessionStorage (si existe)
+let activeBranchId = sessionStorage.getItem('rb_active_branch_id');
 const headers = {
   'Authorization': 'Bearer ' + token,
-  'Content-Type': 'application/json',
-  ...(rb.id ? { 'X-Branch-ID': String(rb.id) } : {})
+  'Content-Type': 'application/json'
 };
 
+// Si el usuario seleccionó una sucursal específica en el dashboard, la aplicamos aquí.
+// Si seleccionó "all" o no hay selección, usamos la casa matriz.
+if (activeBranchId && activeBranchId !== 'all' && activeBranchId !== 'matriz') {
+    headers['X-Branch-ID'] = String(activeBranchId);
+}
+
 let paymentMethods = [];
+let settingsMap = null;
+let settingsMarker = null;
+
+// ── LÓGICA DEL MAPA ──
+function initSettingsMap(lat, lon) {
+    const defaultLat = parseFloat(lat) || 4.6097;
+    const defaultLon = parseFloat(lon) || -74.0817;
+
+    document.getElementById('branch-lat').value = defaultLat;
+    document.getElementById('branch-lon').value = defaultLon;
+
+    if (!settingsMap) {
+        settingsMap = L.map('settings-map').setView([defaultLat, defaultLon], lat ? 16 : 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(settingsMap);
+
+        settingsMarker = L.marker([defaultLat, defaultLon], { draggable: true }).addTo(settingsMap);
+
+        settingsMarker.on('dragend', function (e) {
+            updateSettingsPin(settingsMarker.getLatLng());
+        });
+
+        settingsMap.on('click', function(e) {
+            settingsMarker.setLatLng(e.latlng);
+            updateSettingsPin(e.latlng);
+        });
+    } else {
+        settingsMap.setView([defaultLat, defaultLon], lat ? 16 : 12);
+        settingsMarker.setLatLng([defaultLat, defaultLon]);
+        setTimeout(() => settingsMap.invalidateSize(), 200);
+    }
+}
+
+async function updateSettingsPin(latlng) {
+    document.getElementById('branch-lat').value = latlng.lat;
+    document.getElementById('branch-lon').value = latlng.lng;
+    
+    try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}&addressdetails=1`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.address) {
+                const a = data.address;
+                const street = a.road || a.pedestrian || a.path || '';
+                const number = a.house_number || '';
+                const hood   = a.neighbourhood || a.suburb || '';
+                const city   = a.city || a.town || a.county || '';
+                
+                let cleanAddress = `${street} ${number}`.trim();
+                if (hood) cleanAddress += `, ${hood}`;
+                if (city) cleanAddress += `, ${city}`;
+                
+                document.getElementById('set-address').value = cleanAddress.replace(/^,|,$/g, '').trim() || data.display_name;
+            }
+        }
+    } catch (e) { console.error("Error reverse geocoding:", e); }
+}
+
+async function validateSettingsAddress() {
+    const addressInput = document.getElementById('set-address').value.trim();
+    if (!addressInput) { alert('Ingresa una dirección primero'); return; }
+    
+    const btn = document.querySelector('[onclick="validateSettingsAddress()"]');
+    const prev = btn.textContent;
+    btn.textContent = 'Buscando...'; btn.disabled = true;
+    
+    try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressInput)}&limit=1`);
+        if (r.ok) {
+            const data = await r.json();
+            if (data && data.length > 0) {
+                const lat = parseFloat(data[0].lat);
+                const lon = parseFloat(data[0].lon);
+                
+                document.getElementById('branch-lat').value = lat;
+                document.getElementById('branch-lon').value = lon;
+                
+                if (settingsMap && settingsMarker) {
+                    const newPos = new L.LatLng(lat, lon);
+                    settingsMap.setView(newPos, 16);
+                    settingsMarker.setLatLng(newPos);
+                }
+            } else { alert('❌ No se encontró la dirección. Usa el clic en el mapa.'); }
+        }
+    } catch(e) { alert('❌ Error de red al buscar. Usa el clic en el mapa.'); } 
+    finally { btn.textContent = prev; btn.disabled = false; }
+}
+// ── FIN LÓGICA MAPA ──
 
 async function loadSettings() {
   try {
@@ -205,13 +302,16 @@ async function loadSettings() {
     document.getElementById('toggle-upsell').checked    = d.upsell_active !== false;
     document.getElementById('delivery-fee').value       = d.delivery_fee || 0;
     document.getElementById('min-order').value          = d.min_order || 0;
-    document.getElementById('delivery-radius').value   = d.delivery_radius_km || 5;
+    document.getElementById('delivery-radius').value    = d.delivery_radius_km || 5;
     document.getElementById('maps-url').value           = d.google_maps_url || '';
-    document.getElementById('config-timezone').value = d.timezone || 'UTC';
-    document.getElementById('config-currency').value = d.currency || 'USD';
-    document.getElementById('config-locale').value   = d.locale || 'en-US';
-    document.getElementById('branch-lat').value = d.latitude || '';
-    document.getElementById('branch-lon').value = d.longitude || '';
+    document.getElementById('config-timezone').value    = d.timezone || 'UTC';
+    document.getElementById('config-currency').value    = d.currency || 'USD';
+    document.getElementById('config-locale').value      = d.locale || 'en-US';
+    
+    // Cargar la dirección y el mapa
+    document.getElementById('set-address').value = d.address || '';
+    initSettingsMap(d.latitude, d.longitude);
+    
   } catch(e) { console.error(e); }
 }
 
@@ -248,6 +348,9 @@ async function saveSettings() {
   btn.textContent = 'Guardando...'; btn.disabled = true;
   try {
     const body = {
+      address:           document.getElementById('set-address').value.trim(),
+      latitude:          document.getElementById('branch-lat').value ? parseFloat(document.getElementById('branch-lat').value) : null,
+      longitude:         document.getElementById('branch-lon').value ? parseFloat(document.getElementById('branch-lon').value) : null,
       payment_methods:   paymentMethods,
       bot_active:        document.getElementById('toggle-bot').checked,
       domicilio_active:  document.getElementById('toggle-domicilio').checked,
@@ -259,12 +362,12 @@ async function saveSettings() {
       google_maps_url:   document.getElementById('maps-url').value.trim(),
       timezone:          document.getElementById('config-timezone').value,
       currency:          document.getElementById('config-currency').value,
-      locale:            document.getElementById('config-locale').value,
-      latitude:          document.getElementById('branch-lat').value || null,
-      longitude:         document.getElementById('branch-lon').value || null
+      locale:            document.getElementById('config-locale').value
     };
+    
     const r = await fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify(body) });
     const fb = document.getElementById('feedback');
+    
     if (r.ok) {
       fb.textContent = '✅ Configuración guardada correctamente.';
       fb.className = 'feedback ok'; fb.style.display = 'block';
@@ -284,7 +387,16 @@ async function saveSettings() {
   btn.textContent = '💾 Guardar configuración'; btn.disabled = false;
 }
 
-loadSettings();
+// Para que mantenga la sucursal seleccionada al navegar de Dashboard a Settings
+document.addEventListener('DOMContentLoaded', () => {
+    // Si venimos del dashboard, intentamos leer la sucursal seleccionada
+    if (!activeBranchId) {
+        // En tu app actual el header X-Branch-ID vive en window._dashHeaders, 
+        // pero como es otra página, lo leeremos de sessionStorage si existe.
+        // Haremos que dashboard.js lo guarde al cambiar (paso extra opcional).
+    }
+    loadSettings();
+});
 </script>
 </body>
 </html>
