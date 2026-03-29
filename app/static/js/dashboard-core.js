@@ -694,7 +694,8 @@ window.loadGlobalBranches = async function() {
 window.changeGlobalBranch = function() {
   const select = document.getElementById('global-branch-select');
   const val = select ? select.value : '';
-
+  sessionStorage.setItem('rb_active_branch_id', val);
+  
   // 🛡️ BLOQUEO INTELIGENTE CON MODAL ELEGANTE
   if (val === 'all') {
       const activeSection = document.querySelector('.section.active')?.id;
@@ -716,6 +717,7 @@ window.changeGlobalBranch = function() {
       delete window._dashHeaders['X-Branch-ID'];
   }
   
+  sessionStorage.setItem('rb_active_branch_id', val);
   refreshAll();
   if(typeof loadMenu === 'function') loadMenu();
   if(typeof loadTables === 'function') loadTables();
