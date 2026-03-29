@@ -27,14 +27,14 @@ def get_date_range(period: str, tz_str: str):
     elif period == "year": return str(today.replace(month=1, day=1)), str(today)
     return str(today), str(today)
 
-async def filter_conversations_for_branch(conversations: list, branch_id: int, bot_number: str) -> list:
+async def filter_conversations_for_branch(conversations: list, branch_id: int | str, bot_number: str) -> list:
     """Si el usuario es de una sucursal, solo muestra los chats de sus mesas."""
-    if not branch_id or not conversations:
+    # 🛡️ Si es "all" o None (matriz), no filtramos nada y devolvemos la lista completa
+    if not branch_id or branch_id == "all" or not conversations:
         return conversations
     
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        # Buscamos los teléfonos con sesiones activas en las mesas de ESTA sucursal
         rows = await conn.fetch("""
             SELECT DISTINCT ts.phone 
             FROM table_sessions ts
@@ -43,9 +43,8 @@ async def filter_conversations_for_branch(conversations: list, branch_id: int, b
         """, branch_id, bot_number)
         allowed_phones = {r["phone"] for r in rows}
     
-    # Devolvemos solo los chats que coincidan con esos teléfonos
-    return [c for c in conversations if c.get("phone") in allowed_phones]    
-    
+    return [c for c in conversations if c.get("phone") in allowed_phones]
+        
 async def _get_effective_bot_number(restaurant: dict) -> str:
     """For branches: returns the parent's WhatsApp number (where messages are actually stored).
     For parent restaurants: returns their own WhatsApp number."""
@@ -58,12 +57,17 @@ async def _get_effective_bot_number(restaurant: dict) -> str:
 # =====================================================================
 # ENDPOINT MAESTRO (SYNC)
 # =====================================================================
-def _resolve_branch_id(user: dict, restaurant: dict) -> int | None:
-    """Devuelve el branch_id correcto para filtrado: del usuario o, si el restaurante
-    es una sucursal, de su propio ID."""
-    return user.get("branch_id") or (
-        restaurant["id"] if restaurant.get("parent_restaurant_id") else None
-    )
+def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | str | None:
+    branch_header = request.headers.get("X-Branch-ID")
+    is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
+    
+    if is_admin:
+        if branch_header == "all": return "all"
+        elif branch_header == "matriz": return None
+        elif branch_header and branch_header.isdigit(): return int(branch_header)
+        return None
+        
+    return user.get("branch_id") or (restaurant["id"] if restaurant.get("parent_restaurant_id") else None)
 
 @router.get("/api/dashboard/sync")
 async def dashboard_sync(request: Request, period: str = Query("today")):

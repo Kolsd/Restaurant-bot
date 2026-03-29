@@ -2,12 +2,11 @@ import os
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_restaurant
+from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 
 _NPS_INTERNAL_KEY = os.getenv("NPS_INTERNAL_KEY", "")
 
 router = APIRouter()
-
 
 class NPSResponse(BaseModel):
     phone: str
@@ -15,64 +14,58 @@ class NPSResponse(BaseModel):
     score: int
     comment: str = ""
 
-
+def _resolve_branch_id(request: Request, user: dict, restaurant: dict):
+    branch_header = request.headers.get("X-Branch-ID")
+    is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
+    
+    if is_admin:
+        if branch_header == "all": return "all"
+        elif branch_header == "matriz": return None
+        elif branch_header and branch_header.isdigit(): return int(branch_header)
+        return None
+    return user.get("branch_id") or (restaurant["id"] if restaurant.get("parent_restaurant_id") else None)
+    
 @router.post("/api/nps/response")
 async def save_nps_response(request: Request, body: NPSResponse):
-    """Internal endpoint: saves NPS response. Called only from the agent service."""
     key = request.headers.get("X-Internal-Key", "")
-    if not _NPS_INTERNAL_KEY or key != _NPS_INTERNAL_KEY:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if body.score < 1 or body.score > 5:
-        raise HTTPException(status_code=400, detail="Score must be between 1 and 5")
-    await db.db_save_nps_response(
-        phone=body.phone,
-        bot_number=body.bot_number,
-        score=body.score,
-        comment=body.comment,
-    )
+    if not _NPS_INTERNAL_KEY or key != _NPS_INTERNAL_KEY: raise HTTPException(403)
+    if body.score < 1 or body.score > 5: raise HTTPException(400)
+    await db.db_save_nps_response(body.phone, body.bot_number, body.score, body.comment)
     return {"success": True}
-
 
 @router.get("/api/nps/stats")
 async def get_nps_stats(request: Request, period: str = "month"):
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    # get_current_restaurant ya nos da el objeto correcto basado en X-Branch-ID
-    bot_number = restaurant["whatsapp_number"]
-    stats = await db.db_get_nps_stats(bot_number, period)
-    return stats
+    branch_id = _resolve_branch_id(request, user, restaurant)
+    raw_bot_num = restaurant.get("whatsapp_number", "")
+    clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
+    return await db.db_get_nps_stats(clean_bot_num, period, branch_id=branch_id)
     
-
 @router.get("/api/nps/responses")
 async def get_nps_responses(request: Request, period: str = "month", limit: int = 50):
-    """Lista de respuestas NPS filtrada por sucursal exacta"""
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    
-    # 🛡️ LEER SELECTOR GLOBAL
-    bot_number = restaurant["whatsapp_number"]
-    
-    responses = await db.db_get_nps_responses(bot_number, period, limit)
-    return {"responses": responses}
+    branch_id = _resolve_branch_id(request, user, restaurant)
+    raw_bot_num = restaurant.get("whatsapp_number", "")
+    clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
+    return {"responses": await db.db_get_nps_responses(clean_bot_num, period, limit, branch_id=branch_id)}
 
 @router.get("/api/nps/google-maps-url")
 async def get_google_maps_url(request: Request):
-    """Retorna la URL de Google Maps del restaurante"""
-    restaurant = await get_current_restaurant(request)
-    maps_url = restaurant.get("google_maps_url", "")
-    return {"url": maps_url}
-
+    return {"url": (await get_current_restaurant(request)).get("google_maps_url", "")}
 
 @router.post("/api/nps/google-maps-url")
 async def set_google_maps_url(request: Request):
-    """Guarda la URL de Google Maps del restaurante"""
     await require_auth(request)
     restaurant = await get_current_restaurant(request)
-    body = await request.json()
-    url = body.get("url", "").strip()
+    url = (await request.json()).get("url", "")
+    features = restaurant.get("features", {})
+    if isinstance(features, str):
+        import json; features = json.loads(features)
+    features["google_maps_url"] = url
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-    "UPDATE restaurants SET google_maps_url = $1 WHERE id = $2",
-    url,
-    restaurant["id"]
-)
-    return {"success": True}
+        import json
+        await conn.execute("UPDATE restaurants SET features = $1::jsonb WHERE id = $2", json.dumps(features), restaurant["id"])
+    return {"success": True, "url": url}

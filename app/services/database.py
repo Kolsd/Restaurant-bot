@@ -286,7 +286,7 @@ async def db_save_history(phone: str, bot_number: str, history: list, branch_id:
             DO UPDATE SET history=EXCLUDED.history, branch_id=EXCLUDED.branch_id, updated_at=NOW()
         """, phone, bot_number, json.dumps(history[-20:]), branch_id)
 
-async def db_get_all_conversations(bot_number: str = None, branch_id: int = None, date_from: str = None, date_to: str = None):
+async def db_get_all_conversations(bot_number: str = None, branch_id: int | str = None, date_from: str = None, date_to: str = None):
     pool = await get_pool()
     async with pool.acquire() as conn:
         conditions = []
@@ -298,11 +298,14 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int = None
             params.append(bot_number)
             idx += 1
 
-        if branch_id is not None:
+        # 🛡️ LA MAGIA DEL "ALL"
+        if branch_id == "all":
+            pass # Sin filtro, trae las conversaciones de toda la franquicia
+        elif branch_id is not None:
             conditions.append(f"branch_id = ${idx}")
             params.append(branch_id)
             idx += 1
-        elif bot_number: # Si es el owner viendo la matriz
+        elif bot_number:
             conditions.append("branch_id IS NULL")
 
         if date_from:
@@ -335,7 +338,7 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int = None
                 "updated_at": r["updated_at"].isoformat()[:19]
             })
         return result
-        
+                
 async def db_delete_conversation(phone: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -1211,15 +1214,21 @@ async def db_get_restaurant_settings() -> dict:
     all_r = await db_get_all_restaurants()
     return all_r[0] if all_r else {}
  
-async def db_save_nps_response(phone: str, bot_number: str, score: int, comment: str = "") -> dict:
+async def db_save_nps_response(phone: str, bot_number: str, score: int, comment: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """INSERT INTO nps_responses (phone, bot_number, score, comment)
-               VALUES ($1, $2, $3, $4) RETURNING *""",
-            phone, bot_number, score, comment
-        )
-        return _serialize(dict(row))
+        # 1. Inferimos el branch_id buscando la mesa donde acaba de comer el cliente
+        branch_id = await conn.fetchval("""
+            SELECT rt.branch_id FROM table_sessions ts 
+            JOIN restaurant_tables rt ON ts.table_id = rt.id 
+            WHERE ts.phone = $1 ORDER BY ts.started_at DESC LIMIT 1
+        """, phone)
+        
+        # 2. Guardamos la calificación amarrada a esa sucursal
+        await conn.execute("""
+            INSERT INTO nps_responses (phone, bot_number, score, comment, branch_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+        """, phone, bot_number, score, comment, branch_id)
  
  
 async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
@@ -1262,68 +1271,73 @@ async def db_get_pending_nps_score(phone: str, bot_number: str) -> int | None:
         return row["score"] if row else None
 
 
-async def db_get_nps_stats(bot_number: str, period: str = "month") -> dict:
+async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: int | str = None) -> dict:
     pool = await get_pool()
-    period_map = {
-        "today":    "1 day",
-        "week":     "7 days",
-        "month":    "30 days",
-        "semester": "180 days",
-        "year":     "365 days",
-    }
-    interval = period_map.get(period, "30 days")
+    period_map = {"today": "1 day", "week": "7 days", "month": "30 days", "semester": "180 days", "year": "365 days"}
+    interval_str = period_map.get(period, "30 days")
+    
+    async with pool.acquire() as conn:
+        conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+        params = [bot_number]
+        
+        # 🛡️ LA MAGIA DEL "ALL"
+        if branch_id == "all":
+            pass
+        elif branch_id is not None:
+            conditions.append("branch_id = $2")
+            params.append(branch_id)
+        else:
+            conditions.append("branch_id IS NULL")
+            
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT COUNT(*) as total_responses, COALESCE(AVG(score), 0) as average_score,
+            COUNT(*) FILTER (WHERE score = 5) as promoters, COUNT(*) FILTER (WHERE score = 4) as passives,
+            COUNT(*) FILTER (WHERE score <= 3) as detractors
+            FROM nps_responses WHERE {where_clause}
+        """
+        row = await conn.fetchrow(query, *params)
+        
+        total = row["total_responses"]
+        nps_score = round(((row["promoters"] / total) - (row["detractors"] / total)) * 100) if total > 0 else 0
+            
+        return {
+            "total_responses": total, "average_score": round(row["average_score"], 1),
+            "nps_score": nps_score, "promoters": row["promoters"], "passives": row["passives"], "detractors": row["detractors"]
+        }
+
+
+async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50, branch_id: int | str = None) -> list:
+    pool = await get_pool()
+    period_map = {"today": "1 day", "week": "7 days", "month": "30 days", "semester": "180 days", "year": "365 days"}
+    interval_str = period_map.get(period, "30 days")
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            f"""SELECT score, COUNT(*) AS count
-                FROM nps_responses
-                WHERE bot_number = $1
-                  AND created_at >= NOW() - INTERVAL '{interval}'
-                GROUP BY score
-                ORDER BY score""",
-            bot_number
-        )
+        conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+        params = [bot_number]
+        
+        # 🛡️ LA MAGIA DEL "ALL"
+        if branch_id == "all":
+            pass
+        elif branch_id is not None:
+            conditions.append("branch_id = $2")
+            params.append(branch_id)
+        else:
+            conditions.append("branch_id IS NULL")
+            
+        where_clause = " AND ".join(conditions)
+        limit_idx = len(params) + 1
+        params.append(limit)
 
-    total      = sum(r["count"] for r in rows)
-    promoters  = sum(r["count"] for r in rows if r["score"] >= 4)
-    detractors = sum(r["count"] for r in rows if r["score"] <= 3)
-    score_sum  = 0
-    dist       = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-
-    for r in rows:
-        dist[r["score"]] = dist.get(r["score"], 0) + r["count"]
-        score_sum += r["score"] * r["count"]
-
-    nps_score = round(((promoters - detractors) / total * 100)) if total > 0 else 0
-    avg_score = round(score_sum / total, 2) if total > 0 else 0
-
-    return {
-        "total":        total,
-        "promoters":    promoters,
-        "detractors":   detractors,
-        "nps_score":    nps_score,
-        "avg_score":    avg_score,
-        "distribution": dist,
-    }
-
-async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50) -> list:
-    pool = await get_pool()
-    period_map = {
-        "today": "1 day", "week": "7 days",
-        "month": "30 days", "semester": "180 days", "year": "365 days",
-    }
-    interval = period_map.get(period, "30 days")
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            f"""SELECT * FROM nps_responses
-                WHERE bot_number = $1
-                  AND created_at >= NOW() - INTERVAL '{interval}'
-                  AND comment != '__pending__'
-                ORDER BY created_at DESC
-                LIMIT $2""",
-            bot_number, limit
-        )
-    return [_serialize(dict(r)) for r in rows]
+        query = f"SELECT * FROM nps_responses WHERE {where_clause} ORDER BY created_at DESC LIMIT ${limit_idx}"
+        rows = await conn.fetch(query, *params)
+        
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("created_at"): d["created_at"] = d["created_at"].isoformat() + "Z"
+            result.append(d)
+        return result
 
 
 # ── NPS WAITING STATE (persiste el estado "waiting_score" en DB) ──────
