@@ -204,15 +204,36 @@
   let settingsMarker = null;
   
 // ── LÓGICA DEL MAPA ──
+// ── LÓGICA DEL MAPA ──
 function initSettingsMap(lat, lon) {
-    const defaultLat = parseFloat(lat) || 4.6097;
-    const defaultLon = parseFloat(lon) || -74.0817;
+    // Validamos estrictamente los números para evitar NaN
+    let defaultLat = 4.6097;
+    let defaultLon = -74.0817;
+    let hasCoords = false;
+
+    if (lat !== null && lat !== undefined && !isNaN(parseFloat(lat))) {
+        defaultLat = parseFloat(lat);
+        hasCoords = true;
+    }
+    if (lon !== null && lon !== undefined && !isNaN(parseFloat(lon))) {
+        defaultLon = parseFloat(lon);
+        hasCoords = true; // Solo confirmamos si ambos son válidos idealmente, pero con uno basta para sobreescribir
+    }
+
+    const zoomLevel = hasCoords ? 16 : 12;
 
     document.getElementById('branch-lat').value = defaultLat;
     document.getElementById('branch-lon').value = defaultLon;
 
+    // Nos aseguramos de que el contenedor exista antes de hacer nada
+    const mapContainer = document.getElementById('settings-map');
+    if (!mapContainer) {
+        console.error("El contenedor 'settings-map' no existe en el DOM.");
+        return;
+    }
+
     if (!settingsMap) {
-        settingsMap = L.map('settings-map').setView([defaultLat, defaultLon], lat ? 16 : 12);
+        settingsMap = L.map('settings-map').setView([defaultLat, defaultLon], zoomLevel);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap'
         }).addTo(settingsMap);
@@ -228,15 +249,16 @@ function initSettingsMap(lat, lon) {
             updateSettingsPin(e.latlng);
         });
     } else {
-        settingsMap.setView([defaultLat, defaultLon], lat ? 16 : 12);
+        settingsMap.setView([defaultLat, defaultLon], zoomLevel);
         settingsMarker.setLatLng([defaultLat, defaultLon]);
-        setTimeout(() => settingsMap.invalidateSize(), 200);
     }
 
-setTimeout(() => {
-    settingsMap.invalidateSize();
-}, 500);
-
+    // Retraso para asegurar que el DOM haya pintado el contenedor completamente
+    setTimeout(() => {
+        if (settingsMap) {
+            settingsMap.invalidateSize();
+        }
+    }, 500);
 }
 
 async function updateSettingsPin(latlng) {
