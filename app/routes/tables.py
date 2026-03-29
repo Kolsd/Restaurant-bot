@@ -65,16 +65,13 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
 
 async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, db_phone_id: str | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
-    
-    # 🛡️ Usamos el bot_number limpio para que coincida con el webhook de Meta
+    # Usamos el bot_number limpio para que coincida con el webhook de Meta
     raw_bot_num = rest.get("whatsapp_number", "")
     clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
     final_bot_num = (session_data.get("bot_number") if session_data else None) or clean_bot_num
     
     rest_name = rest.get("name", "nuestro restaurante")
-
-    await send_wa_msg(phone, "Tu mesa ha sido cerrada. ¡Gracias por visitarnos! 😊", db_phone_id)
-
+    # Disparamos directamente la encuesta NPS
     if final_bot_num:
         asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
         asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))

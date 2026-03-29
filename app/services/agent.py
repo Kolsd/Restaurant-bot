@@ -793,40 +793,38 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     user_message_clean = _sanitize_user_input(user_message)
     user_message_clean = re.sub(r'\s*\[(?:table_id|t):[^\]]+\]', '', user_message_clean).strip()
 
-    nps_key = _nps_key(user_phone, bot_number)
-
-    # Always sync NPS state from DB — DB is the single source of truth across workers.
-    # This prevents stale in-memory state on one worker intercepting messages after
-    # another worker already completed/cleared the NPS flow.
-    try:
-        pending_score = await db.db_get_pending_nps_score(user_phone, bot_number)
-        is_waiting    = await db.db_get_nps_waiting(user_phone, bot_number)
-        if pending_score is not None:
-            _nps_state[nps_key] = {"state": "waiting_comment", "score": pending_score}
-        elif is_waiting:
-            _nps_state[nps_key] = {"state": "waiting_score", "score": 0}
-        else:
-            # DB says no NPS pending — evict any stale in-memory state on this worker
-            _nps_state.pop(nps_key, None)
-    except Exception:
-        pass
-
+    # ── FLUJO DE ENCUESTA (NPS) ──
+    nps_key = f"{user_phone}:{bot_number}"
     if nps_key in _nps_state:
-        # ... (código existente para buscar el nombre del restaurante y url)
+        # 🛡️ FIX: Primero definimos las variables buscando la info del restaurante
+        restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number) or {}
+        nps_restaurant_name = restaurant_data.get("name", "nuestro restaurante")
+        
+        # Extraer URL de Google Maps de los features
+        features = restaurant_data.get("features", {})
+        if isinstance(features, str):
+            try:
+                import json as _json
+                features = _json.loads(features)
+            except:
+                features = {}
+        nps_google_maps_url = features.get("google_maps_url", "")
+
+        # Ahora sí llamamos al flujo con las variables definidas
         nps_reply = await _handle_nps_flow(
             user_phone, bot_number, user_message_clean,
             nps_restaurant_name, nps_google_maps_url
         )
-        # NPS completado (o skipped) → cerrar sesión nps_pending
-        nps_done = nps_key not in _nps_state
-        if nps_done:
+
+        # Si terminó la encuesta, cerramos la sesión nps_pending
+        if nps_key not in _nps_state:
             try:
-                await db.db_close_session(user_phone, bot_number, "nps_completed", "")
+                await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
             except Exception:
                 pass
-        # No guardar en conversations — el chat NPS no debe aparecer en el dashboard
+        
         return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
-
+        
     table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
 
@@ -991,7 +989,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         full_history[-(HISTORY_WINDOW * 2 + 2):], 
         branch_id=branch_id  # <--- Pasamos la sucursal detectada
     )
-    
+
     result_payload = {"message": assistant_message}
     if nps_interactive:
         result_payload["interactive"] = nps_interactive
