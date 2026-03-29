@@ -655,7 +655,6 @@ function setCustomPeriod(btn) {
   refreshAll();
 }
 
-// ── GESTIÓN GLOBAL DE SUCURSALES (TOPBAR) ──
 /* ═══════════════════════════════════════════════════
    SELECTOR GLOBAL DE SUCURSALES (TOPBAR)
 ═══════════════════════════════════════════════════ */
@@ -675,7 +674,6 @@ window.loadGlobalBranches = async function() {
           if(branches.length === 0) return;
 
           select.innerHTML = '<option value="matriz">🏠 Casa Matriz</option>';
-          // 🛡️ AÑADIMOS LA OPCIÓN "TODAS"
           select.innerHTML += '<option value="all">🌐 Todas las Sucursales</option>';
           
           branches.forEach(b => {
@@ -690,21 +688,24 @@ window.loadGlobalBranches = async function() {
           }
           select.style.display = 'block';
       }
-  } catch(e) { console.error('Error cargando sucursales', e); }
+  } catch(e) { console.error('Error cargando sucursales globales', e); }
 };
 
 window.changeGlobalBranch = function() {
   const select = document.getElementById('global-branch-select');
   const val = select ? select.value : '';
 
-  // 🛡️ BLOQUEO INTELIGENTE MEJORADO
+  // 🛡️ BLOQUEO INTELIGENTE CON MODAL ELEGANTE
   if (val === 'all') {
       const activeSection = document.querySelector('.section.active')?.id;
-      // Añadimos 'staff' a la validación
       if (activeSection === 'menu' || activeSection === 'mesas' || activeSection === 'staff') {
-          showFranchiseBlockModal(); // 🪄 Usamos el modal elegante
-          select.value = 'matriz'; // Revertimos el selector a la matriz
-          return window.changeGlobalBranch(); // Volvemos a ejecutar la función
+          if (typeof showFranchiseBlockModal === 'function') {
+              showFranchiseBlockModal();
+          } else {
+              alert("Para gestionar el Menú, el Salón o el Staff, selecciona una sucursal.");
+          }
+          select.value = 'matriz';
+          return window.changeGlobalBranch();
       }
       window._dashHeaders['X-Branch-ID'] = 'all';
   } else if (val === 'matriz') {
@@ -735,24 +736,3 @@ window.addEventListener('load', () => {
         }
     }, 300); // Un pequeño retraso de 300ms para asegurar que tu token de sesión ya esté listo
 });
-
-window.changeGlobalBranch = function() {
-  const select = document.getElementById('global-branch-select');
-  if (select && select.value && select.value !== 'matriz') {
-      window._dashHeaders['X-Branch-ID'] = select.value;
-  } else {
-      delete window._dashHeaders['X-Branch-ID']; // Vuelve a la matriz
-  }
-  
-  // Recargar TODAS las secciones activas con el nuevo filtro
-  refreshAll();
-  if(typeof loadMenu === 'function') loadMenu();
-  if(typeof loadTables === 'function') loadTables();
-  if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
-  
-  const staffActive = document.getElementById('staff')?.classList.contains('active');
-  if(staffActive && typeof loadStaffSection === 'function') loadStaffSection();
-  
-  const loyaltyActive = document.getElementById('loyalty')?.classList.contains('active');
-  if(loyaltyActive && typeof loadLoyaltySection === 'function') loadLoyaltySection();
-};
