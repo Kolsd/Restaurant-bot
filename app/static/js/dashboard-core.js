@@ -128,7 +128,39 @@ function setPeriod(p, btn) {
   refreshAll();
 }
 
+// 🛡️ MODAL ELEGANTE DE BLOQUEO DE FRANQUICIA
+function showFranchiseBlockModal() {
+  let overlay = document.getElementById('_franchise-block-modal');
+  if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = '_franchise-block-modal';
+      // Fondo oscuro con desenfoque elegante
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+      
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff;border-radius:16px;padding:2rem;width:400px;max-width:90vw;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.2);';
+      box.innerHTML = `
+          <div style="font-size:48px;margin-bottom:1rem;line-height:1;">🏢</div>
+          <div style="font-size:18px;font-weight:700;color:#111;margin-bottom:8px;">Vista Global Activa</div>
+          <div style="font-size:14px;color:#555;line-height:1.5;margin-bottom:1.5rem;">
+              Para visualizar y gestionar el <strong>Menú</strong>, el <strong>Salón</strong> o el <strong>Staff</strong>, debes seleccionar una sucursal específica en el menú superior derecho.
+          </div>
+          <button onclick="document.getElementById('_franchise-block-modal').style.display='none'" style="background:#1D9E75;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;width:100%;transition:background .2s;" onmouseover="this.style.background='#0F6E56'" onmouseout="this.style.background='#1D9E75'">Entendido</button>
+      `;
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+}
+
 function showSection(id, btn) {
+  // 🛡️ BLOQUEO DE SECCIONES EN MODO "TODAS LAS SUCURSALES"
+  const restrictedSections = ['menu', 'mesas', 'staff'];
+  if (window._dashHeaders && window._dashHeaders['X-Branch-ID'] === 'all' && restrictedSections.includes(id)) {
+      showFranchiseBlockModal();
+      return; // Detenemos la navegación, el usuario se queda donde estaba
+  }
+
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -151,7 +183,7 @@ function showSection(id, btn) {
     }
   }
 
-  // Salón: always load tables; load POS only if that tab is active
+  // Salón: load tables; load POS only if that tab is active
   if (id === 'mesas') {
     loadTables();
     const posPanel = document.getElementById('mesas-panel-pos');
@@ -665,13 +697,14 @@ window.changeGlobalBranch = function() {
   const select = document.getElementById('global-branch-select');
   const val = select ? select.value : '';
 
-  // 🛡️ BLOQUEO INTELIGENTE: Protegemos Menú y Salón si elige "Todas"
+  // 🛡️ BLOQUEO INTELIGENTE MEJORADO
   if (val === 'all') {
       const activeSection = document.querySelector('.section.active')?.id;
-      if (activeSection === 'menu' || activeSection === 'mesas') {
-          alert("Para gestionar el Menú o el Salón, debes seleccionar una sucursal específica o la Casa Matriz.");
-          select.value = 'matriz';
-          return window.changeGlobalBranch();
+      // Añadimos 'staff' a la validación
+      if (activeSection === 'menu' || activeSection === 'mesas' || activeSection === 'staff') {
+          showFranchiseBlockModal(); // 🪄 Usamos el modal elegante
+          select.value = 'matriz'; // Revertimos el selector a la matriz
+          return window.changeGlobalBranch(); // Volvemos a ejecutar la función
       }
       window._dashHeaders['X-Branch-ID'] = 'all';
   } else if (val === 'matriz') {
@@ -682,20 +715,18 @@ window.changeGlobalBranch = function() {
       delete window._dashHeaders['X-Branch-ID'];
   }
   
-  // Recargar todo
   refreshAll();
   if(typeof loadMenu === 'function') loadMenu();
   if(typeof loadTables === 'function') loadTables();
   if(typeof loadTableOrdersSection === 'function') loadTableOrdersSection();
-  
   const staffActive = document.getElementById('staff')?.classList.contains('active');
   if(staffActive && typeof loadStaffSection === 'function') loadStaffSection();
-  
   const loyaltyActive = document.getElementById('loyalty')?.classList.contains('active');
   if(loyaltyActive && typeof loadLoyaltySection === 'function') loadLoyaltySection();
-
   if(typeof loadNPS === 'function') loadNPS();
+  if(typeof loadConversations === 'function') loadConversations();
 };
+
 // 🛡️ EL GATILLO AUTOMÁTICO: Esto obliga al navegador a cargar el botón SIEMPRE al iniciar
 window.addEventListener('load', () => {
     setTimeout(() => {
