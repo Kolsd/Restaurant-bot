@@ -266,42 +266,73 @@ async function loadBranchUsers(branchId) {
   } catch(e) {}
 }
 
+// 🗺️ LÓGICA DEL MAPA INTERACTIVO
+let locationMap = null;
+let locationMarker = null;
+
 function showCreateBranch() {
   document.getElementById('create-branch-form').style.display = 'block';
   document.getElementById('branch-name').focus();
+  
+  // Inicializar mapa si no existe
+  if (!locationMap) {
+      // Centramos por defecto en Colombia (Bogotá)
+      const defaultLat = 4.6097; 
+      const defaultLon = -74.0817;
+      
+      locationMap = L.map('interactive-map').setView([defaultLat, defaultLon], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap'
+      }).addTo(locationMap);
+
+      // Crear el PIN arrastrable
+      locationMarker = L.marker([defaultLat, defaultLon], { draggable: true }).addTo(locationMap);
+
+      // Cuando el usuario arrastra el pin, guardamos las coordenadas
+      locationMarker.on('dragend', function (e) {
+          const pos = locationMarker.getLatLng();
+          document.getElementById('branch-lat').value = pos.lat;
+          document.getElementById('branch-lon').value = pos.lng;
+      });
+  } else {
+      // Necesario para que Leaflet re-calcule el tamaño si el div estaba oculto
+      setTimeout(() => locationMap.invalidateSize(), 200);
+  }
 }
 
 async function validateAddress() {
   const h = window._dashHeaders;
   const address = document.getElementById('branch-address').value.trim();
   if (!address) { alert('Ingresa una dirección primero'); return; }
+  
   const btn = document.querySelector('[onclick="validateAddress()"]');
   const prev = btn.textContent;
-  btn.textContent = '...'; btn.disabled = true;
-  document.getElementById('branch-map-preview').style.display = 'none';
-  document.getElementById('branch-map-error').style.display = 'none';
+  btn.textContent = 'Buscando...'; btn.disabled = true;
+  
   try {
     const r = await fetch('/api/geocode?address=' + encodeURIComponent(address), { headers: h });
     if (r.ok) {
       const d = await r.json();
+      
+      // Guardar coordenadas
       document.getElementById('branch-lat').value = d.latitude;
       document.getElementById('branch-lon').value = d.longitude;
-      document.getElementById('branch-address-display').textContent = d.display_name;
-      document.getElementById('branch-lat-display').textContent = d.latitude.toFixed(6);
-      document.getElementById('branch-lon-display').textContent = d.longitude.toFixed(6);
-      document.getElementById('branch-maps-link').href = d.maps_url;
-      document.getElementById('branch-map-preview').style.display = 'block';
+      
+      // 📍 Mover el mapa y el PIN a la nueva dirección
+      if (locationMap && locationMarker) {
+          const newPos = new L.LatLng(d.latitude, d.longitude);
+          locationMap.setView(newPos, 16); // Acercamos el zoom
+          locationMarker.setLatLng(newPos);
+      }
+      
     } else {
-      const e = await r.json();
-      document.getElementById('branch-error-text').textContent = '❌ ' + (e.detail || 'No se encontró la dirección.');
-      document.getElementById('branch-map-error').style.display = 'block';
-      document.getElementById('branch-lat').value = '';
-      document.getElementById('branch-lon').value = '';
+      alert('❌ No se encontró la dirección exacta. Por favor arrastra el pin rojo en el mapa hasta tu restaurante.');
     }
   } catch(e) {
-    document.getElementById('branch-error-text').textContent = '❌ Error de conexión.';
-    document.getElementById('branch-map-error').style.display = 'block';
-  } finally { btn.textContent = prev; btn.disabled = false; }
+    alert('❌ Error de conexión al buscar la dirección.');
+  } finally { 
+    btn.textContent = prev; btn.disabled = false; 
+  }
 }
 
 function applyManualCoords() {

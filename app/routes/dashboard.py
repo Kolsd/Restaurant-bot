@@ -201,18 +201,28 @@ async def settings_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Settings no disponible</h1>")
 
 @router.get("/api/settings")
+@router.get("/api/settings")
 async def get_settings(request: Request):
-    restaurant = await get_current_restaurant(request)
+    user = await get_current_user(request)
+    # 🛡️ LEER SUCURSAL DEL HEADER (Igual que en el resto del dashboard)
+    branch_id = user.get("branch_id")
+    branch_header = request.headers.get("X-Branch-ID")
+    
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+    
+    # Buscamos el restaurante específico que queremos configurar
+    restaurant = await db.db_get_restaurant_by_id(branch_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
     raw_features = restaurant.get("features", {}) or {}
     if isinstance(raw_features, str):
         try:
             import json as _json
             features = _json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = raw_features
+        except Exception: features = {}
+    else: features = raw_features
 
     return {
         "restaurant_id": restaurant["id"],
@@ -237,19 +247,26 @@ async def get_settings(request: Request):
     }
 
 @router.post("/api/settings")
+@router.post("/api/settings")
 async def save_settings(request: Request):
     import json as _json
-    restaurant = await get_current_restaurant(request)
+    user = await get_current_user(request)
+    
+    # 🛡️ DETERMINAR SUCURSAL DESTINO
+    branch_id = user.get("branch_id")
+    branch_header = request.headers.get("X-Branch-ID")
+    
+    if branch_header == "all":
+        raise HTTPException(status_code=400, detail="No puedes editar configuración en modo 'Todas las sucursales'. Selecciona una específica.")
+    
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+
+    restaurant = await db.db_get_restaurant_by_id(branch_id)
     body = await request.json()
 
     raw_features = restaurant.get("features", {}) or {}
-    if isinstance(raw_features, str):
-        try:
-            current_features = _json.loads(raw_features)
-        except Exception:
-            current_features = {}
-    else:
-        current_features = dict(raw_features)
+    current_features = _json.loads(raw_features) if isinstance(raw_features, str) else dict(raw_features)
 
     updatable = [
         "payment_methods", "google_maps_url", "bot_active",
@@ -264,16 +281,23 @@ async def save_settings(request: Request):
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
+        # Actualizar Features
         await conn.execute(
             "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
             _json.dumps(current_features), restaurant["id"]
         )
-        if "latitude" in body and body["latitude"] is not None:
-            await conn.execute("UPDATE restaurants SET latitude=$1 WHERE id=$2", float(body["latitude"]), restaurant["id"])
-        if "longitude" in body and body["longitude"] is not None:
-            await conn.execute("UPDATE restaurants SET longitude=$1 WHERE id=$2", float(body["longitude"]), restaurant["id"])
-    return {"success": True, "features": current_features}
+        
+        # 🛡️ FIX ERROR 500: Validar lat/lon antes de convertir a float
+        try:
+            if "latitude" in body and body["latitude"] not in [None, ""]:
+                await conn.execute("UPDATE restaurants SET latitude=$1 WHERE id=$2", float(body["latitude"]), restaurant["id"])
+            if "longitude" in body and body["longitude"] not in [None, ""]:
+                await conn.execute("UPDATE restaurants SET longitude=$1 WHERE id=$2", float(body["longitude"]), restaurant["id"])
+        except ValueError:
+            pass # Ignoramos errores de formato en coordenadas para no tumbar el servidor
 
+    return {"success": True, "features": current_features}
+    
 # ── AUTH ──────────────────────────────────────────────────────────────
 @router.post("/api/auth/login")
 async def auth_login(request: Request, body: LoginRequest):
@@ -1057,7 +1081,7 @@ async def get_dashboard_conversations(request: Request):
             "last_updated": r["updated_at"].isoformat() + "Z"
         })
     return {"conversations": convs}
-    
+
 @router.get("/api/dashboard/menu")
 async def get_dashboard_menu(request: Request):
     # Ahora el menú también respeta el selector de la sucursal
