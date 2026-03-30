@@ -327,6 +327,7 @@ STEP 3 — ADDRESS (only if delivery): Ask for the full delivery address. If the
 STEP 4 — PAYMENT METHOD: List EVERY payment method from [MÉTODOS_DE_PAGO] explicitly in your reply (e.g. "Puedes pagar con: • Efectivo • Tarjeta débito"). Then ask which one the customer prefers. action="chat"
 STEP 5 — CONFIRM: Summarize the order, address, and payment method. Ask for explicit confirmation. action="chat"
 STEP 6 — CREATE ORDER: Only after confirmation. action="delivery" or action="pickup". Include 'address' and 'payment_method'. If the payment method requires transfer (e.g., Nequi, Daviplata, Transferencia), you MUST include the exact payment instructions from [INSTRUCCIONES_PAGO] in your reply and kindly ask the customer to send the payment receipt/screenshot here.
+STEP 7 — PAYMENT VERIFICATION: When the customer sends the receipt (indicated by 📸), you MUST use action="delivery" or action="pickup" again. CRITICAL: You MUST re-include the 'address' and 'payment_method' in the JSON. Set your reply EXACTLY to: "✅ Hemos recibido tu comprobante. Danos un momento mientras validamos el pago en caja para enviar tu orden a la cocina."
 
 CRITICAL RULES FOR EXTERNAL MODE:
 - NEVER use action="delivery" or action="pickup" without a confirmed address (if applicable) AND payment_method.
@@ -693,8 +694,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             payment_method = parsed.get("payment_method", "")
 
             if action == "delivery" and not address:
-                await orders.clear_cart(phone, bot_number)
-                return reply
+                return "Parece que me faltó tu dirección de entrega exacta. ¿Me la podrías escribir para poder procesar el envío?"
 
             # For delivery: try to route to nearest branch by GPS location
             effective_bot_number = bot_number
