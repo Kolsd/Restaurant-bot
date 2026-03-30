@@ -77,6 +77,11 @@ async def clear_cart(phone: str, bot_number: str):
     async with _get_cart_lock(phone):
         await db.db_clear_cart(phone, bot_number)
 
+# 🛡️ NUEVO: Wrapper respetando el lock transaccional por usuario
+async def migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
+    async with _get_cart_lock(phone):
+        await db.db_migrate_cart(phone, from_bot_number, to_bot_number)
+        
 async def get_cart_total(phone: str, bot_number: str) -> int:
     cart = await db.db_get_cart(phone, bot_number)
     return sum(item["subtotal"] for item in cart["items"])
