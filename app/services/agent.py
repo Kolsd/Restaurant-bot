@@ -508,7 +508,8 @@ def _parse_bot_response(raw: str) -> dict | None:
 
 async def execute_action(parsed: dict, phone: str, bot_number: str,
                          table_context: dict | None, session_state: dict,
-                         full_history: list = None, restaurant_obj: dict = None) -> str:
+                         full_history: list = None, restaurant_obj: dict = None,
+                         routing_context: dict = None) -> str:
     action = parsed.get("action", "chat")
     items  = parsed.get("items", [])
     reply  = parsed.get("reply", "")
@@ -723,9 +724,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         nearest = await db.db_find_nearest_branch(customer_lat, customer_lon, parent_id)
                         if nearest:
                             effective_bot_number = nearest["whatsapp_number"]
+                            if routing_context is not None:
+                                routing_context["branch_id"] = nearest["id"]
                             print(f"📍 Delivery routed to branch '{nearest['name']}' ({effective_bot_number})", flush=True)
-                        else:
-                            # 🛡️ FLUJO: FUERA DE COBERTURA
+                        else:    # 🛡️ FLUJO: FUERA DE COBERTURA
                             if not has_gps:
                                 return "Parece que la dirección que nos diste está fuera de nuestra zona de cobertura o es difícil de ubicar. 🛵\n\nPara estar 100% seguros y poder llevarte tu pedido, por favor **envíanos tu ubicación actual** usando el botón de 📍 *Ubicación* de WhatsApp (el clip 📎)."
                             else:
@@ -745,7 +747,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         print(f"⚠️ Error routing delivery by coordinates: {_e}", flush=True)
                 elif not customer_lat and address:
                     return "No pudimos encontrar la dirección exacta en el mapa. 🗺️ Por favor, envíanos tu ubicación usando el botón de 📍 *Ubicación* de WhatsApp (el clip 📎)."
-                    
+            if effective_bot_number != bot_number:
+                await orders.migrate_cart(phone, bot_number, effective_bot_number)
+
             order_type = "domicilio" if action == "delivery" else "recoger"
             res = await orders.create_order(phone, order_type, address, notes, effective_bot_number, payment_method)
 
@@ -979,11 +983,13 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
                                restaurant_id=restaurant_obj.get("id"))
     parsed = _parse_bot_response(raw)
 
+    routing_context = {}
     if parsed is None:
         print(f"❌ JSON inválido. Raw: {raw[:120]}", flush=True)
         assistant_message = "Lo siento, hubo un problema. ¿Puedes repetir tu pedido?"
     else:
-        assistant_message = await execute_action(parsed, user_phone, bot_number, table_context, session_state, full_history=full_history, restaurant_obj=restaurant_obj)
+        # Pasamos el routing_context para atrapar la decisión del backend
+        assistant_message = await execute_action(parsed, user_phone, bot_number, table_context, session_state, full_history=full_history, restaurant_obj=restaurant_obj, routing_context=routing_context)
         assistant_message = assistant_message.replace("[LINK_MENU]", menu_url)
 
     nps_interactive = None
@@ -1000,27 +1006,25 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
             "body": {"text": nps_question},
             "action": {
                 "buttons": [
-                    {
-                        "type": "reply",
-                        "reply": {
-                            "id": "skip_nps",
-                            "title": "No calificar"
-                        }
-                    }
+                    {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
                 ]
             }
         }
 
+    # 🛡️ BUG 2 FIX: Solo UNA inserción al historial
     full_history.append({"role": "user",      "content": user_message_clean})
     full_history.append({"role": "assistant", "content": assistant_message})
     
+    # 🛡️ RE-ENRUTAMIENTO INTELIGENTE Y PROACTIVO
     branch_id = table_context.get("branch_id") if table_context else None
     
-    if not branch_id:
+    # Prioridad a la decisión de ruteo tomada milisegundos atrás
+    if not branch_id and routing_context.get("branch_id"):
+        branch_id = routing_context.get("branch_id")
+    elif not branch_id:
         try:
             pool = await db.get_pool()
             async with pool.acquire() as conn:
-                # Buscamos en qué sucursal cayó la última orden de este cliente
                 active_order = await conn.fetchrow(
                     "SELECT bot_number FROM orders WHERE phone=$1 AND status NOT IN ('entregado', 'cancelado') ORDER BY created_at DESC LIMIT 1", user_phone
                 )
@@ -1031,9 +1035,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         except Exception as e:
             print(f"Error detectando sucursal para chat: {e}")
 
-    full_history.append({"role": "user",      "content": user_message_clean})
-    full_history.append({"role": "assistant", "content": assistant_message})
-    
     await db.db_save_history(
         user_phone, 
         bot_number, 
@@ -1045,6 +1046,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     if nps_interactive:
         result_payload["interactive"] = nps_interactive
     return result_payload
-
+    
 async def reset_conversation(user_phone: str):
     await db.db_delete_conversation(user_phone)
