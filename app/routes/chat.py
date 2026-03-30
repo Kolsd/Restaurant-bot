@@ -85,6 +85,21 @@ async def reset_chat(request: ResetRequest):
     await reset_conversation(request.phone)
     return {"success": True, "message": f"Conversacion de {request.phone} reiniciada"}
 
+@router.get("/api/media/{media_id}")
+async def get_whatsapp_media(media_id: str, bot: str):
+    """Descarga la imagen encriptada desde Meta y la muestra en el navegador del Cajero"""
+    rest = await db.db_get_restaurant_by_phone(bot)
+    token = rest.get("wa_access_token") if rest else os.getenv("META_ACCESS_TOKEN")
+    if not token:
+        token = os.getenv("WHATSAPP_TOKEN", "")
+        
+    async with httpx.AsyncClient() as client:
+        res = await client.get(f"https://graph.facebook.com/{META_API_VERSION}/{media_id}", headers={"Authorization": f"Bearer {token}"})
+        if res.status_code == 200:
+            media_url = res.json().get("url")
+            media_res = await client.get(media_url, headers={"Authorization": f"Bearer {token}"})
+            return Response(content=media_res.content, media_type=media_res.headers.get("content-type", "image/jpeg"))
+    return Response(content="Imagen no encontrada o expirada", status_code=404)
 
 @router.get("/webhook/meta")
 async def verify_meta_webhook(request: Request):
@@ -217,11 +232,11 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             button_reply = message.get("interactive", {}).get("button_reply", {})
             user_text = button_reply.get("id", "") or button_reply.get("title", "")
         elif msg_type == "image":
-            # 🛡️ LA IA AHORA ENTIENDE IMÁGENES
-            user_text = "📸 [El cliente ha enviado una imagen, posiblemente el comprobante de pago]"
+            image_id = message.get("image", {}).get("id", "")
+            user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: /api/media/{image_id}?bot={bot_number}"
         else:
             user_text = message.get("text", {}).get("body", "")
-            
+
         if not user_text or not user_phone:
             return JSONResponse(content={"status": "ok"})
 
