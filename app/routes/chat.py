@@ -93,7 +93,8 @@ async def get_whatsapp_media(media_id: str, bot: str):
     if not token:
         token = os.getenv("WHATSAPP_TOKEN", "")
         
-    async with httpx.AsyncClient() as client:
+    # 🛡️ FIX: follow_redirects=True es OBLIGATORIO para que Meta no nos devuelva 404
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         res = await client.get(f"https://graph.facebook.com/{META_API_VERSION}/{media_id}", headers={"Authorization": f"Bearer {token}"})
         if res.status_code == 200:
             media_url = res.json().get("url")
@@ -223,9 +224,19 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             return JSONResponse(content={"status": "ok"})
 
         # 7. Extraer texto del mensaje
+        # 7. Extraer texto del mensaje
         if msg_type == "location":
             loc = message.get("location", {})
             lat, lon = loc.get("latitude"), loc.get("longitude")
+            
+            try:
+                cart = await db.db_get_cart(user_phone, bot_number)
+                cart["latitude"] = lat
+                cart["longitude"] = lon
+                await db.db_save_cart(user_phone, bot_number, cart)
+            except Exception as e:
+                print(f"Error guardando GPS en carrito: {e}")
+                
             maps_url = f"https://maps.google.com/?q={lat},{lon}"
             user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
         elif msg_type == "interactive":

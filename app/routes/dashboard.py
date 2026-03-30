@@ -900,9 +900,16 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
         try:
             q_wa = "SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2"
             p_wa = [start_date, end_date]
+            
             if bot_number:
-                q_wa += " AND bot_number = $3"
-                p_wa.append(bot_number)
+                # 🛡️ FIX: Si es "all", usamos LIKE para atrapar el bot principal y sus sub-bots (_b...)
+                if branch_id == "all":
+                    q_wa += " AND bot_number LIKE $3"
+                    p_wa.append(f"{bot_number}%")
+                else:
+                    q_wa += " AND bot_number = $3"
+                    p_wa.append(bot_number)
+                    
             q_wa += " ORDER BY created_at DESC"
             
             rows_wa = await conn.fetch(q_wa, *p_wa)
@@ -925,7 +932,8 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
             print(f"Error cargando orders: {e}", flush=True)
 
         try:
-            if branch_id:
+            # 🛡️ FIX: Ignoramos "all" explícitamente para que Postgres no explote esperando un Int
+            if branch_id and branch_id != "all":
                 q_mesa = """
                     SELECT o.* FROM table_orders o
                     LEFT JOIN restaurant_tables t ON o.table_id = t.id
@@ -935,6 +943,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                 """
                 p_mesa = [start_date, end_date, branch_id]
             else:
+                # 🌐 MODO ALL: Carga mesas de toda la franquicia
                 q_mesa = """
                     SELECT * FROM table_orders
                     WHERE created_at >= $1 AND created_at < $2
@@ -959,6 +968,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                 mesa_groups[base_id]["total"] += float(r["total"] or 0)
 
                 try:
+                    import json
                     raw_items = r["items"]
                     if isinstance(raw_items, str):
                         parsed_items = json.loads(raw_items)
@@ -977,6 +987,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                     mesa_groups[base_id]["status"] = row_status
 
             for base_id, g in mesa_groups.items():
+                import json
                 orders.append({
                     "id": g["id"], "items": json.dumps(g["items"], default=str), "type": "mesa",
                     "status": g["status"], "paid": g["is_paid"], "total": g["total"],
@@ -1072,19 +1083,20 @@ async def get_dashboard_conversations(request: Request):
         params = []
         idx = 1
         
-        if bot_number:
-            conditions.append(f"bot_number = ${idx}")
-            params.append(bot_number)
-            idx += 1
-            
-        # 🛡️ LA MAGIA DEL "ALL" PARA WHATSAPP
+        # 🛡️ LA MAGIA DE LA TRIANGULACIÓN DE CHATS
         if branch_id == "all":
             pass # Sin filtro extra, trae todo
         elif branch_id is not None:
+            # 🛡️ Si es una sucursal específica (Muzu), filtramos SOLO por branch_id
+            # Ignoramos el bot_number porque el chat entró por la Casa Matriz
             conditions.append(f"branch_id = ${idx}")
             params.append(branch_id)
             idx += 1
         elif bot_number:
+            # Si es la Casa Matriz, traemos los de ella (branch_id IS NULL) y su bot_number
+            conditions.append(f"bot_number = ${idx}")
+            params.append(bot_number)
+            idx += 1
             conditions.append("branch_id IS NULL")
             
         if conditions:
@@ -1096,6 +1108,7 @@ async def get_dashboard_conversations(request: Request):
     convs = []
     for r in rows:
         try:
+            import json
             history = json.loads(r["history"]) if isinstance(r["history"], str) else r["history"]
             preview = history[-1]["content"] if history else "Conversación iniciada..."
             if isinstance(preview, dict): preview = "Multimedia/Sistema"
@@ -1110,7 +1123,7 @@ async def get_dashboard_conversations(request: Request):
             "last_updated": r["updated_at"].isoformat() + "Z"
         })
     return {"conversations": convs}
-
+    
 @router.get("/api/dashboard/menu")
 async def get_dashboard_menu(request: Request):
     # Ahora el menú también respeta el selector de la sucursal

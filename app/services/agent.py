@@ -696,28 +696,56 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             if action == "delivery" and not address:
                 return "Parece que me faltó tu dirección de entrega exacta. ¿Me la podrías escribir para poder procesar el envío?"
 
-            # For delivery: try to route to nearest branch by GPS location
+            # For delivery: try to route to nearest branch by GPS location OR Manual Address
             effective_bot_number = bot_number
             if action == "delivery" and restaurant_obj and not restaurant_obj.get("parent_restaurant_id"):
-                history_to_scan = (full_history or [])[-10:]
-                lat_lon_match = None
-                for msg in reversed(history_to_scan):
-                    content = msg.get("content", "") if isinstance(msg.get("content"), str) else ""
-                    m = re.search(r'lat:([-\d.]+),?\s*lon:([-\d.]+)', content)
-                    if m:
-                        lat_lon_match = (float(m.group(1)), float(m.group(2)))
-                        break
-                if lat_lon_match:
-                    customer_lat, customer_lon = lat_lon_match
+                customer_lat, customer_lon = None, None
+                has_gps = False
+                
+                # 1. 🛡️ Leer las coordenadas 100% seguras desde la base de datos (Carrito)
+                cart_data = await db.db_get_cart(phone, bot_number)
+                if cart_data.get("latitude") and cart_data.get("longitude"):
+                    customer_lat = float(cart_data["latitude"])
+                    customer_lon = float(cart_data["longitude"])
+                    has_gps = True
+                        
+                # 2. Si no envió GPS, geocodificamos la dirección manual que escribió
+                if not has_gps and address:
+                    from app.routes.dashboard import geocode_address
+                    try:
+                        customer_lat, customer_lon, _ = await geocode_address(address)
+                    except Exception:
+                        pass
+                
+                if customer_lat and customer_lon:
                     parent_id = restaurant_obj.get("id")
                     try:
                         nearest = await db.db_find_nearest_branch(customer_lat, customer_lon, parent_id)
                         if nearest:
                             effective_bot_number = nearest["whatsapp_number"]
                             print(f"📍 Delivery routed to branch '{nearest['name']}' ({effective_bot_number})", flush=True)
+                        else:
+                            # 🛡️ FLUJO: FUERA DE COBERTURA
+                            if not has_gps:
+                                return "Parece que la dirección que nos diste está fuera de nuestra zona de cobertura o es difícil de ubicar. 🛵\n\nPara estar 100% seguros y poder llevarte tu pedido, por favor **envíanos tu ubicación actual** usando el botón de 📍 *Ubicación* de WhatsApp (el clip 📎)."
+                            else:
+                                pool = await db.get_pool()
+                                async with pool.acquire() as conn:
+                                    abs_nearest = await conn.fetchrow('''
+                                        SELECT name, address,
+                                               (6371 * acos(cos(radians($1)) * cos(radians(latitude::float)) * cos(radians(longitude::float) - radians($2)) + sin(radians($1)) * sin(radians(latitude::float)))) AS distance_km
+                                        FROM restaurants
+                                        WHERE parent_restaurant_id = $3 AND latitude IS NOT NULL AND longitude IS NOT NULL
+                                        ORDER BY distance_km ASC LIMIT 1
+                                    ''', customer_lat, customer_lon, parent_id)
+                                
+                                branch_info = f"*{abs_nearest['name']}* ({abs_nearest['address']})" if abs_nearest else "nuestra sucursal más cercana"
+                                return f"Lo siento mucho, verificamos tu ubicación GPS y estás fuera de nuestra zona de cobertura para domicilios. 😔\n\nSin embargo, tu pedido sigue guardado en el carrito. Puedes cambiarlo a la modalidad de *Recoger* y pasar por él a {branch_info}. ¿Te gustaría que lo preparemos para recoger?"
                     except Exception as _e:
-                        print(f"⚠️ Error routing delivery by GPS: {_e}", flush=True)
-
+                        print(f"⚠️ Error routing delivery by coordinates: {_e}", flush=True)
+                elif not customer_lat and address:
+                    return "No pudimos encontrar la dirección exacta en el mapa. 🗺️ Por favor, envíanos tu ubicación usando el botón de 📍 *Ubicación* de WhatsApp (el clip 📎)."
+                    
             order_type = "domicilio" if action == "delivery" else "recoger"
             res = await orders.create_order(phone, order_type, address, notes, effective_bot_number, payment_method)
 
