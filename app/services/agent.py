@@ -326,8 +326,8 @@ STEP 2 — METHOD: Ask if they want Delivery or Pickup. action="chat"
 STEP 3 — ADDRESS (only if delivery): Ask for the full delivery address. If the customer shares GPS location, use it. action="chat"
 STEP 4 — PAYMENT METHOD: List EVERY payment method from [MÉTODOS_DE_PAGO] explicitly in your reply (e.g. "Puedes pagar con: • Efectivo • Tarjeta débito"). Then ask which one the customer prefers. action="chat"
 STEP 5 — CONFIRM: Summarize the order, address, and payment method. Ask for explicit confirmation. action="chat"
-STEP 6 — CREATE ORDER: Only after confirmation. action="delivery" or action="pickup". Include 'address' and 'payment_method'. If the payment method requires transfer (e.g., Nequi, Daviplata, Transferencia), you MUST include the exact payment instructions from [INSTRUCCIONES_PAGO] in your reply and kindly ask the customer to send the payment receipt/screenshot here.
-STEP 7 — PAYMENT VERIFICATION: When the customer sends the receipt (indicated by 📸), you MUST use action="delivery" or action="pickup" again. CRITICAL: You MUST re-include the 'address' and 'payment_method' in the JSON. Set your reply EXACTLY to: "✅ Hemos recibido tu comprobante. Danos un momento mientras validamos el pago en caja para enviar tu orden a la cocina."
+STEP 6 — CREATE ORDER: Only after confirmation. YOU MUST USE action="delivery" or action="pickup". Include 'address' and 'payment_method' in the JSON. If the payment method requires transfer (e.g., Nequi, Daviplata), you MUST STILL USE action="delivery" (DO NOT use action="chat") and include the payment instructions in your reply, asking the customer to send the screenshot here.
+STEP 7 — PAYMENT VERIFICATION: When the customer sends the receipt (indicated by 📸), use action="chat" and reply EXACTLY: "✅ Hemos recibido tu comprobante. Danos un momento mientras validamos el pago en caja para enviar tu orden a la cocina."
 
 CRITICAL RULES FOR EXTERNAL MODE:
 - NEVER use action="delivery" or action="pickup" without a confirmed address (if applicable) AND payment_method.
@@ -986,14 +986,31 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     full_history.append({"role": "user",      "content": user_message_clean})
     full_history.append({"role": "assistant", "content": assistant_message})
     
-    # 🛡️ Determinamos la sucursal para guardar el historial en el Dashboard correcto
     branch_id = table_context.get("branch_id") if table_context else None
+    
+    if not branch_id:
+        try:
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                # Buscamos en qué sucursal cayó la última orden de este cliente
+                active_order = await conn.fetchrow(
+                    "SELECT bot_number FROM orders WHERE phone=$1 AND status NOT IN ('entregado', 'cancelado') ORDER BY created_at DESC LIMIT 1", user_phone
+                )
+                if active_order and active_order["bot_number"] != bot_number:
+                    b_id = await conn.fetchval("SELECT id FROM restaurants WHERE whatsapp_number=$1", active_order["bot_number"])
+                    if b_id:
+                        branch_id = b_id
+        except Exception as e:
+            print(f"Error detectando sucursal para chat: {e}")
+
+    full_history.append({"role": "user",      "content": user_message_clean})
+    full_history.append({"role": "assistant", "content": assistant_message})
     
     await db.db_save_history(
         user_phone, 
         bot_number, 
         full_history[-(HISTORY_WINDOW * 2 + 2):], 
-        branch_id=branch_id  # <--- Pasamos la sucursal detectada
+        branch_id=branch_id  # <--- Transfiere el chat completo a la sucursal asignada
     )
 
     result_payload = {"message": assistant_message}

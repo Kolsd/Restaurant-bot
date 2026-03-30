@@ -1303,7 +1303,10 @@ async function openChatModal(phone) {
         
         container.innerHTML = msgs.map(m => {
             const isUser = m.role === 'user';
-            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            
+            content = content.replace(/(\/api\/media\/\S+)/g, '<a href="$1" target="_blank" style="color:#1D9E75;text-decoration:none;font-weight:800;background:#E1F5EE;padding:6px 12px;border-radius:8px;display:inline-block;margin-top:6px;border:1px solid #1D9E75;">📎 Abrir Comprobante</a>');
+            
             return `<div class="msg-bubble ${isUser ? 'user' : ''}"><div class="bubble ${isUser ? 'user' : 'bot'}">${content}</div></div>`;
         }).join('');
         container.scrollTop = container.scrollHeight;
