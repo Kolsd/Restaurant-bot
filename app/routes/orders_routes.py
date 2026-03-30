@@ -228,16 +228,11 @@ async def check_delivery_updates(request: Request):
         current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
         return {"hash": current_state_hash}
 
-    """Consulta ultra-ligera para saber si hay cambios en los pedidos del domiciliario"""
-    pool = await db.get_pool()
-    async with pool.acqu
-
 @router.get("/delivery/orders")
 async def get_delivery_orders(request: Request):
     await require_auth(request)
     raw = await db.db_get_delivery_orders(['pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta', 'entregado'])
     return {"orders": raw}
-
 
 @router.patch("/delivery/orders/{order_id}/status")
 async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
