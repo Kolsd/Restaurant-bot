@@ -86,13 +86,31 @@ async def reset_chat(request: ResetRequest):
     return {"success": True, "message": f"Conversacion de {request.phone} reiniciada"}
 
 @router.get("/api/media/{media_id}")
-async def get_whatsapp_media(media_id: str, bot: str):
+async def get_whatsapp_media(media_id: str, bot: str = ""):
     """Descarga la imagen encriptada desde Meta y la muestra en el navegador del Cajero"""
     rest = await db.db_get_restaurant_by_phone(bot)
     token = rest.get("wa_access_token") if rest else os.getenv("META_ACCESS_TOKEN")
     if not token:
         token = os.getenv("WHATSAPP_TOKEN", "")
         
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        headers = {"Authorization": f"Bearer {token}"}
+        # 1. Obtener la URL temporal real del archivo
+        res = await client.get(f"https://graph.facebook.com/{META_API_VERSION}/{media_id}", headers=headers)
+        
+        if res.status_code == 200:
+            data = res.json()
+            media_url = data.get("url")
+            if media_url:
+                # 2. Descargar la imagen usando la URL y el mismo token de autorización
+                media_res = await client.get(media_url, headers=headers)
+                if media_res.status_code == 200:
+                    return Response(content=media_res.content, media_type=data.get("mime_type", "image/jpeg"))
+                else:
+                    print(f"Error descargando imagen de Meta: {media_res.status_code}", flush=True)
+                    
+    return Response(content="Imagen no encontrada o expirada", status_code=404)
+            
     # 🛡️ FIX: follow_redirects=True es OBLIGATORIO para que Meta no nos devuelva 404
     async with httpx.AsyncClient(follow_redirects=True) as client:
         res = await client.get(f"https://graph.facebook.com/{META_API_VERSION}/{media_id}", headers={"Authorization": f"Bearer {token}"})

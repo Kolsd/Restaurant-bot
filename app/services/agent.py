@@ -326,7 +326,7 @@ STEP 2 — METHOD: Ask if they want Delivery or Pickup. action="chat"
 STEP 3 — ADDRESS (only if delivery): Ask for the full delivery address. If the customer shares GPS location, use it. action="chat"
 STEP 4 — PAYMENT METHOD: List EVERY payment method from [MÉTODOS_DE_PAGO] explicitly in your reply (e.g. "Puedes pagar con: • Efectivo • Tarjeta débito"). Then ask which one the customer prefers. action="chat"
 STEP 5 — CONFIRM: Summarize the order, address, and payment method. Ask for explicit confirmation. action="chat"
-STEP 6 — CREATE ORDER: Only after confirmation. YOU MUST USE action="delivery" or action="pickup". Include 'address' and 'payment_method' in the JSON. If the payment method requires transfer (e.g., Nequi, Daviplata), you MUST STILL USE action="delivery" (DO NOT use action="chat") and include the payment instructions in your reply, asking the customer to send the screenshot here.
+STEP 6 — CREATE ORDER: Only after confirmation. YOU MUST USE action="delivery" or action="pickup". Include 'address' and 'payment_method' in the JSON. CRITICAL: DO NOT include payment instructions in your reply (e.g., do not invent bank account numbers). The system will append them automatically.
 STEP 7 — PAYMENT VERIFICATION: When the customer sends the receipt (indicated by 📸), use action="chat" and reply EXACTLY: "✅ Hemos recibido tu comprobante. Danos un momento mientras validamos el pago en caja para enviar tu orden a la cocina."
 
 CRITICAL RULES FOR EXTERNAL MODE:
@@ -556,9 +556,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
             # ── FASE 2: enrutamiento multi-estación (Cocina vs. Bar) ──────────────
-            # Leemos features del restaurante. Si bar_enabled=true y bar_categories
-            # está definido, separamos los ítems por categoría.
-            # Los pedidos sin bar activo usan station='all' (comportamiento original).
             bar_enabled    = False
             bar_categories: list = []
             try:
@@ -727,7 +724,8 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                             if routing_context is not None:
                                 routing_context["branch_id"] = nearest["id"]
                             print(f"📍 Delivery routed to branch '{nearest['name']}' ({effective_bot_number})", flush=True)
-                        else:    # 🛡️ FLUJO: FUERA DE COBERTURA
+                        else:
+                            # 🛡️ FLUJO: FUERA DE COBERTURA
                             if not has_gps:
                                 return "Parece que la dirección que nos diste está fuera de nuestra zona de cobertura o es difícil de ubicar. 🛵\n\nPara estar 100% seguros y poder llevarte tu pedido, por favor **envíanos tu ubicación actual** usando el botón de 📍 *Ubicación* de WhatsApp (el clip 📎)."
                             else:
@@ -747,6 +745,8 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         print(f"⚠️ Error routing delivery by coordinates: {_e}", flush=True)
                 elif not customer_lat and address:
                     return "No pudimos encontrar la dirección exacta en el mapa. 🗺️ Por favor, envíanos tu ubicación usando el botón de 📍 *Ubicación* de WhatsApp (el clip 📎)."
+
+            # 🛡️ BUG 1 FIX: Migrar el carrito a la sucursal antes de intentar leerlo para la orden
             if effective_bot_number != bot_number:
                 await orders.migrate_cart(phone, bot_number, effective_bot_number)
 
@@ -763,6 +763,24 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     await db.db_deduct_inventory_for_order(effective_bot_number, order.get("items", []))
                 except Exception as e:
                     print(f"⚠️ Error descontando inventario: {e}", flush=True)
+
+                # 🛡️ MAGIA: INYECTAR INSTRUCCIONES DE PAGO DESPUÉS DE SABER LA SUCURSAL EXACTA
+                if payment_method and payment_method.lower() in ["nequi", "daviplata", "transferencia"]:
+                    try:
+                        branch_rest = await db.db_get_restaurant_by_phone(effective_bot_number)
+                        if branch_rest:
+                            feats = branch_rest.get("features", {})
+                            if isinstance(feats, str):
+                                feats = json.loads(feats)
+                            
+                            # Buscar instrucciones (soporta mayúsculas y minúsculas)
+                            inst_dict = feats.get("payment_instructions", {})
+                            instructions = inst_dict.get(payment_method.lower(), "") or inst_dict.get(payment_method.capitalize(), "")
+                            
+                            if instructions:
+                                reply += f"\n\nPara pagar con {payment_method}, por favor sigue estas instrucciones:\n*{instructions}*\n\nUna vez realices el pago, envíanos el comprobante (foto/captura) por aquí. 📸"
+                    except Exception as e:
+                        print(f"Error inyectando instrucciones: {e}")
 
                 if res["order"].get("is_additional"):
                     print(f"➕ Adicional agregado a {order['id']} | Total: {order['total']}", flush=True)
@@ -882,10 +900,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     if payment_methods:
         payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
         
-    payment_instructions = feats.get("payment_instructions", {})
-    if payment_instructions:
-        inst_text = "\n[INSTRUCCIONES_PAGO:\n" + "\n".join(f"• {k}: {v}" for k, v in payment_instructions.items()) + "]"
-
     # Buscar por branch_id si hay contexto de mesa
     if table_context and table_context.get("branch_id"):
         r = await db.db_get_restaurant_by_id(table_context["branch_id"])
@@ -967,7 +981,6 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         f"\n[CARRITO: {cart_text}]"
         f"{table_note}"
         f"{metodos_bloque}"
-        f"{inst_text}"
         f"{delivery_fee_note}"
         f"{loyalty_note}"
         f"{in_transit_note}"
