@@ -328,6 +328,44 @@ async def sync_menu_to_branches(request: Request):
     
     return {"success": True, "branches_updated": branches_updated}
 
+@router.put("/api/menu/update")
+async def update_menu_structure(request: Request):
+    """
+    Endpoint exclusivo para la Casa Matriz. Actualiza la estructura del JSON del menú.
+    """
+    await require_auth(request)
+    user = await get_current_user(request)
+    restaurant = await get_current_restaurant(request)
+    
+    if "owner" not in user.get("role", ""):
+        raise HTTPException(status_code=403, detail="Solo el dueño puede editar el menú.")
+        
+    if restaurant.get("parent_restaurant_id") is not None:
+        raise HTTPException(status_code=400, detail="El menú solo se puede editar desde la Casa Matriz.")
+        
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header != "matriz" and branch_header != "all":
+        raise HTTPException(status_code=400, detail="Debes estar en la vista de la Casa Matriz para editar el menú.")
+
+    body = await request.json()
+    new_menu = body.get("menu")
+    if not isinstance(new_menu, dict):
+        raise HTTPException(status_code=400, detail="Formato de menú inválido.")
+
+    # 🛡️ Validación estricta en backend: asegurar que los precios sean numéricos
+    for cat, items in new_menu.items():
+        for item in items:
+            try:
+                item["price"] = float(item.get("price", 0))
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"El precio del plato '{item.get('name')}' debe ser un número (sin signos $ ni letras).")
+
+    success = await db.db_update_menu(restaurant["id"], new_menu)
+    if not success:
+        raise HTTPException(status_code=500, detail="No se pudo actualizar el menú en la base de datos.")
+        
+    return {"success": True}
+
 @router.delete("/api/conversations/cleanup")
 async def cleanup_conversations(request: Request):
     restaurant = await get_current_restaurant(request)
