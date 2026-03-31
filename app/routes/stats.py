@@ -302,6 +302,32 @@ async def set_dish_availability(request: Request):
     )
     return {"success": True, "dish_name": body["dish_name"], "available": body.get("available", True)}
 
+@router.post("/api/menu/sync-branches")
+async def sync_menu_to_branches(request: Request):
+    """
+    Endpoint exclusivo para la Casa Matriz. Propaga el menú a todas las sucursales.
+    """
+    await require_auth(request)
+    user = await get_current_user(request)
+    restaurant = await get_current_restaurant(request)
+    
+    # Validaciones de seguridad
+    if "owner" not in user.get("role", ""):
+        raise HTTPException(status_code=403, detail="Solo el dueño puede sincronizar el menú.")
+        
+    if restaurant.get("parent_restaurant_id") is not None:
+        raise HTTPException(status_code=400, detail="Esta acción solo se puede realizar desde la Casa Matriz.")
+        
+    # Verificar que no se esté intentando sincronizar mientras se visualiza una sucursal específica
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header != "matriz" and branch_header != "all":
+        raise HTTPException(status_code=400, detail="Debes estar en la vista de la Casa Matriz para sincronizar.")
+
+    # Ejecutar sincronización
+    branches_updated = await db.db_sync_menu_to_branches(restaurant["id"])
+    
+    return {"success": True, "branches_updated": branches_updated}
+
 @router.delete("/api/conversations/cleanup")
 async def cleanup_conversations(request: Request):
     restaurant = await get_current_restaurant(request)

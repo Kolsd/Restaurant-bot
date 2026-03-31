@@ -512,6 +512,35 @@ async def db_create_restaurant(name: str, whatsapp_number: str, address: str, me
                 latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, features=EXCLUDED.features
         """, name, whatsapp_number, address, menu, latitude, longitude, features)
 
+async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
+    """
+    Sincroniza (sobrescribe) la columna 'menu' de todas las sucursales hijas
+    con el JSON exacto de la Casa Matriz.
+    Devuelve el número de sucursales actualizadas.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # 1. Obtener el menú de la matriz
+        parent = await conn.fetchrow("SELECT menu FROM restaurants WHERE id = $1", parent_restaurant_id)
+        if not parent or not parent["menu"]:
+            return 0
+            
+        menu_jsonb = parent["menu"]
+        
+        # 2. Hacer UPDATE masivo en las sucursales hijas
+        result = await conn.execute(
+            "UPDATE restaurants SET menu = $1 WHERE parent_restaurant_id = $2",
+            menu_jsonb, parent_restaurant_id
+        )
+        
+        # El result de execute suele ser un string como "UPDATE 3"
+        try:
+            count = int(result.split()[-1])
+        except:
+            count = 0
+            
+        return count        
+
 # ── OFFLINE SYNC BATCH ───────────────────────────────────────────────
 # Dispatch table for POST /api/sync operations.
 # Keys are the `type` field sent by offline-sync.js.

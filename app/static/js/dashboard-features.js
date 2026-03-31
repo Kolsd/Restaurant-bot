@@ -78,6 +78,36 @@ async function toggleDish(name, available) {
   } catch(e) {}
 }
 
+async function syncMenuToBranches() {
+  if (!confirm("⚠️ ¿Estás seguro de sincronizar el menú?\n\nEsto sobrescribirá el catálogo de TODAS las sucursales con los precios y platos actuales de la Casa Matriz.\n\nNota: La disponibilidad y el stock de las sucursales NO se verán afectados.")) return;
+  
+  const btn = document.getElementById('btn-sync-menu');
+  const originalText = btn.textContent;
+  btn.textContent = 'Sincronizando...';
+  btn.disabled = true;
+  
+  const h = window._dashHeaders;
+  try {
+    const r = await fetch('/api/menu/sync-branches', {
+      method: 'POST', 
+      headers: { ...h, 'Content-Type': 'application/json' }
+    });
+    
+    if (r.ok) {
+      const res = await r.json();
+      alert(`✅ Sincronización exitosa.\n\nEl menú ha sido actualizado en ${res.branches_updated} sucursales.`);
+    } else {
+      const e = await r.json();
+      alert('Error: ' + (e.detail || 'No se pudo sincronizar el menú.'));
+    }
+  } catch(e) {
+    alert('Error de conexión al intentar sincronizar el menú.');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
 // ── MESAS & QR ────────────────────────────────────────────────────────
 async function loadTables() {
   const h = window._dashHeaders;
