@@ -921,7 +921,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     full_history = await db.db_get_history(user_phone, bot_number)
     cart_text    = await orders.cart_summary(user_phone, bot_number)
 
-    availability = await db.db_get_menu_availability()
+    availability = await db.db_get_menu_availability(restaurant_obj.get("id"))
     menu         = await db.db_get_menu(bot_number) or {}
     compact_menu = _build_compact_menu(menu, availability)
 

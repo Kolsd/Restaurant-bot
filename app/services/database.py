@@ -604,10 +604,28 @@ async def db_sync_batch(restaurant_id: int, operations: list) -> list:
 async def db_get_menu(whatsapp_number: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT menu FROM restaurants WHERE whatsapp_number=$1", whatsapp_number)
-        if row and row['menu']:
-            return row['menu'] if isinstance(row['menu'], dict) else json.loads(row['menu'])
-        return None
+        # 🛡️ FIX: Leemos ambos menús (sucursal y padre)
+        row = await conn.fetchrow("""
+            SELECT 
+                r.menu, 
+                p.menu AS parent_menu
+            FROM restaurants r
+            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
+            WHERE r.whatsapp_number = $1
+        """, whatsapp_number)
+        
+        if not row:
+            return None
+            
+        menu_data = row['menu']
+        
+        # 🛡️ Si la sucursal tiene su menú vacío, hereda el del padre temporalmente
+        if (not menu_data or menu_data == '{}' or menu_data == "{}") and row['parent_menu']:
+            menu_data = row['parent_menu']
+            
+        if menu_data:
+            return menu_data if isinstance(menu_data, dict) else json.loads(menu_data)
+        return {}
 
 async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
     menu = await db_get_menu(whatsapp_number)
@@ -646,21 +664,20 @@ async def db_delete_branch(branch_id: int, owner_restaurant_id: int) -> bool:
         return result != "DELETE 0"
 
 # ── MENU AVAILABILITY ────────────────────────────────────────────────
-async def db_get_menu_availability():
+async def db_get_menu_availability(restaurant_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT dish_name, available FROM menu_availability")
+        rows = await conn.fetch("SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1", restaurant_id)
         return {r['dish_name']: r['available'] for r in rows}
 
-async def db_set_dish_availability(dish_name: str, available: bool):
+async def db_set_dish_availability(restaurant_id: int, dish_name: str, available: bool):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO menu_availability (dish_name, available, updated_at)
-            VALUES ($1,$2,NOW())
-            ON CONFLICT (dish_name) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
-        """, dish_name, available)
-
+            INSERT INTO menu_availability (dish_name, restaurant_id, available, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (dish_name, restaurant_id) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
+        """, dish_name, restaurant_id, available)
 
 # ── SESIONES AUTH ────────────────────────────────────────────────────
 async def db_save_session(token: str, username: str):
@@ -1422,7 +1439,7 @@ async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
         item = _serialize(dict(row))
         # Si el stock es 0, desactivar platos vinculados
         if current_stock <= 0:
-            await _sync_dish_availability(linked_dishes, False)
+            await _sync_dish_availability(linked_dishes, False, restaurant_id)
         return item
  
  
@@ -1458,14 +1475,15 @@ async def db_update_inventory_item(item_id: int, fields: dict) -> dict | None:
         row = await conn.fetchrow(query, *values)
         item = _serialize(dict(row))
  
-        # Sincronizar disponibilidad si cambió el stock
         new_stock = fields.get("current_stock", existing["current_stock"])
         dishes    = fields.get("linked_dishes", existing["linked_dishes"])
         if isinstance(dishes, str):
             dishes = json.loads(dishes)
-        await _sync_dish_availability(dishes, new_stock > 0)
+            
+        restaurant_id = existing["restaurant_id"]
+        
+        await _sync_dish_availability(dishes, new_stock > 0, restaurant_id)
         return item
- 
  
 async def db_delete_inventory_item(item_id: int):
     pool = await get_pool()
@@ -1500,7 +1518,7 @@ async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
         dishes = item.get("linked_dishes", [])
         if isinstance(dishes, str):
             dishes = json.loads(dishes)
-        await _sync_dish_availability(dishes, float(item["current_stock"]) > 0)
+        await _sync_dish_availability(dishes, float(item["current_stock"]) > 0, restaurant_id)
         return item
  
  
@@ -1598,7 +1616,7 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                             if isinstance(dishes, str):
                                 dishes = json.loads(dishes)
                             if dishes:
-                                await _sync_dish_availability_conn(conn, dishes, False)
+                                await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
 
                 else:
                     # ── 2. Fallback legacy: linked_dishes ────────────────
@@ -1628,28 +1646,27 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                         if isinstance(dishes, str):
                             dishes = json.loads(dishes)
                         if new_stock <= float(row["min_stock"] or 0) and dishes:
-                            await _sync_dish_availability_conn(conn, dishes, False)
+                            await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
  
  
-async def _sync_dish_availability_conn(conn, dish_names: list, available: bool):
+async def _sync_dish_availability_conn(conn, dish_names: list, available: bool, restaurant_id: int):
     """Activa o desactiva platos usando una conexión existente (dentro de transacción)."""
     for name in dish_names:
         await conn.execute(
-            """INSERT INTO menu_availability (dish_name, available, updated_at)
-               VALUES ($1, $2, NOW())
-               ON CONFLICT (dish_name)
+            """INSERT INTO menu_availability (dish_name, restaurant_id, available, updated_at)
+               VALUES ($1, $2, $3, NOW())
+               ON CONFLICT (dish_name, restaurant_id)
                DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
-            name, available
+            name, restaurant_id, available
         )
 
-
-async def _sync_dish_availability(dish_names: list, available: bool):
+async def _sync_dish_availability(dish_names: list, available: bool, restaurant_id: int):
     """Activa o desactiva platos en menu_availability según el stock."""
     if not dish_names:
         return
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await _sync_dish_availability_conn(conn, dish_names, available)
+        await _sync_dish_availability_conn(conn, dish_names, available, restaurant_id)
 
 
 # ══════════════════════════════════════════════════════════════════════
