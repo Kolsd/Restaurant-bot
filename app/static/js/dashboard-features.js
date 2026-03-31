@@ -25,6 +25,17 @@ async function loadMenu() {
     }
   } catch(e) { console.error('loadMenu:', e); }
   renderMenu();
+
+  const role = localStorage.getItem('rb_role') || '';
+  const branchVal = window._dashHeaders['X-Branch-ID'];
+  const isMatriz = (!branchVal || branchVal === 'matriz');
+  
+  const btnEdit = document.getElementById('btn-edit-menu');
+  const btnSync = document.getElementById('btn-sync-menu');
+  
+  if (btnEdit) btnEdit.style.display = (role.includes('owner') && isMatriz) ? '' : 'none';
+  if (btnSync) btnSync.style.display = (role.includes('owner') && isMatriz) ? '' : 'none';
+
 }
 
 function renderMenu() {
@@ -104,6 +115,194 @@ async function syncMenuToBranches() {
     alert('Error de conexión al intentar sincronizar el menú.');
   } finally {
     btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+// ── EDITOR DE MENÚ ──
+let editorMenuState = {};
+
+function openMenuEditor() {
+  // Clonar el menú actual de la matriz basándonos en la vista
+  editorMenuState = {};
+  
+  // Reconstruir desde MENU_ITEMS para tener la estructura limpia
+  MENU_ITEMS.forEach(m => {
+    if (!editorMenuState[m.cat]) editorMenuState[m.cat] = [];
+    editorMenuState[m.cat].push({ 
+      name: m.name, 
+      price: m.price.replace(/[^0-9.-]+/g,""), // Extraer solo el número
+      description: m.desc || '' 
+    });
+  });
+
+  renderMenuEditor();
+  document.getElementById('modal-menu-editor').style.display = 'flex';
+}
+
+function closeMenuEditor() {
+  document.getElementById('modal-menu-editor').style.display = 'none';
+}
+
+function renderMenuEditor() {
+  const canvas = document.getElementById('menu-editor-canvas');
+  canvas.innerHTML = '';
+
+  if (Object.keys(editorMenuState).length === 0) {
+    canvas.innerHTML = '<div class="empty-state">Tu carta está vacía. Añade una categoría para comenzar.</div>';
+    return;
+  }
+
+  Object.entries(editorMenuState).forEach(([catName, dishes], catIndex) => {
+    const catCard = document.createElement('div');
+    catCard.className = 'menu-editor-cat-card';
+    
+    // Header Categoría
+    catCard.innerHTML = `
+      <div class="menu-editor-cat-header">
+        <input type="text" class="menu-editor-cat-input" value="${catName.replace(/"/g, '&quot;')}" placeholder="Nombre de categoría (Ej: Platos Fuertes)" data-oldcat="${catName.replace(/"/g, '&quot;')}">
+        <button class="btn-del-cat" onclick="removeMenuEditorCategory('${catName.replace(/'/g, "\\'")}')" title="Eliminar Categoría entera">🗑️</button>
+      </div>
+      <div class="menu-editor-dishes" id="editor-dishes-${catIndex}"></div>
+      <div class="menu-editor-cat-footer">
+        <button onclick="addMenuEditorDish('${catName.replace(/'/g, "\\'")}')">+ Añadir Plato</button>
+      </div>
+    `;
+    
+    canvas.appendChild(catCard);
+
+    // Evitar que el input pierda focus si el usuario cambia el nombre
+    const catInput = catCard.querySelector('.menu-editor-cat-input');
+    catInput.addEventListener('change', (e) => {
+      const newName = e.target.value.trim();
+      const oldName = e.target.dataset.oldcat;
+      if (newName && newName !== oldName) {
+        if (editorMenuState[newName]) {
+          alert('Ya existe una categoría con este nombre.');
+          e.target.value = oldName;
+          return;
+        }
+        editorMenuState[newName] = editorMenuState[oldName];
+        delete editorMenuState[oldName];
+        renderMenuEditor();
+      }
+    });
+
+    const dishesContainer = catCard.querySelector('.menu-editor-dishes');
+    dishes.forEach((dish, dishIndex) => {
+      const dishRow = document.createElement('div');
+      dishRow.className = 'menu-editor-dish-row';
+      dishRow.innerHTML = `
+        <div class="dish-inputs">
+          <input type="text" placeholder="Nombre del plato" value="${dish.name.replace(/"/g, '&quot;')}" onchange="updateMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex}, 'name', this.value)">
+          <input type="text" placeholder="Precio (Sin $)" value="${dish.price}" onchange="updateMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex}, 'price', this.value)">
+          <input type="text" placeholder="Descripción (Opcional)" value="${(dish.description || '').replace(/"/g, '&quot;')}" onchange="updateMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex}, 'description', this.value)">
+        </div>
+        <button class="btn-del-dish" onclick="removeMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex})">✕</button>
+      `;
+      dishesContainer.appendChild(dishRow);
+    });
+  });
+}
+
+function addMenuEditorCategory() {
+  const name = prompt("Nombre de la nueva categoría:");
+  if (!name) return;
+  const cleanName = name.trim();
+  if (editorMenuState[cleanName]) {
+    alert("Esta categoría ya existe.");
+    return;
+  }
+  editorMenuState[cleanName] = [];
+  renderMenuEditor();
+}
+
+function removeMenuEditorCategory(catName) {
+  if (confirm(`¿Eliminar la categoría "${catName}" y todos sus platos?`)) {
+    delete editorMenuState[catName];
+    renderMenuEditor();
+  }
+}
+
+function addMenuEditorDish(catName) {
+  editorMenuState[catName].push({ name: '', price: '', description: '' });
+  renderMenuEditor();
+}
+
+function removeMenuEditorDish(catName, dishIndex) {
+  editorMenuState[catName].splice(dishIndex, 1);
+  renderMenuEditor();
+}
+
+function updateMenuEditorDish(catName, dishIndex, field, value) {
+  editorMenuState[catName][dishIndex][field] = value;
+}
+
+async function saveMenuEditor() {
+  const finalMenu = {};
+  let hasError = false;
+  let errorMsg = '';
+
+  // Validaciones
+  for (const cat of Object.keys(editorMenuState)) {
+    finalMenu[cat] = [];
+    for (const dish of editorMenuState[cat]) {
+      const name = dish.name.trim();
+      let price = dish.price.toString().trim();
+      
+      if (!name) continue; // Ignorar platos vacíos
+
+      // 🛡️ VALIDACIÓN CRÍTICA: Impedir signos extraños en el precio
+      if (price.includes('$') || /[a-zA-Z]/.test(price)) {
+        hasError = true;
+        errorMsg = `El precio del plato "${name}" contiene signos $ o letras. Solo usa números (ej: 45000).`;
+        break;
+      }
+      
+      const numPrice = parseFloat(price);
+      if (isNaN(numPrice) || numPrice < 0) {
+        hasError = true;
+        errorMsg = `El precio del plato "${name}" es inválido.`;
+        break;
+      }
+
+      finalMenu[cat].push({
+        name: name,
+        price: numPrice,
+        description: dish.description.trim()
+      });
+    }
+    if (hasError) break;
+  }
+
+  if (hasError) {
+    alert("⚠️ Error de formato:\n\n" + errorMsg);
+    return;
+  }
+
+  const btn = document.getElementById('btn-save-menu-editor');
+  btn.textContent = 'Guardando...';
+  btn.disabled = true;
+
+  try {
+    const r = await fetch('/api/menu/update', {
+      method: 'PUT',
+      headers: { ...window._dashHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu: finalMenu })
+    });
+    
+    if (r.ok) {
+      alert("✅ Carta actualizada exitosamente en la Casa Matriz.\n\nPara propagar estos cambios a tus demás locales, cierra este editor y haz clic en 'Sincronizar a Sucursales'.");
+      closeMenuEditor();
+      loadMenu(); // Refrescar vista
+    } else {
+      const e = await r.json();
+      alert("Error al guardar: " + (e.detail || 'Fallo desconocido.'));
+    }
+  } catch(e) {
+    alert("Error de conexión al guardar.");
+  } finally {
+    btn.textContent = 'Guardar Cambios';
     btn.disabled = false;
   }
 }

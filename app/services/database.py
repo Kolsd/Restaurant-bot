@@ -539,7 +539,17 @@ async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
         except:
             count = 0
             
-        return count        
+        return count
+
+async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
+    """Sobrescribe el JSON del menú para un restaurante específico."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE restaurants SET menu = $1::jsonb, updated_at = NOW() WHERE id = $2",
+            json.dumps(menu_data), restaurant_id
+        )
+        return result == "UPDATE 1"
 
 # ── OFFLINE SYNC BATCH ───────────────────────────────────────────────
 # Dispatch table for POST /api/sync operations.
