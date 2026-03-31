@@ -286,7 +286,7 @@ async def get_menu_availability(request: Request):
     restaurant = await get_current_restaurant(request)
     branch_header = request.headers.get("X-Branch-ID")
     
-    # 🛡️ FIX: Leer contexto de sucursal o matriz
+    # FIX: Leer contexto de sucursal o matriz
     restaurant_id = user.get("branch_id") or restaurant["id"]
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         restaurant_id = int(branch_header)
@@ -297,13 +297,14 @@ async def get_menu_availability(request: Request):
 async def set_dish_availability(request: Request):
     await require_auth(request)
     body = await request.json()
-    if not body.get("dish_name"): raise HTTPException(status_code=400, detail="dish_name requerido")
+    if not body.get("dish_name"):
+        raise HTTPException(status_code=400, detail="dish_name requerido")
     
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     branch_header = request.headers.get("X-Branch-ID")
     
-    # 🛡️ FIX: Leer contexto de sucursal o matriz
+    # FIX: Leer contexto de sucursal o matriz
     restaurant_id = user.get("branch_id") or restaurant["id"]
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         restaurant_id = int(branch_header)
