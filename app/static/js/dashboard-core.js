@@ -695,7 +695,7 @@ window.loadGlobalBranches = async function() {
   } catch(e) { console.error('Error cargando sucursales globales', e); }
 };
 
-window.changeGlobalBranch = function() {
+window.changeGlobalBranch = function() { 
   const select = document.getElementById('global-branch-select');
   const val = select ? select.value : '';
 
@@ -720,8 +720,18 @@ window.changeGlobalBranch = function() {
       delete window._dashHeaders['X-Branch-ID'];
   }
   
-  // 🛡️ AQUÍ ESTÁ LA MAGIA: Guardamos en memoria para settings.html
   sessionStorage.setItem('rb_active_branch_id', val);
+
+  const btnSyncMenu = document.getElementById('btn-sync-menu');
+  if (btnSyncMenu) {
+      // Solo mostramos el botón si es Owner y está en 'matriz' o no ha seleccionado sucursal (por defecto)
+      const role = localStorage.getItem('rb_role') || '';
+      if (role.includes('owner') && (!val || val === 'matriz')) {
+          btnSyncMenu.style.display = '';
+      } else {
+          btnSyncMenu.style.display = 'none';
+      }
+  }
   
   refreshAll();
   if(typeof loadMenu === 'function') loadMenu();

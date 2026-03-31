@@ -220,7 +220,14 @@
 
     <!-- Panel: Disponibilidad del menú -->
     <div id="menu-panel-disp">
-      <div class="card"><div class="card-title">Platos del menú (Disponibilidad)</div><div id="menu-grid"></div></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:18px;font-weight:600;">Menú y Disponibilidad</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">Activa o desactiva platos. Apagar un plato aquí no afecta el stock del inventario.</div>
+        </div>
+        <button id="btn-sync-menu" onclick="syncMenuToBranches()" style="display:none;background:#378ADD;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">🔄 Sincronizar a Sucursales</button>
+      </div>
+      <div class="card"><div id="menu-grid"></div></div>
     </div>
 
     <!-- Panel: Inventario -->
