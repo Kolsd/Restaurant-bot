@@ -266,20 +266,53 @@ async def dashboard_chart(request: Request, period: str = Query("week")):
 
 @router.get("/api/dashboard/menu")
 async def dashboard_menu(request: Request):
+    user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    return {"menu": await db.db_get_menu(restaurant["whatsapp_number"]) or {}}
+    bot_number = restaurant.get("whatsapp_number", "")
+    
+    branch_header = request.headers.get("X-Branch-ID")
+        if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        branch_id = int(branch_header)
+        branch_rest = await db.db_get_restaurant_by_id(branch_id)
+        if branch_rest and branch_rest.get("whatsapp_number"):
+            bot_number = branch_rest["whatsapp_number"]
+            
+    return {"menu": await db.db_get_menu(bot_number) or {}}
 
 @router.get("/api/menu/availability")
 async def get_menu_availability(request: Request):
     await require_auth(request)
-    return {"availability": await db.db_get_menu_availability()}
+    user = await get_current_user(request)
+    restaurant = await get_current_restaurant(request)
+    branch_header = request.headers.get("X-Branch-ID")
+    
+    # 🛡️ FIX: Leer contexto de sucursal o matriz
+    restaurant_id = user.get("branch_id") or restaurant["id"]
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        restaurant_id = int(branch_header)
+        
+    return {"availability": await db.db_get_menu_availability(restaurant_id)}
 
 @router.post("/api/menu/availability")
 async def set_dish_availability(request: Request):
     await require_auth(request)
     body = await request.json()
     if not body.get("dish_name"): raise HTTPException(status_code=400, detail="dish_name requerido")
-    await db.db_set_dish_availability(body["dish_name"], body.get("available", True))
+    
+    user = await get_current_user(request)
+    restaurant = await get_current_restaurant(request)
+    branch_header = request.headers.get("X-Branch-ID")
+    
+    # 🛡️ FIX: Leer contexto de sucursal o matriz
+    restaurant_id = user.get("branch_id") or restaurant["id"]
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+        restaurant_id = int(branch_header)
+        
+    await db.db_set_dish_availability(
+        restaurant_id=restaurant_id,
+        dish_name=body["dish_name"], 
+        available=body.get("available", True)
+    )
     return {"success": True, "dish_name": body["dish_name"], "available": body.get("available", True)}
 
 @router.delete("/api/conversations/cleanup")
