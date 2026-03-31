@@ -29,7 +29,6 @@ def get_date_range(period: str, tz_str: str):
 
 async def filter_conversations_for_branch(conversations: list, branch_id: int | str, bot_number: str) -> list:
     """Si el usuario es de una sucursal, solo muestra los chats de sus mesas."""
-    # 🛡️ Si es "all" o None (matriz), no filtramos nada y devolvemos la lista completa
     if not branch_id or branch_id == "all" or not conversations:
         return conversations
     
@@ -54,9 +53,6 @@ async def _get_effective_bot_number(restaurant: dict) -> str:
             return parent["whatsapp_number"]
     return restaurant.get("whatsapp_number", "")
 
-# =====================================================================
-# ENDPOINT MAESTRO (SYNC)
-# =====================================================================
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | str | None:
     branch_header = request.headers.get("X-Branch-ID")
     is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
@@ -75,7 +71,7 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period, get_tz(restaurant))
-    branch_id = _resolve_branch_id(user, restaurant)
+    branch_id = _resolve_branch_id(request, user, restaurant)
     effective_bot = await _get_effective_bot_number(restaurant)
 
     orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
@@ -150,11 +146,6 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
         "conversations": conversations
     }
 
-
-# =====================================================================
-# ENDPOINTS INDIVIDUALES
-# =====================================================================
-
 @router.get("/api/dashboard/stats")
 async def dashboard_stats(request: Request, period: str = Query("today")):
     user = await get_current_user(request)
@@ -173,7 +164,7 @@ async def dashboard_stats(request: Request, period: str = Query("today")):
         date_from=date_from,
         date_to=date_to
     )
-    conversations = await filter_conversations_for_branch(all_convs, _resolve_branch_id(user, restaurant), effective_bot)
+    conversations = await filter_conversations_for_branch(all_convs, _resolve_branch_id(request, user, restaurant), effective_bot)
 
     return {
         "period": period, "date_from": date_from, "date_to": date_to,
@@ -223,17 +214,14 @@ async def get_conversations(request: Request):
     
     bot_number = restaurant.get("whatsapp_number", "")
     
-    # 🛡️ 1. Detectar si es matriz o gerente
     is_main = restaurant.get("parent_restaurant_id") is None
     branch_id = None if is_main else restaurant["id"]
     
-    # 🛡️ 2. Leer el selector del Topbar (Igual que en las mesas)
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and any(r in user.get("role", "") for r in ["owner", "admin"]):
         branch_id = int(branch_header)
         is_main = False
 
-    # 3. Llamamos a la base de datos pasando el branch_id
     conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
     
     return {"conversations": conversations}
@@ -271,7 +259,8 @@ async def dashboard_menu(request: Request):
     bot_number = restaurant.get("whatsapp_number", "")
     
     branch_header = request.headers.get("X-Branch-ID")
-        if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+    
+    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
         branch_rest = await db.db_get_restaurant_by_id(branch_id)
         if branch_rest and branch_rest.get("whatsapp_number"):
@@ -286,7 +275,6 @@ async def get_menu_availability(request: Request):
     restaurant = await get_current_restaurant(request)
     branch_header = request.headers.get("X-Branch-ID")
     
-    # FIX: Leer contexto de sucursal o matriz
     restaurant_id = user.get("branch_id") or restaurant["id"]
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         restaurant_id = int(branch_header)
@@ -297,14 +285,12 @@ async def get_menu_availability(request: Request):
 async def set_dish_availability(request: Request):
     await require_auth(request)
     body = await request.json()
-    if not body.get("dish_name"):
-        raise HTTPException(status_code=400, detail="dish_name requerido")
+    if not body.get("dish_name"): raise HTTPException(status_code=400, detail="dish_name requerido")
     
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     branch_header = request.headers.get("X-Branch-ID")
     
-    # FIX: Leer contexto de sucursal o matriz
     restaurant_id = user.get("branch_id") or restaurant["id"]
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         restaurant_id = int(branch_header)
