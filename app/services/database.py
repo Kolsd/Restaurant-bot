@@ -503,13 +503,14 @@ async def db_create_restaurant(name: str, whatsapp_number: str, address: str, me
     if features is None: features = {}
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # 🛡️ FIX: Los diccionarios entran directo a asyncpg (sin json.dumps)
         await conn.execute("""
             INSERT INTO restaurants (name, whatsapp_number, address, menu, latitude, longitude, features)
             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
             ON CONFLICT (whatsapp_number) DO UPDATE
             SET name=EXCLUDED.name, address=EXCLUDED.address, menu=EXCLUDED.menu,
                 latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, features=EXCLUDED.features
-        """, name, whatsapp_number, address, json.dumps(menu), latitude, longitude, json.dumps(features))
+        """, name, whatsapp_number, address, menu, latitude, longitude, features)
 
 # ── OFFLINE SYNC BATCH ───────────────────────────────────────────────
 # Dispatch table for POST /api/sync operations.
@@ -602,9 +603,9 @@ async def db_sync_batch(restaurant_id: int, operations: list) -> list:
 
 
 async def db_get_menu(whatsapp_number: str):
+    import json
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # 🛡️ FIX: Leemos ambos menús (sucursal y padre)
         row = await conn.fetchrow("""
             SELECT 
                 r.menu, 
@@ -619,12 +620,20 @@ async def db_get_menu(whatsapp_number: str):
             
         menu_data = row['menu']
         
-        # 🛡️ Si la sucursal tiene su menú vacío, hereda el del padre temporalmente
         if (not menu_data or menu_data == '{}' or menu_data == "{}") and row['parent_menu']:
             menu_data = row['parent_menu']
             
+        # 🛡️ AUTO-SANADOR: Repara cadenas doblemente codificadas al vuelo
         if menu_data:
-            return menu_data if isinstance(menu_data, dict) else json.loads(menu_data)
+            if isinstance(menu_data, str):
+                try:
+                    parsed = json.loads(menu_data)
+                    if isinstance(parsed, str):
+                        parsed = json.loads(parsed)
+                    return parsed
+                except:
+                    return {}
+            return menu_data
         return {}
 
 async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):

@@ -149,11 +149,12 @@ async def catalog_page():
 
 @router.get("/api/public/menu/{bot_number}")
 async def get_public_menu(bot_number: str):
+    import json
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         rest = await conn.fetchrow("""
             SELECT 
-                r.id AS restaurant_id,  -- 🛡️ NUEVO
+                r.id AS restaurant_id,
                 r.name, 
                 r.menu, 
                 p.menu AS parent_menu,
@@ -163,31 +164,40 @@ async def get_public_menu(bot_number: str):
             LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
             WHERE r.whatsapp_number = $1
         """, bot_number)
-
+        
         if not rest:
             raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
-        # 🛡️ FIX: Fallback inteligente del Menú
+        # 🛡️ FALLBACK INTELIGENTE CON AUTO-SANADOR PARA MENÚ
         menu_data = rest["menu"]
         if (not menu_data or menu_data == '{}' or menu_data == "{}") and rest["parent_menu"]:
             menu_data = rest["parent_menu"]
 
         if isinstance(menu_data, str):
-            try: menu_data = json.loads(menu_data)
+            try: 
+                menu_data = json.loads(menu_data)
+                if isinstance(menu_data, str): 
+                    menu_data = json.loads(menu_data)
             except: menu_data = {}
+        elif not menu_data:
+            menu_data = {}
 
+        # 🛡️ FALLBACK INTELIGENTE CON AUTO-SANADOR PARA FEATURES
         features = rest["features"]
         if (not features or features == '{}' or features == "{}") and rest["parent_features"]:
             features = rest["parent_features"]
             
         if isinstance(features, str):
-            try: features = json.loads(features)
+            try: 
+                features = json.loads(features)
+                if isinstance(features, str): 
+                    features = json.loads(features)
             except: features = {}
-        elif features is None:
+        elif not features:
             features = {}
 
         inv_rows = await conn.fetch(
-            "SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1", 
+            "SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1",
             rest["restaurant_id"]
         )
         availability = {r["dish_name"]: r["available"] for r in inv_rows}
@@ -511,6 +521,7 @@ async def list_team_branches(request: Request):
 @router.post("/api/team/branches")
 async def create_branch(request: Request, body: CreateBranchRequest):
     import time
+    import json
     user = await get_current_user(request)
     if "owner" not in user.get("role", "owner"): 
         raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
@@ -523,8 +534,6 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     wa_number = body.whatsapp_number.strip()
     
     async with pool.acquire() as conn:
-        # 🛡️ 1. Obtenemos TODOS los datos vitales de la Casa Matriz
-        # (Incluyendo las credenciales de Meta API)
         matriz_row = await conn.fetchrow(
             "SELECT whatsapp_number, menu, features, wa_phone_id, wa_access_token FROM restaurants WHERE id = $1", 
             my_restaurant_id
@@ -534,18 +543,26 @@ async def create_branch(request: Request, body: CreateBranchRequest):
             raise HTTPException(status_code=404, detail="No se encontró la Casa Matriz.")
 
         if not wa_number:
-            # 🛡️ EXPLICACIÓN DEL SUFIJO: 
-            # Se necesita obligatoriamente para que Postgres no sobreescriba la Casa Matriz,
-            # ya que la columna whatsapp_number tiene un ON CONFLICT UNIQUE.
             wa_number = f"{matriz_row['whatsapp_number']}_b{int(time.time())}"
         
-        menu_heredado = matriz_row['menu'] or {}
-        features_heredado = matriz_row['features'] or {}
+        # 🛡️ AUTO-SANADOR AL HEREDAR: Evita arrastrar el error de doble JSON
+        menu_heredado = matriz_row['menu']
+        if isinstance(menu_heredado, str):
+            try: 
+                menu_heredado = json.loads(menu_heredado)
+                if isinstance(menu_heredado, str): menu_heredado = json.loads(menu_heredado)
+            except: menu_heredado = {}
+        elif not menu_heredado:
+            menu_heredado = {}
         
+        features_heredado = matriz_row['features']
         if isinstance(features_heredado, str):
-            import json
-            try: features_heredado = json.loads(features_heredado)
+            try: 
+                features_heredado = json.loads(features_heredado)
+                if isinstance(features_heredado, str): features_heredado = json.loads(features_heredado)
             except: features_heredado = {}
+        elif not features_heredado:
+            features_heredado = {}
 
     lat = body.latitude
     lon = body.longitude
@@ -554,7 +571,7 @@ async def create_branch(request: Request, body: CreateBranchRequest):
     if lat is None or lon is None:
         lat, lon, display = await geocode_address(body.address)
     
-    # 🛡️ 2. Creamos la sucursal inyectándole menú, features y coordenadas
+    # Se envía el diccionario directo, sin json.dumps()
     await db.db_create_restaurant(
         name=body.name, 
         whatsapp_number=wa_number, 
@@ -565,7 +582,6 @@ async def create_branch(request: Request, body: CreateBranchRequest):
         features=features_heredado
     )
     
-    # 🛡️ 3. Vinculación jerárquica y herencia de credenciales de Meta
     async with pool.acquire() as conn:
         await conn.execute("""
             UPDATE restaurants 
@@ -581,7 +597,7 @@ async def create_branch(request: Request, body: CreateBranchRequest):
         )
             
     return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
-        
+
 _STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "otro"}
 
 
@@ -784,9 +800,11 @@ async def admin_get_restaurant_detail(restaurant_id: int, admin_key: str):
 
 @router.post("/api/admin/update-restaurant")
 async def admin_update_restaurant(request: UpdateRestaurantRequest):
+    import json
     if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
     rest = await db.db_get_restaurant_by_id(request.restaurant_id)
     if not rest: raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         if request.name is not None:
@@ -804,16 +822,22 @@ async def admin_update_restaurant(request: UpdateRestaurantRequest):
         if request.features is not None:
             raw = rest.get("features") or {}
             current = json.loads(raw) if isinstance(raw, str) else dict(raw)
+            # Limpiamos si el features actual estaba doblemente codificado
+            if isinstance(current, str):
+                try: current = json.loads(current)
+                except: current = {}
             current.update(request.features)
+            # 🛡️ FIX: Se quita json.dumps()
             await conn.execute("UPDATE restaurants SET features=$1::jsonb WHERE id=$2",
-                               json.dumps(current), request.restaurant_id)
+                               current, request.restaurant_id)
         if request.menu is not None:
             try: menu_dict = json.loads(request.menu)
             except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
+            # 🛡️ FIX: Se quita json.dumps()
             await conn.execute("UPDATE restaurants SET menu=$1::jsonb WHERE id=$2",
-                               json.dumps(menu_dict), request.restaurant_id)
+                               menu_dict, request.restaurant_id)
     return {"success": True, "restaurant": await db.db_get_restaurant_by_id(request.restaurant_id)}
-
+    
 @router.get("/api/admin/billing-stats")
 async def admin_billing_stats(admin_key: str):
     if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
