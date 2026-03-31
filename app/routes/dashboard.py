@@ -151,16 +151,35 @@ async def catalog_page():
 async def get_public_menu(bot_number: str):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        rest = await conn.fetchrow("SELECT name, menu, features FROM restaurants WHERE whatsapp_number = $1", bot_number)
+        rest = await conn.fetchrow("""
+            SELECT 
+                r.id AS restaurant_id,  -- 🛡️ NUEVO
+                r.name, 
+                r.menu, 
+                p.menu AS parent_menu,
+                r.features,
+                p.features AS parent_features
+            FROM restaurants r
+            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
+            WHERE r.whatsapp_number = $1
+        """, bot_number)
+
         if not rest:
             raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
+        # 🛡️ FIX: Fallback inteligente del Menú
         menu_data = rest["menu"]
+        if (not menu_data or menu_data == '{}' or menu_data == "{}") and rest["parent_menu"]:
+            menu_data = rest["parent_menu"]
+
         if isinstance(menu_data, str):
             try: menu_data = json.loads(menu_data)
             except: menu_data = {}
 
         features = rest["features"]
+        if (not features or features == '{}' or features == "{}") and rest["parent_features"]:
+            features = rest["parent_features"]
+            
         if isinstance(features, str):
             try: features = json.loads(features)
             except: features = {}
@@ -168,7 +187,8 @@ async def get_public_menu(bot_number: str):
             features = {}
 
         inv_rows = await conn.fetch(
-            "SELECT dish_name, available FROM menu_availability"
+            "SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1", 
+            rest["restaurant_id"]
         )
         availability = {r["dish_name"]: r["available"] for r in inv_rows}
 
@@ -180,7 +200,7 @@ async def get_public_menu(bot_number: str):
             "locale": features.get("locale", "en-US"),
             "currency": features.get("currency", "USD")
         }
-        
+
 @router.get("/privacidad", response_class=HTMLResponse)
 async def privacidad_page(): 
     return (STATIC / "html" / "privacidad.html").read_text(encoding="utf-8")
