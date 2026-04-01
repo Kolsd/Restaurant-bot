@@ -560,11 +560,23 @@ async function cobrarTodo(billId) {
   const items = Object.values(byName);
 
   const taxPct = _billingConfig?.tax_percentage ?? 19.0;
+  
+  // 🛡️ FIX: Calculamos los totales exactos antes de enviarlos al backend
+  const total = items.reduce((sum, i) => sum + (i.unit_price * i.qty), 0);
+  const subtotal = taxPct > 0 ? total / (1 + taxPct / 100) : total;
+  const tax_amount = total - subtotal;
+
   try {
     const r = await fetch(`/api/table-orders/${billId}/checks`, {
       method: 'POST', headers: reqHeaders,
       body: JSON.stringify({
-        checks: [{ check_number: 1, items }],
+        checks: [{ 
+          check_number: 1, 
+          items: items,
+          subtotal: subtotal,
+          tax_amount: tax_amount,
+          total: total
+        }],
         tax_pct: taxPct,
         tax_regime: _billingConfig?.tax_regime ?? 'iva'
       })
@@ -573,7 +585,10 @@ async function cobrarTodo(billId) {
     const { checks } = await r.json();
     const check = checks[0];
     openPayModal(billId, check.id, check);
-  } catch(e) { alert('Error de conexión con el servidor.'); }
+  } catch(e) { 
+    alert('Error de conexión con el servidor.\n' + e.message); 
+    console.error(e);
+  }
 }
 
 function openSplitModal(billId) {
@@ -700,12 +715,30 @@ async function submitSplit() {
   const checks = [];
   for (let c = 1; c <= n; c++) {
     const checkItems = [];
+    let checkTotal = 0; // 🛡️ FIX: Variable para sumar el total de esta división
+    
     items.forEach((item, idx) => {
       const el = document.getElementById(`sq-${idx}-${c}`);
       const qty = parseInt(el?.value || '0') || 0;
-      if (qty > 0) checkItems.push({ name: item.name, qty, unit_price: item.unit_price });
+      if (qty > 0) {
+        checkItems.push({ name: item.name, qty, unit_price: item.unit_price });
+        checkTotal += (item.unit_price * qty);
+      }
     });
-    if (checkItems.length > 0) checks.push({ check_number: c, items: checkItems });
+    
+    if (checkItems.length > 0) {
+      // 🛡️ FIX: Calculamos los impuestos por cada cuenta dividida
+      const sub = taxPct > 0 ? checkTotal / (1 + taxPct / 100) : checkTotal;
+      const tax = checkTotal - sub;
+      
+      checks.push({ 
+        check_number: c, 
+        items: checkItems,
+        subtotal: sub,
+        tax_amount: tax,
+        total: checkTotal
+      });
+    }
   }
 
   const btn = document.getElementById('btn-create-split');
@@ -714,8 +747,7 @@ async function submitSplit() {
   try {
     const r = await fetch(`/api/table-orders/${_splitBillId}/checks`, {
       method: 'POST', headers: reqHeaders,
-      body: JSON.stringify({ checks, tax_pct: taxPct,
-                             tax_regime: _billingConfig?.tax_regime ?? 'iva' })
+      body: JSON.stringify({ checks, tax_pct: taxPct, tax_regime: _billingConfig?.tax_regime ?? 'iva' })
     });
     if (!r.ok) {
       const e = await r.json();
@@ -727,8 +759,9 @@ async function submitSplit() {
     _splitChecks = createdChecks;
     _showSplitPhase2();
   } catch(e) {
-    alert('Error de conexión');
+    alert('Error de conexión.\n' + e.message);
     btn.textContent = 'Crear División'; btn.disabled = false;
+    console.error(e);
   }
 }
 
