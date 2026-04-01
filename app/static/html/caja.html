@@ -1335,20 +1335,19 @@ async function processPayment() {
 
   const fb = document.getElementById('pay-feedback');
   if (!valid || payments.length === 0) {
-    fb.style.display = 'block';
     fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
     fb.textContent = 'Completa al menos un método de pago con monto válido.';
     return;
   }
   if (received < _payCheckTotal) {
-    fb.style.display = 'block';
     fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
     fb.textContent = `Pago insuficiente: faltan ${fmt(_payCheckTotal - received)}.`;
     return;
   }
 
   const btn = document.getElementById('btn-process-pay');
-  btn.textContent = 'Procesando...'; btn.disabled = true;
+  btn.textContent = 'Procesando...'; 
+  btn.disabled = true;
   fb.style.display = 'none';
 
   const body = {
@@ -1360,15 +1359,25 @@ async function processPayment() {
 
   try {
     const r = await fetch(`/api/table-orders/${_payBillId}/checks/${_payCheckId}/pay`, {
-      method: 'POST', headers: reqHeaders, body: JSON.stringify(body)
+      method: 'POST', 
+      headers: reqHeaders, 
+      body: JSON.stringify(body)
     });
-    const data = await r.json();
+    
+    // 🛡️ FIX: Validar si la respuesta es JSON antes de parsear
+    const textResponse = await r.text();
+    let data;
+    try {
+        data = JSON.parse(textResponse);
+    } catch(err) {
+        throw new Error(`El servidor no devolvió JSON. Status: ${r.status}. Respuesta: ${textResponse.substring(0, 50)}...`);
+    }
+
     if (r.ok) {
       fb.style.cssText = 'display:block;background:#ECFDF5;color:#059669;border-radius:8px;padding:8px 12px;font-size:13px;';
       const change = data.change || 0;
       fb.textContent = `✅ Pago registrado. CUFE: ${(data.fiscal?.cufe||'').slice(0,16)}...${change > 0 ? ` Cambio: ${fmt(change)}` : ''}`;
 
-      // Auto-print the invoice
       try {
         const ticketResp = await fetch(`/api/table-orders/${_payBillId}/checks/${_payCheckId}/ticket`, { headers: reqHeaders });
         if (ticketResp.ok) {
@@ -1387,12 +1396,16 @@ async function processPayment() {
     } else {
       fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
       fb.textContent = data.detail || 'Error al procesar el pago.';
-      btn.textContent = 'Procesar Pago y Emitir Factura'; btn.disabled = false;
+      btn.textContent = 'Cobrar e Imprimir Factura'; 
+      btn.disabled = false;
     }
   } catch(e) {
+    // 🕵️‍♂️ AQUÍ ATRAPAMOS AL VERDADERO CULPABLE
+    console.error("Error crítico en processPayment:", e);
     fb.style.cssText = 'display:block;background:#FEF2F2;color:#EF4444;border-radius:8px;padding:8px 12px;font-size:13px;';
-    fb.textContent = 'Error de conexión.';
-    btn.textContent = 'Procesar Pago y Emitir Factura'; btn.disabled = false;
+    fb.textContent = `Error JS/Red: ${e.message}`;
+    btn.textContent = 'Cobrar e Imprimir Factura'; 
+    btn.disabled = false;
   }
 }
 
