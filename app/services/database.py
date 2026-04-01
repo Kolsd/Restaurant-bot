@@ -546,8 +546,8 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
-            "UPDATE restaurants SET menu = $1::jsonb, updated_at = NOW() WHERE id = $2",
-            json.dumps(menu_data), restaurant_id
+            "UPDATE restaurants SET menu = $1::jsonb WHERE id = $2",
+            menu_data, restaurant_id
         )
         return result == "UPDATE 1"
 
