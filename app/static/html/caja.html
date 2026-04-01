@@ -929,6 +929,8 @@ let _splitChecks   = [];     // check objects del servidor (fase 2)
 let _payBillId     = null;
 let _payCheckId    = null;
 let _payCheckTotal = 0;
+let _payCheckData  = null;
+let _activePayments = [];
 let _billingConfig = null;
 
 // Carga la config de billing para obtener tax_pct
@@ -1634,6 +1636,7 @@ async function sendManualReply() {
 }
 
 // Iniciar polling (solo recargamos chats si estamos en esa pestaña)
+loadBillingConfig();
 loadCajaOrders();
 loadDomicilios();
 
