@@ -6,7 +6,7 @@
 // ── MENÚ ─────────────────────────────────────────────────────────────
 let menuAvailability = {};
 let MENU_ITEMS = [];
-const CAT_ICONS = { 'Entradas':'🥗','Pastas':'🍝','Pizzas':'🍕','Postres':'🍮','Bebidas':'🥤','Extras':'🫙','default':'🍽️' };
+const icon  = CAT_ICONS[cat] || CAT_ICONS['default'];
 
 async function loadMenu() {
   const h = window._dashHeaders;
@@ -20,12 +20,19 @@ async function loadMenu() {
       const menu = (await rMenu.json()).menu || {};
       MENU_ITEMS = [];
       Object.entries(menu).forEach(([cat, dishes]) => {
-        if (Array.isArray(dishes)) dishes.forEach(d => MENU_ITEMS.push({ name:d.name||'', cat, price:d.price?'$'+d.price:'$0' }));
+        if (Array.isArray(dishes)) {
+          dishes.forEach(d => MENU_ITEMS.push({ 
+            name: d.name || '', 
+            cat: cat, 
+            price: d.price ? '$'+d.price : '$0',
+            desc: d.description || '' // 🛡️ FIX: Recuperar descripción
+          }));
+        }
       });
     }
   } catch(e) { console.error('loadMenu:', e); }
-  renderMenu();
-
+  
+  // Lógica de visibilidad de botones exclusivos de Matriz
   const role = localStorage.getItem('rb_role') || '';
   const branchVal = window._dashHeaders['X-Branch-ID'];
   const isMatriz = (!branchVal || branchVal === 'matriz');
@@ -36,6 +43,7 @@ async function loadMenu() {
   if (btnEdit) btnEdit.style.display = (role.includes('owner') && isMatriz) ? '' : 'none';
   if (btnSync) btnSync.style.display = (role.includes('owner') && isMatriz) ? '' : 'none';
 
+  renderMenu();
 }
 
 function renderMenu() {
@@ -120,85 +128,86 @@ async function syncMenuToBranches() {
 }
 
 // ── EDITOR DE MENÚ ──
-let editorMenuState = {};
+
+let editorMenuState = []; // 🛡️ FIX: Ahora es un Array para evitar errores de comillas en HTML
 
 function openMenuEditor() {
-  // Clonar el menú actual de la matriz basándonos en la vista
-  editorMenuState = {};
-  
-  // Reconstruir desde MENU_ITEMS para tener la estructura limpia
+  editorMenuState = [];
+  const catMap = {};
+
+  // Agrupar platos por categoría
   MENU_ITEMS.forEach(m => {
-    if (!editorMenuState[m.cat]) editorMenuState[m.cat] = [];
-    editorMenuState[m.cat].push({ 
-      name: m.name, 
-      price: m.price.replace(/[^0-9.-]+/g,""), // Extraer solo el número
-      description: m.desc || '' 
+    if (!catMap[m.cat]) {
+      catMap[m.cat] = [];
+      editorMenuState.push({ catName: m.cat, dishes: catMap[m.cat] });
+    }
+    catMap[m.cat].push({
+      name: m.name,
+      price: String(m.price).replace(/[^0-9.-]+/g,""),
+      description: m.desc || ''
     });
   });
 
   renderMenuEditor();
   document.getElementById('modal-menu-editor').style.display = 'flex';
+  document.body.style.overflow = 'hidden'; // 🛡️ FIX: Permite deslizar el modal sin mover el fondo
 }
 
 function closeMenuEditor() {
   document.getElementById('modal-menu-editor').style.display = 'none';
+  document.body.style.overflow = '';
 }
 
 function renderMenuEditor() {
   const canvas = document.getElementById('menu-editor-canvas');
   canvas.innerHTML = '';
 
-  if (Object.keys(editorMenuState).length === 0) {
+  if (editorMenuState.length === 0) {
     canvas.innerHTML = '<div class="empty-state">Tu carta está vacía. Añade una categoría para comenzar.</div>';
     return;
   }
 
-  Object.entries(editorMenuState).forEach(([catName, dishes], catIndex) => {
+  editorMenuState.forEach((catObj, catIndex) => {
     const catCard = document.createElement('div');
     catCard.className = 'menu-editor-cat-card';
     
-    // Header Categoría
+    // Convertir comillas para que el input no se rompa visualmente
+    const safeCatName = catObj.catName.replace(/"/g, '&quot;');
+
     catCard.innerHTML = `
       <div class="menu-editor-cat-header">
-        <input type="text" class="menu-editor-cat-input" value="${catName.replace(/"/g, '&quot;')}" placeholder="Nombre de categoría (Ej: Platos Fuertes)" data-oldcat="${catName.replace(/"/g, '&quot;')}">
-        <button class="btn-del-cat" onclick="removeMenuEditorCategory('${catName.replace(/'/g, "\\'")}')" title="Eliminar Categoría entera">🗑️</button>
+        <input type="text" class="menu-editor-cat-input" value="${safeCatName}" placeholder="Nombre de categoría">
+        <button class="btn-del-cat" onclick="removeMenuEditorCategory(${catIndex})" title="Eliminar Categoría">🗑️</button>
       </div>
       <div class="menu-editor-dishes" id="editor-dishes-${catIndex}"></div>
       <div class="menu-editor-cat-footer">
-        <button onclick="addMenuEditorDish('${catName.replace(/'/g, "\\'")}')">+ Añadir Plato</button>
+        <button onclick="addMenuEditorDish(${catIndex})">+ Añadir Plato</button>
       </div>
     `;
     
     canvas.appendChild(catCard);
 
-    // Evitar que el input pierda focus si el usuario cambia el nombre
+    // Guardar nombre de categoría en tiempo real
     const catInput = catCard.querySelector('.menu-editor-cat-input');
     catInput.addEventListener('change', (e) => {
-      const newName = e.target.value.trim();
-      const oldName = e.target.dataset.oldcat;
-      if (newName && newName !== oldName) {
-        if (editorMenuState[newName]) {
-          alert('Ya existe una categoría con este nombre.');
-          e.target.value = oldName;
-          return;
-        }
-        editorMenuState[newName] = editorMenuState[oldName];
-        delete editorMenuState[oldName];
-        renderMenuEditor();
-      }
+      editorMenuState[catIndex].catName = e.target.value.trim() || 'Sin Nombre';
     });
 
     const dishesContainer = catCard.querySelector('.menu-editor-dishes');
-    dishes.forEach((dish, dishIndex) => {
+    catObj.dishes.forEach((dish, dishIndex) => {
       const dishRow = document.createElement('div');
       dishRow.className = 'menu-editor-dish-row';
+      
+      const safeDishName = dish.name.replace(/"/g, '&quot;');
+      const safeDishDesc = (dish.description || '').replace(/"/g, '&quot;');
+
       dishRow.innerHTML = `
         <div class="dish-inputs">
-          <input type="text" placeholder="Nombre del plato" value="${dish.name.replace(/"/g, '&quot;')}" onchange="updateMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex}, 'name', this.value)">
-          <input type="text" placeholder="Precio (Sin $)" value="${dish.price}" onchange="updateMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex}, 'price', this.value)">
-          <input type="text" placeholder="Descripción (Opcional)" value="${(dish.description || '').replace(/"/g, '&quot;')}" onchange="updateMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex}, 'description', this.value)">
+          <input type="text" placeholder="Nombre del plato" value="${safeDishName}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'name', this.value)">
+          <input type="text" placeholder="Precio (Sin $)" value="${dish.price}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'price', this.value)">
+          <input type="text" placeholder="Descripción (Opcional)" value="${safeDishDesc}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'description', this.value)">
         </div>
-        <button class="btn-del-dish" onclick="removeMenuEditorDish('${catName.replace(/'/g, "\\'")}', ${dishIndex})">✕</button>
+        <button class="btn-del-dish" onclick="removeMenuEditorDish(${catIndex}, ${dishIndex})">✕</button>
       `;
       dishesContainer.appendChild(dishRow);
     });
@@ -207,35 +216,31 @@ function renderMenuEditor() {
 
 function addMenuEditorCategory() {
   const name = prompt("Nombre de la nueva categoría:");
-  if (!name) return;
-  const cleanName = name.trim();
-  if (editorMenuState[cleanName]) {
-    alert("Esta categoría ya existe.");
-    return;
-  }
-  editorMenuState[cleanName] = [];
+  if (!name || !name.trim()) return;
+  editorMenuState.push({ catName: name.trim(), dishes: [] });
   renderMenuEditor();
 }
 
-function removeMenuEditorCategory(catName) {
+function removeMenuEditorCategory(catIndex) {
+  const catName = editorMenuState[catIndex].catName;
   if (confirm(`¿Eliminar la categoría "${catName}" y todos sus platos?`)) {
-    delete editorMenuState[catName];
+    editorMenuState.splice(catIndex, 1);
     renderMenuEditor();
   }
 }
 
-function addMenuEditorDish(catName) {
-  editorMenuState[catName].push({ name: '', price: '', description: '' });
+function addMenuEditorDish(catIndex) {
+  editorMenuState[catIndex].dishes.push({ name: '', price: '', description: '' });
   renderMenuEditor();
 }
 
-function removeMenuEditorDish(catName, dishIndex) {
-  editorMenuState[catName].splice(dishIndex, 1);
+function removeMenuEditorDish(catIndex, dishIndex) {
+  editorMenuState[catIndex].dishes.splice(dishIndex, 1);
   renderMenuEditor();
 }
 
-function updateMenuEditorDish(catName, dishIndex, field, value) {
-  editorMenuState[catName][dishIndex][field] = value;
+function updateMenuEditorDish(catIndex, dishIndex, field, value) {
+  editorMenuState[catIndex].dishes[dishIndex][field] = value;
 }
 
 async function saveMenuEditor() {
@@ -243,16 +248,17 @@ async function saveMenuEditor() {
   let hasError = false;
   let errorMsg = '';
 
-  // Validaciones
-  for (const cat of Object.keys(editorMenuState)) {
-    finalMenu[cat] = [];
-    for (const dish of editorMenuState[cat]) {
+  for (const catObj of editorMenuState) {
+    const catName = catObj.catName.trim();
+    if (!catName) continue;
+
+    finalMenu[catName] = [];
+    for (const dish of catObj.dishes) {
       const name = dish.name.trim();
       let price = dish.price.toString().trim();
       
-      if (!name) continue; // Ignorar platos vacíos
+      if (!name) continue; // Ignorar platos con nombre vacío
 
-      // 🛡️ VALIDACIÓN CRÍTICA: Impedir signos extraños en el precio
       if (price.includes('$') || /[a-zA-Z]/.test(price)) {
         hasError = true;
         errorMsg = `El precio del plato "${name}" contiene signos $ o letras. Solo usa números (ej: 45000).`;
@@ -266,7 +272,7 @@ async function saveMenuEditor() {
         break;
       }
 
-      finalMenu[cat].push({
+      finalMenu[catName].push({
         name: name,
         price: numPrice,
         description: dish.description.trim()
@@ -292,9 +298,9 @@ async function saveMenuEditor() {
     });
     
     if (r.ok) {
-      alert("✅ Carta actualizada exitosamente en la Casa Matriz.\n\nPara propagar estos cambios a tus demás locales, cierra este editor y haz clic en 'Sincronizar a Sucursales'.");
+      alert("✅ Carta actualizada exitosamente en la Casa Matriz.\n\nPara propagar estos cambios a tus demás locales, haz clic en 'Sincronizar a Sucursales'.");
       closeMenuEditor();
-      loadMenu(); // Refrescar vista
+      loadMenu(); 
     } else {
       const e = await r.json();
       alert("Error al guardar: " + (e.detail || 'Fallo desconocido.'));
