@@ -311,32 +311,73 @@ async def update_delivery_order_status(request: Request, order_id: str):
     body = await request.json()
     new_status = body.get("status", "")
     valid = ["pendiente_pago", "confirmado", "en_preparacion", "listo", "en_camino", "entregado", "cancelado"]
+    
     if new_status not in valid:
         raise HTTPException(status_code=400, detail="Estado inválido")
+        
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
-        # Notificar al cliente si avanza
+        
         if new_status in ("en_camino", "entregado"):
             row = await conn.fetchrow("SELECT phone, address, total FROM orders WHERE id=$1", order_id)
             if row:
                 phone = row["phone"]
-                if new_status == "en_camino":
-                    msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
-                else:
-                    msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
-                # Buscar phone_id de la sesión si existe
+                msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo." if new_status == "en_camino" else f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
                 try:
-                    session = await conn.fetchrow(
-                        "SELECT meta_phone_id, bot_number FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1",
-                        phone
-                    )
+                    session = await conn.fetchrow("SELECT meta_phone_id FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1", phone)
                     db_phone_id = session["meta_phone_id"] if session else None
                 except Exception:
                     db_phone_id = None
                 await send_wa_msg(phone, msg, db_phone_id)
-    return {"success": True}
+                
+        if new_status == "confirmado":
+            order_row = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
+            if order_row:
+                restaurant = await get_current_restaurant(request)
+                config = await billing.get_billing_config(restaurant["id"])
+                
+                features = restaurant.get("features") or {}
+                if isinstance(features, str):
+                    import json as _json
+                    try:
+                        features = _json.loads(features)
+                    except Exception:
+                        features = {}
+                
+                raw_dian = features.get("dian_active", False)
+                if isinstance(raw_dian, str):
+                    dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
+                else:
+                    dian_active = bool(raw_dian)
 
+                items = order_row["items"]
+                if isinstance(items, str):
+                    import json as _json
+                    items = _json.loads(items)
+
+                if config and dian_active:
+                    config["_restaurant_id"] = restaurant["id"]
+                    provider = config.get("provider", "mesio_native")
+                    adapter = billing.get_adapter(provider)
+                    
+                    order_for_billing = {
+                        "id": order_id,
+                        "total": float(order_row["total"]),
+                        "subtotal": float(order_row["subtotal"]),
+                        "service_charge": 0.0,
+                        "items": items,
+                        "payment_method": order_row.get("payment_method", "cash"),
+                        "order_ref": order_id,
+                        "customer": {"name": "Consumidor Final", "nit": "222222222", "email": ""}
+                    }
+                    try:
+                        await adapter.create_invoice(order_for_billing, config)
+                    except Exception:
+                        pass
+
+    return {"success": True}
+    
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 
 @router.get("/api/table-orders")
@@ -869,129 +910,112 @@ async def get_checks(request: Request, base_order_id: str):
     checks = await db.db_get_checks(base_order_id)
     return {"checks": checks}
 
-
 @router.post("/api/table-orders/{base_order_id}/checks/{check_id}/pay")
 async def pay_check(request: Request, base_order_id: str, check_id: str, body: PayCheckBody):
-    """
-    Procesa el pago de un check:
-    1. Valida que la suma de pagos >= total del check.
-    2. Llama al motor de billing para emitir una factura DIAN individual.
-    3. En una transacción DB: marca el check invoiced + cierra la mesa si aplica.
-    Regla DIAN: 1 factura electrónica por check cobrado.
-    """
-    restaurant = await get_current_restaurant(request)
+    try:
+        restaurant = await get_current_restaurant(request)
+        check = await db.db_get_check(check_id)
+        
+        if not check:
+            raise HTTPException(status_code=404, detail="Check no encontrado")
+        if check["base_order_id"] != base_order_id:
+            raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
+        if check["status"] != "open":
+            raise HTTPException(status_code=400, detail=f"Este check ya fue procesado (status: {check['status']})")
 
-    check = await db.db_get_check(check_id)
-    if not check:
-        raise HTTPException(status_code=404, detail="Check no encontrado")
-    if check["base_order_id"] != base_order_id:
-        raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
-    if check["status"] != "open":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Este check ya fue procesado (status: {check['status']})"
+        total_pagado = sum(p.amount for p in body.payments)
+        check_total  = float(check["total"]) + body.service_charge
+        if total_pagado < check_total:
+            raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${check_total:,.0f}, se recibieron ${total_pagado:,.0f}")
+        change = round(total_pagado - check_total, 2)
+
+        config = await billing.get_billing_config(restaurant["id"])
+        features = restaurant.get("features") or {}
+        if isinstance(features, str):
+            import json as _json
+            try:
+                features = _json.loads(features)
+            except Exception:
+                features = {}
+
+        raw_dian = features.get("dian_active", False)
+        if isinstance(raw_dian, str):
+            dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
+        else:
+            dian_active = bool(raw_dian)
+
+        items = check.get("items", [])
+        if isinstance(items, str):
+            import json as _json
+            items = _json.loads(items)
+
+        order_for_billing = {
+            "id":             check_id,
+            "total":          float(check["total"]) + body.service_charge,
+            "subtotal":       float(check["total"]),
+            "service_charge": body.service_charge,
+            "items":          items,
+            "payment_method": body.payments[0].method if body.payments else "cash",
+            "order_ref":      base_order_id,
+            "customer": {
+                "name":  body.customer_name,
+                "nit":   body.customer_nit,
+                "email": body.customer_email,
+            },
+        }
+
+        fiscal_invoice_id = None
+        if config and dian_active:
+            config["_restaurant_id"] = restaurant["id"]
+            provider = config.get("provider", "mesio_native")
+            adapter  = billing.get_adapter(provider)
+            try:
+                fiscal = await adapter.create_invoice(order_for_billing, config)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
+            fiscal_invoice_id = fiscal["id"]
+        else:
+            fiscal = {"id": None, "local": True}
+
+        payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
+
+        await db.db_finalize_check_payment(
+            check_id=check_id,
+            base_order_id=base_order_id,
+            payments=payments_list,
+            change_amount=change,
+            fiscal_invoice_id=fiscal_invoice_id,
+            customer_name=body.customer_name,
+            customer_nit=body.customer_nit,
+            customer_email=body.customer_email,
         )
 
-    total_pagado = sum(p.amount for p in body.payments)
-    check_total  = float(check["total"]) + body.service_charge
-    if total_pagado < check_total:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Pago insuficiente: se requieren ${check_total:,.0f}, "
-                   f"se recibieron ${total_pagado:,.0f}"
-        )
-    change = round(total_pagado - check_total, 2)
+        asyncio.create_task(loyalty_svc.accrue_on_check(
+            restaurant_id=restaurant["id"],
+            bot_number=restaurant.get("whatsapp_number", ""),
+            base_order_id=base_order_id,
+            check_id=check_id,
+            total_cop=float(check["total"]) + body.service_charge,
+        ))
 
-    # Obtener config de billing
-    config = await billing.get_billing_config(restaurant["id"])
-    features = restaurant.get("features") or {}
-    if isinstance(features, str):
-        import json as _json
-        try:
-            features = _json.loads(features)
-        except Exception:
-            features = {}
-            
-    raw_dian = features.get("dian_active", False)
-    if isinstance(raw_dian, str):
-        dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
-    else:
-        dian_active = bool(raw_dian)
+        order_row = await db.db_get_first_table_order(base_order_id)
+        if order_row and order_row["status"] == "factura_entregada":
+            customer_phone = order_row.get("phone")
+            if customer_phone and customer_phone != "manual":
+                sess = await db.db_get_open_session_by_phone(customer_phone)
+                session_phone_id = sess.get("meta_phone_id") if sess else None
+                await _farewell_and_nps(customer_phone, order_row.get("table_id"), sess, session_phone_id, "caja")
 
-    # Construir el objeto order para el adaptador de billing
-    items = check.get("items", [])
-    if isinstance(items, str):
-        import json as _json
-        items = _json.loads(items)
-
-    order_for_billing = {
-        "id":             check_id,
-        "total":          float(check["total"]) + body.service_charge,
-        "subtotal":       float(check["total"]),
-        "service_charge": body.service_charge,
-        "items":          items,
-        "payment_method": body.payments[0].method if body.payments else "cash",
-        "order_ref":      base_order_id,
-        "customer": {
-            "name":  body.customer_name,
-            "nit":   body.customer_nit,
-            "email": body.customer_email,
-        },
-    }
-
-    fiscal_invoice_id = None
-    if config and dian_active:
-        # Módulo DIAN activo y configurado: emitir factura electrónica
-        config["_restaurant_id"] = restaurant["id"]
-        provider = config.get("provider", "mesio_native")
-        adapter  = billing.get_adapter(provider)
-        try:
-            fiscal = await adapter.create_invoice(order_for_billing, config)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
-        fiscal_invoice_id = fiscal["id"]
-    else:
-        # Sin módulo DIAN o sin configuración: tirilla POS local (sin factura electrónica)
-        fiscal = {"id": None, "local": True}
-
-    payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
-
-    await db.db_finalize_check_payment(
-        check_id=check_id,
-        base_order_id=base_order_id,
-        payments=payments_list,
-        change_amount=change,
-        fiscal_invoice_id=fiscal_invoice_id,
-        customer_name=body.customer_name,
-        customer_nit=body.customer_nit,
-        customer_email=body.customer_email,
-    )
-
-    # Acumulación de puntos loyalty en background (silenciosa, no bloquea respuesta)
-    asyncio.create_task(loyalty_svc.accrue_on_check(
-        restaurant_id=restaurant["id"],
-        bot_number=restaurant.get("whatsapp_number", ""),
-        base_order_id=base_order_id,
-        check_id=check_id,
-        total_cop=float(check["total"]) + body.service_charge,
-    ))
-
-    # Si todos los checks están pagados, la mesa quedó en 'factura_entregada'.
-    # Disparar goodbye + NPS + limpiar sesión.
-    order_row = await db.db_get_first_table_order(base_order_id)
-    if order_row and order_row["status"] == "factura_entregada":
-        customer_phone = order_row.get("phone")
-        if customer_phone and customer_phone != "manual":
-            sess = await db.db_get_open_session_by_phone(customer_phone)
-            session_phone_id = sess.get("meta_phone_id") if sess else None
-            await _farewell_and_nps(customer_phone, order_row.get("table_id"), sess, session_phone_id, "caja")
-
-    return {
-        "success":  True,
-        "check_id": check_id,
-        "change":   change,
-        "fiscal":   fiscal,
-    }
+        return {
+            "success":  True,
+            "check_id": check_id,
+            "change":   change,
+            "fiscal":   fiscal,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
 @router.get("/api/table-orders/{base_order_id}/checks/{check_id}/ticket")
 async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
