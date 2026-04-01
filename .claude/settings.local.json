@@ -48,7 +48,9 @@
       "Bash(mv \"$BASE\"/*.css \"$BASE/css/\")",
       "Bash(mv \"$BASE/logo.png\" \"$BASE/img/logo.png\")",
       "Bash(python3:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)"
     ]
   }
 }

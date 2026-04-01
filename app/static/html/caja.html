@@ -7,6 +7,31 @@
 <title>Mesio — Módulo de Caja</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <style>
+:root {
+  --primary: #7C3AED;
+  --primary-light: #F3E8FF;
+  --primary-dark: #6D28D9;
+  --success: #059669;
+  --success-light: #ECFDF5;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --dark: #18181B;
+  --card: #ffffff;
+  --bg: #F4F4F5;
+  --border: #E4E4E7;
+  --border-light: #F4F4F5;
+  --text: #18181B;
+  --text-muted: #71717A;
+  --text-light: #A1A1AA;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+  --shadow: 0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.1);
+  --transition: all 0.2s ease;
+}
 
   /* =========================================================
    📱 MODO MÓVIL (Se activa en pantallas de celular)
@@ -119,7 +144,7 @@
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F4F4F5; color: #18181B; min-height: 100vh; }
 
 /* ── HEADER & NAVEGACIÓN DE ROLES ── */
-header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: var(--shadow); }
 .logo-container { display: flex; align-items: center; }
 .logo { font-size: 1.25rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px; }
 .logo span { color: #39FF6A; }
@@ -140,15 +165,15 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.5rem; }
 
 /* ── NUEVOS ESTILOS PARA LAS PESTAÑAS (TABS) ── */
-.segmented-control { display:flex; gap:4px; margin-bottom:1.5rem; background:#E4E4E7; border-radius:10px; padding:4px; width:fit-content; flex-wrap:wrap; }
+.segmented-control { display:flex; gap:4px; margin-bottom:1.5rem; background:#E4E4E7; border-radius: var(--radius); padding:4px; width:fit-content; flex-wrap:wrap; }
 .seg-btn { padding:8px 20px; border-radius:8px; border:none; font-size:13px; font-weight:600; cursor:pointer; transition: all 0.2s; position:relative; }
-.seg-btn.active { background:#fff; color:#18181B; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+.seg-btn.active { background:#fff; color:#18181B; box-shadow: var(--shadow-sm); }
 .seg-btn:not(.active) { background:transparent; color:#71717A; }
 .badge-tab { background:#EF4444; color:#fff; border-radius:10px; padding:2px 6px; font-size:10px; margin-left:6px; display:inline-block; }
 
 /* ── TICKET DE CAJA ── */
-.ticket-card { background: #fff; border: 1px solid #E4E4E7; border-radius: 16px; padding: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.02); display: flex; flex-direction: column; transition: transform 0.2s; border-top: 4px solid #7C3AED; }
-.ticket-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px rgba(0,0,0,0.05); }
+.ticket-card { background: #fff; border: 1px solid #E4E4E7; border-radius: var(--radius-lg); padding: 1.5rem; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; transition: transform 0.2s, var(--transition); border-top: 4px solid #7C3AED; }
+.ticket-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
 .ticket-card.domicilio { border-top: 4px solid #F59E0B; } /* Estilo especial Domicilios */
 .t-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px dashed #E4E4E7; padding-bottom: 1rem; margin-bottom: 1rem; }
 .t-table { font-size: 1.25rem; font-weight: 800; color: #18181B; }
@@ -163,7 +188,7 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 
 /* ── STATUS & BUTTONS ── */
 .t-status-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; padding: 8px 10px; border-radius: 8px; background: #F3E8FF; color: #6D28D9; margin-bottom: 1rem; width: 100%; justify-content: center; text-align: center; }
-.btn-pay { width: 100%; background: #18181B; color: #fff; border: none; padding: 14px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.btn-pay { width: 100%; background: #18181B; color: #fff; border: none; padding: 14px; border-radius: var(--radius); font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.2s, var(--transition); display: flex; align-items: center; justify-content: center; gap: 8px; }
 .btn-pay:hover { background: #27272A; }
 .btn-pay:active { transform: scale(0.98); }
 .btn-confirm-dom { width: 100%; background: #1D9E75; color: #fff; border: none; padding: 14px; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top:10px; transition: background 0.2s;}
@@ -192,7 +217,7 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 /* ── MODAL AJUSTAR FACTURA ── */
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 1rem; }
 .modal-overlay.open { display: flex; }
-.modal-box { background: #fff; border-radius: 20px; padding: 1.5rem; max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+.modal-box { background: #fff; border-radius: var(--radius-xl); padding: 1.5rem; max-width: 480px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
 .modal-header h3 { font-size: 1.1rem; font-weight: 800; color: #18181B; }
 .modal-close { background: #F4F4F5; border: none; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -221,7 +246,7 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 /* ── MODALES SPLIT & PAY ── */
 .sp-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1100; align-items: center; justify-content: center; padding: 1rem; }
 .sp-overlay.open { display: flex; }
-.sp-box { background: #fff; border-radius: 20px; width: 860px; max-width: 98vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.22); overflow: hidden; }
+.sp-box { background: #fff; border-radius: 20px; width: 860px; max-width: 98vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); overflow: hidden; }
 .sp-head { padding: 1.1rem 1.5rem; border-bottom: 1px solid #E4E4E7; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
 .sp-head h3 { font-size: 1rem; font-weight: 800; color: #18181B; }
 .sp-body { flex: 1; overflow-y: auto; padding: 1.25rem 1.5rem; }
@@ -259,7 +284,7 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 .btn-print-check { padding: 7px 10px; background: none; color: #3B82F6; border: 1.5px solid #BFDBFE; border-radius: 8px; font-size: 12px; cursor: pointer; }
 
 /* Pay modal */
-.pay-box { background: #fff; border-radius: 20px; width: 480px; max-width: 98vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.22); overflow: hidden; }
+.pay-box { background: #fff; border-radius: 20px; width: 480px; max-width: 98vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); overflow: hidden; }
 .pay-method-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .pay-method-sel { flex: 1; padding: 8px 10px; border: 1.5px solid #E4E4E7; border-radius: 8px; font-size: 13px; outline: none; }
 .pay-method-amt { width: 110px; padding: 8px 10px; border: 1.5px solid #E4E4E7; border-radius: 8px; font-size: 13px; font-weight: 700; outline: none; text-align: right; }
@@ -300,6 +325,67 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   .pos-receipt-pane { width: 100%; height: 300px; box-shadow: inset 0 10px 20px rgba(0,0,0,0.1); }
 }
 
+/* ── CAJA SPLIT SCREEN PREVIEW ── */
+.caja-preview-pane {
+  width: 420px;
+  background: #374151;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1rem;
+  overflow-y: auto;
+  box-shadow: inset 4px 0 12px rgba(0,0,0,0.1);
+  border-left: 1px solid #4B5563;
+  transition: all 0.3s ease;
+}
+.caja-preview-header {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.caja-preview-header span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.caja-preview-header button {
+  background: rgba(255,255,255,0.1);
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #9CA3AF;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.caja-preview-header button:hover {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+}
+.ticket-card.selected {
+  border-color: #7C3AED;
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.2), 0 10px 15px rgba(0,0,0,0.05);
+}
+.preview-actions {
+  margin-top: 1rem;
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+}
+@media (max-width: 768px) {
+  .caja-preview-pane { display: none !important; }
+}
+
 </style>
 </head>
 <body>
@@ -324,7 +410,8 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
     <button id="tab-chats" class="seg-btn" onclick="switchTab('chats')">💬 WhatsApp Comprobantes <span id="badge-chat" class="badge-tab" style="display:none;">0</span></button>
   </div>
 
-  <div id="view-mesas">
+  <div id="view-mesas" style="display:flex; gap:0; min-height:calc(100vh - 160px);">
+    <div id="mesas-left" style="flex:1; overflow-y:auto;">
       <div class="section-title">
         Cuentas por Cobrar
         <span style="font-size:14px; color:#71717A; font-weight:500;" id="total-pending">0 cuentas pendientes</span>
@@ -332,6 +419,18 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
       <div class="board" id="board">
         <div class="empty-state">Cargando caja...</div>
       </div>
+    </div>
+    <div id="mesas-right" class="caja-preview-pane" style="display:none;">
+      <div class="caja-preview-header">
+        <span>Vista previa de factura</span>
+        <button onclick="closeMesasPreview()">✕</button>
+      </div>
+      <div class="thermal-paper" id="mesas-receipt-preview"></div>
+      <div class="preview-actions">
+        <button class="btn-pay" id="preview-cobrar-btn" style="flex:1;">💰 Cobrar Todo</button>
+        <button class="btn-print-factura" id="preview-print-btn" style="width:auto; padding:10px 16px;">🖨️</button>
+      </div>
+    </div>
   </div>
 
   <div id="view-domicilios" style="display:none;">
@@ -438,6 +537,7 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
       <div style="display:grid; gap:12px;">
         <input type="text" id="pay-customer-name" placeholder="Nombre del cliente (Ej: Consumidor Final)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
         <input type="text" id="pay-customer-nit" placeholder="CC / NIT (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
+        <input type="email" id="pay-customer-email" placeholder="Email (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;">
       </div>
       <div id="pay-feedback" style="display:none; margin-top:1.5rem; padding:12px; border-radius:10px; font-size:14px; font-weight:600;"></div>
     </div>
@@ -455,6 +555,20 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
       </div>
   </div>
 
+</div>
+
+<div class="sp-overlay" id="chat-modal" onclick="if(event.target===this)closeChatModal()">
+  <div class="sp-box">
+    <div class="sp-head">
+      <h3 id="chat-modal-title">Chat</h3>
+      <button class="modal-close" onclick="closeChatModal()">✕</button>
+    </div>
+    <div class="sp-body" id="chat-modal-msgs" style="background:#efeae2;min-height:300px;"></div>
+    <div class="sp-foot" style="gap:8px;">
+      <input type="text" id="chat-reply-input" class="chat-input" placeholder="Escribe un mensaje..." onkeydown="if(event.key==='Enter')sendManualReply()">
+      <button class="sp-btn-ok" onclick="sendManualReply()">Enviar</button>
+    </div>
+  </div>
 </div>
 
 <script src="/static/js/roles.js"></script>
@@ -501,84 +615,148 @@ function switchTab(tabId) {
   if (tabId === 'domicilios') loadDomicilios();
 }
 
+// ── RECEIPT HTML BUILDER (shared by preview + print) ──
+function _buildReceiptHtml(bill, paymentContext) {
+  const taxPct = _billingConfig?.tax_percentage ?? 19.0;
+  const taxRegime = _billingConfig?.tax_regime || 'iva';
+  const taxLabel = taxRegime === 'ico' ? `Impoconsumo ${taxPct}%` : `IVA ${taxPct}%`;
+  const total = Number(bill.total) || 0;
+  const subtotal = taxPct > 0 ? total / (1 + taxPct / 100) : total;
+  const tax = total - subtotal;
+
+  const iso = (bill.created_at || '').endsWith('Z') ? bill.created_at : (bill.created_at || '') + 'Z';
+  const dt = new Date(iso);
+  const timeStr = dt.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
+  const dateStr = dt.toLocaleDateString('es-CO');
+
+  const itemsHtml = (bill.items || []).map(i => {
+    const qty = Number(i.quantity || i.qty || 1);
+    const price = Number(i.price || i.unit_price || 0);
+    const lineTotal = price * qty;
+    return `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
+      <span>${qty}x ${i.name}</span><span style="white-space:nowrap;">${fmt(lineTotal)}</span>
+    </div>`;
+  }).join('');
+
+  let paymentsHtml = '';
+  if (paymentContext && paymentContext.payments && paymentContext.payments.length > 0) {
+    paymentsHtml = `<div style="border-top:1px dashed #000;margin:6px 0;padding-top:4px;">`;
+    paymentContext.payments.forEach(p => {
+      paymentsHtml += `<div style="display:flex;justify-content:space-between;font-size:10px;color:#444;">
+        <span>${p.method || p.icon || ''}</span><span>${fmt(p.amount)}</span></div>`;
+    });
+    if (paymentContext.change > 0) {
+      paymentsHtml += `<div style="display:flex;justify-content:space-between;font-size:10px;color:#059669;font-weight:700;">
+        <span>Cambio</span><span>${fmt(paymentContext.change)}</span></div>`;
+    }
+    paymentsHtml += `</div>`;
+  }
+
+  let customerHtml = '';
+  if (paymentContext && (paymentContext.customerName || paymentContext.customerNit)) {
+    customerHtml = `<div style="font-size:9px;color:#666;margin-top:4px;">
+      Cliente: ${paymentContext.customerName || 'Consumidor Final'}<br>
+      CC/NIT: ${paymentContext.customerNit || '222222222'}
+    </div>`;
+  }
+
+  let fiscalHtml = '';
+  if (paymentContext?.fiscal) {
+    const f = paymentContext.fiscal;
+    if (f.cufe) {
+      fiscalHtml = `
+        <div style="border-top:1px dashed #000;margin:6px 0;padding-top:4px;">
+          <div style="font-size:9px;color:#444;">Factura N°: ${f.invoice_number || ''}</div>
+          <div style="font-size:9px;color:#444;">Estado DIAN: ${f.dian_status || '-'}</div>
+          <div style="font-size:7px;color:#444;word-break:break-all;">CUFE: ${f.cufe}</div>
+          ${f.qr_data ? `<div style="font-size:7px;color:#444;word-break:break-all;">QR: ${f.qr_data}</div>` : ''}
+        </div>`;
+    }
+  }
+
+  return `
+    <div style="text-align:center;font-weight:bold;font-size:14px;letter-spacing:1px;">FACTURA DE VENTA</div>
+    <div style="text-align:center;font-size:10px;color:#444;">Mesio &middot; Sistema POS</div>
+    <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:9px;color:#444;">MESA</div>
+    <div style="font-size:16px;font-weight:bold;">${bill.table_name || ''}</div>
+    <div style="font-size:9px;color:#444;">Fecha: ${dateStr} &nbsp;${timeStr}</div>
+    ${customerHtml}
+    <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+    <div style="display:flex;justify-content:space-between;font-size:8px;color:#888;font-weight:700;text-transform:uppercase;margin-bottom:2px;">
+      <span>Item</span><span>Valor</span>
+    </div>
+    ${itemsHtml}
+    <div style="border-top:1px dashed #000;margin:6px 0;"></div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:#444;">
+      <span>Subtotal (base gravable)</span><span>${fmt(subtotal)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:#444;">
+      <span>${taxLabel}</span><span>${fmt(tax)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:13px;border-top:1.5px solid #000;padding-top:4px;margin-top:4px;">
+      <span>TOTAL</span><span>${fmt(total)}</span>
+    </div>
+    ${paymentsHtml}
+    ${fiscalHtml}
+    <div style="border-top:1px dashed #000;margin:8px 0;"></div>
+    <div style="text-align:center;font-size:10px;">Gracias por su visita</div>
+    <div style="text-align:center;font-size:9px;color:#444;">— Mesio POS —</div>
+  `;
+}
+
+function _updateReceiptPreview() {
+  const el = document.getElementById('receipt-preview');
+  if (!el || !_payBillId) return;
+
+  const bill = _billsCache[_payBillId];
+  const received = _activePayments.reduce((s, p) => s + p.amount, 0);
+
+  const receiptBill = {
+    table_name: bill?.table_name || '',
+    items: _payCheckData?.items || bill?.items || [],
+    total: _payCheckTotal,
+    created_at: bill?.created_at || new Date().toISOString()
+  };
+
+  el.innerHTML = _buildReceiptHtml(receiptBill, {
+    payments: _activePayments.map(p => ({ method: p.method, amount: p.amount })),
+    customerName: document.getElementById('pay-customer-name')?.value.trim() || 'Consumidor Final',
+    customerNit: document.getElementById('pay-customer-nit')?.value.trim() || '222222222',
+    change: Math.max(0, received - _payCheckTotal),
+    fiscal: null
+  });
+}
+
+// ── THERMAL PRINT VIA HIDDEN IFRAME ──
+function _printThermal(contentHtml) {
+  const frame = document.getElementById('print-frame');
+  if (!frame) { console.warn('print-frame not found'); return; }
+  const doc = frame.contentDocument || frame.contentWindow.document;
+  doc.open();
+  doc.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
+@page{size:80mm auto;margin:0}
+@media print{body{width:72mm;}}
+</style></head><body>${contentHtml}</body></html>`);
+  doc.close();
+  setTimeout(() => { frame.contentWindow.print(); }, 300);
+}
+
 async function printFactura(billId) {
   const bill = _billsCache[billId];
   if (!bill) return;
 
-  // Obtener datos fiscales del backend (CUFE, QR, régimen de impuesto)
   let fiscal = null;
   try {
     const r = await fetch(`/api/table-orders/${billId}/ticket`, { headers: reqHeaders });
     if (r.ok) { fiscal = (await r.json()).fiscal; }
   } catch(e) {}
 
-  const taxRegime = (fiscal && fiscal.tax_regime) || 'iva';
-  const taxPct    = (fiscal && fiscal.tax_pct != null) ? Number(fiscal.tax_pct) : 19.0;
-  const taxLabel  = taxRegime === 'ico' ? `Impoconsumo ${taxPct}%` : `IVA ${taxPct}%`;
-  const total     = bill.total;
-  const subtotal  = taxPct > 0 ? total / (1 + taxPct / 100) : total;
-  const tax       = total - subtotal;
-
-  const iso = (bill.created_at || '').endsWith('Z') ? bill.created_at : (bill.created_at || '') + 'Z';
-  const dt  = new Date(iso);
-  const timeStr = dt.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
-  const dateStr = dt.toLocaleDateString('es-CO');
-
-  const itemsHtml = bill.items.map(i => {
-    const lineTotal = (Number(i.price) || 0) * (Number(i.quantity) || 1);
-    return `<tr><td>${i.quantity||1}x ${i.name}</td><td class="val">${fmt(lineTotal)}</td></tr>`;
-  }).join('');
-
-  const cufeHtml = (fiscal && fiscal.cufe) ? `
-<div class="sep"></div>
-<div class="label">Factura N°: ${fiscal.invoice_number || ''}</div>
-<div class="label">Estado DIAN: ${fiscal.dian_status || '-'}</div>
-<div class="label cufe">CUFE: ${fiscal.cufe}</div>
-${fiscal.qr_data ? `<div class="label" style="word-break:break-all;font-size:7pt;">QR: ${fiscal.qr_data}</div>` : ''}` : '';
-
-  const win = window.open('', '_blank', 'width=340,height=700,toolbar=0,menubar=0');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>Factura ${bill.table_name}</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
-@page{size:80mm auto;margin:0}
-.title{font-size:13pt;font-weight:bold;text-align:center;letter-spacing:1px}
-.center{text-align:center}
-.sep{border-top:1px dashed #000;margin:5px 0}
-.label{font-size:8pt;color:#444;margin-top:2px}
-.mesa{font-size:14pt;font-weight:bold}
-table{width:100%;border-collapse:collapse;margin:4px 0;font-size:10pt}
-td{padding:2px 0;vertical-align:top}
-.val{text-align:right;white-space:nowrap}
-.total-row td{font-weight:bold;font-size:11pt;border-top:1px solid #000;padding-top:3px}
-.footer{text-align:center;font-size:9pt;margin-top:4px}
-.cufe{font-size:7pt;word-break:break-all}
-</style></head><body>
-<div class="title">FACTURA DE VENTA</div>
-<div class="center label">Mesio · Sistema POS</div>
-<div class="sep"></div>
-<div class="label">MESA</div><div class="mesa">${bill.table_name}</div>
-<div class="label">Fecha: ${dateStr} &nbsp;${timeStr}</div>
-<div class="sep"></div>
-<table>
-  <thead><tr><th style="text-align:left;font-size:8pt">ITEM</th><th style="text-align:right;font-size:8pt">VALOR</th></tr></thead>
-  <tbody>${itemsHtml}</tbody>
-</table>
-<div class="sep"></div>
-<table>
-  <tr><td class="label">Subtotal (base gravable)</td><td class="val label">${fmt(subtotal)}</td></tr>
-  <tr><td class="label">${taxLabel}</td><td class="val label">${fmt(tax)}</td></tr>
-  <tr class="total-row"><td>TOTAL</td><td class="val">${fmt(total)}</td></tr>
-</table>
-${cufeHtml}
-<div class="sep"></div>
-<div class="footer">Gracias por su visita</div>
-<div class="center label">— Mesio POS —</div>
-</body></html>`);
-  win.document.close();
-  win.focus();
-  win.onload = () => { win.print(); };
+  const paymentContext = fiscal ? { payments: [], customerName: '', customerNit: '', change: 0, fiscal } : null;
+  _printThermal(_buildReceiptHtml(bill, paymentContext));
 }
 
 async function loadCajaOrders() {
@@ -660,7 +838,7 @@ async function loadCajaOrders() {
       `).join('');
 
       return `
-        <div class="ticket-card">
+        <div class="ticket-card" onclick="selectTicketCard('${b.id}', this)">
           <div class="t-header">
             <div>
               <div class="t-table">${b.table_name}</div>
@@ -668,7 +846,7 @@ async function loadCajaOrders() {
             </div>
             <div class="t-time">⏱ ${time}</div>
           </div>
-          
+
           <div class="t-items">
             ${itemsHtml}
           </div>
@@ -682,22 +860,63 @@ async function loadCajaOrders() {
             <span class="t-total-val">${fmt(b.total)}</span>
           </div>
 
-          <button class="btn-adjust" onclick="openAdjModal('${b.id}')">
+          <button class="btn-adjust" onclick="event.stopPropagation(); openAdjModal('${b.id}')">
             ✏️ Ajustar Factura
           </button>
-          <button class="btn-split" onclick="openSplitModal('${b.id}')">
+          <button class="btn-split" onclick="event.stopPropagation(); openSplitModal('${b.id}')">
             ✂️ Dividir Cuenta
           </button>
-          <button class="btn-pay" onclick="cobrarTodo('${b.id}')">
+          <button class="btn-pay" onclick="event.stopPropagation(); cobrarTodo('${b.id}')">
             💰 Cobrar Todo
           </button>
         </div>
       `;
     }).join('');
 
+    // Re-apply selection after re-render
+    if (_selectedBillId && _billsCache[_selectedBillId]) {
+      const selectedCard = document.querySelector(`.ticket-card[onclick*="${_selectedBillId}"]`);
+      if (selectedCard) selectedCard.classList.add('selected');
+      document.getElementById('mesas-receipt-preview').innerHTML = _buildReceiptHtml(_billsCache[_selectedBillId], null);
+    } else if (_selectedBillId) {
+      closeMesasPreview();
+    }
+
   } catch(e) {
     console.error('Error cargando caja:', e);
   }
+}
+
+// ── SPLIT SCREEN: TICKET SELECTION & PREVIEW ──
+let _selectedBillId = null;
+
+function selectTicketCard(billId, el) {
+  const bill = _billsCache[billId];
+  if (!bill) return;
+
+  if (_selectedBillId === billId) {
+    closeMesasPreview();
+    return;
+  }
+
+  _selectedBillId = billId;
+
+  document.querySelectorAll('.ticket-card').forEach(c => c.classList.remove('selected'));
+  if (el) el.classList.add('selected');
+
+  const pane = document.getElementById('mesas-right');
+  pane.style.display = 'flex';
+
+  document.getElementById('mesas-receipt-preview').innerHTML = _buildReceiptHtml(bill, null);
+
+  document.getElementById('preview-cobrar-btn').onclick = (e) => { e.stopPropagation(); cobrarTodo(billId); };
+  document.getElementById('preview-print-btn').onclick = (e) => { e.stopPropagation(); printFactura(billId); };
+}
+
+function closeMesasPreview() {
+  _selectedBillId = null;
+  document.getElementById('mesas-right').style.display = 'none';
+  document.querySelectorAll('.ticket-card').forEach(c => c.classList.remove('selected'));
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -977,10 +1196,11 @@ function openPayModal(billId, checkId, checkData) {
   addPayMethod('Efectivo', '💵', _payCheckTotal);
 
   document.getElementById('pay-modal').style.display = 'flex';
+  _updateReceiptPreview();
 }
 
 function closePayModal() {
-  document.getElementById('pay-modal').classList.remove('open');
+  document.getElementById('pay-modal').style.display = 'none';
   _payBillId = _payCheckId = null;
 }
 
@@ -1042,19 +1262,61 @@ function addPayMethod(method, icon, forcedAmount = null) {
   _activePayments.push({ method, icon, amount: amt, id: Date.now() });
   _renderPaymentsList();
   _recalcChange();
+  _updateReceiptPreview();
+}
+
+function _renderPaymentsList() {
+  const container = document.getElementById('pay-methods-list');
+  container.innerHTML = _activePayments.map((p, i) => `
+    <div class="pay-method-row" data-idx="${i}">
+      <span style="font-size:20px;">${p.icon}</span>
+      <select class="pay-method-sel" onchange="_activePayments[${i}].method=this.value;_recalcChange();">
+        ${_getPayMethodOptions().map(m =>
+          '<option value="'+m+'" '+(m===p.method?'selected':'')+'>'+m+'</option>'
+        ).join('')}
+      </select>
+      <input type="number" class="pay-method-amt" value="${p.amount}" min="0" step="100"
+             oninput="_activePayments[${i}].amount=parseFloat(this.value)||0;_recalcChange();">
+      <button class="pay-method-rm" onclick="_activePayments.splice(${i},1);_renderPaymentsList();_recalcChange();">✕</button>
+    </div>
+  `).join('');
+
+  const received = _activePayments.reduce((s, p) => s + p.amount, 0);
+  const change = received - _payCheckTotal;
+  container.innerHTML += `
+    <div class="pay-summary-box">
+      <div class="pay-summary-line"><span>Total cuenta</span><span id="pay-check-total">${fmt(_payCheckTotal)}</span></div>
+      <div class="pay-summary-line"><span>Recibido</span><span id="pay-received">${fmt(received)}</span></div>
+      <div class="pay-summary-line total"><span>Cambio</span>
+        <span id="pay-change" class="pay-change${change<0?' insuf':''}">${fmt(Math.abs(change))}</span>
+      </div>
+    </div>`;
+}
+
+function _getPayMethodOptions() {
+  const feats = _restData.features || {};
+  const custom = feats.payment_methods;
+  if (Array.isArray(custom) && custom.length > 0)
+    return custom.map(pm => typeof pm === 'string' ? pm : pm.name || 'Pago');
+  return ['Efectivo', 'Tarjeta', 'Nequi', 'Transferencia'];
 }
 
 function _recalcChange() {
-  let received = 0;
-  document.querySelectorAll('.pay-method-amt').forEach(el => {
-    received += parseFloat(el.value) || 0;
-  });
+  const received = _activePayments.reduce((s, p) => s + p.amount, 0);
   const change = received - _payCheckTotal;
-  document.getElementById('pay-received').textContent = fmt(received);
-  const changeEl = document.getElementById('pay-change');
-  changeEl.textContent = fmt(Math.abs(change));
-  changeEl.className = `pay-change${change < 0 ? ' insuf' : ''}`;
-  document.getElementById('pay-check-total').textContent = fmt(_payCheckTotal);
+
+  document.getElementById('pay-pending-display').textContent = fmt(_payCheckTotal);
+  document.getElementById('pay-change-display').textContent = change >= 0 ? fmt(change) : fmt(0);
+  document.getElementById('pay-change-display').style.color = change >= 0 ? '#059669' : '#EF4444';
+
+  const rcv = document.getElementById('pay-received');
+  if (rcv) rcv.textContent = fmt(received);
+  const chg = document.getElementById('pay-change');
+  if (chg) { chg.textContent = fmt(Math.abs(change)); chg.className = `pay-change${change < 0 ? ' insuf' : ''}`; }
+  const tot = document.getElementById('pay-check-total');
+  if (tot) tot.textContent = fmt(_payCheckTotal);
+
+  _updateReceiptPreview();
 }
 
 async function processPayment() {
@@ -1104,6 +1366,15 @@ async function processPayment() {
       const change = data.change || 0;
       fb.textContent = `✅ Pago registrado. CUFE: ${(data.fiscal?.cufe||'').slice(0,16)}...${change > 0 ? ` Cambio: ${fmt(change)}` : ''}`;
 
+      // Auto-print the invoice
+      try {
+        const ticketResp = await fetch(`/api/table-orders/${_payBillId}/checks/${_payCheckId}/ticket`, { headers: reqHeaders });
+        if (ticketResp.ok) {
+          const ticket = await ticketResp.json();
+          _printCheckWindow(ticket);
+        }
+      } catch(printErr) { console.warn('Auto-print failed:', printErr); }
+
       const updIdx = _splitChecks.findIndex(c => c.id === _payCheckId);
       if (updIdx >= 0) {
         _splitChecks[updIdx].status = 'invoiced';
@@ -1133,66 +1404,34 @@ async function printCheckTicket(billId, checkId) {
 }
 
 function _printCheckWindow(ticket) {
-  const taxPct   = parseFloat(ticket.tax_pct) || 19.0;
-  const total    = parseFloat(ticket.total) || 0;
-  const subtotal = taxPct > 0 ? total / (1 + taxPct / 100) : total;
-  const tax      = total - subtotal;
-  const taxLabel = (ticket.tax_regime === 'ico') ? `Impoconsumo (${taxPct}%)` : `IVA (${taxPct}%)`;
+  const total = parseFloat(ticket.total) || 0;
+  const bill = {
+    table_name: ticket.table_name || '',
+    items: (ticket.items || []).map(i => ({
+      name: i.name,
+      quantity: i.qty || i.quantity || 1,
+      price: i.unit_price || i.price || 0
+    })),
+    total: total,
+    created_at: ticket.created_at || new Date().toISOString()
+  };
 
-  const itemsHtml = (ticket.items || []).map(i => {
-    const line = (Number(i.unit_price||i.price||0)) * (Number(i.qty||i.quantity||1));
-    return `<tr><td>${i.qty||i.quantity||1}x ${i.name}</td><td class="val">${fmt(line)}</td></tr>`;
-  }).join('');
+  const fiscal = ticket.cufe ? {
+    cufe: ticket.cufe,
+    qr_data: ticket.qr_data,
+    invoice_number: ticket.invoice_number,
+    dian_status: ticket.dian_status
+  } : null;
 
-  const payments = (ticket.payments || []).map(p =>
-    `<tr><td class="label">${p.method}</td><td class="val label">${fmt(p.amount)}</td></tr>`
-  ).join('');
-  const changeLine = (ticket.change_amount > 0)
-    ? `<tr><td class="label">Cambio</td><td class="val label">${fmt(ticket.change_amount)}</td></tr>` : '';
+  const paymentContext = {
+    payments: (ticket.payments || []).map(p => ({ method: p.method, amount: p.amount })),
+    customerName: ticket.customer_name || '',
+    customerNit: ticket.customer_nit || '',
+    change: parseFloat(ticket.change_amount) || 0,
+    fiscal: fiscal
+  };
 
-  const cufeHtml = ticket.cufe ? `
-<div class="sep"></div>
-<div class="label">Factura N°: ${ticket.invoice_number||''}</div>
-<div class="label">Estado DIAN: ${ticket.dian_status||''}</div>
-<div class="label cufe">CUFE: ${ticket.cufe}</div>
-${ticket.qr_data ? `<div class="label" style="word-break:break-all;font-size:7pt;">QR: ${ticket.qr_data}</div>` : ''}` : '';
-
-  const win = window.open('', '_blank', 'width=340,height=740,toolbar=0,menubar=0');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
-@page{size:80mm auto;margin:0}
-.title{font-size:13pt;font-weight:bold;text-align:center;letter-spacing:1px}
-.center{text-align:center}.sep{border-top:1px dashed #000;margin:5px 0}
-.label{font-size:8pt;color:#444;margin-top:2px}
-.mesa{font-size:14pt;font-weight:bold}
-table{width:100%;border-collapse:collapse;margin:4px 0;font-size:10pt}
-td{padding:2px 0;vertical-align:top}.val{text-align:right;white-space:nowrap}
-.total-row td{font-weight:bold;font-size:11pt;border-top:1px solid #000;padding-top:3px}
-.footer{text-align:center;font-size:9pt;margin-top:4px}.cufe{font-size:7pt;word-break:break-all}
-</style></head><body>
-<div class="title">FACTURA DE VENTA</div>
-<div class="center label">Cuenta ${ticket.check_number||''} de ${ticket.base_order_id||''}</div>
-<div class="sep"></div>
-<div class="label">MESA</div><div class="mesa">${ticket.table_name||''}</div>
-<div class="sep"></div>
-<table><thead><tr><th style="text-align:left;font-size:8pt">ÍTEM</th><th style="text-align:right;font-size:8pt">VALOR</th></tr></thead>
-<tbody>${itemsHtml}</tbody></table>
-<div class="sep"></div>
-<table>
-<tr><td class="label">Subtotal</td><td class="val label">${fmt(subtotal)}</td></tr>
-<tr><td class="label">${taxLabel}</td><td class="val label">${fmt(tax)}</td></tr>
-<tr class="total-row"><td>TOTAL</td><td class="val">${fmt(total)}</td></tr>
-</table>
-<div class="sep"></div>
-<table>${payments}${changeLine}</table>
-${cufeHtml}
-<div class="sep"></div>
-<div class="footer">Gracias por su visita — Mesio POS</div>
-</body></html>`);
-  win.document.close(); win.focus();
-  win.onload = () => { win.print(); };
+  _printThermal(_buildReceiptHtml(bill, paymentContext));
 }
 
 // ── MODAL AJUSTAR FACTURA ──
@@ -1407,5 +1646,6 @@ setInterval(() => {
 }, 5000);
 
 </script>
+<iframe id="print-frame" style="display:none;position:absolute;width:0;height:0;border:0;"></iframe>
 </body>
 </html>
