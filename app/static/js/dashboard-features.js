@@ -134,6 +134,7 @@ async function syncMenuToBranches() {
 
 // ── EDITOR DE MENÚ ──
 
+
 function openMenuEditor() {
   editorMenuState = [];
   const catMap = {};
@@ -142,23 +143,35 @@ function openMenuEditor() {
   MENU_ITEMS.forEach(m => {
     if (!catMap[m.cat]) {
       catMap[m.cat] = [];
-      editorMenuState.push({ catName: m.cat, dishes: catMap[m.cat] });
+      // 🛡️ FIX: Añadido "isOpen: false" para manejar el acordeón
+      editorMenuState.push({ catName: m.cat, isOpen: false, dishes: catMap[m.cat] });
     }
     catMap[m.cat].push({
       name: m.name,
-      price: String(m.price).replace(/[^0-9.-]+/g,""),
+      price: String(m.price).replace(/[^0-9.-]+/g,""), // Solo números
       description: m.desc || ''
     });
   });
 
+  // Abrir automáticamente la primera viñeta por comodidad
+  if (editorMenuState.length > 0) {
+    editorMenuState[0].isOpen = true;
+  }
+
   renderMenuEditor();
   document.getElementById('modal-menu-editor').style.display = 'flex';
-  document.body.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden'; 
 }
 
 function closeMenuEditor() {
   document.getElementById('modal-menu-editor').style.display = 'none';
   document.body.style.overflow = '';
+}
+
+// 🛡️ FIX: Función para abrir/cerrar las viñetas (Acordeón)
+function toggleEditorCat(index) {
+  editorMenuState[index].isOpen = !editorMenuState[index].isOpen;
+  renderMenuEditor();
 }
 
 function renderMenuEditor() {
@@ -175,20 +188,30 @@ function renderMenuEditor() {
     catCard.className = 'menu-editor-cat-card';
     
     const safeCatName = catObj.catName.replace(/"/g, '&quot;');
+    const displayStyle = catObj.isOpen ? 'block' : 'none';
+    const arrowIcon = catObj.isOpen ? '▲' : '▼';
 
+    // 🛡️ FIX: Maquetación con viñeta desplegable y protección de clics
     catCard.innerHTML = `
-      <div class="menu-editor-cat-header">
-        <input type="text" class="menu-editor-cat-input" value="${safeCatName}" placeholder="Nombre de categoría">
-        <button class="btn-del-cat" onclick="removeMenuEditorCategory(${catIndex})" title="Eliminar Categoría">🗑️</button>
+      <div class="menu-editor-cat-header" style="cursor:pointer; user-select:none;" onclick="toggleEditorCat(${catIndex})">
+        <input type="text" class="menu-editor-cat-input" value="${safeCatName}" placeholder="Nombre de categoría" onclick="event.stopPropagation()">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <button class="btn-del-cat" onclick="event.stopPropagation(); removeMenuEditorCategory(${catIndex})" title="Eliminar Categoría">🗑️</button>
+          <span style="font-size:12px; color:#888; font-weight:bold; width:15px; text-align:center;">${arrowIcon}</span>
+        </div>
       </div>
-      <div class="menu-editor-dishes" id="editor-dishes-${catIndex}"></div>
-      <div class="menu-editor-cat-footer">
-        <button onclick="addMenuEditorDish(${catIndex})">+ Añadir Plato</button>
+      
+      <div style="display: ${displayStyle}; border-top: 1px solid #e0e0d8; background: #fafaf8;">
+        <div class="menu-editor-dishes" id="editor-dishes-${catIndex}"></div>
+        <div class="menu-editor-cat-footer">
+          <button onclick="addMenuEditorDish(${catIndex})">+ Añadir Plato</button>
+        </div>
       </div>
     `;
     
     canvas.appendChild(catCard);
 
+    // Guardar nombre de categoría sin que se cierre el input
     const catInput = catCard.querySelector('.menu-editor-cat-input');
     catInput.addEventListener('change', (e) => {
       editorMenuState[catIndex].catName = e.target.value.trim() || 'Sin Nombre';
@@ -208,7 +231,7 @@ function renderMenuEditor() {
           <input type="text" placeholder="Precio (Sin $)" value="${dish.price}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'price', this.value)">
           <input type="text" placeholder="Descripción (Opcional)" value="${safeDishDesc}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'description', this.value)">
         </div>
-        <button class="btn-del-dish" onclick="removeMenuEditorDish(${catIndex}, ${dishIndex})">✕</button>
+        <button class="btn-del-dish" title="Eliminar plato" onclick="removeMenuEditorDish(${catIndex}, ${dishIndex})">✕</button>
       `;
       dishesContainer.appendChild(dishRow);
     });
@@ -218,7 +241,9 @@ function renderMenuEditor() {
 function addMenuEditorCategory() {
   const name = prompt("Nombre de la nueva categoría:");
   if (!name || !name.trim()) return;
-  editorMenuState.push({ catName: name.trim(), dishes: [] });
+  // Cierra todas y abre la nueva categoría para enfocar al usuario
+  editorMenuState.forEach(c => c.isOpen = false);
+  editorMenuState.push({ catName: name.trim(), isOpen: true, dishes: [] });
   renderMenuEditor();
 }
 
@@ -231,13 +256,16 @@ function removeMenuEditorCategory(catIndex) {
 }
 
 function addMenuEditorDish(catIndex) {
+  editorMenuState[catIndex].isOpen = true; // Fuerza a abrir la viñeta
   editorMenuState[catIndex].dishes.push({ name: '', price: '', description: '' });
   renderMenuEditor();
 }
 
 function removeMenuEditorDish(catIndex, dishIndex) {
-  editorMenuState[catIndex].dishes.splice(dishIndex, 1);
-  renderMenuEditor();
+  if(confirm('¿Eliminar este plato?')) {
+    editorMenuState[catIndex].dishes.splice(dishIndex, 1);
+    renderMenuEditor();
+  }
 }
 
 function updateMenuEditorDish(catIndex, dishIndex, field, value) {
@@ -258,7 +286,7 @@ async function saveMenuEditor() {
       const name = dish.name.trim();
       let price = dish.price.toString().trim();
       
-      if (!name) continue;
+      if (!name) continue; 
 
       if (price.includes('$') || /[a-zA-Z]/.test(price)) {
         hasError = true;
