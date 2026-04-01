@@ -135,40 +135,38 @@ async function syncMenuToBranches() {
 // ── EDITOR DE MENÚ ──
 
 
+// ── EDITOR DE MENÚ ──
+
 function openMenuEditor() {
   editorMenuState = [];
   const catMap = {};
 
-  // Agrupar platos por categoría
   MENU_ITEMS.forEach(m => {
     if (!catMap[m.cat]) {
       catMap[m.cat] = [];
-      // 🛡️ FIX: Añadido "isOpen: false" para manejar el acordeón
       editorMenuState.push({ catName: m.cat, isOpen: false, dishes: catMap[m.cat] });
     }
     catMap[m.cat].push({
       name: m.name,
-      price: String(m.price).replace(/[^0-9.-]+/g,""), // Solo números
+      price: String(m.price).replace(/[^0-9.-]+/g,""),
       description: m.desc || ''
     });
   });
 
-  // Abrir automáticamente la primera viñeta por comodidad
-  if (editorMenuState.length > 0) {
-    editorMenuState[0].isOpen = true;
-  }
+  if (editorMenuState.length > 0) editorMenuState[0].isOpen = true;
 
   renderMenuEditor();
-  document.getElementById('modal-menu-editor').style.display = 'flex';
+  
+  // Ocultamos el scroll del fondo y mostramos el editor en pantalla completa
   document.body.style.overflow = 'hidden'; 
+  document.getElementById('full-menu-editor').style.display = 'block';
 }
 
 function closeMenuEditor() {
-  document.getElementById('modal-menu-editor').style.display = 'none';
+  document.getElementById('full-menu-editor').style.display = 'none';
   document.body.style.overflow = '';
 }
 
-// 🛡️ FIX: Función para abrir/cerrar las viñetas (Acordeón)
 function toggleEditorCat(index) {
   editorMenuState[index].isOpen = !editorMenuState[index].isOpen;
   renderMenuEditor();
@@ -179,59 +177,74 @@ function renderMenuEditor() {
   canvas.innerHTML = '';
 
   if (editorMenuState.length === 0) {
-    canvas.innerHTML = '<div class="empty-state">Tu carta está vacía. Añade una categoría para comenzar.</div>';
+    canvas.innerHTML = '<div class="empty-state" style="background:#fff; border-radius:12px; padding:4rem; font-size:16px;">Tu carta está vacía. Añade una categoría para comenzar.</div>';
     return;
   }
 
   editorMenuState.forEach((catObj, catIndex) => {
     const catCard = document.createElement('div');
-    catCard.className = 'menu-editor-cat-card';
+    catCard.style.cssText = 'background:#fff; border:1px solid #d0d0c8; border-radius:12px; overflow:hidden; box-shadow:0 4px 6px rgba(0,0,0,0.03);';
     
     const safeCatName = catObj.catName.replace(/"/g, '&quot;');
     const displayStyle = catObj.isOpen ? 'block' : 'none';
     const arrowIcon = catObj.isOpen ? '▲' : '▼';
+    const headerBg = catObj.isOpen ? '#f8f8f5' : '#fff';
 
-    // 🛡️ FIX: Maquetación con viñeta desplegable y protección de clics
     catCard.innerHTML = `
-      <div class="menu-editor-cat-header" style="cursor:pointer; user-select:none;" onclick="toggleEditorCat(${catIndex})">
-        <input type="text" class="menu-editor-cat-input" value="${safeCatName}" placeholder="Nombre de categoría" onclick="event.stopPropagation()">
-        <div style="display:flex; align-items:center; gap:12px;">
-          <button class="btn-del-cat" onclick="event.stopPropagation(); removeMenuEditorCategory(${catIndex})" title="Eliminar Categoría">🗑️</button>
-          <span style="font-size:12px; color:#888; font-weight:bold; width:15px; text-align:center;">${arrowIcon}</span>
+      <div style="padding:16px 20px; background:${headerBg}; display:flex; align-items:center; justify-content:space-between; cursor:pointer; border-bottom:${catObj.isOpen ? '1px solid #e0e0d8' : 'none'};" onclick="toggleEditorCat(${catIndex})">
+        <div style="display:flex; align-items:center; gap:12px; flex:1;">
+          <span style="font-size:22px; color:#888;">☰</span>
+          <input type="text" value="${safeCatName}" placeholder="Nombre de categoría (Ej: Entradas)" 
+            style="font-size:20px; font-weight:700; color:#111; border:1px solid transparent; background:transparent; padding:6px 12px; border-radius:8px; outline:none; width:70%; transition:border 0.2s;" 
+            onclick="event.stopPropagation()" onfocus="this.style.borderColor='#1D9E75'; this.style.background='#fff'" onblur="this.style.borderColor='transparent'; this.style.background='transparent'">
+        </div>
+        <div style="display:flex; align-items:center; gap:16px;">
+          <button onclick="event.stopPropagation(); removeMenuEditorCategory(${catIndex})" style="background:#FDE8E8; color:#C0392B; border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer;">🗑️ Eliminar Categoría</button>
+          <span style="font-size:16px; color:#555; width:20px; text-align:center;">${arrowIcon}</span>
         </div>
       </div>
       
-      <div style="display: ${displayStyle}; border-top: 1px solid #e0e0d8; background: #fafaf8;">
-        <div class="menu-editor-dishes" id="editor-dishes-${catIndex}"></div>
-        <div class="menu-editor-cat-footer">
-          <button onclick="addMenuEditorDish(${catIndex})">+ Añadir Plato</button>
-        </div>
+      <div style="display:${displayStyle}; background:#fafaf8; padding:20px;">
+        <div class="menu-editor-dishes" id="editor-dishes-${catIndex}" style="display:flex; flex-direction:column; gap:16px; margin-bottom:20px;"></div>
+        <button onclick="addMenuEditorDish(${catIndex})" style="background:#E1F5EE; color:#0F6E56; border:1px dashed #1D9E75; padding:12px 20px; border-radius:8px; font-size:14px; cursor:pointer; font-weight:600; width:100%;">+ Añadir Plato a esta categoría</button>
       </div>
     `;
     
     canvas.appendChild(catCard);
 
-    // Guardar nombre de categoría sin que se cierre el input
-    const catInput = catCard.querySelector('.menu-editor-cat-input');
+    const catInput = catCard.querySelector('input');
     catInput.addEventListener('change', (e) => {
       editorMenuState[catIndex].catName = e.target.value.trim() || 'Sin Nombre';
     });
 
     const dishesContainer = catCard.querySelector('.menu-editor-dishes');
+    if (catObj.dishes.length === 0) {
+       dishesContainer.innerHTML = '<div style="color:#888; font-size:14px; font-style:italic; text-align:center;">No hay platos en esta categoría.</div>';
+    }
+
     catObj.dishes.forEach((dish, dishIndex) => {
       const dishRow = document.createElement('div');
-      dishRow.className = 'menu-editor-dish-row';
+      dishRow.style.cssText = 'display:grid; grid-template-columns: 2fr 1fr 2fr auto; gap:16px; align-items:start; background:#fff; padding:16px; border:1px solid #e0e0d8; border-radius:10px;';
       
       const safeDishName = dish.name.replace(/"/g, '&quot;');
       const safeDishDesc = (dish.description || '').replace(/"/g, '&quot;');
 
       dishRow.innerHTML = `
-        <div class="dish-inputs">
-          <input type="text" placeholder="Nombre del plato" value="${safeDishName}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'name', this.value)">
-          <input type="text" placeholder="Precio (Sin $)" value="${dish.price}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'price', this.value)">
-          <input type="text" placeholder="Descripción (Opcional)" value="${safeDishDesc}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'description', this.value)">
+        <div>
+          <label style="font-size:12px; color:#888; font-weight:600; margin-bottom:6px; display:block;">Nombre del plato *</label>
+          <input type="text" placeholder="Ej: Hamburguesa Clásica" value="${safeDishName}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'name', this.value)" style="width:100%; padding:10px 12px; border:1px solid #ccc; border-radius:8px; font-size:14px; outline:none;">
         </div>
-        <button class="btn-del-dish" title="Eliminar plato" onclick="removeMenuEditorDish(${catIndex}, ${dishIndex})">✕</button>
+        <div>
+          <label style="font-size:12px; color:#888; font-weight:600; margin-bottom:6px; display:block;">Precio (Sin $) *</label>
+          <input type="number" placeholder="Ej: 25000" value="${dish.price}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'price', this.value)" style="width:100%; padding:10px 12px; border:1px solid #ccc; border-radius:8px; font-size:14px; outline:none;">
+        </div>
+        <div>
+          <label style="font-size:12px; color:#888; font-weight:600; margin-bottom:6px; display:block;">Descripción (Opcional)</label>
+          <input type="text" placeholder="Ingredientes, tamaño..." value="${safeDishDesc}" onchange="updateMenuEditorDish(${catIndex}, ${dishIndex}, 'description', this.value)" style="width:100%; padding:10px 12px; border:1px solid #ccc; border-radius:8px; font-size:14px; outline:none;">
+        </div>
+        <div style="padding-top:24px;">
+          <button title="Eliminar plato" onclick="removeMenuEditorDish(${catIndex}, ${dishIndex})" style="background:#FDE8E8; color:#C0392B; border:none; border-radius:8px; width:40px; height:40px; font-size:18px; font-weight:bold; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+        </div>
       `;
       dishesContainer.appendChild(dishRow);
     });
@@ -241,10 +254,15 @@ function renderMenuEditor() {
 function addMenuEditorCategory() {
   const name = prompt("Nombre de la nueva categoría:");
   if (!name || !name.trim()) return;
-  // Cierra todas y abre la nueva categoría para enfocar al usuario
   editorMenuState.forEach(c => c.isOpen = false);
   editorMenuState.push({ catName: name.trim(), isOpen: true, dishes: [] });
   renderMenuEditor();
+  
+  // Hacer scroll automático hacia abajo para ver la nueva categoría
+  setTimeout(() => {
+    const editorEl = document.getElementById('full-menu-editor');
+    editorEl.scrollTo({ top: editorEl.scrollHeight, behavior: 'smooth' });
+  }, 100);
 }
 
 function removeMenuEditorCategory(catIndex) {
@@ -256,7 +274,7 @@ function removeMenuEditorCategory(catIndex) {
 }
 
 function addMenuEditorDish(catIndex) {
-  editorMenuState[catIndex].isOpen = true; // Fuerza a abrir la viñeta
+  editorMenuState[catIndex].isOpen = true; 
   editorMenuState[catIndex].dishes.push({ name: '', price: '', description: '' });
   renderMenuEditor();
 }
