@@ -629,7 +629,13 @@ function _buildReceiptHtml(bill, paymentContext) {
   const timeStr = dt.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
   const dateStr = dt.toLocaleDateString('es-CO');
 
-  const itemsHtml = (bill.items || []).map(i => {
+  // 🛡️ FIX ESTRELLA: Si 'items' llega como texto desde la BD, lo convertimos a Array
+  let safeItems = bill.items || [];
+  if (typeof safeItems === 'string') {
+      try { safeItems = JSON.parse(safeItems); } catch(e) { safeItems = []; }
+  }
+
+  const itemsHtml = safeItems.map(i => {
     const qty = Number(i.quantity || i.qty || 1);
     const price = Number(i.price || i.unit_price || 0);
     const lineTotal = price * qty;
@@ -1206,12 +1212,18 @@ function openPayModal(billId, checkId, checkData) {
   _payBillId     = billId;
   _payCheckId    = checkId;
   _payCheckTotal = parseFloat(checkData.total) || 0;
+  
+  // 🛡️ FIX: Asegurarnos de que checkData.items también se vuelva Array
+  if (typeof checkData.items === 'string') {
+      try { checkData.items = JSON.parse(checkData.items); } catch(e) { checkData.items = []; }
+  }
+  
   _payCheckData  = checkData;
   _activePayments = [];
 
   document.getElementById('pay-modal-title').textContent = `💰 Cobrar Cuenta ${checkData.check_number || ''}`;
   document.getElementById('pay-modal-subtitle').textContent = `Mesa: ${_billsCache[billId]?.table_name || ''} | ID: ${(checkId || '').substring(0,8)}...`;
-    
+  
   document.getElementById('pay-customer-name').value  = '';
   document.getElementById('pay-customer-nit').value   = '';
   
@@ -1224,7 +1236,6 @@ function openPayModal(billId, checkId, checkData) {
 
   document.getElementById('pay-methods-list').innerHTML = '';
   
-  // 🛡️ FIX: Construir la cuadrícula de botones dinámicamente
   renderPayMethodsGrid();
 
   // Agregar automáticamente Efectivo con el valor exacto por comodidad
