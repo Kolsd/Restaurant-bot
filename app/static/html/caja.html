@@ -956,20 +956,53 @@ async function cobrarTodo(billId) {
   const items = Object.values(byName);
 
   const taxPct = _billingConfig?.tax_percentage ?? 19.0;
+  
   try {
     const r = await fetch(`/api/table-orders/${billId}/checks`, {
-      method: 'POST', headers: reqHeaders,
+      method: 'POST', 
+      headers: reqHeaders,
       body: JSON.stringify({
         checks: [{ check_number: 1, items }],
         tax_pct: taxPct,
         tax_regime: _billingConfig?.tax_regime ?? 'iva'
       })
     });
-    if (!r.ok) { const e = await r.json(); alert(e.detail || 'Error al crear check'); return; }
-    const { checks } = await r.json();
+
+    // 🛡️ Leer la respuesta como texto primero para evitar crash de JSON
+    const textResponse = await r.text();
+    let data;
+    try {
+        data = JSON.parse(textResponse);
+    } catch(err) {
+        throw new Error(`El servidor devolvió HTML en lugar de JSON. Status: ${r.status}`);
+    }
+
+    if (!r.ok) { 
+        alert(data.detail || 'Error al crear check'); 
+        return; 
+    }
+
+    const checks = data.checks;
+    if (!checks || checks.length === 0) {
+        throw new Error('El backend respondió bien, pero no devolvió los datos de la cuenta (checks).');
+    }
+
     const check = checks[0];
+    
+    // 🛡️ Prevenir el error más común: que la base de datos no haya devuelto el 'id'
+    if (!check.id) {
+        console.warn("⚠️ El check devuelto no tiene ID.");
+        check.id = "tmp-" + Date.now(); 
+    }
+
+    // Si todo va bien, abrimos el modal
     openPayModal(billId, check.id, check);
-  } catch(e) { alert('Error de conexión'); }
+
+  } catch(e) { 
+    // 🕵️‍♂️ AQUÍ ATRAPAMOS AL VERDADERO CULPABLE
+    console.error("🔥 Error real atrapado en cobrarTodo:", e);
+    alert(`Error JS: ${e.message}`); 
+  }
 }
 
 // ── MODAL DIVIDIR CUENTA ──────────────────────────────────────────
@@ -1177,8 +1210,8 @@ function openPayModal(billId, checkId, checkData) {
   _activePayments = [];
 
   document.getElementById('pay-modal-title').textContent = `💰 Cobrar Cuenta ${checkData.check_number || ''}`;
-  document.getElementById('pay-modal-subtitle').textContent = `Mesa: ${_billsCache[billId]?.table_name || ''} | ID: ${checkId.substring(0,8)}...`;
-  
+  document.getElementById('pay-modal-subtitle').textContent = `Mesa: ${_billsCache[billId]?.table_name || ''} | ID: ${(checkId || '').substring(0,8)}...`;
+    
   document.getElementById('pay-customer-name').value  = '';
   document.getElementById('pay-customer-nit').value   = '';
   
