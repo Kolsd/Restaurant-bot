@@ -377,7 +377,7 @@ async def update_delivery_order_status(request: Request, order_id: str):
                         pass
 
     return {"success": True}
-    
+
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 
 @router.get("/api/table-orders")
@@ -990,13 +990,16 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             customer_email=body.customer_email,
         )
 
-        asyncio.create_task(loyalty_svc.accrue_on_check(
-            restaurant_id=restaurant["id"],
-            bot_number=restaurant.get("whatsapp_number", ""),
-            base_order_id=base_order_id,
-            check_id=check_id,
-            total_cop=float(check["total"]) + body.service_charge,
-        ))
+        if hasattr(loyalty_svc, "accrue_on_check"):
+            asyncio.create_task(loyalty_svc.accrue_on_check(
+                restaurant_id=restaurant["id"],
+                bot_number=restaurant.get("whatsapp_number", ""),
+                base_order_id=base_order_id,
+                check_id=check_id,
+                total_cop=float(check["total"]) + body.service_charge,
+            ))
+        else:
+            print(f"⚠️ Aviso: 'accrue_on_check' no está implementado en loyalty.py. Saltando puntos para el check {check_id}.")
 
         order_row = await db.db_get_first_table_order(base_order_id)
         if order_row and order_row["status"] == "factura_entregada":
