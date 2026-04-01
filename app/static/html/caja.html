@@ -286,6 +286,20 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   .sp-box { max-height: 98vh; }
   #split-table { font-size: 12px; }
 }
+
+/* ── NUEVO POS CAJA ── */
+.pos-overlay { display: none; position: fixed; inset: 0; background: #E5E7EB; z-index: 9999; flex-direction: row; height: 100vh; height: 100dvh; width: 100vw; }
+.pos-controls { flex: 1; display: flex; flex-direction: column; background: #fff; border-right: 1px solid #D1D5DB; overflow-y: auto; }
+.pos-receipt-pane { width: 400px; background: #374151; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; overflow-y: auto; box-shadow: inset 10px 0 20px rgba(0,0,0,0.1); }
+.thermal-paper { width: 100%; max-width: 320px; background: #fff; padding: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.2); font-family: 'Courier New', Courier, monospace; color: #000; font-size: 12px; position: relative; }
+.thermal-paper::after { content: ''; position: absolute; bottom: -8px; left: 0; width: 100%; height: 8px; background: radial-gradient(circle, transparent, transparent 50%, #fff 50%, #fff 100%) 0 0 / 16px 16px repeat-x; }
+.pay-method-btn { padding: 16px; border: 2px solid #E4E4E7; border-radius: 12px; background: #fff; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.pay-method-btn:hover { border-color: #1D9E75; background: #ECFDF5; color: #0F6E56; }
+@media (max-width: 768px) {
+  .pos-overlay { flex-direction: column; }
+  .pos-receipt-pane { width: 100%; height: 300px; box-shadow: inset 0 10px 20px rgba(0,0,0,0.1); }
+}
+
 </style>
 </head>
 <body>
@@ -391,53 +405,57 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
   </div>
 </div>
 
-<div class="sp-overlay" id="pay-modal" onclick="if(event.target===this)closePayModal()">
-  <div class="pay-box">
-    <div class="sp-head">
-      <h3 id="pay-modal-title">💰 Cobrar Cuenta</h3>
-      <button class="modal-close" onclick="closePayModal()">✕</button>
+<div class="pos-overlay" id="pay-modal">
+  
+  <div class="pos-controls">
+    <div style="padding:1.5rem; border-bottom:1px solid #E4E4E7; display:flex; justify-content:space-between; align-items:center; background:#FAFAFA; position:sticky; top:0; z-index:10;">
+      <div>
+        <h2 id="pay-modal-title" style="font-size:1.5rem; font-weight:800; color:#18181B;">💰 Cobrar Cuenta</h2>
+        <div id="pay-modal-subtitle" style="font-size:12px; color:#71717A; font-family:monospace; margin-top:4px;"></div>
+      </div>
+      <button onclick="closePayModal()" style="padding:10px 20px; border-radius:10px; border:1px solid #D1D5DB; background:#fff; font-weight:600; cursor:pointer;">✕ Volver</button>
     </div>
-    <div class="sp-body">
-      <div style="font-size:12px;color:#71717A;margin-bottom:.75rem;">Métodos de pago</div>
-      <div id="pay-methods-list"></div>
-      <button onclick="addPayMethod()" style="font-size:12px;padding:5px 12px;background:#F0FDF4;color:#059669;border:1.5px solid #A7F3D0;border-radius:8px;cursor:pointer;font-weight:700;margin-bottom:.75rem;">+ Agregar método</button>
 
-      <div class="pay-summary-box">
-        <div class="pay-summary-line"><span>Total a cobrar</span><span id="pay-check-total">$0</span></div>
-        <div class="pay-summary-line"><span>Recibido</span><span id="pay-received">$0</span></div>
-        <div class="pay-summary-line total"><span>Cambio / Vueltas</span><span class="pay-change" id="pay-change">$0</span></div>
+    <div style="padding:2rem; flex:1;">
+      <div style="background:#F3E8FF; border:1px solid #D8B4FE; padding:1.5rem; border-radius:16px; margin-bottom:2rem; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:13px; color:#6D28D9; font-weight:700; text-transform:uppercase; letter-spacing:1px;">Pendiente por cobrar</div>
+          <div id="pay-pending-display" style="font-size:2.5rem; font-weight:900; color:#7C3AED; margin-top:4px;">$0</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:13px; color:#6D28D9; font-weight:700; text-transform:uppercase; letter-spacing:1px;">Cambio a devolver</div>
+          <div id="pay-change-display" style="font-size:2.5rem; font-weight:900; color:#059669; margin-top:4px;">$0</div>
+        </div>
       </div>
 
-      <div style="margin-bottom:.5rem;">
-        <div style="font-size:11px;font-weight:700;color:#71717A;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Datos del cliente (opcional — para factura)</div>
-        <input class="pay-input" id="pay-customer-name" placeholder="Nombre del cliente (Ej: Juan García)">
-        <input class="pay-input" id="pay-customer-nit"  placeholder="NIT / Cédula (vacío = Consumidor Final)">
-        <input class="pay-input" id="pay-customer-email" placeholder="Email (opcional)">
+      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">1. Selecciona Método de Pago</h3>
+      <div id="dynamic-pay-methods" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:1.5rem;">
       </div>
 
-      <div id="pay-feedback"></div>
+      <div id="pay-methods-list" style="margin-bottom: 2rem;"></div>
+
+      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">2. Datos para Factura DIAN</h3>
+      <div style="display:grid; gap:12px;">
+        <input type="text" id="pay-customer-name" placeholder="Nombre del cliente (Ej: Consumidor Final)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
+        <input type="text" id="pay-customer-nit" placeholder="CC / NIT (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
+      </div>
+      <div id="pay-feedback" style="display:none; margin-top:1.5rem; padding:12px; border-radius:10px; font-size:14px; font-weight:600;"></div>
     </div>
-    <div class="sp-foot">
-      <button class="sp-btn-cancel" onclick="closePayModal()">Cancelar</button>
-      <button class="sp-btn-ok" id="btn-process-pay" onclick="processPayment()">Procesar Pago y Emitir Factura</button>
+
+    <div style="padding:1.5rem; border-top:1px solid #E4E4E7; background:#FAFAFA; position:sticky; bottom:0;">
+      <button id="btn-process-pay" onclick="processPayment()" style="width:100%; background:#1D9E75; color:#fff; border:none; padding:18px; border-radius:12px; font-size:18px; font-weight:800; cursor:pointer; box-shadow:0 6px 16px rgba(29,158,117,0.3); transition:background 0.2s;">
+        Cobrar e Imprimir Factura
+      </button>
     </div>
   </div>
-</div>
 
-<div class="sp-overlay" id="chat-modal" onclick="if(event.target===this)closeChatModal()">
-  <div class="sp-box" style="width: 500px; height: 80vh;">
-    <div class="sp-head">
-      <h3 id="chat-modal-title">Chat de WhatsApp</h3>
-      <button class="modal-close" onclick="closeChatModal()">✕</button>
-    </div>
-    <div class="sp-body" id="chat-modal-msgs" style="background: #efeae2; display: flex; flex-direction: column;"></div>
-    <div class="sp-foot" style="align-items: center; border-top: 1px solid #E4E4E7; background:#fff; padding:1rem;">
-      <input type="text" id="chat-reply-input" class="chat-input" placeholder="Escribe un mensaje..." onkeydown="if(event.key==='Enter')sendManualReply()">
-      <button onclick="sendManualReply()" style="background:#1D9E75;color:#fff;border:none;padding:10px 20px;border-radius:20px;cursor:pointer;font-weight:600;margin-left:10px;">Enviar</button>
-    </div>
+  <div class="pos-receipt-pane">
+    <div style="color:#9CA3AF; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Previsualización de Factura</div>
+    <div class="thermal-paper" id="receipt-preview">
+      </div>
   </div>
-</div>
 
+</div>
 
 <script src="/static/js/roles.js"></script>
 <script>
@@ -934,24 +952,31 @@ function openPayModal(billId, checkId, checkData) {
   _payBillId     = billId;
   _payCheckId    = checkId;
   _payCheckTotal = parseFloat(checkData.total) || 0;
+  _payCheckData  = checkData;
+  _activePayments = [];
 
-  document.getElementById('pay-modal-title').textContent =
-    `💰 Cobrar Cuenta ${checkData.check_number || ''}`;
-  document.getElementById('pay-check-total').textContent = fmt(_payCheckTotal);
+  document.getElementById('pay-modal-title').textContent = `💰 Cobrar Cuenta ${checkData.check_number || ''}`;
+  document.getElementById('pay-modal-subtitle').textContent = `Mesa: ${_billsCache[billId]?.table_name || ''} | ID: ${checkId.substring(0,8)}...`;
+  
   document.getElementById('pay-customer-name').value  = '';
   document.getElementById('pay-customer-nit').value   = '';
-  document.getElementById('pay-customer-email').value = '';
+  
   const fb = document.getElementById('pay-feedback');
   fb.style.display = 'none';
-  document.getElementById('btn-process-pay').disabled = false;
-  document.getElementById('btn-process-pay').textContent = 'Procesar Pago y Emitir Factura';
+  
+  const btn = document.getElementById('btn-process-pay');
+  btn.disabled = false;
+  btn.textContent = 'Cobrar e Imprimir Factura';
 
-  // Reset methods to 1 row with full amount
   document.getElementById('pay-methods-list').innerHTML = '';
-  addPayMethod(_payCheckTotal);
-  _recalcChange();
+  
+  // 🛡️ FIX: Construir la cuadrícula de botones dinámicamente
+  renderPayMethodsGrid();
 
-  document.getElementById('pay-modal').classList.add('open');
+  // Agregar automáticamente Efectivo con el valor exacto por comodidad
+  addPayMethod('Efectivo', '💵', _payCheckTotal);
+
+  document.getElementById('pay-modal').style.display = 'flex';
 }
 
 function closePayModal() {
@@ -959,25 +984,63 @@ function closePayModal() {
   _payBillId = _payCheckId = null;
 }
 
-function addPayMethod(defaultAmt) {
-  const list = document.getElementById('pay-methods-list');
-  const idx  = list.children.length;
-  const div  = document.createElement('div');
-  div.className = 'pay-method-row';
-  div.innerHTML = `
-    <select class="pay-method-sel">
-      <option value="efectivo">💵 Efectivo</option>
-      <option value="tarjeta">💳 Tarjeta</option>
-      <option value="nequi">📱 Nequi</option>
-      <option value="transferencia">🏦 Transferencia</option>
-      <option value="daviplata">📱 Daviplata</option>
-    </select>
-    <input class="pay-method-amt" type="number" min="0" step="1000"
-           placeholder="Monto" value="${defaultAmt != null ? defaultAmt : ''}"
-           oninput="_recalcChange()">
-    <button class="pay-method-rm" onclick="this.parentElement.remove();_recalcChange();">✕</button>
-  `;
-  list.appendChild(div);
+// ── RENDERIZAR MÉTODOS DE PAGO DINÁMICOS ──
+function renderPayMethodsGrid() {
+  const container = document.getElementById('dynamic-pay-methods');
+  if (!container) return;
+
+  // 1. Opciones por defecto (Fallback)
+  let methods = [
+    { name: 'Efectivo', icon: '💵' },
+    { name: 'Tarjeta', icon: '💳' },
+    { name: 'Nequi', icon: '📱' },
+    { name: 'Transferencia', icon: '🏦' }
+  ];
+
+  // 2. Leer de la configuración del restaurante
+  const feats = _restData.features || {};
+  const customMethods = feats.payment_methods;
+
+  if (Array.isArray(customMethods) && customMethods.length > 0) {
+    methods = customMethods.map(pm => {
+      if (typeof pm === 'string') {
+        let icon = '💳';
+        const lower = pm.toLowerCase();
+        if (lower.includes('efectivo') || lower.includes('cash')) icon = '💵';
+        else if (lower.includes('nequi') || lower.includes('daviplata') || lower.includes('zelle')) icon = '📱';
+        else if (lower.includes('trans')) icon = '🏦';
+        return { name: pm, icon: icon };
+      }
+      return { name: pm.name || 'Pago', icon: pm.icon || '💳' };
+    });
+  }
+
+  // 3. Inyectar los botones al HTML
+  container.innerHTML = methods.map(m => `
+    <button class="pay-method-btn" onclick="addPayMethod('${m.name}', '${m.icon}')">
+      <span style="font-size:24px;">${m.icon}</span> ${m.name}
+    </button>
+  `).join('');
+}
+
+function addPayMethod(method, icon, forcedAmount = null) {
+  const received = _activePayments.reduce((s, p) => s + p.amount, 0);
+  const pending = _payCheckTotal - received;
+  
+  if (pending <= 0 && forcedAmount === null) return; 
+
+  let amt = forcedAmount !== null ? forcedAmount : pending;
+  
+  // Si es efectivo y no viene un monto forzado, preguntamos cuánto entrega el cliente
+  if (method === 'Efectivo' && forcedAmount === null) {
+    const input = prompt(`Monto entregado en Efectivo (Pendiente: ${fmt(pending)}):`, pending);
+    if (!input) return;
+    amt = parseFloat(input.replace(/[^0-9.-]+/g,""));
+    if (isNaN(amt) || amt <= 0) return;
+  }
+
+  _activePayments.push({ method, icon, amount: amt, id: Date.now() });
+  _renderPaymentsList();
   _recalcChange();
 }
 
