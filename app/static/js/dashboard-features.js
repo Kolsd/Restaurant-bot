@@ -46,6 +46,9 @@ async function loadMenu() {
   renderMenu();
 }
 
+// 🛡️ Memoria global para recordar qué pestañas del menú dejamos abiertas
+window._openMenuCats = window._openMenuCats || new Set();
+
 function renderMenu() {
   const grid = document.getElementById('menu-grid');
   if (!grid) return;
@@ -54,15 +57,22 @@ function renderMenu() {
     return;
   }
   const cats = [...new Set(MENU_ITEMS.map(m => m.cat))];
+  
+  // Si es la primera vez que carga y no hay nada abierto, abrimos la primera categoría por defecto
+  if (window._openMenuCats.size === 0 && cats.length > 0) {
+    const firstCat = /\p{Emoji}/u.test(cats[0]) ? cats[0] : `🍽️ ${cats[0]}`;
+    window._openMenuCats.add(firstCat);
+  }
+
   grid.innerHTML = cats.map((cat, ci) => {
     const items = MENU_ITEMS.filter(m => m.cat === cat);
     const avail = items.filter(m => menuAvailability[m.name] !== false).length;
-    const isOpen = ci === 0;
     
-    // 🛡️ FIX: Ya no usamos el diccionario hardcodeado. 
-    // Si el nombre de la categoría ya trae emoji, lo deja igual. Si no trae, le pone el 🍽️
     const hasEmoji = /\p{Emoji}/u.test(cat);
     const displayCat = hasEmoji ? cat : `🍽️ ${cat}`;
+    
+    // 🛡️ FIX: Leemos la memoria para saber si debe estar abierto o cerrado
+    const isOpen = window._openMenuCats.has(displayCat);
 
     return `<div class="menu-category">
       <div class="menu-cat-header" onclick="toggleCat(this)">
@@ -86,8 +96,19 @@ function renderMenu() {
 }
 
 function toggleCat(header) {
-  header.nextElementSibling.classList.toggle('open');
-  header.querySelector('.menu-cat-arrow').classList.toggle('open');
+  const body = header.nextElementSibling;
+  const arrow = header.querySelector('.menu-cat-arrow');
+  const catName = header.querySelector('.menu-cat-title span:first-child').textContent; 
+  
+  body.classList.toggle('open');
+  arrow.classList.toggle('open');
+  
+  // 🛡️ FIX: Actualizamos la memoria cuando el usuario hace clic
+  if (body.classList.contains('open')) {
+    window._openMenuCats.add(catName);
+  } else {
+    window._openMenuCats.delete(catName);
+  }
 }
 
 async function toggleDish(name, available) {
@@ -131,9 +152,6 @@ async function syncMenuToBranches() {
     btn.disabled = false;
   }
 }
-
-// ── EDITOR DE MENÚ ──
-
 
 // ── EDITOR DE MENÚ ──
 
