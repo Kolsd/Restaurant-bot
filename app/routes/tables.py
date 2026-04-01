@@ -907,8 +907,16 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
     features = restaurant.get("features") or {}
     if isinstance(features, str):
         import json as _json
-        features = _json.loads(features)
-    dian_active = features.get("dian_active", False)
+        try:
+            features = _json.loads(features)
+        except Exception:
+            features = {}
+            
+    raw_dian = features.get("dian_active", False)
+    if isinstance(raw_dian, str):
+        dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
+    else:
+        dian_active = bool(raw_dian)
 
     # Construir el objeto order para el adaptador de billing
     items = check.get("items", [])

@@ -50,7 +50,8 @@
       "Bash(python3:*)",
       "Bash(python:*)",
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/table-orders)"
     ]
   }
 }
