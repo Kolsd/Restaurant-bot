@@ -6,7 +6,7 @@
 // ── MENÚ ─────────────────────────────────────────────────────────────
 let menuAvailability = {};
 let MENU_ITEMS = [];
-const icon  = CAT_ICONS[cat] || CAT_ICONS['default'];
+let editorMenuState = []; // 🛡️ FIX: Declarado al inicio para evitar errores de TDZ
 
 async function loadMenu() {
   const h = window._dashHeaders;
@@ -25,7 +25,7 @@ async function loadMenu() {
             name: d.name || '', 
             cat: cat, 
             price: d.price ? '$'+d.price : '$0',
-            desc: d.description || '' // 🛡️ FIX: Recuperar descripción
+            desc: d.description || '' 
           }));
         }
       });
@@ -57,11 +57,16 @@ function renderMenu() {
   grid.innerHTML = cats.map((cat, ci) => {
     const items = MENU_ITEMS.filter(m => m.cat === cat);
     const avail = items.filter(m => menuAvailability[m.name] !== false).length;
-    const icon  = CAT_ICONS[cat] || CAT_ICONS['default'];
     const isOpen = ci === 0;
+    
+    // 🛡️ FIX: Ya no usamos el diccionario hardcodeado. 
+    // Si el nombre de la categoría ya trae emoji, lo deja igual. Si no trae, le pone el 🍽️
+    const hasEmoji = /\p{Emoji}/u.test(cat);
+    const displayCat = hasEmoji ? cat : `🍽️ ${cat}`;
+
     return `<div class="menu-category">
       <div class="menu-cat-header" onclick="toggleCat(this)">
-        <div class="menu-cat-title"><span>${icon}</span><span>${cat}</span><span class="menu-cat-meta">${avail}/${items.length} disponibles</span></div>
+        <div class="menu-cat-title"><span>${displayCat}</span><span class="menu-cat-meta">${avail}/${items.length} disponibles</span></div>
         <span class="menu-cat-arrow ${isOpen?'open':''}">▼</span>
       </div>
       <div class="menu-cat-body ${isOpen?'open':''}">
@@ -129,8 +134,6 @@ async function syncMenuToBranches() {
 
 // ── EDITOR DE MENÚ ──
 
-let editorMenuState = []; // 🛡️ FIX: Ahora es un Array para evitar errores de comillas en HTML
-
 function openMenuEditor() {
   editorMenuState = [];
   const catMap = {};
@@ -150,7 +153,7 @@ function openMenuEditor() {
 
   renderMenuEditor();
   document.getElementById('modal-menu-editor').style.display = 'flex';
-  document.body.style.overflow = 'hidden'; // 🛡️ FIX: Permite deslizar el modal sin mover el fondo
+  document.body.style.overflow = 'hidden';
 }
 
 function closeMenuEditor() {
@@ -171,7 +174,6 @@ function renderMenuEditor() {
     const catCard = document.createElement('div');
     catCard.className = 'menu-editor-cat-card';
     
-    // Convertir comillas para que el input no se rompa visualmente
     const safeCatName = catObj.catName.replace(/"/g, '&quot;');
 
     catCard.innerHTML = `
@@ -187,7 +189,6 @@ function renderMenuEditor() {
     
     canvas.appendChild(catCard);
 
-    // Guardar nombre de categoría en tiempo real
     const catInput = catCard.querySelector('.menu-editor-cat-input');
     catInput.addEventListener('change', (e) => {
       editorMenuState[catIndex].catName = e.target.value.trim() || 'Sin Nombre';
@@ -257,7 +258,7 @@ async function saveMenuEditor() {
       const name = dish.name.trim();
       let price = dish.price.toString().trim();
       
-      if (!name) continue; // Ignorar platos con nombre vacío
+      if (!name) continue;
 
       if (price.includes('$') || /[a-zA-Z]/.test(price)) {
         hasError = true;
