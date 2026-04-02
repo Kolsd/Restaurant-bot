@@ -257,16 +257,35 @@ function _rowStyle() {
 
 // ── API calls ─────────────────────────────────────────────────────────────────
 
-async function _staffFetch(path, opts = {}) {
-  const res = await fetch('/api/staff' + path, {
-    headers: _apiHeaders(),
-    ...opts,
-  });
+async function _staffFetch(path, methodOrOpts = 'GET', body = null) {
+  // Supports two call styles:
+  //   _staffFetch(path, optsObject)          — legacy (opts spread)
+  //   _staffFetch(path, 'POST', bodyObject)  — new explicit style
+  let opts;
+  if (methodOrOpts && typeof methodOrOpts === 'object') {
+    // Legacy: second arg is a plain options object
+    opts = { headers: _apiHeaders(), ...methodOrOpts };
+  } else {
+    // New: second arg is an HTTP method string
+    opts = { headers: { ..._apiHeaders(), 'Content-Type': 'application/json' }, method: methodOrOpts };
+    if (body !== null) opts.body = JSON.stringify(body);
+  }
+  const res = await fetch('/api/staff' + path, opts);
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.detail || `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+function _staffFmt(n) {
+  const restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+  const locale   = restData.locale   || 'es-CO';
+  const currency = restData.currency || 'COP';
+  return new Intl.NumberFormat(locale, {
+    style: 'currency', currency,
+    minimumFractionDigits: ['COP','CLP','PYG','JPY'].includes(currency) ? 0 : 2,
+  }).format(Number(n) || 0);
 }
 
 // ── Avatar helpers ────────────────────────────────────────────────────────────
@@ -1081,6 +1100,268 @@ async function _reloadShifts(self) {
 }
 
 
+// ── Payroll tab ───────────────────────────────────────────────────────────────
+
+function _renderPayrollTab(state, el, self) {
+  // ── Period selector ──
+  const periodCard = document.createElement('div');
+  periodCard.className = 'card';
+  periodCard.style.cssText = 'margin-bottom:1.5rem;padding:1.25rem;';
+
+  const h3 = document.createElement('h3');
+  h3.textContent = '💰 Calcular Nómina';
+  h3.style.cssText = 'font-size:15px;font-weight:700;margin-bottom:1rem;';
+  periodCard.appendChild(h3);
+
+  // Date inputs row
+  const dateRow = document.createElement('div');
+  dateRow.style.cssText = 'display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:1rem;';
+
+  const mkDateField = (labelText, stateKey) => {
+    const wrap = document.createElement('div');
+    const lbl = document.createElement('label');
+    lbl.textContent = labelText;
+    lbl.style.cssText = 'font-size:11px;font-weight:700;color:#666;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;';
+    const inp = document.createElement('input');
+    inp.type = 'date';
+    inp.value = state[stateKey] || '';
+    inp.style.cssText = 'padding:9px 12px;border:1.5px solid #e0e0d8;border-radius:8px;font-size:13px;font-weight:600;outline:none;';
+    inp.addEventListener('change', () => self.setState({ [stateKey]: inp.value }));
+    wrap.appendChild(lbl); wrap.appendChild(inp);
+    return wrap;
+  };
+
+  dateRow.appendChild(mkDateField('Inicio', 'payrollPeriodStart'));
+  dateRow.appendChild(mkDateField('Fin', 'payrollPeriodEnd'));
+
+  // Quick preset buttons
+  const presets = document.createElement('div');
+  presets.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+  [
+    ['Esta semana', () => {
+      const now = new Date();
+      const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay()+6)%7));
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      return [mon.toISOString().slice(0,10), sun.toISOString().slice(0,10)];
+    }],
+    ['Semana pasada', () => {
+      const now = new Date();
+      const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay()+6)%7) - 7);
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      return [mon.toISOString().slice(0,10), sun.toISOString().slice(0,10)];
+    }],
+    ['Este mes', () => {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return [start.toISOString().slice(0,10), end.toISOString().slice(0,10)];
+    }],
+  ].forEach(([label, getFn]) => {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.style.cssText = 'padding:7px 12px;border:1.5px solid #e0e0d8;border-radius:8px;background:#f9f9f7;font-size:12px;font-weight:600;cursor:pointer;color:#444;';
+    btn.addEventListener('click', () => {
+      const [s, e] = getFn();
+      self.setState({ payrollPeriodStart: s, payrollPeriodEnd: e });
+    });
+    presets.appendChild(btn);
+  });
+
+  dateRow.appendChild(presets);
+  periodCard.appendChild(dateRow);
+
+  // Calculate button
+  const calcBtn = document.createElement('button');
+  calcBtn.textContent = state.payrollLoading ? 'Calculando...' : '🔢 Calcular Nómina';
+  calcBtn.style.cssText = 'background:#18181B;color:#fff;border:none;padding:11px 22px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;';
+  calcBtn.disabled = state.payrollLoading;
+  calcBtn.addEventListener('click', async () => {
+    if (!state.payrollPeriodStart || !state.payrollPeriodEnd) {
+      alert('Selecciona el período de nómina.'); return;
+    }
+    self.setState({ payrollLoading: true });
+    try {
+      const r = await _staffFetch(`/payroll/calculate?period_start=${state.payrollPeriodStart}&period_end=${state.payrollPeriodEnd}`);
+      self.setState({ payrollEntries: r.entries || [], payrollLoading: false });
+    } catch(e) {
+      alert('Error al calcular: ' + e.message);
+      self.setState({ payrollLoading: false });
+    }
+  });
+  periodCard.appendChild(calcBtn);
+  el.appendChild(periodCard);
+
+  // ── Results table ──
+  if (state.payrollEntries && state.payrollEntries.length > 0) {
+    const resultsCard = document.createElement('div');
+    resultsCard.className = 'card';
+    resultsCard.style.cssText = 'margin-bottom:1.5rem;overflow-x:auto;';
+
+    // Totals banner
+    const totals = state.payrollEntries.reduce((acc, e) => ({
+      gross: acc.gross + (e.gross_pay || 0),
+      tips:  acc.tips  + (e.tip_earnings || 0),
+      net:   acc.net   + (e.net_pay || 0),
+    }), { gross: 0, tips: 0, net: 0 });
+
+    const banner = document.createElement('div');
+    banner.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap;padding:1rem 1.25rem;background:#f0fdf4;border-bottom:1px solid #e0e0d8;';
+    [
+      ['Bruto Total', totals.gross, '#1D9E75'],
+      ['Propinas',    totals.tips,  '#F59E0B'],
+      ['Neto Total',  totals.net,   '#7C3AED'],
+    ].forEach(([label, val, color]) => {
+      const d = document.createElement('div');
+      const labelEl = document.createElement('div');
+      labelEl.textContent = label;
+      labelEl.style.cssText = 'font-size:11px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.05em;';
+      const valEl = document.createElement('div');
+      valEl.textContent = _staffFmt(val);
+      valEl.style.cssText = `font-size:1.4rem;font-weight:900;color:${color};`;
+      d.appendChild(labelEl); d.appendChild(valEl);
+      banner.appendChild(d);
+    });
+    resultsCard.appendChild(banner);
+
+    // Table
+    const tbl = document.createElement('table');
+    tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    const thead = document.createElement('thead');
+    const theadRow = document.createElement('tr');
+    theadRow.style.background = '#f9f9f7';
+    ['Empleado','Rol','Hrs Reg.','Hrs Extra','Tarifa','Bruto','Propinas','Deducciones','Neto'].forEach(h => {
+      const th = document.createElement('th');
+      th.textContent = h;
+      th.style.cssText = 'padding:9px 10px;text-align:left;font-size:11px;font-weight:700;color:#666;text-transform:uppercase;white-space:nowrap;';
+      theadRow.appendChild(th);
+    });
+    thead.appendChild(theadRow);
+    tbl.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    state.payrollEntries.forEach((e, i) => {
+      const tr = document.createElement('tr');
+      tr.style.cssText = `background:${i%2===0?'#fff':'#fafaf8'};`;
+      const ded = Object.values(e.deductions || {}).reduce((s,v) => s + v, 0);
+      const otHours = (e.overtime_hours || 0);
+      // Build cell values: use textContent for name/role (user data), safe spans for numbers
+      const cells = [
+        { text: e.name || '—' },
+        { text: e.role || '—' },
+        { text: (e.regular_hours || 0).toFixed(1) + 'h' },
+        { html: otHours > 0
+            ? `<span style="color:#F59E0B;font-weight:700;">${otHours.toFixed(1)}h</span>`
+            : '0h' },
+        { text: _staffFmt(e.hourly_rate || 0) },
+        { text: _staffFmt(e.gross_pay || 0) },
+        { text: _staffFmt(e.tip_earnings || 0) },
+        { html: ded > 0
+            ? `<span style="color:#EF4444;">-${_staffFmt(ded)}</span>`
+            : '—' },
+        { html: `<strong style="color:#1D9E75;">${_staffFmt(e.net_pay || 0)}</strong>` },
+      ];
+      cells.forEach(cell => {
+        const td = document.createElement('td');
+        td.style.cssText = 'padding:9px 10px;border-bottom:1px solid #f0f0ec;vertical-align:middle;';
+        if (cell.text !== undefined) {
+          td.textContent = cell.text;
+        } else {
+          td.innerHTML = cell.html;
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    resultsCard.appendChild(tbl);
+
+    // Action buttons
+    const actRow = document.createElement('div');
+    actRow.style.cssText = 'padding:1rem 1.25rem;display:flex;gap:10px;flex-wrap:wrap;';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = '💾 Guardar Borrador';
+    saveBtn.style.cssText = 'background:#18181B;color:#fff;border:none;padding:10px 18px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const r = await _staffFetch('/payroll/runs', 'POST', {
+          period_start: state.payrollPeriodStart,
+          period_end:   state.payrollPeriodEnd,
+        });
+        alert('✅ Nómina guardada. ID: ' + (r.run?.id || '').slice(0, 8));
+        const runsData = await _staffFetch('/payroll/runs');
+        self.setState({ payrollRuns: runsData.runs || [] });
+      } catch(e) { alert('Error: ' + e.message); }
+    });
+    actRow.appendChild(saveBtn);
+    resultsCard.appendChild(actRow);
+    el.appendChild(resultsCard);
+  } else if (!state.payrollLoading) {
+    const hint = document.createElement('div');
+    hint.className = 'empty-state';
+    hint.textContent = 'Selecciona un período y presiona Calcular.';
+    el.appendChild(hint);
+  }
+
+  // ── Payroll history ──
+  if (state.payrollRuns && state.payrollRuns.length > 0) {
+    const histCard = document.createElement('div');
+    histCard.className = 'card';
+
+    const hh = document.createElement('h3');
+    hh.textContent = '📋 Historial de Nóminas';
+    hh.style.cssText = 'font-size:14px;font-weight:700;padding:1rem 1.25rem;border-bottom:1px solid #e0e0d8;';
+    histCard.appendChild(hh);
+
+    state.payrollRuns.forEach(run => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 1.25rem;border-bottom:1px solid #f0f0ec;';
+      const statusColor = run.status === 'approved' ? '#1D9E75' : run.status === 'paid' ? '#7C3AED' : '#F59E0B';
+
+      const left = document.createElement('div');
+      const titleEl = document.createElement('div');
+      titleEl.style.cssText = 'font-size:13px;font-weight:600;';
+      titleEl.textContent = `${run.period_start} → ${run.period_end}`;
+      const subEl = document.createElement('div');
+      subEl.style.cssText = 'font-size:11px;color:#666;';
+      subEl.textContent = `Neto: ${_staffFmt(run.total_net)} · Por: ${run.created_by || '—'}`;
+      left.appendChild(titleEl); left.appendChild(subEl);
+
+      const right = document.createElement('div');
+      right.style.cssText = 'display:flex;gap:8px;align-items:center;';
+
+      const badge = document.createElement('span');
+      badge.textContent = run.status;
+      badge.style.cssText = `background:${statusColor}22;color:${statusColor};padding:3px 9px;border-radius:6px;font-size:11px;font-weight:700;text-transform:uppercase;`;
+      right.appendChild(badge);
+
+      if (run.status === 'draft') {
+        const approveBtn = document.createElement('button');
+        approveBtn.textContent = '✅ Aprobar';
+        approveBtn.style.cssText = 'background:#1D9E75;color:#fff;border:none;padding:6px 12px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;';
+        approveBtn.addEventListener('click', async () => {
+          if (!confirm('¿Aprobar esta nómina?')) return;
+          await _staffFetch(`/payroll/runs/${run.id}/approve`, 'PUT', {});
+          const runsData = await _staffFetch('/payroll/runs');
+          self.setState({ payrollRuns: runsData.runs || [] });
+        });
+        right.appendChild(approveBtn);
+      }
+
+      const exportBtn = document.createElement('button');
+      exportBtn.textContent = '⬇ CSV';
+      exportBtn.style.cssText = 'background:#f0f0ec;border:1.5px solid #e0e0d8;padding:6px 10px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;';
+      exportBtn.addEventListener('click', () => { window.open(`/api/staff/payroll/export/${run.id}`, '_blank'); });
+      right.appendChild(exportBtn);
+
+      row.appendChild(left); row.appendChild(right);
+      histCard.appendChild(row);
+    });
+    el.appendChild(histCard);
+  }
+}
+
+
 // ── Main StaffSection component ───────────────────────────────────────────────
 
 const StaffSection = MesioComponent({
@@ -1093,6 +1374,13 @@ const StaffSection = MesioComponent({
     filter:     'all',
     search:     '',
     error:      null,
+    payrollEntries:     [],
+    payrollRuns:        [],
+    payrollLoading:     false,
+    payrollPeriodStart: '',
+    payrollPeriodEnd:   '',
+    timecardData:       [],
+    timecardWeek:       '',
   },
 
   render(state, el) {
@@ -1139,9 +1427,10 @@ const StaffSection = MesioComponent({
     tabBar.style.cssText = 'display:flex;gap:2px;margin-bottom:1.5rem;border-bottom:1px solid #e0e0d8;';
 
     [
-      ['roster', '👥  Roster'],
-      ['shifts', '⏱  Turnos'],
-      ['tips',   '💸  Propinas'],
+      ['roster',  '👥  Roster'],
+      ['shifts',  '⏱  Turnos'],
+      ['tips',    '💸  Propinas'],
+      ['payroll', '💰  Nómina'],
     ].forEach(([id, label]) => {
       const btn = document.createElement('button');
       btn.textContent = label;
@@ -1155,9 +1444,10 @@ const StaffSection = MesioComponent({
     el.appendChild(tabBar);
 
     const content = document.createElement('div');
-    if (state.tab === 'roster') _renderRosterTab(state, content, StaffSection);
-    if (state.tab === 'shifts') _renderShiftsTab(state, content, StaffSection);
-    if (state.tab === 'tips')   _renderTipsTab(state, content, StaffSection);
+    if (state.tab === 'roster')  _renderRosterTab(state, content, StaffSection);
+    if (state.tab === 'shifts')  _renderShiftsTab(state, content, StaffSection);
+    if (state.tab === 'tips')    _renderTipsTab(state, content, StaffSection);
+    if (state.tab === 'payroll') _renderPayrollTab(state, content, StaffSection);
     el.appendChild(content);
   },
 
@@ -1169,11 +1459,12 @@ const StaffSection = MesioComponent({
           await _loadStaffBranchesSelect();
       }
       
-      const [rosterData, shiftsData] = await Promise.all([
+      const [rosterData, shiftsData, runsData] = await Promise.all([
         _staffFetch(''),
         _staffFetch('/open-shifts'),
+        _staffFetch('/payroll/runs').catch(() => ({ runs: [] })),
       ]);
-      self.setState({ staff: rosterData.staff, shifts: shiftsData.shifts, loading: false });
+      self.setState({ staff: rosterData.staff, shifts: shiftsData.shifts, payrollRuns: runsData.runs || [], loading: false });
     } catch (err) {
       self.setState({ loading: false, error: err.message });
     }
