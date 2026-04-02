@@ -368,3 +368,161 @@ async def tip_distributions(
     """Return the 20 most recent tip distribution cuts."""
     cuts = await db.db_get_tip_distributions(restaurant["id"])
     return {"distributions": cuts}
+
+
+# ── Break management (self-service) ─────────────────────────────────────────
+
+class BreakRequest(BaseModel):
+    """No body needed - uses authenticated staff_id."""
+    pass
+
+
+@router.post("/self/break-start", status_code=200)
+async def self_break_start(request: Request):
+    """Start a break. Staff must have an open shift."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    session_key = await db.db_get_session(token)
+    if not session_key or not session_key.startswith("staff:"):
+        raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
+    staff_id = session_key.split(":", 1)[1]
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    shifts = await db.db_get_open_shifts(row["restaurant_id"])
+    open_shift = next((s for s in shifts if str(s["staff_id"]) == staff_id), None)
+    if not open_shift:
+        raise HTTPException(status_code=404, detail="No tienes un turno abierto.")
+    try:
+        brk = await db.db_start_break(staff_id, open_shift["id"])
+        return {"break": brk}
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/self/break-end", status_code=200)
+async def self_break_end(request: Request):
+    """End current break."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    session_key = await db.db_get_session(token)
+    if not session_key or not session_key.startswith("staff:"):
+        raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
+    staff_id = session_key.split(":", 1)[1]
+    brk = await db.db_end_break(staff_id)
+    if not brk:
+        raise HTTPException(status_code=404, detail="No tienes un break abierto.")
+    return {"break": brk}
+
+
+# ── Shift edit (admin) ───────────────────────────────────────────────────────
+
+class ShiftEditBody(BaseModel):
+    clock_in:  str | None = None   # ISO datetime string
+    clock_out: str | None = None   # ISO datetime string
+    notes:     str | None = None
+
+
+@router.post("/shifts/{shift_id}/edit", dependencies=_MODULE_DEPS)
+async def edit_shift(
+    request: Request,
+    shift_id: str,
+    body: ShiftEditBody,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Admin: correct shift times."""
+    result = await db.db_edit_shift(
+        shift_id, restaurant["id"],
+        clock_in=body.clock_in, clock_out=body.clock_out, notes=body.notes,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Turno no encontrado.")
+    return {"shift": result}
+
+
+# ── Schedule management (admin) ──────────────────────────────────────────────
+
+class ScheduleBody(BaseModel):
+    staff_id:    str
+    day_of_week: int = Field(..., ge=0, le=6)  # 0=Monday
+    start_time:  str  # "HH:MM" format
+    end_time:    str  # "HH:MM" format
+
+
+@router.post("/schedules", dependencies=_MODULE_DEPS, status_code=200)
+async def save_schedule(
+    body: ScheduleBody,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Create or update schedule for staff member on a specific day."""
+    from datetime import time
+    start = time.fromisoformat(body.start_time)
+    end = time.fromisoformat(body.end_time)
+    result = await db.db_upsert_schedule(
+        body.staff_id, restaurant["id"], body.day_of_week, start, end,
+    )
+    return {"schedule": result}
+
+
+@router.get("/schedules", dependencies=_MODULE_DEPS)
+async def list_schedules(
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Get all schedules for the restaurant."""
+    schedules = await db.db_get_schedules(restaurant["id"])
+    return {"schedules": schedules}
+
+
+@router.delete("/schedules/{schedule_id}", dependencies=_MODULE_DEPS, status_code=200)
+async def delete_schedule(
+    schedule_id: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Delete a schedule entry by ID."""
+    deleted = await db.db_delete_schedule(schedule_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Horario no encontrado.")
+    return {"success": True}
+
+
+# ── Timecard (admin) ─────────────────────────────────────────────────────────
+
+@router.get("/timecard", dependencies=_MODULE_DEPS)
+async def get_timecard(
+    week_start: str,
+    week_end: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Weekly timecard: hours per employee per day."""
+    data = await db.db_get_timecard(restaurant["id"], week_start, week_end)
+    return {"timecard": data}
+
+
+# ── Overtime report (admin) ──────────────────────────────────────────────────
+
+@router.get("/overtime", dependencies=_MODULE_DEPS)
+async def get_overtime(
+    date_from: str,
+    date_to: str,
+    restaurant: dict = Depends(get_current_restaurant),
+    daily_threshold: float = 8.0,
+    weekly_threshold: float = 40.0,
+):
+    """Overtime report for a date range."""
+    data = await db.db_get_overtime_report(
+        restaurant["id"], date_from, date_to, daily_threshold, weekly_threshold,
+    )
+    return {"overtime": data}
+
+
+# ── Attendance report (admin) ────────────────────────────────────────────────
+
+@router.get("/attendance", dependencies=_MODULE_DEPS)
+async def get_attendance(
+    date_from: str,
+    date_to: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Compare actual clock-in with scheduled times."""
+    data = await db.db_get_attendance_report(restaurant["id"], date_from, date_to)
+    return {"attendance": data}
