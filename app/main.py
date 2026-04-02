@@ -15,6 +15,8 @@ from app.routes.crm import router as crm_router
 from app.routes import nps, inventory
 from app.routes.sync import router as sync_router
 from app.routes.staff import router as staff_router
+from app.routes.staff_webauthn import router as staff_webauthn_router
+from app.routes.staff_payroll import router as staff_payroll_router
 from app.routes.loyalty import router as loyalty_router
 from app.services import database as db  # ← FIX: import directo de db
 
@@ -96,4 +98,6 @@ app.include_router(nps.router)
 app.include_router(inventory.router)
 app.include_router(sync_router, prefix="/api")
 app.include_router(staff_router)
+app.include_router(staff_webauthn_router)
+app.include_router(staff_payroll_router)
 app.include_router(loyalty_router)

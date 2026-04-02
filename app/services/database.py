@@ -3181,3 +3181,603 @@ async def db_is_duplicate_wam(wam_id: str) -> bool:
         # result is None  → row already existed → duplicate
         # result is wam_id → freshly inserted   → new message
         return result is None
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ADVANCED STAFF MANAGEMENT
+# ══════════════════════════════════════════════════════════════════════
+
+# ── WebAuthn ──────────────────────────────────────────────────────────
+
+async def db_save_webauthn_credential(
+    staff_id: str,
+    credential_id: str,
+    public_key: str,
+    sign_count: int,
+    transports: list,
+    device_name: str = "",
+) -> dict:
+    """Store a WebAuthn credential for a staff member."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO webauthn_credentials
+                   (staff_id, credential_id, public_key, sign_count, transports, device_name)
+               VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6)
+               RETURNING id::text, staff_id::text, credential_id,
+                         sign_count, transports, device_name, created_at""",
+            staff_id, credential_id, public_key, sign_count,
+            json.dumps(transports), device_name,
+        )
+        return _serialize(dict(row))
+
+
+async def db_get_webauthn_credentials_by_staff(staff_id: str) -> list:
+    """Return all WebAuthn credentials registered for a staff member."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id::text, staff_id::text, credential_id,
+                      sign_count, transports, device_name, created_at
+               FROM webauthn_credentials
+               WHERE staff_id = $1::uuid
+               ORDER BY created_at DESC""",
+            staff_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_webauthn_credentials_by_restaurant(restaurant_id: int) -> list:
+    """Get all WebAuthn credentials for a restaurant (for authentication ceremony)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT wc.id::text, wc.staff_id::text, wc.credential_id, wc.public_key,
+                      wc.sign_count, wc.transports, wc.device_name, s.name AS staff_name
+               FROM webauthn_credentials wc
+               JOIN staff s ON wc.staff_id = s.id
+               WHERE s.restaurant_id = $1 AND s.active = TRUE
+               ORDER BY wc.created_at DESC""",
+            restaurant_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_webauthn_credential(credential_id: str) -> dict | None:
+    """Get a single credential by its credential_id (base64url string)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT wc.id::text, wc.staff_id::text, wc.credential_id, wc.public_key,
+                      wc.sign_count, wc.transports, s.restaurant_id, s.name AS staff_name
+               FROM webauthn_credentials wc
+               JOIN staff s ON wc.staff_id = s.id
+               WHERE wc.credential_id = $1""",
+            credential_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_update_webauthn_sign_count(credential_id: str, new_count: int) -> None:
+    """Update the sign counter after a successful assertion."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE webauthn_credentials SET sign_count = $1 WHERE credential_id = $2",
+            new_count, credential_id,
+        )
+
+
+async def db_delete_webauthn_credential(credential_id: str) -> bool:
+    """Delete a credential. Returns True if a row was deleted."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM webauthn_credentials WHERE credential_id = $1", credential_id
+        )
+    return "DELETE 1" in result
+
+
+async def db_save_webauthn_challenge(
+    challenge: str,
+    staff_id: str | None,
+    challenge_type: str,
+    restaurant_id: int,
+) -> None:
+    """Persist a WebAuthn challenge (registration or authentication)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO webauthn_challenges (challenge, staff_id, type, restaurant_id)
+               VALUES ($1, $2, $3, $4)""",
+            challenge, staff_id, challenge_type, restaurant_id,
+        )
+
+
+async def db_consume_webauthn_challenge(challenge: str) -> dict | None:
+    """Atomically get and delete a challenge. Returns None if expired (>5 min) or not found."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """DELETE FROM webauthn_challenges
+               WHERE challenge = $1
+                 AND created_at > NOW() - INTERVAL '5 minutes'
+               RETURNING id::text, challenge, staff_id::text, type, restaurant_id""",
+            challenge,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_cleanup_expired_challenges() -> None:
+    """Remove all WebAuthn challenges older than 5 minutes."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM webauthn_challenges WHERE created_at < NOW() - INTERVAL '5 minutes'"
+        )
+
+
+# ── Breaks ────────────────────────────────────────────────────────────
+
+async def db_start_break(staff_id: str, shift_id: str) -> dict:
+    """Start a break for an employee. Raises ValueError if a break is already open."""
+    import asyncpg as _asyncpg
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            row = await conn.fetchrow(
+                """INSERT INTO staff_breaks (staff_id, shift_id)
+                   VALUES ($1::uuid, $2::uuid)
+                   RETURNING id::text, staff_id::text, shift_id::text,
+                             break_start, break_end, notes, created_at""",
+                staff_id, shift_id,
+            )
+            return _serialize(dict(row))
+        except _asyncpg.UniqueViolationError:
+            raise ValueError("El empleado ya tiene un break abierto.")
+
+
+async def db_end_break(staff_id: str) -> dict | None:
+    """End the current open break. Returns None if no open break exists."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE staff_breaks SET break_end = NOW()
+               WHERE staff_id = $1::uuid AND break_end IS NULL
+               RETURNING id::text, staff_id::text, shift_id::text,
+                         break_start, break_end, notes""",
+            staff_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_get_breaks_for_shift(shift_id: str) -> list:
+    """Return all breaks for a given shift ordered chronologically."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id::text, staff_id::text, shift_id::text,
+                      break_start, break_end, notes
+               FROM staff_breaks
+               WHERE shift_id = $1::uuid
+               ORDER BY break_start""",
+            shift_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_open_break(staff_id: str) -> dict | None:
+    """Return the currently open break for a staff member, or None."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id::text, staff_id::text, shift_id::text, break_start, notes
+               FROM staff_breaks
+               WHERE staff_id = $1::uuid AND break_end IS NULL""",
+            staff_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+# ── Schedules ─────────────────────────────────────────────────────────
+
+async def db_upsert_schedule(
+    staff_id: str,
+    restaurant_id: int,
+    day_of_week: int,
+    start_time: str,
+    end_time: str,
+) -> dict:
+    """Create or replace the schedule for a staff member on a specific day."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
+            staff_id, day_of_week,
+        )
+        row = await conn.fetchrow(
+            """INSERT INTO staff_schedules
+                   (staff_id, restaurant_id, day_of_week, start_time, end_time)
+               VALUES ($1::uuid, $2, $3, $4, $5)
+               RETURNING id::text, staff_id::text, restaurant_id,
+                         day_of_week, start_time::text, end_time::text, active""",
+            staff_id, restaurant_id, day_of_week, start_time, end_time,
+        )
+        return _serialize(dict(row))
+
+
+async def db_get_schedules(restaurant_id: int) -> list:
+    """Return all active schedules for a restaurant with staff info."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT ss.id::text, ss.staff_id::text, s.name AS staff_name,
+                      s.role AS staff_role, ss.day_of_week,
+                      ss.start_time::text, ss.end_time::text, ss.active
+               FROM staff_schedules ss
+               JOIN staff s ON ss.staff_id = s.id
+               WHERE ss.restaurant_id = $1 AND ss.active = TRUE
+               ORDER BY s.name, ss.day_of_week""",
+            restaurant_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_delete_schedule(schedule_id: str) -> bool:
+    """Delete a schedule entry. Returns True if a row was deleted."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM staff_schedules WHERE id = $1::uuid", schedule_id
+        )
+    return "DELETE 1" in result
+
+
+# ── Shift editing ─────────────────────────────────────────────────────
+
+async def db_edit_shift(
+    shift_id: str,
+    restaurant_id: int,
+    clock_in=None,
+    clock_out=None,
+    notes=None,
+) -> dict | None:
+    """Admin edit of shift times/notes. Only updates provided fields."""
+    pool = await get_pool()
+    parts: list[str] = []
+    params: list = []
+    idx = 1
+    if clock_in is not None:
+        parts.append(f"clock_in = ${idx}::timestamptz")
+        params.append(clock_in)
+        idx += 1
+    if clock_out is not None:
+        parts.append(f"clock_out = ${idx}::timestamptz")
+        params.append(clock_out)
+        idx += 1
+    if notes is not None:
+        parts.append(f"notes = ${idx}")
+        params.append(notes)
+        idx += 1
+    if not parts:
+        return None
+    params.append(shift_id)
+    params.append(restaurant_id)
+    query = (
+        f"UPDATE staff_shifts SET {', '.join(parts)} "
+        f"WHERE id = ${idx}::uuid AND restaurant_id = ${idx + 1} "
+        "RETURNING id::text, staff_id::text, restaurant_id, clock_in, clock_out, notes"
+    )
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(query, *params)
+    return _serialize(dict(row)) if row else None
+
+
+# ── Timecard & Overtime ───────────────────────────────────────────────
+
+async def db_get_timecard(
+    restaurant_id: int,
+    week_start: str,
+    week_end: str,
+) -> list:
+    """Weekly timecard: per employee per day — gross hours minus break time."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT
+                 ss.staff_id::text,
+                 s.name  AS staff_name,
+                 s.role  AS staff_role,
+                 DATE(ss.clock_in) AS work_date,
+                 ROUND(SUM(
+                   EXTRACT(EPOCH FROM (COALESCE(ss.clock_out, NOW()) - ss.clock_in))
+                   / 3600.0
+                 )::numeric, 2) AS gross_hours,
+                 COALESCE((
+                   SELECT ROUND(SUM(
+                     EXTRACT(EPOCH FROM (COALESCE(sb.break_end, NOW()) - sb.break_start))
+                     / 3600.0
+                   )::numeric, 2)
+                   FROM staff_breaks sb
+                   WHERE sb.shift_id = ANY(ARRAY_AGG(ss.id))
+                 ), 0) AS break_hours
+               FROM staff_shifts ss
+               JOIN staff s ON ss.staff_id = s.id
+               WHERE ss.restaurant_id = $1
+                 AND ss.clock_in >= $2::timestamptz
+                 AND ss.clock_in <  $3::timestamptz
+               GROUP BY ss.staff_id, s.name, s.role, DATE(ss.clock_in)
+               ORDER BY s.name, work_date""",
+            restaurant_id, week_start, week_end,
+        )
+    result = []
+    for r in rows:
+        d = _serialize(dict(r))
+        gross = float(d.get("gross_hours", 0))
+        brk   = float(d.get("break_hours", 0))
+        d["net_hours"] = round(gross - brk, 2)
+        result.append(d)
+    return result
+
+
+async def db_get_overtime_report(
+    restaurant_id: int,
+    date_from: str,
+    date_to: str,
+    daily_threshold: float = 8.0,
+    weekly_threshold: float = 40.0,
+) -> list:
+    """Overtime report: identifies daily and weekly overtime per employee."""
+    timecard = await db_get_timecard(restaurant_id, date_from, date_to)
+
+    by_staff: dict = {}
+    for entry in timecard:
+        sid = entry["staff_id"]
+        if sid not in by_staff:
+            by_staff[sid] = {
+                "staff_id":    sid,
+                "staff_name":  entry["staff_name"],
+                "staff_role":  entry["staff_role"],
+                "days":        [],
+                "total_hours": 0.0,
+                "regular_hours":  0.0,
+                "overtime_hours": 0.0,
+            }
+        by_staff[sid]["days"].append(entry)
+        by_staff[sid]["total_hours"] += entry["net_hours"]
+
+    result = []
+    for sid, data in by_staff.items():
+        daily_ot  = sum(max(0.0, d["net_hours"] - daily_threshold) for d in data["days"])
+        weekly_ot = max(0.0, data["total_hours"] - weekly_threshold)
+        ot = max(daily_ot, weekly_ot)
+        data["overtime_hours"] = round(ot, 2)
+        data["regular_hours"]  = round(data["total_hours"] - ot, 2)
+        result.append(data)
+    return result
+
+
+async def db_get_attendance_report(
+    restaurant_id: int,
+    date_from: str,
+    date_to: str,
+) -> list:
+    """Compare actual clock-in times with scheduled times to identify lateness."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT
+                 ss.staff_id::text,
+                 s.name  AS staff_name,
+                 s.role  AS staff_role,
+                 ss.clock_in,
+                 ss.clock_out,
+                 sch.start_time AS scheduled_start,
+                 sch.end_time   AS scheduled_end,
+                 EXTRACT(DOW FROM ss.clock_in) AS dow
+               FROM staff_shifts ss
+               JOIN staff s ON ss.staff_id = s.id
+               LEFT JOIN staff_schedules sch
+                 ON sch.staff_id    = ss.staff_id
+                AND sch.day_of_week = EXTRACT(ISODOW FROM ss.clock_in)::int - 1
+                AND sch.active      = TRUE
+               WHERE ss.restaurant_id = $1
+                 AND ss.clock_in >= $2::timestamptz
+                 AND ss.clock_in <  $3::timestamptz
+               ORDER BY ss.clock_in DESC""",
+            restaurant_id, date_from, date_to,
+        )
+    result = []
+    for r in rows:
+        d = _serialize(dict(r))
+        clock_in = d.get("clock_in")
+        sched    = d.get("scheduled_start")
+        if clock_in and sched:
+            if hasattr(clock_in, "time"):
+                from datetime import time as _dt_time
+                actual_time = clock_in.time()
+                if hasattr(sched, "hour"):
+                    diff_minutes = (
+                        actual_time.hour * 60 + actual_time.minute
+                        - sched.hour * 60 - sched.minute
+                    )
+                    d["late_minutes"] = max(0, diff_minutes)
+                    d["status"] = "late" if diff_minutes > 5 else "on_time"
+                else:
+                    d["late_minutes"] = 0
+                    d["status"] = "no_schedule"
+            else:
+                d["late_minutes"] = 0
+                d["status"] = "no_schedule"
+        else:
+            d["late_minutes"] = 0
+            d["status"] = "no_schedule"
+        result.append(d)
+    return result
+
+
+# ── Payroll ───────────────────────────────────────────────────────────
+
+async def db_calculate_payroll(
+    restaurant_id: int,
+    period_start: str,
+    period_end: str,
+    config: dict | None = None,
+) -> list:
+    """Calculate payroll for all active staff in a period.
+
+    config keys (all optional):
+      overtime_daily_threshold  — default 8.0 h
+      overtime_weekly_threshold — default 40.0 h
+      overtime_multiplier       — default 1.5
+    """
+    if config is None:
+        config = {}
+    daily_threshold  = config.get("overtime_daily_threshold", 8.0)
+    weekly_threshold = config.get("overtime_weekly_threshold", 40.0)
+    ot_multiplier    = config.get("overtime_multiplier", 1.5)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        staff_rows = await conn.fetch(
+            """SELECT id::text, name, role, hourly_rate, deductions
+               FROM staff WHERE restaurant_id = $1 AND active = TRUE""",
+            restaurant_id,
+        )
+
+    overtime_data  = await db_get_overtime_report(
+        restaurant_id, period_start, period_end, daily_threshold, weekly_threshold
+    )
+    hours_by_staff = {d["staff_id"]: d for d in overtime_data}
+
+    async with pool.acquire() as conn:
+        tip_rows = await conn.fetch(
+            """SELECT distribution FROM tip_distributions
+               WHERE restaurant_id = $1
+                 AND period_start >= $2::date
+                 AND period_end   <= $3::date""",
+            restaurant_id, period_start, period_end,
+        )
+
+    tips_by_staff: dict = {}
+    for tr in tip_rows:
+        dist = tr["distribution"]
+        if isinstance(dist, str):
+            dist = json.loads(dist)
+        for entry in (dist or []):
+            sid = entry.get("staff_id", "")
+            tips_by_staff[sid] = tips_by_staff.get(sid, 0.0) + float(entry.get("amount", 0))
+
+    entries = []
+    for sr in staff_rows:
+        s    = _serialize(dict(sr))
+        sid  = s["id"]
+        rate = float(s.get("hourly_rate") or 0)
+
+        hours_data = hours_by_staff.get(sid, {})
+        regular    = float(hours_data.get("regular_hours", 0))
+        overtime   = float(hours_data.get("overtime_hours", 0))
+
+        gross        = (regular * rate) + (overtime * rate * ot_multiplier)
+        tip_earnings = tips_by_staff.get(sid, 0.0)
+        total_comp   = gross + tip_earnings
+
+        deductions_cfg = s.get("deductions") or {}
+        if isinstance(deductions_cfg, str):
+            deductions_cfg = json.loads(deductions_cfg)
+
+        deductions       = {}
+        total_deductions = 0.0
+        for ded_name, ded_pct in deductions_cfg.items():
+            amt = round(total_comp * float(ded_pct) / 100, 2)
+            deductions[ded_name] = amt
+            total_deductions     += amt
+
+        net_pay = round(total_comp - total_deductions, 2)
+        entries.append({
+            "staff_id":           sid,
+            "name":               s["name"],
+            "role":               s["role"],
+            "regular_hours":      regular,
+            "overtime_hours":     overtime,
+            "hourly_rate":        rate,
+            "gross_pay":          round(gross, 2),
+            "tip_earnings":       round(tip_earnings, 2),
+            "total_compensation": round(total_comp, 2),
+            "deductions":         deductions,
+            "total_deductions":   round(total_deductions, 2),
+            "net_pay":            net_pay,
+        })
+    return entries
+
+
+async def db_save_payroll_run(
+    restaurant_id: int,
+    period_start: str,
+    period_end: str,
+    snapshot: list,
+    config: dict,
+    created_by: str = "",
+) -> dict:
+    """Persist a payroll run snapshot. Returns the saved row."""
+    total_gross = sum(e.get("gross_pay", 0) for e in snapshot)
+    total_net   = sum(e.get("net_pay",   0) for e in snapshot)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO payroll_runs
+                   (restaurant_id, period_start, period_end,
+                    snapshot, config, total_gross, total_net, created_by)
+               VALUES ($1, $2::date, $3::date, $4::jsonb, $5::jsonb, $6, $7, $8)
+               RETURNING id::text, restaurant_id, period_start, period_end,
+                         status, total_gross, total_net, created_by, created_at""",
+            restaurant_id, period_start, period_end,
+            json.dumps(snapshot), json.dumps(config),
+            total_gross, total_net, created_by,
+        )
+    return _serialize(dict(row))
+
+
+async def db_get_payroll_runs(restaurant_id: int, limit: int = 20) -> list:
+    """Return recent payroll runs for a restaurant."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id::text, restaurant_id, period_start, period_end,
+                      status, total_gross, total_net, created_by, created_at, approved_at
+               FROM payroll_runs
+               WHERE restaurant_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            restaurant_id, limit,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_payroll_run(run_id: str, restaurant_id: int) -> dict | None:
+    """Return a single payroll run including its snapshot."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT id::text, restaurant_id, period_start, period_end,
+                      status, snapshot, config, total_gross, total_net,
+                      created_by, created_at, approved_at
+               FROM payroll_runs
+               WHERE id = $1::uuid AND restaurant_id = $2""",
+            run_id, restaurant_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_approve_payroll_run(run_id: str, restaurant_id: int) -> dict | None:
+    """Approve a draft payroll run. Returns None if not found or already approved."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE payroll_runs
+               SET status = 'approved', approved_at = NOW()
+               WHERE id = $1::uuid AND restaurant_id = $2 AND status = 'draft'
+               RETURNING id::text, status, approved_at""",
+            run_id, restaurant_id,
+        )
+    return _serialize(dict(row)) if row else None
