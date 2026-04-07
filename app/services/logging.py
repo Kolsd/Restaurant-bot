@@ -80,22 +80,28 @@ def _setup_stdlib() -> None:
 # ── structlog setup ──────────────────────────────────────────────────────────
 
 def _setup_structlog() -> None:
-    structlog.configure(
-        processors=[
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.dev.set_exc_info,
-            structlog.processors.JSONRenderer(),
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            logging.DEBUG if os.getenv("DEBUG") else logging.INFO
-        ),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+    # 1. Configurar el logging de Python (stdlib) para que apunte a consola
+    logging.basicConfig(
+        format="%(message)s",
+        level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
     )
 
+    # 2. Configurar structlog para que use stdlib internamente
+    structlog.configure(
+        processors=[
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            # Si quieres JSON en prod y amigable en dev:
+            structlog.processors.JSONRenderer() if not os.getenv("DEV_LOGS") else structlog.dev.ConsoleRenderer()
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
 
 # ── Public factory ───────────────────────────────────────────────────────────
 
