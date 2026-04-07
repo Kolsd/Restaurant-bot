@@ -1,0 +1,187 @@
+/*
+ * mesio-role.css — Shared design system for Mesio operational role pages
+ * Provides: unified topbar, role-nav pills, common tokens
+ * Used by: mesero.html, kitchen.html, bar.html, caja.html, domiciliario.html, staff-hq.html
+ */
+
+/* ─── DESIGN TOKENS ─────────────────────────────────────────── */
+:root {
+  --m-green:       #1D9E75;
+  --m-green-dim:   rgba(29, 158, 117, 0.15);
+  --m-green-border:rgba(29, 158, 117, 0.30);
+  --m-dark:        #111827;
+  --m-dark-2:      #1F2937;
+  --m-dark-3:      #374151;
+  --m-gray-400:    #9CA3AF;
+  --m-gray-500:    #6B7280;
+  --m-red:         #EF4444;
+  --m-border:      #E5E7EB;
+  --m-bg:          #F4F5F7;
+  --m-card:        #FFFFFF;
+  --m-text:        #111827;
+  --m-radius:      12px;
+}
+
+/* ─── RESET HELPERS ─────────────────────────────────────────── */
+.m-topbar *, .m-topbar *::before, .m-topbar *::after { box-sizing: border-box; }
+
+/* ─── UNIFIED TOPBAR ────────────────────────────────────────── */
+.m-topbar {
+  position: sticky;
+  top: 0;
+  height: 56px;
+  background: var(--m-dark);
+  border-bottom: 1px solid var(--m-dark-2);
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 12px;
+  z-index: 200;
+  box-shadow: 0 1px 12px rgba(0,0,0,0.30);
+}
+
+/* Logo mark */
+.m-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.m-logo-mark {
+  width: 30px; height: 30px;
+  background: var(--m-green);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+  letter-spacing: -0.5px;
+}
+.m-logo-title {
+  font-size: 15px; font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Divider + page name */
+.m-page-label {
+  font-size: 12px; font-weight: 600;
+  color: var(--m-gray-400);
+  padding-left: 12px;
+  border-left: 1px solid var(--m-dark-3);
+  white-space: nowrap;
+}
+
+/* Role badge (e.g. "Mesero") */
+.m-role-chip {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px; font-weight: 700;
+  background: var(--m-green-dim);
+  color: var(--m-green);
+  border: 1px solid var(--m-green-border);
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+/* ─── ROLE NAVIGATION PILLS ─────────────────────────────────── */
+/*
+ * roles.js injects .role-btn anchors into #dynamic-role-nav.
+ * This styles them consistently across all pages.
+ */
+#dynamic-role-nav {
+  display: none;          /* roles.js sets display:flex when populated */
+  align-items: center;
+  gap: 3px;
+  background: var(--m-dark-2);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.role-nav {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--m-dark-2);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.role-btn {
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 11px; font-weight: 600;
+  color: var(--m-gray-400);
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+  border: none; cursor: pointer; background: transparent;
+}
+.role-btn:hover:not(.active) {
+  color: #fff;
+  background: var(--m-dark-3);
+}
+.role-btn.active {
+  background: var(--m-green);
+  color: #fff;
+}
+
+/* ─── TOPBAR RIGHT CLUSTER ──────────────────────────────────── */
+.m-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.m-live {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600;
+  color: var(--m-green);
+}
+.m-live-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--m-green);
+  animation: m-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes m-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+.m-topbar-clock {
+  font-size: 12px;
+  color: var(--m-gray-500);
+  font-variant-numeric: tabular-nums;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.m-btn-logout {
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--m-dark-3);
+  border-radius: 8px;
+  color: var(--m-gray-400);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.m-btn-logout:hover {
+  border-color: var(--m-red);
+  color: var(--m-red);
+  background: rgba(239,68,68,0.08);
+}
+
+/* ─── RESPONSIVE ────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .m-topbar { padding: 0 12px; gap: 8px; }
+  #dynamic-role-nav { display: none !important; }
+  .role-nav { display: none !important; }
+  .m-page-label { display: none; }
+  .m-topbar-clock { display: none; }
+  .m-live { display: none; }
+}

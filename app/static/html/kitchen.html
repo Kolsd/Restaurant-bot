@@ -8,33 +8,11 @@
 * { box-sizing:border-box; margin:0; padding:0; }
 body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#0D0D0D; color:#fff; min-height:100vh; }
 
-/* ── HEADER Y NAVEGACIÓN ── */
-header { background:#111; border-bottom:1px solid #222; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; }
-.logo { font-size:1.2rem; font-weight:700; color:#fff; display:flex; align-items:center; }
-.logo span { color:#1D9E75; }
-
-/* Barra dinámica insertada por roles.js */
-.role-nav { display: flex; gap: 8px; background: #222; padding: 4px; border-radius: 10px; margin-left: 20px; }
-.role-btn { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #888; text-decoration: none; transition: all 0.2s; }
-.role-btn.active { background: #1D9E75; color: #fff; }
-.role-btn:hover:not(.active) { color: #fff; background: #333; }
-
-.header-right { display:flex; align-items:center; gap:12px; }
-.live-dot { width:8px; height:8px; border-radius:50%; background:#1D9E75; animation:pulse 2s infinite; }
-@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
-.live-text { font-size:12px; color:#1D9E75; }
-.time { font-size:13px; color:#666; }
-.btn-logout { width:auto; padding:5px 12px; background:none; border:1px solid #333; border-radius:8px; color:#aaa; margin-left:15px; cursor:pointer; font-size:12px; font-weight:600; transition:all .15s;}
-.btn-logout:hover { color:#fff; border-color:#555; }
-
 /* ── MAIN BOARD ── */
 .main { padding:1.5rem; }
 .board { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
 @media(max-width:900px){ .board{grid-template-columns:1fr;} }
 @media(max-width:600px){
-  header { padding:.75rem 1rem; }
-  .role-nav { display:none !important; }
-  .logo span:last-of-type { display:none; }
   .main { padding:1rem; }
   .btn { padding:12px; font-size:14px; }
 }
@@ -83,18 +61,22 @@ header { background:#111; border-bottom:1px solid #222; padding:1rem 1.5rem; dis
 .notification.show { transform:translateY(0); }
 .btn-print { background:rgba(255,255,255,.06); color:#666; border:1px solid #2A2A2A; margin-bottom:6px; }
 </style>
+<link rel="stylesheet" href="/static/css/mesio-role.css">
 </head>
 <body>
 
-  <header>
-    <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#555;font-weight:400;margin-left:8px;">Cocina</span>
-      <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
-    </div>
-    <div class="header-right">
-      <div class="live-dot"></div>
-      <span class="live-text">En vivo</span>
-      <span class="time" id="clock"></span>
-      <button class="btn-logout" onclick=doStaffLogout();">Salir</button>
+  <header class="m-topbar">
+    <a href="/staff-hq" class="m-logo">
+      <div class="m-logo-mark">M</div>
+      <span class="m-logo-title">Mesio</span>
+    </a>
+    <span class="m-page-label">👨‍🍳 Cocina</span>
+    <span class="m-role-chip">Cocina</span>
+    <div id="dynamic-role-nav"></div>
+    <div class="m-topbar-right">
+      <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
+      <span class="m-topbar-clock" id="header-clock">--:--</span>
+      <button class="m-btn-logout" onclick="doStaffLogout()">Salir</button>
     </div>
   </header>
 
@@ -124,7 +106,8 @@ if (!token) window.location.href = '/login';
 const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
 function clock() {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const el = document.getElementById('header-clock');
+  if (el) el.textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }
 clock(); setInterval(clock, 1000);
 

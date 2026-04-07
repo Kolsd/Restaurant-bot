@@ -143,22 +143,6 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F4F4F5; color: #18181B; min-height: 100vh; }
 
-/* ── HEADER & NAVEGACIÓN DE ROLES ── */
-header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; box-shadow: var(--shadow); }
-.logo-container { display: flex; align-items: center; }
-.logo { font-size: 1.25rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px; }
-.logo span { color: #39FF6A; }
-.role-nav { display: flex; gap: 8px; background: #27272A; padding: 4px; border-radius: 10px; margin-left: 20px; }
-.role-btn { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; color: #A1A1AA; text-decoration: none; transition: all 0.2s; }
-.role-btn.active { background: #39FF6A; color: #000; }
-.role-btn:hover:not(.active) { color: #fff; background: #3F3F46; }
-.header-right { display: flex; align-items: center; gap: 12px; }
-.live-badge { display: flex; align-items: center; gap: 6px; background: rgba(57,255,106,0.15); color: #39FF6A; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; }
-.live-dot { width: 6px; height: 6px; border-radius: 50%; background: #39FF6A; animation: pulse 2s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-.btn-logout { font-size: 12px; padding: 6px 12px; border: 1px solid #3F3F46; border-radius: 8px; background: none; cursor: pointer; color: #A1A1AA; transition: all 0.2s; }
-.btn-logout:hover { color: #fff; border-color: #52525B; }
-
 /* ── MAIN GRID ── */
 .main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
 .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; }
@@ -298,14 +282,8 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 .pay-input:focus { border-color: #7C3AED; }
 #pay-feedback { border-radius: 8px; padding: 8px 12px; font-size: 13px; display: none; }
 
-/* ── MÓVIL: header compacto ── */
+/* ── MÓVIL: layout compacto ── */
 @media (max-width: 600px) {
-  header { padding: 0.75rem 1rem; flex-wrap: wrap; gap: 8px; }
-  .logo-container { flex: 1 1 100%; }
-  #dynamic-role-nav { display: none !important; }
-  .header-right { width: 100%; justify-content: space-between; }
-  .live-badge { font-size: 10px; padding: 4px 8px; }
-  #clock { display: none; }
   .main { padding: 1rem; }
   .board { grid-template-columns: 1fr !important; }
   .sp-box { max-height: 98vh; }
@@ -387,19 +365,22 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 }
 
 </style>
+<link rel="stylesheet" href="/static/css/mesio-role.css">
 </head>
 <body>
 
-<header>
-  <div class="logo-container">
-    <div class="logo">Mesio<span>.</span> <span style="font-size:13px;color:#A1A1AA;font-weight:500;margin-left:8px;">Módulo de Caja</span></div>
-    <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
-  </div>
-
-  <div class="header-right">
-    <div class="live-badge"><div class="live-dot"></div> Sincronizado</div>
-    <div id="clock" style="color:#A1A1AA; font-size:13px; font-weight:600;"></div>
-    <button class="btn-logout" onclick="doLogout()">Salir</button>
+<header class="m-topbar">
+  <a href="/staff-hq" class="m-logo">
+    <div class="m-logo-mark">M</div>
+    <span class="m-logo-title">Mesio</span>
+  </a>
+  <span class="m-page-label">💰 Caja</span>
+  <span class="m-role-chip">Caja</span>
+  <div id="dynamic-role-nav"></div>
+  <div class="m-topbar-right">
+    <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
+    <span class="m-topbar-clock" id="header-clock">--:--</span>
+    <button class="m-btn-logout" onclick="doStaffLogout()">Salir</button>
   </div>
 </header>
 
@@ -599,9 +580,13 @@ let currentChatPhone = null;
 function doLogout() { doStaffLogout(); }
 
 // Reloj en tiempo real
-setInterval(() => {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-}, 1000);
+(function _initClock() {
+  function _tc() {
+    const el = document.getElementById('header-clock');
+    if (el) el.textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+  _tc(); setInterval(_tc, 1000);
+})();
 
 // Leemos la configuración del restaurante desde LocalStorage
 const _restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');

@@ -8,75 +8,6 @@
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
         body { background: #f0f2f5; color: #333; padding-bottom: 70px; }
         
-        /* Topbar estilo Mesio - Modernizado */
-        .topbar { 
-            position: sticky; 
-            top: 0; 
-            background: rgba(255, 255, 255, 0.95); 
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-bottom: 1px solid #eaeaea; 
-            padding: 16px 20px; 
-            display: flex; 
-            align-items: center; 
-            justify-content: space-between; 
-            z-index: 100; 
-            box-shadow: 0 4px 16px rgba(0,0,0,0.04); 
-        }
-
-        .topbar-brand { display: flex; align-items: center; gap: 8px; }
-        .topbar-brand h2 { font-size: 20px; font-weight: 700; color: #111; letter-spacing: -0.3px; margin: 0; }
-        .topbar-brand span { color: #1D9E75; }
-
-        .topbar-actions { display: flex; align-items: center; gap: 12px; }
-
-        .btn-logout {
-            background: #fff0f0;
-            color: #d32f2f;
-            border: 1px solid #ffcdd2;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .btn-logout:hover { background: #ffebee; }
-        
-/* Estilos para el menú dinámico de roles (Inyectado por roles.js) */
-        #dynamic-role-nav {
-            display: flex;
-            gap: 8px;
-            overflow-x: auto; /* Permite deslizar con el dedo en móviles */
-            max-width: 50vw; /* Evita que empuje o aplaste el botón de salir */
-            align-items: center;
-            scrollbar-width: none; /* Oculta la barra de scroll en Firefox */
-        }
-        
-        #dynamic-role-nav::-webkit-scrollbar { 
-            display: none; /* Oculta la barra de scroll en Chrome/Safari/iOS */
-        }
-        
-        #dynamic-role-nav a {
-            text-decoration: none;
-            color: #444;
-            font-size: 13px;
-            font-weight: 600;
-            white-space: nowrap; /* Evita que el texto salte a la siguiente línea */
-            background: #f0f2f5;
-            padding: 6px 12px;
-            border-radius: 16px;
-            border: 1px solid #e4e4e4;
-            transition: all 0.2s ease;
-        }
-
-        #dynamic-role-nav a:hover {
-            background: #e4e6e9;
-            color: #111;
-        }
         /* Contenedor principal */
         .container { padding: 15px; }
 
@@ -112,26 +43,24 @@
         .tab-content { display: none; }
         .tab-content.active { display: block; }
     </style>
+  <link rel="stylesheet" href="/static/css/mesio-role.css">
 </head>
 <body>
 
-    <div class="topbar">
-        <div class="topbar-brand">
-            <h2>🛵 <span>Domicilios</span></h2>
-        </div>
-        
-        <div class="topbar-actions">
-            <div id="dynamic-role-nav" style="display:none;"></div> 
-            
-            <button class="btn-logout" onclick="doStaffLogout()">Salir
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                    <polyline points="16 17 21 12 16 7"></polyline>
-                    <line x1="21" y1="12" x2="9" y2="12"></line>
-                </svg>
-            </button>
-        </div>
+  <header class="m-topbar">
+    <a href="/staff-hq" class="m-logo">
+      <div class="m-logo-mark">M</div>
+      <span class="m-logo-title">Mesio</span>
+    </a>
+    <span class="m-page-label">🛵 Domiciliario</span>
+    <span class="m-role-chip">Domiciliario</span>
+    <div id="dynamic-role-nav"></div>
+    <div class="m-topbar-right">
+      <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
+      <span class="m-topbar-clock" id="header-clock">--:--</span>
+      <button class="m-btn-logout" onclick="doStaffLogout()">Salir</button>
     </div>
+  </header>
 
     <div class="container">
         <div id="tab-recoger" class="tab-content active">
@@ -383,6 +312,12 @@ async function checkUpdates() {
 checkUpdates(); // Llama la primera vez
 // Ahora podemos revisar cada 5 segundos sin saturar la base de datos!
 setInterval(checkUpdates, 5000);
+
+// Topbar clock
+(function(){
+  function _tc(){ const n=new Date(); document.getElementById('header-clock').textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0'); }
+  _tc(); setInterval(_tc, 10000);
+})();
 
 </script>
 </body>

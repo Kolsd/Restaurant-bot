@@ -362,7 +362,44 @@
     }
     .btn-modal-primary:hover:not(:disabled) { opacity: 0.88; }
     .btn-modal-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── ROLE NAV (in header) — populated by roles.js ── */
+    #dynamic-role-nav {
+      display: none;
+      align-items: center;
+      gap: 3px;
+      background: #F3F4F6;
+      border-radius: 10px;
+      padding: 3px;
+      flex: 1;
+      justify-content: center;
+      max-width: 400px;
+    }
+    #dynamic-role-nav .role-btn {
+      padding: 6px 13px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: all 0.15s;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+    }
+    #dynamic-role-nav .role-btn:hover:not(.active) {
+      background: #E5E7EB;
+      color: var(--text);
+    }
+    #dynamic-role-nav .role-btn.active {
+      background: var(--green);
+      color: #fff;
+    }
+    @media (max-width: 640px) {
+      #dynamic-role-nav { display: none !important; }
+    }
   </style>
+  <link rel="stylesheet" href="/static/css/mesio-role.css">
 </head>
 <body>
   <!-- HEADER -->
@@ -375,6 +412,7 @@
         <div id="hdr-roles"></div>
       </div>
     </div>
+    <div id="dynamic-role-nav"></div>
     <div style="display:flex;align-items:center;gap:10px;">
       <div class="webauthn-badge inactive" id="webauthn-badge">&#x1F4F1; Biométrico</div>
       <button class="btn-logout" onclick="doHQLogout()">Cerrar sesión</button>

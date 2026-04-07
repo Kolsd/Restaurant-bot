@@ -8,18 +8,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #111; }
 
-/* ── TOPBAR Y TABS ── */
-.topbar { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; align-items: center; padding: 0 1rem; gap: 12px; z-index: 100; }
-.topbar-logo { width: 32px; height: 32px; background: #1D9E75; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
-.topbar-title { font-size: 15px; font-weight: 600; }
-.topbar-role { font-size: 11px; padding: 3px 10px; background: #E1F5EE; color: #0F6E56; border-radius: 20px; font-weight: 500; }
-.logout-btn { font-size: 12px; padding: 5px 10px; border: 0.5px solid #ddd; border-radius: 8px; background: none; cursor: pointer; color: #555; margin-left: auto; }
-
-.role-nav { display: flex; gap: 8px; background: #f0f0e8; padding: 4px; border-radius: 10px; margin-left: 15px; }
-@media(max-width: 700px) { .role-nav { display: none !important; } }
-.role-btn { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #888; text-decoration: none; transition: all 0.2s; }
-.role-btn.active { background: #1D9E75; color: #fff; }
-
+/* ── TABS ── */
 .tabs { position: fixed; top: 56px; left: 0; right: 0; background: #fff; border-bottom: 0.5px solid #e0e0d8; display: flex; z-index: 90; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tab { flex: 1; min-width: 90px; padding: 12px; text-align: center; font-size: 13px; font-weight: 600; color: #888; cursor: pointer; border-bottom: 2px solid transparent; transition: all .2s; white-space: nowrap; }
@@ -118,16 +107,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .msg-user { background: #DCF8C6; align-self: flex-end; }
 .msg-bot  { background: #fff; align-self: flex-start; }
 </style>
+  <link rel="stylesheet" href="/static/css/mesio-role.css">
 </head>
 <body>
 
-  <div class="topbar">
-    <div class="topbar-logo">M</div>
-    <div class="topbar-title" id="rest-name">Cargando...</div>
-    <div class="topbar-role">Mesero</div>
-    <div id="dynamic-role-nav" class="role-nav" style="display: none;"></div>
-    <button class="logout-btn" onclick="doLogout()">Salir</button>
-  </div>
+  <header class="m-topbar">
+    <a href="/staff-hq" class="m-logo">
+      <div class="m-logo-mark">M</div>
+      <span class="m-logo-title">Mesio</span>
+    </a>
+    <span class="m-page-label">🍽️ Mesero</span>
+    <span class="m-role-chip">Mesero</span>
+    <div id="dynamic-role-nav"></div>
+    <div class="m-topbar-right">
+      <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
+      <span class="m-topbar-clock" id="header-clock">--:--</span>
+      <button class="m-btn-logout" onclick="doLogout()">Salir</button>
+    </div>
+  </header>
 
   <div class="tabs">
     <div class="tab active" id="tab-mesas" onclick="switchTab('mesas',this)">
@@ -718,6 +715,12 @@ setInterval(loadTablesStatus, 15000);
 setInterval(loadAlerts, 10000);
 setInterval(loadOrders, 15000);
 setInterval(loadChats, 20000);
+
+// Topbar clock
+(function(){
+  function _tc(){ const n=new Date(); document.getElementById('header-clock').textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0'); }
+  _tc(); setInterval(_tc, 10000);
+})();
 
 </script>
 </body>
