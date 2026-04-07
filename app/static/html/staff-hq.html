@@ -280,6 +280,88 @@
       font-size: 13px;
     }
     .timecard-footer strong { font-weight: 700; }
+
+    /* ── WEBAUTHN BADGE ── */
+    .webauthn-badge {
+      font-size: 11px; font-weight: 600;
+      padding: 4px 10px; border-radius: 20px;
+      display: flex; align-items: center; gap: 5px;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .webauthn-badge.active   { background: var(--green-light); color: var(--green);  border-color: #a7f3d0; }
+    .webauthn-badge.inactive { background: #F3F4F6;            color: var(--gray);    border-color: var(--border); }
+    .webauthn-badge.none     { background: #FEF3C7;            color: #92400E;        border-color: #fde68a; }
+
+    /* ── BIOMETRIC SECTION ── */
+    .bio-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .bio-card-info { display: flex; align-items: center; gap: 12px; }
+    .bio-icon { font-size: 28px; }
+    .bio-title { font-weight: 700; font-size: 14px; }
+    .bio-sub   { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .btn-bio-reg {
+      background: var(--green); color: #fff;
+      border: none; border-radius: 9px;
+      padding: 9px 16px; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn-bio-reg:hover { opacity: 0.88; }
+    .btn-bio-reg:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-bio-del {
+      background: var(--red-light); color: var(--red);
+      border: 1px solid #fca5a5; border-radius: 9px;
+      padding: 9px 14px; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn-bio-del:hover { opacity: 0.8; }
+
+    /* ── REGISTRATION MODAL ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45); z-index: 500;
+      align-items: center; justify-content: center; padding: 20px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px 20px;
+      width: 100%; max-width: 400px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+      animation: modalIn 0.2s ease;
+    }
+    @keyframes modalIn { from { transform: translateY(16px); opacity:0; } to { transform: translateY(0); opacity:1; } }
+    .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .modal-close-btn { background: none; border: none; font-size: 20px; color: var(--text-muted); cursor: pointer; }
+    .modal-msg {
+      font-size: 13px; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: none;
+    }
+    .modal-msg.error   { background: var(--red-light);   color: var(--red); }
+    .modal-msg.success { background: var(--green-light);  color: var(--green); }
+    .bio-spinner {
+      display: none; text-align: center; padding: 20px 0;
+      font-size: 13px; color: var(--text-muted);
+    }
+    .bio-spinner span { display: block; font-size: 36px; margin-bottom: 8px; animation: spin 1.2s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .btn-modal-primary {
+      width: 100%; padding: 12px; border: none; border-radius: 10px;
+      background: var(--green); color: #fff; font-size: 14px; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s; margin-top: 8px;
+    }
+    .btn-modal-primary:hover:not(:disabled) { opacity: 0.88; }
+    .btn-modal-primary:disabled { opacity: 0.4; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -293,7 +375,10 @@
         <div id="hdr-roles"></div>
       </div>
     </div>
-    <button class="btn-logout" onclick="doHQLogout()">Cerrar sesión</button>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="webauthn-badge inactive" id="webauthn-badge">&#x1F4F1; Biométrico</div>
+      <button class="btn-logout" onclick="doHQLogout()">Cerrar sesión</button>
+    </div>
   </header>
 
   <div class="hq-body">
@@ -334,6 +419,21 @@
       <div class="stations-grid" id="stations-grid"></div>
     </div>
 
+    <!-- BIOMETRÍA -->
+    <div>
+      <div class="section-title">Biometría</div>
+      <div class="bio-card" id="bio-card">
+        <div class="bio-card-info">
+          <div class="bio-icon">&#x1F9B7;</div>
+          <div>
+            <div class="bio-title" id="bio-title">Cargando...</div>
+            <div class="bio-sub"  id="bio-sub"></div>
+          </div>
+        </div>
+        <div id="bio-actions"></div>
+      </div>
+    </div>
+
     <!-- TIMECARD -->
     <div class="card">
       <div class="card-header">
@@ -346,6 +446,26 @@
       </div>
       <div id="timecard-container">
         <div class="timecard-empty">Cargando timecard...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Registration modal -->
+  <div class="modal-overlay" id="bio-modal">
+    <div class="modal-box">
+      <div class="modal-title">
+        <span>&#x1F9B7; Registrar Biometría</span>
+        <button class="modal-close-btn" onclick="closeBioModal()">&times;</button>
+      </div>
+      <div class="modal-msg" id="bio-modal-msg"></div>
+      <div class="bio-spinner" id="bio-spinner"><span>&#x1F504;</span>Activando sensor...</div>
+      <div id="bio-modal-body">
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+          Registra tu huella dactilar o Face ID para autenticarte rápidamente en los terminales de fichaje.
+        </p>
+        <button class="btn-modal-primary" id="bio-reg-btn" onclick="startBioRegistration()">
+          &#x1F91A; Iniciar registro biométrico
+        </button>
       </div>
     </div>
   </div>
@@ -641,6 +761,198 @@
     // ── Init ───────────────────────────────────────────────────────
     loadProfile();
     loadTimecard();
+
+    // ── WebAuthn / Biometrics ──────────────────────────────────────
+    const WEBAUTHN_OK = !!window.PublicKeyCredential;
+
+    function _b64uToBuffer(b) {
+      const base64 = b.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      const bin = atob(padded);
+      return Uint8Array.from(bin, c => c.charCodeAt(0)).buffer;
+    }
+    function _bufferToB64u(buffer) {
+      let bin = '';
+      new Uint8Array(buffer).forEach(b => bin += String.fromCharCode(b));
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function _setBadge(state) {
+      const badge = document.getElementById('webauthn-badge');
+      if (!WEBAUTHN_OK) {
+        badge.className = 'webauthn-badge none';
+        badge.textContent = 'Sin biométrico';
+        return;
+      }
+      if (state === 'active') {
+        badge.className = 'webauthn-badge active';
+        badge.textContent = '✅ Biométrico activo';
+      } else if (state === 'none') {
+        badge.className = 'webauthn-badge none';
+        badge.textContent = '⚠️ Sin huella registrada';
+      } else {
+        badge.className = 'webauthn-badge inactive';
+        badge.textContent = '📱 Biométrico';
+      }
+    }
+
+    let _bioCredentials = [];
+
+    async function loadBiometricStatus() {
+      const titleEl   = document.getElementById('bio-title');
+      const subEl     = document.getElementById('bio-sub');
+      const actionsEl = document.getElementById('bio-actions');
+
+      if (!WEBAUTHN_OK) {
+        _setBadge('none');
+        titleEl.textContent   = 'Biometría no disponible';
+        subEl.textContent     = 'Usa un navegador moderno con HTTPS.';
+        actionsEl.innerHTML   = '';
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/staff/webauthn/credentials', {
+          headers: { 'Authorization': 'Bearer ' + TOKEN }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        _bioCredentials = data.credentials || [];
+      } catch(_) { _bioCredentials = []; }
+
+      actionsEl.innerHTML = '';
+
+      if (_bioCredentials.length === 0) {
+        _setBadge('none');
+        titleEl.textContent = 'Sin huella registrada';
+        subEl.textContent   = 'Registra tu huella o Face ID para fichar rápidamente.';
+        const btn = document.createElement('button');
+        btn.className   = 'btn-bio-reg';
+        btn.textContent = '+ Registrar huella / Face ID';
+        btn.onclick     = openBioModal;
+        actionsEl.appendChild(btn);
+      } else {
+        _setBadge('active');
+        const cred = _bioCredentials[0];
+        titleEl.textContent = 'Biometría activa';
+        subEl.textContent   = 'Dispositivo: ' + (cred.device_name || 'Dispositivo') +
+          ' · Registrado: ' + new Date(cred.created_at).toLocaleDateString('es-CO');
+        const delBtn = document.createElement('button');
+        delBtn.className   = 'btn-bio-del';
+        delBtn.textContent = 'Eliminar huella';
+        delBtn.onclick     = () => deleteBioCredential(cred.id);
+        actionsEl.appendChild(delBtn);
+      }
+    }
+
+    async function deleteBioCredential(credId) {
+      if (!confirm('¿Eliminar la credencial biométrica?')) return;
+      try {
+        const res = await fetch('/api/staff/webauthn/credentials/' + encodeURIComponent(credId), {
+          method: 'DELETE',
+          headers: { 'Authorization': 'Bearer ' + TOKEN }
+        });
+        if (!res.ok) { alert('No se pudo eliminar.'); return; }
+        await loadBiometricStatus();
+      } catch(_) { alert('Error de conexión.'); }
+    }
+
+    function openBioModal() {
+      document.getElementById('bio-modal').classList.add('open');
+      document.getElementById('bio-modal-msg').style.display = 'none';
+      document.getElementById('bio-spinner').style.display   = 'none';
+      document.getElementById('bio-modal-body').style.display = '';
+      document.getElementById('bio-reg-btn').disabled = false;
+      document.getElementById('bio-reg-btn').textContent = '🤚 Iniciar registro biométrico';
+    }
+
+    function closeBioModal() {
+      document.getElementById('bio-modal').classList.remove('open');
+    }
+
+    function _setBioModalMsg(type, text) {
+      const el = document.getElementById('bio-modal-msg');
+      el.className     = 'modal-msg ' + type;
+      el.textContent   = text;
+      el.style.display = '';
+    }
+
+    async function startBioRegistration() {
+      if (!WEBAUTHN_OK) { _setBioModalMsg('error', 'Este dispositivo no soporta biometría.'); return; }
+
+      const btn = document.getElementById('bio-reg-btn');
+      btn.disabled = true;
+      document.getElementById('bio-spinner').style.display = '';
+      document.getElementById('bio-modal-msg').style.display = 'none';
+
+      try {
+        // 1. Obtener opciones de registro
+        const optRes = await fetch('/api/staff/webauthn/register-options', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN }
+        });
+        const opts = await optRes.json();
+        if (!optRes.ok) throw new Error(opts.detail || 'Error al obtener opciones');
+
+        // 2. Prompt biométrico del navegador
+        const cred = await navigator.credentials.create({
+          publicKey: {
+            challenge:        _b64uToBuffer(opts.challenge),
+            rp:               { id: opts.rp.id, name: opts.rp.name || 'Mesio' },
+            user: {
+              id:          _b64uToBuffer(opts.user.id),
+              name:        opts.user.name,
+              displayName: opts.user.displayName || opts.user.name
+            },
+            pubKeyCredParams:          opts.pubKeyCredParams || [{ type: 'public-key', alg: -7 }],
+            authenticatorSelection:    opts.authenticatorSelection || { userVerification: 'required' },
+            timeout:                   60000,
+            attestation:               'none'
+          }
+        });
+
+        document.getElementById('bio-spinner').style.display = 'none';
+
+        // 3. Completar registro
+        const completeRes = await fetch('/api/staff/webauthn/register-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+          body: JSON.stringify({
+            id:     _bufferToB64u(cred.rawId),
+            raw_id: _bufferToB64u(cred.rawId),
+            response: {
+              attestationObject: _bufferToB64u(cred.response.attestationObject),
+              clientDataJSON:    _bufferToB64u(cred.response.clientDataJSON)
+            },
+            type:        'public-key',
+            device_name: navigator.userAgentData?.platform || navigator.platform || 'Dispositivo'
+          })
+        });
+        const completeData = await completeRes.json();
+        if (!completeRes.ok) throw new Error(completeData.detail || 'Error al guardar huella');
+
+        _setBioModalMsg('success', '¡Biometría registrada exitosamente!');
+        btn.textContent = '✅ Registrado';
+        await loadBiometricStatus();
+        setTimeout(closeBioModal, 2000);
+
+      } catch(e) {
+        document.getElementById('bio-spinner').style.display = 'none';
+        if (e.name === 'NotAllowedError') {
+          _setBioModalMsg('error', 'Registro cancelado por el dispositivo.');
+        } else {
+          _setBioModalMsg('error', e.message || 'Error inesperado');
+        }
+        btn.disabled    = false;
+        btn.textContent = '🤚 Intentar de nuevo';
+      }
+    }
+
+    document.getElementById('bio-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeBioModal();
+    });
+
+    loadBiometricStatus();
   </script>
 </body>
 </html>

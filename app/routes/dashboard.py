@@ -230,11 +230,6 @@ async def domiciliario_page():
     p = STATIC / "html" / "domiciliario.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)
 
-@router.get("/reloj", response_class=HTMLResponse)
-async def reloj_page():
-    p = STATIC / "html" / "reloj.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
-
 
 @router.get("/staff-hq", response_class=HTMLResponse)
 async def staff_hq_page():

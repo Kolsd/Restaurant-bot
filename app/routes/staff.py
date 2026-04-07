@@ -159,7 +159,8 @@ async def staff_pin_login(body: StaffPinLoginRequest):
         except: raw_features = {}
 
     return {
-        "token":    token,
+        "token":        token,
+        "access_token": token,   # alias for reloj.html WebAuthn registration flow
         "staff_id": member["id"],
         "roles":    roles,
         "name":     member["name"],

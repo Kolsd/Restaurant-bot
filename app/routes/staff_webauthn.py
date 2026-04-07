@@ -84,11 +84,11 @@ class RegisterCompleteBody(BaseModel):
 
 class AuthOptionsBody(BaseModel):
     restaurant_id: int
-    action:        str = Field(..., pattern="^(clock_in|clock_out)$")
+    action:        str = Field(..., pattern="^(clock_in|clock_out|break)$")
 
 
 class AuthCompleteBody(BaseModel):
-    action:             str   = Field(..., pattern="^(clock_in|clock_out)$")
+    action:             str   = Field(..., pattern="^(clock_in|clock_out|break)$")
     credential_id:      str
     authenticator_data: str
     client_data_json:   str
@@ -327,6 +327,27 @@ async def auth_complete(request: Request, body: AuthCompleteBody):
     # Execute the clock action
     staff_id = cred_record["staff_id"]
     restaurant_id = cred_record["restaurant_id"]
+
+    if body.action == "break":
+        # Find the open shift to get shift_id, then toggle break start/end
+        open_shifts = await db.db_get_open_shifts(restaurant_id)
+        open_shift = next((s for s in open_shifts if str(s["staff_id"]) == str(staff_id)), None)
+        if not open_shift:
+            raise HTTPException(status_code=400, detail="No tienes un turno abierto para registrar break")
+        try:
+            brk = await db.db_start_break(staff_id, open_shift["id"])
+            break_label = "break_start"
+        except ValueError:
+            brk = await db.db_end_break(staff_id)
+            if not brk:
+                raise HTTPException(status_code=400, detail="No hay break abierto para terminar")
+            break_label = "break_end"
+        return {
+            "success":    True,
+            "staff_name": cred_record.get("staff_name", ""),
+            "action":     break_label,
+            "break":      brk,
+        }
 
     try:
         if body.action == "clock_in":
