@@ -7,27 +7,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pathlib import Path
 from starlette.responses import RedirectResponse
-
-logging.basicConfig(
-    format="%(message)s",
-    level=logging.INFO,
-)
-
-structlog.configure(
-    processors=[
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.dev.ConsoleRenderer() # Formato amigable para Railway/Terminal
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    cache_logger_on_first_use=True,
-)
-
 from pathlib import Path
 from starlette.responses import RedirectResponse
 from app.routes.chat import router as chat_router
@@ -45,6 +24,31 @@ from app.routes.staff_payroll import router as staff_payroll_router
 from app.routes.loyalty import router as loyalty_router
 from app.services import database as db  # ← FIX: import directo de db
 from app.services.logging import get_logger as _get_logger
+
+def _setup_structlog() -> None:
+    # 1. Configurar el logging de Python (stdlib) para que apunte a consola
+    logging.basicConfig(
+        format="%(message)s",
+        level=logging.DEBUG if os.getenv("DEBUG") else logging.INFO,
+    )
+
+    # 2. Configurar structlog para que use stdlib internamente
+    structlog.configure(
+        processors=[
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            # Si quieres JSON en prod y amigable en dev:
+            structlog.processors.JSONRenderer() if not os.getenv("DEV_LOGS") else structlog.dev.ConsoleRenderer()
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
 
 _log = _get_logger(__name__)
 
