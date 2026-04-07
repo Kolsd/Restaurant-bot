@@ -825,7 +825,7 @@ class PaymentMethod(BaseModel):
     amount: float
 
 class PayCheckBody(BaseModel):
-    payments: list[PaymentMethod]
+    payments: list[PaymentMethod] = []
     customer_name: str = "Consumidor Final"
     customer_nit:  str = "222222222"
     customer_email: str = ""
@@ -923,6 +923,21 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
         if check["status"] != "open":
             raise HTTPException(status_code=400, detail=f"Este check ya fue procesado (status: {check['status']})")
+
+        # Si no se enviaron pagos, usar proposed_payments del check (flujo bot)
+        if not body.payments:
+            proposed = check.get("proposed_payments")
+            if isinstance(proposed, str):
+                import json as _json
+                proposed = _json.loads(proposed)
+            if proposed:
+                body.payments = [PaymentMethod(method=p["method"], amount=p["amount"]) for p in proposed]
+            else:
+                raise HTTPException(status_code=400, detail="No se especificaron métodos de pago")
+
+        # También usar tip propuesto si no se envió tip explícito y hay uno guardado
+        if body.tip_amount == 0.0 and check.get("proposed_tip"):
+            body.tip_amount = float(check["proposed_tip"])
 
         total_pagado = sum(p.amount for p in body.payments)
         check_total  = float(check["total"]) + body.service_charge
@@ -1024,6 +1039,45 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
+
+class CheckoutProofBody(BaseModel):
+    media_url: str
+    customer_phone: str
+
+@router.post("/api/table-orders/{base_order_id}/checkout-proposal/proof")
+async def attach_checkout_proof(
+    request: Request,
+    base_order_id: str,
+    body: CheckoutProofBody,
+):
+    """Adjunta comprobante de pago a los checks con propuesta awaiting_proof."""
+    await get_current_user(request)
+    updated = await db.db_attach_proof(base_order_id, body.customer_phone, body.media_url)
+    if not updated:
+        raise HTTPException(status_code=404, detail="No hay propuesta awaiting_proof para este teléfono")
+    return {"success": True}
+
+
+@router.get("/api/checkout-proposals")
+async def list_checkout_proposals(request: Request):
+    """
+    Lista mesas con propuestas de pago bot activas (pending/awaiting_proof/proof_received).
+    Para el tab 'Por Confirmar' en caja.html.
+    """
+    restaurant = await get_current_restaurant(request)
+    branch_header = request.headers.get("X-Branch-ID", "")
+
+    branch_ids = None
+    if branch_header and branch_header != "all":
+        try:
+            branch_ids = [int(branch_header)]
+        except ValueError:
+            pass
+
+    proposals = await db.db_list_checkout_proposals(restaurant["id"], branch_ids)
+    return {"proposals": proposals}
+
 
 @router.get("/api/table-orders/{base_order_id}/checks/{check_id}/ticket")
 async def get_check_ticket(request: Request, base_order_id: str, check_id: str):

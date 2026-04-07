@@ -169,6 +169,25 @@ async def _process_message(user_phone: str, user_text: str, bot_number: str,
         print(f"❌ ERROR en _process_message:\n{traceback.format_exc()}", flush=True)
 
 
+async def _send_wa_text(user_phone: str, text: str, phone_id: str, access_token: str):
+    """Envía un mensaje de texto simple a WhatsApp sin pasar por la IA."""
+    try:
+        url = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": user_phone,
+            "type": "text",
+            "text": {"body": text},
+        }
+        async with httpx.AsyncClient(timeout=10) as client:
+            res = await client.post(url, headers=headers, json=payload)
+            if res.status_code != 200:
+                print(f"🚨 _send_wa_text ERROR: {res.text}", flush=True)
+    except Exception:
+        print(f"❌ ERROR en _send_wa_text:\n{traceback.format_exc()}", flush=True)
+
+
 @router.post("/webhook/meta")
 async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
     import json as _json
@@ -262,7 +281,34 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             user_text = button_reply.get("id", "") or button_reply.get("title", "")
         elif msg_type == "image":
             image_id = message.get("image", {}).get("id", "")
-            user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: /api/media/{image_id}?bot={bot_number}"
+            media_url = f"/api/media/{image_id}?bot={bot_number}"
+
+            # Atajo no-LLM: si hay una propuesta awaiting_proof para este teléfono,
+            # adjuntar el comprobante directamente sin pasar por el modelo.
+            try:
+                restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number)
+                if restaurant_data:
+                    proposal = await db.db_get_open_proposal_for_phone(
+                        restaurant_data["id"], user_phone
+                    )
+                    if proposal and proposal.get("proposal_status") == "awaiting_proof":
+                        await db.db_attach_proof(
+                            proposal["base_order_id"], user_phone, media_url
+                        )
+                        # Limpiar checkout state en memoria
+                        from app.services.agent import _checkout_state, _ck_key
+                        ck_key = _ck_key(user_phone, bot_number)
+                        _checkout_state.pop(ck_key, None)
+                        # Enviar confirmación vía background task
+                        confirm_msg = "✅ Comprobante recibido, caja lo está validando. ¡Gracias! 🙏"
+                        background_tasks.add_task(
+                            _send_wa_text, user_phone, confirm_msg, phone_id, access_token
+                        )
+                        return JSONResponse(content={"status": "ok"})
+            except Exception as e:
+                print(f"⚠️ Error en atajo de comprobante: {e}", flush=True)
+
+            user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: {media_url}"
         else:
             user_text = message.get("text", {}).get("body", "")
 

@@ -165,6 +165,23 @@ _nps_state: dict = {}
 def _nps_key(phone: str, bot_number: str) -> str:
     return f"{phone}:{bot_number}"
 
+# ── CHECKOUT: estado en memoria por teléfono+bot ──────────────────────────
+_checkout_state: dict = {}  # key: "checkout:phone:bot_number" → state dict
+
+def _ck_key(phone: str, bot_number: str) -> str:
+    return f"checkout:{phone}:{bot_number}"
+
+def _fmt_cop(n: float) -> str:
+    """Formatea número como $84.000 sin decimales."""
+    return f"${int(n):,}".replace(",", ".")
+
+def _resolve_tip(mode: str, value: float, subtotal: float) -> float:
+    if mode == "none":
+        return 0.0
+    if mode == "percent":
+        return round(subtotal * (value / 100.0), 2)
+    return round(float(value), 2)
+
 async def _handle_nps_flow(phone: str, bot_number: str, message: str,
                             restaurant_name: str, google_maps_url: str) -> str | None:
     key = _nps_key(phone, bot_number)
@@ -438,6 +455,244 @@ def _build_module_restrictions(features: dict) -> str:
         "=========================================\n"
         + "\n\n".join(lines)
     )
+
+
+def _ask_payment_for_check(state: dict, idx: int) -> str:
+    n = state["split_count"]
+    if n == 1:
+        return "¿Cómo vas a pagar? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
+    return f"¿Cómo paga la persona {idx + 1} de {n}? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
+
+
+async def _save_checkout_proposal(
+    phone: str, bot_number: str, state: dict, table_context: dict | None
+) -> None:
+    """Persiste la propuesta de pago en DB usando las funciones de database.py."""
+    base_order_id = state.get("base_order_id")
+    if not base_order_id:
+        raise ValueError("base_order_id missing from checkout state")
+
+    n = state["split_count"]
+    subtotal = state["subtotal"]
+    tip_total = state["tip_amount"]
+
+    per = round(subtotal / n, 2)
+    amounts = [per] * n
+    amounts[-1] = round(subtotal - per * (n - 1), 2)
+
+    # Crear checks en DB
+    checks_payload = [
+        {
+            "check_number": i + 1,
+            "items": [{"name": f"Parte {i+1}", "qty": 1, "unit_price": amounts[i]}],
+            "subtotal": amounts[i],
+            "tax_amount": 0.0,
+            "total": amounts[i],
+        }
+        for i in range(n)
+    ]
+    created = await db.db_create_checks(base_order_id, checks_payload)
+
+    proposal_status = "awaiting_proof" if state["requires_proof"] else "pending"
+    tip_per_check = round(tip_total / n, 2)
+
+    for i, check in enumerate(created):
+        payments = state["payments"][i] if i < len(state["payments"]) else []
+        await db.db_attach_proposal(
+            check_id=check["id"],
+            proposed_payments=payments,
+            proposed_tip=tip_per_check,
+            proposal_source="bot",
+            proposal_status=proposal_status,
+            customer_phone=phone,
+        )
+        if tip_per_check > 0:
+            await db.db_set_check_tip(check["id"], tip_per_check)
+
+    print(f"✅ Checkout proposal guardado: {base_order_id} ({n} checks, propina {tip_total})", flush=True)
+
+
+async def _handle_checkout_flow(
+    phone: str, bot_number: str, message: str, table_context: dict | None
+) -> str | None:
+    """
+    Multi-turn checkout state machine. Returns a reply string if handled,
+    or None if the message should fall through to the normal LLM flow.
+    """
+    key = _ck_key(phone, bot_number)
+    state = _checkout_state.get(key)
+    if state is None:
+        return None
+
+    msg = message.strip().lower()
+
+    # ── Estado: preguntando cuántos dividir ─────────────────────────────
+    if state["step"] == "asking_split":
+        n = None
+        # Detectar número explícito
+        m = re.search(r'\b(\d+)\b', msg)
+        if m:
+            n = int(m.group(1))
+        elif any(w in msg for w in ("junto", "solo", "uno", "1", "sola", "completa", "todo")):
+            n = 1
+        elif "dos" in msg or "2" in msg:
+            n = 2
+        elif "tres" in msg or "3" in msg:
+            n = 3
+
+        if n is None or n < 1 or n > 20:
+            return "¿Cuántas personas van a dividir la cuenta? Dime el número (ej: 2, 3...)."
+
+        state["split_count"] = n
+        state["payments"] = [[] for _ in range(n)]
+        state["tip_amount"] = 0.0
+
+        # Preguntar propina con efecto anclaje
+        subtotal = state["subtotal"]
+        tip_10 = _resolve_tip("percent", 10, subtotal)
+        tip_15 = _resolve_tip("percent", 15, subtotal)
+        tip_20 = _resolve_tip("percent", 20, subtotal)
+
+        state["step"] = "asking_tip"
+        _checkout_state[key] = state
+
+        lines = [
+            f"El equipo de cocina y tu mesero estuvieron felices de atenderte hoy 👨‍🍳",
+            f"Subtotal: {_fmt_cop(subtotal)}",
+            f"¿Deseas agregar una propina?",
+            f"  1) 10% → {_fmt_cop(tip_10)}",
+            f"  2) 15% → {_fmt_cop(tip_15)}  ⭐ sugerida",
+            f"  3) 20% → {_fmt_cop(tip_20)}",
+            f"  4) Otro valor",
+            f"  5) Ninguna",
+        ]
+        return "\n".join(lines)
+
+    # ── Estado: esperando respuesta de propina ───────────────────────────
+    if state["step"] == "asking_tip":
+        subtotal = state["subtotal"]
+        tip = None
+
+        if msg in ("5", "ninguna", "no", "sin propina", "0"):
+            tip = 0.0
+        elif msg in ("1", "10%", "10", "diez"):
+            tip = _resolve_tip("percent", 10, subtotal)
+        elif msg in ("2", "15%", "15", "quince"):
+            tip = _resolve_tip("percent", 15, subtotal)
+        elif msg in ("3", "20%", "20", "veinte"):
+            tip = _resolve_tip("percent", 20, subtotal)
+        elif msg == "4" or "otro" in msg or "diferente" in msg:
+            state["step"] = "asking_tip_custom"
+            _checkout_state[key] = state
+            return "¿Cuánto deseas dejar de propina? (escribe el valor, ej: 5000)"
+        else:
+            # Intentar parsear como número/monto directo
+            clean = re.sub(r'[$\s,.]', '', msg)
+            if clean.isdigit():
+                val = float(clean)
+                # Heurística: si < 100 tratar como porcentaje, si > subtotal/2 rechazar
+                if val <= 50 and val > 0:
+                    tip = _resolve_tip("percent", val, subtotal)
+                elif val <= subtotal * 0.5:
+                    tip = val
+                else:
+                    return f"La propina no puede superar el 50% del subtotal ({_fmt_cop(subtotal * 0.5)}). ¿Cuánto deseas dejar?"
+
+        if tip is None:
+            return "Elige una opción del 1 al 5, o escribe el valor de propina que deseas dejar."
+
+        state["tip_amount"] = tip
+        state["step"] = "asking_payment_0"
+        state["current_check_idx"] = 0
+        _checkout_state[key] = state
+        return _ask_payment_for_check(state, 0)
+
+    # ── Estado: propina personalizada ────────────────────────────────────
+    if state["step"] == "asking_tip_custom":
+        subtotal = state["subtotal"]
+        clean = re.sub(r'[$\s,.]', '', msg)
+        if not clean.isdigit():
+            return "Por favor escribe solo el valor numérico, ej: 5000"
+        val = float(clean)
+        if val > subtotal * 0.5:
+            return f"La propina no puede superar el 50% del subtotal ({_fmt_cop(subtotal * 0.5)}). ¿Cuánto deseas dejar?"
+        state["tip_amount"] = val
+        state["step"] = "asking_payment_0"
+        state["current_check_idx"] = 0
+        _checkout_state[key] = state
+        return _ask_payment_for_check(state, 0)
+
+    # ── Estado: pidiendo método de pago por check ────────────────────────
+    if state["step"].startswith("asking_payment_"):
+        idx = state.get("current_check_idx", 0)
+        methods_map = {
+            "efectivo": "efectivo", "cash": "efectivo",
+            "nequi": "nequi",
+            "daviplata": "daviplata",
+            "tarjeta": "tarjeta", "card": "tarjeta", "débito": "tarjeta", "credito": "tarjeta",
+            "transferencia": "transferencia", "transfencia": "transferencia",
+        }
+        method = None
+        for kw, mval in methods_map.items():
+            if kw in msg:
+                method = mval
+                break
+
+        if method is None:
+            return "No reconocí el método de pago. Por favor elige: Efectivo, Nequi, Daviplata, Tarjeta, o Transferencia."
+
+        per_check_total = round(state["subtotal"] / state["split_count"], 2)
+        state["payments"][idx] = [{"method": method, "amount": per_check_total}]
+        idx += 1
+        state["current_check_idx"] = idx
+
+        if idx < state["split_count"]:
+            state["step"] = f"asking_payment_{idx}"
+            _checkout_state[key] = state
+            return _ask_payment_for_check(state, idx)
+
+        # Todos los métodos recolectados → confirmar y enviar a caja
+        state["step"] = "confirming"
+        _checkout_state[key] = state
+
+        # Determinar si necesita comprobante (algún método digital)
+        digital = {"nequi", "daviplata", "transferencia"}
+        needs_proof = any(
+            p[0]["method"] in digital for p in state["payments"] if p
+        )
+        state["requires_proof"] = needs_proof
+
+        # Resumen para el cliente
+        total_with_tip = state["subtotal"] + state["tip_amount"]
+        lines = ["✅ ¡Listo! Aquí está el resumen de tu pago:"]
+        for i, pmts in enumerate(state["payments"]):
+            if pmts:
+                m = pmts[0]["method"].capitalize()
+                a = _fmt_cop(pmts[0]["amount"])
+                lines.append(f"  Parte {i+1}: {a} · {m}")
+        if state["tip_amount"] > 0:
+            lines.append(f"  Propina: {_fmt_cop(state['tip_amount'])}")
+        lines.append(f"  Total: {_fmt_cop(total_with_tip)}")
+        lines.append("")
+        if needs_proof:
+            lines.append("Por favor envía la foto del comprobante de pago por aquí 📸 y caja lo validará.")
+        else:
+            lines.append("He enviado tu propuesta de pago a caja. ¡Gracias! 🙌")
+
+        # Guardar propuesta en DB
+        try:
+            await _save_checkout_proposal(phone, bot_number, state, table_context)
+        except Exception as e:
+            print(f"❌ Error guardando checkout proposal: {e}", flush=True)
+            del _checkout_state[key]
+            return "Hubo un problema al procesar tu pago. Por favor pide ayuda al mesero."
+
+        if not needs_proof:
+            del _checkout_state[key]
+
+        return "\n".join(lines)
+
+    return None
 
 
 async def build_system_prompt(features: dict = None) -> list:
@@ -803,6 +1058,40 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             alert_type = "bill" if action == "bill" else "waiter"
             table_id   = table_context["id"]   if table_context else ""
             table_name = table_context["name"] if table_context else ""
+
+            # Si es bill con contexto de mesa, iniciar flujo de checkout conversacional
+            if action == "bill" and table_context:
+                try:
+                    base_order_id = await db.db_get_base_order_id(table_id)
+                    if base_order_id:
+                        pool = await db.get_pool()
+                        async with pool.acquire() as conn:
+                            order_row = await conn.fetchrow(
+                                """SELECT total FROM table_orders
+                                   WHERE base_order_id=$1
+                                   ORDER BY created_at LIMIT 1""",
+                                base_order_id,
+                            )
+                        if order_row:
+                            total = float(order_row["total"])
+                            ck_key = _ck_key(phone, bot_number)
+                            _checkout_state[ck_key] = {
+                                "step": "asking_split",
+                                "base_order_id": base_order_id,
+                                "subtotal": total,
+                                "split_count": 1,
+                                "payments": [],
+                                "tip_amount": 0.0,
+                                "requires_proof": False,
+                            }
+                            print(f"🛒 Checkout iniciado: {table_name} ({base_order_id})", flush=True)
+                            reply = f"¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
+                            return reply
+                except Exception as e:
+                    print(f"⚠️ Error iniciando checkout, fallback a waiter_alert: {e}", flush=True)
+                    # Fallback: crear waiter_alert si falla el checkout
+
+            # Fallback: waiter_alert (tarjeta física, bot falla, etc.)
             if action == "bill":
                 payment_info = parsed.get("payment_method", "") or parsed.get("notes", "")
                 payment_str  = f" Método de pago: {payment_info}." if payment_info else ""
@@ -874,6 +1163,19 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
                 pass
         
         return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
+
+    # ── FLUJO DE CHECKOUT (bot-driven payment) ──
+    ck_key = _ck_key(user_phone, bot_number)
+    if ck_key in _checkout_state:
+        ck_reply = await _handle_checkout_flow(user_phone, bot_number, user_message_clean, None)
+        if ck_reply:
+            await db.db_save_history(
+                user_phone, bot_number,
+                [{"role": "user", "content": user_message_clean},
+                 {"role": "assistant", "content": ck_reply}],
+                branch_id=None,
+            )
+            return {"message": ck_reply}
 
     table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)

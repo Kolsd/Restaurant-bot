@@ -406,6 +406,7 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 <div class="main">
   <div class="segmented-control">
     <button id="tab-mesas" class="seg-btn active" onclick="switchTab('mesas')">🪑 Mesas</button>
+    <button id="tab-proposals" class="seg-btn" onclick="switchTab('proposals')">💳 Por Confirmar <span id="proposals-badge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
     <button id="tab-domicilios" class="seg-btn" onclick="switchTab('domicilios')">🛵 Domicilios <span id="badge-dom" class="badge-tab" style="display:none;">0</span></button>
     <button id="tab-chats" class="seg-btn" onclick="switchTab('chats')">💬 WhatsApp Comprobantes <span id="badge-chat" class="badge-tab" style="display:none;">0</span></button>
   </div>
@@ -430,6 +431,13 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
         <button class="btn-pay" id="preview-cobrar-btn" style="flex:1;">💰 Cobrar Todo</button>
         <button class="btn-print-factura" id="preview-print-btn" style="width:auto; padding:10px 16px;">🖨️</button>
       </div>
+    </div>
+  </div>
+
+  <div id="view-proposals" style="display:none;">
+    <div class="section-title">Por Confirmar — Propuestas de Pago del Bot</div>
+    <div id="proposals-list" style="display:flex;flex-wrap:wrap;gap:12px;padding:16px;">
+      <p style="color:#999;">Cargando propuestas...</p>
     </div>
   </div>
 
@@ -533,7 +541,17 @@ header { background: #18181B; padding: 1rem 1.5rem; display: flex; align-items: 
 
       <div id="pay-methods-list" style="margin-bottom: 2rem;"></div>
 
-      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">2. Datos para Factura DIAN</h3>
+      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">2. Propina (Opcional)</h3>
+      <div style="display:grid; gap:12px; margin-bottom:2rem;">
+        <div>
+          <input type="number" id="payTipAmount" placeholder="0" min="0" step="100" inputmode="decimal"
+            style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;"
+            oninput="_recalcChange()">
+          <small id="payTipBadge" style="color:#27ae60;display:none;margin-top:4px;font-size:12px;"></small>
+        </div>
+      </div>
+
+      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">3. Datos para Factura DIAN</h3>
       <div style="display:grid; gap:12px;">
         <input type="text" id="pay-customer-name" placeholder="Nombre del cliente (Ej: Consumidor Final)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
         <input type="text" id="pay-customer-nit" placeholder="CC / NIT (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
@@ -604,15 +622,17 @@ const fmt = (amount) => {
 function switchTab(tabId) {
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tabId).classList.add('active');
-  
-  document.getElementById('view-mesas').style.display = 'none';
-  document.getElementById('view-domicilios').style.display = 'none';
-  document.getElementById('view-chats').style.display = 'none';
-  
+
+  ['mesas', 'proposals', 'domicilios', 'chats'].forEach(id => {
+    const el = document.getElementById('view-' + id);
+    if (el) el.style.display = 'none';
+  });
+
   document.getElementById('view-' + tabId).style.display = 'block';
-  
+
   if (tabId === 'chats') loadChats();
   if (tabId === 'domicilios') loadDomicilios();
+  if (tabId === 'proposals') loadCheckoutProposals();
 }
 
 // ── RECEIPT HTML BUILDER (shared by preview + print) ──
@@ -1226,7 +1246,27 @@ function openPayModal(billId, checkId, checkData) {
   
   document.getElementById('pay-customer-name').value  = '';
   document.getElementById('pay-customer-nit').value   = '';
-  
+
+  // Reset tip field
+  const tipInput = document.getElementById('payTipAmount');
+  if (tipInput) {
+    tipInput.value = '';
+    tipInput.style.borderColor = '#E4E4E7';
+  }
+  const tipBadge = document.getElementById('payTipBadge');
+  if (tipBadge) { tipBadge.style.display = 'none'; tipBadge.textContent = ''; }
+
+  // Pre-rellenar propina del bot si existe
+  const botTip = parseFloat(checkData.tip_amount || checkData.proposed_tip || 0);
+  if (tipInput && botTip > 0) {
+    tipInput.value = botTip.toFixed(2);
+    tipInput.style.borderColor = '#27ae60';
+    if (tipBadge) {
+      tipBadge.textContent = '🤖 Propina sugerida por el cliente';
+      tipBadge.style.display = 'block';
+    }
+  }
+
   const fb = document.getElementById('pay-feedback');
   fb.style.display = 'none';
   
@@ -1394,11 +1434,13 @@ async function processPayment() {
   btn.disabled = true;
   fb.style.display = 'none';
 
+  const tipVal = parseFloat(document.getElementById('payTipAmount')?.value || 0) || 0;
   const body = {
     payments,
     customer_name:  document.getElementById('pay-customer-name').value.trim()  || 'Consumidor Final',
     customer_nit:   document.getElementById('pay-customer-nit').value.trim()   || '222222222',
     customer_email: document.getElementById('pay-customer-email').value.trim() || '',
+    ...(tipVal > 0 ? { tip_amount: tipVal } : {}),
   };
 
   try {
@@ -1692,14 +1734,154 @@ async function sendManualReply() {
     } catch(e) {}
 }
 
-// Iniciar polling (solo recargamos chats si estamos en esa pestaña)
+// ── CHECKOUT PROPOSALS (Bot-driven payment) ────────────────────────
+async function loadCheckoutProposals() {
+  try {
+    const res = await fetch('/api/checkout-proposals', { headers: _apiHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const proposals = data.proposals || [];
+
+    const badge = document.getElementById('proposals-badge');
+    if (badge) {
+      badge.textContent = proposals.length;
+      badge.style.display = proposals.length > 0 ? 'inline' : 'none';
+    }
+
+    const container = document.getElementById('proposals-list');
+    if (!container) return;
+    if (proposals.length === 0) {
+      container.innerHTML = '<p style="color:#999;padding:20px;">No hay propuestas de pago pendientes.</p>';
+      return;
+    }
+    container.innerHTML = proposals.map(p => renderProposalCard(p)).join('');
+  } catch(e) {
+    console.error('loadCheckoutProposals:', e);
+  }
+}
+
+function renderProposalCard(p) {
+  const checks = Array.isArray(p.checks) ? p.checks :
+    (typeof p.checks === 'string' ? JSON.parse(p.checks) : []);
+
+  const timeAgo = checks[0]?.proposal_created_at ? _timeAgo(checks[0].proposal_created_at) : '';
+
+  const anyAwaitingProof = checks.some(c => c.proposal_status === 'awaiting_proof');
+  const canConfirm = !anyAwaitingProof;
+
+  const checksHtml = checks.map(c => {
+    const pmts = Array.isArray(c.proposed_payments) ? c.proposed_payments :
+      (typeof c.proposed_payments === 'string' ? JSON.parse(c.proposed_payments || '[]') : []);
+    const method = pmts[0]?.method || '?';
+    const amount = fmt(c.total || 0);
+    const proofHtml = c.proof_media_url
+      ? `<a href="${c.proof_media_url}" target="_blank" style="color:#3498db;font-size:12px;">📎 Ver comprobante</a>`
+      : '';
+    return `<div style="font-size:13px;padding:2px 0;"><span>#${c.check_number} ${amount} · ${method}</span> ${proofHtml}</div>`;
+  }).join('');
+
+  const tipTotal = checks.reduce((s, c) => s + parseFloat(c.tip_amount || 0), 0);
+  const tipHtml = tipTotal > 0
+    ? `<div style="font-size:13px;color:#27ae60;">Propina: ${fmt(tipTotal)}</div>`
+    : '';
+
+  const statusBadge = anyAwaitingProof
+    ? '<span style="background:#f39c12;color:white;border-radius:4px;padding:1px 6px;font-size:11px;">⏳ Esperando comprobante</span>'
+    : '<span style="background:#27ae60;color:white;border-radius:4px;padding:1px 6px;font-size:11px;">✅ Listo para cobrar</span>';
+
+  const tableName = document.createTextNode(p.table_name || 'Mesa').nodeValue;
+  const confirmBtn = canConfirm
+    ? `<button onclick="confirmProposal('${p.base_order_id}')"
+         style="background:#27ae60;color:white;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:13px;flex:1;">
+         ✅ Confirmar y Facturar
+       </button>`
+    : `<button disabled
+         style="background:#ccc;color:#666;border:none;border-radius:6px;padding:8px 14px;font-size:13px;flex:1;cursor:not-allowed;">
+         ⏳ Esperando comprobante
+       </button>`;
+
+  return `
+    <div style="background:white;border-radius:10px;padding:16px;min-width:260px;max-width:300px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <strong>${tableName}</strong>
+        <span style="font-size:11px;color:#999;">${timeAgo} 🤖 BOT</span>
+      </div>
+      ${statusBadge}
+      <div style="margin:8px 0;border-top:1px solid #eee;padding-top:8px;">
+        ${checks.length > 1 ? `<div style="font-size:12px;color:#666;margin-bottom:4px;">Dividido en ${checks.length}</div>` : ''}
+        ${checksHtml}
+        ${tipHtml}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        ${confirmBtn}
+        <button onclick="editProposalManually('${p.base_order_id}')"
+          style="background:#ecf0f1;color:#333;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;">
+          ✏️ Editar
+        </button>
+      </div>
+    </div>`;
+}
+
+function _timeAgo(isoStr) {
+  try {
+    const diff = Math.floor((Date.now() - new Date(isoStr)) / 60000);
+    if (diff < 1) return 'ahora';
+    if (diff < 60) return `hace ${diff} min`;
+    return `hace ${Math.floor(diff / 60)}h`;
+  } catch(e) { return ''; }
+}
+
+async function confirmProposal(baseOrderId) {
+  if (!confirm('¿Confirmar y facturar todos los pagos de esta mesa?')) return;
+  try {
+    const res = await fetch(`/api/table-orders/${baseOrderId}/checks`, { headers: _apiHeaders() });
+    if (!res.ok) throw new Error('No se pudieron obtener los checks');
+    const data = await res.json();
+    const checks = (data.checks || []).filter(c => c.status === 'open');
+
+    for (const check of checks) {
+      const payRes = await fetch(
+        `/api/table-orders/${baseOrderId}/checks/${check.id}/pay`,
+        {
+          method: 'POST',
+          headers: { ..._apiHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            payments: [],
+            customer_name: 'Consumidor Final',
+            customer_nit: '222222222',
+            tip_amount: check.tip_amount || 0,
+          })
+        }
+      );
+      if (!payRes.ok) {
+        const err = await payRes.json().catch(() => ({}));
+        throw new Error(err.detail || `Error al pagar check ${check.check_number}`);
+      }
+    }
+    alert('✅ Pagos confirmados y facturados correctamente');
+    loadCheckoutProposals();
+    if (typeof loadCajaOrders === 'function') loadCajaOrders();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function editProposalManually(baseOrderId) {
+  switchTab('mesas');
+  if (typeof selectOrder === 'function') selectOrder(baseOrderId);
+  else if (typeof openSplitModal === 'function') openSplitModal(baseOrderId);
+}
+
+// Iniciar polling (solo recargamos chats y proposals si estamos en esa pestaña)
 loadBillingConfig();
 loadCajaOrders();
 loadDomicilios();
+loadCheckoutProposals();
 
 setInterval(() => {
   loadCajaOrders();
   loadDomicilios();
+  loadCheckoutProposals();
   if (document.getElementById('view-chats').style.display !== 'none') {
       loadChats();
   }

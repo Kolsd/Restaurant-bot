@@ -2408,6 +2408,13 @@ async def db_finalize_check_payment(
                 customer_name, customer_nit, customer_email,
                 float(tip_amount), check_id
             )
+            # Marcar propuesta como confirmada si existía
+            await conn.execute(
+                """UPDATE table_checks
+                   SET proposal_status = 'confirmed'
+                 WHERE id = $1 AND proposal_status IS NOT NULL""",
+                check_id
+            )
             # Verificar si todos los checks del grupo están cerrados
             pending = await conn.fetchval(
                 """SELECT COUNT(*) FROM table_checks
@@ -2433,6 +2440,121 @@ async def db_delete_open_check(check_id: str) -> bool:
             "DELETE FROM table_checks WHERE id=$1 AND status='open'", check_id
         )
     return result != "DELETE 0"
+
+
+async def db_attach_proposal(
+    check_id: str,
+    proposed_payments: list,
+    proposed_tip: float,
+    proposal_source: str,
+    proposal_status: str,
+    customer_phone: str,
+) -> None:
+    """Adjunta metadatos de propuesta de pago a un check existente."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE table_checks
+               SET proposed_payments     = $2::jsonb,
+                   proposed_tip          = $3,
+                   proposal_source       = $4,
+                   proposal_status       = $5,
+                   proposal_customer_phone = $6,
+                   proposal_created_at   = NOW()
+             WHERE id = $1""",
+            check_id,
+            json.dumps(proposed_payments),
+            float(proposed_tip),
+            proposal_source,
+            proposal_status,
+            customer_phone,
+        )
+
+
+async def db_set_check_tip(check_id: str, tip_amount: float) -> None:
+    """Actualiza tip_amount en un check abierto (durante el flujo de checkout del bot)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE table_checks SET tip_amount = $1 WHERE id = $2",
+            float(tip_amount),
+            check_id,
+        )
+
+
+async def db_attach_proof(base_order_id: str, customer_phone: str, media_url: str) -> bool:
+    """
+    Adjunta URL de comprobante a los checks con propuesta awaiting_proof del cliente.
+    Retorna True si se actualizó al menos un check.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """UPDATE table_checks
+               SET proof_media_url  = $3,
+                   proposal_status  = 'proof_received'
+             WHERE base_order_id     = $1
+               AND proposal_customer_phone = $2
+               AND proposal_status   = 'awaiting_proof'""",
+            base_order_id,
+            customer_phone,
+            media_url,
+        )
+    return result != "UPDATE 0"
+
+
+async def db_get_open_proposal_for_phone(
+    restaurant_id: int, customer_phone: str
+) -> dict | None:
+    """
+    Busca si el cliente tiene algún check con propuesta pendiente/esperando comprobante.
+    Útil en chat.py para interceptar imágenes y adjuntarlas sin pasar por el LLM.
+    Retorna el check (con base_order_id) o None.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT tc.id, tc.base_order_id, tc.proposal_status, tc.proposed_payments
+               FROM table_checks tc
+               JOIN table_orders tor ON tor.base_order_id = tc.base_order_id
+              WHERE tc.proposal_customer_phone = $2
+                AND tc.proposal_status IN ('pending', 'awaiting_proof')
+                AND tor.restaurant_id = $1
+              ORDER BY tc.proposal_created_at DESC
+              LIMIT 1""",
+            restaurant_id,
+            customer_phone,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_list_checkout_proposals(
+    restaurant_id: int, branch_ids: list[int] | None = None
+) -> list:
+    """
+    Lista mesas que tienen checks con propuestas bot activas (pending/awaiting_proof/proof_received).
+    Agrupado por base_order_id para la vista de Caja.
+    """
+    pool = await get_pool()
+    ids = branch_ids if branch_ids else []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT
+                 tor.base_order_id,
+                 tor.table_name,
+                 tor.total           AS order_total,
+                 tor.restaurant_id,
+                 json_agg(tc.* ORDER BY tc.check_number) AS checks
+               FROM table_orders tor
+               JOIN table_checks tc ON tc.base_order_id = tor.base_order_id
+              WHERE tor.restaurant_id = $1
+                AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
+                AND tc.status = 'open'
+              GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.restaurant_id
+              ORDER BY MIN(tc.proposal_created_at) ASC""",
+            restaurant_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
 
 
 async def db_get_check_ticket(check_id: str) -> dict | None:
