@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.services import database as db
 from app.services import billing
 from app.services.agent import trigger_nps
