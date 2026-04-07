@@ -235,6 +235,12 @@ async def reloj_page():
     p = STATIC / "html" / "reloj.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
+
+@router.get("/staff-hq", response_class=HTMLResponse)
+async def staff_hq_page():
+    p = STATIC / "html" / "staff-hq.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
+
 # ── SETTINGS ─────────────────────────────────────────────────────────
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page():
@@ -374,6 +380,7 @@ async def verify_role_for_page(request: Request, page: str):
         "domiciliario": {"domiciliario", "delivery"},
         "cocina":       {"cocina"},
         "bar":          {"bar"},
+        "staff-hq":     {"mesero", "cocina", "caja", "bar", "domiciliario", "otro"},
         "dashboard":    _ADMIN_ROLES,
         "settings":     _ADMIN_ROLES,
         "billing":      _ADMIN_ROLES,

@@ -246,6 +246,7 @@ async function doStaffLogin() {
     }
 
     localStorage.setItem('rb_token', data.token);
+    if (data.staff_id) localStorage.setItem('rb_staff_id', data.staff_id);
 
     // Sanitizar roles
     let rolesArr = [];
@@ -258,7 +259,6 @@ async function doStaffLogin() {
     }
     localStorage.setItem('rb_role', rolesArr.join(','));
 
-    // ✅ FIX: guardar restaurant con role y branch_id para que la barra de roles funcione
     localStorage.setItem('rb_restaurant', JSON.stringify({
       id:             parseInt(restaurantId),
       branch_id:      parseInt(restaurantId),
@@ -270,27 +270,15 @@ async function doStaffLogin() {
       features:       data.restaurant?.features || {},
     }));
 
-    // ✅ FIX: guardar el restaurantId para usarlo en el logout
     localStorage.setItem('rb_staff_restaurant_id', restaurantId);
 
+    // Admins/gerentes van al dashboard; todo el staff operativo va al HQ personal
     if (rolesArr.includes('owner') || rolesArr.includes('admin') || rolesArr.includes('gerente')) {
       window.location.href = '/dashboard';
       return;
     }
 
-    const opRoles = rolesArr.filter(r => ROLE_META[r]);
-
-    if (opRoles.length === 0) {
-      window.location.href = data.redirect || '/mesero';
-      return;
-    }
-
-    if (opRoles.length === 1) {
-      window.location.href = ROLE_META[opRoles[0]].url;
-      return;
-    }
-
-    showRoleSelector(data.name || name, opRoles);
+    window.location.href = '/staff-hq';
 
   } catch (e) {
     console.error("Error:", e);

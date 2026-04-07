@@ -2474,7 +2474,7 @@ async def db_get_staff(restaurant_id: int) -> list:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id::text, restaurant_id, name, role, roles, active, phone, "
-            "created_at, updated_at FROM staff "
+            "document_number, created_at, updated_at FROM staff "
             "WHERE restaurant_id=$1 ORDER BY name ASC",
             restaurant_id,
         )
@@ -2508,7 +2508,8 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin "
+            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin, "
+            "document_number, hourly_rate, photo_url "
             "FROM staff WHERE restaurant_id=$1 AND LOWER(name)=LOWER($2) AND active=true",
             restaurant_id, name,
         )
@@ -2528,7 +2529,8 @@ async def db_get_staff_candidates_by_name(name: str) -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin "
+            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin, "
+            "document_number, hourly_rate "
             "FROM staff WHERE LOWER(name)=LOWER($1) AND active=true "
             "ORDER BY restaurant_id",
             name,
@@ -2551,6 +2553,7 @@ async def db_create_staff(
     pin_hash: str,
     phone: str = "",
     roles: list = None,
+    document_number: str = "",
 ) -> dict:
     """Insert a new staff member. Returns the created row."""
     if roles is None:
@@ -2558,11 +2561,11 @@ async def db_create_staff(
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO staff (restaurant_id, name, role, pin, phone, roles)
-               VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+            """INSERT INTO staff (restaurant_id, name, role, pin, phone, roles, document_number)
+               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
                RETURNING id::text, restaurant_id, name, role, roles, active, phone,
-                         created_at, updated_at""",
-            restaurant_id, name, role, pin_hash, phone, json.dumps(roles),
+                         document_number, created_at, updated_at""",
+            restaurant_id, name, role, pin_hash, phone, json.dumps(roles), document_number,
         )
     return _serialize(dict(row))
 
@@ -2574,7 +2577,7 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
     Only updates columns that are explicitly passed in fields.
     All values are passed as parameters — no f-string SQL.
     """
-    allowed = {"name", "role", "roles", "pin", "phone", "active"}
+    allowed = {"name", "role", "roles", "pin", "phone", "active", "document_number"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return None
@@ -2597,7 +2600,7 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
             f"UPDATE staff SET {', '.join(set_parts)}, updated_at=NOW() "
             f"WHERE id=$1::uuid AND restaurant_id=$2 "
             f"RETURNING id::text, restaurant_id, name, role, roles, active, phone, "
-            f"created_at, updated_at"
+            f"document_number, created_at, updated_at"
         )
         row = await conn.fetchrow(sql, staff_id, restaurant_id, *values)
     return _serialize(dict(row)) if row else None
@@ -2614,15 +2617,58 @@ async def db_delete_staff(staff_id: str, restaurant_id: int) -> bool:
     return result.split()[-1] != "0"  # "DELETE N" → True si N > 0
 
 
+async def _record_attendance_deduction(
+    conn,
+    shift_id: str,
+    staff_id: str,
+    restaurant_id: int,
+    deduction_type: str,
+    scheduled_time,
+    actual_time,
+    hourly_rate: float,
+) -> None:
+    """
+    Insert an attendance_deductions row if the deviation exceeds 5 minutes.
+    deduction_type: 'tardiness' | 'early_departure'
+    scheduled_time: datetime.time object from asyncpg
+    actual_time: timezone-aware datetime from asyncpg
+    """
+    from datetime import datetime, timedelta
+    # Strip timezone for arithmetic (comparisons are done in the DB server's local representation)
+    actual_naive = actual_time.replace(tzinfo=None)
+    sched_dt = datetime.combine(actual_naive.date(), scheduled_time)
+
+    if deduction_type == "tardiness":
+        diff_seconds = (actual_naive - sched_dt).total_seconds()
+    else:  # early_departure
+        diff_seconds = (sched_dt - actual_naive).total_seconds()
+
+    minutes_diff = int(diff_seconds / 60)
+    if minutes_diff <= 5:
+        return  # Within tolerance
+
+    deduction_amount = round((minutes_diff / 60.0) * float(hourly_rate), 2)
+    await conn.execute(
+        """INSERT INTO attendance_deductions
+           (shift_id, staff_id, restaurant_id, type, scheduled_time,
+            actual_time, minutes_diff, deduction_amount)
+           VALUES ($1::uuid, $2::uuid, $3, $4, $5::time, $6::timestamptz, $7, $8)""",
+        shift_id, staff_id, restaurant_id, deduction_type,
+        str(scheduled_time), actual_time, minutes_diff, deduction_amount,
+    )
+
+
 # ── Clock-in / Clock-out ─────────────────────────────────────────────
 
 async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
     """
     Open a new shift for staff_id.
-    Raises ValueError if the employee already has an open shift
-    (caught via asyncpg.UniqueViolationError from uq_staff_shifts_one_open).
+    Raises ValueError if the employee already has an open shift.
+    After inserting, checks staff_schedules for today's day and records
+    a tardiness attendance_deduction if clock_in is > 5 min late.
     Returns the new shift dict.
     """
+    from datetime import datetime, timedelta
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
@@ -2633,16 +2679,45 @@ async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
                              clock_in, clock_out, notes, created_at""",
                 staff_id, restaurant_id,
             )
-            return _serialize(dict(row))
         except asyncpg.UniqueViolationError:
             raise ValueError("El empleado ya tiene un turno abierto.")
+
+        shift = _serialize(dict(row))
+        clock_in_dt = row["clock_in"]
+        # 0=Monday in our system; Python weekday() also gives 0=Monday
+        dow = clock_in_dt.weekday()
+
+        sched = await conn.fetchrow(
+            "SELECT start_time FROM staff_schedules "
+            "WHERE staff_id=$1::uuid AND day_of_week=$2 AND active=true LIMIT 1",
+            staff_id, dow,
+        )
+        if sched:
+            staff_row = await conn.fetchrow(
+                "SELECT hourly_rate FROM staff WHERE id=$1::uuid", staff_id
+            )
+            hourly_rate = float(staff_row["hourly_rate"] or 0) if staff_row else 0.0
+            await _record_attendance_deduction(
+                conn,
+                shift_id=str(row["id"]),
+                staff_id=staff_id,
+                restaurant_id=restaurant_id,
+                deduction_type="tardiness",
+                scheduled_time=sched["start_time"],
+                actual_time=clock_in_dt,
+                hourly_rate=hourly_rate,
+            )
+    return shift
 
 
 async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
     """
     Close the open shift for staff_id.
+    After updating, checks staff_schedules for today's day and records
+    an early_departure attendance_deduction if clock_out is > 5 min early.
     Returns the updated shift, or None if no open shift was found.
     """
+    from datetime import datetime, timedelta
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -2655,7 +2730,34 @@ async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
                          clock_in, clock_out, notes, created_at""",
             staff_id, restaurant_id,
         )
-    return _serialize(dict(row)) if row else None
+        if not row:
+            return None
+
+        shift = _serialize(dict(row))
+        clock_out_dt = row["clock_out"]
+        dow = clock_out_dt.weekday()
+
+        sched = await conn.fetchrow(
+            "SELECT end_time FROM staff_schedules "
+            "WHERE staff_id=$1::uuid AND day_of_week=$2 AND active=true LIMIT 1",
+            staff_id, dow,
+        )
+        if sched:
+            staff_row = await conn.fetchrow(
+                "SELECT hourly_rate FROM staff WHERE id=$1::uuid", staff_id
+            )
+            hourly_rate = float(staff_row["hourly_rate"] or 0) if staff_row else 0.0
+            await _record_attendance_deduction(
+                conn,
+                shift_id=str(row["id"]),
+                staff_id=staff_id,
+                restaurant_id=restaurant_id,
+                deduction_type="early_departure",
+                scheduled_time=sched["end_time"],
+                actual_time=clock_out_dt,
+                hourly_rate=hourly_rate,
+            )
+    return shift
 
 
 async def db_get_open_shifts(restaurant_id: int) -> list:
@@ -3614,6 +3716,85 @@ async def db_get_attendance_report(
             d["status"] = "no_schedule"
         result.append(d)
     return result
+
+
+# ── Deduction items (manual) ─────────────────────────────────────────
+
+async def db_list_deduction_items(staff_id: str, restaurant_id: int) -> list:
+    """List all deduction items for a staff member."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id::text, staff_id::text, restaurant_id, category, label,
+                      type, amount, active, created_at
+               FROM staff_deduction_items
+               WHERE staff_id=$1::uuid AND restaurant_id=$2
+               ORDER BY created_at ASC""",
+            staff_id, restaurant_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_create_deduction_item(
+    staff_id: str,
+    restaurant_id: int,
+    category: str,
+    label: str,
+    item_type: str,
+    amount: float,
+) -> dict:
+    """Create a manual deduction item."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO staff_deduction_items
+               (staff_id, restaurant_id, category, label, type, amount)
+               VALUES ($1::uuid, $2, $3, $4, $5, $6)
+               RETURNING id::text, staff_id::text, restaurant_id, category, label,
+                         type, amount, active, created_at""",
+            staff_id, restaurant_id, category, label, item_type, float(amount),
+        )
+    return _serialize(dict(row))
+
+
+async def db_update_deduction_item(
+    item_id: str,
+    restaurant_id: int,
+    patch: dict,
+) -> dict | None:
+    """Update a deduction item. patch keys: label, category, type, amount, active."""
+    allowed = {"label", "category", "type", "amount", "active"}
+    updates = {k: v for k, v in patch.items() if k in allowed}
+    if not updates:
+        return None
+    pool = await get_pool()
+    set_parts = []
+    values: list = [item_id, restaurant_id]
+    idx = 3
+    for col, val in updates.items():
+        set_parts.append(f"{col} = ${idx}")
+        values.append(val)
+        idx += 1
+    sql = (
+        f"UPDATE staff_deduction_items SET {', '.join(set_parts)} "
+        f"WHERE id=$1::uuid AND restaurant_id=$2 "
+        f"RETURNING id::text, staff_id::text, restaurant_id, category, label, "
+        f"type, amount, active, created_at"
+    )
+    async with (await get_pool()).acquire() as conn:
+        row = await conn.fetchrow(sql, *values)
+    return _serialize(dict(row)) if row else None
+
+
+async def db_delete_deduction_item(item_id: str, restaurant_id: int) -> bool:
+    """Delete a deduction item. Returns True if deleted."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM staff_deduction_items WHERE id=$1::uuid AND restaurant_id=$2",
+            item_id, restaurant_id,
+        )
+    return result.split()[-1] != "0"
 
 
 # ── Payroll ───────────────────────────────────────────────────────────

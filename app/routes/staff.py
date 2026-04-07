@@ -37,20 +37,22 @@ _MODULE_DEPS = [Depends(require_module("staff_tips"))]
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
 class StaffCreate(BaseModel):
-    name:     str       = Field(..., min_length=1, max_length=100)
-    role:     str       = Field("mesero", min_length=1, max_length=50) # 🔓 Quitamos el pattern restrictivo
-    roles:    list[str] = Field(default_factory=list)
-    password: str       = Field(..., min_length=4, max_length=100)
-    phone:    str       = Field("", max_length=30)
+    name:            str       = Field(..., min_length=1, max_length=100)
+    role:            str       = Field("mesero", min_length=1, max_length=50)
+    roles:           list[str] = Field(default_factory=list)
+    password:        str       = Field(..., min_length=4, max_length=100)
+    phone:           str       = Field("", max_length=30)
+    document_number: str       = Field("", max_length=50)
 
 
 class StaffUpdate(BaseModel):
-    name:     str | None       = Field(None, min_length=1, max_length=100)
-    role:     str | None       = Field(None, min_length=1, max_length=50) # 🔓 Quitamos el pattern restrictivo
-    roles:    list[str] | None = None
-    password: str | None       = Field(None, min_length=4, max_length=100)
-    phone:    str | None       = Field(None, max_length=30)
-    active:   bool | None      = None
+    name:            str | None       = Field(None, min_length=1, max_length=100)
+    role:            str | None       = Field(None, min_length=1, max_length=50)
+    roles:           list[str] | None = None
+    password:        str | None       = Field(None, min_length=4, max_length=100)
+    phone:           str | None       = Field(None, max_length=30)
+    active:          bool | None      = None
+    document_number: str | None       = Field(None, max_length=50)
 
 class StaffPinLoginRequest(BaseModel):
     restaurant_id: int
@@ -60,23 +62,13 @@ class StaffPinLoginRequest(BaseModel):
 
 def _staff_redirect(roles: list) -> str:
     """Return the best landing page URL for the given role set.
-    For multi-role staff the frontend handles selection; this is used
-    only for single-role redirects from /api/staff/pin-login.
+    Admins/managers go to /dashboard.
+    All operational staff go to /staff-hq (personal HQ terminal).
     """
-    if "gerente" in roles:
+    admin_roles = {"owner", "admin", "gerente"}
+    if any(r in admin_roles for r in roles):
         return "/dashboard"
-    if "cocina" in roles:
-        return "/cocina"
-    if "domiciliario" in roles:
-        return "/domiciliario"
-    if "mesero" in roles:
-        return "/mesero"
-    if "caja" in roles:
-        return "/caja"
-    if "bar" in roles:
-        return "/bar"
-    # otro / unknown → staff portal (will handle redirect there)
-    return "/staff"
+    return "/staff-hq"
 
 
 class ClockInRequest(BaseModel):
@@ -135,12 +127,13 @@ async def create_staff(
     roles = [r.strip().lower() for r in body.roles if r.strip()] if body.roles else [body.role.strip().lower()]
     
     member = await db.db_create_staff(
-        restaurant_id=branch_id, # 🚀 Se guarda en la sucursal correcta
+        restaurant_id=branch_id,
         name=body.name,
         role=roles[0] if roles else "mesero",
         pin_hash=pin_hash,
         phone=body.phone,
         roles=roles or ["mesero"],
+        document_number=body.document_number,
     )
     return {"staff": member}
     
@@ -167,6 +160,7 @@ async def staff_pin_login(body: StaffPinLoginRequest):
 
     return {
         "token":    token,
+        "staff_id": member["id"],
         "roles":    roles,
         "name":     member["name"],
         "redirect": _staff_redirect(roles),
@@ -415,6 +409,200 @@ async def self_break_end(request: Request):
     return {"break": brk}
 
 
+# ── Self-service endpoints para Staff HQ ─────────────────────────────────────
+
+async def _resolve_staff_from_token(request: Request) -> dict:
+    """Helper: extrae staff_id desde Bearer token y retorna su fila completa."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    session_key = await db.db_get_session(token)
+    if not session_key or not session_key.startswith("staff:"):
+        raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
+    staff_id = session_key[6:]
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text, restaurant_id, name, role, roles, active, phone, "
+            "document_number, hourly_rate, photo_url FROM staff WHERE id=$1::uuid",
+            staff_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    d = dict(row)
+    d["id"] = str(d["id"])
+    roles_list = d.get("roles") or []
+    if not roles_list and d.get("role"):
+        roles_list = [d["role"]]
+    d["roles"] = roles_list
+    return d
+
+
+@router.get("/self/profile", status_code=200)
+async def self_profile(request: Request):
+    """Retorna el perfil completo del operativo autenticado, incluyendo estado de turno y break."""
+    member = await _resolve_staff_from_token(request)
+    staff_id = member["id"]
+    restaurant_id = member["restaurant_id"]
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        # Turno abierto
+        shift_row = await conn.fetchrow(
+            "SELECT id::text, clock_in FROM staff_shifts "
+            "WHERE staff_id=$1::uuid AND clock_out IS NULL LIMIT 1",
+            staff_id,
+        )
+        # Break abierto
+        break_row = await conn.fetchrow(
+            "SELECT id::text, break_start FROM staff_breaks "
+            "WHERE staff_id=$1::uuid AND break_end IS NULL LIMIT 1",
+            staff_id,
+        )
+
+    return {
+        "id":              member["id"],
+        "name":            member["name"],
+        "roles":           member["roles"],
+        "role":            member["role"],
+        "phone":           member["phone"],
+        "document_number": member["document_number"],
+        "hourly_rate":     float(member["hourly_rate"] or 0),
+        "photo_url":       member["photo_url"],
+        "restaurant_id":   restaurant_id,
+        "current_shift":   db._serialize(dict(shift_row)) if shift_row else None,
+        "current_break":   db._serialize(dict(break_row)) if break_row else None,
+    }
+
+
+@router.get("/self/timecard", status_code=200)
+async def self_timecard(request: Request, week_start: str = None, week_end: str = None):
+    """Retorna el timecard semanal personal del operativo autenticado."""
+    member = await _resolve_staff_from_token(request)
+    staff_id = member["id"]
+    restaurant_id = member["restaurant_id"]
+
+    from datetime import date, timedelta
+    today = date.today()
+    if not week_start:
+        # Lunes de la semana actual
+        monday = today - timedelta(days=today.weekday())
+        week_start = monday.isoformat()
+    if not week_end:
+        week_end = (date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                s.id::text      AS shift_id,
+                s.clock_in,
+                s.clock_out,
+                s.clock_in::date AS work_date,
+                COALESCE(
+                    EXTRACT(EPOCH FROM (COALESCE(s.clock_out, NOW()) - s.clock_in)) / 3600,
+                    0
+                )::numeric(8,2) AS gross_hours,
+                COALESCE((
+                    SELECT SUM(EXTRACT(EPOCH FROM (COALESCE(b.break_end, NOW()) - b.break_start)) / 3600)
+                    FROM staff_breaks b
+                    WHERE b.shift_id = s.id
+                ), 0)::numeric(8,2) AS break_hours
+            FROM staff_shifts s
+            WHERE s.staff_id = $1::uuid
+              AND s.clock_in::date BETWEEN $2::date AND $3::date
+            ORDER BY s.clock_in ASC
+            """,
+            staff_id, week_start, week_end,
+        )
+
+    # Fetch schedules for the week
+    async with pool.acquire() as conn:
+        sched_rows = await conn.fetch(
+            "SELECT day_of_week, start_time, end_time FROM staff_schedules "
+            "WHERE staff_id=$1::uuid AND active=true",
+            staff_id,
+        )
+
+    sched_map = {r["day_of_week"]: {"start": str(r["start_time"]), "end": str(r["end_time"])} for r in sched_rows}
+
+    # Fetch attendance deductions for the period
+    async with pool.acquire() as conn:
+        ded_rows = await conn.fetch(
+            "SELECT shift_id::text, type, minutes_diff, deduction_amount "
+            "FROM attendance_deductions "
+            "WHERE staff_id=$1::uuid AND created_at::date BETWEEN $2::date AND $3::date",
+            staff_id, week_start, week_end,
+        )
+
+    ded_map: dict = {}
+    for d in ded_rows:
+        sid = str(d["shift_id"])
+        ded_map.setdefault(sid, []).append(dict(d))
+
+    entries = []
+    for r in rows:
+        gross = float(r["gross_hours"] or 0)
+        brk   = float(r["break_hours"] or 0)
+        net   = round(max(gross - brk, 0), 2)
+        dow   = r["work_date"].weekday()
+        sched = sched_map.get(dow)
+        shift_id = r["shift_id"]
+        deductions = ded_map.get(shift_id, [])
+        is_late = any(d["type"] == "tardiness" for d in deductions)
+        is_early = any(d["type"] == "early_departure" for d in deductions)
+        entries.append({
+            "shift_id":    shift_id,
+            "work_date":   r["work_date"].isoformat(),
+            "clock_in":    r["clock_in"].isoformat() if r["clock_in"] else None,
+            "clock_out":   r["clock_out"].isoformat() if r["clock_out"] else None,
+            "gross_hours": gross,
+            "break_hours": brk,
+            "net_hours":   net,
+            "schedule":    sched,
+            "is_late":     is_late,
+            "is_early_departure": is_early,
+            "deductions":  deductions,
+        })
+
+    total_net = round(sum(e["net_hours"] for e in entries), 2)
+    return {
+        "week_start":  week_start,
+        "week_end":    week_end,
+        "staff_id":    staff_id,
+        "staff_name":  member["name"],
+        "entries":     entries,
+        "total_hours": total_net,
+    }
+
+
+@router.get("/self/schedule", status_code=200)
+async def self_schedule(request: Request):
+    """Retorna el horario semanal del operativo autenticado."""
+    member = await _resolve_staff_from_token(request)
+    staff_id = member["id"]
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id::text, day_of_week, start_time, end_time, active "
+            "FROM staff_schedules WHERE staff_id=$1::uuid AND active=true "
+            "ORDER BY day_of_week ASC",
+            staff_id,
+        )
+    days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    return {
+        "schedule": [
+            {
+                "id":          r["id"],
+                "day_of_week": r["day_of_week"],
+                "day_name":    days[r["day_of_week"]],
+                "start_time":  str(r["start_time"]),
+                "end_time":    str(r["end_time"]),
+            }
+            for r in rows
+        ]
+    }
+
+
 # ── Shift edit (admin) ───────────────────────────────────────────────────────
 
 class ShiftEditBody(BaseModel):
@@ -526,3 +714,134 @@ async def get_attendance(
     """Compare actual clock-in with scheduled times."""
     data = await db.db_get_attendance_report(restaurant["id"], date_from, date_to)
     return {"attendance": data}
+
+
+class DeductionItemCreate(BaseModel):
+    category: str = Field("custom", max_length=50)
+    label:    str = Field(..., min_length=1, max_length=100)
+    type:     str = Field("fixed", pattern="^(fixed|percentage)$")
+    amount:   float = Field(..., ge=0)
+
+
+class DeductionItemUpdate(BaseModel):
+    category: str   | None = None
+    label:    str   | None = Field(None, min_length=1, max_length=100)
+    type:     str   | None = None
+    amount:   float | None = Field(None, ge=0)
+    active:   bool  | None = None
+
+
+# ── Deduction items CRUD (admin) ─────────────────────────────────────────────
+
+@router.get("/{staff_id}/deductions", dependencies=_MODULE_DEPS)
+async def list_deduction_items(
+    staff_id: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """List all deduction items for a staff member."""
+    items = await db.db_list_deduction_items(staff_id, restaurant["id"])
+    return {"items": items}
+
+
+@router.post("/{staff_id}/deductions", dependencies=_MODULE_DEPS, status_code=201)
+async def create_deduction_item(
+    staff_id: str,
+    body: DeductionItemCreate,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Create a manual deduction item for a staff member."""
+    item = await db.db_create_deduction_item(
+        staff_id=staff_id,
+        restaurant_id=restaurant["id"],
+        category=body.category,
+        label=body.label,
+        item_type=body.type,
+        amount=body.amount,
+    )
+    return {"item": item}
+
+
+@router.patch("/deductions/{item_id}", dependencies=_MODULE_DEPS)
+async def update_deduction_item(
+    item_id: str,
+    body: DeductionItemUpdate,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Edit or deactivate a deduction item."""
+    patch = body.model_dump(exclude_none=True)
+    if not patch:
+        raise HTTPException(status_code=422, detail="No fields to update.")
+    updated = await db.db_update_deduction_item(item_id, restaurant["id"], patch)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Item no encontrado.")
+    return {"item": updated}
+
+
+@router.delete("/deductions/{item_id}", dependencies=_MODULE_DEPS, status_code=200)
+async def delete_deduction_item(
+    item_id: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Delete a deduction item."""
+    deleted = await db.db_delete_deduction_item(item_id, restaurant["id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Item no encontrado.")
+    return {"success": True}
+
+
+# ── Payroll endpoints ─────────────────────────────────────────────────────────
+
+@router.get("/payroll/calculate", dependencies=_MODULE_DEPS)
+async def payroll_calculate(
+    request: Request,
+    period_start: str,
+    period_end: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Calculate payroll for all staff in the selected branch/period."""
+    branch_id = restaurant["id"]
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit():
+        branch_id = int(branch_header)
+    entries = await db.db_calculate_payroll(branch_id, period_start, period_end)
+    return {"entries": entries}
+
+
+@router.post("/payroll/runs", dependencies=_MODULE_DEPS, status_code=201)
+async def save_payroll_run(
+    request: Request,
+    body: dict,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Save payroll calculation as a draft run."""
+    period_start = body.get("period_start")
+    period_end   = body.get("period_end")
+    if not period_start or not period_end:
+        raise HTTPException(status_code=422, detail="period_start y period_end son requeridos.")
+    branch_id = restaurant["id"]
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit():
+        branch_id = int(branch_header)
+    entries = await db.db_calculate_payroll(branch_id, period_start, period_end)
+    run = await db.db_save_payroll_run(
+        restaurant_id=branch_id,
+        period_start=period_start,
+        period_end=period_end,
+        entries=entries,
+        created_by=restaurant.get("whatsapp_number", ""),
+    )
+    return {"run": run}
+
+
+@router.get("/payroll/runs", dependencies=_MODULE_DEPS)
+async def list_payroll_runs(
+    request: Request,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """List recent payroll runs."""
+    branch_id = restaurant["id"]
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit():
+        branch_id = int(branch_header)
+    runs = await db.db_get_payroll_runs(branch_id)
+    return {"runs": runs}

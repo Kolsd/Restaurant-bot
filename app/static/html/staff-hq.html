@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Mesio — Mi HQ</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
+  <style>
+    :root {
+      --green:      #1D9E75;
+      --green-light:#E1F5EE;
+      --red:        #EF4444;
+      --red-light:  #FEE2E2;
+      --amber:      #F59E0B;
+      --amber-light:#FEF3C7;
+      --blue:       #3B82F6;
+      --blue-light: #DBEAFE;
+      --gray:       #6B7280;
+      --bg:         #F9F9F7;
+      --card:       #FFFFFF;
+      --border:     #E5E7EB;
+      --text:       #111827;
+      --text-muted: #6B7280;
+      --radius:     14px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ── */
+    .hq-header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .hq-header-left { display: flex; align-items: center; gap: 12px; }
+    .hq-avatar {
+      width: 42px; height: 42px;
+      border-radius: 50%;
+      background: var(--green);
+      color: #fff;
+      font-weight: 700;
+      font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .hq-name { font-weight: 700; font-size: 16px; }
+    .hq-restaurant { font-size: 12px; color: var(--text-muted); }
+    .role-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--green-light);
+      color: var(--green);
+      text-transform: capitalize;
+      margin-right: 4px;
+    }
+    .btn-logout {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-logout:hover { background: var(--red-light); color: var(--red); border-color: var(--red); }
+
+    /* ── LAYOUT ── */
+    .hq-body {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── CLOCK CARD ── */
+    .clock-card {
+      background: linear-gradient(135deg, #0f6e56 0%, #1D9E75 100%);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .clock-time {
+      font-size: 56px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .clock-date {
+      font-size: 14px;
+      opacity: 0.8;
+      margin-top: 4px;
+      text-transform: capitalize;
+    }
+    .shift-status-pill {
+      padding: 8px 18px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 700;
+      text-align: center;
+      min-width: 120px;
+    }
+    .status-off     { background: rgba(255,255,255,0.15); color: #fff; }
+    .status-in      { background: #39FF6A22; color: #39FF6A; border: 1px solid #39FF6A55; }
+    .status-break   { background: #F59E0B22; color: #FCD34D; border: 1px solid #F59E0B55; }
+    .shift-duration { font-size: 12px; opacity: 0.7; text-align: center; margin-top: 4px; }
+
+    /* ── ACTION BUTTONS ── */
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    @media (min-width: 600px) {
+      .action-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+    .action-btn {
+      border: none;
+      border-radius: var(--radius);
+      padding: 18px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      outline: none;
+    }
+    .action-btn .btn-icon { font-size: 28px; }
+    .action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-clock-in   { background: #DCFCE7; color: #15803D; }
+    .btn-clock-in:hover:not(:disabled)   { background: #BBF7D0; }
+    .btn-clock-out  { background: #FEE2E2; color: #B91C1C; }
+    .btn-clock-out:hover:not(:disabled)  { background: #FECACA; }
+    .btn-break-start { background: #FEF3C7; color: #92400E; }
+    .btn-break-start:hover:not(:disabled){ background: #FDE68A; }
+    .btn-break-end  { background: #DBEAFE; color: #1D4ED8; }
+    .btn-break-end:hover:not(:disabled)  { background: #BFDBFE; }
+
+    /* ── FEEDBACK TOAST ── */
+    #action-feedback {
+      display: none;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 14px;
+      text-align: center;
+    }
+    .feedback-ok    { background: var(--green-light); color: var(--green); }
+    .feedback-error { background: var(--red-light); color: var(--red); }
+
+    /* ── ROLE STATIONS ── */
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+    .stations-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 10px;
+    }
+    .station-tile {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 10px;
+      text-align: center;
+      text-decoration: none;
+      color: var(--text);
+      font-weight: 600;
+      font-size: 13px;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .station-tile:hover { border-color: var(--green); background: var(--green-light); color: var(--green); }
+    .station-tile .st-icon { font-size: 26px; }
+
+    /* ── TIMECARD ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-header-title { font-weight: 700; font-size: 15px; }
+    .week-nav { display: flex; align-items: center; gap: 8px; }
+    .week-nav button {
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 8px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-muted);
+      transition: background 0.1s;
+    }
+    .week-nav button:hover { background: var(--bg); }
+    .week-label { font-size: 13px; color: var(--text-muted); font-weight: 600; min-width: 130px; text-align: center; }
+
+    .timecard-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .timecard-table th {
+      background: var(--bg);
+      padding: 9px 14px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .timecard-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .timecard-table tr:last-child td { border-bottom: none; }
+    .timecard-table tr.row-late td   { background: #FFF1F2; }
+    .timecard-table tr.row-early td  { background: #FFFBEB; }
+    .timecard-table tr.row-overtime td { background: #EFF6FF; }
+    .tc-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .tc-late     { background: #FEE2E2; color: #B91C1C; }
+    .tc-early    { background: #FEF3C7; color: #92400E; }
+    .tc-overtime { background: #DBEAFE; color: #1D4ED8; }
+    .tc-normal   { background: #F3F4F6; color: #374151; }
+    .timecard-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 14px; }
+    .timecard-footer {
+      padding: 12px 18px;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 20px;
+      font-size: 13px;
+    }
+    .timecard-footer strong { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="hq-header">
+    <div class="hq-header-left">
+      <div class="hq-avatar" id="hdr-avatar">?</div>
+      <div>
+        <div class="hq-name" id="hdr-name">Cargando...</div>
+        <div class="hq-restaurant" id="hdr-restaurant"></div>
+        <div id="hdr-roles"></div>
+      </div>
+    </div>
+    <button class="btn-logout" onclick="doHQLogout()">Cerrar sesión</button>
+  </header>
+
+  <div class="hq-body">
+    <!-- CLOCK + STATUS -->
+    <div class="clock-card">
+      <div>
+        <div class="clock-time" id="clock-time">--:--</div>
+        <div class="clock-date" id="clock-date">--</div>
+      </div>
+      <div>
+        <div class="shift-status-pill status-off" id="shift-status-pill">Sin turno</div>
+        <div class="shift-duration" id="shift-duration"></div>
+      </div>
+    </div>
+
+    <!-- ACTION BUTTONS -->
+    <div class="action-grid">
+      <button class="action-btn btn-clock-in"    id="btn-clock-in"    onclick="doAction('clock-in')">
+        <span class="btn-icon">▶</span>Entrada
+      </button>
+      <button class="action-btn btn-clock-out"   id="btn-clock-out"   onclick="doAction('clock-out')">
+        <span class="btn-icon">■</span>Salida
+      </button>
+      <button class="action-btn btn-break-start" id="btn-break-start" onclick="doAction('break-start')">
+        <span class="btn-icon">☕</span>Iniciar break
+      </button>
+      <button class="action-btn btn-break-end"   id="btn-break-end"   onclick="doAction('break-end')">
+        <span class="btn-icon">↩</span>Fin de break
+      </button>
+    </div>
+
+    <!-- FEEDBACK -->
+    <div id="action-feedback"></div>
+
+    <!-- ROLE STATIONS -->
+    <div>
+      <div class="section-title">Mis estaciones</div>
+      <div class="stations-grid" id="stations-grid"></div>
+    </div>
+
+    <!-- TIMECARD -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-title">Mi Timecard</div>
+        <div class="week-nav">
+          <button onclick="shiftWeek(-1)">&#8592;</button>
+          <span class="week-label" id="week-label">Esta semana</span>
+          <button onclick="shiftWeek(1)">&#8594;</button>
+        </div>
+      </div>
+      <div id="timecard-container">
+        <div class="timecard-empty">Cargando timecard...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/roles.js"></script>
+  <script>
+    const TOKEN    = localStorage.getItem('rb_token');
+    const REST_STR = localStorage.getItem('rb_restaurant');
+    const REST     = REST_STR ? JSON.parse(REST_STR) : {};
+
+    if (!TOKEN) { window.location.href = '/staff'; }
+
+    const ROLE_META = {
+      mesero:       { icon: '🍽️', label: 'Mesero',     url: '/mesero'       },
+      cocina:       { icon: '👨‍🍳', label: 'Cocina',      url: '/cocina'       },
+      bar:          { icon: '🍹', label: 'Bar',          url: '/bar'          },
+      caja:         { icon: '💰', label: 'Caja',         url: '/caja'         },
+      domiciliario: { icon: '🛵', label: 'Domicilios',   url: '/domiciliario' },
+    };
+
+    // ── Clock display ──────────────────────────────────────────────
+    function _pad(n) { return String(n).padStart(2, '0'); }
+
+    function updateClock() {
+      const now  = new Date();
+      document.getElementById('clock-time').textContent =
+        _pad(now.getHours()) + ':' + _pad(now.getMinutes()) + ':' + _pad(now.getSeconds());
+      document.getElementById('clock-date').textContent =
+        now.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // ── Profile & state ────────────────────────────────────────────
+    let _profile = null;
+    let _shiftStart = null;
+    let _shiftDurationInterval = null;
+
+    async function loadProfile() {
+      try {
+        const res = await fetch('/api/staff/self/profile', {
+          headers: { 'Authorization': 'Bearer ' + TOKEN }
+        });
+        if (!res.ok) { if (res.status === 401) { doHQLogout(); return; } return; }
+        _profile = await res.json();
+        renderHeader(_profile);
+        renderShiftStatus(_profile);
+        renderButtons(_profile);
+        renderStations(_profile);
+      } catch(e) { console.error('loadProfile:', e); }
+    }
+
+    function renderHeader(p) {
+      const initials = p.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+      document.getElementById('hdr-avatar').textContent     = initials;
+      document.getElementById('hdr-name').textContent       = p.name;
+      document.getElementById('hdr-restaurant').textContent = REST.name || '';
+      const rolesEl = document.getElementById('hdr-roles');
+      rolesEl.innerHTML = '';
+      (p.roles || []).forEach(r => {
+        const span = document.createElement('span');
+        span.className   = 'role-badge';
+        span.textContent = r;
+        rolesEl.appendChild(span);
+      });
+    }
+
+    function renderShiftStatus(p) {
+      const pill     = document.getElementById('shift-status-pill');
+      const durEl    = document.getElementById('shift-duration');
+      clearInterval(_shiftDurationInterval);
+
+      if (p.current_break) {
+        pill.textContent = '☕ En break';
+        pill.className   = 'shift-status-pill status-break';
+        durEl.textContent = 'Break desde ' + _fmtTime(p.current_break.break_start);
+      } else if (p.current_shift) {
+        pill.textContent = '✅ En turno';
+        pill.className   = 'shift-status-pill status-in';
+        _shiftStart = new Date(p.current_shift.clock_in);
+        function tickDur() {
+          const mins = Math.floor((Date.now() - _shiftStart) / 60000);
+          durEl.textContent = 'Desde ' + _fmtTime(p.current_shift.clock_in) +
+            ' (' + (mins >= 60 ? Math.floor(mins/60) + 'h ' + (mins%60) + 'min' : mins + ' min') + ')';
+        }
+        tickDur();
+        _shiftDurationInterval = setInterval(tickDur, 30000);
+      } else {
+        pill.textContent = 'Sin turno';
+        pill.className   = 'shift-status-pill status-off';
+        durEl.textContent = '';
+      }
+    }
+
+    function renderButtons(p) {
+      const inShift = !!p.current_shift;
+      const inBreak = !!p.current_break;
+      document.getElementById('btn-clock-in').disabled    = inShift;
+      document.getElementById('btn-clock-out').disabled   = !inShift || inBreak;
+      document.getElementById('btn-break-start').disabled = !inShift || inBreak;
+      document.getElementById('btn-break-end').disabled   = !inBreak;
+    }
+
+    function renderStations(p) {
+      const grid  = document.getElementById('stations-grid');
+      const roles = p.roles || [];
+      grid.innerHTML = '';
+      roles.forEach(role => {
+        const meta = ROLE_META[role];
+        if (!meta) return;
+        const a = document.createElement('a');
+        a.href      = meta.url;
+        a.className = 'station-tile';
+        a.innerHTML = '<span class="st-icon">' + meta.icon + '</span>' + meta.label;
+        grid.appendChild(a);
+      });
+      if (!grid.children.length) {
+        grid.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Sin estaciones asignadas.</div>';
+      }
+    }
+
+    function _fmtTime(iso) {
+      if (!iso) return '--:--';
+      const d = new Date(iso);
+      return _pad(d.getHours()) + ':' + _pad(d.getMinutes());
+    }
+
+    // ── Action buttons ─────────────────────────────────────────────
+    const ACTION_ENDPOINTS = {
+      'clock-in':    '/api/staff/self/clock-in',
+      'clock-out':   '/api/staff/self/clock-out',
+      'break-start': '/api/staff/self/break-start',
+      'break-end':   '/api/staff/self/break-end',
+    };
+
+    async function doAction(action) {
+      const allBtns = document.querySelectorAll('.action-btn');
+      allBtns.forEach(b => b.disabled = true);
+      showFeedback('', '');
+
+      try {
+        const res = await fetch(ACTION_ENDPOINTS[action], {
+          method:  'POST',
+          headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showFeedback(data.detail || 'Error al procesar acción.', 'error');
+        } else {
+          const msgs = {
+            'clock-in':    '✅ Entrada registrada',
+            'clock-out':   '👋 Salida registrada',
+            'break-start': '☕ Break iniciado',
+            'break-end':   '✅ Break terminado',
+          };
+          showFeedback(msgs[action], 'ok');
+          await loadProfile();
+          await loadTimecard();
+        }
+      } catch(e) {
+        showFeedback('Error de conexión.', 'error');
+      }
+    }
+
+    function showFeedback(msg, type) {
+      const el = document.getElementById('action-feedback');
+      if (!msg) { el.style.display = 'none'; return; }
+      el.textContent = msg;
+      el.className   = type === 'ok' ? 'feedback-ok' : 'feedback-error';
+      el.style.display = '';
+      if (type === 'ok') setTimeout(() => { el.style.display = 'none'; }, 3500);
+    }
+
+    // ── Timecard ───────────────────────────────────────────────────
+    let _weekStart = null;
+
+    function _getMonday(d) {
+      const dt = new Date(d);
+      const day = dt.getDay();
+      const diff = (day === 0 ? -6 : 1 - day);
+      dt.setDate(dt.getDate() + diff);
+      dt.setHours(0,0,0,0);
+      return dt;
+    }
+
+    function _isoDate(d) {
+      return d.getFullYear() + '-' + _pad(d.getMonth()+1) + '-' + _pad(d.getDate());
+    }
+
+    function shiftWeek(delta) {
+      _weekStart = new Date(_weekStart);
+      _weekStart.setDate(_weekStart.getDate() + delta * 7);
+      loadTimecard();
+    }
+
+    async function loadTimecard() {
+      if (!_weekStart) _weekStart = _getMonday(new Date());
+      const weekEnd = new Date(_weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+
+      const ws = _isoDate(_weekStart);
+      const we = _isoDate(weekEnd);
+
+      // Update week label
+      const opts = { month: 'short', day: 'numeric' };
+      document.getElementById('week-label').textContent =
+        _weekStart.toLocaleDateString('es-CO', opts) + ' – ' + weekEnd.toLocaleDateString('es-CO', opts);
+
+      const container = document.getElementById('timecard-container');
+      container.innerHTML = '<div class="timecard-empty">Cargando...</div>';
+
+      try {
+        const res = await fetch('/api/staff/self/timecard?week_start=' + ws + '&week_end=' + we, {
+          headers: { 'Authorization': 'Bearer ' + TOKEN }
+        });
+        if (!res.ok) { container.innerHTML = '<div class="timecard-empty">No se pudo cargar el timecard.</div>'; return; }
+        const data = await res.json();
+        renderTimecard(data);
+      } catch(e) {
+        container.innerHTML = '<div class="timecard-empty">Error al cargar timecard.</div>';
+      }
+    }
+
+    const DAYS_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+    function renderTimecard(data) {
+      const container = document.getElementById('timecard-container');
+      if (!data.entries || data.entries.length === 0) {
+        container.innerHTML = '<div class="timecard-empty">Sin registros para esta semana.</div>';
+        return;
+      }
+
+      let html = '<table class="timecard-table"><thead><tr>' +
+        '<th>Día</th><th>Horario</th><th>Entrada</th><th>Salida</th>' +
+        '<th>Break</th><th>Horas</th><th>Estado</th>' +
+        '</tr></thead><tbody>';
+
+      let totalNet = 0;
+
+      for (const e of data.entries) {
+        const d  = new Date(e.work_date + 'T12:00:00');
+        const dayLabel = DAYS_ES[d.getDay()] + ' ' + d.getDate();
+
+        const sched   = e.schedule ? e.schedule.start.slice(0,5) + ' – ' + e.schedule.end.slice(0,5) : '—';
+        const cin     = e.clock_in  ? _fmtTime(e.clock_in)  : '—';
+        const cout    = e.clock_out ? _fmtTime(e.clock_out) : 'Abierto';
+        const brk     = e.break_hours > 0 ? e.break_hours.toFixed(2) + 'h' : '—';
+        const net     = e.net_hours.toFixed(2) + 'h';
+        totalNet += e.net_hours;
+
+        let rowCls = '';
+        let badge  = '<span class="tc-badge tc-normal">Normal</span>';
+        if (e.is_late && e.is_early_departure) {
+          rowCls = 'row-late';
+          badge = '<span class="tc-badge tc-late">Tardanza + Temprano</span>';
+        } else if (e.is_late) {
+          rowCls = 'row-late';
+          badge = '<span class="tc-badge tc-late">Tardanza</span>';
+        } else if (e.is_early_departure) {
+          rowCls = 'row-early';
+          badge = '<span class="tc-badge tc-early">Salida temprana</span>';
+        } else if (e.net_hours > 8) {
+          rowCls = 'row-overtime';
+          badge = '<span class="tc-badge tc-overtime">Overtime</span>';
+        }
+
+        html += '<tr class="' + rowCls + '">' +
+          '<td><strong>' + dayLabel + '</strong></td>' +
+          '<td style="color:var(--text-muted)">' + sched + '</td>' +
+          '<td>' + cin  + '</td>' +
+          '<td>' + cout + '</td>' +
+          '<td style="color:var(--text-muted)">' + brk + '</td>' +
+          '<td><strong>' + net + '</strong></td>' +
+          '<td>' + badge + '</td>' +
+          '</tr>';
+      }
+
+      html += '</tbody></table>';
+      html += '<div class="timecard-footer">' +
+        '<span>Total semana: <strong>' + totalNet.toFixed(2) + ' horas</strong></span>' +
+        '</div>';
+
+      container.innerHTML = html;
+    }
+
+    // ── Logout ─────────────────────────────────────────────────────
+    function doHQLogout() {
+      const rid = localStorage.getItem('rb_staff_restaurant_id');
+      localStorage.clear();
+      window.location.href = rid ? '/staff?r=' + rid : '/staff';
+    }
+
+    // ── Init ───────────────────────────────────────────────────────
+    loadProfile();
+    loadTimecard();
+  </script>
+</body>
+</html>

@@ -335,6 +335,15 @@ function _openStaffModal(self, existing = null) {
   nameIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
   box.appendChild(nameIn);
 
+  const docLabel = document.createElement('div');
+  docLabel.textContent = 'Número de documento (cédula / ID)';
+  docLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
+  box.appendChild(docLabel);
+  const docIn = _makeInput('Ej: 1234567890');
+  if (existing) docIn.value = existing.document_number || '';
+  docIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
+  box.appendChild(docIn);
+
   const phoneLabel = document.createElement('div');
   phoneLabel.textContent = 'Teléfono (opcional)';
   phoneLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
@@ -519,9 +528,10 @@ function _openStaffModal(self, existing = null) {
 
   const submitBtn = _makeBtn(isEdit ? 'Guardar cambios' : 'Crear empleado', 'btn-sm btn-primary', async () => {
       errMsg.textContent = '';
-      const name  = nameIn.value.trim();
-      const pin   = pinIn.value.trim();
-      const phone = phoneIn.value.trim();
+      const name            = nameIn.value.trim();
+      const pin             = pinIn.value.trim();
+      const phone           = phoneIn.value.trim();
+      const document_number = docIn.value.trim();
 
       if (!name) { errMsg.textContent = 'El nombre es obligatorio.'; return; }
       if (!isEdit && pin.length < 4) { errMsg.textContent = 'La contraseña debe tener al menos 4 caracteres.'; return; }
@@ -532,13 +542,13 @@ function _openStaffModal(self, existing = null) {
       try {
         const rolesArr = Array.from(currentRoles);
         if (isEdit) {
-          const patch = { name, roles: rolesArr, role: rolesArr[0], phone };
+          const patch = { name, roles: rolesArr, role: rolesArr[0], phone, document_number };
           if (pin) patch.password = pin;
           await _staffFetch(`/${existing.id}`, { method: 'PUT', body: JSON.stringify(patch) });
         } else {
           await _staffFetch('', {
             method: 'POST',
-            body: JSON.stringify({ name, role: rolesArr[0], roles: rolesArr, password: pin, phone }),
+            body: JSON.stringify({ name, role: rolesArr[0], roles: rolesArr, password: pin, phone, document_number }),
           });
         }
         overlay.remove();
@@ -1366,37 +1376,24 @@ function _renderPayrollTab(state, el, self) {
 
 const StaffSection = MesioComponent({
   state: {
-    loading:    true,
-    staff:      [],
-    shifts:     [],
-    tipPreview: null,
-    tab:        'roster',
-    filter:     'all',
-    search:     '',
-    error:      null,
-    payrollEntries:     [],
-    payrollRuns:        [],
-    payrollLoading:     false,
-    payrollPeriodStart: '',
-    payrollPeriodEnd:   '',
-    timecardData:       [],
-    timecardWeek:       '',
+    loading: true,
+    staff:   [],
+    filter:  'all',
+    search:  '',
+    error:   null,
   },
 
   render(state, el) {
-    el.textContent = ''; // Limpia todo el contenido previo
+    el.textContent = '';
 
-    // 🛡️ 1. CREACIÓN DE LA CABECERA ÚNICA (Solo botones, sin título duplicado)
     const headerActions = document.createElement('div');
     headerActions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-bottom:20px;';
 
-    // Botón para Administradores (Password)
     const btnAdmin = _makeBtn('+ Añadir Admin', 'btn-sm btn-outline', () => {
         if (typeof window.openStaffAdminModal === 'function') window.openStaffAdminModal();
     });
     btnAdmin.style.cssText += 'background:#E1F5EE;color:#0F6E56;border:1px solid #1D9E75;font-weight:600;padding:10px 18px;border-radius:10px;';
 
-    // Botón para Empleados Operativos (PIN)
     const btnStaff = _makeBtn('+ Nuevo Empleado', 'btn-sm btn-primary', () => _openStaffModal(StaffSection));
     btnStaff.style.cssText += 'padding:10px 18px;border-radius:10px;';
 
@@ -1411,7 +1408,7 @@ const StaffSection = MesioComponent({
       el.appendChild(msg);
       return;
     }
-    
+
     if (state.error) {
       const msg = document.createElement('div');
       msg.className   = 'empty-state';
@@ -1422,49 +1419,19 @@ const StaffSection = MesioComponent({
       return;
     }
 
-    // Tab bar
-    const tabBar = document.createElement('div');
-    tabBar.style.cssText = 'display:flex;gap:2px;margin-bottom:1.5rem;border-bottom:1px solid #e0e0d8;';
-
-    [
-      ['roster',  '👥  Roster'],
-      ['shifts',  '⏱  Turnos'],
-      ['tips',    '💸  Propinas'],
-      ['payroll', '💰  Nómina'],
-    ].forEach(([id, label]) => {
-      const btn = document.createElement('button');
-      btn.textContent = label;
-      const active = state.tab === id;
-      btn.style.cssText = `padding:9px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:${active ? '600' : '400'};
-        color:${active ? '#1D9E75' : '#666'};border-bottom:2px solid ${active ? '#1D9E75' : 'transparent'};
-        margin-bottom:-1px;transition:color .15s;`;
-      btn.addEventListener('click', () => StaffSection.setState({ tab: id }));
-      tabBar.appendChild(btn);
-    });
-    el.appendChild(tabBar);
-
     const content = document.createElement('div');
-    if (state.tab === 'roster')  _renderRosterTab(state, content, StaffSection);
-    if (state.tab === 'shifts')  _renderShiftsTab(state, content, StaffSection);
-    if (state.tab === 'tips')    _renderTipsTab(state, content, StaffSection);
-    if (state.tab === 'payroll') _renderPayrollTab(state, content, StaffSection);
+    _renderRosterTab(state, content, StaffSection);
     el.appendChild(content);
   },
 
   async onMount(self) {
     try {
-      // ⬇️ Carga las sucursales en el select si es Dueño
       const role = (localStorage.getItem('rb_role') || '').toLowerCase();
       if (role.includes('owner')) {
           await _loadStaffBranchesSelect();
       }
-      
-      const [rosterData, shiftsData, runsData] = await Promise.all([
-        _staffFetch(''),
-        _staffFetch('/open-shifts'),
-        _staffFetch('/payroll/runs').catch(() => ({ runs: [] })),
-      ]);
-      self.setState({ staff: rosterData.staff, shifts: shiftsData.shifts, payrollRuns: runsData.runs || [], loading: false });
+      const rosterData = await _staffFetch('');
+      self.setState({ staff: rosterData.staff, loading: false });
     } catch (err) {
       self.setState({ loading: false, error: err.message });
     }
@@ -1696,3 +1663,64 @@ window.openStaffAdminModal = function() {
       }
   };
 };
+
+// ── PayrollSection component ──────────────────────────────────────────────────
+
+const PayrollSection = MesioComponent({
+  state: {
+    payrollLoading:     false,
+    payrollPeriodStart: '',
+    payrollPeriodEnd:   '',
+    payrollEntries:     null,
+    payrollRuns:        [],
+  },
+
+  render(state, el) {
+    el.textContent = '';
+    _renderPayrollTab(state, el, PayrollSection);
+  },
+
+  async onMount(self) {
+    // Default period: current month
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const fmt   = d => d.toISOString().slice(0, 10);
+    try {
+      const runsData = await _staffFetch('/payroll/runs');
+      self.setState({
+        payrollPeriodStart: fmt(start),
+        payrollPeriodEnd:   fmt(end),
+        payrollRuns:        runsData.runs || [],
+      });
+    } catch (_) {
+      self.setState({
+        payrollPeriodStart: fmt(start),
+        payrollPeriodEnd:   fmt(end),
+      });
+    }
+  },
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// loadPayrollSection — called by dashboard-core.js when the user navigates to
+// the 'payroll' section. Mounts PayrollSection into #payroll-component on
+// first visit; subsequent calls reload the run history.
+// ─────────────────────────────────────────────────────────────────────────────
+let _payrollMounted = false;
+
+async function loadPayrollSection() {
+  const el = document.getElementById('payroll-component');
+  if (!el) return;
+
+  if (!_payrollMounted) {
+    _payrollMounted = true;
+    PayrollSection.mount('#payroll-component');
+  } else {
+    try {
+      const runsData = await _staffFetch('/payroll/runs');
+      PayrollSection.setState({ payrollRuns: runsData.runs || [] });
+    } catch (_) {}
+  }
+}
