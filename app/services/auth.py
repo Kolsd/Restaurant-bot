@@ -1,7 +1,7 @@
 ﻿import json as _json
-import secrets
 from passlib.context import CryptContext
 from app.services import database as db
+from app.repositories import sessions_repo
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -26,8 +26,7 @@ async def login(username: str, password: str) -> dict:
         if not member:
             return {"success": False, "error": "Usuario o contraseña incorrectos"}
 
-        token = secrets.token_hex(32)
-        await db.db_save_session(token, f"staff:{member['id']}")
+        token = await sessions_repo.create_session(f"staff:{member['id']}")
 
         roles     = member.get("roles") or [member.get("role", "mesero")]
         role      = ",".join(roles)
@@ -64,8 +63,7 @@ async def login(username: str, password: str) -> dict:
     if not verify_password(password, user["password_hash"]):
         return {"success": False, "error": "Contraseña incorrecta"}
 
-    token = secrets.token_hex(32)
-    await db.db_save_session(token, username.lower().strip())
+    token = await sessions_repo.create_session(username.lower().strip())
 
     role = user.get("role", "owner")
     branch_id = user.get("branch_id")
@@ -112,10 +110,10 @@ async def login(username: str, password: str) -> dict:
     }
 
 async def verify_token(token: str) -> str | None:
-    return await db.db_get_session(token)
+    return await sessions_repo.get_session(token)
 
 async def logout(token: str):
-    await db.db_delete_session(token)
+    await sessions_repo.delete_session(token)
 
 async def create_user(username: str, password: str, restaurant_name: str) -> dict:
     success = await db.db_create_user(username, hash_password(password), restaurant_name)

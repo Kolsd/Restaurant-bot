@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
+from app.services.money import to_decimal, ZERO
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
@@ -126,14 +127,10 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             if not isinstance(_raw_feats, dict):
                 _raw_feats = {}
             
-            try:
-                delivery_fee = float(_raw_feats.get("delivery_fee", 0)) if order_type == "domicilio" else 0
-            except (ValueError, TypeError):
-                delivery_fee = 0
-                
+            delivery_fee = to_decimal(_raw_feats.get("delivery_fee", 0)) if order_type == "domicilio" else ZERO
             tz_str = _raw_feats.get("timezone", "UTC")
 
-        subtotal = sum(item["subtotal"] for item in cart["items"])
+        subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
         total = subtotal + delivery_fee
 
         pool = await db.get_pool()
@@ -234,10 +231,10 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 try: _raw_feats = json.loads(_raw_feats)
                 except Exception: _raw_feats = {}
             if not isinstance(_raw_feats, dict): _raw_feats = {}
-            delivery_fee = _raw_feats.get("delivery_fee", 0) if order_type == "domicilio" else 0
+            delivery_fee = to_decimal(_raw_feats.get("delivery_fee", 0)) if order_type == "domicilio" else ZERO
             tz_str = _raw_feats.get("timezone", "UTC")
 
-        subtotal = sum(item["subtotal"] for item in cart["items"])
+        subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
         total = subtotal + delivery_fee
 
         pool = await db.get_pool()

@@ -4,6 +4,7 @@ import time
 import httpx
 import urllib.parse
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -13,6 +14,7 @@ from app.services import billing
 from app.services.agent import trigger_nps
 from app.routes.deps import require_auth, get_current_user, get_current_restaurant
 from app.services import loyalty as loyalty_svc
+from app.services.money import to_decimal, money_mul, quantize_money
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -285,7 +287,7 @@ async def get_delivery_orders(request: Request):
             "order_type": r["order_type"],
             "address": r.get("address", ""),
             "notes": r.get("notes", ""),
-            "total": float(r["total"]),
+            "total": float(to_decimal(r["total"])),  # JSON boundary
             "paid": r.get("paid", False),
             "status": r.get("status", "confirmado"),
             "payment_method": r.get("payment_method", ""),
@@ -363,8 +365,8 @@ async def update_delivery_order_status(request: Request, order_id: str):
                     
                     order_for_billing = {
                         "id": order_id,
-                        "total": float(order_row["total"]),
-                        "subtotal": float(order_row["subtotal"]),
+                        "total": float(to_decimal(order_row["total"])),      # JSON boundary
+                        "subtotal": float(to_decimal(order_row["subtotal"])), # JSON boundary
                         "service_charge": 0.0,
                         "items": items,
                         "payment_method": order_row.get("payment_method", "cash"),
@@ -479,7 +481,7 @@ async def get_order_ticket(request: Request, order_id: str):
 
         # Agregar ítems y totales de todas las sub-órdenes
         all_items: list = []
-        total: float = 0.0
+        total: Decimal = Decimal("0")
         notes_parts: list = []
         first = dict(rows[0])
 
@@ -493,7 +495,7 @@ async def get_order_ticket(request: Request, order_id: str):
                     items = []
             if isinstance(items, list):
                 all_items.extend(items)
-            total += float(d.get("total") or 0)
+            total += to_decimal(d.get("total") or 0)
             if d.get("notes"):
                 notes_parts.append(d["notes"])
 
@@ -521,7 +523,7 @@ async def get_order_ticket(request: Request, order_id: str):
         "table_name": first.get("table_name", ""),
         "created_at": created,
         "items":      all_items,
-        "total":      total,
+        "total":      float(total),  # JSON boundary: Decimal → float for display
         "notes":      " | ".join(notes_parts) if notes_parts else "",
         "fiscal":     fiscal,
     }
@@ -734,7 +736,7 @@ async def adjust_table_bill(request: Request, base_order_id: str):
 
     body = await request.json()
     adjusted_items = body.get("items", [])
-    new_total = float(body.get("total", 0))
+    new_total = to_decimal(body.get("total", 0))
 
     if new_total < 0:
         raise HTTPException(status_code=400, detail="El total no puede ser negativo")
@@ -760,7 +762,7 @@ async def adjust_table_bill(request: Request, base_order_id: str):
         )
 
     print(f"✏️ Factura ajustada: {base_order_id} → total={new_total}", flush=True)
-    return {"success": True, "base_order_id": base_order_id, "new_total": new_total}
+    return {"success": True, "base_order_id": base_order_id, "new_total": float(new_total)}
 
 
 @router.post("/api/pos/order")
@@ -868,36 +870,35 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
             )
 
     # Construir checks con totales calculados servidor-side
-    tax_factor = body.tax_pct / 100
+    tax_factor = to_decimal(body.tax_pct) / Decimal("100")
     validated = []
     for chk in body.checks:
         # Reconstruir items con unit_price desde el ticket (busca por nombre)
-        price_map: dict[str, float] = {}
+        price_map: dict[str, Decimal] = {}
         for item in ticket.get("items", []):
-            price_map[item["name"].strip().lower()] = float(item.get("price", 0))
+            price_map[item["name"].strip().lower()] = to_decimal(item.get("price", 0))
 
         items_out = []
-        gross = 0.0
+        gross = Decimal("0")
         for it in chk.items:
-            unit_price = price_map.get(it.name.strip().lower(), it.unit_price)
-            line_sub = round(unit_price * it.qty / (1 + tax_factor), 2)
+            unit_price = price_map.get(it.name.strip().lower(), to_decimal(it.unit_price))
             items_out.append({
                 "name": it.name, "qty": it.qty,
-                "unit_price": unit_price,
-                "subtotal": round(unit_price * it.qty, 2)
+                "unit_price": float(unit_price),  # JSON boundary
+                "subtotal": float(money_mul(unit_price, it.qty))  # JSON boundary
             })
-            gross += unit_price * it.qty
+            gross += money_mul(unit_price, it.qty)
 
-        subtotal  = round(gross / (1 + tax_factor), 2)
-        tax_amount = round(gross - subtotal, 2)
-        total     = round(gross, 2)
+        subtotal   = quantize_money(gross / (Decimal("1") + tax_factor))
+        tax_amount = quantize_money(gross - subtotal)
+        total      = quantize_money(gross)
 
         validated.append({
             "check_number": chk.check_number,
             "items": items_out,
-            "subtotal": subtotal,
-            "tax_amount": tax_amount,
-            "total": total,
+            "subtotal": float(subtotal),   # JSON boundary: stored as NUMERIC via db
+            "tax_amount": float(tax_amount),
+            "total": float(total),
         })
 
     result = await db.db_create_checks(base_order_id, validated)
@@ -937,15 +938,16 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
 
         # También usar tip propuesto si no se envió tip explícito y hay uno guardado
         if body.tip_amount == 0.0 and check.get("proposed_tip"):
-            body.tip_amount = float(check["proposed_tip"])
+            body.tip_amount = float(to_decimal(check["proposed_tip"]))
 
-        total_pagado = sum(p.amount for p in body.payments)
-        check_total  = float(check["total"]) + body.service_charge
+        total_pagado = to_decimal(sum(p.amount for p in body.payments))
+        check_total  = to_decimal(check["total"]) + to_decimal(body.service_charge)
         if total_pagado < check_total:
-            raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${check_total:,.0f}, se recibieron ${total_pagado:,.0f}")
-        change = round(total_pagado - check_total, 2)
+            raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_pagado):,.0f}")
+        change = float(quantize_money(total_pagado - check_total))
 
-        if body.tip_amount > 0 and body.tip_amount > float(check["total"]) * 0.5:
+        tip_amount_d = to_decimal(body.tip_amount)
+        if tip_amount_d > 0 and tip_amount_d > money_mul(check["total"], Decimal("0.5")):
             raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
 
         config = await billing.get_billing_config(restaurant["id"])
@@ -968,11 +970,13 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             import json as _json
             items = _json.loads(items)
 
+        _check_total_d = to_decimal(check["total"])
+        _svc_charge_d  = to_decimal(body.service_charge)
         order_for_billing = {
             "id":             check_id,
-            "total":          float(check["total"]) + body.service_charge,
-            "subtotal":       float(check["total"]),
-            "service_charge": body.service_charge,
+            "total":          float(_check_total_d + _svc_charge_d),  # JSON boundary
+            "subtotal":       float(_check_total_d),                   # JSON boundary
+            "service_charge": float(_svc_charge_d),
             "items":          items,
             "payment_method": body.payments[0].method if body.payments else "cash",
             "order_ref":      base_order_id,
@@ -1016,7 +1020,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 bot_number=restaurant.get("whatsapp_number", ""),
                 base_order_id=base_order_id,
                 check_id=check_id,
-                total_cop=float(check["total"]) + body.service_charge,
+                total_cop=float(to_decimal(check["total"]) + to_decimal(body.service_charge)),
             ))
         else:
             print(f"⚠️ Aviso: 'accrue_on_check' no está implementado en loyalty.py. Saltando puntos para el check {check_id}.")

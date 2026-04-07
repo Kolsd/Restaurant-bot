@@ -9,6 +9,10 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from app.services.agent import chat, reset_conversation
 from app.services import database as db
+from app.repositories import inbox_repo
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter()
 
@@ -295,10 +299,9 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         await db.db_attach_proof(
                             proposal["base_order_id"], user_phone, media_url
                         )
-                        # Limpiar checkout state en memoria
-                        from app.services.agent import _checkout_state, _ck_key
-                        ck_key = _ck_key(user_phone, bot_number)
-                        _checkout_state.pop(ck_key, None)
+                        # Limpiar checkout state
+                        from app.services import state_store as _ss
+                        await _ss.checkout_delete(user_phone, bot_number)
                         # Enviar confirmación vía background task
                         confirm_msg = "✅ Comprobante recibido, caja lo está validando. ¡Gracias! 🙏"
                         background_tasks.add_task(
@@ -318,10 +321,24 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         print(f"💬 [Bot Inbound] De: {user_phone} | Bot: {bot_number} | WAM: {wam_id}", flush=True)
         print(f"📝 Texto: {user_text[:200]}", flush=True)
 
-        # 8. Encolar procesamiento en segundo plano — respuesta llega ANTES que la IA
-        background_tasks.add_task(
-            _process_message, user_phone, user_text, bot_number, phone_id, access_token
+        # 8. Persist to webhook_inbox — durable processing survives worker restarts.
+        #    The inbox worker (inbox_worker.py) will call _process_message asynchronously.
+        pool = await db.get_pool()
+        enqueue_payload = {
+            "user_phone":   user_phone,
+            "user_text":    user_text,
+            "bot_number":   bot_number,
+            "phone_id":     phone_id,
+            "access_token": access_token,
+        }
+        inserted = await inbox_repo.enqueue(
+            pool,
+            provider="meta_whatsapp",
+            external_id=wam_id or None,
+            payload=enqueue_payload,
         )
+        if not inserted:
+            log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
 
     except Exception:
         print(f"❌ ERROR CRÍTICO EN WEBHOOK:\n{traceback.format_exc()}", flush=True)

@@ -19,6 +19,9 @@ from app.routes.staff_webauthn import router as staff_webauthn_router
 from app.routes.staff_payroll import router as staff_payroll_router
 from app.routes.loyalty import router as loyalty_router
 from app.services import database as db  # ← FIX: import directo de db
+from app.services.logging import get_logger as _get_logger
+
+_log = _get_logger(__name__)
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
@@ -71,8 +74,16 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+import asyncio as _asyncio
+
+_inbox_stop_event: _asyncio.Event | None = None
+_inbox_task: "_asyncio.Task | None" = None
+
+
 @app.on_event("startup")
 async def startup():
+    global _inbox_stop_event, _inbox_task
+
     # Warm up the connection pool.
     # All schema migrations are handled by Alembic (run `alembic upgrade head`
     # before deploying). Do NOT add DDL calls here — with 4 uvicorn workers,
@@ -84,7 +95,38 @@ async def startup():
 
     await db.db_cleanup_expired_sessions()
 
+    # Start the webhook inbox worker (one per uvicorn worker process).
+    # FOR UPDATE SKIP LOCKED in the worker query makes concurrent workers safe.
+    from app.services.inbox_worker import run_worker
+    _inbox_stop_event = _asyncio.Event()
+    _inbox_task = _asyncio.create_task(run_worker(_inbox_stop_event))
+    _log.info("inbox_worker_task_created")
+
+    import os as _os
+    _redis_configured = bool(_os.getenv("REDIS_URL"))
+    _log.info("redis_url_configured", configured=_redis_configured)
+
     print("Mesio v6.0 started", flush=True)
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global _inbox_stop_event, _inbox_task
+
+    if _inbox_stop_event is not None:
+        _inbox_stop_event.set()
+
+    if _inbox_task is not None:
+        try:
+            await _asyncio.wait_for(_inbox_task, timeout=10.0)
+            _log.info("inbox_worker_shutdown_clean")
+        except _asyncio.TimeoutError:
+            _log.warning("inbox_worker_shutdown_timeout", timeout_seconds=10)
+        except Exception:
+            _log.exception("inbox_worker_shutdown_error")
+
+    from app.services.redis_client import close_redis
+    await close_redis()
 
 
 app.include_router(dashboard_router)

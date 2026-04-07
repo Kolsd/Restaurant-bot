@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
+from app.services.money import to_decimal
 
 from app.routes.deps import get_current_restaurant, require_module
 from app.services import database as db
@@ -471,7 +472,7 @@ async def self_profile(request: Request):
         "role":            member["role"],
         "phone":           member["phone"],
         "document_number": member["document_number"],
-        "hourly_rate":     float(member["hourly_rate"] or 0),
+        "hourly_rate":     float(to_decimal(member["hourly_rate"] or 0)),  # JSON boundary
         "photo_url":       member["photo_url"],
         "restaurant_id":   restaurant_id,
         "current_shift":   db._serialize(dict(shift_row)) if shift_row else None,

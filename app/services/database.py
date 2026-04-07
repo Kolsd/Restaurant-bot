@@ -2,6 +2,8 @@ import os
 import asyncpg
 import json
 from datetime import date, datetime, timedelta
+from decimal import Decimal
+from app.services.money import to_decimal, money_mul, money_sum, quantize_money, ZERO
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -985,7 +987,7 @@ async def db_merge_table_order_items(base_order_id: str, new_items: list, additi
                 items_map[name] = dict(ni)
 
         merged = list(items_map.values())
-        new_total = float(row["total"]) + float(additional_total)
+        new_total = to_decimal(row["total"]) + to_decimal(additional_total)
         await conn.execute(
             "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1",
             base_order_id, json.dumps(merged), new_total
@@ -1603,7 +1605,16 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
     Usa SELECT FOR UPDATE dentro de una transacción para evitar race conditions
     con los 4 workers de Railway.
     Si no hay receta definida, cae al comportamiento legacy de linked_dishes.
+
+    NOTA: Para órdenes de domicilio/recoger, usar commit_order_transaction en
+    app.repositories.orders_repo, que envuelve esto junto con db_save_order y
+    la limpieza del carrito en una sola transacción.
+
+    Raises:
+        InsufficientStockError: si el stock de un ingrediente es insuficiente.
     """
+    from app.repositories.orders_repo import InsufficientStockError as _ISE
+
     pool = await get_pool()
     restaurant = await db_get_restaurant_by_phone(bot_number)
     if not restaurant:
@@ -1645,13 +1656,23 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                         inv       = locked_map.get(ing_id)
                         if not inv:
                             continue
-                        new_stock = max(0.0, float(inv["current_stock"]) - deduct)
-                        await conn.execute(
+                        updated = await conn.fetchrow(
                             """UPDATE inventory
-                               SET current_stock = $1, updated_at = NOW()
-                               WHERE id = $2""",
-                            new_stock, ing_id
+                               SET current_stock = current_stock - $1,
+                                   updated_at    = NOW()
+                               WHERE id = $2
+                                 AND current_stock >= $1
+                               RETURNING current_stock""",
+                            deduct, ing_id
                         )
+                        if updated is None:
+                            available = float(inv["current_stock"])
+                            raise _ISE(
+                                sku=f"{dish_name} (ingrediente id={ing_id})",
+                                requested=deduct,
+                                available=available,
+                            )
+                        new_stock = float(updated["current_stock"])
                         await conn.execute(
                             """INSERT INTO inventory_history
                                (inventory_id, quantity_delta, stock_after, reason)
@@ -1677,13 +1698,23 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                         restaurant_id, json.dumps([dish_name])
                     )
                     for row in rows:
-                        new_stock = max(0.0, float(row["current_stock"]) - qty)
-                        await conn.execute(
+                        available = float(row["current_stock"])
+                        updated = await conn.fetchrow(
                             """UPDATE inventory
-                               SET current_stock = $1, updated_at = NOW()
-                               WHERE id = $2""",
-                            new_stock, row["id"]
+                               SET current_stock = current_stock - $1,
+                                   updated_at    = NOW()
+                               WHERE id = $2
+                                 AND current_stock >= $1
+                               RETURNING current_stock""",
+                            qty, row["id"]
                         )
+                        if updated is None:
+                            raise _ISE(
+                                sku=dish_name,
+                                requested=qty,
+                                available=available,
+                            )
+                        new_stock = float(updated["current_stock"])
                         await conn.execute(
                             """INSERT INTO inventory_history
                                (inventory_id, quantity_delta, stock_after, reason)
@@ -2257,7 +2288,7 @@ async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) ->
     if not rows:
         return None
     all_items = []
-    total = 0.0
+    total = ZERO
     first = dict(rows[0])
     for row in rows:
         d = dict(row)
@@ -2269,12 +2300,12 @@ async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) ->
                 items = []
         if isinstance(items, list):
             all_items.extend(items)
-        total += float(d.get("total") or 0)
+        total += to_decimal(d.get("total") or 0)
     return {
         "base_order_id": base_order_id,
         "table_name": first.get("table_name", ""),
         "items": all_items,
-        "total": total,
+        "total": float(total),  # JSON boundary
     }
 
 async def db_init_table_checks():
@@ -2340,7 +2371,7 @@ async def db_create_checks(base_order_id: str, checks: list) -> list:
                                      tax_amount=$6, total=$7, status='open'""",
                     check_id, base_order_id, int(c["check_number"]),
                     json.dumps(c["items"]),
-                    float(c["subtotal"]), float(c["tax_amount"]), float(c["total"])
+                    to_decimal(c["subtotal"]), to_decimal(c["tax_amount"]), to_decimal(c["total"])
                 )
                 inserted_ids.append(check_id)
         rows = await conn.fetch(
@@ -2403,10 +2434,10 @@ async def db_finalize_check_payment(
                        customer_name=$4, customer_nit=$5, customer_email=$6,
                        tip_amount=$7, paid_at=NOW()
                    WHERE id=$8""",
-                json.dumps(payments), float(change_amount),
+                json.dumps(payments), to_decimal(change_amount),
                 fiscal_invoice_id,
                 customer_name, customer_nit, customer_email,
-                float(tip_amount), check_id
+                to_decimal(tip_amount), check_id
             )
             # Marcar propuesta como confirmada si existía
             await conn.execute(
@@ -2464,7 +2495,7 @@ async def db_attach_proposal(
              WHERE id = $1""",
             check_id,
             json.dumps(proposed_payments),
-            float(proposed_tip),
+            to_decimal(proposed_tip),
             proposal_source,
             proposal_status,
             customer_phone,
@@ -2477,7 +2508,7 @@ async def db_set_check_tip(check_id: str, tip_amount: float) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE table_checks SET tip_amount = $1 WHERE id = $2",
-            float(tip_amount),
+            to_decimal(tip_amount),
             check_id,
         )
 
@@ -2748,7 +2779,7 @@ async def _record_attendance_deduction(
     deduction_type: str,
     scheduled_time,
     actual_time,
-    hourly_rate: float,
+    hourly_rate,  # Decimal (or anything coercible via to_decimal)
 ) -> None:
     """
     Insert an attendance_deductions row if the deviation exceeds 5 minutes.
@@ -2770,7 +2801,7 @@ async def _record_attendance_deduction(
     if minutes_diff <= 5:
         return  # Within tolerance
 
-    deduction_amount = round((minutes_diff / 60.0) * float(hourly_rate), 2)
+    deduction_amount = quantize_money(money_mul(Decimal(minutes_diff) / Decimal("60"), hourly_rate))
     await conn.execute(
         """INSERT INTO attendance_deductions
            (shift_id, staff_id, restaurant_id, type, scheduled_time,
@@ -2819,7 +2850,7 @@ async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
             staff_row = await conn.fetchrow(
                 "SELECT hourly_rate FROM staff WHERE id=$1::uuid", staff_id
             )
-            hourly_rate = float(staff_row["hourly_rate"] or 0) if staff_row else 0.0
+            hourly_rate = to_decimal(staff_row["hourly_rate"] or 0) if staff_row else ZERO
             await _record_attendance_deduction(
                 conn,
                 shift_id=str(row["id"]),
@@ -2869,7 +2900,7 @@ async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
             staff_row = await conn.fetchrow(
                 "SELECT hourly_rate FROM staff WHERE id=$1::uuid", staff_id
             )
-            hourly_rate = float(staff_row["hourly_rate"] or 0) if staff_row else 0.0
+            hourly_rate = to_decimal(staff_row["hourly_rate"] or 0) if staff_row else ZERO
             await _record_attendance_deduction(
                 conn,
                 shift_id=str(row["id"]),
@@ -2977,7 +3008,7 @@ async def db_calculate_tip_pool(
                 "pct_config": {},
                 "entries": [],
                 "total_allocated": 0.0,
-                "total_unallocated": round(float(total_tips), 2),
+                "total_unallocated": float(quantize_money(total_tips)),
             }
 
         # 2. Compute effective hours per employee within the period.
@@ -3014,29 +3045,30 @@ async def db_calculate_tip_pool(
 
         # 3. Distribute tips by role
         entries = []
-        total_allocated = 0.0
+        total_allocated = ZERO
+        total_tips_d = to_decimal(total_tips)
 
         for role, pct in pct_config.items():
             role_emps = [r for r in rows if r["role"] == role]
             if not role_emps:
                 continue  # role has no hours in this period — skip
 
-            role_pool = float(total_tips) * (float(pct) / 100.0)
-            total_role_hours = sum(float(r["effective_hours"]) for r in role_emps)
+            role_pool = money_mul(total_tips_d, to_decimal(pct) / Decimal("100"))
+            total_role_hours = money_sum(r["effective_hours"] for r in role_emps)
 
             for emp in role_emps:
-                h = float(emp["effective_hours"])
-                if total_role_hours > 0:
-                    amount = role_pool * (h / total_role_hours)
+                h = to_decimal(emp["effective_hours"])
+                if total_role_hours > ZERO:
+                    amount = money_mul(role_pool, h / total_role_hours)
                 else:
-                    amount = role_pool / len(role_emps)
+                    amount = role_pool / Decimal(len(role_emps))
 
                 entries.append({
                     "staff_id": emp["staff_id"],
                     "name":     emp["name"],
                     "role":     role,
-                    "hours":    float(emp["effective_hours"]),
-                    "amount":   round(amount, 2),
+                    "hours":    float(emp["effective_hours"]),  # display only
+                    "amount":   float(quantize_money(amount)),  # JSON boundary
                     "pct":      pct,
                 })
                 total_allocated += amount
@@ -3044,8 +3076,8 @@ async def db_calculate_tip_pool(
     return {
         "pct_config":        pct_config,
         "entries":           entries,
-        "total_allocated":   round(total_allocated, 2),
-        "total_unallocated": round(float(total_tips) - total_allocated, 2),
+        "total_allocated":   float(quantize_money(total_allocated)),   # JSON boundary
+        "total_unallocated": float(quantize_money(total_tips_d - total_allocated)),  # JSON boundary
     }
 
 
@@ -3104,11 +3136,11 @@ async def db_calculate_tips_by_attendance(
 
         # For each check, find staff on shift at paid_at
         totals: dict[str, dict] = {}  # staff_id -> {name, role, tickets, amount}
-        total_tips = 0.0
-        unallocated = 0.0
+        total_tips = ZERO
+        unallocated = ZERO
 
         for chk in checks:
-            tip = float(chk["tip_amount"])
+            tip = to_decimal(chk["tip_amount"])
             total_tips += tip
             paid_at = chk["paid_at"]
 
@@ -3134,15 +3166,15 @@ async def db_calculate_tips_by_attendance(
 
             # Redistribute % among present roles only
             present_roles = list(role_staff.keys())
-            total_pct = sum(pct_config.get(r, 0) for r in present_roles)
-            if total_pct == 0:
+            total_pct = to_decimal(sum(pct_config.get(r, 0) for r in present_roles))
+            if total_pct == ZERO:
                 unallocated += tip
                 continue
 
             for role, members in role_staff.items():
-                role_pct = pct_config.get(role, 0)
-                role_share = tip * (role_pct / total_pct)
-                per_person = role_share / len(members)
+                role_pct = to_decimal(pct_config.get(role, 0))
+                role_share = money_mul(tip, role_pct / total_pct)
+                per_person = role_share / Decimal(len(members))
                 for m in members:
                     sid = m["staff_id"]
                     if sid not in totals:
@@ -3151,16 +3183,20 @@ async def db_calculate_tips_by_attendance(
                             "name": m["name"],
                             "role": role,
                             "tickets_contributed": 0,
-                            "total_tips": 0.0,
+                            "total_tips": ZERO,
                         }
                     totals[sid]["tickets_contributed"] += 1
-                    totals[sid]["total_tips"] = round(totals[sid]["total_tips"] + per_person, 2)
+                    totals[sid]["total_tips"] += per_person
+
+        # Quantize at JSON boundary
+        for entry in totals.values():
+            entry["total_tips"] = float(quantize_money(entry["total_tips"]))
 
         entries = sorted(totals.values(), key=lambda x: x["total_tips"], reverse=True)
         return {
             "entries": entries,
-            "total_tips": round(total_tips, 2),
-            "unallocated": round(unallocated, 2),
+            "total_tips": float(quantize_money(total_tips)),
+            "unallocated": float(quantize_money(unallocated)),
             "pct_config": pct_config,
         }
 
@@ -3188,7 +3224,7 @@ async def db_save_tip_distribution(
             restaurant_id,
             period_start,
             period_end,
-            float(total_tips),
+            to_decimal(total_tips),
             json.dumps(distribution),
             json.dumps(pct_config),
             created_by,
@@ -3893,7 +3929,7 @@ async def db_get_timecard(
         d = _serialize(dict(r))
         gross = float(d.get("gross_hours", 0))
         brk   = float(d.get("break_hours", 0))
-        d["net_hours"] = round(gross - brk, 2)
+        d["net_hours"] = round(gross - brk, 2)  # hours: float is fine here
         result.append(d)
     return result
 
@@ -4028,7 +4064,7 @@ async def db_create_deduction_item(
                VALUES ($1::uuid, $2, $3, $4, $5, $6)
                RETURNING id::text, staff_id::text, restaurant_id, category, label,
                          type, amount, active, created_at""",
-            staff_id, restaurant_id, category, label, item_type, float(amount),
+            staff_id, restaurant_id, category, label, item_type, to_decimal(amount),
         )
     return _serialize(dict(row))
 
@@ -4111,22 +4147,23 @@ async def db_calculate_payroll(
         restaurant_id, period_start, period_end
     )
     tips_by_staff: dict = {
-        e["staff_id"]: float(e["total_tips"])
+        e["staff_id"]: to_decimal(e["total_tips"])
         for e in tips_result.get("entries", [])
     }
+    ot_multiplier_d = to_decimal(ot_multiplier)
 
     entries = []
     for sr in staff_rows:
         s    = _serialize(dict(sr))
         sid  = s["id"]
-        rate = float(s.get("hourly_rate") or 0)
+        rate = to_decimal(s.get("hourly_rate") or 0)
 
         hours_data = hours_by_staff.get(sid, {})
-        regular    = float(hours_data.get("regular_hours", 0))
-        overtime   = float(hours_data.get("overtime_hours", 0))
+        regular    = to_decimal(hours_data.get("regular_hours", 0))
+        overtime   = to_decimal(hours_data.get("overtime_hours", 0))
 
-        gross        = (regular * rate) + (overtime * rate * ot_multiplier)
-        tip_earnings = tips_by_staff.get(sid, 0.0)
+        gross        = money_mul(regular, rate) + money_mul(money_mul(overtime, rate), ot_multiplier_d)
+        tip_earnings = tips_by_staff.get(sid, ZERO)
         total_comp   = gross + tip_earnings
 
         deductions_cfg = s.get("deductions") or {}
@@ -4134,26 +4171,26 @@ async def db_calculate_payroll(
             deductions_cfg = json.loads(deductions_cfg)
 
         deductions       = {}
-        total_deductions = 0.0
+        total_deductions = ZERO
         for ded_name, ded_pct in deductions_cfg.items():
-            amt = round(total_comp * float(ded_pct) / 100, 2)
-            deductions[ded_name] = amt
-            total_deductions     += amt
+            amt = quantize_money(money_mul(total_comp, to_decimal(ded_pct) / Decimal("100")))
+            deductions[ded_name] = float(amt)  # JSON boundary
+            total_deductions    += amt
 
-        net_pay = round(total_comp - total_deductions, 2)
+        net_pay = quantize_money(total_comp - total_deductions)
         entries.append({
             "staff_id":           sid,
             "name":               s["name"],
             "role":               s["role"],
-            "regular_hours":      regular,
-            "overtime_hours":     overtime,
-            "hourly_rate":        rate,
-            "gross_pay":          round(gross, 2),
-            "tip_earnings":       round(tip_earnings, 2),
-            "total_compensation": round(total_comp, 2),
+            "regular_hours":      float(regular),   # display only
+            "overtime_hours":     float(overtime),  # display only
+            "hourly_rate":        float(rate),       # display only
+            "gross_pay":          float(quantize_money(gross)),
+            "tip_earnings":       float(quantize_money(tip_earnings)),
+            "total_compensation": float(quantize_money(total_comp)),
             "deductions":         deductions,
-            "total_deductions":   round(total_deductions, 2),
-            "net_pay":            net_pay,
+            "total_deductions":   float(quantize_money(total_deductions)),
+            "net_pay":            float(net_pay),
         })
     return entries
 
@@ -4167,8 +4204,8 @@ async def db_save_payroll_run(
     created_by: str = "",
 ) -> dict:
     """Persist a payroll run snapshot. Returns the saved row."""
-    total_gross = sum(e.get("gross_pay", 0) for e in snapshot)
-    total_net   = sum(e.get("net_pay",   0) for e in snapshot)
+    total_gross = money_sum(e.get("gross_pay", 0) for e in snapshot)
+    total_net   = money_sum(e.get("net_pay",   0) for e in snapshot)
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -4265,13 +4302,13 @@ async def db_create_contract_template(restaurant_id: int, data: dict) -> dict:
                          active, created_at""",
             restaurant_id,
             data["name"],
-            float(data.get("weekly_hours", 44)),
-            float(data.get("monthly_salary", 0)),
+            float(data.get("weekly_hours", 44)),          # hours — float ok
+            to_decimal(data.get("monthly_salary", 0)),
             data.get("pay_period", "biweekly"),
-            float(data.get("transport_subsidy", 0)),
-            float(data.get("arl_pct", 0.00522)),
-            float(data.get("health_pct", 0.04)),
-            float(data.get("pension_pct", 0.04)),
+            to_decimal(data.get("transport_subsidy", 0)),
+            to_decimal(data.get("arl_pct", "0.00522")),   # pct fraction stored as NUMERIC
+            to_decimal(data.get("health_pct", "0.04")),
+            to_decimal(data.get("pension_pct", "0.04")),
             json.dumps(data.get("other_benefits", {})),
             bool(data.get("breaks_billable", True)),
             bool(data.get("lunch_billable", False)),
@@ -4413,7 +4450,7 @@ async def db_upsert_overtime_request(
                RETURNING id::text, staff_id::text, restaurant_id, week_start,
                          regular_minutes, overtime_minutes, overtime_rate, status, created_at""",
             staff_id, restaurant_id, week_start,
-            regular_minutes, overtime_minutes, float(overtime_rate),
+            regular_minutes, overtime_minutes, to_decimal(overtime_rate),
         )
     return _serialize(dict(row))
 
