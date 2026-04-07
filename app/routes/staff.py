@@ -483,11 +483,14 @@ async def self_timecard(request: Request, week_start: str = None, week_end: str 
     from datetime import date, timedelta
     today = date.today()
     if not week_start:
-        # Lunes de la semana actual
         monday = today - timedelta(days=today.weekday())
         week_start = monday.isoformat()
     if not week_end:
         week_end = (date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
+
+    # asyncpg requires date objects (not strings) for DATE parameter binding
+    ws_date = date.fromisoformat(week_start)
+    we_date = date.fromisoformat(week_end)
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
@@ -509,10 +512,10 @@ async def self_timecard(request: Request, week_start: str = None, week_end: str 
                 ), 0)::numeric(8,2) AS break_hours
             FROM staff_shifts s
             WHERE s.staff_id = $1::uuid
-              AND s.clock_in::date BETWEEN $2::date AND $3::date
+              AND s.clock_in::date BETWEEN $2 AND $3
             ORDER BY s.clock_in ASC
             """,
-            staff_id, week_start, week_end,
+            staff_id, ws_date, we_date,
         )
 
     # Fetch schedules for the week
@@ -530,8 +533,8 @@ async def self_timecard(request: Request, week_start: str = None, week_end: str 
         ded_rows = await conn.fetch(
             "SELECT shift_id::text, type, minutes_diff, deduction_amount "
             "FROM attendance_deductions "
-            "WHERE staff_id=$1::uuid AND created_at::date BETWEEN $2::date AND $3::date",
-            staff_id, week_start, week_end,
+            "WHERE staff_id=$1::uuid AND created_at::date BETWEEN $2 AND $3",
+            staff_id, ws_date, we_date,
         )
 
     ded_map: dict = {}
