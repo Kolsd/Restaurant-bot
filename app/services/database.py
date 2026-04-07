@@ -2783,6 +2783,17 @@ async def db_get_shifts(
     date_to: str,
 ) -> list:
     """Return closed and open shifts in [date_from, date_to] with staff name/role."""
+    from datetime import datetime, timezone
+    def _parse_dt(s: str):
+        s = s.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            return datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+    dt_from = _parse_dt(date_from)
+    dt_to   = _parse_dt(date_to)
+
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -2795,10 +2806,10 @@ async def db_get_shifts(
                FROM staff_shifts ss
                JOIN staff s ON ss.staff_id = s.id
                WHERE ss.restaurant_id=$1
-                 AND ss.clock_in >= $2::timestamptz
-                 AND ss.clock_in <  $3::timestamptz
+                 AND ss.clock_in >= $2
+                 AND ss.clock_in <  $3
                ORDER BY ss.clock_in DESC""",
-            restaurant_id, date_from, date_to,
+            restaurant_id, dt_from, dt_to,
         )
     return [_serialize(dict(r)) for r in rows]
 

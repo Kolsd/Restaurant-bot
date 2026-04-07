@@ -518,6 +518,49 @@ function _openStaffModal(self, existing = null) {
   pinIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
   box.appendChild(pinIn);
 
+  // ── CONTRATO (solo en edición) ──
+  let contractTemplateSelect = null;
+  let contractStartInput = null;
+  if (isEdit) {
+    const contractSep = document.createElement('div');
+    contractSep.style.cssText = 'border-top:1px solid #f0f0ec;margin:1rem 0 1rem;';
+    box.appendChild(contractSep);
+
+    const contractTitle = document.createElement('div');
+    contractTitle.textContent = 'Plantilla de contrato';
+    contractTitle.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;';
+    box.appendChild(contractTitle);
+
+    contractTemplateSelect = document.createElement('select');
+    contractTemplateSelect.style.cssText = 'width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e0e0d8;border-radius:8px;font-size:13px;margin-bottom:10px;background:#fff;';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = '— Sin plantilla asignada —';
+    contractTemplateSelect.appendChild(noneOpt);
+
+    // Load templates async
+    _staffFetch('/payroll/contracts').then(data => {
+      (data.templates || []).forEach(t => {
+        const o = document.createElement('option');
+        o.value = t.id;
+        o.textContent = `${t.name} · ${t.weekly_hours}h/sem · $${Number(t.monthly_salary).toLocaleString('es-CO')}`;
+        if (existing.contract_template_id === t.id) o.selected = true;
+        contractTemplateSelect.appendChild(o);
+      });
+    }).catch(() => {});
+    box.appendChild(contractTemplateSelect);
+
+    const contractStartLabel = document.createElement('div');
+    contractStartLabel.textContent = 'Fecha inicio contrato';
+    contractStartLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
+    box.appendChild(contractStartLabel);
+    contractStartInput = document.createElement('input');
+    contractStartInput.type = 'date';
+    contractStartInput.value = existing.contract_start ? existing.contract_start.slice(0,10) : '';
+    contractStartInput.style.cssText = 'width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #e0e0d8;border-radius:8px;font-size:13px;margin-bottom:1rem;';
+    box.appendChild(contractStartInput);
+  }
+
   const errMsg = document.createElement('div');
   errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-bottom:10px;min-height:16px;';
   box.appendChild(errMsg);
@@ -544,6 +587,16 @@ function _openStaffModal(self, existing = null) {
           const patch = { name, roles: rolesArr, role: rolesArr[0], phone, document_number };
           if (pin) patch.password = pin;
           await _staffFetch(`/${existing.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+          // Assign contract template if selector exists
+          if (contractTemplateSelect) {
+            const tplId = contractTemplateSelect.value || null;
+            const cStart = contractStartInput?.value || null;
+            await _staffFetch(`/${existing.id}/contract`, 'PATCH', {
+              template_id: tplId,
+              overrides: {},
+              contract_start: cStart,
+            });
+          }
         } else {
           await _staffFetch('', {
             method: 'POST',
