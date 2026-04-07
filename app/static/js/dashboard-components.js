@@ -976,12 +976,13 @@ async function _renderShiftsEditor(container) {
 
   let staff = [], schedules = [], shifts = [];
   try {
-    const branchHeader = localStorage.getItem('rb_branch_id') || '';
-    const headers = { 'Authorization': `Bearer ${localStorage.getItem('rb_token')}`, 'X-Branch-ID': branchHeader, 'Content-Type': 'application/json' };
+    // date_to is start of Monday = end of Sunday (inclusive of full week)
+    const weekEnd = new Date(days[6]);
+    weekEnd.setDate(weekEnd.getDate() + 1);
     const [staffRes, schedRes, shiftsRes] = await Promise.all([
-      fetch('/api/staff', { headers }).then(r => r.json()),
-      fetch('/api/staff/schedules', { headers }).then(r => r.json()),
-      fetch(`/api/staff/shifts?date_from=${days[0].toISOString()}&date_to=${days[6].toISOString()}`, { headers }).then(r => r.json()),
+      _staffFetch(''),
+      _staffFetch('/schedules'),
+      _staffFetch(`/shifts?date_from=${days[0].toISOString()}&date_to=${weekEnd.toISOString()}`),
     ]);
     staff = (staffRes.staff || []).filter(s => s.active);
     schedules = schedRes.schedules || [];
