@@ -313,49 +313,6 @@ async def get_shifts(
 
 # ── Tip distributions ────────────────────────────────────────────────────────
 
-@router.post("/tip-cut", dependencies=_MODULE_DEPS)
-async def tip_cut(
-    body: TipCutRequest,
-    restaurant: dict = Depends(get_current_restaurant),
-):
-    """
-    Preview + save a tip distribution cut.
-
-    Step 1: calculate proportional distribution from features.tip_distribution config.
-    Step 2: persist the cut to tip_distributions.
-    Returns the saved distribution with per-employee breakdown.
-    """
-    preview = await db.db_calculate_tip_pool(
-        restaurant_id=restaurant["id"],
-        period_start=body.period_start,
-        period_end=body.period_end,
-        total_tips=body.total_tips,
-    )
-
-    if not preview["entries"]:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "No se encontraron turnos en el período seleccionado, "
-                "o el restaurante no tiene configurado 'tip_distribution' en sus features."
-            ),
-        )
-
-    saved = await db.db_save_tip_distribution(
-        restaurant_id=restaurant["id"],
-        period_start=body.period_start,
-        period_end=body.period_end,
-        total_tips=body.total_tips,
-        distribution=preview["entries"],
-        pct_config=preview["pct_config"],
-        created_by=restaurant.get("whatsapp_number", ""),
-    )
-    return {
-        "distribution": saved,
-        "preview": preview,
-    }
-
-
 @router.get("/tip-distributions", dependencies=_MODULE_DEPS)
 async def tip_distributions(
     restaurant: dict = Depends(get_current_restaurant),
@@ -363,6 +320,54 @@ async def tip_distributions(
     """Return the 20 most recent tip distribution cuts."""
     cuts = await db.db_get_tip_distributions(restaurant["id"])
     return {"distributions": cuts}
+
+
+class TipsAutoRequest(BaseModel):
+    period_start: str
+    period_end: str
+    branch_id: int | None = None
+
+
+@router.get("/tips/auto", dependencies=_MODULE_DEPS)
+async def tips_auto(
+    period_start: str,
+    period_end: str,
+    branch_id: int | None = None,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Return auto-calculated tip distribution based on attendance overlap."""
+    result = await db.db_calculate_tips_by_attendance(
+        restaurant_id=restaurant["id"],
+        period_start=period_start,
+        period_end=period_end,
+        branch_id=branch_id,
+    )
+    return result
+
+
+class TipDistributionConfig(BaseModel):
+    config: dict[str, float]
+
+
+@router.patch("/tip-distribution", dependencies=_MODULE_DEPS, status_code=200)
+async def update_tip_distribution(
+    body: TipDistributionConfig,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Update the tip distribution % config for all roles."""
+    total = sum(body.config.values())
+    if abs(total - 100.0) > 0.01 and total > 0:
+        if total > 100.0:
+            raise HTTPException(status_code=400, detail=f"Los porcentajes suman {total:.1f}%, no pueden superar 100%")
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE restaurants
+               SET features = jsonb_set(COALESCE(features, '{}'), '{tip_distribution}', $1::jsonb)
+               WHERE id = $2""",
+            json.dumps(body.config), restaurant["id"],
+        )
+    return {"success": True, "config": body.config}
 
 
 # ── Break management (self-service) ─────────────────────────────────────────
@@ -641,6 +646,29 @@ class ScheduleBody(BaseModel):
     end_time:    str  # "HH:MM" format
 
 
+class ScheduleBulkBody(BaseModel):
+    entries: list[ScheduleBody]
+
+
+@router.post("/schedules/bulk", dependencies=_MODULE_DEPS, status_code=200)
+async def save_schedules_bulk(
+    body: ScheduleBulkBody,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Bulk create/update schedules for multiple staff members."""
+    from datetime import time
+    entries = []
+    for e in body.entries:
+        entries.append({
+            "staff_id": e.staff_id,
+            "day_of_week": e.day_of_week,
+            "start_time": time.fromisoformat(e.start_time),
+            "end_time": time.fromisoformat(e.end_time),
+        })
+    results = await db.db_bulk_upsert_schedules(entries, restaurant["id"])
+    return {"schedules": results}
+
+
 @router.post("/schedules", dependencies=_MODULE_DEPS, status_code=200)
 async def save_schedule(
     body: ScheduleBody,
@@ -849,3 +877,151 @@ async def list_payroll_runs(
         branch_id = int(branch_header)
     runs = await db.db_get_payroll_runs(branch_id)
     return {"runs": runs}
+
+
+# ── Contract templates (admin/owner) ─────────────────────────────────────────
+
+class ContractTemplateCreate(BaseModel):
+    name:               str   = Field(..., min_length=1, max_length=100)
+    weekly_hours:       float = Field(44.0, ge=1, le=84)
+    monthly_salary:     float = Field(0.0, ge=0)
+    pay_period:         str   = Field("biweekly", pattern="^(monthly|biweekly|weekly)$")
+    transport_subsidy:  float = Field(0.0, ge=0)
+    arl_pct:            float = Field(0.00522, ge=0, le=1)
+    health_pct:         float = Field(0.04, ge=0, le=1)
+    pension_pct:        float = Field(0.04, ge=0, le=1)
+    other_benefits:     dict  = Field(default_factory=dict)
+    breaks_billable:    bool  = True
+    lunch_billable:     bool  = False
+    lunch_minutes:      int   = Field(60, ge=0, le=120)
+
+
+class ContractTemplateUpdate(BaseModel):
+    name:               str   | None = Field(None, min_length=1, max_length=100)
+    weekly_hours:       float | None = Field(None, ge=1, le=84)
+    monthly_salary:     float | None = Field(None, ge=0)
+    pay_period:         str   | None = Field(None, pattern="^(monthly|biweekly|weekly)$")
+    transport_subsidy:  float | None = Field(None, ge=0)
+    arl_pct:            float | None = Field(None, ge=0, le=1)
+    health_pct:         float | None = Field(None, ge=0, le=1)
+    pension_pct:        float | None = Field(None, ge=0, le=1)
+    other_benefits:     dict  | None = None
+    breaks_billable:    bool  | None = None
+    lunch_billable:     bool  | None = None
+    lunch_minutes:      int   | None = Field(None, ge=0, le=120)
+    active:             bool  | None = None
+
+
+class StaffContractAssign(BaseModel):
+    template_id:    str | None = None
+    overrides:      dict       = Field(default_factory=dict)
+    contract_start: str | None = None
+
+
+@router.get("/payroll/contracts", dependencies=_MODULE_DEPS)
+async def list_contract_templates(
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """List all contract templates for the restaurant."""
+    templates = await db.db_list_contract_templates(restaurant["id"])
+    return {"templates": templates}
+
+
+@router.post("/payroll/contracts", dependencies=_MODULE_DEPS, status_code=201)
+async def create_contract_template(
+    body: ContractTemplateCreate,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Create a new contract template."""
+    template = await db.db_create_contract_template(restaurant["id"], body.model_dump())
+    return {"template": template}
+
+
+@router.patch("/payroll/contracts/{template_id}", dependencies=_MODULE_DEPS)
+async def update_contract_template(
+    template_id: str,
+    body: ContractTemplateUpdate,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Update a contract template."""
+    data = {k: v for k, v in body.model_dump().items() if v is not None}
+    template = await db.db_update_contract_template(template_id, restaurant["id"], data)
+    if not template:
+        raise HTTPException(status_code=404, detail="Plantilla no encontrada.")
+    return {"template": template}
+
+
+@router.delete("/payroll/contracts/{template_id}", dependencies=_MODULE_DEPS)
+async def delete_contract_template(
+    template_id: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Delete a contract template (fails if staff are assigned to it)."""
+    deleted = await db.db_delete_contract_template(template_id, restaurant["id"])
+    if not deleted:
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede eliminar: hay empleados asignados a esta plantilla.",
+        )
+    return {"success": True}
+
+
+@router.patch("/{staff_id}/contract", dependencies=_MODULE_DEPS)
+async def assign_staff_contract(
+    staff_id: str,
+    body: StaffContractAssign,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Assign or clear a contract template for a staff member."""
+    result = await db.db_assign_staff_contract(
+        staff_id=staff_id,
+        restaurant_id=restaurant["id"],
+        template_id=body.template_id,
+        overrides=body.overrides,
+        contract_start=body.contract_start,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    return {"staff": result}
+
+
+# ── Overtime approval (admin/owner) ──────────────────────────────────────────
+
+class OvertimeReview(BaseModel):
+    status: str = Field(..., pattern="^(approved|rejected)$")
+    notes:  str = Field("", max_length=500)
+
+
+@router.get("/payroll/overtime", dependencies=_MODULE_DEPS)
+async def list_overtime_requests(
+    request: Request,
+    week_start: str | None = None,
+    status: str | None = None,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """List overtime requests for review."""
+    branch_id = restaurant["id"]
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit():
+        branch_id = int(branch_header)
+    requests = await db.db_list_overtime_requests(branch_id, week_start, status)
+    return {"overtime_requests": requests}
+
+
+@router.patch("/payroll/overtime/{request_id}", dependencies=_MODULE_DEPS)
+async def review_overtime_request(
+    request_id: str,
+    body: OvertimeReview,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Approve or reject an overtime request."""
+    result = await db.db_review_overtime_request(
+        request_id=request_id,
+        restaurant_id=restaurant["id"],
+        status=body.status,
+        approved_by=None,  # Could pass restaurant admin ID if available
+        notes=body.notes,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Solicitud de overtime no encontrada.")
+    return {"overtime_request": result}

@@ -830,6 +830,7 @@ class PayCheckBody(BaseModel):
     customer_nit:  str = "222222222"
     customer_email: str = ""
     service_charge: float = 0.0  # Cargo de servicio en valor absoluto (ej. 10% del subtotal)
+    tip_amount: float = Field(0.0, ge=0.0)
 
 
 @router.post("/api/table-orders/{base_order_id}/checks")
@@ -929,6 +930,9 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${check_total:,.0f}, se recibieron ${total_pagado:,.0f}")
         change = round(total_pagado - check_total, 2)
 
+        if body.tip_amount > 0 and body.tip_amount > float(check["total"]) * 0.5:
+            raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
+
         config = await billing.get_billing_config(restaurant["id"])
         features = restaurant.get("features") or {}
         if isinstance(features, str):
@@ -988,6 +992,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             customer_name=body.customer_name,
             customer_nit=body.customer_nit,
             customer_email=body.customer_email,
+            tip_amount=body.tip_amount,
         )
 
         if hasattr(loyalty_svc, "accrue_on_check"):

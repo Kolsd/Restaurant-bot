@@ -2385,6 +2385,7 @@ async def db_finalize_check_payment(
     customer_name: str = None,
     customer_nit: str = None,
     customer_email: str = None,
+    tip_amount: float = 0.0,
 ) -> None:
     """
     Atómicamente:
@@ -2400,12 +2401,12 @@ async def db_finalize_check_payment(
                    SET payments=$1::jsonb, change_amount=$2,
                        fiscal_invoice_id=$3, status='invoiced',
                        customer_name=$4, customer_nit=$5, customer_email=$6,
-                       paid_at=NOW()
-                   WHERE id=$7""",
+                       tip_amount=$7, paid_at=NOW()
+                   WHERE id=$8""",
                 json.dumps(payments), float(change_amount),
                 fiscal_invoice_id,
                 customer_name, customer_nit, customer_email,
-                check_id
+                float(tip_amount), check_id
             )
             # Verificar si todos los checks del grupo están cerrados
             pending = await conn.fetchval(
@@ -2913,6 +2914,122 @@ async def db_calculate_tip_pool(
         "total_allocated":   round(total_allocated, 2),
         "total_unallocated": round(float(total_tips) - total_allocated, 2),
     }
+
+
+async def db_calculate_tips_by_attendance(
+    restaurant_id: int,
+    period_start: str,
+    period_end: str,
+    branch_id: int | None = None,
+) -> dict:
+    """
+    Distribute tips from table_checks to staff based on who was clocked-in
+    when each ticket was paid. Uses features.tip_distribution % config.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Get tip distribution config
+        rest = await conn.fetchrow(
+            "SELECT features FROM restaurants WHERE id=$1", restaurant_id
+        )
+        features = rest["features"] or {} if rest else {}
+        if isinstance(features, str):
+            import json as _j
+            try:
+                features = _j.loads(features)
+            except Exception:
+                features = {}
+        pct_config = features.get("tip_distribution", {})
+        if not pct_config:
+            return {"entries": [], "total_tips": 0, "unallocated": 0, "pct_config": {}}
+
+        # Resolve restaurant scope (branch or matrix + branches)
+        if branch_id:
+            rest_ids = [branch_id]
+        else:
+            branches = await conn.fetch(
+                "SELECT id FROM restaurants WHERE id=$1 OR parent_restaurant_id=$1",
+                restaurant_id,
+            )
+            rest_ids = [r["id"] for r in branches]
+
+        # Fetch all paid checks in period with tip_amount > 0
+        checks = await conn.fetch(
+            """SELECT tc.id, tc.tip_amount, tc.paid_at
+               FROM table_checks tc
+               JOIN table_orders to2 ON to2.id = tc.base_order_id
+               WHERE tc.paid_at >= $1::timestamptz
+                 AND tc.paid_at < $2::timestamptz
+                 AND tc.tip_amount > 0
+                 AND tc.status = 'invoiced'
+                 AND COALESCE(to2.branch_id, $3) = ANY($4::int[])""",
+            period_start, period_end, restaurant_id, rest_ids,
+        )
+
+        if not checks:
+            return {"entries": [], "total_tips": 0, "unallocated": 0, "pct_config": pct_config}
+
+        # For each check, find staff on shift at paid_at
+        totals: dict[str, dict] = {}  # staff_id -> {name, role, tickets, amount}
+        total_tips = 0.0
+        unallocated = 0.0
+
+        for chk in checks:
+            tip = float(chk["tip_amount"])
+            total_tips += tip
+            paid_at = chk["paid_at"]
+
+            on_shift = await conn.fetch(
+                """SELECT ss.staff_id::text, s.name, s.role
+                   FROM staff_shifts ss
+                   JOIN staff s ON s.id = ss.staff_id
+                   WHERE ss.restaurant_id = ANY($1::int[])
+                     AND ss.clock_in <= $2
+                     AND (ss.clock_out IS NULL OR ss.clock_out >= $2)
+                     AND s.role = ANY($3::text[])""",
+                rest_ids, paid_at, list(pct_config.keys()),
+            )
+
+            if not on_shift:
+                unallocated += tip
+                continue
+
+            # Group by role
+            role_staff: dict[str, list[dict]] = {}
+            for s in on_shift:
+                role_staff.setdefault(s["role"], []).append(dict(s))
+
+            # Redistribute % among present roles only
+            present_roles = list(role_staff.keys())
+            total_pct = sum(pct_config.get(r, 0) for r in present_roles)
+            if total_pct == 0:
+                unallocated += tip
+                continue
+
+            for role, members in role_staff.items():
+                role_pct = pct_config.get(role, 0)
+                role_share = tip * (role_pct / total_pct)
+                per_person = role_share / len(members)
+                for m in members:
+                    sid = m["staff_id"]
+                    if sid not in totals:
+                        totals[sid] = {
+                            "staff_id": sid,
+                            "name": m["name"],
+                            "role": role,
+                            "tickets_contributed": 0,
+                            "total_tips": 0.0,
+                        }
+                    totals[sid]["tickets_contributed"] += 1
+                    totals[sid]["total_tips"] = round(totals[sid]["total_tips"] + per_person, 2)
+
+        entries = sorted(totals.values(), key=lambda x: x["total_tips"], reverse=True)
+        return {
+            "entries": entries,
+            "total_tips": round(total_tips, 2),
+            "unallocated": round(unallocated, 2),
+            "pct_config": pct_config,
+        }
 
 
 async def db_save_tip_distribution(
@@ -3508,6 +3625,32 @@ async def db_upsert_schedule(
         return _serialize(dict(row))
 
 
+async def db_bulk_upsert_schedules(
+    entries: list[dict],
+    restaurant_id: int,
+) -> list[dict]:
+    """Bulk create/update schedules. Each entry: {staff_id, day_of_week, start_time, end_time}."""
+    pool = await get_pool()
+    results = []
+    async with pool.acquire() as conn:
+        for entry in entries:
+            await conn.execute(
+                "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
+                entry["staff_id"], entry["day_of_week"],
+            )
+            row = await conn.fetchrow(
+                """INSERT INTO staff_schedules (staff_id, restaurant_id, day_of_week, start_time, end_time)
+                   VALUES ($1::uuid, $2, $3, $4, $5)
+                   RETURNING id::text, staff_id::text, restaurant_id, day_of_week,
+                             start_time::text, end_time::text""",
+                entry["staff_id"], restaurant_id, entry["day_of_week"],
+                entry["start_time"], entry["end_time"],
+            )
+            if row:
+                results.append(_serialize(dict(row)))
+    return results
+
+
 async def db_get_schedules(restaurant_id: int) -> list:
     """Return all active schedules for a restaurant with staff info."""
     pool = await get_pool()
@@ -3831,23 +3974,13 @@ async def db_calculate_payroll(
     )
     hours_by_staff = {d["staff_id"]: d for d in overtime_data}
 
-    async with pool.acquire() as conn:
-        tip_rows = await conn.fetch(
-            """SELECT distribution FROM tip_distributions
-               WHERE restaurant_id = $1
-                 AND period_start >= $2::date
-                 AND period_end   <= $3::date""",
-            restaurant_id, period_start, period_end,
-        )
-
-    tips_by_staff: dict = {}
-    for tr in tip_rows:
-        dist = tr["distribution"]
-        if isinstance(dist, str):
-            dist = json.loads(dist)
-        for entry in (dist or []):
-            sid = entry.get("staff_id", "")
-            tips_by_staff[sid] = tips_by_staff.get(sid, 0.0) + float(entry.get("amount", 0))
+    tips_result = await db_calculate_tips_by_attendance(
+        restaurant_id, period_start, period_end
+    )
+    tips_by_staff: dict = {
+        e["staff_id"]: float(e["total_tips"])
+        for e in tips_result.get("entries", [])
+    }
 
     entries = []
     for sr in staff_rows:
@@ -3960,5 +4093,216 @@ async def db_approve_payroll_run(run_id: str, restaurant_id: int) -> dict | None
                WHERE id = $1::uuid AND restaurant_id = $2 AND status = 'draft'
                RETURNING id::text, status, approved_at""",
             run_id, restaurant_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+# ── Contract templates ─────────────────────────────────────────────────────
+
+async def db_list_contract_templates(restaurant_id: int) -> list:
+    """Return all contract templates for a restaurant."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id::text, restaurant_id, name, weekly_hours, monthly_salary,
+                      pay_period, transport_subsidy, arl_pct, health_pct, pension_pct,
+                      other_benefits, breaks_billable, lunch_billable, lunch_minutes,
+                      active, created_at
+               FROM contract_templates
+               WHERE restaurant_id = $1
+               ORDER BY active DESC, name""",
+            restaurant_id,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_create_contract_template(restaurant_id: int, data: dict) -> dict:
+    """Create a new contract template."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO contract_templates
+               (restaurant_id, name, weekly_hours, monthly_salary, pay_period,
+                transport_subsidy, arl_pct, health_pct, pension_pct,
+                other_benefits, breaks_billable, lunch_billable, lunch_minutes)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               RETURNING id::text, restaurant_id, name, weekly_hours, monthly_salary,
+                         pay_period, transport_subsidy, arl_pct, health_pct, pension_pct,
+                         other_benefits, breaks_billable, lunch_billable, lunch_minutes,
+                         active, created_at""",
+            restaurant_id,
+            data["name"],
+            float(data.get("weekly_hours", 44)),
+            float(data.get("monthly_salary", 0)),
+            data.get("pay_period", "biweekly"),
+            float(data.get("transport_subsidy", 0)),
+            float(data.get("arl_pct", 0.00522)),
+            float(data.get("health_pct", 0.04)),
+            float(data.get("pension_pct", 0.04)),
+            json.dumps(data.get("other_benefits", {})),
+            bool(data.get("breaks_billable", True)),
+            bool(data.get("lunch_billable", False)),
+            int(data.get("lunch_minutes", 60)),
+        )
+    return _serialize(dict(row))
+
+
+async def db_update_contract_template(template_id: str, restaurant_id: int, data: dict) -> dict | None:
+    """Update allowed fields of a contract template."""
+    allowed = {
+        "name", "weekly_hours", "monthly_salary", "pay_period",
+        "transport_subsidy", "arl_pct", "health_pct", "pension_pct",
+        "other_benefits", "breaks_billable", "lunch_billable", "lunch_minutes", "active",
+    }
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return None
+    pool = await get_pool()
+    set_parts = []
+    values: list = [template_id, restaurant_id]
+    idx = 3
+    for col, val in updates.items():
+        set_parts.append(f"{col} = ${idx}")
+        values.append(val)
+        idx += 1
+    sql = (
+        f"UPDATE contract_templates SET {', '.join(set_parts)} "
+        f"WHERE id=$1::uuid AND restaurant_id=$2 "
+        f"RETURNING id::text, restaurant_id, name, weekly_hours, monthly_salary, pay_period, "
+        f"transport_subsidy, arl_pct, health_pct, pension_pct, other_benefits, "
+        f"breaks_billable, lunch_billable, lunch_minutes, active, created_at"
+    )
+    async with (await get_pool()).acquire() as conn:
+        row = await conn.fetchrow(sql, *values)
+    return _serialize(dict(row)) if row else None
+
+
+async def db_delete_contract_template(template_id: str, restaurant_id: int) -> bool:
+    """Delete a contract template (only if no staff assigned)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        in_use = await conn.fetchval(
+            "SELECT COUNT(*) FROM staff WHERE contract_template_id=$1::uuid",
+            template_id,
+        )
+        if in_use:
+            return False
+        result = await conn.execute(
+            "DELETE FROM contract_templates WHERE id=$1::uuid AND restaurant_id=$2",
+            template_id, restaurant_id,
+        )
+    return result.split()[-1] != "0"
+
+
+async def db_assign_staff_contract(
+    staff_id: str,
+    restaurant_id: int,
+    template_id: str | None,
+    overrides: dict | None = None,
+    contract_start: str | None = None,
+) -> dict | None:
+    """Assign (or clear) a contract template for a staff member."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE staff
+               SET contract_template_id = $1::uuid,
+                   contract_overrides   = $2::jsonb,
+                   contract_start       = $3::date
+               WHERE id = $4::uuid AND restaurant_id = $5
+               RETURNING id::text, name, role, contract_template_id::text,
+                         contract_overrides, contract_start""",
+            template_id,
+            json.dumps(overrides or {}),
+            contract_start,
+            staff_id,
+            restaurant_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+# ── Overtime requests ──────────────────────────────────────────────────────
+
+async def db_list_overtime_requests(
+    restaurant_id: int,
+    week_start: str | None = None,
+    status: str | None = None,
+) -> list:
+    """Return overtime requests, optionally filtered by week and status."""
+    pool = await get_pool()
+    clauses = ["o.restaurant_id = $1"]
+    values: list = [restaurant_id]
+    idx = 2
+    if week_start:
+        clauses.append(f"o.week_start = ${idx}::date")
+        values.append(week_start)
+        idx += 1
+    if status:
+        clauses.append(f"o.status = ${idx}")
+        values.append(status)
+        idx += 1
+    where = " AND ".join(clauses)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""SELECT o.id::text, o.staff_id::text, s.name AS staff_name, s.role,
+                       o.restaurant_id, o.week_start, o.regular_minutes,
+                       o.overtime_minutes, o.overtime_rate, o.status,
+                       o.approved_by::text, o.approved_at, o.notes, o.created_at
+                FROM overtime_requests o
+                JOIN staff s ON s.id = o.staff_id
+                WHERE {where}
+                ORDER BY o.week_start DESC, s.name""",
+            *values,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_upsert_overtime_request(
+    staff_id: str,
+    restaurant_id: int,
+    week_start: str,
+    regular_minutes: int,
+    overtime_minutes: int,
+    overtime_rate: float = 1.25,
+) -> dict:
+    """Insert or update an overtime request for a staff member's week."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO overtime_requests
+               (staff_id, restaurant_id, week_start, regular_minutes, overtime_minutes, overtime_rate)
+               VALUES ($1::uuid, $2, $3::date, $4, $5, $6)
+               ON CONFLICT (staff_id, week_start) DO UPDATE
+                 SET regular_minutes  = EXCLUDED.regular_minutes,
+                     overtime_minutes = EXCLUDED.overtime_minutes,
+                     overtime_rate    = EXCLUDED.overtime_rate,
+                     status           = 'pending'
+               RETURNING id::text, staff_id::text, restaurant_id, week_start,
+                         regular_minutes, overtime_minutes, overtime_rate, status, created_at""",
+            staff_id, restaurant_id, week_start,
+            regular_minutes, overtime_minutes, float(overtime_rate),
+        )
+    return _serialize(dict(row))
+
+
+async def db_review_overtime_request(
+    request_id: str,
+    restaurant_id: int,
+    status: str,
+    approved_by: str | None,
+    notes: str = "",
+) -> dict | None:
+    """Approve or reject an overtime request."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE overtime_requests
+               SET status=$3, approved_by=$4::uuid, approved_at=NOW(), notes=$5
+               WHERE id=$1::uuid AND restaurant_id=$2
+               RETURNING id::text, staff_id::text, restaurant_id, week_start,
+                         regular_minutes, overtime_minutes, overtime_rate,
+                         status, approved_by::text, approved_at, notes""",
+            request_id, restaurant_id, status,
+            approved_by, notes,
         )
     return _serialize(dict(row)) if row else None

@@ -158,8 +158,7 @@ const ConnectionStatus = MesioComponent({
 //     loading:    bool,
 //     staff:      [...],          // GET /api/staff
 //     shifts:     [...],          // GET /api/staff/open-shifts  (includes staff_id)
-//     tipPreview: null | {...},   // result of POST /api/staff/tip-cut
-//     tab:        'roster' | 'shifts' | 'tips',
+//     tab:        'roster' | 'shifts',
 //     filter:     'all' | role,   // active role filter chip
 //     search:     string,         // name search term
 //     error:      string | null,
@@ -849,249 +848,529 @@ function _renderRosterTab(state, el, self) {
 }
 
 
-// ── Shifts tab ────────────────────────────────────────────────────────────────
+// ── Shifts editor ──────────────────────────────────────────────────────────────
 
-function _renderShiftsTab(state, el, self) {
-  // Clock-in/out panel
-  const panel = document.createElement('div');
-  panel.style.cssText = 'background:#f8f8f5;border:1px solid #e0e0d8;border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.25rem;';
+const _DAY_NAMES = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 
-  const panelTitle = document.createElement('div');
-  panelTitle.textContent = 'Registrar entrada / salida';
-  panelTitle.style.cssText = 'font-size:14px;font-weight:600;margin-bottom:.75rem;';
-  panel.appendChild(panelTitle);
+function _shiftsWeekStart(offset = 0) {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7; // 0=Mon
+  d.setDate(d.getDate() - dow + offset * 7);
+  d.setHours(0,0,0,0);
+  return d;
+}
 
-  const activeStaff = state.staff.filter(s => s.active);
-  if (!activeStaff.length) {
-    const msg = document.createElement('div');
-    msg.className   = 'empty-state';
-    msg.textContent = 'No hay empleados activos. Agrega empleados en la pestaña Roster.';
-    panel.appendChild(msg);
-    el.appendChild(panel);
-  } else {
-    const staffSel = _makeSelect(
-      activeStaff.map(s => [s.id, `${s.name} (${_ROLE_LABELS[s.role] || s.role})`]),
-    );
+function _fmtDateShort(d) {
+  return d.toLocaleDateString('es-CO', { day:'numeric', month:'short' });
+}
 
-    const errMsg = document.createElement('div');
-    errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-top:6px;min-height:16px;';
+async function _renderShiftsEditor(container) {
+  container.textContent = '';
 
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:.75rem;';
+  // Module-level week offset state on the container element
+  if (container._weekOffset === undefined) container._weekOffset = 0;
+  if (container._selectedStaff === undefined) container._selectedStaff = new Set();
 
-    const ciBtn = _makeBtn('▶ Entrada', 'btn-sm btn-primary', async () => {
-      errMsg.textContent = '';
-      ciBtn.disabled = true;
-      try {
-        await _staffFetch('/clock-in', { method: 'POST', body: JSON.stringify({ staff_id: staffSel.value }) });
-        await _reloadShifts(self);
-      } catch (e) {
-        errMsg.textContent = e.message;
-      } finally {
-        ciBtn.disabled = false;
-      }
+  const weekStart = _shiftsWeekStart(container._weekOffset);
+  const days = Array.from({length:7}, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+
+  // ── Week navigation ──
+  const navBar = document.createElement('div');
+  navBar.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;';
+
+  const prevBtn = document.createElement('button');
+  prevBtn.textContent = '← Anterior';
+  prevBtn.style.cssText = 'padding:7px 13px;border:1.5px solid #e0e0d8;background:#f9f9f7;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;';
+  prevBtn.addEventListener('click', () => { container._weekOffset--; container._selectedStaff.clear(); _renderShiftsEditor(container); });
+
+  const weekLabel = document.createElement('span');
+  weekLabel.style.cssText = 'font-weight:700;font-size:13px;min-width:190px;text-align:center;';
+  weekLabel.textContent = _fmtDateShort(days[0]) + ' – ' + _fmtDateShort(days[6]);
+
+  const nextBtn = document.createElement('button');
+  nextBtn.textContent = 'Siguiente →';
+  nextBtn.style.cssText = prevBtn.style.cssText;
+  nextBtn.addEventListener('click', () => { container._weekOffset++; container._selectedStaff.clear(); _renderShiftsEditor(container); });
+
+  const todayBtn = document.createElement('button');
+  todayBtn.textContent = 'Hoy';
+  todayBtn.style.cssText = 'padding:7px 13px;border:1.5px solid #e0e0d8;background:#18181B;color:#fff;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;';
+  todayBtn.addEventListener('click', () => { container._weekOffset = 0; container._selectedStaff.clear(); _renderShiftsEditor(container); });
+
+  const copyPrevBtn = document.createElement('button');
+  copyPrevBtn.textContent = '📋 Copiar semana anterior';
+  copyPrevBtn.style.cssText = 'padding:7px 13px;border:1.5px solid #e0e0d8;background:#f0f0ec;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:auto;';
+  copyPrevBtn.addEventListener('click', async () => {
+    if (!confirm('¿Copiar los horarios de la semana anterior a esta semana?')) return;
+    const prevDays = Array.from({length:7}, (_,i) => {
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() - 7 + i);
+      return d;
     });
+    try {
+      const prevSched = await _staffFetch(`/schedules?week_start=${prevDays[0].toISOString().slice(0,10)}`);
+      const entries = (prevSched.schedules || []).map(s => ({
+        staff_id: s.staff_id, day_of_week: s.day_of_week,
+        start_time: s.start_time, end_time: s.end_time,
+      }));
+      if (!entries.length) { alert('No hay horarios en la semana anterior.'); return; }
+      await _staffFetch('/schedules/bulk', 'POST', { entries });
+      _renderShiftsEditor(container);
+    } catch(e) { alert('Error: ' + e.message); }
+  });
 
-    const coBtn = _makeBtn('■ Salida', 'btn-sm btn-outline', async () => {
-      errMsg.textContent = '';
-      coBtn.disabled = true;
-      try {
-        await _staffFetch('/clock-out', { method: 'POST', body: JSON.stringify({ staff_id: staffSel.value }) });
-        await _reloadShifts(self);
-      } catch (e) {
-        errMsg.textContent = e.message;
-      } finally {
-        coBtn.disabled = false;
-      }
-    });
+  navBar.appendChild(prevBtn);
+  navBar.appendChild(weekLabel);
+  navBar.appendChild(nextBtn);
+  navBar.appendChild(todayBtn);
+  navBar.appendChild(copyPrevBtn);
+  container.appendChild(navBar);
 
-    btnRow.appendChild(ciBtn);
-    btnRow.appendChild(coBtn);
-    panel.appendChild(staffSel);
-    panel.appendChild(btnRow);
-    panel.appendChild(errMsg);
-    el.appendChild(panel);
+  // ── Bulk action bar ──
+  const bulkBar = document.createElement('div');
+  bulkBar.id = 'shifts-bulk-bar';
+  bulkBar.style.cssText = 'display:none;background:#E8F4FD;border:1.5px solid #93C5FD;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;';
+  const bulkLabel = document.createElement('span');
+  bulkLabel.style.cssText = 'font-size:13px;font-weight:600;color:#1D4ED8;flex:1;';
+  const bulkApplyBtn = document.createElement('button');
+  bulkApplyBtn.textContent = 'Aplicar turno';
+  bulkApplyBtn.style.cssText = 'background:#1D4ED8;color:#fff;border:none;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;';
+  const bulkClearBtn = document.createElement('button');
+  bulkClearBtn.textContent = 'Limpiar selección';
+  bulkClearBtn.style.cssText = 'background:#fff;border:1.5px solid #93C5FD;color:#1D4ED8;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;';
+  bulkBar.appendChild(bulkLabel);
+  bulkBar.appendChild(bulkApplyBtn);
+  bulkBar.appendChild(bulkClearBtn);
+  bulkBar.style.display = 'none';
+  container.appendChild(bulkBar);
+
+  const refreshBulkBar = () => {
+    const n = container._selectedStaff.size;
+    if (n > 0) {
+      bulkBar.style.display = 'flex';
+      bulkLabel.textContent = `${n} empleado${n>1?'s':''} seleccionado${n>1?'s':''}`;
+    } else {
+      bulkBar.style.display = 'none';
+    }
+  };
+
+  bulkClearBtn.addEventListener('click', () => {
+    container._selectedStaff.clear();
+    container.querySelectorAll('.staff-row-check').forEach(cb => { cb.checked = false; });
+    refreshBulkBar();
+  });
+
+  bulkApplyBtn.addEventListener('click', () => {
+    _openBulkScheduleModal(container, [...container._selectedStaff], days, refreshBulkBar);
+  });
+
+  // ── Load data ──
+  const loadingMsg = document.createElement('div');
+  loadingMsg.className = 'empty-state';
+  loadingMsg.textContent = 'Cargando horarios...';
+  container.appendChild(loadingMsg);
+
+  let staff = [], schedules = [], shifts = [];
+  try {
+    const branchHeader = localStorage.getItem('rb_branch_id') || '';
+    const headers = { 'Authorization': `Bearer ${localStorage.getItem('rb_token')}`, 'X-Branch-ID': branchHeader, 'Content-Type': 'application/json' };
+    const [staffRes, schedRes, shiftsRes] = await Promise.all([
+      fetch('/api/staff', { headers }).then(r => r.json()),
+      fetch('/api/staff/schedules', { headers }).then(r => r.json()),
+      fetch(`/api/staff/shifts?date_from=${days[0].toISOString()}&date_to=${days[6].toISOString()}`, { headers }).then(r => r.json()),
+    ]);
+    staff = (staffRes.staff || []).filter(s => s.active);
+    schedules = schedRes.schedules || [];
+    shifts = shiftsRes.shifts || [];
+  } catch(e) {
+    loadingMsg.textContent = 'Error al cargar: ' + e.message;
+    return;
   }
+  loadingMsg.remove();
 
-  // Open shifts
-  const openTitle = document.createElement('div');
-  openTitle.textContent = 'Turnos abiertos ahora';
-  openTitle.style.cssText = 'font-size:14px;font-weight:600;margin-bottom:.75rem;';
-  el.appendChild(openTitle);
-
-  if (!state.shifts.length) {
+  if (!staff.length) {
     const empty = document.createElement('div');
-    empty.className   = 'empty-state';
-    empty.textContent = 'No hay turnos abiertos en este momento.';
-    el.appendChild(empty);
+    empty.className = 'empty-state';
+    empty.textContent = 'No hay empleados activos.';
+    container.appendChild(empty);
     return;
   }
 
+  // Build lookup maps
+  const schedByStaffDay = {}; // `${staff_id}_${day_of_week}` -> schedule
+  schedules.forEach(s => { schedByStaffDay[`${s.staff_id}_${s.day_of_week}`] = s; });
+
+  const shiftsByStaffDay = {}; // `${staff_id}_${dateStr}` -> shift[]
+  shifts.forEach(sh => {
+    const d = new Date(sh.clock_in);
+    const dayStr = d.toISOString().slice(0,10);
+    const key = `${sh.staff_id}_${dayStr}`;
+    shiftsByStaffDay[key] = shiftsByStaffDay[key] || [];
+    shiftsByStaffDay[key].push(sh);
+  });
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // ── Grid table ──
+  const tableWrap = document.createElement('div');
+  tableWrap.style.cssText = 'overflow-x:auto;border-radius:12px;border:1px solid #e0e0d8;';
+
   const tbl = document.createElement('table');
-  tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+  tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;min-width:680px;';
+
+  // Header row
   const thead = document.createElement('thead');
-  const hrow  = document.createElement('tr');
-  ['Empleado', 'Rol', 'Entrada', 'Tiempo'].forEach(h => {
+  const hrow = document.createElement('tr');
+  hrow.style.background = '#f9f9f7';
+
+  // Checkbox + Employee column
+  const thCheck = document.createElement('th');
+  thCheck.style.cssText = 'padding:10px 8px;border-bottom:1px solid #e0e0d8;width:32px;';
+  hrow.appendChild(thCheck);
+
+  const thEmp = document.createElement('th');
+  thEmp.textContent = 'Empleado';
+  thEmp.style.cssText = 'text-align:left;padding:10px 12px;border-bottom:1px solid #e0e0d8;font-size:11px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.05em;min-width:140px;position:sticky;left:32px;background:#f9f9f7;z-index:2;';
+  hrow.appendChild(thEmp);
+
+  days.forEach((d, i) => {
     const th = document.createElement('th');
-    th.textContent = h;
-    th.style.cssText = 'text-align:left;padding:8px 10px;border-bottom:1px solid #e0e0d8;color:#888;font-weight:500;';
+    const isToday = d.getTime() === today.getTime();
+    th.style.cssText = `text-align:center;padding:10px 6px;border-bottom:1px solid #e0e0d8;font-size:11px;font-weight:700;color:${isToday?'#6366F1':'#666'};text-transform:uppercase;letter-spacing:.05em;min-width:90px;${isToday?'background:#EEF2FF;':''}`;
+    const dayName = document.createElement('div');
+    dayName.textContent = _DAY_NAMES[i];
+    const dayNum = document.createElement('div');
+    dayNum.textContent = _fmtDateShort(d);
+    dayNum.style.fontWeight = '600';
+    dayNum.style.marginTop = '2px';
+    th.appendChild(dayName);
+    th.appendChild(dayNum);
     hrow.appendChild(th);
   });
   thead.appendChild(hrow);
   tbl.appendChild(thead);
 
+  // Body rows
   const tbody = document.createElement('tbody');
-  const now   = Date.now();
-  state.shifts.forEach(sh => {
-    const tr    = document.createElement('tr');
-    const tdN   = document.createElement('td');
-    const tdR   = document.createElement('td');
-    const tdIn  = document.createElement('td');
-    const tdDur = document.createElement('td');
-    tdN.textContent  = sh.staff_name;
-    tdR.textContent  = _ROLE_LABELS[sh.staff_role] || sh.staff_role;
-    tdIn.textContent = new Date(sh.clock_in).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-    const diffH = (now - new Date(sh.clock_in).getTime()) / 3600000;
-    tdDur.textContent = diffH < 1
-      ? Math.round(diffH * 60) + ' min'
-      : diffH.toFixed(1) + ' h';
-    tdDur.style.cssText = 'color:#1D9E75;font-weight:600;';
-    [tdN, tdR, tdIn, tdDur].forEach(td => {
-      td.style.padding = '9px 10px';
+  staff.forEach((s, rowIdx) => {
+    const tr = document.createElement('tr');
+    tr.style.cssText = `background:${rowIdx%2===0?'#fff':'#fafaf8'};`;
+
+    // Checkbox
+    const tdChk = document.createElement('td');
+    tdChk.style.cssText = 'padding:8px;text-align:center;border-bottom:1px solid #f0f0ec;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'staff-row-check';
+    cb.style.cursor = 'pointer';
+    cb.addEventListener('change', () => {
+      if (cb.checked) container._selectedStaff.add(s.id);
+      else container._selectedStaff.delete(s.id);
+      refreshBulkBar();
+    });
+    tdChk.appendChild(cb);
+    tr.appendChild(tdChk);
+
+    // Employee name + role
+    const tdEmp = document.createElement('td');
+    tdEmp.style.cssText = 'padding:8px 12px;border-bottom:1px solid #f0f0ec;position:sticky;left:32px;background:inherit;z-index:1;';
+    const avatar = document.createElement('div');
+    avatar.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#E0E7FF;color:#6366F1;font-weight:700;font-size:12px;margin-right:8px;vertical-align:middle;flex-shrink:0;';
+    avatar.textContent = (s.name || '?')[0].toUpperCase();
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = s.name || '';
+    nameSpan.style.cssText = 'font-weight:600;font-size:13px;';
+    const rolePill = document.createElement('div');
+    rolePill.textContent = _ROLE_LABELS[s.role] || s.role;
+    rolePill.style.cssText = 'font-size:10px;color:#888;margin-top:2px;padding-left:36px;';
+    const nameWrap = document.createElement('div');
+    nameWrap.style.cssText = 'display:flex;align-items:center;';
+    nameWrap.appendChild(avatar);
+    nameWrap.appendChild(nameSpan);
+    tdEmp.appendChild(nameWrap);
+    tdEmp.appendChild(rolePill);
+    tr.appendChild(tdEmp);
+
+    // Day cells
+    days.forEach((d, dayIdx) => {
+      const td = document.createElement('td');
+      const isPast = d < today;
+      const isToday = d.getTime() === today.getTime();
+      td.style.cssText = `padding:6px 8px;border-bottom:1px solid #f0f0ec;text-align:center;vertical-align:middle;cursor:pointer;${isToday?'background:#FAFAFE;':''}`;
+      td.setAttribute('aria-label', `${_DAY_NAMES[dayIdx]} ${_fmtDateShort(d)}, ${s.name}`);
+
+      const sched = schedByStaffDay[`${s.staff_id}_${dayIdx}`] || schedByStaffDay[`${s.id}_${dayIdx}`];
+
+      if (sched) {
+        const pill = document.createElement('div');
+        pill.style.cssText = 'display:inline-block;background:#E0E7FF;color:#4F46E5;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;';
+        // sched.start_time / end_time may be "HH:MM:SS" — slice to HH:MM
+        const st = (sched.start_time || '').slice(0,5);
+        const et = (sched.end_time   || '').slice(0,5);
+        pill.textContent = st + '–' + et;
+        td.appendChild(pill);
+
+        // Compliance badge for past days
+        if (isPast) {
+          const dayStr = d.toISOString().slice(0,10);
+          const dayShifts = shiftsByStaffDay[`${s.staff_id}_${dayStr}`] || shiftsByStaffDay[`${s.id}_${dayStr}`] || [];
+          const dot = document.createElement('span');
+          dot.style.cssText = 'display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:5px;vertical-align:middle;';
+          if (dayShifts.length > 0) {
+            const hadLate = dayShifts.some(sh => sh.tardiness_minutes > 0 || (sh.deductions && sh.deductions.length));
+            dot.style.background = hadLate ? '#F59E0B' : '#22C55E';
+            dot.title = hadLate ? 'Tardanza detectada' : 'Entrada a tiempo';
+          } else {
+            dot.style.background = '#EF4444';
+            dot.title = 'No se presentó';
+          }
+          td.appendChild(dot);
+        }
+
+        td.addEventListener('click', () => _openScheduleModal({ mode:'edit', schedule: sched, staffId: s.id || s.staff_id, staffName: s.name, dayIdx, container }));
+      } else {
+        const plusIcon = document.createElement('span');
+        plusIcon.textContent = '+';
+        plusIcon.style.cssText = 'color:#ccc;font-size:18px;font-weight:300;line-height:1;';
+        td.appendChild(plusIcon);
+        td.addEventListener('mouseenter', () => { plusIcon.style.color = '#6366F1'; });
+        td.addEventListener('mouseleave', () => { plusIcon.style.color = '#ccc'; });
+        td.addEventListener('click', () => _openScheduleModal({ mode:'create', staffId: s.id, staffName: s.name, dayIdx, container }));
+      }
+
       tr.appendChild(td);
     });
     tbody.appendChild(tr);
   });
   tbl.appendChild(tbody);
+  tableWrap.appendChild(tbl);
+  container.appendChild(tableWrap);
 
-  const tableCard = document.createElement('div');
-  tableCard.className    = 'card';
-  tableCard.style.overflowX = 'auto';
-  tableCard.appendChild(tbl);
-  el.appendChild(tableCard);
-}
-
-
-// ── Tips tab ──────────────────────────────────────────────────────────────────
-
-function _renderTipsTab(state, el, self) {
-  const formWrap = document.createElement('div');
-  formWrap.style.cssText = 'background:#f8f8f5;border:1px solid #e0e0d8;border-radius:12px;padding:1rem 1.25rem;margin-bottom:1.25rem;';
-
-  const formTitle = document.createElement('div');
-  formTitle.textContent = 'Corte de propinas';
-  formTitle.style.cssText = 'font-size:14px;font-weight:600;margin-bottom:.75rem;';
-  formWrap.appendChild(formTitle);
-
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const now = new Date();
-
-  const toLocalInput = d => {
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  };
-
-  const fromIn  = _makeInput('Inicio del período', 'datetime-local', toLocalInput(todayStart));
-  const toIn    = _makeInput('Fin del período',    'datetime-local', toLocalInput(now));
-  const totalIn = _makeInput('Total propinas ($)',  'number');
-  totalIn.min   = '0';
-  totalIn.step  = '0.01';
-
-  const row1 = document.createElement('div');
-  row1.style.cssText = _rowStyle();
-  row1.appendChild(fromIn);
-  row1.appendChild(toIn);
-  row1.appendChild(totalIn);
-  formWrap.appendChild(row1);
-
-  const errMsg = document.createElement('div');
-  errMsg.style.cssText = 'color:#C0392B;font-size:12px;margin-top:4px;min-height:16px;';
-  formWrap.appendChild(errMsg);
-
-  const cutBtn = _makeBtn('Calcular y guardar corte', 'btn-sm btn-primary', async () => {
-    errMsg.textContent = '';
-    const total = parseFloat(totalIn.value);
-    if (!fromIn.value || !toIn.value) { errMsg.textContent = 'Selecciona el período.'; return; }
-    if (isNaN(total) || total < 0)    { errMsg.textContent = 'Ingresa el total de propinas.'; return; }
-
-    cutBtn.disabled    = true;
-    cutBtn.textContent = 'Calculando...';
-    try {
-      const data = await _staffFetch('/tip-cut', {
-        method: 'POST',
-        body: JSON.stringify({
-          period_start: new Date(fromIn.value).toISOString(),
-          period_end:   new Date(toIn.value).toISOString(),
-          total_tips:   total,
-        }),
-      });
-      self.setState({ tipPreview: data.preview });
-    } catch (e) {
-      errMsg.textContent = e.message;
-    } finally {
-      cutBtn.disabled    = false;
-      cutBtn.textContent = 'Calcular y guardar corte';
-    }
-  });
-  formWrap.appendChild(cutBtn);
-  el.appendChild(formWrap);
-
-  const preview = state.tipPreview;
-  if (preview && preview.entries && preview.entries.length) {
-    const resWrap = document.createElement('div');
-    resWrap.className = 'card';
-
-    const resTitle = document.createElement('div');
-    resTitle.textContent = 'Distribución calculada';
-    resTitle.style.cssText = 'font-size:14px;font-weight:600;margin-bottom:.75rem;';
-    resWrap.appendChild(resTitle);
-
-    const tbl = document.createElement('table');
-    tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
-    const thead = document.createElement('thead');
-    const hrow  = document.createElement('tr');
-    ['Empleado', 'Rol', 'Horas', '% Rol', 'Monto'].forEach(h => {
-      const th = document.createElement('th');
-      th.textContent = h;
-      th.style.cssText = 'text-align:left;padding:8px 10px;border-bottom:1px solid #e0e0d8;color:#888;font-weight:500;';
-      hrow.appendChild(th);
-    });
-    thead.appendChild(hrow);
-    tbl.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    preview.entries.forEach(e => {
-      const tr = document.createElement('tr');
-      [
-        e.name,
-        _ROLE_LABELS[e.role] || e.role,
-        e.hours.toFixed(1) + ' h',
-        e.pct + '%',
-        '$' + e.amount.toLocaleString('es-CO', { minimumFractionDigits: 2 }),
-      ].forEach(txt => {
-        const td = document.createElement('td');
-        td.textContent   = txt;
-        td.style.padding = '9px 10px';
-        tr.appendChild(td);
-      });
-      tbody.appendChild(tr);
-    });
-    tbl.appendChild(tbody);
-    resWrap.appendChild(tbl);
-
-    const totals = document.createElement('div');
-    totals.style.cssText = 'margin-top:.75rem;font-size:12px;color:#888;display:flex;gap:16px;';
-    const alloc   = document.createElement('span');
-    alloc.textContent = 'Distribuido: $' + preview.total_allocated.toLocaleString('es-CO', { minimumFractionDigits: 2 });
-    const unalloc = document.createElement('span');
-    unalloc.textContent = 'Sin asignar: $' + preview.total_unallocated.toLocaleString('es-CO', { minimumFractionDigits: 2 });
-    totals.appendChild(alloc);
-    totals.appendChild(unalloc);
-    resWrap.appendChild(totals);
-    el.appendChild(resWrap);
+  // Empty state if no staff
+  if (!staff.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No hay empleados activos. Agrégalos en la pestaña Equipo.';
+    container.appendChild(empty);
   }
 }
+
+function _openScheduleModal({ mode, schedule, staffId, staffName, dayIdx, container }) {
+  const existing = document.getElementById('shifts-modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'shifts-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#fff;border-radius:14px;padding:1.5rem;width:320px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.2);';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'font-size:15px;font-weight:700;margin-bottom:1rem;';
+  const dayLabel = _DAY_NAMES[dayIdx];
+  title.textContent = (mode === 'create' ? 'Agregar turno — ' : 'Editar turno — ') + dayLabel;
+  modal.appendChild(title);
+
+  const nameEl = document.createElement('div');
+  nameEl.style.cssText = 'font-size:13px;color:#666;margin-bottom:1rem;';
+  nameEl.textContent = staffName;
+  modal.appendChild(nameEl);
+
+  const mkField = (lbl, type, val) => {
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '12px';
+    const l = document.createElement('label');
+    l.textContent = lbl;
+    l.style.cssText = 'display:block;font-size:11px;font-weight:700;color:#666;margin-bottom:4px;text-transform:uppercase;';
+    const inp = document.createElement('input');
+    inp.type = type;
+    inp.value = val || '';
+    inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid #e0e0d8;border-radius:8px;font-size:13px;';
+    wrap.appendChild(l); wrap.appendChild(inp);
+    return { wrap, inp };
+  };
+
+  const startField = mkField('Hora inicio', 'time', schedule ? (schedule.start_time || '').slice(0,5) : '09:00');
+  const endField   = mkField('Hora fin',    'time', schedule ? (schedule.end_time   || '').slice(0,5) : '17:00');
+  modal.appendChild(startField.wrap);
+  modal.appendChild(endField.wrap);
+
+  const errMsg = document.createElement('div');
+  errMsg.style.cssText = 'color:#EF4444;font-size:12px;min-height:16px;margin-bottom:8px;';
+  modal.appendChild(errMsg);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancelar';
+  cancelBtn.style.cssText = 'padding:9px 16px;border:1.5px solid #e0e0d8;background:#f9f9f7;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;';
+  cancelBtn.addEventListener('click', () => overlay.remove());
+
+  const saveBtn = document.createElement('button');
+  saveBtn.textContent = 'Guardar';
+  saveBtn.style.cssText = 'padding:9px 16px;background:#18181B;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;';
+  saveBtn.addEventListener('click', async () => {
+    const st = startField.inp.value;
+    const et = endField.inp.value;
+    if (!st || !et) { errMsg.textContent = 'Completa los horarios.'; return; }
+    if (st >= et)   { errMsg.textContent = 'La hora de inicio debe ser antes del fin.'; return; }
+    saveBtn.disabled = true;
+    try {
+      await _staffFetch('/schedules', 'POST', { staff_id: staffId, day_of_week: dayIdx, start_time: st, end_time: et });
+      overlay.remove();
+      _renderShiftsEditor(container);
+    } catch(e) {
+      errMsg.textContent = e.message;
+      saveBtn.disabled = false;
+    }
+  });
+
+  btnRow.appendChild(cancelBtn);
+
+  if (mode === 'edit' && schedule) {
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Eliminar';
+    delBtn.style.cssText = 'padding:9px 16px;background:#FEE2E2;color:#DC2626;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este horario?')) return;
+      delBtn.disabled = true;
+      try {
+        await _staffFetch(`/schedules/${schedule.id}`, 'DELETE');
+        overlay.remove();
+        _renderShiftsEditor(container);
+      } catch(e) {
+        errMsg.textContent = e.message;
+        delBtn.disabled = false;
+      }
+    });
+    btnRow.appendChild(delBtn);
+  }
+
+  btnRow.appendChild(saveBtn);
+  modal.appendChild(btnRow);
+
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+
+  startField.inp.focus();
+}
+
+function _openBulkScheduleModal(container, staffIds, days, refreshBulkBar) {
+  const existing = document.getElementById('shifts-bulk-modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'shifts-bulk-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#fff;border-radius:14px;padding:1.5rem;width:360px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.2);';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'font-size:15px;font-weight:700;margin-bottom:.5rem;';
+  title.textContent = 'Aplicar turno masivo';
+  modal.appendChild(title);
+
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:13px;color:#666;margin-bottom:1rem;';
+  sub.textContent = `${staffIds.length} empleado${staffIds.length>1?'s':''} seleccionado${staffIds.length>1?'s':''}`;
+  modal.appendChild(sub);
+
+  // Day checkboxes
+  const daysWrap = document.createElement('div');
+  daysWrap.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;';
+  const dayCheckboxes = days.map((d, i) => {
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;cursor:pointer;padding:5px 9px;border:1.5px solid #e0e0d8;border-radius:8px;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    lbl.appendChild(cb);
+    const txt = document.createElement('span');
+    txt.textContent = _DAY_NAMES[i];
+    lbl.appendChild(txt);
+    daysWrap.appendChild(lbl);
+    return { cb, dayIdx: i };
+  });
+  modal.appendChild(daysWrap);
+
+  const mkField = (lbl, type, val) => {
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '12px';
+    const l = document.createElement('label');
+    l.textContent = lbl;
+    l.style.cssText = 'display:block;font-size:11px;font-weight:700;color:#666;margin-bottom:4px;text-transform:uppercase;';
+    const inp = document.createElement('input');
+    inp.type = type; inp.value = val || '';
+    inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid #e0e0d8;border-radius:8px;font-size:13px;';
+    wrap.appendChild(l); wrap.appendChild(inp);
+    return { wrap, inp };
+  };
+  const startField = mkField('Hora inicio', 'time', '09:00');
+  const endField   = mkField('Hora fin',    'time', '17:00');
+  modal.appendChild(startField.wrap);
+  modal.appendChild(endField.wrap);
+
+  const errMsg = document.createElement('div');
+  errMsg.style.cssText = 'color:#EF4444;font-size:12px;min-height:16px;margin-bottom:8px;';
+  modal.appendChild(errMsg);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancelar';
+  cancelBtn.style.cssText = 'padding:9px 16px;border:1.5px solid #e0e0d8;background:#f9f9f7;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;';
+  cancelBtn.addEventListener('click', () => overlay.remove());
+
+  const applyBtn = document.createElement('button');
+  applyBtn.textContent = 'Aplicar a todos';
+  applyBtn.style.cssText = 'padding:9px 16px;background:#18181B;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;';
+  applyBtn.addEventListener('click', async () => {
+    const st = startField.inp.value;
+    const et = endField.inp.value;
+    if (!st || !et) { errMsg.textContent = 'Completa los horarios.'; return; }
+    if (st >= et)   { errMsg.textContent = 'La hora de inicio debe ser antes del fin.'; return; }
+    const selectedDays = dayCheckboxes.filter(d => d.cb.checked).map(d => d.dayIdx);
+    if (!selectedDays.length) { errMsg.textContent = 'Selecciona al menos un día.'; return; }
+    applyBtn.disabled = true;
+    const entries = [];
+    staffIds.forEach(sid => {
+      selectedDays.forEach(dayIdx => {
+        entries.push({ staff_id: sid, day_of_week: dayIdx, start_time: st, end_time: et });
+      });
+    });
+    try {
+      await _staffFetch('/schedules/bulk', 'POST', { entries });
+      overlay.remove();
+      container._selectedStaff.clear();
+      refreshBulkBar();
+      _renderShiftsEditor(container);
+    } catch(e) {
+      errMsg.textContent = e.message;
+      applyBtn.disabled = false;
+    }
+  });
+
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(applyBtn);
+  modal.appendChild(btnRow);
+
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+
+
+// Tips are now calculated automatically — see PayrollSection
 
 
 // ── Data reload helpers ───────────────────────────────────────────────────────
@@ -1113,6 +1392,65 @@ async function _reloadShifts(self) {
 // ── Payroll tab ───────────────────────────────────────────────────────────────
 
 function _renderPayrollTab(state, el, self) {
+  // ── Tab bar: Nómina / Overtime / Contratos ──
+  const tabsNav = document.createElement('div');
+  tabsNav.style.cssText = 'display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid #e5e7eb;';
+  const payrollTabs = ['nomina', 'overtime', 'contratos'];
+  const payrollTabLabels = { nomina: '💰 Nómina', overtime: '⏱ Overtime', contratos: '📄 Contratos' };
+  const payrollPanels = {};
+  const payrollTabBtns = {};
+
+  payrollTabs.forEach((tab, i) => {
+    const btn = document.createElement('button');
+    btn.textContent = payrollTabLabels[tab];
+    btn.style.cssText = `background:none;border:none;padding:10px 20px;cursor:pointer;font-size:13px;font-weight:600;color:${i===0?'#6366F1':'#9CA3AF'};border-bottom:${i===0?'2px solid #6366F1':'2px solid transparent'};margin-bottom:-2px;white-space:nowrap;`;
+    btn.addEventListener('click', () => {
+      payrollTabs.forEach(k => { payrollPanels[k].style.display = 'none'; payrollTabBtns[k].style.color = '#9CA3AF'; payrollTabBtns[k].style.borderBottom = '2px solid transparent'; });
+      payrollPanels[tab].style.display = 'block';
+      btn.style.color = '#6366F1';
+      btn.style.borderBottom = '2px solid #6366F1';
+      if (tab === 'overtime') _renderOvertimePanel(payrollPanels['overtime'], self);
+      if (tab === 'contratos') _renderContractsPanel(payrollPanels['contratos'], self);
+    });
+    tabsNav.appendChild(btn);
+    payrollTabBtns[tab] = btn;
+  });
+  el.appendChild(tabsNav);
+
+  // Create tab panels
+  payrollTabs.forEach((tab, i) => {
+    const panel = document.createElement('div');
+    panel.style.display = i === 0 ? 'block' : 'none';
+    payrollPanels[tab] = panel;
+    el.appendChild(panel);
+  });
+
+  // Redirect el to the nomina panel for all subsequent code in this function
+  el = payrollPanels['nomina'];
+
+  // ── Tip distribution config (collapsible) ──
+  const tipConfigToggle = document.createElement('button');
+  tipConfigToggle.style.cssText = 'width:100%;display:flex;justify-content:space-between;align-items:center;background:#f9f9f7;border:1.5px solid #e0e0d8;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:16px;';
+  const tipConfigToggleTxt = document.createElement('span');
+  tipConfigToggleTxt.textContent = '⚙ Configurar % de propinas por rol';
+  const tipConfigChevron = document.createElement('span');
+  tipConfigChevron.textContent = '▾';
+  tipConfigToggle.appendChild(tipConfigToggleTxt);
+  tipConfigToggle.appendChild(tipConfigChevron);
+  el.appendChild(tipConfigToggle);
+
+  const tipConfigPanel = document.createElement('div');
+  tipConfigPanel.style.cssText = 'display:none;background:#f9f9f7;border:1.5px solid #e0e0d8;border-top:none;border-radius:0 0 10px 10px;padding:14px;margin-top:-18px;margin-bottom:16px;';
+
+  tipConfigToggle.addEventListener('click', () => {
+    const open = tipConfigPanel.style.display !== 'none';
+    tipConfigPanel.style.display = open ? 'none' : 'block';
+    tipConfigChevron.textContent = open ? '▾' : '▴';
+    if (!open) _renderTipConfig(tipConfigPanel);
+  });
+
+  el.appendChild(tipConfigPanel);
+
   // ── Period selector ──
   const periodCard = document.createElement('div');
   periodCard.className = 'card';
@@ -1189,10 +1527,18 @@ function _renderPayrollTab(state, el, self) {
     if (!state.payrollPeriodStart || !state.payrollPeriodEnd) {
       alert('Selecciona el período de nómina.'); return;
     }
-    self.setState({ payrollLoading: true });
+    self.setState({ payrollLoading: true, tipsAutoData: null });
     try {
-      const r = await _staffFetch(`/payroll/calculate?period_start=${state.payrollPeriodStart}&period_end=${state.payrollPeriodEnd}`);
-      self.setState({ payrollEntries: r.entries || [], payrollLoading: false });
+      const [r, tipsR] = await Promise.allSettled([
+        _staffFetch(`/payroll/calculate?period_start=${state.payrollPeriodStart}&period_end=${state.payrollPeriodEnd}`),
+        _staffFetch(`/tips/auto?period_start=${state.payrollPeriodStart}&period_end=${state.payrollPeriodEnd}`),
+      ]);
+      const entries = r.status === 'fulfilled' ? (r.value.entries || []) : [];
+      const tipsAuto = tipsR.status === 'fulfilled' ? tipsR.value : null;
+      if (r.status === 'rejected') {
+        alert('Error al calcular nómina: ' + r.reason.message);
+      }
+      self.setState({ payrollEntries: entries, tipsAutoData: tipsAuto, payrollLoading: false });
     } catch(e) {
       alert('Error al calcular: ' + e.message);
       self.setState({ payrollLoading: false });
@@ -1200,6 +1546,64 @@ function _renderPayrollTab(state, el, self) {
   });
   periodCard.appendChild(calcBtn);
   el.appendChild(periodCard);
+
+  // ── Tips auto summary card ──
+  if (state.tipsAutoData) {
+    const tipsCard = document.createElement('div');
+    tipsCard.className = 'card';
+    tipsCard.style.cssText = 'margin-bottom:1.25rem;padding:1.25rem;background:#FFFBEB;border:1px solid #FDE68A;';
+
+    const tipsTitle = document.createElement('div');
+    tipsTitle.style.cssText = 'font-size:14px;font-weight:700;margin-bottom:10px;color:#92400E;';
+    const tipsTotal = state.tipsAutoData.total_tips || 0;
+    tipsTitle.textContent = 'Propinas del período: ' + _staffFmt(tipsTotal);
+    tipsCard.appendChild(tipsTitle);
+
+    const tipEntries = state.tipsAutoData.entries || [];
+    if (tipEntries.length > 0) {
+      const tipsTbl = document.createElement('table');
+      tipsTbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;';
+      const tipsThead = document.createElement('thead');
+      const tipsThr = document.createElement('tr');
+      ['Empleado', 'Rol', 'Tickets', 'Monto'].forEach(h => {
+        const th = document.createElement('th');
+        th.textContent = h;
+        th.style.cssText = 'text-align:left;padding:6px 8px;border-bottom:1px solid #FDE68A;color:#92400E;font-weight:700;';
+        tipsThr.appendChild(th);
+      });
+      tipsThead.appendChild(tipsThr);
+      tipsTbl.appendChild(tipsThead);
+
+      const tipsTbody = document.createElement('tbody');
+      tipEntries.forEach(te => {
+        const tr = document.createElement('tr');
+        [
+          te.name || '—',
+          getDynamicRoleLabel(te.role || ''),
+          String(te.tickets || te.ticket_count || 0),
+          _staffFmt(te.amount || te.tip_amount || 0),
+        ].forEach(txt => {
+          const td = document.createElement('td');
+          td.textContent = txt;
+          td.style.cssText = 'padding:6px 8px;border-bottom:1px solid #FEF3C7;';
+          tr.appendChild(td);
+        });
+        tipsTbody.appendChild(tr);
+      });
+      tipsTbl.appendChild(tipsTbody);
+      tipsCard.appendChild(tipsTbl);
+    }
+
+    const unalloc = state.tipsAutoData.unallocated || 0;
+    if (unalloc > 0) {
+      const warnEl = document.createElement('div');
+      warnEl.style.cssText = 'margin-top:10px;font-size:12px;color:#F59E0B;font-weight:600;';
+      warnEl.textContent = '⚠ ' + _staffFmt(unalloc) + ' sin asignar (pedidos sin staff en turno)';
+      tipsCard.appendChild(warnEl);
+    }
+
+    el.appendChild(tipsCard);
+  }
 
   // ── Results table ──
   if (state.payrollEntries && state.payrollEntries.length > 0) {
@@ -1239,7 +1643,7 @@ function _renderPayrollTab(state, el, self) {
     const thead = document.createElement('thead');
     const theadRow = document.createElement('tr');
     theadRow.style.background = '#f9f9f7';
-    ['Empleado','Rol','Hrs Reg.','Hrs Extra','Tarifa','Bruto','Propinas','Deducciones','Neto'].forEach(h => {
+    ['Nombre','Documento','Horas','Salario Base','Propinas','Ded. Auto','Ded. Manual','Neto'].forEach(h => {
       const th = document.createElement('th');
       th.textContent = h;
       th.style.cssText = 'padding:9px 10px;text-align:left;font-size:11px;font-weight:700;color:#666;text-transform:uppercase;white-space:nowrap;';
@@ -1248,34 +1652,57 @@ function _renderPayrollTab(state, el, self) {
     thead.appendChild(theadRow);
     tbl.appendChild(thead);
 
+    // Build tips lookup by staff_id from tipsAutoData
+    const tipsById = {};
+    if (state.tipsAutoData && state.tipsAutoData.entries) {
+      state.tipsAutoData.entries.forEach(te => {
+        if (te.staff_id) tipsById[te.staff_id] = te.amount || te.tip_amount || 0;
+      });
+    }
+
     const tbody = document.createElement('tbody');
     state.payrollEntries.forEach((e, i) => {
       const tr = document.createElement('tr');
       tr.style.cssText = `background:${i%2===0?'#fff':'#fafaf8'};`;
-      const ded = Object.values(e.deductions || {}).reduce((s,v) => s + v, 0);
-      const otHours = (e.overtime_hours || 0);
-      // Build cell values: use textContent for name/role (user data), safe spans for numbers
+      const dedsObj = e.deductions || {};
+      const dedAuto   = dedsObj.auto   !== undefined ? dedsObj.auto   : (dedsObj.attendance || 0);
+      const dedManual = dedsObj.manual !== undefined ? dedsObj.manual : Object.entries(dedsObj).filter(([k]) => k !== 'auto' && k !== 'attendance').reduce((s,[,v]) => s + v, 0);
+      const totalHours = (e.regular_hours || 0) + (e.overtime_hours || 0);
+      const tipFromAuto = tipsById[e.staff_id] !== undefined ? tipsById[e.staff_id] : (e.tip_earnings || 0);
+      // Build cell values: use textContent for user data
       const cells = [
         { text: e.name || '—' },
-        { text: e.role || '—' },
-        { text: (e.regular_hours || 0).toFixed(1) + 'h' },
-        { html: otHours > 0
-            ? `<span style="color:#F59E0B;font-weight:700;">${otHours.toFixed(1)}h</span>`
-            : '0h' },
-        { text: _staffFmt(e.hourly_rate || 0) },
+        { text: e.document_number || '—' },
+        { text: totalHours.toFixed(1) + 'h' },
         { text: _staffFmt(e.gross_pay || 0) },
-        { text: _staffFmt(e.tip_earnings || 0) },
-        { html: ded > 0
-            ? `<span style="color:#EF4444;">-${_staffFmt(ded)}</span>`
-            : '—' },
-        { html: `<strong style="color:#1D9E75;">${_staffFmt(e.net_pay || 0)}</strong>` },
+        { text: _staffFmt(tipFromAuto) },
+        { el: (() => {
+            const span = document.createElement('span');
+            if (dedAuto > 0) { span.textContent = '-' + _staffFmt(dedAuto); span.style.color = '#EF4444'; }
+            else { span.textContent = '—'; }
+            return span;
+          })() },
+        { el: (() => {
+            const span = document.createElement('span');
+            if (dedManual > 0) { span.textContent = '-' + _staffFmt(dedManual); span.style.color = '#EF4444'; }
+            else { span.textContent = '—'; }
+            return span;
+          })() },
+        { el: (() => {
+            const span = document.createElement('strong');
+            span.textContent = _staffFmt(e.net_pay || 0);
+            span.style.color = '#1D9E75';
+            return span;
+          })() },
       ];
       cells.forEach(cell => {
         const td = document.createElement('td');
         td.style.cssText = 'padding:9px 10px;border-bottom:1px solid #f0f0ec;vertical-align:middle;';
         if (cell.text !== undefined) {
           td.textContent = cell.text;
-        } else {
+        } else if (cell.el) {
+          td.appendChild(cell.el);
+        } else if (cell.html !== undefined) {
           td.innerHTML = cell.html;
         }
         tr.appendChild(td);
@@ -1372,15 +1799,368 @@ function _renderPayrollTab(state, el, self) {
 }
 
 
+
+// ── Payroll sub-panels ────────────────────────────────────────────────────────
+
+async function _renderTipConfig(container) {
+  container.textContent = '';
+  const roles = ['mesero','cocina','bar','caja','gerente','domiciliario'];
+  let currentConfig = {};
+  try {
+    const rest = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+    const f = rest.features || {};
+    currentConfig = (typeof f === 'string' ? JSON.parse(f) : f).tip_distribution || {};
+  } catch(_) {}
+
+  const totalIndicator = document.createElement('div');
+  totalIndicator.style.cssText = 'font-size:12px;font-weight:700;margin-bottom:12px;';
+
+  const inputs = {};
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px;';
+
+  const refreshTotal = () => {
+    const total = roles.reduce((sum, r) => sum + (parseFloat(inputs[r]?.value) || 0), 0);
+    totalIndicator.textContent = `Total: ${total.toFixed(1)}%`;
+    totalIndicator.style.color = Math.abs(total - 100) < 0.1 ? '#16A34A' : total > 100 ? '#DC2626' : '#D97706';
+  };
+
+  roles.forEach(role => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid #e0e0d8;border-radius:8px;padding:8px 10px;';
+    const lbl = document.createElement('label');
+    lbl.textContent = _ROLE_LABELS[role] || role;
+    lbl.style.cssText = 'font-size:12px;font-weight:600;flex:1;';
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.min = '0'; inp.max = '100'; inp.step = '0.5';
+    inp.value = currentConfig[role] || 0;
+    inp.style.cssText = 'width:56px;padding:5px 8px;border:1.5px solid #e0e0d8;border-radius:6px;font-size:13px;font-weight:700;text-align:right;';
+    const pct = document.createElement('span');
+    pct.textContent = '%';
+    pct.style.cssText = 'font-size:12px;color:#666;';
+    inp.addEventListener('input', refreshTotal);
+    inputs[role] = inp;
+    wrap.appendChild(lbl); wrap.appendChild(inp); wrap.appendChild(pct);
+    grid.appendChild(wrap);
+  });
+
+  container.appendChild(grid);
+  container.appendChild(totalIndicator);
+  refreshTotal();
+
+  const errMsg = document.createElement('div');
+  errMsg.style.cssText = 'color:#EF4444;font-size:12px;min-height:16px;margin-bottom:8px;';
+  container.appendChild(errMsg);
+
+  const saveBtn = document.createElement('button');
+  saveBtn.textContent = 'Guardar configuración';
+  saveBtn.style.cssText = 'background:#18181B;color:#fff;border:none;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;';
+  saveBtn.addEventListener('click', async () => {
+    const config = {};
+    roles.forEach(r => { const v = parseFloat(inputs[r].value) || 0; if (v > 0) config[r] = v; });
+    const total = Object.values(config).reduce((s,v) => s+v, 0);
+    if (total > 100.01) { errMsg.textContent = `Los porcentajes suman ${total.toFixed(1)}%, no pueden superar 100%.`; return; }
+    saveBtn.disabled = true;
+    try {
+      await _staffFetch('/tip-distribution', 'PATCH', { config });
+      errMsg.style.color = '#16A34A';
+      errMsg.textContent = '✓ Guardado correctamente';
+      setTimeout(() => { errMsg.textContent = ''; errMsg.style.color = '#EF4444'; }, 2500);
+    } catch(e) {
+      errMsg.textContent = e.message;
+    } finally { saveBtn.disabled = false; }
+  });
+  container.appendChild(saveBtn);
+}
+
+async function _renderOvertimePanel(container, self) {
+  container.textContent = '';
+  const loading = document.createElement('div');
+  loading.className = 'empty-state';
+  loading.textContent = 'Cargando overtime...';
+  container.appendChild(loading);
+  try {
+    const data = await _staffFetch('/payroll/overtime?status=pending');
+    loading.remove();
+    const requests = data.overtime_requests || [];
+    if (!requests.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'No hay solicitudes de overtime pendientes.';
+      container.appendChild(empty);
+      return;
+    }
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.overflowX = 'auto';
+    const tbl = document.createElement('table');
+    tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    const thead = document.createElement('thead');
+    const hrow = document.createElement('tr');
+    hrow.style.background = '#f9f9f7';
+    ['Empleado','Rol','Semana','Hrs Regulares','Hrs Extra','Monto Est.','Acción'].forEach(h => {
+      const th = document.createElement('th');
+      th.textContent = h;
+      th.style.cssText = 'padding:9px 10px;text-align:left;font-size:11px;font-weight:700;color:#666;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid #e0e0d8;';
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    tbl.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    requests.forEach((req, i) => {
+      const tr = document.createElement('tr');
+      tr.style.background = i%2===0?'#fff':'#fafaf8';
+      const otHrs = (req.overtime_minutes/60).toFixed(1);
+      const regHrs = (req.regular_minutes/60).toFixed(1);
+      const cells = [
+        { text: req.staff_name || '—' },
+        { text: _ROLE_LABELS[req.role] || req.role || '—' },
+        { text: req.week_start || '—' },
+        { text: regHrs + 'h' },
+        { text: otHrs + 'h' },
+        { text: '—' },
+      ];
+      cells.forEach(cell => {
+        const td = document.createElement('td');
+        td.style.cssText = 'padding:9px 10px;border-bottom:1px solid #f0f0ec;vertical-align:middle;';
+        td.textContent = cell.text;
+        tr.appendChild(td);
+      });
+      // Action cell
+      const actionTd = document.createElement('td');
+      actionTd.style.cssText = 'padding:9px 10px;border-bottom:1px solid #f0f0ec;';
+      const approveBtn = document.createElement('button');
+      approveBtn.textContent = '✅ Aprobar';
+      approveBtn.style.cssText = 'background:#16A34A;color:#fff;border:none;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-right:6px;';
+      const rejectBtn = document.createElement('button');
+      rejectBtn.textContent = '✕ Rechazar';
+      rejectBtn.style.cssText = 'background:#FEE2E2;color:#DC2626;border:none;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;';
+      const reviewOT = async (status) => {
+        approveBtn.disabled = true; rejectBtn.disabled = true;
+        try {
+          await _staffFetch(`/payroll/overtime/${req.id}`, 'PATCH', { status, notes: '' });
+          _renderOvertimePanel(container, self);
+        } catch(e) { alert('Error: ' + e.message); approveBtn.disabled = false; rejectBtn.disabled = false; }
+      };
+      approveBtn.addEventListener('click', () => reviewOT('approved'));
+      rejectBtn.addEventListener('click', () => reviewOT('rejected'));
+      actionTd.appendChild(approveBtn);
+      actionTd.appendChild(rejectBtn);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    card.appendChild(tbl);
+    container.appendChild(card);
+  } catch(e) {
+    loading.textContent = 'Error: ' + e.message;
+  }
+}
+
+async function _renderContractsPanel(container, self) {
+  container.textContent = '';
+  const headerRow = document.createElement('div');
+  headerRow.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:14px;';
+  const newBtn = document.createElement('button');
+  newBtn.textContent = '+ Nueva Plantilla';
+  newBtn.style.cssText = 'background:#18181B;color:#fff;border:none;padding:9px 16px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;';
+  newBtn.addEventListener('click', () => _openContractModal({ mode:'create', container, self }));
+  headerRow.appendChild(newBtn);
+  container.appendChild(headerRow);
+
+  const loading = document.createElement('div');
+  loading.className = 'empty-state';
+  loading.textContent = 'Cargando plantillas...';
+  container.appendChild(loading);
+  try {
+    const data = await _staffFetch('/payroll/contracts');
+    loading.remove();
+    const templates = data.templates || [];
+    if (!templates.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'No hay plantillas de contrato. Crea una para asignarla a empleados.';
+      container.appendChild(empty);
+      return;
+    }
+    templates.forEach(t => {
+      const card = document.createElement('div');
+      card.style.cssText = `background:${t.active?'#fff':'#f9f9f7'};border:1.5px solid ${t.active?'#e0e0d8':'#f0f0ec'};border-radius:12px;padding:14px 16px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;`;
+      const info = document.createElement('div');
+      const nameEl = document.createElement('div');
+      nameEl.textContent = t.name;
+      nameEl.style.cssText = 'font-size:14px;font-weight:700;';
+      const detailEl = document.createElement('div');
+      detailEl.style.cssText = 'font-size:12px;color:#666;margin-top:4px;';
+      const periodLabel = { monthly:'Mensual', biweekly:'Quincenal', weekly:'Semanal' }[t.pay_period] || t.pay_period;
+      detailEl.textContent = `${t.weekly_hours}h/sem · Salario: $${Number(t.monthly_salary).toLocaleString('es-CO')} · ${periodLabel} · Break: ${t.breaks_billable?'billable':'no billable'} · Almuerzo: ${t.lunch_billable?'billable':t.lunch_minutes+'min no billable'}`;
+      info.appendChild(nameEl);
+      info.appendChild(detailEl);
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Editar';
+      editBtn.style.cssText = 'background:#f0f0ec;border:1.5px solid #e0e0d8;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;';
+      editBtn.addEventListener('click', () => _openContractModal({ mode:'edit', template: t, container, self }));
+      card.appendChild(info);
+      card.appendChild(editBtn);
+      container.appendChild(card);
+    });
+  } catch(e) {
+    loading.textContent = 'Error: ' + e.message;
+  }
+}
+
+function _openContractModal({ mode, template, container, self }) {
+  const existing = document.getElementById('contract-modal-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'contract-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px;box-sizing:border-box;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#fff;border-radius:14px;padding:1.5rem;width:480px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.2);';
+
+  const title = document.createElement('h3');
+  title.textContent = mode === 'create' ? 'Nueva plantilla de contrato' : 'Editar plantilla';
+  title.style.cssText = 'font-size:15px;font-weight:700;margin-bottom:1.25rem;';
+  modal.appendChild(title);
+
+  const t = template || {};
+  const mkField = (lbl, type, val, attrs = {}) => {
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '12px';
+    const l = document.createElement('label');
+    l.textContent = lbl;
+    l.style.cssText = 'display:block;font-size:11px;font-weight:700;color:#666;margin-bottom:4px;text-transform:uppercase;';
+    const inp = type === 'select' ? document.createElement('select') : document.createElement('input');
+    if (type !== 'select') { inp.type = type; inp.value = val !== undefined ? val : ''; }
+    inp.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid #e0e0d8;border-radius:8px;font-size:13px;';
+    Object.assign(inp, attrs);
+    if (type === 'select' && Array.isArray(val)) {
+      val.forEach(([v,ltext]) => { const o = document.createElement('option'); o.value = v; o.textContent = ltext; inp.appendChild(o); });
+    }
+    wrap.appendChild(l); wrap.appendChild(inp);
+    return { wrap, inp };
+  };
+
+  const mkCheckbox = (lbl, val) => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = val;
+    cb.style.width = '16px'; cb.style.height = '16px';
+    const l = document.createElement('label');
+    l.textContent = lbl;
+    l.style.cssText = 'font-size:13px;font-weight:600;cursor:pointer;';
+    l.prepend(cb);
+    wrap.appendChild(l);
+    return { wrap, inp: cb };
+  };
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:0 12px;';
+
+  const nameF     = mkField('Nombre plantilla', 'text', t.name || '');
+  const hoursF    = mkField('Horas semanales', 'number', t.weekly_hours || 44, { min:'1', max:'84', step:'0.5' });
+  const salaryF   = mkField('Salario mensual', 'number', t.monthly_salary || 0, { min:'0', step:'1000' });
+  const periodF   = mkField('Periodicidad', 'select', [['monthly','Mensual'],['biweekly','Quincenal'],['weekly','Semanal']], {});
+  if (t.pay_period) periodF.inp.value = t.pay_period;
+  const subsidyF  = mkField('Subsidio transporte', 'number', t.transport_subsidy || 0, { min:'0', step:'1000' });
+  const arlF      = mkField('ARL % (ej: 0.00522)', 'number', t.arl_pct !== undefined ? t.arl_pct : 0.00522, { min:'0', max:'1', step:'0.001' });
+  const healthF   = mkField('Salud %', 'number', t.health_pct !== undefined ? t.health_pct : 0.04, { min:'0', max:'1', step:'0.001' });
+  const pensionF  = mkField('Pensión %', 'number', t.pension_pct !== undefined ? t.pension_pct : 0.04, { min:'0', max:'1', step:'0.001' });
+  const lunchMinF = mkField('Minutos almuerzo', 'number', t.lunch_minutes || 60, { min:'0', max:'120', step:'5' });
+  const breakBillableF = mkCheckbox('Breaks son billable (se pagan)', t.breaks_billable !== false);
+  const lunchBillableF = mkCheckbox('Almuerzo es billable', t.lunch_billable === true);
+  const activeF   = mkCheckbox('Plantilla activa', t.active !== false);
+
+  modal.appendChild(nameF.wrap);
+  grid.appendChild(hoursF.wrap);
+  grid.appendChild(salaryF.wrap);
+  grid.appendChild(periodF.wrap);
+  grid.appendChild(subsidyF.wrap);
+  grid.appendChild(arlF.wrap);
+  grid.appendChild(healthF.wrap);
+  grid.appendChild(pensionF.wrap);
+  grid.appendChild(lunchMinF.wrap);
+  modal.appendChild(grid);
+  modal.appendChild(breakBillableF.wrap);
+  modal.appendChild(lunchBillableF.wrap);
+  if (mode === 'edit') modal.appendChild(activeF.wrap);
+
+  const errMsg = document.createElement('div');
+  errMsg.style.cssText = 'color:#EF4444;font-size:12px;min-height:16px;margin-bottom:8px;';
+  modal.appendChild(errMsg);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancelar';
+  cancelBtn.style.cssText = 'padding:9px 16px;border:1.5px solid #e0e0d8;background:#f9f9f7;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;';
+  cancelBtn.addEventListener('click', () => overlay.remove());
+
+  const saveBtn = document.createElement('button');
+  saveBtn.textContent = 'Guardar';
+  saveBtn.style.cssText = 'padding:9px 16px;background:#18181B;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;';
+  saveBtn.addEventListener('click', async () => {
+    const name = nameF.inp.value.trim();
+    if (!name) { errMsg.textContent = 'El nombre es requerido.'; return; }
+    saveBtn.disabled = true;
+    const payload = {
+      name, weekly_hours: parseFloat(hoursF.inp.value), monthly_salary: parseFloat(salaryF.inp.value),
+      pay_period: periodF.inp.value, transport_subsidy: parseFloat(subsidyF.inp.value),
+      arl_pct: parseFloat(arlF.inp.value), health_pct: parseFloat(healthF.inp.value),
+      pension_pct: parseFloat(pensionF.inp.value), lunch_minutes: parseInt(lunchMinF.inp.value),
+      breaks_billable: breakBillableF.inp.checked, lunch_billable: lunchBillableF.inp.checked,
+      ...(mode === 'edit' ? { active: activeF.inp.checked } : {}),
+    };
+    try {
+      if (mode === 'create') await _staffFetch('/payroll/contracts', 'POST', payload);
+      else await _staffFetch(`/payroll/contracts/${template.id}`, 'PATCH', payload);
+      overlay.remove();
+      _renderContractsPanel(container, self);
+    } catch(e) {
+      errMsg.textContent = e.message;
+      saveBtn.disabled = false;
+    }
+  });
+
+  btnRow.appendChild(cancelBtn);
+  if (mode === 'edit') {
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Eliminar';
+    delBtn.style.cssText = 'padding:9px 16px;background:#FEE2E2;color:#DC2626;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar la plantilla "${template.name}"?`)) return;
+      delBtn.disabled = true;
+      try {
+        await _staffFetch(`/payroll/contracts/${template.id}`, 'DELETE');
+        overlay.remove();
+        _renderContractsPanel(container, self);
+      } catch(e) { errMsg.textContent = e.message; delBtn.disabled = false; }
+    });
+    btnRow.appendChild(delBtn);
+  }
+  btnRow.appendChild(saveBtn);
+  modal.appendChild(btnRow);
+
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  nameF.inp.focus();
+}
+
 // ── Main StaffSection component ───────────────────────────────────────────────
 
 const StaffSection = MesioComponent({
   state: {
-    loading: true,
-    staff:   [],
-    filter:  'all',
-    search:  '',
-    error:   null,
+    loading:      true,
+    staff:        [],
+    filter:       'all',
+    search:       '',
+    error:        null,
+    staffSubTab:  'roster',
   },
 
   render(state, el) {
@@ -1419,9 +2199,42 @@ const StaffSection = MesioComponent({
       return;
     }
 
-    const content = document.createElement('div');
-    _renderRosterTab(state, content, StaffSection);
-    el.appendChild(content);
+    // Sub-tab navigation: Equipo / Turnos
+    const subtabNav = document.createElement('div');
+    subtabNav.style.cssText = 'display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid #e5e7eb;';
+
+    const panels = {};
+    const subtabBtns = {};
+
+    ['roster', 'shifts'].forEach((tab, i) => {
+      const label = tab === 'roster' ? 'Equipo' : 'Turnos';
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.style.cssText = `background:none;border:none;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:600;color:${i===0?'#6366F1':'#9CA3AF'};border-bottom:${i===0?'2px solid #6366F1':'2px solid transparent'};margin-bottom:-2px;transition:color .15s;`;
+      btn.addEventListener('click', () => {
+        Object.keys(panels).forEach(k => { panels[k].style.display = 'none'; subtabBtns[k].style.color = '#9CA3AF'; subtabBtns[k].style.borderBottom = '2px solid transparent'; });
+        panels[tab].style.display = 'block';
+        btn.style.color = '#6366F1';
+        btn.style.borderBottom = '2px solid #6366F1';
+        if (tab === 'shifts') _renderShiftsEditor(panels['shifts']);
+      });
+      subtabNav.appendChild(btn);
+      subtabBtns[tab] = btn;
+    });
+
+    el.appendChild(subtabNav);
+
+    const rosterPanel = document.createElement('div');
+    rosterPanel.id = 'staff-roster-panel';
+    _renderRosterTab(state, rosterPanel, StaffSection);
+    panels['roster'] = rosterPanel;
+    el.appendChild(rosterPanel);
+
+    const shiftsPanel = document.createElement('div');
+    shiftsPanel.id = 'staff-shifts-panel';
+    shiftsPanel.style.display = 'none';
+    panels['shifts'] = shiftsPanel;
+    el.appendChild(shiftsPanel);
   },
 
   async onMount(self) {
@@ -1673,6 +2486,8 @@ const PayrollSection = MesioComponent({
     payrollPeriodEnd:   '',
     payrollEntries:     null,
     payrollRuns:        [],
+    tipConfigOpen:      false,
+    tipsAutoData:       null,
   },
 
   render(state, el) {
