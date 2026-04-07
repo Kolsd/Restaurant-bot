@@ -5,14 +5,14 @@ using pgcrypto.  The raw token column is left in place (nullable) so that
 existing logged-in users are not forcibly kicked out during the rollout.
 Drop `token` in a follow-up migration once legacy_lookup log volume reaches zero.
 
-Revision ID: 0009
-Revises: 0008
+Revision ID: 0010
+Revises: 0009
 Create Date: 2026-04-07
 """
 from alembic import op
 
-revision      = "0009"
-down_revision = "0008"
+revision      = "0010"
+down_revision = "0009"
 branch_labels = None
 depends_on    = None
 

@@ -3,14 +3,14 @@
 Adds proposal columns to table_checks to support the WhatsApp checkout
 conversation flow: split, tip capture, payment methods, proof image.
 
-Revision ID: 0008
-Revises: 0007
+Revision ID: 0009
+Revises: 0008
 Create Date: 2026-04-06
 """
 from alembic import op
 
-revision      = "0008"
-down_revision = "0007"
+revision      = "0009"
+down_revision = "0008"
 branch_labels = None
 depends_on    = None
 
