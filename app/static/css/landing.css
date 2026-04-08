@@ -483,6 +483,32 @@ thead .col-mesio { color: var(--accent) !important; }
 .plan-features li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
 .plan-cta { width: 100%; text-align: center; }
 
+/* 4-column pricing grid */
+@media (min-width: 1024px) { .pricing-grid-4 { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 768px) and (max-width: 1023px) { .pricing-grid-4 { grid-template-columns: repeat(2, 1fr); } }
+
+/* USD secondary price */
+.price-usd {
+  display: block; font-size: .78rem; color: var(--text-mute);
+  margin-top: 2px; font-weight: 400;
+}
+
+/* Add-ons section */
+.addons-section { margin-top: var(--s-8); }
+.addons-title { font-size: 1.2rem; font-weight: 700; margin-bottom: var(--s-2); color: var(--text); }
+.addons-grid {
+  display: grid; gap: var(--s-3); margin-top: var(--s-5);
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.addon-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--s-4) var(--s-5);
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s-3);
+}
+.addon-name { font-size: .88rem; color: var(--text-dim); font-weight: 500; }
+.addon-price { font-size: .95rem; font-weight: 700; color: var(--text); white-space: nowrap; font-family: 'Fraunces', serif; }
+.addon-per { font-size: .72rem; font-weight: 400; color: var(--text-mute); }
+
 /* ── FAQ ── */
 .faq-section { padding: var(--s-9) 0; }
 .faq-inner { max-width: 800px; margin-inline: auto; }
