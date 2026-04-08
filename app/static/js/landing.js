@@ -1,135 +1,166 @@
-/* ═══════════════════════════════════════════════════
-   Mesio Landing — Scripts
-   app/static/landing.js
-═══════════════════════════════════════════════════ */
+/* Mesio Landing — landing.js (vanilla, no deps) */
+(function () {
+  'use strict';
 
-// ── SCROLL REVEAL ─────────────────────────────────────────────────
-const revealObserver = new IntersectionObserver(entries => {
-  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('on'); });
-}, { threshold: 0.1 });
-document.querySelectorAll('.rv').forEach(el => revealObserver.observe(el));
+  var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// ── ANIMATED COUNTERS ─────────────────────────────────────────────
-function animateCounter(el) {
-  const prefix = el.dataset.prefix || '';
-  const suffix = el.dataset.suffix || '';
-  const target = parseFloat(el.dataset.target);
-  if (target === 0) { el.textContent = prefix + '0' + suffix; return; }
-  let current = 0;
-  const step = Math.max(1, Math.ceil(target / 50));
-  const interval = setInterval(() => {
-    current = Math.min(current + step, target);
-    el.textContent = prefix + current + suffix;
-    if (current >= target) clearInterval(interval);
-  }, 28);
-}
+  /* ── INTERSECTION OBSERVER: reveal .rv elements ── */
+  function initReveal() {
+    var els = document.querySelectorAll('.rv');
+    if (!els.length) return;
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15 });
+    els.forEach(function (el) { observer.observe(el); });
+  }
 
-const counterObserver = new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) {
-      animateCounter(e.target);
-      counterObserver.unobserve(e.target);
+  /* ── ANIMATED COUNTERS ── */
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function animateCounter(el) {
+    var target = parseFloat(el.dataset.target) || 0;
+    var prefix = el.dataset.prefix || '';
+    var suffix = el.dataset.suffix || '';
+    var duration = 1600;
+    var start = null;
+
+    if (reducedMotion) {
+      el.textContent = prefix + target + suffix;
+      return;
     }
-  });
-}, { threshold: 0.5 });
-document.querySelectorAll('[data-target]').forEach(el => counterObserver.observe(el));
 
-// ── PRIVACY MODAL ─────────────────────────────────────────────────
-function openPrivacy() {
-  const modal = document.getElementById('privacy-modal');
-  if(modal) {
-    modal.classList.add('open');
-    document.body.style.overflow = 'hidden';
+    function step(ts) {
+      if (!start) start = ts;
+      var progress = Math.min((ts - start) / duration, 1);
+      var value = Math.round(easeOutCubic(progress) * target);
+      el.textContent = prefix + value + suffix;
+      if (progress < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
   }
-}
-function closePrivacy() {
-  const modal = document.getElementById('privacy-modal');
-  if(modal) {
-    modal.classList.remove('open');
-    document.body.style.overflow = '';
+
+  function initCounters() {
+    var counters = document.querySelectorAll('.stat-num[data-target]');
+    if (!counters.length) return;
+    var triggered = new Set();
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting && !triggered.has(entry.target)) {
+          triggered.add(entry.target);
+          animateCounter(entry.target);
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.4 });
+    counters.forEach(function (el) { observer.observe(el); });
   }
-}
 
-// Cerrar modal al hacer clic en el overlay (CON VALIDACIÓN)
-const privacyModalEl = document.getElementById('privacy-modal');
-if (privacyModalEl) {
-  privacyModalEl.addEventListener('click', function(e) {
-    if (e.target === this) closePrivacy();
-  });
-}
+  /* ── MOBILE NAV ── */
+  function initMobileNav() {
+    var btn = document.querySelector('.hamburger');
+    var nav = document.getElementById('mobile-nav');
+    if (!btn || !nav) return;
 
-// Cerrar modal con Escape
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closePrivacy();
-});
+    function open() {
+      document.body.classList.add('nav-open');
+      btn.setAttribute('aria-expanded', 'true');
+      nav.setAttribute('aria-hidden', 'false');
+    }
+    function close() {
+      document.body.classList.remove('nav-open');
+      btn.setAttribute('aria-expanded', 'false');
+      nav.setAttribute('aria-hidden', 'true');
+    }
+    function toggle() {
+      document.body.classList.contains('nav-open') ? close() : open();
+    }
 
-// ── PRICING TOGGLE ────────────────────────────────────────────────
-function switchPricing(view) {
-  const viewPacks = document.getElementById('view-packs');
-  const viewLego  = document.getElementById('view-lego');
-  const tabPacks  = document.getElementById('tab-packs');
-  const tabLego   = document.getElementById('tab-lego');
+    btn.addEventListener('click', toggle);
 
-  if (view === 'packs') {
-    viewPacks.style.display = '';
-    viewLego.style.display  = 'none';
-    tabPacks.classList.add('ptab-active');
-    tabLego.classList.remove('ptab-active');
-  } else {
-    viewPacks.style.display = 'none';
-    viewLego.style.display  = '';
-    tabLego.classList.add('ptab-active');
-    tabPacks.classList.remove('ptab-active');
-    // Trigger scroll reveal for lego view
-    document.querySelectorAll('#view-lego .rv').forEach(el => {
-      if (!el.classList.contains('on')) el.classList.add('on');
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') close();
+    });
+
+    document.addEventListener('click', function (e) {
+      if (
+        document.body.classList.contains('nav-open') &&
+        !nav.contains(e.target) &&
+        !btn.contains(e.target)
+      ) {
+        close();
+      }
+    });
+
+    nav.querySelectorAll('a').forEach(function (a) {
+      a.addEventListener('click', close);
     });
   }
-}
 
-// ── LEGO CALCULATOR ───────────────────────────────────────────────
-const BASE_PRICE = 29;
+  /* ── PRICING TOGGLE ── */
+  function initPricingToggle() {
+    var btnMonthly = document.getElementById('toggle-monthly');
+    var btnAnnual = document.getElementById('toggle-annual');
+    var grid = document.getElementById('pricing-grid');
+    if (!btnMonthly || !btnAnnual || !grid) return;
 
-function updateLegoTotal() {
-  const active = document.querySelectorAll('.lego-mod.lego-mod-active');
-  let total = BASE_PRICE;
-  active.forEach(mod => { total += parseInt(mod.dataset.price, 10); });
+    function setMonthly() {
+      btnMonthly.classList.add('active');
+      btnAnnual.classList.remove('active');
+      btnMonthly.setAttribute('aria-pressed', 'true');
+      btnAnnual.setAttribute('aria-pressed', 'false');
+      grid.querySelectorAll('.price-m').forEach(function (el) { el.hidden = false; });
+      grid.querySelectorAll('.price-a').forEach(function (el) { el.hidden = true; });
+    }
+    function setAnnual() {
+      btnAnnual.classList.add('active');
+      btnMonthly.classList.remove('active');
+      btnAnnual.setAttribute('aria-pressed', 'true');
+      btnMonthly.setAttribute('aria-pressed', 'false');
+      grid.querySelectorAll('.price-a').forEach(function (el) { el.hidden = false; });
+      grid.querySelectorAll('.price-m').forEach(function (el) { el.hidden = true; });
+    }
 
-  document.getElementById('lego-total').textContent = '$' + total;
+    btnMonthly.addEventListener('click', setMonthly);
+    btnAnnual.addEventListener('click', setAnnual);
+    setMonthly();
+  }
 
-  // Rebuild selected list
-  const list = document.getElementById('lego-sel-list');
-  
-  // Keep base row, remove added module rows
-  const addedRows = list.querySelectorAll('.lego-sel-added');
-  addedRows.forEach(r => r.remove());
+  /* ── DEMO FORM ── */
+  function initDemoForm() {
+    var form = document.getElementById('demo-form');
+    if (!form) return;
 
-  active.forEach(mod => {
-    const row = document.createElement('div');
-    row.className = 'lego-sel-row lego-sel-added';
-    const price = parseInt(mod.dataset.price, 10);
-    row.innerHTML = '<span>' + mod.dataset.name + '</span><span>+$' + price + '</span>';
-    list.appendChild(row);
-  });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = (form.querySelector('#f-name') || {}).value || '';
+      var restaurant = (form.querySelector('#f-restaurant') || {}).value || '';
+      var whatsapp = (form.querySelector('#f-whatsapp') || {}).value || '';
+      var branches = (form.querySelector('#f-branches') || {}).value || '1';
 
-  // Update setup note based on new USD prices
-  const setupNote = document.getElementById('lego-setup-note');
-  const hasAdvanced = !!document.querySelector('.lego-mod-active[data-name="Multi-sucursal"]');
-  const hasMesa     = !!document.querySelector('.lego-mod-active[data-name="Mesa QR"]');
-  
-  let setup = 39;
-  if (hasMesa)     setup = Math.max(setup, 49);
-  if (hasAdvanced) setup = Math.max(setup, 59);
-  
-  setupNote.textContent = '+ $' + setup + ' setup único';
-}
+      var text = [
+        'Hola, quiero solicitar una demo de Mesio.',
+        'Nombre: ' + name,
+        'Restaurante: ' + restaurant,
+        'WhatsApp: ' + whatsapp,
+        'Sucursales: ' + branches
+      ].join('\n');
 
-// Asegurarnos de que el DOM esté listo antes de agregar los eventos a los módulos
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.lego-mod').forEach(mod => {
-    mod.addEventListener('click', function() {
-      this.classList.toggle('lego-mod-active');
-      updateLegoTotal();
+      var url = 'https://wa.me/573144914554?text=' + encodeURIComponent(text);
+      window.open(url, '_blank', 'noopener');
     });
+  }
+
+  /* ── INIT ── */
+  document.addEventListener('DOMContentLoaded', function () {
+    initReveal();
+    initCounters();
+    initMobileNav();
+    initPricingToggle();
+    initDemoForm();
   });
-});
+})();

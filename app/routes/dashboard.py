@@ -101,6 +101,7 @@ async def login_page(): return (STATIC / "html" / "login.html").read_text(encodi
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(): return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")
 @router.get("/demo", response_class=HTMLResponse)
+@router.get("/dashboard-demo", response_class=HTMLResponse)
 async def demo_page(): return (STATIC / "html" / "dashboard-demo.html").read_text(encoding="utf-8")
 @router.get("/landing", response_class=HTMLResponse)
 async def landing_page(): return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
