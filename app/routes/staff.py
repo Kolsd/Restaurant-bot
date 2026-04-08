@@ -13,6 +13,7 @@ Layer rules:
 import json
 import secrets
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -860,7 +861,7 @@ async def save_payroll_run(
         restaurant_id=branch_id,
         period_start=period_start,
         period_end=period_end,
-        entries=entries,
+        snapshot=entries,
         created_by=restaurant.get("whatsapp_number", ""),
     )
     return {"run": run}
@@ -883,32 +884,32 @@ async def list_payroll_runs(
 # ── Contract templates (admin/owner) ─────────────────────────────────────────
 
 class ContractTemplateCreate(BaseModel):
-    name:               str   = Field(..., min_length=1, max_length=100)
-    weekly_hours:       float = Field(44.0, ge=1, le=84)
-    monthly_salary:     float = Field(0.0, ge=0)
-    pay_period:         str   = Field("biweekly", pattern="^(monthly|biweekly|weekly)$")
-    transport_subsidy:  float = Field(0.0, ge=0)
-    arl_pct:            float = Field(0.00522, ge=0, le=1)
-    health_pct:         float = Field(0.04, ge=0, le=1)
-    pension_pct:        float = Field(0.04, ge=0, le=1)
-    other_benefits:     dict  = Field(default_factory=dict)
-    breaks_billable:    bool  = True
-    lunch_billable:     bool  = False
-    lunch_minutes:      int   = Field(60, ge=0, le=120)
+    name:               str     = Field(..., min_length=1, max_length=100)
+    weekly_hours:       float   = Field(44.0, ge=1, le=84)
+    monthly_salary:     Decimal = Field(Decimal("0"), ge=0)
+    pay_period:         str     = Field("biweekly", pattern="^(monthly|biweekly|weekly)$")
+    transport_subsidy:  Decimal = Field(Decimal("0"), ge=0)
+    arl_pct:            Decimal = Field(Decimal("0.00522"), ge=0, le=1)
+    health_pct:         Decimal = Field(Decimal("0.04"), ge=0, le=1)
+    pension_pct:        Decimal = Field(Decimal("0.04"), ge=0, le=1)
+    other_benefits:     dict    = Field(default_factory=dict)
+    breaks_billable:    bool    = True
+    lunch_billable:     bool    = False
+    lunch_minutes:      int     = Field(60, ge=0, le=120)
 
 
 class ContractTemplateUpdate(BaseModel):
-    name:               str   | None = Field(None, min_length=1, max_length=100)
-    weekly_hours:       float | None = Field(None, ge=1, le=84)
-    monthly_salary:     float | None = Field(None, ge=0)
-    pay_period:         str   | None = Field(None, pattern="^(monthly|biweekly|weekly)$")
-    transport_subsidy:  float | None = Field(None, ge=0)
-    arl_pct:            float | None = Field(None, ge=0, le=1)
-    health_pct:         float | None = Field(None, ge=0, le=1)
-    pension_pct:        float | None = Field(None, ge=0, le=1)
-    other_benefits:     dict  | None = None
-    breaks_billable:    bool  | None = None
-    lunch_billable:     bool  | None = None
+    name:               str     | None = Field(None, min_length=1, max_length=100)
+    weekly_hours:       float   | None = Field(None, ge=1, le=84)
+    monthly_salary:     Decimal | None = Field(None, ge=0)
+    pay_period:         str     | None = Field(None, pattern="^(monthly|biweekly|weekly)$")
+    transport_subsidy:  Decimal | None = Field(None, ge=0)
+    arl_pct:            Decimal | None = Field(None, ge=0, le=1)
+    health_pct:         Decimal | None = Field(None, ge=0, le=1)
+    pension_pct:        Decimal | None = Field(None, ge=0, le=1)
+    other_benefits:     dict    | None = None
+    breaks_billable:    bool    | None = None
+    lunch_billable:     bool    | None = None
     lunch_minutes:      int   | None = Field(None, ge=0, le=120)
     active:             bool  | None = None
 

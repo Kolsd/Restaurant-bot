@@ -944,13 +944,9 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         check_total  = to_decimal(check["total"]) + to_decimal(body.service_charge)
         if total_pagado < check_total:
             raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_pagado):,.0f}")
-        change = float(quantize_money(total_pagado - check_total))
 
-        tip_amount_d = to_decimal(body.tip_amount)
-        if tip_amount_d > 0 and tip_amount_d > money_mul(check["total"], Decimal("0.5")):
-            raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
-
-        config = await billing.get_billing_config(restaurant["id"])
+        # Resolve currency before quantizing change/tip so zero-decimal currencies (COP, CLP)
+        # are rounded correctly at this JSON boundary.
         features = restaurant.get("features") or {}
         if isinstance(features, str):
             import json as _json
@@ -958,6 +954,15 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 features = _json.loads(features)
             except Exception:
                 features = {}
+        _currency = features.get("currency") if isinstance(features, dict) else None
+
+        change = float(quantize_money(total_pagado - check_total, _currency))
+
+        tip_amount_d = to_decimal(body.tip_amount)
+        if tip_amount_d > 0 and tip_amount_d > money_mul(check["total"], Decimal("0.5")):
+            raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
+
+        config = await billing.get_billing_config(restaurant["id"])
 
         raw_dian = features.get("dian_active", False)
         if isinstance(raw_dian, str):
