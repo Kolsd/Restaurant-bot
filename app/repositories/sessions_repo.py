@@ -38,8 +38,8 @@ async def create_session(username: str) -> str:
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO sessions (token, token_hash, username, expires_at)
-            VALUES (NULL, $1, $2, $3)
+            INSERT INTO sessions (token_hash, username, expires_at)
+            VALUES ($1, $2, $3)
             """,
             token_hash, username, expires,
         )
