@@ -15,7 +15,11 @@ import secrets
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from app.services.money import to_decimal
@@ -862,6 +866,7 @@ async def save_payroll_run(
         period_start=period_start,
         period_end=period_end,
         snapshot=entries,
+        config={},
         created_by=restaurant.get("whatsapp_number", ""),
     )
     return {"run": run}
@@ -879,6 +884,54 @@ async def list_payroll_runs(
         branch_id = int(branch_header)
     runs = await db.db_get_payroll_runs(branch_id)
     return {"runs": runs}
+
+
+@router.get("/payroll/runs/{run_id}/export", dependencies=_MODULE_DEPS)
+async def export_payroll_run(
+    run_id: str,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Download a saved payroll run as a CSV file."""
+    branch_id = restaurant["id"]
+    run = await db.db_get_payroll_run(run_id, branch_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Corrida de nómina no encontrada.")
+
+    snapshot = run.get("snapshot") or []
+    if isinstance(snapshot, str):
+        snapshot = json.loads(snapshot)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Nombre", "Rol", "Horas Regulares", "Horas Extra",
+        "Tarifa/Hora", "Pago Bruto", "Propinas",
+        "Compensación Total", "Total Deducciones", "Pago Neto",
+    ])
+    for e in snapshot:
+        writer.writerow([
+            e.get("name", ""),
+            e.get("role", ""),
+            e.get("regular_hours", 0),
+            e.get("overtime_hours", 0),
+            e.get("hourly_rate", 0),
+            e.get("gross_pay", 0),
+            e.get("tip_earnings", 0),
+            e.get("total_compensation", 0),
+            e.get("total_deductions", 0),
+            e.get("net_pay", 0),
+        ])
+
+    period_start = str(run.get("period_start", "")).replace("-", "")
+    period_end   = str(run.get("period_end",   "")).replace("-", "")
+    filename     = f"nomina_{period_start}_{period_end}.csv"
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Contract templates (admin/owner) ─────────────────────────────────────────
