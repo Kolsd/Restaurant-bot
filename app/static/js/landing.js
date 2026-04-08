@@ -162,5 +162,12 @@
     initMobileNav();
     initPricingToggle();
     initDemoForm();
+
+    // Safety fallback: reveal any .rv elements still hidden after 600ms
+    setTimeout(function () {
+      document.querySelectorAll('.rv:not(.in)').forEach(function (el) {
+        el.classList.add('in');
+      });
+    }, 600);
   });
 })();

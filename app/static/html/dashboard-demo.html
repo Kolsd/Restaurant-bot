@@ -794,6 +794,50 @@
       });
     }
   });
+
+  // ── Override AI functions with hardcoded demo responses ──────────────────────
+  // generateAIInsights() and askMesioAI() call api.anthropic.com directly,
+  // which fails in demo mode (CORS + no API key). Replace with static mocks.
+
+  window.generateAIInsights = async function(orders, avgTicket, topPlato, topHora) {
+    const _set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+
+    _set('ai-main-text',
+      '<strong>Hoy es un día de alta rotación:</strong> la Bandeja Paisa lidera con 34 pedidos y el ticket promedio es $28.500. ' +
+      'Refuerza el turno de 12–14h con un mesero adicional para mantener los tiempos de servicio.');
+
+    _set('ai-stock-text',
+      'Con Bandeja Paisa como plato top, asegura al menos <strong>3 kg de frijoles y 2 kg de chorizo</strong> antes del servicio del mediodía.');
+
+    const upsellHtml = [
+      { icon:'🍺', texto:'Ofrece Cerveza Club Colombia al confirmar pedidos de Bandeja Paisa (+$8.500)', ganancia:'+18% ticket' },
+      { icon:'🍮', texto:'Sugiere Arroz con Leche como postre después de platos fuertes', ganancia:'+$9.500 / pedido' },
+      { icon:'🥤', texto:'Combo Limonada + plato fuerte con 5% de descuento para grupos de 3+', ganancia:'+22% conversión' },
+    ].map(s => `<div class="upsell-card"><span class="upsell-icon">${s.icon}</span><span class="upsell-text">${s.texto}</span><span class="upsell-badge">${s.ganancia}</span></div>`).join('');
+    _set('upsell-container', upsellHtml);
+  };
+
+  window.askMesioAI = function() {
+    const question = document.getElementById('ai-question').value.trim();
+    if (!question) return;
+    const responseDiv = document.getElementById('ai-response');
+    const btn = document.querySelector('.ask-ai-btn');
+    btn.textContent = 'Pensando...'; btn.disabled = true;
+    responseDiv.style.display = 'block';
+    responseDiv.textContent = '✦ Analizando tu pregunta...';
+    setTimeout(() => {
+      const demoAnswers = {
+        'personal':   '✦ Los viernes y sábados necesitas al menos 2 meseros adicionales en el turno de las 7–10pm. El pico histórico de pedidos es entre las 12–2pm y 7–9pm.',
+        'promover':   '✦ Este fin de semana promociona el combo Bandeja Paisa + Limonada con un 8% de descuento en pedidos WhatsApp. Históricamente aumenta el volumen un 22% los sábados.',
+        'inventario': '✦ Con base en el consumo de esta semana, necesitas reponer frijoles (stock bajo: 3 kg), maíz tierno (stock bajo: 2 kg) y crema de leche antes del servicio del mediodía.',
+      };
+      const key = Object.keys(demoAnswers).find(k => question.toLowerCase().includes(k)) || null;
+      responseDiv.innerHTML = key
+        ? demoAnswers[key]
+        : '✦ <strong>Respuesta demo:</strong> En la versión real, Mesio IA analiza tus datos reales de pedidos, inventario y turnos para darte una respuesta personalizada. Crea tu cuenta para acceder al análisis completo.';
+      btn.textContent = 'Preguntar a Mesio IA →'; btn.disabled = false;
+    }, 900);
+  };
 })();
 </script>
 </body>

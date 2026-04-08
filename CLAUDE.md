@@ -416,17 +416,16 @@ Formateador universal que lee `rb_restaurant` de localStorage para obtener `loca
 - Sucursal: `parent_restaurant_id` apunta a la Matriz.
 - WhatsApp: sucursales usan sufijo `_b[TIMESTAMP]` en `whatsapp_number` para evitar colisiones.
 
-## Instrucciones para Claude Code
+## Estrategias de Eficiencia (Token Saving)
+- **Contexto Quirúrgico**: Antes de editar, identifica los archivos mínimos necesarios. No leas carpetas completas.
+- **Sin Resúmenes Proactivos**: No generes resúmenes de cambios ni explicaciones extensas a menos que se solicite con "explica".
+- **Muestreo de Código**: Para archivos de más de 300 líneas, busca funciones específicas por nombre en lugar de leer el archivo completo.
+- **Reset de Sesión**: Sugiere al usuario usar `/clear` si el historial de la conversación supera los 10 mensajes para limpiar la memoria de trabajo.
 
-- NO leer `tests/` ni cachés sin que se pida explícitamente.
-- NO explicar en exceso, ir al grano.
-- Al modificar flujos asíncronos, cuidar locks en `orders.py` (Race Conditions con múltiples workers).
-- Al agregar endpoints a `staff.py`, verificar que `Field` esté importado de pydantic (error frecuente).
-- Migraciones: siempre usar `IF NOT EXISTS` en `CREATE TABLE/INDEX` y `ADD COLUMN IF NOT EXISTS`.
-- La función `db_update_deduction_item` (y similares) usa f-strings SOLO para construir la cláusula `SET` dinámica — esto es intencional, los nombres de columna vienen de un `allowed` set hardcodeado.
-- Cuando se modifique `_renderShiftsEditor`, recordar que usa `_staffFetch` (no `fetch` raw).
-- `day_of_week` en schedules: 0=Lunes (ISO weekday - 1). JS usa `(d.getDay() + 6) % 7`.
-- **Repositories**: cuando agregues una función DB de un agregado ya extraído (orders/sessions/inventory/staff/tables/conversations), escríbela en el repo correspondiente, NO en `database.py`. Añade la re-export al bloque del shim si algún call site la usa por `db.<name>`.
-- **Money**: cualquier nueva función que toque dinero usa `Decimal` + helpers de `money.py` desde el día uno.
-- **Logging**: `get_logger(__name__)` al tope del archivo. Cero `print()` para errores.
-- **Webhook handlers nuevos**: registrarlos via `inbox_worker.register_handler('provider_name', handler_fn)` para que hereden retry+backoff+dead-letter automáticamente.
+## Instrucciones Críticas para Claude Code
+- **No Vaguedad**: Ante una duda técnica, pregunta antes de proponer cambios masivos que consuman tokens.
+- **Aislamiento Multi-Worker**: Al modificar estados (`NPS`, `checkout`), asume siempre que hay 4 workers y usa `state_manager` (Redis).
+- **Patrón Repositorio**: Prohibido añadir lógica SQL compleja en `app/services/`. Debe ir en `app/repositories/`.
+- **Precisión Financiera**: Prohibido usar `float` para dinero. Usa `Decimal` y los helpers en `app/services/money.py`.
+- **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
+- **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle.

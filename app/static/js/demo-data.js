@@ -371,6 +371,15 @@ const _npsStats = {
 
 const _payrollRuns = [];
 
+const _tableSessions = [
+  { id:1,  table_id:2,  table_name:'Mesa 2',  bot_number:'573001234567', phone:'573011111111', started_at: _ago(3.5), closed_at: _ago(2.0), closed_by:'client_goodbye',    closed_by_username:'Cliente',          total_spent:90200  },
+  { id:2,  table_id:4,  table_name:'Mesa 4',  bot_number:'573001234567', phone:'573022222222', started_at: _ago(5.0), closed_at: _ago(3.5), closed_by:'waiter_manual',     closed_by_username:'Carlos Ramírez',   total_spent:141500 },
+  { id:3,  table_id:7,  table_name:'Mesa 7',  bot_number:'573001234567', phone:'573033333333', started_at: _ago(6.0), closed_at: _ago(4.8), closed_by:'inactivity_timeout', closed_by_username:'Sistema',         total_spent:null   },
+  { id:4,  table_id:1,  table_name:'Mesa 1',  bot_number:'573001234567', phone:'573044444444', started_at: _ago(8.0), closed_at: _ago(7.0), closed_by:'client_goodbye',    closed_by_username:'Cliente',          total_spent:55000  },
+  { id:5,  table_id:5,  table_name:'Mesa 5',  bot_number:'573001234567', phone:'573055555555', started_at: _ago(9.5), closed_at: _ago(8.2), closed_by:'waiter_manual',     closed_by_username:'María Gómez',     total_spent:60500  },
+  { id:6,  table_id:3,  table_name:'Mesa 3',  bot_number:'573001234567', phone:'573066666666', started_at: _ago(12.0),closed_at: _ago(10.5),closed_by:'client_goodbye',    closed_by_username:'Cliente',          total_spent:112000 },
+];
+
 // ── Route matcher ──────────────────────────────────────────────────────────────
 
 function _demoMatch(path, method) {
@@ -538,6 +547,8 @@ function _demoMatch(path, method) {
     return { ok: true };
 
   // ── Table sessions ──
+  if (p.startsWith('/table-sessions/closed') && method === 'GET')
+    return { sessions: _tableSessions };
   if (p.startsWith('/table-sessions') && method === 'GET')
     return { sessions: [] };
   if (/\/table-sessions\/.*\/history/.test(p) && method === 'GET')
