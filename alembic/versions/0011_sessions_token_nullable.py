@@ -17,6 +17,23 @@ depends_on    = None
 
 
 def upgrade() -> None:
+    # token is PRIMARY KEY — PK columns cannot be nullable.
+    # Step 1: add a surrogate PK so token can be demoted.
+    op.execute("""
+    ALTER TABLE sessions
+        ADD COLUMN IF NOT EXISTS id BIGSERIAL
+    """)
+    # Step 2: drop the token primary key constraint.
+    op.execute("""
+    ALTER TABLE sessions
+        DROP CONSTRAINT IF EXISTS sessions_pkey
+    """)
+    # Step 3: promote id to primary key.
+    op.execute("""
+    ALTER TABLE sessions
+        ADD PRIMARY KEY (id)
+    """)
+    # Step 4: now token has no PK obligation — drop NOT NULL.
     op.execute("""
     ALTER TABLE sessions
         ALTER COLUMN token DROP NOT NULL
@@ -24,12 +41,21 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Only safe if no rows have token IS NULL; guard with a check.
+    # Restore token values where missing, then reinstate token as PK.
     op.execute("""
     UPDATE sessions SET token = encode(token_hash, 'hex')
      WHERE token IS NULL AND token_hash IS NOT NULL
     """)
     op.execute("""
     ALTER TABLE sessions
+        DROP CONSTRAINT IF EXISTS sessions_pkey
+    """)
+    op.execute("""
+    ALTER TABLE sessions
         ALTER COLUMN token SET NOT NULL
     """)
+    op.execute("""
+    ALTER TABLE sessions
+        ADD PRIMARY KEY (token)
+    """)
+    op.execute("ALTER TABLE sessions DROP COLUMN IF EXISTS id")
