@@ -5,7 +5,6 @@ All SQL uses positional $1/$2/... params (no f-strings for data).
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import asyncpg
@@ -46,7 +45,7 @@ async def enqueue(
             """,
             provider,
             external_id,
-            json.dumps(payload),
+            payload,  # dict — asyncpg's JSONB codec (json.dumps encoder) serializa esto
         )
         return True
 
