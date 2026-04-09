@@ -201,7 +201,15 @@ async def get_prospects(
         params.append(limit)
         where = " AND ".join(conditions)
         rows = await conn.fetch(
-            f"SELECT * FROM prospects WHERE {where} ORDER BY updated_at DESC LIMIT ${idx}",
+            f"""
+            SELECT p.*,
+                (SELECT direction FROM prospect_interactions
+                 WHERE prospect_id = p.id ORDER BY created_at DESC LIMIT 1) AS last_message_direction,
+                (SELECT content   FROM prospect_interactions
+                 WHERE prospect_id = p.id ORDER BY created_at DESC LIMIT 1) AS last_message_preview
+            FROM prospects p
+            WHERE {where} ORDER BY p.updated_at DESC LIMIT ${idx}
+            """,
             *params
         )
         return {"prospects": [_ser(dict(r)) for r in rows]}

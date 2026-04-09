@@ -287,12 +287,26 @@ function renderInbox() {
   });
   document.getElementById('inbox-total').textContent = sorted.length;
   document.getElementById('inbox-list').innerHTML = sorted.map(p => {
-    const active = S.inboxId === p.id;
-    return `<div class="inbox-row${active?' active':''}" onclick="openInboxChat(${p.id})">
-      <div class="inbox-av">${(p.restaurant_name||'?')[0].toUpperCase()}</div>
-      <div class="inbox-info">
-        <div class="inbox-iname">${esc(p.restaurant_name)}${p.owner_name?' · '+esc(p.owner_name):''}</div>
-        <div class="inbox-ipreview">${esc(p.phone||'')}</div>
+    const active   = S.inboxId === p.id;
+    const dir      = p.last_message_direction;     // 'inbound' | 'outbound' | null
+    const hasNew   = dir === 'inbound' && !active;
+    const waiting  = dir === 'outbound';
+    const preview  = p.last_message_preview
+      ? esc(p.last_message_preview.slice(0, 50)) + (p.last_message_preview.length > 50 ? '…' : '')
+      : '<span style="color:var(--text-3);font-style:italic">Sin mensajes</span>';
+    const statusDot = hasNew
+      ? `<span style="width:10px;height:10px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block"></span>`
+      : waiting
+        ? `<span style="font-size:11px;color:var(--text-3)">⏳</span>`
+        : '';
+    return `<div class="inbox-row${active?' active':''}${hasNew?' inbox-row--unread':''}" onclick="openInboxChat(${p.id})">
+      <div class="inbox-av" style="${hasNew?'background:#22c55e;color:#fff':''}">${(p.restaurant_name||'?')[0].toUpperCase()}</div>
+      <div class="inbox-info" style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;justify-content:space-between">
+          <div class="inbox-iname" style="${hasNew?'font-weight:700':''}">${esc(p.restaurant_name)}${p.owner_name?' · '+esc(p.owner_name):''}</div>
+          ${statusDot}
+        </div>
+        <div class="inbox-ipreview" style="${hasNew?'color:var(--text-1);font-weight:500':''}">${preview}</div>
         <div class="inbox-imeta">${p.city?esc(p.city)+' · ':''}${STAGE_LABEL[p.stage]||''}</div>
       </div>
     </div>`;
