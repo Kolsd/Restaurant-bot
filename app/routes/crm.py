@@ -571,10 +571,14 @@ async def delete_template(request: Request, tid: int):
 async def upload_csv(request: Request, file: UploadFile = File(...)):
     await _require_auth(request)
     
+    await _ensure_crm_tables()
     content = await file.read()
-    
-    # Decodificar el archivo CSV y prepararlo para leer
-    text = content.decode("utf-8")
+
+    # utf-8-sig strips Excel BOM (\ufeff); fallback to latin-1 for Windows-1252
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
     reader = csv.DictReader(io.StringIO(text))
 
     pool = await db.get_pool()
@@ -583,10 +587,18 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
 
     async with pool.acquire() as conn:
         for row in reader:
-            name = row.get('Restaurante', row.get('restaurante', row.get('name', ''))).strip()
-            phone = row.get('Telefono', row.get('telefono', row.get('phone', ''))).strip()
-            owner = row.get('Dueño', row.get('owner', '')).strip()
-            city = row.get('Ciudad', row.get('city', '')).strip()
+            def _col(*keys): return next((row.get(k,'') for k in keys if row.get(k,'')), '').strip()
+            name  = _col('Restaurante','restaurante','name')
+            phone = _col('Telefono','telefono','phone')
+            owner = _col('Dueño','Dueno','owner')
+            city  = _col('Ciudad','city')
+            neighborhood = _col('Barrio','barrio','neighborhood')
+            category     = _col('Categoria','categoria','category')
+            instagram    = _col('Instagram','instagram')
+            google_maps  = _col('Google Maps','google_maps')
+            source       = _col('Fuente','fuente','source') or 'csv_import'
+            stage        = _col('Etapa Inicial','etapa_inicial','stage') or 'prospecto'
+            priority     = _col('Prioridad','prioridad','priority') or 'medium'
 
             if not name or not phone:
                 errors += 1
@@ -595,21 +607,21 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
             phone = phone.replace(" ", "").replace("+", "").replace("-", "")
 
             try:
-                # Búsqueda exacta indexada en lugar de ILIKE
                 existing = await conn.fetchval(
-                    "SELECT id FROM prospects WHERE phone = $1", 
+                    "SELECT id FROM prospects WHERE phone = $1",
                     phone
                 )
-                
-                # Solo inserta si no existe previamente
                 if not existing:
                     await conn.execute("""
-                        INSERT INTO prospects (restaurant_name, owner_name, phone, city, source)
-                        VALUES ($1, $2, $3, $4, 'csv_import')
-                    """, name, owner, phone, city)
+                        INSERT INTO prospects
+                          (restaurant_name, owner_name, phone, city, neighborhood,
+                           category, instagram, google_maps, source, stage, priority)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                    """, name, owner, phone, city, neighborhood,
+                         category, instagram, google_maps, source, stage, priority)
                     inserted += 1
                 else:
-                    errors += 1 
+                    errors += 1
             except Exception as e:
                 errors += 1
 
