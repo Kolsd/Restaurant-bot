@@ -597,6 +597,7 @@ async function doLogin() {
     const data = await r.json();
     ADMIN_KEY = key;
     localStorage.setItem('hq_key', key);
+    localStorage.setItem('mesio_admin_key', key);
     $('login-overlay').style.display = 'none';
     $('app').style.display = 'block';
     renderKPIs(data);
