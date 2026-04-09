@@ -65,6 +65,7 @@ class NoteCreate(BaseModel):
 class TemplateCreate(BaseModel):
     name:     str
     wa_name:  str
+    language: str = "es_CO"
     category: str = "MARKETING"
     body:     str
     params:   List[str] = []
@@ -550,9 +551,9 @@ async def create_template(request: Request, body: TemplateCreate):
         try:
             # 👇 Agregamos ::TEXT[] al parámetro $5 para que la BD no se confunda con listas vacías
             row = await conn.fetchrow("""
-                INSERT INTO crm_templates (name, wa_name, category, body, params)
-                VALUES ($1,$2,$3,$4,$5::TEXT[]) RETURNING *
-            """, body.name, body.wa_name, body.category, body.body, body.params)
+                INSERT INTO crm_templates (name, wa_name, language, category, body, params)
+                VALUES ($1,$2,$3,$4,$5,$6::TEXT[]) RETURNING *
+            """, body.name, body.wa_name, body.language, body.category, body.body, body.params)
             return {"success": True, "template": _ser(dict(row))}
         except Exception as e:
             # Si hay un error (ej. nombre duplicado), ahora sí se lo diremos al CRM

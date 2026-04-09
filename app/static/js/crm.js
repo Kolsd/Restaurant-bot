@@ -881,16 +881,18 @@ function loadTemplateManagerList() {
 }
 
 async function saveTemplate() {
-  const name    = document.getElementById('tpl-name').value.trim();
-  const wa_name = document.getElementById('tpl-wa-name').value.trim();
-  const body    = document.getElementById('tpl-body').value.trim();
-  const params  = document.getElementById('tpl-params').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const name     = document.getElementById('tpl-name').value.trim();
+  const wa_name  = document.getElementById('tpl-wa-name').value.trim();
+  const language = document.getElementById('tpl-language').value.trim() || 'es_CO';
+  const body     = document.getElementById('tpl-body').value.trim();
+  const params   = document.getElementById('tpl-params').value.split(',').map(s=>s.trim()).filter(Boolean);
   if (!name || !wa_name || !body) { toast('Nombre, wa_name y cuerpo son requeridos', 'err'); return; }
-  const d = await api('POST', '/templates', { name, wa_name, body, params, category:'MARKETING' });
+  const d = await api('POST', '/templates', { name, wa_name, language, body, params, category:'MARKETING' });
   if (d?.success) {
     await loadTemplates();
     loadTemplateManagerList();
     ['tpl-name','tpl-wa-name','tpl-body','tpl-params'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+    const langEl = document.getElementById('tpl-language'); if(langEl) langEl.value='es_CO';
     toast('Template guardado', 'ok');
   }
 }
