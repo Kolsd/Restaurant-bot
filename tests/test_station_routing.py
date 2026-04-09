@@ -150,6 +150,8 @@ def test_ruta_cocina_sigue_funcionando(client):
 def test_pos_order_station_default_all(client, monkeypatch):
     """POST /api/pos/order sin station= debe usar station='all'."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
     mock_save = AsyncMock()
     monkeypatch.setattr(tables_routes.db, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(tables_routes.db, "db_save_table_order", mock_save)
@@ -173,6 +175,8 @@ def test_pos_order_station_default_all(client, monkeypatch):
 def test_pos_order_station_bar(client, monkeypatch):
     """POST /api/pos/order con station='bar' debe guardarlo como 'bar'."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
     mock_save = AsyncMock()
     monkeypatch.setattr(tables_routes.db, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(tables_routes.db, "db_save_table_order", mock_save)
@@ -196,6 +200,8 @@ def test_pos_order_station_bar(client, monkeypatch):
 def test_pos_order_station_kitchen_mensaje(client, monkeypatch):
     """POST /api/pos/order con station='kitchen' da mensaje de cocina."""
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="admin_test"))
+    monkeypatch.setattr(tables_routes, "get_current_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "role": "owner"}))
     monkeypatch.setattr(tables_routes.db, "db_get_base_order_id", AsyncMock(return_value=None))
     monkeypatch.setattr(tables_routes.db, "db_save_table_order", AsyncMock())
     monkeypatch.setattr(tables_routes.db, "db_get_next_sub_number", AsyncMock(return_value=1))

@@ -168,6 +168,8 @@ async def test_deduct_usa_receta_cuando_existe():
         [recipe_row],   # dish_recipes query
         [locked_row],   # SELECT ... FOR UPDATE
     ])
+    # fetchrow returns the updated stock after UPDATE ... RETURNING current_stock
+    mock_conn.fetchrow = AsyncMock(return_value=MagicMock(__getitem__=lambda s, k: 4.4))
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -183,17 +185,17 @@ async def test_deduct_usa_receta_cuando_existe():
             bot_number="+57300", items=[{"name": "Pizza", "quantity": 2}]
         )
 
-    # Debe haber un UPDATE de inventario
-    update_calls = [c for c in mock_conn.execute.call_args_list
+    # Debe haber un UPDATE de inventario via fetchrow (uses RETURNING)
+    update_calls = [c for c in mock_conn.fetchrow.call_args_list
                     if "UPDATE inventory" in str(c)]
     assert len(update_calls) == 1
 
-    # El nuevo stock debe ser 5 - (0.3 * 2) = 4.4
-    # args: (sql, new_stock, id)
+    # deduct = recipe_qty * qty = 0.3 * 2 = 0.6
+    # args: (sql, deduct, ing_id)
     update_args = update_calls[0].args
-    assert abs(float(update_args[1]) - 4.4) < 0.001
+    assert abs(float(update_args[1]) - 0.6) < 0.001
 
-    # Historial registrado
+    # Historial registrado via execute
     history_calls = [c for c in mock_conn.execute.call_args_list
                      if "inventory_history" in str(c)]
     assert len(history_calls) == 1
@@ -220,6 +222,8 @@ async def test_deduct_usa_linked_dishes_fallback_sin_receta():
         [],           # dish_recipes → vacío → fallback
         [legacy_row], # linked_dishes FOR UPDATE
     ])
+    # fetchrow returns updated stock after UPDATE ... RETURNING current_stock
+    mock_conn.fetchrow = AsyncMock(return_value=MagicMock(__getitem__=lambda s, k: 7.0))
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -236,11 +240,12 @@ async def test_deduct_usa_linked_dishes_fallback_sin_receta():
             items=[{"name": "Hamburguesa", "quantity": 3}]
         )
 
-    update_calls = [c for c in mock_conn.execute.call_args_list
+    # UPDATE uses fetchrow (RETURNING current_stock)
+    update_calls = [c for c in mock_conn.fetchrow.call_args_list
                     if "UPDATE inventory" in str(c)]
     assert len(update_calls) == 1
-    # stock: 10 - 3 = 7  (args: sql, new_stock, id)
-    assert abs(float(update_calls[0].args[1]) - 7.0) < 0.001
+    # args: (sql, qty=3, row_id=5) — deduction amount is 3
+    assert abs(float(update_calls[0].args[1]) - 3.0) < 0.001
 
 
 @pytest.mark.asyncio
@@ -250,6 +255,7 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
     a _sync_dish_availability_conn para desactivar los platos vinculados.
     """
     from app.services import database as db
+    import app.repositories.inventory_repo as inv_repo
 
     restaurant = {"id": 1}
 
@@ -265,6 +271,8 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
         [recipe_row],
         [locked_row],
     ])
+    # fetchrow returns new_stock = 0.0 (0.5 - 0.5) so new_stock <= min_stock triggers sync
+    mock_conn.fetchrow = AsyncMock(return_value=MagicMock(__getitem__=lambda s, k: 0.0))
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -272,7 +280,7 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
 
     sync_calls = []
 
-    async def fake_sync_conn(conn, dish_names, available):
+    async def fake_sync_conn(conn, dish_names, available, restaurant_id):
         sync_calls.append((dish_names, available))
 
     with (
@@ -280,7 +288,7 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
                      AsyncMock(return_value=_make_pool(mock_conn))),
         patch.object(db, "db_get_restaurant_by_phone",
                      AsyncMock(return_value=restaurant)),
-        patch.object(db, "_sync_dish_availability_conn", fake_sync_conn),
+        patch.object(inv_repo, "_sync_dish_availability_conn", fake_sync_conn),
     ):
         await db.db_deduct_inventory_for_order(
             bot_number="+57300",

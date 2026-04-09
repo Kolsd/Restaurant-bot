@@ -153,9 +153,9 @@ async def test_finalize_check_marca_invoiced():
             customer_email="j@test.co",
         )
 
-    # UPDATE table_checks llamado
+    # UPDATE table_checks llamado (main UPDATE with SET payments=)
     update_check_calls = [c for c in mock_conn.execute.call_args_list
-                          if "UPDATE table_checks" in str(c)]
+                          if "UPDATE table_checks" in str(c) and "SET payments=" in str(c)]
     assert len(update_check_calls) == 1
 
     # Los args del UPDATE deben incluir el fiscal_invoice_id y change_amount

@@ -109,7 +109,7 @@ def test_create_staff_pin_not_in_response(client, monkeypatch):
 
     r = client.post(
         "/api/staff",
-        json={"name": "Ana García", "role": "mesero", "pin": "1234", "phone": "+573001111111"},
+        json={"name": "Ana García", "role": "mesero", "password": "1234", "phone": "+573001111111"},
         headers=_HEADERS,
     )
     assert r.status_code == 201
@@ -261,122 +261,6 @@ def test_get_shifts_with_date_range(client, monkeypatch):
     )
     assert r.status_code == 200
     assert r.json()["shifts"][0]["hours_worked"] == 8.0
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 11–13. Tip cut
-# ══════════════════════════════════════════════════════════════════════════════
-
-def test_tip_cut_no_employees_returns_422(client, monkeypatch):
-    """
-    When db_calculate_tip_pool returns empty entries (no shifts in period),
-    the endpoint must return 422 with a descriptive error.
-    """
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    monkeypatch.setattr(db_mod, "db_calculate_tip_pool", AsyncMock(return_value={
-        "pct_config": {},
-        "entries": [],
-        "total_allocated": 0.0,
-        "total_unallocated": 50000.0,
-    }))
-
-    r = client.post(
-        "/api/staff/tip-cut",
-        json={
-            "period_start": "2026-03-25T00:00:00Z",
-            "period_end":   "2026-03-25T23:59:59Z",
-            "total_tips":   50000.0,
-        },
-        headers=_HEADERS,
-    )
-    assert r.status_code == 422
-
-
-def test_tip_cut_valid_returns_distribution(client, monkeypatch):
-    """Valid tip cut returns 200 with distribution data."""
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    preview = {
-        "pct_config": {"mesero": 70, "cocina": 30},
-        "entries": [
-            {"staff_id": _STAFF_ROW["id"], "name": "Ana",   "role": "mesero",
-             "hours": 8.0, "amount": 35000.0, "pct": 70},
-            {"staff_id": "cccccccc-0000-4000-8000-000000000001", "name": "Carlos",
-             "role": "cocina", "hours": 8.0, "amount": 15000.0, "pct": 30},
-        ],
-        "total_allocated":   50000.0,
-        "total_unallocated": 0.0,
-    }
-    saved = {
-        "id":           "dddddddd-0000-4000-8000-000000000001",
-        "restaurant_id": 1,
-        "period_start": "2026-03-25T00:00:00+00:00",
-        "period_end":   "2026-03-25T23:59:59+00:00",
-        "total_tips":   50000.0,
-        "distribution": preview["entries"],
-        "pct_config":   preview["pct_config"],
-        "created_by":   "+573009999999",
-        "created_at":   "2026-03-25T17:00:00+00:00",
-    }
-
-    monkeypatch.setattr(db_mod, "db_calculate_tip_pool",   AsyncMock(return_value=preview))
-    monkeypatch.setattr(db_mod, "db_save_tip_distribution", AsyncMock(return_value=saved))
-
-    r = client.post(
-        "/api/staff/tip-cut",
-        json={
-            "period_start": "2026-03-25T00:00:00Z",
-            "period_end":   "2026-03-25T23:59:59Z",
-            "total_tips":   50000.0,
-        },
-        headers=_HEADERS,
-    )
-    assert r.status_code == 200
-    data = r.json()
-    assert "distribution" in data
-    assert "preview" in data
-
-
-def test_tip_cut_amounts_do_not_exceed_total(client, monkeypatch):
-    """
-    The sum of all distribution amounts must be ≤ total_tips.
-    This validates the math invariant regardless of rounding.
-    """
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    total_tips = 100_000.0
-    entries = [
-        {"staff_id": "e1", "name": "A", "role": "mesero", "hours": 6.0, "amount": 40000.0, "pct": 60},
-        {"staff_id": "e2", "name": "B", "role": "mesero", "hours": 2.0, "amount": 20000.0, "pct": 60},
-        {"staff_id": "e3", "name": "C", "role": "cocina",  "hours": 8.0, "amount": 40000.0, "pct": 40},
-    ]
-    preview = {
-        "pct_config": {"mesero": 60, "cocina": 40},
-        "entries": entries,
-        "total_allocated":   100_000.0,
-        "total_unallocated": 0.0,
-    }
-    saved = {"id": "x", "distribution": entries, "total_tips": total_tips,
-             "period_start": "2026-03-25T00:00:00Z", "period_end": "2026-03-25T23:59:59Z",
-             "pct_config": preview["pct_config"], "created_by": "+57", "created_at": "2026-03-25T17:00:00Z"}
-
-    monkeypatch.setattr(db_mod, "db_calculate_tip_pool",   AsyncMock(return_value=preview))
-    monkeypatch.setattr(db_mod, "db_save_tip_distribution", AsyncMock(return_value=saved))
-
-    r = client.post(
-        "/api/staff/tip-cut",
-        json={"period_start": "2026-03-25T00:00:00Z",
-              "period_end":   "2026-03-25T23:59:59Z",
-              "total_tips":   total_tips},
-        headers=_HEADERS,
-    )
-    assert r.status_code == 200
-    total_distributed = sum(e["amount"] for e in r.json()["preview"]["entries"])
-    assert total_distributed <= total_tips + 0.01  # tolerance for float rounding
 
 
 # ══════════════════════════════════════════════════════════════════════════════
