@@ -849,17 +849,25 @@ async function doSendTemplate() {
   if (!tpl) return;
   const ids = [...S.selectedIds];
   if (!ids.length) { toast('No hay prospectos seleccionados', 'err'); return; }
-  const params = (tpl.params||[]).map((_,i) => document.getElementById('tpl-param-'+i)?.value||'');
-  const paramsMap = {};
-  ids.forEach(id => { paramsMap[id] = params; });
-  const d = await api('POST', '/send-template', { prospect_ids: ids, template_id: tplId, params_map: paramsMap });
-  if (d) {
-    toast(`${d.sent||0} enviados, ${d.errors||0} errores`, d.errors ? 'err' : 'ok');
-    closeModal('modal-tpl-send');
-    clearSelection();
-    await loadProspects();
-    if (S.view !== 'pipeline') applyFilters();
-    else renderPipeline();
+
+  const btn = document.querySelector('#modal-tpl-send .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+
+  try {
+    const params = (tpl.params||[]).map((_,i) => document.getElementById('tpl-param-'+i)?.value||'');
+    const paramsMap = {};
+    ids.forEach(id => { paramsMap[id] = params; });
+    const d = await api('POST', '/send-template', { prospect_ids: ids, template_id: tplId, params_map: paramsMap });
+    if (d) {
+      toast(`${d.sent||0} enviados, ${d.errors||0} errores`, d.errors ? 'err' : 'ok');
+      closeModal('modal-tpl-send');
+      clearSelection();
+      await loadProspects();
+      if (S.view !== 'pipeline') applyFilters();
+      else renderPipeline();
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Enviar'; }
   }
 }
 

@@ -509,9 +509,16 @@ async def send_template(request: Request, body: SendTemplatePayload):
             status    = "no_credentials"
             error_msg = "Credenciales Meta no configuradas"
 
+        # Construir preview con valores resueltos (igual que la lógica de envío)
         preview = tpl["body"]
-        for i, p in enumerate(params):
-            preview = preview.replace(f"{{{{{i+1}}}}}", str(p))
+        tpl_params = list(tpl.get("params") or [])
+        for i, p_val in enumerate(params):
+            p_name = tpl_params[i].strip().lower() if i < len(tpl_params) else ""
+            field  = _PROSPECT_FIELDS.get(p_name)
+            resolved = str(prospect[field]) if field and prospect.get(field) else str(p_val)
+            preview = preview.replace(f"{{{{{i+1}}}}}", resolved)
+            if p_name:
+                preview = preview.replace("{{" + p_name + "}}", resolved)
 
         # Registrar en la base de datos SOLO si se envió con éxito
         if status == "sent":
