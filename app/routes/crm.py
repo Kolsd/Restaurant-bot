@@ -425,24 +425,40 @@ async def send_template(request: Request, body: SendTemplatePayload):
         phone    = prospect["phone"].lstrip("+").replace(" ", "")
         params   = body.params_map.get(str(pid), [])
 
-# Build template components
+        # Mapa de alias → campo del prospecto para auto-rellenar parámetros
+        _PROSPECT_FIELDS = {
+            "restaurante": "restaurant_name",
+            "restaurant":  "restaurant_name",
+            "nombre":      "owner_name",
+            "name":        "owner_name",
+            "ciudad":      "city",
+            "city":        "city",
+        }
+
+        # Build template components
         components = []
-        
+
         # Solo enviamos el cuerpo si hay parámetros
         if params:
             parameters_list = []
             for i, p_val in enumerate(params):
-                # 1. Limpiamos llaves {} porque Meta rechaza el mensaje por considerarlo variable vacía
-                clean_text = str(p_val).replace("{", "").replace("}", "")
-                param_obj = {"type": "text", "text": clean_text}
-                
-                # 2. FIX META API: Si el template usa variables con nombre, Meta exige 'parameter_name'
+                p_name = ""
                 if tpl.get("params") and i < len(tpl["params"]):
-                    p_name = str(tpl["params"][i]).strip()
-                    # Si el nombre no es un simple número (como "1" o "2"), lo incluimos
-                    if p_name and not p_name.isdigit():
-                        param_obj["parameter_name"] = p_name[:20]
-                        
+                    p_name = str(tpl["params"][i]).strip().lower()
+
+                # Auto-rellenar desde el prospecto si el nombre del parámetro coincide
+                field = _PROSPECT_FIELDS.get(p_name)
+                if field and prospect.get(field):
+                    resolved = str(prospect[field])
+                else:
+                    resolved = str(p_val)
+
+                clean_text = resolved.replace("{", "").replace("}", "")
+                param_obj  = {"type": "text", "text": clean_text}
+
+                if p_name and not p_name.isdigit():
+                    param_obj["parameter_name"] = p_name[:20]
+
                 parameters_list.append(param_obj)
                 
             components.append({
