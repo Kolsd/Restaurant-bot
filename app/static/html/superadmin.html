@@ -620,6 +620,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       const r = await fetch(`/api/admin/stats?admin_key=${encodeURIComponent(saved)}`);
       if(r.ok) {
         const data = await r.json();
+        localStorage.setItem('mesio_admin_key', saved);
+        const redirect = new URLSearchParams(window.location.search).get('redirect');
+        if(redirect) { window.location.href = '/' + redirect; return; }
         $('login-overlay').style.display = 'none';
         $('app').style.display = 'block';
         renderKPIs(data);
