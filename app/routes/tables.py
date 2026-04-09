@@ -1044,6 +1044,8 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             "change":   change,
             "fiscal":   fiscal,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()

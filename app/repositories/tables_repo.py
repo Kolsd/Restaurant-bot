@@ -265,6 +265,15 @@ async def db_update_table_order_status(order_id: str, status: str):
 async def db_get_base_order_id(table_id: str) -> str | None:
     pool = await _get_pool()
     async with pool.acquire() as conn:
+        # FIX: Only return a base_order_id when there's an active session for this table.
+        # Without this check, a new customer at a table with leftover orders from a
+        # previous session would get labeled "Adicional #N" instead of starting fresh.
+        session_row = await conn.fetchrow(
+            "SELECT id FROM table_sessions WHERE table_id=$1 AND status='active' LIMIT 1",
+            table_id,
+        )
+        if not session_row:
+            return None
         row = await conn.fetchrow("""
             SELECT COALESCE(base_order_id, id) as base_id
             FROM table_orders
