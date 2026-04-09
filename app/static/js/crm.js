@@ -291,7 +291,7 @@ function renderInbox() {
     return `<div class="inbox-row${active?' active':''}" onclick="openInboxChat(${p.id})">
       <div class="inbox-av">${(p.restaurant_name||'?')[0].toUpperCase()}</div>
       <div class="inbox-info">
-        <div class="inbox-iname">${esc(p.restaurant_name)}</div>
+        <div class="inbox-iname">${esc(p.restaurant_name)}${p.owner_name?' · '+esc(p.owner_name):''}</div>
         <div class="inbox-ipreview">${esc(p.phone||'')}</div>
         <div class="inbox-imeta">${p.city?esc(p.city)+' · ':''}${STAGE_LABEL[p.stage]||''}</div>
       </div>
@@ -315,7 +315,7 @@ async function openInboxChat(id) {
   document.getElementById('chat-hd').innerHTML = `
     <div>
       <div class="chat-hd-name">${esc(p.restaurant_name)}</div>
-      <div class="chat-hd-meta">${esc(p.phone||'')} · <span class="badge badge-${p.stage}">${STAGE_LABEL[p.stage]}</span></div>
+      <div class="chat-hd-meta">${p.owner_name?esc(p.owner_name)+' · ':''}${esc(p.phone||'')} · <span class="badge badge-${p.stage}">${STAGE_LABEL[p.stage]}</span></div>
     </div>
     <button class="btn-ghost btn-sm" onclick="openDetail(${p.id})">Ver perfil →</button>`;
   // mobile
