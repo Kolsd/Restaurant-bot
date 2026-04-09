@@ -825,21 +825,32 @@ function openTemplateModal() {
   openModal('modal-tpl-send');
 }
 
+const _PROSPECT_FIELDS_JS = {
+  restaurante: 'restaurant_name', restaurant: 'restaurant_name',
+  nombre: 'owner_name', name: 'owner_name',
+  ciudad: 'city', city: 'city',
+};
+
 function onTplSendSelect() {
   const id = parseInt(document.getElementById('tpl-send-sel').value);
   const tpl = S.templates.find(t => t.id === id);
   const preview = document.getElementById('tpl-send-preview');
   if (!tpl) { preview.style.display = 'none'; return; }
   preview.style.display = 'block';
-  document.getElementById('tpl-preview-body').textContent = tpl.body;
   const params = tpl.params || [];
+  // Mostrar qué campo se usará por parámetro (solo informativo, sin inputs)
   document.getElementById('tpl-params-wrap').innerHTML = params.length
-    ? `<div style="margin-top:10px"><div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;margin-bottom:8px">Valores para los parámetros</div>` +
-      params.map((p,i) => `<div class="fg" style="margin-bottom:8px">
-        <label>{{${i+1}}} — ${esc(p)}</label>
-        <input type="text" id="tpl-param-${i}" placeholder="Valor para ${esc(p)}">
-      </div>`).join('') + '</div>'
+    ? `<div style="margin-top:10px"><div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;margin-bottom:6px">Parámetros automáticos</div>` +
+      params.map(p => {
+        const key = p.trim().toLowerCase();
+        const field = _PROSPECT_FIELDS_JS[key];
+        const badge = field
+          ? `<span style="color:var(--green,#22c55e)">✓ se usará <b>${field === 'restaurant_name' ? 'nombre del restaurante' : field === 'owner_name' ? 'nombre del dueño' : field}</b></span>`
+          : `<span style="color:var(--text-3)">— sin dato, se omitirá</span>`;
+        return `<div style="font-size:12px;margin-bottom:4px"><code>{{${esc(p)}}}</code> ${badge}</div>`;
+      }).join('') + '</div>'
     : '';
+  document.getElementById('tpl-preview-body').textContent = tpl.body;
 }
 
 async function doSendTemplate() {
@@ -854,9 +865,9 @@ async function doSendTemplate() {
   if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
 
   try {
-    const params = (tpl.params||[]).map((_,i) => document.getElementById('tpl-param-'+i)?.value||'');
+    // Parámetros se resuelven automáticamente en el backend desde los datos del prospecto
     const paramsMap = {};
-    ids.forEach(id => { paramsMap[id] = params; });
+    ids.forEach(id => { paramsMap[id] = []; });
     const d = await api('POST', '/send-template', { prospect_ids: ids, template_id: tplId, params_map: paramsMap });
     if (d) {
       toast(`${d.sent||0} enviados, ${d.errors||0} errores`, d.errors ? 'err' : 'ok');

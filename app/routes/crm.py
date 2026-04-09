@@ -413,6 +413,12 @@ async def send_template(request: Request, body: SendTemplatePayload):
     token    = os.getenv("META_ACCESS_TOKEN", "")
     phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")
 
+    _PROSPECT_FIELDS = {
+        "restaurante": "restaurant_name", "restaurant": "restaurant_name",
+        "nombre":      "owner_name",      "name":       "owner_name",
+        "ciudad":      "city",            "city":       "city",
+    }
+
     results = []
     for pid in body.prospect_ids:
         async with pool.acquire() as conn:
@@ -423,42 +429,22 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
         prospect = dict(prospect)
         phone    = prospect["phone"].lstrip("+").replace(" ", "")
-        params   = body.params_map.get(str(pid), [])
 
-        # Mapa de alias → campo del prospecto para auto-rellenar parámetros
-        _PROSPECT_FIELDS = {
-            "restaurante": "restaurant_name",
-            "restaurant":  "restaurant_name",
-            "nombre":      "owner_name",
-            "name":        "owner_name",
-            "ciudad":      "city",
-            "city":        "city",
-        }
-
-        # Build template components
+        # Build template components resolviendo parámetros desde el prospecto
         components = []
+        tpl_param_names = [str(p).strip().lower() for p in (tpl.get("params") or [])]
 
-        # Solo enviamos el cuerpo si hay parámetros
-        if params:
+        if tpl_param_names:
             parameters_list = []
-            for i, p_val in enumerate(params):
-                p_name = ""
-                if tpl.get("params") and i < len(tpl["params"]):
-                    p_name = str(tpl["params"][i]).strip().lower()
-
-                # Auto-rellenar desde el prospecto si el nombre del parámetro coincide
-                field = _PROSPECT_FIELDS.get(p_name)
-                if field and prospect.get(field):
-                    resolved = str(prospect[field])
-                else:
-                    resolved = str(p_val)
-
+            for p_name in tpl_param_names:
+                field    = _PROSPECT_FIELDS.get(p_name)
+                resolved = str(prospect[field]) if field and prospect.get(field) else ""
+                if not resolved:
+                    continue  # omitir parámetro si no hay dato
                 clean_text = resolved.replace("{", "").replace("}", "")
                 param_obj  = {"type": "text", "text": clean_text}
-
-                if p_name and not p_name.isdigit():
+                if not p_name.isdigit():
                     param_obj["parameter_name"] = p_name[:20]
-
                 parameters_list.append(param_obj)
                 
             components.append({
@@ -509,15 +495,12 @@ async def send_template(request: Request, body: SendTemplatePayload):
             status    = "no_credentials"
             error_msg = "Credenciales Meta no configuradas"
 
-        # Construir preview con valores resueltos (igual que la lógica de envío)
+        # Construir preview reemplazando parámetros con valores del prospecto
         preview = tpl["body"]
-        tpl_params = list(tpl.get("params") or [])
-        for i, p_val in enumerate(params):
-            p_name = tpl_params[i].strip().lower() if i < len(tpl_params) else ""
-            field  = _PROSPECT_FIELDS.get(p_name)
-            resolved = str(prospect[field]) if field and prospect.get(field) else str(p_val)
-            preview = preview.replace(f"{{{{{i+1}}}}}", resolved)
-            if p_name:
+        for p_name in tpl_param_names:
+            field    = _PROSPECT_FIELDS.get(p_name)
+            resolved = str(prospect[field]) if field and prospect.get(field) else ""
+            if resolved:
                 preview = preview.replace("{{" + p_name + "}}", resolved)
 
         # Registrar en la base de datos SOLO si se envió con éxito
