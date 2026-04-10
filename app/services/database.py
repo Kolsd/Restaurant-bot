@@ -578,13 +578,24 @@ async def db_set_dish_availability(restaurant_id: int, dish_name: str, available
 
 # ── SESIONES AUTH ────────────────────────────────────────────────────
 async def db_save_session(token: str, username: str):
+    import hashlib as _hashlib
     pool = await get_pool()
     async with pool.acquire() as conn:
         expires = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
-        await conn.execute(
-            "INSERT INTO sessions (token, username, expires_at) VALUES ($1, $2, $3)",
-            token, username, expires
-        )
+        token_hash = _hashlib.sha256(token.encode()).digest()
+        try:
+            # Store both hash and plaintext so sessions_repo.get_session finds
+            # pin_login sessions via Phase 1 (hash lookup), not just the legacy fallback.
+            await conn.execute(
+                "INSERT INTO sessions (token, token_hash, username, expires_at) VALUES ($1, $2, $3, $4)",
+                token, token_hash, username, expires
+            )
+        except Exception:
+            # Fallback: migration 0009 not yet applied in this environment.
+            await conn.execute(
+                "INSERT INTO sessions (token, username, expires_at) VALUES ($1, $2, $3)",
+                token, username, expires
+            )
 
 async def db_get_session(token: str):
     pool = await get_pool()

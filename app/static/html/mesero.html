@@ -285,7 +285,12 @@ let currentPosTableName = '';
 async function loadTablesStatus() {
     try {
         const r = await fetch('/api/pos/tables-status', { headers });
-        if (!r.ok) return;
+        if (!r.ok) {
+            const errText = await r.text().catch(() => r.status);
+            document.getElementById('tables-grid').innerHTML =
+                `<div class="empty" style="color:red;">Error ${r.status} al cargar mesas. ${errText}</div>`;
+            return;
+        }
         const data = await r.json();
         const container = document.getElementById('tables-grid');
         
