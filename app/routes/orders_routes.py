@@ -126,6 +126,8 @@ class UpdateOrderStatusRequest(BaseModel):
 
 async def send_delivery_notification(phone: str, status: str, bot_number: str = ""):
     """Envía un mensaje automático de WhatsApp según el estado del pedido"""
+    print(f"🔔 send_delivery_notification: status={status} phone={phone} bot_number={bot_number}", flush=True)
+
     # Fetch restaurant credentials first (restaurant-specific phone_id takes priority)
     rest_name = ""
     rest_phone_id = ""
@@ -137,13 +139,29 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                 rest_name = rest.get("name", "")
                 rest_phone_id = rest.get("wa_phone_id", "") or ""
                 rest_token = rest.get("wa_access_token", "") or ""
-        except Exception:
-            pass
+                print(f"🏪 Restaurante encontrado: {rest_name} | phone_id={'SET' if rest_phone_id else 'NULL'} | token={'SET' if rest_token else 'NULL'}", flush=True)
+
+                # Si la sucursal no tiene credenciales propias, heredar del restaurante padre
+                if (not rest_phone_id or not rest_token) and rest.get("parent_restaurant_id"):
+                    parent = await db.db_get_restaurant_by_id(rest["parent_restaurant_id"])
+                    if parent:
+                        if not rest_phone_id:
+                            rest_phone_id = parent.get("wa_phone_id", "") or ""
+                        if not rest_token:
+                            rest_token = parent.get("wa_access_token", "") or ""
+                        if not rest_name:
+                            rest_name = parent.get("name", "")
+                        print(f"🔄 Credenciales heredadas del padre: phone_id={'SET' if rest_phone_id else 'NULL'} | token={'SET' if rest_token else 'NULL'}", flush=True)
+            else:
+                print(f"⚠️ No se encontró restaurante para bot_number={bot_number}", flush=True)
+        except Exception as e:
+            print(f"❌ Error buscando restaurante para notificación: {e}", flush=True)
 
     token = rest_token or os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     phone_id = rest_phone_id or os.getenv("META_PHONE_NUMBER_ID", "")
 
     has_credentials = bool(token and phone_id)
+    print(f"🔑 Credenciales: token={'OK' if token else 'FALTA'} | phone_id={'OK: '+phone_id if phone_id else 'FALTA'}", flush=True)
 
     if status not in ('en_camino', 'en_puerta', 'entregado'):
         return  # No enviamos mensajes para otros estados
@@ -160,7 +178,7 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
 
         try:
             async with httpx.AsyncClient(timeout=5) as client:
-                await client.post(
+                res = await client.post(
                     f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
                     headers={"Authorization": f"Bearer {token}"},
                     json={
@@ -170,11 +188,14 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                         "text": {"body": msg}
                     }
                 )
-                print(f"📤 Notificación de delivery enviada a {clean_phone}")
+                if res.status_code == 200:
+                    print(f"📤 Notificación de delivery enviada a {clean_phone} (status={status})", flush=True)
+                else:
+                    print(f"❌ Meta rechazó notificación delivery: {res.status_code} — {res.text[:200]}", flush=True)
         except Exception as e:
-            print(f"❌ Error enviando notificación de delivery: {e}")
+            print(f"❌ Error enviando notificación de delivery: {e}", flush=True)
     else:
-        print(f"⚠️ Sin credenciales Meta para notificación delivery ({status}) — bot_number={bot_number}")
+        print(f"🚫 Sin credenciales para notificación delivery — token={'missing' if not token else 'ok'} phone_id={'missing' if not phone_id else 'ok'} bot={bot_number}", flush=True)
 
     # NPS always fires on entregado regardless of WA credentials.
     # trigger_nps sets Redis state; the next inbound message will handle the score.

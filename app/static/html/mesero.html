@@ -244,7 +244,8 @@ const _currency = restaurant.currency || 'USD';
 
 if (!token) window.location.href = '/login';
 const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
-document.getElementById('rest-name').textContent = restaurant.name || 'Mi Restaurante';
+const _restNameEl = document.getElementById('rest-name');
+if (_restNameEl) _restNameEl.textContent = restaurant.name || 'Mi Restaurante';
 
 // Formateador Universal Inteligente
 const fmt = (amount) => {
@@ -316,7 +317,10 @@ async function loadTablesStatus() {
                 <div class="tc-status">${statusText}</div>
             </div>`;
         }).join('');
-    } catch(e) { console.error('Error cargando mapa de mesas:', e); }
+    } catch(e) {
+        document.getElementById('tables-grid').innerHTML =
+            `<div class="empty" style="color:red;">Error inesperado al cargar mesas: ${e.message}</div>`;
+    }
 }
 
 async function openPOS(tableId, tableName) {
@@ -638,7 +642,10 @@ async function loadOrders() {
 
     if(!html) html = '<div class="empty">No hay pedidos listos ni cuentas pendientes.</div>';
     document.getElementById('orders-list').innerHTML = html;
-  } catch(e) {}
+  } catch(e) {
+    document.getElementById('orders-list').innerHTML =
+      `<div class="empty" style="color:red;">Error inesperado: ${e.message}</div>`;
+  }
 }
 
 async function updateOrderStatus(id, status) {
