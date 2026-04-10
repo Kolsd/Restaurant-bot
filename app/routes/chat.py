@@ -243,6 +243,19 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         else:
             access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
 
+        # Auto-persist phone_id so delivery notifications can use it later.
+        # wa_phone_id comes from Meta webhook metadata — always authoritative.
+        if restaurant and phone_id and not restaurant.get("wa_phone_id"):
+            try:
+                pool_tmp = await db.get_pool()
+                async with pool_tmp.acquire() as _conn:
+                    await _conn.execute(
+                        "UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2",
+                        phone_id, restaurant["id"],
+                    )
+            except Exception:
+                pass  # non-critical, next message will retry
+
         # 5. Ruta CRM — procesamiento inline (no requiere IA)
         crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
         if crm_phone_id and phone_id == crm_phone_id:

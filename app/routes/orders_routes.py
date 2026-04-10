@@ -143,53 +143,22 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     token = rest_token or os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     phone_id = rest_phone_id or os.getenv("META_PHONE_NUMBER_ID", "")
 
-    if not token or not phone_id:
-        print("⚠️ No hay credenciales de Meta para enviar la notificación.")
-        return
+    has_credentials = bool(token and phone_id)
 
-    if status == 'en_camino':
-        msg = "🛵 *¡Buenas noticias!*\n\nNuestro domiciliario acaba de salir del restaurante con tu pedido. ¡Ve preparando la mesa! 🍔"
-    elif status == 'en_puerta':
-        msg = "📍 *¡El domiciliario está en la puerta!*\n\n¡Ya casi llega tu pedido! Por favor ten listo el pago si aplica. 🏠"
-    elif status == 'entregado':
-        msg = "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
-    else:
-        return # No enviamos mensajes para otros estados
+    if status not in ('en_camino', 'en_puerta', 'entregado'):
+        return  # No enviamos mensajes para otros estados
 
     clean_phone = phone.replace("+", "").replace(" ", "")
 
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            await client.post(
-                f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                json={
-                    "messaging_product": "whatsapp",
-                    "to": clean_phone,
-                    "type": "text",
-                    "text": {"body": msg}
-                }
-            )
-            print(f"📤 Notificación de delivery enviada a {clean_phone}")
-    except Exception as e:
-        print(f"❌ Error enviando notificación de delivery: {e}")
+    if has_credentials:
+        if status == 'en_camino':
+            msg = "🛵 *¡Buenas noticias!*\n\nNuestro domiciliario acaba de salir del restaurante con tu pedido. ¡Ve preparando la mesa! 🍔"
+        elif status == 'en_puerta':
+            msg = "📍 *¡El domiciliario está en la puerta!*\n\n¡Ya casi llega tu pedido! Por favor ten listo el pago si aplica. 🏠"
+        else:  # entregado
+            msg = "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
 
-    # After entregado: trigger NPS and send interactive question with skip button
-    if status == 'entregado' and bot_number:
         try:
-            await trigger_nps(phone, bot_number, rest_name)
-            print(f"⭐ NPS iniciado post-entrega: {phone}", flush=True)
-        except Exception as e:
-            print(f"❌ Error iniciando NPS post-entrega: {e}", flush=True)
-
-        # Send interactive NPS message with "No calificar" button
-        try:
-            nps_label = rest_name or "nuestro restaurante"
-            nps_text = (
-                f"⭐ ¿Cómo calificarías tu experiencia con {nps_label}?\n"
-                "Responde con un número del 1 al 5\n"
-                "(1 = Muy mala · 5 = Excelente)"
-            )
             async with httpx.AsyncClient(timeout=5) as client:
                 await client.post(
                     f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
@@ -197,20 +166,55 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                     json={
                         "messaging_product": "whatsapp",
                         "to": clean_phone,
-                        "type": "interactive",
-                        "interactive": {
-                            "type": "button",
-                            "body": {"text": nps_text},
-                            "action": {
-                                "buttons": [
-                                    {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
-                                ]
-                            }
-                        }
+                        "type": "text",
+                        "text": {"body": msg}
                     }
                 )
+                print(f"📤 Notificación de delivery enviada a {clean_phone}")
         except Exception as e:
-            print(f"❌ Error enviando NPS interactivo delivery: {e}")
+            print(f"❌ Error enviando notificación de delivery: {e}")
+    else:
+        print(f"⚠️ Sin credenciales Meta para notificación delivery ({status}) — bot_number={bot_number}")
+
+    # NPS always fires on entregado regardless of WA credentials.
+    # trigger_nps sets Redis state; the next inbound message will handle the score.
+    if status == 'entregado' and bot_number:
+        try:
+            await trigger_nps(phone, bot_number, rest_name)
+            print(f"⭐ NPS iniciado post-entrega: {phone}", flush=True)
+        except Exception as e:
+            print(f"❌ Error iniciando NPS post-entrega: {e}", flush=True)
+
+        if has_credentials:
+            # Send interactive NPS message with "No calificar" button
+            try:
+                nps_label = rest_name or "nuestro restaurante"
+                nps_text = (
+                    f"⭐ ¿Cómo calificarías tu experiencia con {nps_label}?\n"
+                    "Responde con un número del 1 al 5\n"
+                    "(1 = Muy mala · 5 = Excelente)"
+                )
+                async with httpx.AsyncClient(timeout=5) as client:
+                    await client.post(
+                        f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json={
+                            "messaging_product": "whatsapp",
+                            "to": clean_phone,
+                            "type": "interactive",
+                            "interactive": {
+                                "type": "button",
+                                "body": {"text": nps_text},
+                                "action": {
+                                    "buttons": [
+                                        {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
+                                    ]
+                                }
+                            }
+                        }
+                    )
+            except Exception as e:
+                print(f"❌ Error enviando NPS interactivo delivery: {e}")
 
 
 @router.get("/delivery/check-updates")
