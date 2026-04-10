@@ -86,8 +86,10 @@
 
         // 2. Cargar menú desde la API pública
         async function loadMenu() {
+            // Normalize: URLSearchParams decodes '+' as space, strip both
+            const normalizedBot = botNumber.replace(/\+/g, '').replace(/\s/g, '');
             try {
-                const res = await fetch(`/api/public/menu/${botNumber}`);
+                const res = await fetch(`/api/public/menu/${encodeURIComponent(normalizedBot)}`);
                 if (!res.ok) throw new Error("Menú no encontrado");
                 const data = await res.json();
                 

@@ -151,20 +151,22 @@ async def catalog_page():
 @router.get("/api/public/menu/{bot_number}")
 async def get_public_menu(bot_number: str):
     import json
+    # Normalize: strip +, spaces. Handles URLSearchParams + → space decoding.
+    normalized = bot_number.replace("+", "").replace(" ", "").strip()
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         rest = await conn.fetchrow("""
-            SELECT 
+            SELECT
                 r.id AS restaurant_id,
-                r.name, 
-                r.menu, 
+                r.name,
+                r.menu,
                 p.menu AS parent_menu,
                 r.features,
                 p.features AS parent_features
             FROM restaurants r
             LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
-            WHERE r.whatsapp_number = $1
-        """, bot_number)
+            WHERE replace(replace(r.whatsapp_number, '+', ''), ' ', '') = $1
+        """, normalized)
         
         if not rest:
             raise HTTPException(status_code=404, detail="Restaurante no encontrado")

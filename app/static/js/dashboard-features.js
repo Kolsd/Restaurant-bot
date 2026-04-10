@@ -415,7 +415,7 @@ async function loadTables() {
               return; // Detiene la generación del QR para esta mesa y evita enlaces rotos
           }
 
-          const catalogUrl = window.location.origin + '/catalog?bot=' + botNum + '&mesa=' + encodeURIComponent(t.name) + '&table_id=' + encodeURIComponent(t.id);
+          const catalogUrl = window.location.origin + '/catalog?bot=' + encodeURIComponent(botNum) + '&mesa=' + encodeURIComponent(t.name) + '&table_id=' + encodeURIComponent(t.id);
             try { 
               new QRCode(el, { 
                 text: catalogUrl, 
