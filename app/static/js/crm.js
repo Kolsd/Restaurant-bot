@@ -343,7 +343,7 @@ async function loadInboxMessages(id) {
   const msgs = d.interactions || [];
   const el = document.getElementById('chat-messages');
   if (!msgs.length) { el.innerHTML = '<div class="empty-state" style="padding:2rem">Sin mensajes aún</div>'; return; }
-  el.innerHTML = msgs.map(m => {
+  el.innerHTML = msgs.filter(m => m.content?.trim()).map(m => {
     const out = m.direction === 'outbound';
     return `<div class="msg-bubble ${out?'msg-out':'msg-in'}${m.template_name?' msg-template':''}">
       ${esc(m.content)}
@@ -370,6 +370,28 @@ function chatKeydown(e) {
 function autoResizeChatInput(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+}
+
+function chatInputPaste(e) {
+  const html = e.clipboardData.getData('text/html');
+  if (!html) return; // plain text paste: browser handles it natively
+  e.preventDefault();
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  // block-level elements → newline before their text
+  tmp.querySelectorAll('p, div, li, tr, blockquote').forEach(el => {
+    el.prepend(document.createTextNode('\n'));
+  });
+  // <br> → newline
+  tmp.querySelectorAll('br').forEach(el => el.replaceWith('\n'));
+  let text = tmp.textContent;
+  // collapse more than 2 consecutive newlines, trim edges
+  text = text.replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
+  const ta = e.target;
+  const s = ta.selectionStart, end = ta.selectionEnd;
+  ta.value = ta.value.slice(0, s) + text + ta.value.slice(end);
+  ta.selectionStart = ta.selectionEnd = s + text.length;
+  autoResizeChatInput(ta);
 }
 
 function openQuickTemplate() {

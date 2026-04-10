@@ -161,7 +161,7 @@
               <div class="chat-hd" id="chat-hd"></div>
               <div class="chat-messages" id="chat-messages"></div>
               <div class="chat-footer">
-                <textarea id="chat-input" placeholder="Escribe un mensaje…" onkeydown="chatKeydown(event)" oninput="autoResizeChatInput(this)"></textarea>
+                <textarea id="chat-input" placeholder="Escribe un mensaje…" onkeydown="chatKeydown(event)" oninput="autoResizeChatInput(this)" onpaste="chatInputPaste(event)"></textarea>
                 <div class="chat-footer-btns">
                   <button class="btn-ghost btn-sm" onclick="openQuickTemplate()">📤 Template</button>
                   <button class="btn-primary btn-sm" onclick="sendMessage()">Enviar →</button>
