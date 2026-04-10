@@ -42,6 +42,11 @@ async def run_worker(stop_event: asyncio.Event) -> None:
     """
     Main worker loop.  Runs until *stop_event* is set.
     Call this from the FastAPI lifespan startup as an asyncio.Task.
+
+    IMPORTANT: fetch, dispatch, and mark_processed/mark_failed must all happen
+    within the SAME transaction on the SAME connection.  FOR UPDATE SKIP LOCKED
+    only holds the row lock while the transaction is open — closing it early
+    releases the lock and lets other workers grab the same row.
     """
     from app.services import database as db  # late import avoids circular
 
@@ -51,30 +56,28 @@ async def run_worker(stop_event: asyncio.Event) -> None:
         pool = await db.get_pool()
 
         try:
-            async with pool.acquire() as conn:
-                async with conn.transaction():
-                    rows = await inbox_repo.fetch_batch(conn, limit=_BATCH_SIZE)
+            processed_count = 0
 
-            if not rows:
-                # Nothing to do — wait before polling again
-                try:
-                    await asyncio.wait_for(
-                        stop_event.wait(), timeout=_POLL_INTERVAL_EMPTY
-                    )
-                except asyncio.TimeoutError:
-                    pass
-                continue
-
-            # Process each row in its own transaction so one failure doesn't
-            # roll back the others.
-            for row in rows:
-                inbox_id = row["id"]
-                provider = row["provider"]
-                payload  = row["payload"]
-                attempts = row["attempts"]
+            # Process up to _BATCH_SIZE rows, one per transaction so a single
+            # failure doesn't roll back the others.
+            for _ in range(_BATCH_SIZE):
+                if stop_event.is_set():
+                    break
 
                 async with pool.acquire() as conn:
                     async with conn.transaction():
+                        # fetch_batch holds FOR UPDATE lock inside this transaction
+                        rows = await inbox_repo.fetch_batch(conn, limit=1)
+                        if not rows:
+                            break  # no more pending rows
+
+                        row      = rows[0]
+                        inbox_id = row["id"]
+                        provider = row["provider"]
+                        payload  = row["payload"]
+                        attempts = row["attempts"]
+
+                        # dispatch and mark happen under the same lock
                         try:
                             await _dispatch(provider, payload)
                             await inbox_repo.mark_processed(conn, inbox_id)
@@ -83,6 +86,7 @@ async def run_worker(stop_event: asyncio.Event) -> None:
                                 inbox_id=inbox_id,
                                 provider=provider,
                             )
+                            processed_count += 1
                         except Exception as exc:
                             error_str = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
                             log.error(
@@ -95,10 +99,19 @@ async def run_worker(stop_event: asyncio.Event) -> None:
                             await inbox_repo.mark_failed(
                                 conn, inbox_id, error_str, attempts
                             )
+                            processed_count += 1
 
-            # Batch had work — poll immediately for more
-            # (yield to event loop so other coroutines can run)
-            await asyncio.sleep(0)
+            if processed_count == 0:
+                # Nothing to do — wait before polling again
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(), timeout=_POLL_INTERVAL_EMPTY
+                    )
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                # Had work — yield to event loop then poll immediately
+                await asyncio.sleep(0)
 
         except Exception:
             log.exception("inbox_worker_poll_error")
