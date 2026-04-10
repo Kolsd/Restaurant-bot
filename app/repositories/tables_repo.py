@@ -870,7 +870,7 @@ async def db_get_open_proposal_for_phone(
                JOIN table_orders tor ON tor.base_order_id = tc.base_order_id
               WHERE tc.proposal_customer_phone = $2
                 AND tc.proposal_status IN ('pending', 'awaiting_proof')
-                AND tor.restaurant_id = $1
+                AND (tor.branch_id = $1 OR tor.branch_id IS NULL)
               ORDER BY tc.proposal_created_at DESC
               LIMIT 1""",
             restaurant_id,
@@ -894,14 +894,14 @@ async def db_list_checkout_proposals(
                  tor.base_order_id,
                  tor.table_name,
                  tor.total           AS order_total,
-                 tor.restaurant_id,
+                 tor.branch_id,
                  json_agg(tc.* ORDER BY tc.check_number) AS checks
                FROM table_orders tor
                JOIN table_checks tc ON tc.base_order_id = tor.base_order_id
-              WHERE tor.restaurant_id = $1
+              WHERE (tor.branch_id = $1 OR tor.branch_id IS NULL)
                 AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
                 AND tc.status = 'open'
-              GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.restaurant_id
+              GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.branch_id
               ORDER BY MIN(tc.proposal_created_at) ASC""",
             restaurant_id,
         )

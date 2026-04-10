@@ -1169,12 +1169,18 @@ async def get_dashboard_conversations(request: Request):
         except:
             history = []
             preview = "Conversación activa..."
-            
+
+        has_voucher = any(
+            "/api/media/" in (m.get("content") or "")
+            for m in history if isinstance(m.get("content"), str)
+        )
+
         convs.append({
             "phone": r["phone"],
             "messages": len(history),
             "preview": preview[:60] + "..." if len(preview) > 60 else preview,
-            "last_updated": r["updated_at"].isoformat() + "Z"
+            "last_updated": r["updated_at"].isoformat() + "Z",
+            "has_voucher": has_voucher,
         })
     return {"conversations": convs}
     
