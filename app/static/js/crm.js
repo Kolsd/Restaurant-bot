@@ -345,10 +345,7 @@ async function loadInboxMessages(id) {
   if (!msgs.length) { el.innerHTML = '<div class="empty-state" style="padding:2rem">Sin mensajes aún</div>'; return; }
   el.innerHTML = msgs.filter(m => m.content?.trim()).map(m => {
     const out = m.direction === 'outbound';
-    return `<div class="msg-bubble ${out?'msg-out':'msg-in'}${m.template_name?' msg-template':''}">
-      ${esc(m.content)}
-      <div class="msg-time">${fmtTime(m.created_at)}</div>
-    </div>`;
+    return `<div class="msg-bubble ${out?'msg-out':'msg-in'}${m.template_name?' msg-template':''}">${esc(m.content)}<div class="msg-time">${fmtTime(m.created_at)}</div></div>`;
   }).join('');
   el.scrollTop = el.scrollHeight;
 }
