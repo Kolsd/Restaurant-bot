@@ -108,11 +108,16 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int | str 
                  if m["role"] == "user" and isinstance(m.get("content"), str)),
                 ""
             )
+            has_voucher = any(
+                "/api/media/" in (m.get("content") or "")
+                for m in history if isinstance(m.get("content"), str)
+            )
             result.append({
                 "phone": r["phone"],
                 "messages": len(history),
                 "preview": last_user[:60] if last_user else "...",
-                "updated_at": r["updated_at"].isoformat()[:19]
+                "updated_at": r["updated_at"].isoformat()[:19],
+                "has_voucher": has_voucher,
             })
         return result
 

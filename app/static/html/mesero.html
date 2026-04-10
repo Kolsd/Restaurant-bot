@@ -564,7 +564,12 @@ async function dismissAlert(id) {
 async function loadOrders() {
   try {
     const r = await fetch('/api/table-orders', { headers });
-    if(!r.ok) return;
+    if (!r.ok) {
+      const errText = await r.text().catch(() => r.status);
+      document.getElementById('orders-list').innerHTML =
+        `<div class="empty" style="color:red;">Error ${r.status} al cargar pedidos. ${errText}</div>`;
+      return;
+    }
     const { orders = [] } = await r.json();
 
     // Filtramos los pedidos listos en cocina (cada bandeja es un viaje distinto)
@@ -649,7 +654,12 @@ let currentChatPhone = null;
 async function loadChats() {
   try {
     const r = await fetch('/api/dashboard/conversations', { headers });
-    if(!r.ok) return;
+    if (!r.ok) {
+      const errText = await r.text().catch(() => r.status);
+      document.getElementById('chats-list').innerHTML =
+        `<div class="empty" style="color:red;">Error ${r.status} al cargar chats. ${errText}</div>`;
+      return;
+    }
     const { conversations = [] } = await r.json();
     const cList = document.getElementById('chats-list');
     

@@ -1656,14 +1656,16 @@ async function loadChats() {
         const r = await fetch('/api/dashboard/conversations', { headers: reqHeaders });
         if (!r.ok) return;
         const data = await r.json();
-        const convs = data.conversations || [];
-        
+        const allConvs = data.conversations || [];
+        // Caja solo muestra comprobantes de pago pendientes de validar
+        const convs = allConvs.filter(c => c.has_voucher);
+
         const badge = document.getElementById('badge-chat');
         if (convs.length > 0) { badge.textContent = convs.length; badge.style.display = 'inline-block'; }
         else { badge.style.display = 'none'; }
 
         const list = document.getElementById('inbox-list');
-        if (convs.length === 0) { list.innerHTML = '<div class="empty-state">No hay chats activos.</div>'; return; }
+        if (convs.length === 0) { list.innerHTML = '<div class="empty-state">No hay comprobantes pendientes.</div>'; return; }
 
         list.innerHTML = convs.map(c => `
             <div class="conv-row" onclick="openChatModal('${c.phone}')">
