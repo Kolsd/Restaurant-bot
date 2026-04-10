@@ -358,12 +358,18 @@ async function sendMessage() {
   const msg = input.value.trim();
   if (!msg || !S.inboxId) return;
   input.value = '';
+  autoResizeChatInput(input);
   const d = await api('POST', '/send-message', { prospect_id: S.inboxId, message: msg });
   if (d?.success) { await loadInboxMessages(S.inboxId); toast('Mensaje enviado', 'ok'); }
 }
 
 function chatKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function autoResizeChatInput(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 180) + 'px';
 }
 
 function openQuickTemplate() {
