@@ -224,6 +224,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
     # Handle skip button — customer opted out of rating
     if message.strip().lower() in ("skip_nps", "no calificar", "omitir encuesta"):
         await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
+        await state_store.nps_mark_done(phone, bot_number)
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
@@ -260,6 +261,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
         else:
             await db.db_save_nps_response(phone, bot_number, score, "")
             await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
+            await state_store.nps_mark_done(phone, bot_number)
             try:
                 await db.db_clear_nps_waiting(phone, bot_number)
             except Exception:
@@ -301,6 +303,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             except Exception:
                 log.exception("nps_save_response_failed", phone=phone, bot_number=bot_number)
         await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
+        await state_store.nps_mark_done(phone, bot_number)
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
@@ -326,6 +329,13 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
 
 
 async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
+    # Idempotency guards: skip if NPS is already active, in cooldown, or done within 12h
+    if await state_store.nps_is_done(phone, bot_number):
+        log.info("nps_trigger_skipped_done", phone=phone, bot_number=bot_number)
+        return
+    if await state_store.nps_get(phone, bot_number) is not None:
+        log.info("nps_trigger_skipped_active", phone=phone, bot_number=bot_number)
+        return
     await state_store.nps_set(phone, bot_number, {"state": "waiting_score", "score": 0})
     try:
         await db.db_save_nps_waiting(phone, bot_number)

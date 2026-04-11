@@ -10,6 +10,7 @@ emitted at most once per 60 seconds per key family.
 Key schemas
 -----------
   mesio:nps:{phone}:{bot_number}           → NPS flow state dict
+  mesio:nps_done:{phone}:{bot_number}      → "1" flag (12h TTL) — NPS already completed/skipped
   mesio:checkout:{phone}:{bot_number}      → checkout state machine dict
   mesio:cooldown:table:{table_id}:{bot}    → "1" (SET NX, atomic cooldown flag)
 
@@ -29,6 +30,7 @@ log = get_logger(__name__)
 # ── Fallback in-process dicts ─────────────────────────────────────────────────
 # Each entry: { key: (expire_at_monotonic, value) }
 _fb_nps: dict[str, tuple[float, Any]] = {}
+_fb_nps_done: dict[str, float] = {}  # key → expire_at_monotonic (12h guard)
 _fb_checkout: dict[str, tuple[float, Any]] = {}
 _fb_cooldown: dict[str, float] = {}  # key → expire_at_monotonic
 
@@ -99,6 +101,37 @@ async def nps_delete(phone: str, bot_number: str) -> None:
         return
     _maybe_warn("nps")
     _fb_delete(_fb_nps, key)
+
+
+# ── NPS done flag (12h guard against re-triggering) ───────────────────────────
+
+_NPS_DONE_TTL = 43200  # 12 hours
+
+
+def _nps_done_redis_key(phone: str, bot_number: str) -> str:
+    return f"mesio:nps_done:{phone}:{bot_number}"
+
+
+async def nps_mark_done(phone: str, bot_number: str) -> None:
+    """Mark NPS as completed/skipped for this phone+bot. Blocks re-triggering for 12h."""
+    key = _nps_done_redis_key(phone, bot_number)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, "1", ex=_NPS_DONE_TTL)
+        return
+    _maybe_warn("nps")
+    now = time.monotonic()
+    _fb_nps_done[key] = now + _NPS_DONE_TTL
+
+
+async def nps_is_done(phone: str, bot_number: str) -> bool:
+    """Returns True if NPS was already completed/skipped within the last 12h."""
+    key = _nps_done_redis_key(phone, bot_number)
+    r = await _rc.get_redis()
+    if r is not None:
+        return await r.exists(key) == 1
+    _maybe_warn("nps")
+    return time.monotonic() < _fb_nps_done.get(key, 0.0)
 
 
 # ── Checkout ──────────────────────────────────────────────────────────────────
