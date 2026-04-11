@@ -388,7 +388,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <div class="segmented-control">
     <button id="tab-mesas" class="seg-btn active" onclick="switchTab('mesas')">🪑 Mesas</button>
     <button id="tab-proposals" class="seg-btn" onclick="switchTab('proposals')">💳 Comprobantes <span id="proposals-badge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
-    <button id="tab-domicilios" class="seg-btn" onclick="switchTab('domicilios')">🛵 Domicilios <span id="badge-dom" class="badge-tab" style="display:none;">0</span></button>
   </div>
 
   <div id="view-mesas" style="display:flex; gap:0; min-height:calc(100vh - 160px);">
@@ -421,10 +420,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     </div>
   </div>
 
-  <div id="view-domicilios" style="display:none;">
-    <div class="section-title">Domicilios Pendientes de Confirmación</div>
-    <div class="board" id="board-domicilios"><div class="empty-state">Cargando domicilios...</div></div>
-  </div>
 </div>
 
 <div class="modal-overlay" id="adj-modal" onclick="if(event.target===this)closeAdjModal()">
@@ -602,14 +597,13 @@ function switchTab(tabId) {
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tabId).classList.add('active');
 
-  ['mesas', 'proposals', 'domicilios'].forEach(id => {
+  ['mesas', 'proposals'].forEach(id => {
     const el = document.getElementById('view-' + id);
     if (el) el.style.display = 'none';
   });
 
   document.getElementById('view-' + tabId).style.display = 'block';
 
-  if (tabId === 'domicilios') loadDomicilios();
   if (tabId === 'proposals') loadPaymentProofs();
 }
 
@@ -1639,7 +1633,7 @@ async function confirmarDomicilio(id) {
         await fetch(`/api/delivery/orders/${id}/status`, {
             method: 'PATCH', headers: reqHeaders, body: JSON.stringify({status: 'confirmado'})
         });
-        loadDomicilios();
+        loadPaymentProofs();
     } catch(e) {}
 }
 
@@ -1921,12 +1915,10 @@ function editProposalManually(baseOrderId) {
 
 loadBillingConfig();
 loadCajaOrders();
-loadDomicilios();
 loadPaymentProofs();
 
 setInterval(() => {
   loadCajaOrders();
-  loadDomicilios();
   loadPaymentProofs();
 }, 5000);
 

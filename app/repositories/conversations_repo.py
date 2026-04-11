@@ -129,7 +129,16 @@ async def db_delete_conversation(phone: str):
 async def db_get_conversation_details(phone: str, bot_number: str = ""):
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT history, bot_paused FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
+        row = await conn.fetchrow(
+            "SELECT history, bot_paused FROM conversations WHERE phone=$1 AND bot_number=$2",
+            phone, bot_number,
+        )
+        if not row:
+            # Fallback: conversaciones asignadas a sucursal tienen bot_number diferente
+            row = await conn.fetchrow(
+                "SELECT history, bot_paused FROM conversations WHERE phone=$1 ORDER BY updated_at DESC LIMIT 1",
+                phone,
+            )
         if row:
             history = row["history"] if isinstance(row["history"], list) else json.loads(row["history"])
             return {"history": history, "bot_paused": row["bot_paused"] or False}
