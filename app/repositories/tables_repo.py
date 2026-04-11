@@ -890,7 +890,7 @@ async def db_list_checkout_proposals(
     ids = branch_ids if branch_ids else [restaurant_id]
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT
+            """SELECT DISTINCT ON (tor.table_name, COALESCE(tor.branch_id, 0))
                  tor.base_order_id,
                  tor.table_name,
                  tor.total           AS order_total,
@@ -902,7 +902,8 @@ async def db_list_checkout_proposals(
                 AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
                 AND tc.status = 'open'
               GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.branch_id
-              ORDER BY MIN(tc.proposal_created_at) ASC""",
+              ORDER BY tor.table_name, COALESCE(tor.branch_id, 0),
+                       MIN(tc.proposal_created_at) DESC""",
             ids,
         )
     return [_serialize(dict(r)) for r in rows]

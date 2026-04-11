@@ -569,17 +569,20 @@ async def _save_checkout_proposal(
     ]
     created = await db.db_create_checks(base_order_id, checks_payload)
 
-    proposal_status = "awaiting_proof" if state["requires_proof"] else "pending"
+    _digital = {"nequi", "daviplata", "transferencia"}
     tip_per_check = round(tip_total / n, 2)
 
     for i, check in enumerate(created):
         payments = state["payments"][i] if i < len(state["payments"]) else []
+        # Cada check tiene su propio status según el método de pago
+        check_methods = {p.get("method", "").lower() for p in payments if p}
+        check_status = "awaiting_proof" if check_methods & _digital else "pending"
         await db.db_attach_proposal(
             check_id=check["id"],
             proposed_payments=payments,
             proposed_tip=tip_per_check,
             proposal_source="bot",
-            proposal_status=proposal_status,
+            proposal_status=check_status,
             customer_phone=phone,
         )
         if tip_per_check > 0:

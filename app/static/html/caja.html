@@ -1732,6 +1732,8 @@ function _isAdminOrOwner() {
 }
 
 // ── COMPROBANTES UNIFICADOS (mesas bot + domicilios) ───────────────
+let _proposalsCache = {};  // base_order_id → proposal object
+
 async function loadPaymentProofs() {
   const container = document.getElementById('proposals-list');
   if (!container) return;
@@ -1745,6 +1747,10 @@ async function loadPaymentProofs() {
     const proposals  = propRes.ok  ? ((await propRes.json()).proposals  || []) : [];
     const allOrders  = domRes.ok   ? ((await domRes.json()).orders      || []) : [];
     const allConvs   = convRes.ok  ? ((await convRes.json()).conversations || []) : [];
+
+    // Poblar caché para openEditProposalModal
+    _proposalsCache = {};
+    proposals.forEach(p => { _proposalsCache[p.base_order_id] = p; });
 
     const pendingOrders = allOrders.filter(o => o.status === 'pendiente');
     const voucherPhones = new Set(allConvs.filter(c => c.has_voucher).map(c => c.phone));
@@ -1828,8 +1834,10 @@ function renderProposalCard(p) {
     (typeof p.checks === 'string' ? JSON.parse(p.checks) : []);
 
   const timeAgo = checks[0]?.proposal_created_at ? _timeAgo(checks[0].proposal_created_at) : '';
+  const customerPhone = checks[0]?.proposal_customer_phone || '';
 
-  const anyAwaitingProof = checks.some(c => c.proposal_status === 'awaiting_proof');
+  // Por-check: solo bloquea si algún check digital aún no tiene comprobante
+  const anyAwaitingProof = checks.some(c => c.proposal_status === 'awaiting_proof' && !c.proof_media_url);
   const canConfirm = !anyAwaitingProof;
 
   const checksHtml = checks.map(c => {
@@ -1837,10 +1845,15 @@ function renderProposalCard(p) {
       (typeof c.proposed_payments === 'string' ? JSON.parse(c.proposed_payments || '[]') : []);
     const method = pmts[0]?.method || '?';
     const amount = fmt(c.total || 0);
-    const proofHtml = c.proof_media_url
-      ? `<a href="${c.proof_media_url}" target="_blank" style="color:#3498db;font-size:12px;">📎 Ver comprobante</a>`
-      : '';
-    return `<div style="font-size:13px;padding:2px 0;"><span>#${c.check_number} ${amount} · ${method}</span> ${proofHtml}</div>`;
+    let proofHtml = '';
+    if (c.proposal_status === 'awaiting_proof' && !c.proof_media_url) {
+      proofHtml = '<span style="color:#f39c12;font-size:11px;">⏳ sin comprobante</span>';
+    } else if (c.proof_media_url) {
+      proofHtml = `<a href="${c.proof_media_url}" target="_blank" style="color:#3498db;font-size:12px;">📎 Ver comprobante</a>`;
+    }
+    return `<div style="font-size:13px;padding:3px 0;display:flex;justify-content:space-between;align-items:center;">
+      <span>#${c.check_number} ${amount} · ${method}</span>${proofHtml}
+    </div>`;
   }).join('');
 
   const tipTotal = checks.reduce((s, c) => s + parseFloat(c.tip_amount || 0), 0);
@@ -1864,6 +1877,12 @@ function renderProposalCard(p) {
          ⏳ Esperando comprobante
        </button>`;
 
+  const chatBtn = customerPhone
+    ? `<button onclick="openChatModal('${customerPhone}')"
+         style="background:#25D366;color:white;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;"
+         title="Ver chat del cliente">💬</button>`
+    : '';
+
   return `
     <div style="background:white;border-radius:10px;padding:16px;min-width:260px;max-width:300px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -1878,10 +1897,10 @@ function renderProposalCard(p) {
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;">
         ${confirmBtn}
-        <button onclick="editProposalManually('${p.base_order_id}')"
-          style="background:#ecf0f1;color:#333;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;">
-          ✏️ Editar
-        </button>
+        ${chatBtn}
+        <button onclick="openEditProposalModal('${p.base_order_id}')"
+          style="background:#ecf0f1;color:#333;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;"
+          title="Ver detalle / cancelar propuesta">✏️</button>
         ${_isAdminOrOwner()
             ? `<button onclick="cancelProposal('${p.base_order_id}')"
                  style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;"
@@ -1936,9 +1955,70 @@ async function confirmProposal(baseOrderId) {
 }
 
 function editProposalManually(baseOrderId) {
-  switchTab('mesas');
-  if (typeof selectOrder === 'function') selectOrder(baseOrderId);
-  else if (typeof openSplitModal === 'function') openSplitModal(baseOrderId);
+  openEditProposalModal(baseOrderId);
+}
+
+function openEditProposalModal(baseOrderId) {
+  const p = _proposalsCache[baseOrderId];
+  if (!p) { alert('Propuesta no encontrada. Recarga la página.'); return; }
+
+  const checks = Array.isArray(p.checks) ? p.checks :
+    (typeof p.checks === 'string' ? JSON.parse(p.checks) : []);
+  const customerPhone = checks[0]?.proposal_customer_phone || '';
+  const tableName = p.table_name || 'Mesa';
+
+  document.getElementById('epm-title').textContent = `Detalle — ${tableName}`;
+
+  const rows = checks.map(c => {
+    const pmts = Array.isArray(c.proposed_payments) ? c.proposed_payments :
+      (typeof c.proposed_payments === 'string' ? JSON.parse(c.proposed_payments || '[]') : []);
+    const method = pmts[0]?.method || '?';
+    const amount = fmt(c.total || 0);
+    let proofCell = '—';
+    if (c.proof_media_url) {
+      proofCell = `<a href="${c.proof_media_url}" target="_blank" style="color:#3498db;">📎 Ver</a>`;
+    } else if (c.proposal_status === 'awaiting_proof') {
+      proofCell = '<span style="color:#f39c12;">⏳ Pendiente</span>';
+    }
+    return `<tr style="border-bottom:1px solid #f0f0f0;">
+      <td style="padding:8px 6px;font-weight:600;">#${c.check_number}</td>
+      <td style="padding:8px 6px;">${amount}</td>
+      <td style="padding:8px 6px;">${method}</td>
+      <td style="padding:8px 6px;">${proofCell}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('epm-checks').innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="color:#999;font-size:11px;text-transform:uppercase;">
+        <th style="padding:6px;text-align:left;">#</th>
+        <th style="padding:6px;text-align:left;">Monto</th>
+        <th style="padding:6px;text-align:left;">Método</th>
+        <th style="padding:6px;text-align:left;">Comprobante</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  document.getElementById('epm-chat-btn').style.display = customerPhone ? '' : 'none';
+  document.getElementById('epm-chat-btn').onclick = () => {
+    closeEditProposalModal();
+    openChatModal(customerPhone);
+  };
+  document.getElementById('epm-cancel-btn').onclick = async () => {
+    closeEditProposalModal();
+    await cancelProposal(baseOrderId);
+  };
+  document.getElementById('epm-goto-btn').onclick = () => {
+    closeEditProposalModal();
+    switchTab('mesas');
+    if (typeof selectOrder === 'function') selectOrder(baseOrderId);
+  };
+
+  document.getElementById('edit-proposal-modal').style.display = 'flex';
+}
+
+function closeEditProposalModal() {
+  document.getElementById('edit-proposal-modal').style.display = 'none';
 }
 
 async function cancelProposal(baseOrderId) {
@@ -1973,6 +2053,31 @@ setInterval(() => {
 }, 5000);
 
 </script>
+<!-- ── MODAL DETALLE PROPUESTA BOT ── -->
+<div id="edit-proposal-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:12px;padding:24px;width:420px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 id="epm-title" style="margin:0;font-size:16px;">Detalle propuesta</h3>
+      <button onclick="closeEditProposalModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999;">✕</button>
+    </div>
+    <div id="epm-checks" style="margin-bottom:16px;"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button id="epm-chat-btn"
+        style="background:#25D366;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        💬 Ver chat del cliente
+      </button>
+      <button id="epm-goto-btn"
+        style="background:#3498db;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        🪑 Ir a la mesa (editar división)
+      </button>
+      <button id="epm-cancel-btn"
+        style="background:#fee2e2;color:#dc2626;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        🗑️ Cancelar propuesta del bot
+      </button>
+    </div>
+  </div>
+</div>
+
 <iframe id="print-frame" style="display:none;position:absolute;width:0;height:0;border:0;"></iframe>
 </body>
 </html>
