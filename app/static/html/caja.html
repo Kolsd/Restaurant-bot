@@ -1721,6 +1721,11 @@ async function sendManualReply() {
     } catch(e) {}
 }
 
+function _apiHeaders() {
+  const token = localStorage.getItem('rb_token') || '';
+  return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
+
 // ── CHECKOUT PROPOSALS (Bot-driven payment) ────────────────────────
 async function loadCheckoutProposals() {
   try {
