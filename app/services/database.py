@@ -197,6 +197,23 @@ async def db_get_delivery_orders(status_list: list):
         )
         return [_serialize(dict(r)) for r in rows]
 
+async def db_update_pending_order_payment_method(phone: str, bot_number: str, payment_method: str):
+    """Updates payment_method on the most recent pending delivery/pickup order for a phone+bot."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE orders SET payment_method=$3
+               WHERE id = (
+                 SELECT id FROM orders
+                 WHERE phone=$1 AND bot_number=$2
+                   AND order_type IN ('domicilio','recoger')
+                   AND paid=false
+                   AND status NOT IN ('cancelado','entregado')
+                 ORDER BY created_at DESC LIMIT 1
+               )""",
+            phone, bot_number, payment_method
+        )
+
 async def db_update_order_status(order_id: str, new_status: str):
     """Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id."""
     pool = await get_pool()

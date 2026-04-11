@@ -1625,7 +1625,7 @@ async function loadDomicilios() {
       return `
       <div class="ticket-card domicilio">
         <div class="t-header">
-          <div class="t-table">${o.type === 'domicilio' ? '🛵 Domicilio' : '🛍️ Recoger'}</div>
+          <div class="t-table">${o.order_type === 'domicilio' ? '🛵 Domicilio' : '🛍️ Recoger'}</div>
           <div style="font-size:12px;color:#888;">${o.phone}</div>
         </div>
         <div style="font-size:13px;margin-bottom:10px;">${itemsStr}</div>

@@ -355,7 +355,7 @@ If a customer at a table asks about delivery (for themselves or someone else), r
 ALWAYS respond with valid JSON, nothing else (no markdown, no backticks, no text outside the JSON):
 {
   "items": [{"name": "exact dish name", "qty": 1}],
-  "action": "chat|order|delivery|pickup|reserve|bill|waiter|end_session",
+  "action": "chat|order|delivery|pickup|change_payment|reserve|bill|waiter|end_session",
   "address": "",
   "payment_method": "",
   "notes": "",
@@ -382,6 +382,8 @@ POST-ORDER RULES (after STEP 6 completes):
 - The order is now PENDING PAYMENT. It is NOT yet in transit. NEVER say "tu pedido ya va en camino", "está siendo preparado", or any status implying the order is accepted/dispatched — the kitchen has not received it yet.
 - If the customer says "gracias", "ok", "listo", or any acknowledgement: remind them to send the payment proof. action="chat". Example: "¡Perfecto! Cuando realices el pago, envíanos el comprobante (foto o captura) por aquí para que podamos enviar tu pedido a cocina. 📸"
 - NEVER invent a delivery status. Status updates come only from the restaurant's delivery system.
+
+PAYMENT METHOD CHANGE RULE: If the customer asks to change the payment method AFTER the order has already been confirmed (STEP 6 is done), use action="change_payment" with the new payment_method. Do NOT re-create the order. Confirm the change in your reply.
 
 CRITICAL RULES FOR EXTERNAL MODE:
 - NEVER use action="delivery" or action="pickup" without a confirmed address (if applicable) AND payment_method.
@@ -832,6 +834,12 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
         if action == "chat":
             pass
+
+        elif action == "change_payment":
+            payment_method = parsed.get("payment_method", "")
+            if payment_method:
+                await db.db_update_pending_order_payment_method(phone, bot_number, payment_method)
+                log.info("order.payment_method_changed", phone=phone, new_method=payment_method)
 
         elif action == "order":
             # 🛡️ PROTECCIÓN ANTIFANTASMAS: Bloquea intentos de orden sin mesa detectada
