@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
-from app.routes.deps import require_auth
+from app.routes.deps import require_auth, get_current_restaurant
 from app.services.agent import trigger_nps
 from app.services import loyalty as loyalty_svc
 
@@ -240,23 +240,29 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
 
 @router.get("/delivery/check-updates")
 async def check_delivery_updates(request: Request):
-    await require_auth(request)
+    restaurant = await get_current_restaurant(request)
+    restaurant_id = restaurant["id"]
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, status
-            FROM orders
-            WHERE order_type IN ('domicilio', 'recoger') 
-              AND status IN ('pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
-            ORDER BY id
-        """)
+            SELECT o.id, o.status
+            FROM orders o
+            JOIN restaurants r ON r.whatsapp_number = o.bot_number
+            WHERE o.order_type IN ('domicilio', 'recoger')
+              AND o.status IN ('pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
+              AND (r.id = $1 OR r.parent_restaurant_id = $1)
+            ORDER BY o.id
+        """, restaurant_id)
         current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
         return {"hash": current_state_hash}
 
 @router.get("/delivery/orders")
 async def get_delivery_orders(request: Request):
-    await require_auth(request)
-    raw = await db.db_get_delivery_orders(['pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta', 'entregado'])
+    restaurant = await get_current_restaurant(request)
+    raw = await db.db_get_delivery_orders(
+        ['pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta', 'entregado'],
+        restaurant_id=restaurant["id"]
+    )
     return {"orders": raw}
 
 @router.patch("/delivery/orders/{order_id}/status")

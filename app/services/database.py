@@ -187,14 +187,26 @@ async def db_get_all_orders(bot_number: str = None):
             rows = await conn.fetch("SELECT * FROM orders ORDER BY created_at DESC")
         return [_serialize(dict(r)) for r in rows]
 
-async def db_get_delivery_orders(status_list: list):
-    """Obtiene los pedidos de domicilio filtrados por una lista de estados"""
+async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = None):
+    """Obtiene los pedidos de domicilio filtrados por una lista de estados.
+    Si restaurant_id se provee, filtra por esa sucursal o todas sus sub-sucursales (JOIN con restaurants)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM orders WHERE order_type IN ('domicilio', 'recoger') AND status = ANY($1) ORDER BY created_at ASC",
-            status_list
-        )
+        if restaurant_id is not None:
+            rows = await conn.fetch(
+                """SELECT o.* FROM orders o
+                   JOIN restaurants r ON r.whatsapp_number = o.bot_number
+                   WHERE o.order_type IN ('domicilio', 'recoger')
+                     AND o.status = ANY($1)
+                     AND (r.id = $2 OR r.parent_restaurant_id = $2)
+                   ORDER BY o.created_at ASC""",
+                status_list, restaurant_id
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM orders WHERE order_type IN ('domicilio', 'recoger') AND status = ANY($1) ORDER BY created_at ASC",
+                status_list
+            )
         return [_serialize(dict(r)) for r in rows]
 
 async def db_update_pending_order_payment_method(phone: str, bot_number: str, payment_method: str):
