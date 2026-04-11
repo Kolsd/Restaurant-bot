@@ -2,6 +2,7 @@ import asyncio
 import os
 import httpx
 from app.services import database as db
+from app.services import state_store
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -113,6 +114,14 @@ async def _process_closeable_session(session: dict):
             bot_number,
             db_phone_id
         )
+
+        # Cancelar NPS pendiente: si el usuario no respondió la encuesta antes de que
+        # el scheduler cerrara la sesión por inactividad, no tiene sentido mantener el
+        # estado NPS activo. La próxima vez que escriba debe poder ordenar sin bloqueos.
+        try:
+            await state_store.nps_delete(phone, bot_number)
+        except Exception as e:
+            print(f"⚠️ Scheduler: error clearing NPS state for {phone}: {e}", flush=True)
 
         pool = await db.get_pool()
         async with pool.acquire() as conn:

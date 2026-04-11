@@ -241,7 +241,15 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
         return "¡Entendido! No hay problema. ¡Gracias por visitarnos y esperamos verte pronto! 😊"
 
     if state["state"] == "waiting_score":
-        nums = re.findall(r'[1-5]', message)
+        # Solo aceptar el score si el mensaje es corto (≤30 chars).
+        # Mensajes largos (ej. confirmación del catálogo "¡Hola! Estoy en la 8-2...")
+        # contienen dígitos 1-5 de forma accidental (número de mesa, cantidades)
+        # y NO deben interpretarse como puntuación NPS.
+        stripped_msg = message.strip()
+        if len(stripped_msg) <= 30:
+            nums = re.findall(r'[1-5]', stripped_msg)
+        else:
+            nums = []
         if not nums:
             return "Por favor responde con un número del 1 al 5 ⭐"
 
@@ -1268,19 +1276,25 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
             nps_restaurant_name, nps_google_maps_url
         )
 
-        # Cooldown activo: bot silencioso, no responder
+        # Cooldown activo: bot silencioso.
+        # Excepción: mensaje largo (>30 chars) probablemente es una nueva orden desde el
+        # catálogo — limpiar el NPS y dejar pasar al flujo LLM normal para no bloquear al cliente.
         if nps_reply == "":
-            return None
+            if len(user_message_clean.strip()) > 30:
+                await state_store.nps_delete(user_phone, bot_number)
+                # NO return — cae al flujo normal abajo
+            else:
+                return None
+        else:
+            # Si la encuesta terminó (ahora en cooldown o eliminada), cerramos sesión
+            current_nps = await state_store.nps_get(user_phone, bot_number)
+            if current_nps is None or current_nps.get("state") == "cooldown":
+                try:
+                    await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
+                except Exception:
+                    log.exception("nps_close_session_failed", phone=user_phone, bot_number=bot_number)
 
-        # Si la encuesta terminó (ahora en cooldown o eliminada), cerramos sesión
-        current_nps = await state_store.nps_get(user_phone, bot_number)
-        if current_nps is None or current_nps.get("state") == "cooldown":
-            try:
-                await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
-            except Exception:
-                log.exception("nps_close_session_failed", phone=user_phone, bot_number=bot_number)
-
-        return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
+            return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
 
     # ── FLUJO DE CHECKOUT (bot-driven payment) ──
     if await state_store.checkout_get(user_phone, bot_number) is not None:
