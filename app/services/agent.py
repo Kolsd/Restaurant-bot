@@ -207,6 +207,9 @@ def _resolve_tip(mode: str, value: float, subtotal: float) -> float:
         return round(subtotal * (value / 100.0), 2)
     return round(float(value), 2)
 
+_NPS_COOLDOWN_TTL = 70  # seconds before the bot responds again after NPS closes
+
+
 async def _handle_nps_flow(phone: str, bot_number: str, message: str,
                             restaurant_name: str, google_maps_url: str) -> str | None:
     state = await state_store.nps_get(phone, bot_number)
@@ -214,9 +217,13 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
     if state is None:
         return None
 
+    # Post-NPS cooldown: bot stays silent for 1 minute after NPS ends
+    if state.get("state") == "cooldown":
+        return ""  # empty string = silent, caller must not send any message
+
     # Handle skip button — customer opted out of rating
     if message.strip().lower() in ("skip_nps", "no calificar", "omitir encuesta"):
-        await state_store.nps_delete(phone, bot_number)
+        await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
@@ -252,7 +259,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             )
         else:
             await db.db_save_nps_response(phone, bot_number, score, "")
-            await state_store.nps_delete(phone, bot_number)
+            await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
             try:
                 await db.db_clear_nps_waiting(phone, bot_number)
             except Exception:
@@ -293,7 +300,7 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
                 await db.db_save_nps_response(phone, bot_number, score, comment)
             except Exception:
                 log.exception("nps_save_response_failed", phone=phone, bot_number=bot_number)
-        await state_store.nps_delete(phone, bot_number)
+        await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
@@ -1246,8 +1253,13 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
             nps_restaurant_name, nps_google_maps_url
         )
 
-        # Si terminó la encuesta (state was deleted), cerramos la sesión nps_pending
-        if await state_store.nps_get(user_phone, bot_number) is None:
+        # Cooldown activo: bot silencioso, no responder
+        if nps_reply == "":
+            return None
+
+        # Si la encuesta terminó (ahora en cooldown o eliminada), cerramos sesión
+        current_nps = await state_store.nps_get(user_phone, bot_number)
+        if current_nps is None or current_nps.get("state") == "cooldown":
             try:
                 await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
             except Exception:
