@@ -34,22 +34,26 @@ def _check_login_rate_limit(ip: str) -> None:
     _login_attempts[ip].append(now)
 
 async def geocode_address(address: str) -> tuple:
+    """
+    Geocodifica una dirección. Usa Nominatim (OpenStreetMap) como primario,
+    con sesgo a Colombia, y sin API key requerida.
+    Retorna (lat, lon, display_name) o (None, None, None).
+    """
+    headers = {"User-Agent": "Mesio-Bot/1.0 (contacto@mesioai.com)"}
+    # Añadir "Colombia" si la dirección no parece incluir país
+    query = address if any(c in address.lower() for c in ("colombia", "bogotá", "medellin", "cali")) else f"{address}, Colombia"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get("https://geocode.maps.co/search", params={"q": address, "limit": 1}, headers={"User-Agent": "Mesio/1.0"})
-            if r.status_code == 200 and r.json():
-                return float(r.json()[0]["lat"]), float(r.json()[0]["lon"]), r.json()[0].get("display_name","")
-    except Exception as e:
-        pass
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get("https://photon.komoot.io/api/", params={"q": address, "limit": 1, "lang": "en"})
-            if r.status_code == 200 and r.json().get("features"):
-                coords = r.json()["features"][0]["geometry"]["coordinates"]
-                props = r.json()["features"][0].get("properties", {})
-                display = ", ".join(filter(None, [props.get("name",""), props.get("city",""), props.get("country","")]))
-                return float(coords[1]), float(coords[0]), display
-    except Exception as e:
+            r = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": query, "format": "json", "limit": 1, "countrycodes": "co"},
+                headers=headers,
+            )
+            if r.status_code == 200:
+                results = r.json()
+                if results:
+                    return float(results[0]["lat"]), float(results[0]["lon"]), results[0].get("display_name", "")
+    except Exception:
         pass
     return None, None, None
 

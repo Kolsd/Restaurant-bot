@@ -411,7 +411,7 @@ POST-COMPROBANTE RULES (after STEP 7 — receipt already received):
 
 POST-ORDER RULES (after STEP 6 completes):
 - The order is now PENDING PAYMENT. It is NOT yet in transit. NEVER say "tu pedido ya va en camino", "está siendo preparado", or any status implying the order is accepted/dispatched — the kitchen has not received it yet.
-- If the customer says "gracias", "ok", "listo", or any acknowledgement BEFORE sending the comprobante: remind them to send the payment proof. action="chat". Example: "¡Perfecto! Cuando realices el pago, envíanos el comprobante (foto o captura) por aquí para que podamos enviar tu pedido a cocina. 📸"
+- If the customer says "gracias", "ok", "listo", or any acknowledgement BEFORE sending the comprobante: reply with a brief warm acknowledgement ONLY — do NOT repeat the instruction to send the proof, as the system already sent it in STEP 6. Example: "¡Con gusto! En cuanto lo recibamos te avisamos. 😊" action="chat".
 - NEVER invent a delivery status. Status updates come only from the restaurant's delivery system.
 
 PAYMENT METHOD CHANGE RULE: If the customer asks to change the payment method AFTER the order has already been confirmed (STEP 6 is done), use action="change_payment" with the new payment_method. Do NOT re-create the order. Confirm the change in your reply.
@@ -427,6 +427,7 @@ CRITICAL RULES FOR EXTERNAL MODE:
   • Domicilio: $Y
   • Total: $Z
 - GPS LOCATION RULE: If the customer sends a message that starts with "Mi ubicación es" or contains a Google Maps link (maps.google.com) or coordinates (lat: / lon:), treat those coordinates as the delivery address. Immediately proceed to STEP 4 (payment method). action="chat". NEVER use action="end_session" when receiving a location message.
+- COORDINATES CONFIDENTIALITY: NEVER reveal, repeat, or mention numeric GPS coordinates (latitude/longitude values) to the customer under any circumstances. When confirming a GPS-based address, say "tu ubicación" or "la dirección que nos enviaste" — never the raw numbers.
 - PAYMENT METHOD INQUIRY: If the customer asks how to pay or what payment methods are accepted (e.g. "¿cómo puedo pagar?", "¿aceptan tarjeta?"), immediately list ALL methods from [MÉTODOS_DE_PAGO] in your reply. Do NOT redirect to the menu catalog. Then continue the funnel from wherever you left off.
 - MID-FUNNEL TYPE SWITCH: If the customer switches from "domicilio" to "recoger" (or vice versa), acknowledge the switch and PRESERVE all already-collected information (items, etc.). Request ONLY the missing fields for the new type (pickup requires payment_method; delivery requires address + payment_method). NEVER restart the funnel or resend the catalog link if items have already been collected.
 
@@ -1373,7 +1374,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                             instructions = inst_dict.get(payment_method.lower(), "") or inst_dict.get(payment_method.capitalize(), "")
                             
                             if instructions:
-                                reply += f"\n\nPara pagar con {payment_method}, por favor sigue estas instrucciones:\n*{instructions}*\n\nUna vez realices el pago, envíanos el comprobante (foto/captura) por aquí. 📸"
+                                # Sólo pedir el comprobante si Claude no lo pidió ya en su reply
+                                _proof_reminder = "" if "comprobante" in reply.lower() else "\n\nUna vez realices el pago, envíanos el comprobante (foto/captura) por aquí. 📸"
+                                reply += f"\n\nPara pagar con {payment_method}, por favor sigue estas instrucciones:\n*{instructions}*{_proof_reminder}"
                     except Exception:
                         log.exception("payment_instructions_inject_failed", phone=phone, bot_number=bot_number)
 
@@ -1483,6 +1486,20 @@ HISTORY_WINDOW = 5
 async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
     user_message_clean = _sanitize_user_input(user_message)
     user_message_clean = re.sub(r'\s*\[(?:table_id|t):[^\]]+\]', '', user_message_clean).strip()
+
+    # ── GUARD POST-NPS: si la encuesta fue completada recientemente y no hay sesión activa ──
+    # Esto evita que el bot abra una nueva conversación de bienvenida después de que el
+    # cooldown de 70s expire. nps_is_done tiene TTL de 12h.
+    if await state_store.nps_is_done(user_phone, bot_number):
+        _active_sess = await db.db_get_active_session(user_phone, bot_number)
+        if not _active_sess:
+            # Mensaje largo (>30 chars) = probablemente nueva orden → limpiar y dejar pasar
+            if len(user_message_clean.strip()) > 30:
+                await state_store.nps_delete(user_phone, bot_number)
+                log.info("nps_done_cleared_new_order", phone=user_phone, bot_number=bot_number)
+                # NO return — cae al flujo normal abajo
+            else:
+                return None  # Respuesta corta post-NPS — silencio, no abrir nueva conv.
 
     # ── FLUJO DE ENCUESTA (NPS) ──
     if await state_store.nps_get(user_phone, bot_number) is not None:

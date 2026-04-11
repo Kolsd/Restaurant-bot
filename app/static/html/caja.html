@@ -2172,231 +2172,332 @@ setInterval(() => {
 
 <iframe id="print-frame" style="display:none;position:absolute;width:0;height:0;border:0;"></iframe>
 
-<!-- ── MODAL NUEVA FACTURA RÁPIDA ── -->
-<div id="quick-invoice-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0;">
-  <div style="background:white;border-radius:14px;padding:24px;width:520px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,0.22);margin:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-      <h3 style="margin:0;font-size:17px;">➕ Nueva Factura</h3>
-      <button onclick="closeQuickInvoiceModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">✕</button>
+<!-- ── POS NUEVA FACTURA — pantalla completa estilo mesero ── -->
+<style>
+.qim-screen { display:none; position:fixed; inset:0; background:#f5f5f0; z-index:10000; flex-direction:column; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+.qim-screen.open { display:flex; animation:qimSlide .25s ease-out; }
+@keyframes qimSlide { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+
+.qim-header { height:56px; background:#fff; border-bottom:1px solid #ddd; display:flex; align-items:center; justify-content:space-between; padding:0 20px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,.06); }
+.qim-header-title { font-size:17px; font-weight:800; color:#111; }
+.qim-header-right { display:flex; align-items:center; gap:12px; }
+.qim-close-btn { font-size:22px; background:none; border:none; color:#555; cursor:pointer; line-height:1; padding:4px; }
+
+.qim-body { flex:1; display:flex; overflow:hidden; }
+@media(max-width:799px){ .qim-body{ flex-direction:column; } }
+
+/* ── Área menú ── */
+.qim-menu-area { flex:1; overflow-y:auto; padding:16px 20px; }
+.qim-cat-title { font-size:16px; font-weight:800; color:#333; margin:18px 0 10px; }
+.qim-cat-title:first-child { margin-top:0; }
+.qim-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
+.qim-card { background:#fff; border:1px solid #e0e0d8; border-radius:12px; padding:12px 10px; text-align:center; cursor:pointer; display:flex; flex-direction:column; justify-content:space-between; min-height:90px; box-shadow:0 2px 4px rgba(0,0,0,.03); transition:all .1s; user-select:none; }
+.qim-card:active, .qim-card.added { background:#E1F5EE; border-color:#1D9E75; transform:scale(.96); }
+.qim-card-name { font-size:13px; font-weight:600; color:#444; line-height:1.3; margin-bottom:6px; }
+.qim-card-price { font-size:14px; font-weight:800; color:#1D9E75; }
+
+/* Ítem personalizado */
+.qim-custom-bar { display:flex; gap:8px; margin:14px 0 6px; }
+.qim-custom-bar input { flex:1; padding:8px 10px; border:1px solid #ddd; border-radius:8px; font-size:13px; outline:none; }
+.qim-custom-bar input:focus { border-color:#7C3AED; }
+.qim-custom-bar button { padding:8px 14px; background:#6b7280; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; white-space:nowrap; }
+
+/* ── Área carrito / datos ── */
+.qim-cart-area { width:320px; background:#fff; border-left:1px solid #ddd; display:flex; flex-direction:column; flex-shrink:0; }
+@media(max-width:799px){
+  .qim-cart-area { width:100%; border-left:none; border-top:1px solid #ddd; max-height:55vh; }
+}
+
+.qim-cart-hdr { padding:14px 16px; border-bottom:1px solid #eee; font-weight:800; font-size:15px; color:#111; display:flex; align-items:center; gap:8px; }
+.qim-cart-body { flex:1; overflow-y:auto; padding:8px 16px; }
+.qim-cart-empty { text-align:center; padding:24px 0; color:#aaa; font-size:13px; }
+.qim-cart-item { display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px dashed #eee; gap:6px; }
+.qim-ci-name { flex:1; font-size:13px; font-weight:600; color:#333; line-height:1.2; }
+.qim-ci-price { font-size:13px; color:#1D9E75; font-weight:700; white-space:nowrap; }
+.qim-qty-wrap { display:flex; align-items:center; gap:8px; }
+.qim-qty-btn { width:28px; height:28px; border-radius:7px; border:none; background:#f0f0e8; color:#333; font-weight:700; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.qim-qty-btn:active { background:#ddd; }
+
+.qim-cart-footer { padding:14px 16px; border-top:1px solid #eee; background:#fff; display:flex; flex-direction:column; gap:10px; }
+.qim-section-label { font-size:11px; font-weight:700; text-transform:uppercase; color:#888; letter-spacing:.04em; margin-bottom:4px; }
+.qim-type-btns { display:flex; gap:6px; }
+.qim-type-btn { flex:1; padding:7px; border-radius:8px; border:2px solid #ddd; background:#fff; font-size:12px; font-weight:600; cursor:pointer; color:#555; transition:.15s; }
+.qim-type-btn.active { border-color:#7C3AED; background:#F3E8FF; color:#7C3AED; }
+.qim-tip-btns { display:flex; gap:5px; flex-wrap:wrap; }
+.qim-tip-btn { padding:5px 10px; border-radius:7px; border:1px solid #ddd; background:#fff; font-size:12px; cursor:pointer; color:#555; transition:.15s; }
+.qim-tip-btn.active { border-color:#7C3AED; background:#F3E8FF; color:#7C3AED; font-weight:700; }
+.qim-tip-input { width:100%; padding:7px 10px; border:1px solid #ddd; border-radius:8px; font-size:13px; outline:none; margin-top:4px; }
+.qim-tip-input:focus { border-color:#7C3AED; }
+.qim-pay-select { width:100%; padding:8px 10px; border:1px solid #ddd; border-radius:8px; font-size:13px; outline:none; }
+.qim-field { width:100%; padding:7px 10px; border:1px solid #ddd; border-radius:8px; font-size:13px; outline:none; }
+.qim-field:focus { border-color:#7C3AED; }
+.qim-totals { background:#f5f5f0; border-radius:10px; padding:10px 12px; }
+.qim-totals-row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:3px; }
+.qim-totals-row:last-child { font-size:16px; font-weight:800; color:#111; margin-top:6px; margin-bottom:0; }
+.qim-gen-btn { width:100%; padding:13px; font-size:15px; font-weight:700; border-radius:12px; background:#27ae60; color:#fff; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(39,174,96,.3); transition:opacity .2s; }
+.qim-gen-btn:disabled { opacity:.6; cursor:not-allowed; }
+.qim-gen-btn:active:not(:disabled) { opacity:.85; transform:translateY(1px); }
+</style>
+
+<div id="quick-invoice-screen" class="qim-screen">
+  <!-- Header -->
+  <div class="qim-header">
+    <div class="qim-header-title">🧾 Nueva Factura</div>
+    <div class="qim-header-right">
+      <button class="qim-close-btn" onclick="closeQuickInvoiceModal()">✕</button>
+    </div>
+  </div>
+
+  <div class="qim-body">
+    <!-- Menú izquierda -->
+    <div class="qim-menu-area" id="qim-menu-area">
+      <div style="text-align:center;padding:40px;color:#aaa;font-size:14px;">Cargando menú...</div>
     </div>
 
-    <!-- Tipo de venta -->
-    <div style="margin-bottom:14px;">
-      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Tipo de venta</label>
-      <div style="display:flex;gap:8px;">
-        <button id="qim-type-salon" onclick="qimSetType('salon')"
-          style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--primary);background:var(--primary);color:white;cursor:pointer;font-size:13px;font-weight:600;">🪑 Salón</button>
-        <button id="qim-type-domicilio" onclick="qimSetType('domicilio')"
-          style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--border);background:white;color:#444;cursor:pointer;font-size:13px;">🛵 Domicilio</button>
+    <!-- Carrito + datos derecha -->
+    <div class="qim-cart-area">
+      <div class="qim-cart-hdr">🧾 Factura</div>
+
+      <div class="qim-cart-body">
+        <div id="qim-cart-items" class="qim-cart-empty">Toca un producto del menú para agregarlo.</div>
       </div>
-    </div>
 
-    <!-- Ítems -->
-    <div style="margin-bottom:14px;">
-      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Ítems</label>
-      <div id="qim-items" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
-      <!-- Selector de menú -->
-      <div style="display:flex;gap:6px;align-items:center;">
-        <select id="qim-menu-select" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
-          <option value="">— Seleccionar del menú —</option>
-        </select>
-        <button onclick="qimAddFromMenu()" style="padding:7px 12px;background:var(--primary);color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;">+ Agregar</button>
+      <div class="qim-cart-footer">
+        <!-- Tipo -->
+        <div>
+          <div class="qim-section-label">Tipo de venta</div>
+          <div class="qim-type-btns">
+            <button id="qim-type-salon"     class="qim-type-btn active" onclick="qimSetType('salon')">🪑 Salón</button>
+            <button id="qim-type-domicilio" class="qim-type-btn"        onclick="qimSetType('domicilio')">🛵 Domicilio</button>
+          </div>
+        </div>
+
+        <!-- Propina -->
+        <div>
+          <div class="qim-section-label">Propina</div>
+          <div class="qim-tip-btns">
+            <button class="qim-tip-btn active" id="qtip-0"  onclick="qimSetTipPct(0)">Sin propina</button>
+            <button class="qim-tip-btn"        id="qtip-10" onclick="qimSetTipPct(10)">10%</button>
+            <button class="qim-tip-btn"        id="qtip-15" onclick="qimSetTipPct(15)">15%</button>
+            <button class="qim-tip-btn"        id="qtip-20" onclick="qimSetTipPct(20)">20%</button>
+          </div>
+          <input id="qim-tip-custom" class="qim-tip-input" type="number" min="0" placeholder="Otro valor en $" oninput="qimTipCustom(this.value)">
+        </div>
+
+        <!-- Método de pago -->
+        <div>
+          <div class="qim-section-label">Método de pago</div>
+          <select id="qim-payment" class="qim-pay-select">
+            <option value="efectivo">💵 Efectivo</option>
+            <option value="tarjeta">💳 Tarjeta</option>
+            <option value="nequi">📱 Nequi</option>
+            <option value="daviplata">📱 Daviplata</option>
+            <option value="transferencia">🏦 Transferencia</option>
+          </select>
+        </div>
+
+        <!-- Datos cliente -->
+        <div>
+          <div class="qim-section-label">Cliente</div>
+          <input id="qim-customer-name"  class="qim-field" placeholder="Nombre" value="Consumidor Final" style="margin-bottom:5px;">
+          <div style="display:flex;gap:5px;">
+            <input id="qim-customer-nit"   class="qim-field" placeholder="NIT / Cédula" value="222222222" style="flex:1;">
+            <input id="qim-customer-email" class="qim-field" placeholder="Email" style="flex:1;">
+          </div>
+        </div>
+
+        <!-- Totales -->
+        <div class="qim-totals">
+          <div class="qim-totals-row"><span style="color:#71717A;">Subtotal</span><span id="qim-subtotal">$0</span></div>
+          <div class="qim-totals-row"><span style="color:#71717A;">Propina</span><span id="qim-tip-total">$0</span></div>
+          <div class="qim-totals-row"><span>Total</span><span id="qim-total">$0</span></div>
+        </div>
+
+        <!-- Botón -->
+        <button id="qim-gen-btn" class="qim-gen-btn" onclick="submitQuickInvoice()">🧾 Generar Factura</button>
       </div>
-      <!-- Ítem personalizado -->
-      <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
-        <input id="qim-custom-name" placeholder="Nombre del ítem" style="flex:2;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
-        <input id="qim-custom-price" type="number" min="0" placeholder="Precio" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
-        <button onclick="qimAddCustom()" style="padding:7px 12px;background:#6b7280;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;">+ Otro</button>
-      </div>
-    </div>
-
-    <!-- Propina -->
-    <div style="margin-bottom:14px;">
-      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Propina</label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button onclick="qimSetTip(0)"   style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">Sin propina</button>
-        <button onclick="qimSetTip(10)"  style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">10%</button>
-        <button onclick="qimSetTip(15)"  style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">15%</button>
-        <button onclick="qimSetTip(20)"  style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">20%</button>
-        <input id="qim-tip-custom" type="number" min="0" placeholder="Otro valor $" style="width:110px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;" oninput="qimTipCustom(this.value)">
-      </div>
-      <div id="qim-tip-display" style="font-size:12px;color:#71717A;margin-top:4px;">Propina: $0</div>
-    </div>
-
-    <!-- Método de pago -->
-    <div style="margin-bottom:14px;">
-      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Método de pago</label>
-      <select id="qim-payment" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
-        <option value="efectivo">💵 Efectivo</option>
-        <option value="tarjeta">💳 Tarjeta</option>
-        <option value="nequi">📱 Nequi</option>
-        <option value="daviplata">📱 Daviplata</option>
-        <option value="transferencia">🏦 Transferencia</option>
-      </select>
-    </div>
-
-    <!-- Datos del cliente -->
-    <div style="margin-bottom:18px;">
-      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Datos del cliente (opcional)</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <input id="qim-customer-name" placeholder="Nombre" value="Consumidor Final" style="flex:2;min-width:120px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
-        <input id="qim-customer-nit"  placeholder="NIT / Cédula" value="222222222" style="flex:1;min-width:100px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
-        <input id="qim-customer-email" placeholder="Email (opcional)" style="flex:2;min-width:140px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
-      </div>
-    </div>
-
-    <!-- Totales -->
-    <div id="qim-total-block" style="background:#f4f4f5;border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:13px;">
-      <div style="display:flex;justify-content:space-between;"><span style="color:#71717A;">Subtotal</span><span id="qim-subtotal">$0</span></div>
-      <div style="display:flex;justify-content:space-between;"><span style="color:#71717A;">Propina</span><span id="qim-tip-total">$0</span></div>
-      <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:6px;font-size:15px;"><span>Total</span><span id="qim-total">$0</span></div>
-    </div>
-
-    <div style="display:flex;gap:8px;">
-      <button onclick="closeQuickInvoiceModal()" style="flex:1;padding:11px;background:#ecf0f1;color:#333;border:none;border-radius:8px;cursor:pointer;font-size:14px;">Cancelar</button>
-      <button onclick="submitQuickInvoice()" style="flex:2;padding:11px;background:#27ae60;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;">🧾 Generar Factura</button>
     </div>
   </div>
 </div>
 
 <script>
-// ── NUEVA FACTURA RÁPIDA ──────────────────────────────────────────────
-let _qimItems  = [];   // [{name, qty, unit_price}]
-let _qimTip    = 0;    // valor absoluto
-let _qimType   = 'salon';
-let _qimMenu   = [];   // [{name, price}]
+// ── NUEVA FACTURA RÁPIDA — POS full-screen ────────────────────────────
+let _qimItems = [];   // [{name, qty, unit_price}]
+let _qimTip   = 0;
+let _qimType  = 'salon';
+let _qimActiveTipPct = 0;
+
+const _qimFmt = n => '$' + Math.round(n).toLocaleString('es-CO');
 
 function openQuickInvoiceModal() {
   _qimItems = [];
   _qimTip   = 0;
+  _qimActiveTipPct = 0;
   _qimType  = 'salon';
-  document.getElementById('qim-tip-custom').value = '';
-  document.getElementById('qim-customer-name').value  = 'Consumidor Final';
-  document.getElementById('qim-customer-nit').value   = '222222222';
+  document.getElementById('qim-tip-custom').value    = '';
+  document.getElementById('qim-customer-name').value = 'Consumidor Final';
+  document.getElementById('qim-customer-nit').value  = '222222222';
   document.getElementById('qim-customer-email').value = '';
   document.getElementById('qim-payment').value = 'efectivo';
-  _qimRenderItems();
+  _qimHighlightTip(0);
+  _qimRenderCart();
   _qimRenderTotals();
   _qimLoadMenu();
-  document.getElementById('quick-invoice-modal').style.display = 'flex';
+  document.getElementById('quick-invoice-screen').classList.add('open');
 }
 
 function closeQuickInvoiceModal() {
-  document.getElementById('quick-invoice-modal').style.display = 'none';
+  document.getElementById('quick-invoice-screen').classList.remove('open');
 }
 
 function qimSetType(t) {
   _qimType = t;
   ['salon','domicilio'].forEach(id => {
-    const btn = document.getElementById('qim-type-' + id);
-    if (id === t) {
-      btn.style.background = 'var(--primary)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--primary)';
-    } else {
-      btn.style.background = 'white'; btn.style.color = '#444'; btn.style.borderColor = 'var(--border)';
+    document.getElementById('qim-type-' + id).classList.toggle('active', id === t);
+  });
+}
+
+// ── Menú ──────────────────────────────────────────────────────────────
+async function _qimLoadMenu() {
+  const area = document.getElementById('qim-menu-area');
+  area.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">Cargando menú...</div>';
+  try {
+    const r = await fetch('/api/pos/menu', { headers: reqHeaders });
+    const d = await r.json();
+    _qimRenderMenu(d.menu || {});
+  } catch(e) {
+    area.innerHTML = '<div style="text-align:center;padding:40px;color:#e74c3c;">Error al cargar el menú.</div>';
+  }
+}
+
+function _qimRenderMenu(menu) {
+  const area = document.getElementById('qim-menu-area');
+  if (!Object.keys(menu).length) {
+    area.innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">El menú está vacío.</div>';
+    return;
+  }
+  let html = '';
+  for (const [cat, dishes] of Object.entries(menu)) {
+    if (!Array.isArray(dishes) || !dishes.length) continue;
+    html += `<div class="qim-cat-title">${cat}</div><div class="qim-grid">`;
+    dishes.forEach(d => {
+      if (d.available === false) return;
+      const safe = d.name.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+      html += `<div class="qim-card" onclick="qimAddItem('${safe}',${d.price})">
+        <div class="qim-card-name">${d.name}</div>
+        <div class="qim-card-price">${_qimFmt(d.price)}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+  // Ítem personalizado al final
+  html += `<div class="qim-cat-title" style="margin-top:24px;">Ítem personalizado</div>
+  <div class="qim-custom-bar">
+    <input id="qim-custom-name"  placeholder="Nombre del ítem">
+    <input id="qim-custom-price" type="number" min="0" placeholder="Precio $" style="max-width:120px;">
+    <button onclick="qimAddCustom()">+ Agregar</button>
+  </div>`;
+  area.innerHTML = html;
+}
+
+function qimAddItem(name, price) {
+  const ex = _qimItems.find(i => i.name === name && i.unit_price === price);
+  if (ex) { ex.qty++; } else { _qimItems.push({ name, qty:1, unit_price:price }); }
+  _qimRenderCart();
+  _qimRenderTotals();
+  _qimFlash(name, price);
+}
+
+function _qimFlash(name, price) {
+  // Pulso visual en la card tocada
+  const cards = document.querySelectorAll('.qim-card');
+  cards.forEach(c => {
+    if (c.querySelector('.qim-card-name')?.textContent === name) {
+      c.classList.add('added');
+      setTimeout(() => c.classList.remove('added'), 300);
     }
   });
 }
 
-async function _qimLoadMenu() {
-  try {
-    const r = await fetch('/api/pos/menu', { headers: reqHeaders });
-    const d = await r.json();
-    const menu = d.menu || {};
-    const sel  = document.getElementById('qim-menu-select');
-    sel.innerHTML = '<option value="">— Seleccionar del menú —</option>';
-    _qimMenu = [];
-    for (const [cat, dishes] of Object.entries(menu)) {
-      if (!Array.isArray(dishes)) continue;
-      dishes.forEach(dish => {
-        if (!dish.available && dish.available !== undefined) return;
-        const idx = _qimMenu.length;
-        _qimMenu.push({ name: dish.name, price: dish.price });
-        const opt = document.createElement('option');
-        opt.value = idx;
-        opt.textContent = `${dish.name} — $${Number(dish.price).toLocaleString('es-CO')}`;
-        sel.appendChild(opt);
-      });
-    }
-  } catch(e) { console.warn('qim menu load failed', e); }
-}
-
-function qimAddFromMenu() {
-  const sel = document.getElementById('qim-menu-select');
-  const idx = parseInt(sel.value);
-  if (isNaN(idx) || !_qimMenu[idx]) return;
-  const dish = _qimMenu[idx];
-  const existing = _qimItems.find(i => i.name === dish.name && i.unit_price === dish.price);
-  if (existing) { existing.qty++; }
-  else { _qimItems.push({ name: dish.name, qty: 1, unit_price: dish.price }); }
-  sel.value = '';
-  _qimRenderItems();
-  _qimRenderTotals();
-}
-
 function qimAddCustom() {
-  const name  = document.getElementById('qim-custom-name').value.trim();
-  const price = parseFloat(document.getElementById('qim-custom-price').value);
+  const nameEl  = document.getElementById('qim-custom-name');
+  const priceEl = document.getElementById('qim-custom-price');
+  const name  = nameEl?.value.trim();
+  const price = parseFloat(priceEl?.value);
   if (!name || isNaN(price) || price < 0) { alert('Ingresa nombre y precio válido'); return; }
-  const existing = _qimItems.find(i => i.name === name && i.unit_price === price);
-  if (existing) { existing.qty++; }
-  else { _qimItems.push({ name, qty: 1, unit_price: price }); }
-  document.getElementById('qim-custom-name').value  = '';
-  document.getElementById('qim-custom-price').value = '';
-  _qimRenderItems();
-  _qimRenderTotals();
+  qimAddItem(name, price);
+  if (nameEl)  nameEl.value  = '';
+  if (priceEl) priceEl.value = '';
 }
 
-function _qimRenderItems() {
-  const container = document.getElementById('qim-items');
+// ── Carrito ───────────────────────────────────────────────────────────
+function _qimRenderCart() {
+  const el = document.getElementById('qim-cart-items');
   if (!_qimItems.length) {
-    container.innerHTML = '<p style="font-size:13px;color:#999;margin:0;">Sin ítems aún. Agrega del menú o crea uno.</p>';
+    el.className = 'qim-cart-empty';
+    el.textContent = 'Toca un producto del menú para agregarlo.';
     return;
   }
-  container.innerHTML = _qimItems.map((it, i) => `
-    <div style="display:flex;align-items:center;gap:8px;background:#f9f9f9;border-radius:8px;padding:6px 10px;">
-      <span style="flex:2;font-size:13px;">${it.name}</span>
-      <button onclick="qimQty(${i},-1)" style="width:24px;height:24px;border-radius:6px;border:1px solid #ddd;background:white;cursor:pointer;font-size:14px;line-height:1;">−</button>
-      <span style="min-width:20px;text-align:center;font-size:13px;font-weight:600;">${it.qty}</span>
-      <button onclick="qimQty(${i},+1)" style="width:24px;height:24px;border-radius:6px;border:1px solid #ddd;background:white;cursor:pointer;font-size:14px;line-height:1;">+</button>
-      <span style="flex:1;text-align:right;font-size:13px;color:#444;">$${(it.unit_price*it.qty).toLocaleString('es-CO')}</span>
-      <button onclick="qimRemove(${i})" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:16px;padding:0 4px;">✕</button>
+  el.className = '';
+  el.innerHTML = _qimItems.map((it, i) => `
+    <div class="qim-cart-item">
+      <div class="qim-ci-name">${it.name}</div>
+      <div class="qim-qty-wrap">
+        <button class="qim-qty-btn" onclick="qimQty(${i},-1)">−</button>
+        <span style="font-weight:700;min-width:16px;text-align:center;font-size:13px;">${it.qty}</span>
+        <button class="qim-qty-btn" onclick="qimQty(${i},+1)">+</button>
+      </div>
+      <div class="qim-ci-price">${_qimFmt(it.unit_price * it.qty)}</div>
     </div>`).join('');
 }
 
 function qimQty(i, delta) {
-  _qimItems[i].qty = Math.max(1, _qimItems[i].qty + delta);
-  _qimRenderItems(); _qimRenderTotals();
-}
-function qimRemove(i) {
-  _qimItems.splice(i, 1);
-  _qimRenderItems(); _qimRenderTotals();
+  _qimItems[i].qty += delta;
+  if (_qimItems[i].qty <= 0) _qimItems.splice(i, 1);
+  _qimRenderCart();
+  _qimRenderTotals();
+  // Recalcular propina si hay % activo
+  if (_qimActiveTipPct > 0) qimSetTipPct(_qimActiveTipPct);
 }
 
-function qimSetTip(pct) {
+// ── Propina ───────────────────────────────────────────────────────────
+function _qimHighlightTip(pct) {
+  [0,10,15,20].forEach(p => {
+    const btn = document.getElementById('qtip-' + p);
+    if (btn) btn.classList.toggle('active', p === pct);
+  });
+}
+
+function qimSetTipPct(pct) {
+  _qimActiveTipPct = pct;
   const sub = _qimItems.reduce((s,it) => s + it.unit_price * it.qty, 0);
-  _qimTip = Math.round(sub * pct / 100);
-  document.getElementById('qim-tip-custom').value = _qimTip > 0 ? _qimTip : '';
-  _qimRenderTotals();
-}
-function qimTipCustom(v) {
-  _qimTip = Math.max(0, parseFloat(v) || 0);
+  _qimTip   = Math.round(sub * pct / 100);
+  document.getElementById('qim-tip-custom').value = '';
+  _qimHighlightTip(pct);
   _qimRenderTotals();
 }
 
+function qimTipCustom(v) {
+  _qimActiveTipPct = -1;
+  _qimTip = Math.max(0, parseFloat(v) || 0);
+  _qimHighlightTip(-1);
+  _qimRenderTotals();
+}
+
+// ── Totales ───────────────────────────────────────────────────────────
 function _qimRenderTotals() {
   const sub   = _qimItems.reduce((s,it) => s + it.unit_price * it.qty, 0);
   const total = sub + _qimTip;
-  const fmt   = n => '$' + Math.round(n).toLocaleString('es-CO');
-  document.getElementById('qim-subtotal').textContent  = fmt(sub);
-  document.getElementById('qim-tip-total').textContent = fmt(_qimTip);
-  document.getElementById('qim-total').textContent     = fmt(total);
-  document.getElementById('qim-tip-display').textContent = `Propina: ${fmt(_qimTip)}`;
+  document.getElementById('qim-subtotal').textContent  = _qimFmt(sub);
+  document.getElementById('qim-tip-total').textContent = _qimFmt(_qimTip);
+  document.getElementById('qim-total').textContent     = _qimFmt(total);
 }
 
+// ── Enviar ────────────────────────────────────────────────────────────
 async function submitQuickInvoice() {
   if (!_qimItems.length) { alert('Agrega al menos un ítem'); return; }
   const body = {
-    items:          _qimItems,
+    items:          _qimItems.map(it => ({ name: it.name, qty: it.qty, unit_price: it.unit_price })),
     tip_amount:     _qimTip,
     payment_method: document.getElementById('qim-payment').value,
     customer_name:  document.getElementById('qim-customer-name').value.trim() || 'Consumidor Final',
@@ -2405,17 +2506,18 @@ async function submitQuickInvoice() {
     order_type:     _qimType,
     table_name:     _qimType === 'domicilio' ? 'Domicilio' : 'Caja',
   };
-  const btn = document.querySelector('#quick-invoice-modal button[onclick="submitQuickInvoice()"]');
+  const btn = document.getElementById('qim-gen-btn');
   btn.disabled = true; btn.textContent = 'Procesando...';
   try {
     const r = await fetch('/api/pos/quick-invoice', {
-      method: 'POST', headers: { ...reqHeaders, 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { ...reqHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     const d = await r.json();
     if (!r.ok) { alert('Error: ' + (d.detail || r.status)); return; }
     closeQuickInvoiceModal();
-    alert(`✅ Factura generada correctamente. Total: $${Math.round(d.total).toLocaleString('es-CO')}`);
+    alert(`✅ Factura generada. Total: ${_qimFmt(d.total)}`);
     loadCajaOrders();
     loadPaymentProofs();
   } catch(e) { alert('Error de red: ' + e.message); }

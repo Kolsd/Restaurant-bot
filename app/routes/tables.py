@@ -321,11 +321,16 @@ async def update_delivery_order_status(request: Request, order_id: str):
     async with pool.acquire() as conn:
         await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
         
-        if new_status in ("en_camino", "entregado"):
+        if new_status in ("confirmado", "en_camino", "entregado"):
             row = await conn.fetchrow("SELECT phone, address, total FROM orders WHERE id=$1", order_id)
             if row:
                 phone = row["phone"]
-                msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo." if new_status == "en_camino" else f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
+                if new_status == "confirmado":
+                    msg = f"✅ ¡Tu pedido fue confirmado! Ya está en preparación y pronto estará listo. 🍽️"
+                elif new_status == "en_camino":
+                    msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
+                else:
+                    msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
                 try:
                     session = await conn.fetchrow("SELECT meta_phone_id FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1", phone)
                     db_phone_id = session["meta_phone_id"] if session else None
