@@ -1,4 +1,5 @@
 import os
+import base64
 import hmac
 import hashlib
 import httpx
@@ -7,6 +8,7 @@ from collections import defaultdict
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from anthropic import AsyncAnthropic
 from app.services.agent import chat, reset_conversation
 from app.services import database as db
 from app.repositories import inbox_repo
@@ -160,6 +162,68 @@ async def _process_message(user_phone: str, user_text: str, bot_number: str,
         print(f"❌ ERROR en _process_message:\n{traceback.format_exc()}", flush=True)
 
 
+async def _is_image_safe(image_id: str, access_token: str) -> bool:
+    """Descarga la imagen desde Meta y consulta a Claude Haiku si contiene contenido inapropiado.
+    Retorna False si el modelo responde YES (inapropiado), True en cualquier otro caso.
+    En caso de excepción, retorna True (fail open — no bloquear por errores)."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            headers = {"Authorization": f"Bearer {access_token}"}
+            meta_res = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{image_id}",
+                headers=headers,
+            )
+            if meta_res.status_code != 200:
+                return True
+            data = meta_res.json()
+            media_url = data.get("url")
+            if not media_url:
+                return True
+            img_res = await client.get(media_url, headers=headers)
+            if img_res.status_code != 200:
+                return True
+            image_bytes = img_res.content
+            mime_type = data.get("mime_type", "image/jpeg")
+
+        image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+        haiku_client = AsyncAnthropic()
+        response = await haiku_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime_type,
+                                "data": image_b64,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "Does this image contain inappropriate content "
+                                "(NSFW content, violence, nudity, threats, or hateful imagery)? "
+                                "Reply with only YES or NO."
+                            ),
+                        },
+                    ],
+                }
+            ],
+        )
+        answer = response.content[0].text.strip().upper()
+        # Si Claude se niega a clasificar (refusal por contenido extremo), tratar como unsafe
+        if not answer.startswith("YES") and not answer.startswith("NO"):
+            return False
+        return not answer.startswith("YES")
+    except Exception:
+        log.warning("image_moderation.error", image_id=image_id, exc_info=True)
+        return True
+
+
 async def _send_wa_text(user_phone: str, text: str, phone_id: str, access_token: str):
     """Envía un mensaje de texto simple a WhatsApp sin pasar por la IA."""
     try:
@@ -296,6 +360,15 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         restaurant_data["id"], user_phone
                     )
                     if proposal and proposal.get("proposal_status") == "awaiting_proof":
+                        # Moderación de contenido: rechazar imágenes inapropiadas
+                        is_safe = await _is_image_safe(image_id, access_token)
+                        if not is_safe:
+                            rejection_msg = (
+                                "⚠️ Tu imagen no pudo ser procesada. "
+                                "Por favor envía una captura clara de tu comprobante de pago."
+                            )
+                            await _send_wa_text(user_phone, rejection_msg, phone_id, access_token)
+                            return JSONResponse(content={"status": "ok"})
                         await db.db_attach_proof(
                             proposal["base_order_id"], user_phone, media_url
                         )

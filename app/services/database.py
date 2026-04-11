@@ -1209,6 +1209,7 @@ from app.repositories.tables_repo import (
     db_attach_proof,
     db_get_open_proposal_for_phone,
     db_list_checkout_proposals,
+    db_cancel_checkout_proposal,
     db_get_check_ticket,
 )
 

@@ -908,6 +908,25 @@ async def db_list_checkout_proposals(
     return [_serialize(dict(r)) for r in rows]
 
 
+async def db_cancel_checkout_proposal(base_order_id: str) -> None:
+    """Cancels all pending bot checkout proposals on a base order's open checks."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE table_checks
+               SET proposal_status = NULL,
+                   proposed_payments = NULL,
+                   proposed_tip = NULL,
+                   proof_media_url = NULL,
+                   proposal_customer_phone = NULL,
+                   proposal_created_at = NULL
+             WHERE base_order_id = $1
+               AND proposal_status IS NOT NULL
+               AND status = 'open'""",
+            base_order_id,
+        )
+
+
 async def db_get_check_ticket(check_id: str) -> dict | None:
     """Devuelve datos del check + info fiscal para impresión de factura."""
     pool = await _get_pool()

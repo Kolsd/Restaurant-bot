@@ -1090,6 +1090,13 @@ async def list_checkout_proposals(request: Request):
     return {"proposals": proposals}
 
 
+@router.delete("/api/checkout-proposals/{base_order_id}")
+async def cancel_checkout_proposal(base_order_id: str, request: Request):
+    await get_current_restaurant(request)  # auth check
+    await db.db_cancel_checkout_proposal(base_order_id)
+    return {"success": True}
+
+
 @router.get("/api/table-orders/{base_order_id}/checks/{check_id}/ticket")
 async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
     """Devuelve los datos del check para impresión de factura térmica."""

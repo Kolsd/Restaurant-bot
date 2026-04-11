@@ -1722,6 +1722,15 @@ function _apiHeaders() {
   return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
+function _isAdminOrOwner() {
+    try {
+        const roles = JSON.parse(localStorage.getItem('rb_role') || '[]');
+        return Array.isArray(roles)
+            ? (roles.includes('admin') || roles.includes('owner'))
+            : (roles === 'admin' || roles === 'owner');
+    } catch(e) { return false; }
+}
+
 // ── COMPROBANTES UNIFICADOS (mesas bot + domicilios) ───────────────
 async function loadPaymentProofs() {
   const container = document.getElementById('proposals-list');
@@ -1805,6 +1814,11 @@ function renderDeliveryCard(o, hasVoucher) {
       <div style="display:flex;gap:8px;">
         ${confirmBtn}
         ${chatBtn}
+        ${_isAdminOrOwner()
+            ? `<button onclick="cancelarDomicilio('${o.id}')"
+                 style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;"
+                 title="Solo admin/owner">❌</button>`
+            : ''}
       </div>
     </div>`;
 }
@@ -1868,6 +1882,11 @@ function renderProposalCard(p) {
           style="background:#ecf0f1;color:#333;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;">
           ✏️ Editar
         </button>
+        ${_isAdminOrOwner()
+            ? `<button onclick="cancelProposal('${p.base_order_id}')"
+                 style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;"
+                 title="Solo admin/owner">❌</button>`
+            : ''}
       </div>
     </div>`;
 }
@@ -1920,6 +1939,28 @@ function editProposalManually(baseOrderId) {
   switchTab('mesas');
   if (typeof selectOrder === 'function') selectOrder(baseOrderId);
   else if (typeof openSplitModal === 'function') openSplitModal(baseOrderId);
+}
+
+async function cancelProposal(baseOrderId) {
+    if (!confirm('¿Cancelar esta propuesta de pago? El cliente deberá reiniciar el proceso.')) return;
+    try {
+        const r = await fetch(`/api/checkout-proposals/${baseOrderId}`, {
+            method: 'DELETE', headers: reqHeaders
+        });
+        if (!r.ok) { const e = await r.json().catch(()=>{}); alert('Error: ' + (e?.detail || r.status)); return; }
+        loadPaymentProofs();
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function cancelarDomicilio(id) {
+    if (!confirm('¿Cancelar este domicilio?')) return;
+    try {
+        const r = await fetch(`/api/delivery/orders/${id}/status`, {
+            method: 'PATCH', headers: reqHeaders, body: JSON.stringify({status: 'cancelado'})
+        });
+        if (!r.ok) { const e = await r.json().catch(()=>{}); alert('Error: ' + (e?.detail || r.status)); return; }
+        loadPaymentProofs();
+    } catch(e) { alert('Error: ' + e.message); }
 }
 
 loadBillingConfig();
