@@ -1127,27 +1127,50 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
 @router.get("/api/dashboard/conversations")
 async def get_dashboard_conversations(request: Request):
     branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
-    
+
     if bot_number: bot_number = bot_number.split("_b")[0]
-    
+
+    # Determinar si branch_id corresponde a una sucursal real o a la casa matriz.
+    # Las conversaciones de domicilios asignadas a una sucursal se guardan con
+    # conversations.branch_id = sucursal_id, NO con el id de la matriz.
+    # Por eso: matriz → filtrar branch_id IS NULL; sucursal → filtrar branch_id = X.
+    is_actual_branch = False
+    if branch_id and branch_id != "all":
+        rest_info = await db.db_get_restaurant_by_id(branch_id)
+        if rest_info and rest_info.get("parent_restaurant_id") is not None:
+            is_actual_branch = True
+        else:
+            # Es la casa matriz — resetear para usar el flujo bot_number + branch_id IS NULL
+            branch_id = None
+
+    # Si aún no tenemos bot_number (staff de matriz sin X-Branch-ID), resolverlo
+    if branch_id is None and branch_id != "all" and not bot_number:
+        try:
+            rest_info = await get_current_restaurant(request)
+            if rest_info:
+                raw_bot = rest_info.get("whatsapp_number", "")
+                if raw_bot:
+                    bot_number = raw_bot.split("_b")[0]
+        except Exception:
+            pass
+
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         query = "SELECT * FROM conversations"
         conditions = []
         params = []
         idx = 1
-        
+
         # 🛡️ LA MAGIA DE LA TRIANGULACIÓN DE CHATS
         if branch_id == "all":
             pass # Sin filtro extra, trae todo
-        elif branch_id is not None:
-            # 🛡️ Si es una sucursal específica (Muzu), filtramos SOLO por branch_id
-            # Ignoramos el bot_number porque el chat entró por la Casa Matriz
+        elif is_actual_branch:
+            # Sucursal real — solo sus conversaciones asignadas
             conditions.append(f"branch_id = ${idx}")
             params.append(branch_id)
             idx += 1
         elif bot_number:
-            # Si es la Casa Matriz, traemos los de ella (branch_id IS NULL) y su bot_number
+            # Casa Matriz — traemos solo las no asignadas a ninguna sucursal
             conditions.append(f"bot_number = ${idx}")
             params.append(bot_number)
             idx += 1
