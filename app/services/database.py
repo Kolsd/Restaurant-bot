@@ -347,6 +347,27 @@ async def db_find_nearest_branch(customer_lat: float, customer_lon: float, paren
                 return _serialize(dict(r))
     return None
 
+async def db_find_nearest_branch_any(customer_lat: float, customer_lon: float, parent_id: int) -> dict | None:
+    """Finds the geographically nearest branch with no delivery-radius constraint.
+    Used for pickup routing where any branch is reachable by the customer."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, name, address, whatsapp_number,
+                   (6371 * acos(
+                     cos(radians($1)) * cos(radians(latitude::float))
+                     * cos(radians(longitude::float) - radians($2))
+                     + sin(radians($1)) * sin(radians(latitude::float))
+                   )) AS distance_km
+            FROM restaurants
+            WHERE parent_restaurant_id = $3
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY distance_km ASC
+            LIMIT 1
+        """, customer_lat, customer_lon, parent_id)
+        return _serialize(dict(row)) if row else None
+
 async def db_check_module(bot_number: str, module_name: str) -> bool:
     """
     Return True if module_name is explicitly enabled (true) in the restaurant's

@@ -124,7 +124,7 @@ class UpdateOrderStatusRequest(BaseModel):
 
 # --- FUNCIONES Y ENDPOINTS DEL DOMICILIARIO ---
 
-async def send_delivery_notification(phone: str, status: str, bot_number: str = ""):
+async def send_delivery_notification(phone: str, status: str, bot_number: str = "", order_type: str = "domicilio"):
     """Envía un mensaje automático de WhatsApp según el estado del pedido"""
     print(f"🔔 send_delivery_notification: status={status} phone={phone} bot_number={bot_number}", flush=True)
 
@@ -163,18 +163,29 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     has_credentials = bool(token and phone_id)
     print(f"🔑 Credenciales: token={'OK' if token else 'FALTA'} | phone_id={'OK: '+phone_id if phone_id else 'FALTA'}", flush=True)
 
-    if status not in ('en_camino', 'en_puerta', 'entregado'):
-        return  # No enviamos mensajes para otros estados
+    is_pickup = order_type == "recoger"
+
+    # Statuses válidos según tipo de orden
+    if is_pickup and status not in ('listo', 'entregado'):
+        return  # Para recoger solo notificamos cuando está listo y cuando se recoge
+    if not is_pickup and status not in ('en_camino', 'en_puerta', 'entregado'):
+        return  # Para domicilio notificamos despacho, llegada y entrega
 
     clean_phone = phone.replace("+", "").replace(" ", "")
 
     if has_credentials:
-        if status == 'en_camino':
-            msg = "🛵 *¡Buenas noticias!*\n\nNuestro domiciliario acaba de salir del restaurante con tu pedido. ¡Ve preparando la mesa! 🍔"
-        elif status == 'en_puerta':
-            msg = "📍 *¡El domiciliario está en la puerta!*\n\n¡Ya casi llega tu pedido! Por favor ten listo el pago si aplica. 🏠"
-        else:  # entregado
-            msg = "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
+        if is_pickup:
+            if status == 'listo':
+                msg = "✅ *¡Tu pedido está listo!*\n\nPasa a recogerte cuando quieras. Te esperamos. 🛍️"
+            else:  # entregado
+                msg = "✅ *¡Pedido recogido!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
+        else:
+            if status == 'en_camino':
+                msg = "🛵 *¡Buenas noticias!*\n\nNuestro domiciliario acaba de salir del restaurante con tu pedido. ¡Ve preparando la mesa! 🍔"
+            elif status == 'en_puerta':
+                msg = "📍 *¡El domiciliario está en la puerta!*\n\n¡Ya casi llega tu pedido! Por favor ten listo el pago si aplica. 🏠"
+            else:  # entregado
+                msg = "✅ *¡Pedido Entregado!*\n\nEsperamos que lo disfrutes muchísimo. ¡Gracias por elegirnos y buen provecho! 🌟"
 
         try:
             async with httpx.AsyncClient(timeout=5) as client:
@@ -197,7 +208,7 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     else:
         print(f"🚫 Sin credenciales para notificación delivery — token={'missing' if not token else 'ok'} phone_id={'missing' if not phone_id else 'ok'} bot={bot_number}", flush=True)
 
-    # NPS always fires on entregado regardless of WA credentials.
+    # NPS dispara en entregado para ambos tipos de orden.
     # trigger_nps sets Redis state; the next inbound message will handle the score.
     if status == 'entregado' and bot_number:
         try:
@@ -278,7 +289,11 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
     await db.db_update_order_status(order_id, req.status)
     
     # 3. Disparamos el mensaje de WhatsApp en SEGUNDO PLANO
-    if req.status in ['en_camino', 'en_puerta', 'entregado']:
-        asyncio.create_task(send_delivery_notification(order["phone"], req.status, order.get("bot_number", "")))
+    order_type = order.get("order_type", "domicilio")
+    notify_statuses = ['listo', 'en_camino', 'en_puerta', 'entregado']
+    if req.status in notify_statuses:
+        asyncio.create_task(send_delivery_notification(
+            order["phone"], req.status, order.get("bot_number", ""), order_type
+        ))
 
     return {"success": True, "new_status": req.status}
