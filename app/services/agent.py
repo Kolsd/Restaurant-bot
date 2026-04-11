@@ -3,6 +3,7 @@ import uuid
 import json
 import re
 import traceback
+from datetime import datetime, timezone as _dt_utc
 from anthropic import Anthropic
 from app.services import orders, database as db
 from app.services.logging import get_logger
@@ -962,44 +963,77 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
                     print(f"🍹 Bar order {bar_oid}: {bar_summary}", flush=True)
             else:
-                # Sub-orden adicional a una sesión existente
-                sub_number = await db.db_get_next_sub_number(base_order_id)
-                order_id   = f"{base_order_id}-{sub_number}"
+                # Sub-orden adicional a una sesión existente.
+                # Idempotencia: si los MISMOS ítems ya fueron ordenados en los últimos
+                # 15 segundos para este base_order_id, el LLM re-confirmó por error
+                # (ej. el usuario dijo "Así está bien" y el bot re-ejecutó confirm_order).
+                # En ese caso descartamos la creación pero dejamos que el bot responda.
+                _dup_items_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in cart_items)
+                _is_duplicate_order = False
+                try:
+                    _pool_dup = await db.get_pool()
+                    async with _pool_dup.acquire() as _conn_dup:
+                        _recent = await _conn_dup.fetchrow(
+                            "SELECT items, created_at FROM table_orders "
+                            "WHERE base_order_id=$1 ORDER BY created_at DESC LIMIT 1",
+                            base_order_id,
+                        )
+                    if _recent:
+                        import json as _j_dup
+                        _ri = _recent["items"] if isinstance(_recent["items"], list) else _j_dup.loads(_recent["items"])
+                        _recent_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in _ri)
+                        from datetime import timezone as _tz
+                        _age = (datetime.utcnow().replace(tzinfo=_tz.utc) -
+                                _recent["created_at"].replace(tzinfo=_tz.utc)).total_seconds()
+                        if _recent_key == _dup_items_key and _age < 15:
+                            _is_duplicate_order = True
+                            print(f"🔄 Sub-orden duplicada ignorada para {base_order_id} "
+                                  f"(mismos ítems, hace {_age:.0f}s)", flush=True)
+                except Exception:
+                    log.exception("duplicate_order_check_failed", base_order_id=base_order_id)
 
-                k_items = kitchen_items if has_split else cart_items
-                k_total = _station_total(k_items) if has_split else cart_total
-                await db.db_save_table_order(
-                    _order_base(order_id, k_items, k_total, sub_number, kitchen_station)
-                )
-
-                if has_split and bar_items:
+                if not _is_duplicate_order:
                     sub_number = await db.db_get_next_sub_number(base_order_id)
-                    bar_oid    = f"{base_order_id}-{sub_number}"
-                    await db.db_save_table_order(
-                        _order_base(bar_oid, bar_items, _station_total(bar_items), sub_number, "bar")
-                    )
-                    bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
-                    print(f"🍹 Bar order {bar_oid}: {bar_summary}", flush=True)
+                    order_id   = f"{base_order_id}-{sub_number}"
 
-            try:
-                await db.db_deduct_inventory_for_order(bot_number, cart_items)
-            except InsufficientStockError as e:
-                log.exception(
-                    "inventory_insufficient_table_order",
-                    sku=e.sku,
-                    requested=e.requested,
-                    available=e.available,
-                    phone=phone,
-                    bot_number=bot_number,
-                )
-                # Order is already saved to KDS — log and continue (item was served)
-            except Exception as e:
-                log.exception(
-                    "inventory_deduction_failed_table_order",
-                    error=str(e),
-                    phone=phone,
-                    bot_number=bot_number,
-                )
+                    k_items = kitchen_items if has_split else cart_items
+                    k_total = _station_total(k_items) if has_split else cart_total
+                    await db.db_save_table_order(
+                        _order_base(order_id, k_items, k_total, sub_number, kitchen_station)
+                    )
+
+                    if has_split and bar_items:
+                        sub_number = await db.db_get_next_sub_number(base_order_id)
+                        bar_oid    = f"{base_order_id}-{sub_number}"
+                        await db.db_save_table_order(
+                            _order_base(bar_oid, bar_items, _station_total(bar_items), sub_number, "bar")
+                        )
+                        bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
+                        print(f"🍹 Bar order {bar_oid}: {bar_summary}", flush=True)
+
+            # _is_duplicate_order solo se define en la rama else (sub-órdenes).
+            # Para la primera orden siempre es False.
+            _skip_inventory = locals().get("_is_duplicate_order", False)
+            if not _skip_inventory:
+                try:
+                    await db.db_deduct_inventory_for_order(bot_number, cart_items)
+                except InsufficientStockError as e:
+                    log.exception(
+                        "inventory_insufficient_table_order",
+                        sku=e.sku,
+                        requested=e.requested,
+                        available=e.available,
+                        phone=phone,
+                        bot_number=bot_number,
+                    )
+                    # Order is already saved to KDS — log and continue (item was served)
+                except Exception as e:
+                    log.exception(
+                        "inventory_deduction_failed_table_order",
+                        error=str(e),
+                        phone=phone,
+                        bot_number=bot_number,
+                    )
 
             try:
                 await orders.clear_cart(phone, bot_number)
@@ -1012,28 +1046,13 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 )
 
             await db.db_session_mark_order(phone, bot_number)
-            tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
-            print(f"🆕 {order_id} ({tag}): {items_summary}", flush=True)
-
-            # Anti-spam: sub-órdenes en la misma mesa dentro de 5 min no generan
-            # un nuevo mensaje de WhatsApp; la orden se procesa igual en el dashboard.
-            # table_cooldown_acquire returns True if the lock was just set (no active cooldown),
-            # False if a cooldown is already active. First-order always acquires (sub_number==1
-            # skips the check so the lock is always set for the initial confirmation).
-            _table_id_str = str(table_context["id"])
-            # Pasamos base_order_id al cooldown para que una sesión nueva en la misma
-            # mesa siempre notifique, aunque la sesión anterior todavía esté en cooldown.
-            _should_notify = await state_store.table_cooldown_acquire(
-                _table_id_str, bot_number, base_order_id=base_order_id, ttl_seconds=300
-            )
-            if sub_number > 1 and not _should_notify:
-                # Sub-orden adicional dentro de la MISMA sesión y cooldown activo → silencioso
-                print(f"🔇 Anti-spam: confirmación suprimida para table={_table_id_str} base={base_order_id} (cooldown activo)", flush=True)
-                reply = ""
+            if not _skip_inventory:
+                tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
+                print(f"🆕 {order_id} ({tag}): {items_summary}", flush=True)
 
             if cart_errors:
                 failed = ", ".join(cart_errors)
-                if reply:  # solo agrega nota si vamos a responder
+                if reply:
                     reply += f" (Nota: No pude agregar '{failed}' porque no aparece exacto en el menú)"
 
         elif action in ("delivery", "pickup"):
