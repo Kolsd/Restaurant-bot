@@ -387,9 +387,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div class="main">
   <div class="segmented-control">
     <button id="tab-mesas" class="seg-btn active" onclick="switchTab('mesas')">🪑 Mesas</button>
-    <button id="tab-proposals" class="seg-btn" onclick="switchTab('proposals')">💳 Por Confirmar <span id="proposals-badge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+    <button id="tab-proposals" class="seg-btn" onclick="switchTab('proposals')">💳 Comprobantes <span id="proposals-badge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
     <button id="tab-domicilios" class="seg-btn" onclick="switchTab('domicilios')">🛵 Domicilios <span id="badge-dom" class="badge-tab" style="display:none;">0</span></button>
-    <button id="tab-chats" class="seg-btn" onclick="switchTab('chats')">💬 WhatsApp Comprobantes <span id="badge-chat" class="badge-tab" style="display:none;">0</span></button>
   </div>
 
   <div id="view-mesas" style="display:flex; gap:0; min-height:calc(100vh - 160px);">
@@ -416,20 +415,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 
   <div id="view-proposals" style="display:none;">
-    <div class="section-title">Por Confirmar — Propuestas de Pago del Bot</div>
+    <div class="section-title">Comprobantes de Pago — Mesas y Domicilios</div>
     <div id="proposals-list" style="display:flex;flex-wrap:wrap;gap:12px;padding:16px;">
-      <p style="color:#999;">Cargando propuestas...</p>
+      <p style="color:#999;">Cargando...</p>
     </div>
   </div>
 
   <div id="view-domicilios" style="display:none;">
     <div class="section-title">Domicilios Pendientes de Confirmación</div>
     <div class="board" id="board-domicilios"><div class="empty-state">Cargando domicilios...</div></div>
-  </div>
-
-  <div id="view-chats" style="display:none;">
-    <div class="section-title">Chats de WhatsApp (Validar Pagos)</div>
-    <div id="inbox-list"><div class="empty-state">Cargando chats...</div></div>
   </div>
 </div>
 
@@ -608,16 +602,15 @@ function switchTab(tabId) {
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tabId).classList.add('active');
 
-  ['mesas', 'proposals', 'domicilios', 'chats'].forEach(id => {
+  ['mesas', 'proposals', 'domicilios'].forEach(id => {
     const el = document.getElementById('view-' + id);
     if (el) el.style.display = 'none';
   });
 
   document.getElementById('view-' + tabId).style.display = 'block';
 
-  if (tabId === 'chats') loadChats();
   if (tabId === 'domicilios') loadDomicilios();
-  if (tabId === 'proposals') loadCheckoutProposals();
+  if (tabId === 'proposals') loadPaymentProofs();
 }
 
 // ── RECEIPT HTML BUILDER (shared by preview + print) ──
@@ -1726,30 +1719,91 @@ function _apiHeaders() {
   return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-// ── CHECKOUT PROPOSALS (Bot-driven payment) ────────────────────────
-async function loadCheckoutProposals() {
+// ── COMPROBANTES UNIFICADOS (mesas bot + domicilios) ───────────────
+async function loadPaymentProofs() {
+  const container = document.getElementById('proposals-list');
+  if (!container) return;
   try {
-    const res = await fetch('/api/checkout-proposals', { headers: _apiHeaders() });
-    if (!res.ok) return;
-    const data = await res.json();
-    const proposals = data.proposals || [];
+    const [propRes, domRes, convRes] = await Promise.all([
+      fetch('/api/checkout-proposals',       { headers: reqHeaders }),
+      fetch('/api/delivery/orders',           { headers: reqHeaders }),
+      fetch('/api/dashboard/conversations',   { headers: reqHeaders }),
+    ]);
 
+    const proposals  = propRes.ok  ? ((await propRes.json()).proposals  || []) : [];
+    const allOrders  = domRes.ok   ? ((await domRes.json()).orders      || []) : [];
+    const allConvs   = convRes.ok  ? ((await convRes.json()).conversations || []) : [];
+
+    const pendingOrders = allOrders.filter(o => o.status === 'pendiente');
+    const voucherPhones = new Set(allConvs.filter(c => c.has_voucher).map(c => c.phone));
+
+    const total = proposals.length + pendingOrders.length;
     const badge = document.getElementById('proposals-badge');
-    if (badge) {
-      badge.textContent = proposals.length;
-      badge.style.display = proposals.length > 0 ? 'inline' : 'none';
-    }
+    if (badge) { badge.textContent = total; badge.style.display = total > 0 ? 'inline' : 'none'; }
 
-    const container = document.getElementById('proposals-list');
-    if (!container) return;
-    if (proposals.length === 0) {
-      container.innerHTML = '<p style="color:#999;padding:20px;">No hay propuestas de pago pendientes.</p>';
+    if (total === 0) {
+      container.innerHTML = '<div style="padding:32px;text-align:center;color:#999;font-size:14px;">✅ No hay comprobantes ni pedidos pendientes.</div>';
       return;
     }
-    container.innerHTML = proposals.map(p => renderProposalCard(p)).join('');
+
+    container.innerHTML =
+      proposals.map(p => renderProposalCard(p)).join('') +
+      pendingOrders.map(o => renderDeliveryCard(o, voucherPhones.has(o.phone))).join('');
   } catch(e) {
-    console.error('loadCheckoutProposals:', e);
+    console.error('loadPaymentProofs:', e);
+    container.innerHTML = `<p style="color:#e74c3c;padding:20px;">Error de red: ${e.message}</p>`;
   }
+}
+
+// Alias para referencias internas (confirmProposal, etc.)
+function loadCheckoutProposals() { loadPaymentProofs(); }
+
+function renderDeliveryCard(o, hasVoucher) {
+  let itemsHtml = '';
+  try {
+    const arr = typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []);
+    itemsHtml = arr.map(i => `<div style="font-size:13px;padding:1px 0;">${i.quantity||1}× ${i.name}</div>`).join('');
+  } catch(e) {}
+
+  const typeLabel = o.order_type === 'recoger' ? '🛍️ Recoger' : '🛵 Domicilio';
+  const typeBg    = o.order_type === 'recoger' ? '#8b5cf6'   : '#f59e0b';
+
+  const voucherBadge = hasVoucher
+    ? '<span style="background:#27ae60;color:white;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px;">📎 Comprobante enviado</span>'
+    : '<span style="background:#f39c12;color:white;border-radius:4px;padding:1px 6px;font-size:11px;margin-left:6px;">⏳ Sin comprobante</span>';
+
+  const chatBtn = `<button onclick="openChatModal('${o.phone}')"
+    style="background:#ecf0f1;color:#333;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;">
+    💬 Chat
+  </button>`;
+
+  const confirmBtn = `<button onclick="confirmarDomicilio('${o.id}')"
+    style="background:#27ae60;color:white;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:13px;flex:1;">
+    ✅ Confirmar
+  </button>`;
+
+  const phone = document.createTextNode(o.phone || '').nodeValue;
+
+  return `
+    <div style="background:white;border-radius:10px;padding:16px;min-width:260px;max-width:300px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="background:${typeBg};color:white;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:700;">${typeLabel}</span>
+        <span style="font-size:12px;color:#999;">${phone}</span>
+      </div>
+      ${voucherBadge}
+      <div style="margin:8px 0;border-top:1px solid #eee;padding-top:8px;">
+        ${itemsHtml}
+        ${o.address ? `<div style="font-size:12px;color:#666;margin-top:4px;">📍 ${document.createTextNode(o.address).nodeValue}</div>` : ''}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="font-size:13px;color:#666;">${o.payment_method || 'Sin método'}</span>
+        <strong style="font-size:15px;">${fmt(o.total || 0)}</strong>
+      </div>
+      <div style="display:flex;gap:8px;">
+        ${confirmBtn}
+        ${chatBtn}
+      </div>
+    </div>`;
 }
 
 function renderProposalCard(p) {
@@ -1782,6 +1836,7 @@ function renderProposalCard(p) {
     : '<span style="background:#27ae60;color:white;border-radius:4px;padding:1px 6px;font-size:11px;">✅ Listo para cobrar</span>';
 
   const tableName = document.createTextNode(p.table_name || 'Mesa').nodeValue;
+  const tableLabel = `<span style="background:#3498db;color:white;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:700;">🪑 ${tableName}</span>`;
   const confirmBtn = canConfirm
     ? `<button onclick="confirmProposal('${p.base_order_id}')"
          style="background:#27ae60;color:white;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:13px;flex:1;">
@@ -1795,7 +1850,7 @@ function renderProposalCard(p) {
   return `
     <div style="background:white;border-radius:10px;padding:16px;min-width:260px;max-width:300px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <strong>${tableName}</strong>
+        ${tableLabel}
         <span style="font-size:11px;color:#999;">${timeAgo} 🤖 BOT</span>
       </div>
       ${statusBadge}
@@ -1864,19 +1919,15 @@ function editProposalManually(baseOrderId) {
   else if (typeof openSplitModal === 'function') openSplitModal(baseOrderId);
 }
 
-// Iniciar polling (solo recargamos chats y proposals si estamos en esa pestaña)
 loadBillingConfig();
 loadCajaOrders();
 loadDomicilios();
-loadCheckoutProposals();
+loadPaymentProofs();
 
 setInterval(() => {
   loadCajaOrders();
   loadDomicilios();
-  loadCheckoutProposals();
-  if (document.getElementById('view-chats').style.display !== 'none') {
-      loadChats();
-  }
+  loadPaymentProofs();
 }, 5000);
 
 </script>

@@ -887,7 +887,7 @@ async def db_list_checkout_proposals(
     Agrupado por base_order_id para la vista de Caja.
     """
     pool = await _get_pool()
-    ids = branch_ids if branch_ids else []
+    ids = branch_ids if branch_ids else [restaurant_id]
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT
@@ -898,12 +898,12 @@ async def db_list_checkout_proposals(
                  json_agg(tc.* ORDER BY tc.check_number) AS checks
                FROM table_orders tor
                JOIN table_checks tc ON tc.base_order_id = tor.base_order_id
-              WHERE (tor.branch_id = $1 OR tor.branch_id IS NULL)
+              WHERE (tor.branch_id = ANY($1::int[]) OR tor.branch_id IS NULL)
                 AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
                 AND tc.status = 'open'
               GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.branch_id
               ORDER BY MIN(tc.proposal_created_at) ASC""",
-            restaurant_id,
+            ids,
         )
     return [_serialize(dict(r)) for r in rows]
 
