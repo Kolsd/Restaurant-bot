@@ -983,9 +983,12 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         _ri = _recent["items"] if isinstance(_recent["items"], list) else _j_dup.loads(_recent["items"])
                         _recent_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in _ri)
                         from datetime import timezone as _tz
-                        _age = (datetime.utcnow().replace(tzinfo=_tz.utc) -
-                                _recent["created_at"].replace(tzinfo=_tz.utc)).total_seconds()
-                        if _recent_key == _dup_items_key and _age < 15:
+                        _now_utc = datetime.now(_tz.utc)
+                        _cat = _recent["created_at"]
+                        if _cat.tzinfo is None:
+                            _cat = _cat.replace(tzinfo=_tz.utc)
+                        _age = (_now_utc - _cat).total_seconds()
+                        if _recent_key == _dup_items_key and 0 <= _age < 15:
                             _is_duplicate_order = True
                             print(f"🔄 Sub-orden duplicada ignorada para {base_order_id} "
                                   f"(mismos ítems, hace {_age:.0f}s)", flush=True)
