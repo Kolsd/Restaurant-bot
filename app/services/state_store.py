@@ -176,27 +176,51 @@ def _cooldown_redis_key(table_id: str, bot_number: str) -> str:
     return f"mesio:cooldown:table:{table_id}:{bot_number}"
 
 
-async def table_cooldown_acquire(table_id: str, bot_number: str, ttl_seconds: int = 300) -> bool:
+async def table_cooldown_acquire(
+    table_id: str, bot_number: str, base_order_id: str = "", ttl_seconds: int = 300
+) -> bool:
     """
-    Atomically acquire a cooldown lock for the given table+bot combination.
+    Acquire a cooldown lock for the given table+bot combination.
 
-    Returns True if the lock was acquired (no active cooldown → proceed with
-    confirmation). Returns False if a cooldown is already active (suppress the
-    WhatsApp message).
+    Stores the base_order_id as the lock value so that a NEW session at the same
+    table (different base_order_id) always notifies, even if the previous session's
+    cooldown is still active.
 
-    Redis path: SET key "1" NX EX ttl — atomic, works across workers.
-    Fallback path: checks/updates the in-process _fb_cooldown dict.
+    Returns True  → caller should send the WhatsApp confirmation.
+    Returns False → same session, cooldown active → suppress duplicate notification.
+
+    Redis path: GET then SET (or SET NX + compare).
+    Fallback path: in-process dict with (base_order_id, expire_at) tuples.
     """
     key = _cooldown_redis_key(table_id, bot_number)
     r = await _rc.get_redis()
     if r is not None:
-        result = await r.set(key, "1", ex=ttl_seconds, nx=True)
-        # redis-py returns True when SET NX succeeded (key was new), None otherwise
-        return result is True
+        current = await r.get(key)
+        if current is None:
+            # No cooldown active — acquire for this session
+            await r.set(key, base_order_id or "1", ex=ttl_seconds)
+            return True
+        stored_id = current.decode() if isinstance(current, bytes) else current
+        if base_order_id and stored_id != base_order_id:
+            # Different session at the same table — override cooldown and notify
+            await r.set(key, base_order_id, ex=ttl_seconds)
+            return True
+        # Same session cooldown is active
+        return False
     _maybe_warn("cooldown")
     now = time.monotonic()
-    expire_at = _fb_cooldown.get(key, 0.0)
-    if now < expire_at:
-        return False  # cooldown still active
-    _fb_cooldown[key] = now + ttl_seconds
-    return True
+    stored = _fb_cooldown.get(key)  # (base_order_id, expire_at) or float (legacy)
+    if stored is None or (isinstance(stored, tuple) and now >= stored[1]):
+        _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
+        return True
+    if isinstance(stored, tuple):
+        stored_id, expire_at = stored
+        if base_order_id and stored_id != base_order_id:
+            _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
+            return True
+        return False  # same session, cooldown active
+    # Legacy float entry
+    if now >= stored:
+        _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
+        return True
+    return False

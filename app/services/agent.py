@@ -1021,13 +1021,15 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             # False if a cooldown is already active. First-order always acquires (sub_number==1
             # skips the check so the lock is always set for the initial confirmation).
             _table_id_str = str(table_context["id"])
-            _cooldown_acquired = await state_store.table_cooldown_acquire(_table_id_str, bot_number, ttl_seconds=300)
-            if sub_number > 1 and not _cooldown_acquired:
-                # Sub-orden dentro del cooldown → silencioso en WhatsApp
-                print(f"🔇 Anti-spam: confirmación suprimida para table={_table_id_str} (cooldown activo)", flush=True)
+            # Pasamos base_order_id al cooldown para que una sesión nueva en la misma
+            # mesa siempre notifique, aunque la sesión anterior todavía esté en cooldown.
+            _should_notify = await state_store.table_cooldown_acquire(
+                _table_id_str, bot_number, base_order_id=base_order_id, ttl_seconds=300
+            )
+            if sub_number > 1 and not _should_notify:
+                # Sub-orden adicional dentro de la MISMA sesión y cooldown activo → silencioso
+                print(f"🔇 Anti-spam: confirmación suprimida para table={_table_id_str} base={base_order_id} (cooldown activo)", flush=True)
                 reply = ""
-            else:
-                pass  # Primera orden o cooldown expirado → confirmar y el lock ya fue adquirido
 
             if cart_errors:
                 failed = ", ".join(cart_errors)
