@@ -455,6 +455,7 @@ GENERAL RULES
 =========================================
 - Only add dishes to "items" that EXACTLY match the [MENÚ].
 - CRITICAL (ORDER ITEMS): The "items" array populates the cart. If the user is starting a NEW order, include ALL items. If the user is adding items to an EXISTING/CONFIRMED order (sub-order), you MUST ONLY include the NEW/ADDITIONAL items in the "items" array. NEVER repeat items that were already ordered, or the customer will be charged twice! The cart is automatically cleared after each order.
+- CRITICAL (CLOSING PHRASES): If the customer says something like "Eso es todo", "Es todo", "Así está bien", "Listo", "Nada más", "Gracias", "Ya está" — and they are NOT requesting a new item — you MUST use action="chat" with items=[]. NEVER use action="order" in response to a closing phrase when there are no new items to add. These phrases mean "I am done ordering", not "please confirm my previous order again".
 - UPSELL RULES:
   • TABLE orders (action="order"): In the SAME reply where you confirm the order, suggest 1 complementary item from the menu (e.g. a drink, dessert, or side dish that pairs well).
   • DELIVERY/PICKUP (action="delivery" or action="pickup"): Upsell ONLY at STEP 5 (the confirmation summary, before firing action="delivery"/"pickup"). In your STEP 5 reply, after summarizing the order, add: "¿Te gustaría agregar algo más, como [sugerencia específica del menú]?". NEVER upsell in the same reply as action="delivery" or action="pickup" — by then the order is already closed.
@@ -967,25 +968,33 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     print(f"🍹 Bar order {bar_oid}: {bar_summary}", flush=True)
             else:
                 # Sub-orden adicional a una sesión existente.
-                # Idempotencia: si los MISMOS ítems ya fueron ordenados en los últimos
-                # 15 segundos para este base_order_id, el LLM re-confirmó por error
-                # (ej. el usuario dijo "Así está bien" y el bot re-ejecutó confirm_order).
-                # En ese caso descartamos la creación pero dejamos que el bot responda.
+                # Idempotencia en dos capas:
+                # 1) Mismos ítems que la última sub-orden en los últimos 15s → duplicado inmediato.
+                # 2) Todos los ítems del carrito ya fueron ordenados en ALGUNA sub-orden de
+                #    esta sesión → el LLM re-confirmó ítems previos (ej. "Eso es todo").
                 _dup_items_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in cart_items)
                 _is_duplicate_order = False
                 try:
+                    import json as _j_dup
+                    from datetime import timezone as _tz
                     _pool_dup = await db.get_pool()
                     async with _pool_dup.acquire() as _conn_dup:
+                        # Capa 1: última sub-orden en últimos 15s
                         _recent = await _conn_dup.fetchrow(
                             "SELECT items, created_at FROM table_orders "
                             "WHERE base_order_id=$1 ORDER BY created_at DESC LIMIT 1",
                             base_order_id,
                         )
+                        # Capa 2: acumulado de toda la sesión
+                        _all_prev = await _conn_dup.fetch(
+                            "SELECT items FROM table_orders WHERE base_order_id=$1",
+                            base_order_id,
+                        )
+
+                    # Capa 1
                     if _recent:
-                        import json as _j_dup
                         _ri = _recent["items"] if isinstance(_recent["items"], list) else _j_dup.loads(_recent["items"])
                         _recent_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in _ri)
-                        from datetime import timezone as _tz
                         _now_utc = datetime.now(_tz.utc)
                         _cat = _recent["created_at"]
                         if _cat.tzinfo is None:
@@ -995,6 +1004,33 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                             _is_duplicate_order = True
                             print(f"🔄 Sub-orden duplicada ignorada para {base_order_id} "
                                   f"(mismos ítems, hace {_age:.0f}s)", flush=True)
+
+                    # Capa 2: ¿todos los ítems del carrito ya estaban en la sesión?
+                    # Solo se aplica cuando el mensaje es una frase de cierre (ej. "Eso es todo"),
+                    # para evitar falsos positivos cuando el cliente repide el mismo plato.
+                    _CLOSING = {
+                        "eso es todo", "es todo", "así está bien", "así está", "con eso está",
+                        "con eso bien", "nada más", "ya está", "ya es todo", "listo gracias",
+                        "eso sería todo", "por ahora es todo",
+                    }
+                    _msg_lower = message.strip().lower()
+                    _is_closing_msg = any(p in _msg_lower for p in _CLOSING)
+                    if not _is_duplicate_order and _all_prev and _is_closing_msg:
+                        _session_totals: dict[str, int] = {}
+                        for _row in _all_prev:
+                            _ri2 = _row["items"] if isinstance(_row["items"], list) else _j_dup.loads(_row["items"])
+                            for _itm in _ri2:
+                                _k = _itm.get("name", "")
+                                _session_totals[_k] = _session_totals.get(_k, 0) + int(_itm.get("quantity", 1))
+                        _all_covered = bool(_session_totals) and all(
+                            _session_totals.get(_itm.get("name", ""), 0) >= int(_itm.get("quantity", 1))
+                            for _itm in cart_items
+                        )
+                        if _all_covered:
+                            _is_duplicate_order = True
+                            _covered_str = ", ".join(f"{v}x {k}" for k, v in _session_totals.items())
+                            print(f"🔄 Sub-orden ignorada (frase de cierre, ítems ya en sesión "
+                                  f"{base_order_id}): {_covered_str}", flush=True)
                 except Exception:
                     log.exception("duplicate_order_check_failed", base_order_id=base_order_id)
 
