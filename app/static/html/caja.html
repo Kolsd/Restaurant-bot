@@ -414,7 +414,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 
   <div id="view-proposals" style="display:none;">
-    <div class="section-title">Comprobantes de Pago — Mesas y Domicilios</div>
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>Comprobantes de Pago — Mesas y Domicilios</span>
+      <button onclick="openQuickInvoiceModal()"
+        style="background:var(--primary);color:white;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;">
+        ➕ Nueva Factura
+      </button>
+    </div>
     <div id="proposals-list" style="display:flex;flex-wrap:wrap;gap:12px;padding:16px;">
       <p style="color:#999;">Cargando...</p>
     </div>
@@ -1920,7 +1926,70 @@ function _timeAgo(isoStr) {
 }
 
 async function confirmProposal(baseOrderId) {
-  if (!confirm('¿Confirmar y facturar todos los pagos de esta mesa?')) return;
+  // Mostrar preview de factura antes de facturar
+  const p = _proposalsCache[baseOrderId];
+  const checks = p
+    ? (Array.isArray(p.checks) ? p.checks : JSON.parse(p.checks || '[]'))
+    : [];
+
+  // Intentar obtener ítems reales de la orden (desde caché o API)
+  let bill = typeof _billsCache !== 'undefined' ? _billsCache[baseOrderId] : null;
+  if (!bill) {
+    try {
+      const r = await fetch('/api/table-orders', { headers: _apiHeaders() });
+      const data = await r.json();
+      const all = data.orders || data || [];
+      const matches = all.filter(o => o.base_order_id === baseOrderId || o.id === baseOrderId);
+      if (matches.length) {
+        bill = {
+          table_name: matches[0].table_name || p?.table_name || 'Mesa',
+          total: matches.reduce((s, o) => s + parseFloat(o.total || 0), 0),
+          items: matches.flatMap(o => {
+            const its = typeof o.items === 'string' ? JSON.parse(o.items || '[]') : (o.items || []);
+            return its;
+          }),
+          created_at: matches[0].created_at,
+        };
+      }
+    } catch(e) {}
+  }
+
+  if (!bill) {
+    // Fallback: construir bill mínimo desde los checks del proposal
+    bill = {
+      table_name: p?.table_name || 'Mesa',
+      total: checks.reduce((s, c) => s + parseFloat(c.total || 0), 0),
+      items: checks.map(c => ({ name: `Cuenta ${c.check_number}`, quantity: 1, price: parseFloat(c.total || 0) })),
+      created_at: checks[0]?.proposal_created_at || new Date().toISOString(),
+    };
+  }
+
+  const paymentContext = {
+    payments: checks.map(c => {
+      const pmts = Array.isArray(c.proposed_payments) ? c.proposed_payments :
+        (typeof c.proposed_payments === 'string' ? JSON.parse(c.proposed_payments || '[]') : []);
+      const method = (pmts[0]?.method || '?').charAt(0).toUpperCase() + (pmts[0]?.method || '?').slice(1);
+      return { method: `Cuenta ${c.check_number} · ${method}`, amount: parseFloat(c.total || 0) };
+    }),
+    customerName: 'Consumidor Final',
+    customerNit: '222222222',
+    change: 0,
+  };
+
+  const tipTotal = checks.reduce((s, c) => s + parseFloat(c.tip_amount || 0), 0);
+  if (tipTotal > 0) {
+    paymentContext.payments.push({ method: 'Propina', amount: tipTotal });
+  }
+
+  document.getElementById('ppm-preview').innerHTML = _buildReceiptHtml(bill, paymentContext);
+  document.getElementById('ppm-confirm-btn').onclick = async () => {
+    document.getElementById('proposal-pay-modal').style.display = 'none';
+    await _executeConfirmProposal(baseOrderId);
+  };
+  document.getElementById('proposal-pay-modal').style.display = 'flex';
+}
+
+async function _executeConfirmProposal(baseOrderId) {
   try {
     const res = await fetch(`/api/table-orders/${baseOrderId}/checks`, { headers: _apiHeaders() });
     if (!res.ok) throw new Error('No se pudieron obtener los checks');
@@ -2053,6 +2122,29 @@ setInterval(() => {
 }, 5000);
 
 </script>
+<!-- ── MODAL PREVIEW FACTURA (Confirmar propuesta bot) ── -->
+<div id="proposal-pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:12px;padding:24px;width:380px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:16px;">Vista previa de factura</h3>
+      <button onclick="document.getElementById('proposal-pay-modal').style.display='none'"
+        style="background:none;border:none;font-size:20px;cursor:pointer;color:#999;">✕</button>
+    </div>
+    <div id="ppm-preview"
+      style="flex:1;overflow-y:auto;font-family:monospace;font-size:11px;background:#f9f9f9;padding:12px;border-radius:8px;margin-bottom:16px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="document.getElementById('proposal-pay-modal').style.display='none'"
+        style="flex:1;background:#ecf0f1;color:#333;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;">
+        Cancelar
+      </button>
+      <button id="ppm-confirm-btn"
+        style="flex:2;background:#27ae60;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        ✅ Confirmar y Facturar
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ── MODAL DETALLE PROPUESTA BOT ── -->
 <div id="edit-proposal-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:white;border-radius:12px;padding:24px;width:420px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
@@ -2079,5 +2171,256 @@ setInterval(() => {
 </div>
 
 <iframe id="print-frame" style="display:none;position:absolute;width:0;height:0;border:0;"></iframe>
+
+<!-- ── MODAL NUEVA FACTURA RÁPIDA ── -->
+<div id="quick-invoice-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0;">
+  <div style="background:white;border-radius:14px;padding:24px;width:520px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,0.22);margin:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+      <h3 style="margin:0;font-size:17px;">➕ Nueva Factura</h3>
+      <button onclick="closeQuickInvoiceModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999;">✕</button>
+    </div>
+
+    <!-- Tipo de venta -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Tipo de venta</label>
+      <div style="display:flex;gap:8px;">
+        <button id="qim-type-salon" onclick="qimSetType('salon')"
+          style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--primary);background:var(--primary);color:white;cursor:pointer;font-size:13px;font-weight:600;">🪑 Salón</button>
+        <button id="qim-type-domicilio" onclick="qimSetType('domicilio')"
+          style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--border);background:white;color:#444;cursor:pointer;font-size:13px;">🛵 Domicilio</button>
+      </div>
+    </div>
+
+    <!-- Ítems -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Ítems</label>
+      <div id="qim-items" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
+      <!-- Selector de menú -->
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="qim-menu-select" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+          <option value="">— Seleccionar del menú —</option>
+        </select>
+        <button onclick="qimAddFromMenu()" style="padding:7px 12px;background:var(--primary);color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;">+ Agregar</button>
+      </div>
+      <!-- Ítem personalizado -->
+      <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+        <input id="qim-custom-name" placeholder="Nombre del ítem" style="flex:2;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+        <input id="qim-custom-price" type="number" min="0" placeholder="Precio" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+        <button onclick="qimAddCustom()" style="padding:7px 12px;background:#6b7280;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;">+ Otro</button>
+      </div>
+    </div>
+
+    <!-- Propina -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Propina</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button onclick="qimSetTip(0)"   style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">Sin propina</button>
+        <button onclick="qimSetTip(10)"  style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">10%</button>
+        <button onclick="qimSetTip(15)"  style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">15%</button>
+        <button onclick="qimSetTip(20)"  style="padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:white;cursor:pointer;font-size:12px;">20%</button>
+        <input id="qim-tip-custom" type="number" min="0" placeholder="Otro valor $" style="width:110px;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;" oninput="qimTipCustom(this.value)">
+      </div>
+      <div id="qim-tip-display" style="font-size:12px;color:#71717A;margin-top:4px;">Propina: $0</div>
+    </div>
+
+    <!-- Método de pago -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Método de pago</label>
+      <select id="qim-payment" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+        <option value="efectivo">💵 Efectivo</option>
+        <option value="tarjeta">💳 Tarjeta</option>
+        <option value="nequi">📱 Nequi</option>
+        <option value="daviplata">📱 Daviplata</option>
+        <option value="transferencia">🏦 Transferencia</option>
+      </select>
+    </div>
+
+    <!-- Datos del cliente -->
+    <div style="margin-bottom:18px;">
+      <label style="font-size:13px;font-weight:600;color:#444;display:block;margin-bottom:6px;">Datos del cliente (opcional)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input id="qim-customer-name" placeholder="Nombre" value="Consumidor Final" style="flex:2;min-width:120px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+        <input id="qim-customer-nit"  placeholder="NIT / Cédula" value="222222222" style="flex:1;min-width:100px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+        <input id="qim-customer-email" placeholder="Email (opcional)" style="flex:2;min-width:140px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+      </div>
+    </div>
+
+    <!-- Totales -->
+    <div id="qim-total-block" style="background:#f4f4f5;border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:13px;">
+      <div style="display:flex;justify-content:space-between;"><span style="color:#71717A;">Subtotal</span><span id="qim-subtotal">$0</span></div>
+      <div style="display:flex;justify-content:space-between;"><span style="color:#71717A;">Propina</span><span id="qim-tip-total">$0</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:6px;font-size:15px;"><span>Total</span><span id="qim-total">$0</span></div>
+    </div>
+
+    <div style="display:flex;gap:8px;">
+      <button onclick="closeQuickInvoiceModal()" style="flex:1;padding:11px;background:#ecf0f1;color:#333;border:none;border-radius:8px;cursor:pointer;font-size:14px;">Cancelar</button>
+      <button onclick="submitQuickInvoice()" style="flex:2;padding:11px;background:#27ae60;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;">🧾 Generar Factura</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── NUEVA FACTURA RÁPIDA ──────────────────────────────────────────────
+let _qimItems  = [];   // [{name, qty, unit_price}]
+let _qimTip    = 0;    // valor absoluto
+let _qimType   = 'salon';
+let _qimMenu   = [];   // [{name, price}]
+
+function openQuickInvoiceModal() {
+  _qimItems = [];
+  _qimTip   = 0;
+  _qimType  = 'salon';
+  document.getElementById('qim-tip-custom').value = '';
+  document.getElementById('qim-customer-name').value  = 'Consumidor Final';
+  document.getElementById('qim-customer-nit').value   = '222222222';
+  document.getElementById('qim-customer-email').value = '';
+  document.getElementById('qim-payment').value = 'efectivo';
+  _qimRenderItems();
+  _qimRenderTotals();
+  _qimLoadMenu();
+  document.getElementById('quick-invoice-modal').style.display = 'flex';
+}
+
+function closeQuickInvoiceModal() {
+  document.getElementById('quick-invoice-modal').style.display = 'none';
+}
+
+function qimSetType(t) {
+  _qimType = t;
+  ['salon','domicilio'].forEach(id => {
+    const btn = document.getElementById('qim-type-' + id);
+    if (id === t) {
+      btn.style.background = 'var(--primary)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--primary)';
+    } else {
+      btn.style.background = 'white'; btn.style.color = '#444'; btn.style.borderColor = 'var(--border)';
+    }
+  });
+}
+
+async function _qimLoadMenu() {
+  try {
+    const r = await fetch('/api/pos/menu', { headers: reqHeaders });
+    const d = await r.json();
+    const menu = d.menu || {};
+    const sel  = document.getElementById('qim-menu-select');
+    sel.innerHTML = '<option value="">— Seleccionar del menú —</option>';
+    _qimMenu = [];
+    for (const [cat, dishes] of Object.entries(menu)) {
+      if (!Array.isArray(dishes)) continue;
+      dishes.forEach(dish => {
+        if (!dish.available && dish.available !== undefined) return;
+        const idx = _qimMenu.length;
+        _qimMenu.push({ name: dish.name, price: dish.price });
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = `${dish.name} — $${Number(dish.price).toLocaleString('es-CO')}`;
+        sel.appendChild(opt);
+      });
+    }
+  } catch(e) { console.warn('qim menu load failed', e); }
+}
+
+function qimAddFromMenu() {
+  const sel = document.getElementById('qim-menu-select');
+  const idx = parseInt(sel.value);
+  if (isNaN(idx) || !_qimMenu[idx]) return;
+  const dish = _qimMenu[idx];
+  const existing = _qimItems.find(i => i.name === dish.name && i.unit_price === dish.price);
+  if (existing) { existing.qty++; }
+  else { _qimItems.push({ name: dish.name, qty: 1, unit_price: dish.price }); }
+  sel.value = '';
+  _qimRenderItems();
+  _qimRenderTotals();
+}
+
+function qimAddCustom() {
+  const name  = document.getElementById('qim-custom-name').value.trim();
+  const price = parseFloat(document.getElementById('qim-custom-price').value);
+  if (!name || isNaN(price) || price < 0) { alert('Ingresa nombre y precio válido'); return; }
+  const existing = _qimItems.find(i => i.name === name && i.unit_price === price);
+  if (existing) { existing.qty++; }
+  else { _qimItems.push({ name, qty: 1, unit_price: price }); }
+  document.getElementById('qim-custom-name').value  = '';
+  document.getElementById('qim-custom-price').value = '';
+  _qimRenderItems();
+  _qimRenderTotals();
+}
+
+function _qimRenderItems() {
+  const container = document.getElementById('qim-items');
+  if (!_qimItems.length) {
+    container.innerHTML = '<p style="font-size:13px;color:#999;margin:0;">Sin ítems aún. Agrega del menú o crea uno.</p>';
+    return;
+  }
+  container.innerHTML = _qimItems.map((it, i) => `
+    <div style="display:flex;align-items:center;gap:8px;background:#f9f9f9;border-radius:8px;padding:6px 10px;">
+      <span style="flex:2;font-size:13px;">${it.name}</span>
+      <button onclick="qimQty(${i},-1)" style="width:24px;height:24px;border-radius:6px;border:1px solid #ddd;background:white;cursor:pointer;font-size:14px;line-height:1;">−</button>
+      <span style="min-width:20px;text-align:center;font-size:13px;font-weight:600;">${it.qty}</span>
+      <button onclick="qimQty(${i},+1)" style="width:24px;height:24px;border-radius:6px;border:1px solid #ddd;background:white;cursor:pointer;font-size:14px;line-height:1;">+</button>
+      <span style="flex:1;text-align:right;font-size:13px;color:#444;">$${(it.unit_price*it.qty).toLocaleString('es-CO')}</span>
+      <button onclick="qimRemove(${i})" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:16px;padding:0 4px;">✕</button>
+    </div>`).join('');
+}
+
+function qimQty(i, delta) {
+  _qimItems[i].qty = Math.max(1, _qimItems[i].qty + delta);
+  _qimRenderItems(); _qimRenderTotals();
+}
+function qimRemove(i) {
+  _qimItems.splice(i, 1);
+  _qimRenderItems(); _qimRenderTotals();
+}
+
+function qimSetTip(pct) {
+  const sub = _qimItems.reduce((s,it) => s + it.unit_price * it.qty, 0);
+  _qimTip = Math.round(sub * pct / 100);
+  document.getElementById('qim-tip-custom').value = _qimTip > 0 ? _qimTip : '';
+  _qimRenderTotals();
+}
+function qimTipCustom(v) {
+  _qimTip = Math.max(0, parseFloat(v) || 0);
+  _qimRenderTotals();
+}
+
+function _qimRenderTotals() {
+  const sub   = _qimItems.reduce((s,it) => s + it.unit_price * it.qty, 0);
+  const total = sub + _qimTip;
+  const fmt   = n => '$' + Math.round(n).toLocaleString('es-CO');
+  document.getElementById('qim-subtotal').textContent  = fmt(sub);
+  document.getElementById('qim-tip-total').textContent = fmt(_qimTip);
+  document.getElementById('qim-total').textContent     = fmt(total);
+  document.getElementById('qim-tip-display').textContent = `Propina: ${fmt(_qimTip)}`;
+}
+
+async function submitQuickInvoice() {
+  if (!_qimItems.length) { alert('Agrega al menos un ítem'); return; }
+  const body = {
+    items:          _qimItems,
+    tip_amount:     _qimTip,
+    payment_method: document.getElementById('qim-payment').value,
+    customer_name:  document.getElementById('qim-customer-name').value.trim() || 'Consumidor Final',
+    customer_nit:   document.getElementById('qim-customer-nit').value.trim()  || '222222222',
+    customer_email: document.getElementById('qim-customer-email').value.trim(),
+    order_type:     _qimType,
+    table_name:     _qimType === 'domicilio' ? 'Domicilio' : 'Caja',
+  };
+  const btn = document.querySelector('#quick-invoice-modal button[onclick="submitQuickInvoice()"]');
+  btn.disabled = true; btn.textContent = 'Procesando...';
+  try {
+    const r = await fetch('/api/pos/quick-invoice', {
+      method: 'POST', headers: { ...reqHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { alert('Error: ' + (d.detail || r.status)); return; }
+    closeQuickInvoiceModal();
+    alert(`✅ Factura generada correctamente. Total: $${Math.round(d.total).toLocaleString('es-CO')}`);
+    loadCajaOrders();
+    loadPaymentProofs();
+  } catch(e) { alert('Error de red: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '🧾 Generar Factura'; }
+}
+</script>
 </body>
 </html>

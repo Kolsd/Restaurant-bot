@@ -536,14 +536,17 @@ def _build_module_restrictions(features: dict) -> str:
 
 def _ask_payment_for_check(state: dict, idx: int) -> str:
     n = state["split_count"]
+    check_amounts = state.get("check_amounts") or []
     if n == 1:
-        return "¿Cómo vas a pagar? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
-    return f"¿Cómo paga la persona {idx + 1} de {n}? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
+        amount_str = f" ({_fmt_cop(check_amounts[0])})" if check_amounts else ""
+        return f"¿Cómo vas a pagar{amount_str}? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
+    amount_str = f" — {_fmt_cop(check_amounts[idx])}" if check_amounts and idx < len(check_amounts) else ""
+    return f"¿Cómo paga la persona {idx + 1} de {n}{amount_str}? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
 
 
 async def _save_checkout_proposal(
     phone: str, bot_number: str, state: dict, table_context: dict | None
-) -> None:
+) -> list[str]:
     """Persiste la propuesta de pago en DB usando las funciones de database.py."""
     base_order_id = state.get("base_order_id")
     if not base_order_id:
@@ -590,6 +593,86 @@ async def _save_checkout_proposal(
             await db.db_set_check_tip(check["id"], tip_per_check)
 
     print(f"✅ Checkout proposal guardado: {base_order_id} ({n} checks, propina {tip_total})", flush=True)
+    return [c["id"] for c in created]
+
+
+async def _auto_confirm_checks(check_ids: list[str], base_order_id: str, payments_per_check: list, tip_per_check: float, state: dict) -> None:
+    """Auto-confirma checks de solo-efectivo cuando el cliente solicitó factura."""
+    factura_name = state.get("factura_name", "Consumidor Final")
+    factura_nit  = state.get("factura_nit", "222222222")
+    for i, check_id in enumerate(check_ids):
+        pmts = payments_per_check[i] if i < len(payments_per_check) else []
+        payments_list = [{"method": p.get("method", "efectivo"), "amount": p.get("amount", 0)} for p in pmts]
+        try:
+            await db.db_finalize_check_payment(
+                check_id=check_id,
+                base_order_id=base_order_id,
+                payments=payments_list,
+                change_amount=0.0,
+                fiscal_invoice_id=None,
+                customer_name=factura_name,
+                customer_nit=factura_nit,
+                customer_email="",
+                tip_amount=tip_per_check,
+            )
+            print(f"✅ Auto-confirmado check {check_id} (factura cliente)", flush=True)
+        except Exception:
+            log.exception("auto_confirm_check_failed", check_id=check_id, base_order_id=base_order_id)
+
+
+def _parse_item_assignments(msg: str, items: list, total: float) -> list[float] | None:
+    """
+    Detecta asignaciones de ítems por nombre en el mensaje del cliente.
+    Ej: "una cuenta paga la Club Colombia, otra el Camarón"
+    Retorna lista de montos por cuenta en orden de aparición, o None si no detecta asignaciones.
+    El último elemento absorbería el remanente si hay más cuentas que ítems mencionados.
+    """
+    msg_lower = msg.lower()
+
+    # Construir mapa nombre→subtotal. Palabras clave: tokens ≥4 letras del nombre del ítem.
+    item_entries: list[tuple[list[str], float]] = []
+    for item in items:
+        name = item.get("name", "")
+        sub = float(item.get("subtotal", 0)) or (
+            float(item.get("price", 0)) * float(item.get("quantity", 1))
+        )
+        if not name or sub <= 0:
+            continue
+        keywords = [w.lower() for w in name.split() if len(w) >= 4]
+        if keywords:
+            item_entries.append((keywords, sub))
+
+    if not item_entries:
+        return None
+
+    # Buscar qué ítems se mencionan en el mensaje (por orden de aparición en el texto)
+    mentioned: list[tuple[int, float]] = []  # (pos_en_mensaje, monto)
+    used_prices: set[float] = set()
+    for keywords, price in item_entries:
+        if price in used_prices:
+            continue
+        for kw in keywords:
+            pos = msg_lower.find(kw)
+            if pos != -1:
+                mentioned.append((pos, price))
+                used_prices.add(price)
+                break
+
+    if not mentioned:
+        return None
+
+    # Ordenar por posición de aparición en el mensaje
+    mentioned.sort(key=lambda x: x[0])
+    amounts = [price for _, price in mentioned]
+
+    assigned_total = sum(amounts)
+    remainder = round(total - assigned_total, 2)
+
+    # Si queda un remanente significativo, añadirlo como cuenta adicional
+    if remainder > 0.5:
+        amounts.append(remainder)
+
+    return amounts if amounts else None
 
 
 async def _handle_checkout_flow(
@@ -607,6 +690,9 @@ async def _handle_checkout_flow(
 
     # ── Estado: preguntando cuántos dividir ─────────────────────────────
     if state["step"] == "asking_split":
+        # Detectar petición de factura en cualquier mensaje de esta fase
+        if any(w in msg for w in ("factura", "boleta", "recibo fiscal", "nit", "a nombre de")):
+            state["wants_factura"] = True
         n = None
         # Detectar número explícito
         m = re.search(r'\b(\d+)\b', msg)
@@ -622,9 +708,25 @@ async def _handle_checkout_flow(
         if n is None or n < 1 or n > 20:
             return "¿Cuántas personas van a dividir la cuenta? Dime el número (ej: 2, 3...)."
 
-        state["split_count"] = n
-        state["payments"] = [[] for _ in range(n)]
         state["tip_amount"] = 0.0
+
+        # Intentar detectar asignaciones por ítem en el mismo mensaje
+        # Ej: "3 cuentas, una paga la Club Colombia, otra el Camarón"
+        session_items = state.get("items", [])
+        item_amounts = _parse_item_assignments(msg, session_items, state["subtotal"]) if session_items else None
+
+        if item_amounts:
+            # El cliente especificó quién paga qué → usar montos exactos por ítem
+            effective_n = len(item_amounts)
+            state["split_count"] = effective_n
+            state["check_amounts"] = item_amounts
+            state["payments"] = [[] for _ in range(effective_n)]
+            if effective_n != n:
+                print(f"🔀 Split ajustado: pedía {n} cuentas, detectadas {effective_n} por ítems", flush=True)
+        else:
+            state["split_count"] = n
+            state["check_amounts"] = None
+            state["payments"] = [[] for _ in range(n)]
 
         # Preguntar propina con efecto anclaje
         subtotal = state["subtotal"]
@@ -681,6 +783,10 @@ async def _handle_checkout_flow(
             return "Elige una opción del 1 al 5, o escribe el valor de propina que deseas dejar."
 
         state["tip_amount"] = tip
+        if state.get("wants_factura") and not state.get("factura_name"):
+            state["step"] = "asking_factura_nit"
+            await state_store.checkout_set(phone, bot_number, state)
+            return "¿A nombre de quién va la factura y cuál es el NIT o cédula? (Ej: 'Juan García, 123456789')\nEscribe *omitir* si prefieres factura a Consumidor Final."
         state["step"] = "asking_payment_0"
         state["current_check_idx"] = 0
         await state_store.checkout_set(phone, bot_number, state)
@@ -696,10 +802,33 @@ async def _handle_checkout_flow(
         if val > subtotal * 0.5:
             return f"La propina no puede superar el 50% del subtotal ({_fmt_cop(subtotal * 0.5)}). ¿Cuánto deseas dejar?"
         state["tip_amount"] = val
+        if state.get("wants_factura") and not state.get("factura_name"):
+            state["step"] = "asking_factura_nit"
+            await state_store.checkout_set(phone, bot_number, state)
+            return "¿A nombre de quién va la factura y cuál es el NIT o cédula? (Ej: 'Juan García, 123456789')\nEscribe *omitir* si prefieres factura a Consumidor Final."
         state["step"] = "asking_payment_0"
         state["current_check_idx"] = 0
         await state_store.checkout_set(phone, bot_number, state)
         return _ask_payment_for_check(state, 0)
+
+    # ── Estado: datos de factura ──────────────────────────────────────────
+    if state["step"] == "asking_factura_nit":
+        if msg in ("omitir", "omitir.", "no", "ninguno", "consumidor final"):
+            state["factura_name"] = "Consumidor Final"
+            state["factura_nit"]  = "222222222"
+        else:
+            # Intentar parsear "Nombre, NIT" o solo texto
+            parts = re.split(r'[,;]', message.strip(), maxsplit=1)
+            state["factura_name"] = parts[0].strip()[:80] if parts else message.strip()[:80]
+            nit_candidate = parts[1].strip() if len(parts) > 1 else ""
+            # Extraer dígitos del NIT si viene mezclado con texto
+            nit_digits = re.sub(r'[^\d]', '', nit_candidate)
+            state["factura_nit"] = nit_digits or "222222222"
+        state["step"] = "asking_payment_0"
+        state["current_check_idx"] = 0
+        await state_store.checkout_set(phone, bot_number, state)
+        name_show = state["factura_name"]
+        return f"Perfecto, factura a nombre de *{name_show}* 🧾\n" + _ask_payment_for_check(state, 0)
 
     # ── Estado: pidiendo método de pago por check ────────────────────────
     if state["step"].startswith("asking_payment_"):
@@ -720,7 +849,11 @@ async def _handle_checkout_flow(
         if method is None:
             return "No reconocí el método de pago. Por favor elige: Efectivo, Nequi, Daviplata, Tarjeta, o Transferencia."
 
-        per_check_total = round(state["subtotal"] / state["split_count"], 2)
+        check_amounts = state.get("check_amounts") or []
+        if check_amounts and idx < len(check_amounts):
+            per_check_total = round(check_amounts[idx], 2)
+        else:
+            per_check_total = round(state["subtotal"] / state["split_count"], 2)
         state["payments"][idx] = [{"method": method, "amount": per_check_total}]
         idx += 1
         state["current_check_idx"] = idx
@@ -760,11 +893,32 @@ async def _handle_checkout_flow(
 
         # Guardar propuesta en DB
         try:
-            await _save_checkout_proposal(phone, bot_number, state, table_context)
+            created_check_ids = await _save_checkout_proposal(phone, bot_number, state, table_context)
         except Exception:
             log.exception("checkout_proposal_save_failed", phone=phone, bot_number=bot_number)
             await state_store.checkout_delete(phone, bot_number)
             return "Hubo un problema al procesar tu pago. Por favor pide ayuda al mesero."
+
+        # Auto-confirmar si el cliente pidió factura y todos los pagos son en efectivo
+        if state.get("wants_factura") and not needs_proof and created_check_ids:
+            _digital = {"nequi", "daviplata", "transferencia"}
+            _all_cash = not any(
+                p[0]["method"].lower() in _digital
+                for p in state["payments"] if p
+            )
+            if _all_cash:
+                try:
+                    tip_per_check = round(state["tip_amount"] / state["split_count"], 2)
+                    await _auto_confirm_checks(
+                        check_ids=created_check_ids,
+                        base_order_id=state["base_order_id"],
+                        payments_per_check=state["payments"],
+                        tip_per_check=tip_per_check,
+                        state=state,
+                    )
+                    lines.append("🧾 Tu factura ha sido generada automáticamente. ¡Gracias!")
+                except Exception:
+                    log.exception("auto_confirm_failed", base_order_id=state.get("base_order_id"))
 
         if not needs_proof:
             await state_store.checkout_delete(phone, bot_number)
@@ -1252,24 +1406,37 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     if base_order_id:
                         pool = await db.get_pool()
                         async with pool.acquire() as conn:
-                            order_row = await conn.fetchrow(
-                                """SELECT total FROM table_orders
-                                   WHERE base_order_id=$1
-                                   ORDER BY created_at LIMIT 1""",
+                            # Suma TODAS las sub-órdenes (pedido inicial + adicionales)
+                            all_rows = await conn.fetch(
+                                "SELECT total, items FROM table_orders WHERE base_order_id=$1",
                                 base_order_id,
                             )
-                        if order_row:
-                            total = float(order_row["total"])
+                        if all_rows:
+                            import json as _jco
+                            total = sum(float(r["total"]) for r in all_rows)
+                            # Agregar todos los ítems para split por ítem
+                            all_items: list = []
+                            for r in all_rows:
+                                raw = r["items"]
+                                lst = raw if isinstance(raw, list) else _jco.loads(raw or "[]")
+                                all_items.extend(lst)
+                            # Detectar si el cliente pide factura desde el inicio
+                            _orig_msg = message.lower()
+                            _wants_fac = any(w in _orig_msg for w in ("factura", "boleta", "recibo fiscal", "nit", "a nombre de"))
                             await state_store.checkout_set(phone, bot_number, {
                                 "step": "asking_split",
                                 "base_order_id": base_order_id,
                                 "subtotal": total,
+                                "items": all_items,
                                 "split_count": 1,
                                 "payments": [],
                                 "tip_amount": 0.0,
                                 "requires_proof": False,
+                                "wants_factura": _wants_fac,
+                                "factura_name": "",
+                                "factura_nit": "",
                             })
-                            print(f"🛒 Checkout iniciado: {table_name} ({base_order_id})", flush=True)
+                            print(f"🛒 Checkout iniciado: {table_name} ({base_order_id}) total={total} factura={_wants_fac}", flush=True)
                             reply = f"¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
                             return reply
                 except Exception:

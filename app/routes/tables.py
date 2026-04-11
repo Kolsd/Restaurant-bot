@@ -1151,3 +1151,145 @@ async def delete_check(request: Request, base_order_id: str, check_id: str):
             detail="No se puede eliminar: el check no existe o ya fue procesado"
         )
     return {"success": True}
+
+
+class QuickInvoiceItem(BaseModel):
+    name: str
+    qty: int = 1
+    unit_price: float
+
+class QuickInvoiceBody(BaseModel):
+    items: list[QuickInvoiceItem]
+    tip_amount: float = Field(0.0, ge=0.0)
+    payment_method: str = "efectivo"
+    customer_name: str = "Consumidor Final"
+    customer_nit: str = "222222222"
+    customer_email: str = ""
+    order_type: str = "salon"     # salon | domicilio
+    table_name: str = "Caja"
+    branch_id: int | None = None
+
+
+@router.post("/api/pos/quick-invoice")
+async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
+    """
+    Crea una venta rápida desde caja sin pasar por el flujo de mesa/bot.
+    Crea un table_order efímero, un check y lo paga en un solo paso.
+    """
+    restaurant = await get_current_restaurant(request)
+    user = await get_current_user(request)
+
+    branch_id = body.branch_id or user.get("branch_id") or restaurant["id"]
+
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Se requiere al menos un ítem")
+
+    subtotal = sum(it.unit_price * it.qty for it in body.items)
+    tip_d = to_decimal(body.tip_amount)
+    total_d = to_decimal(subtotal) + tip_d
+
+    if tip_d > 0 and tip_d > money_mul(to_decimal(subtotal), Decimal("0.5")):
+        raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del subtotal")
+
+    order_id = f"qi-{str(uuid.uuid4())[:8]}"
+    base_order_id = order_id
+
+    items_payload = [
+        {"name": it.name, "quantity": it.qty, "price": it.unit_price,
+         "subtotal": it.unit_price * it.qty}
+        for it in body.items
+    ]
+
+    order = {
+        "id": order_id,
+        "table_id": None,
+        "table_name": body.table_name,
+        "phone": "caja",
+        "items": items_payload,
+        "status": "recibido",
+        "notes": f"Factura rápida ({body.order_type})",
+        "total": float(total_d),
+        "base_order_id": base_order_id,
+        "sub_number": 1,
+        "station": "all",
+        "branch_id": branch_id,
+    }
+    await db.db_save_table_order(order)
+
+    # Crear un check único para esta venta
+    check_payload = [{
+        "check_number": 1,
+        "items": items_payload,
+        "subtotal": float(to_decimal(subtotal)),
+        "tax_amount": 0.0,
+        "total": float(to_decimal(subtotal)),
+    }]
+    created = await db.db_create_checks(base_order_id, check_payload)
+    if not created:
+        raise HTTPException(status_code=500, detail="No se pudo crear el check")
+    check_id = created[0]["id"]
+
+    # Billing / DIAN (opcional)
+    features = restaurant.get("features") or {}
+    if isinstance(features, str):
+        import json as _json
+        try:
+            features = _json.loads(features)
+        except Exception:
+            features = {}
+    _currency = features.get("currency") if isinstance(features, dict) else None
+
+    raw_dian = features.get("dian_active", False)
+    if isinstance(raw_dian, str):
+        dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
+    else:
+        dian_active = bool(raw_dian)
+
+    fiscal_invoice_id = None
+    if dian_active:
+        config = await billing.get_billing_config(restaurant["id"])
+        if config:
+            config["_restaurant_id"] = restaurant["id"]
+            provider = config.get("provider", "mesio_native")
+            adapter = billing.get_adapter(provider)
+            order_for_billing = {
+                "id": check_id,
+                "total": float(total_d),
+                "subtotal": float(to_decimal(subtotal)),
+                "service_charge": 0.0,
+                "items": items_payload,
+                "payment_method": body.payment_method,
+                "order_ref": base_order_id,
+                "customer": {
+                    "name": body.customer_name,
+                    "nit": body.customer_nit,
+                    "email": body.customer_email,
+                },
+            }
+            try:
+                fiscal = await adapter.create_invoice(order_for_billing, config)
+                fiscal_invoice_id = fiscal["id"]
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Error al emitir factura DIAN: {exc}")
+
+    payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
+
+    await db.db_finalize_check_payment(
+        check_id=check_id,
+        base_order_id=base_order_id,
+        payments=payments_list,
+        change_amount=0.0,
+        fiscal_invoice_id=fiscal_invoice_id,
+        customer_name=body.customer_name,
+        customer_nit=body.customer_nit,
+        customer_email=body.customer_email,
+        tip_amount=float(tip_d),
+    )
+
+    return {
+        "success": True,
+        "order_id": order_id,
+        "check_id": check_id,
+        "total": float(total_d),
+        "fiscal_invoice_id": fiscal_invoice_id,
+    }
