@@ -250,7 +250,7 @@ async def check_delivery_updates(request: Request):
             JOIN restaurants r ON r.whatsapp_number = o.bot_number
             WHERE o.order_type IN ('domicilio', 'recoger')
               AND o.status IN ('pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
-              AND (r.id = $1 OR r.parent_restaurant_id = $1)
+              AND r.id = $1
             ORDER BY o.id
         """, restaurant_id)
         current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])

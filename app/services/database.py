@@ -189,7 +189,8 @@ async def db_get_all_orders(bot_number: str = None):
 
 async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = None):
     """Obtiene los pedidos de domicilio filtrados por una lista de estados.
-    Si restaurant_id se provee, filtra por esa sucursal o todas sus sub-sucursales (JOIN con restaurants)."""
+    Si restaurant_id se provee, filtra exactamente por ese restaurante/sucursal (r.id = restaurant_id).
+    Cada caja ve únicamente sus propios pedidos — sin herencia de sucursales."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         if restaurant_id is not None:
@@ -198,7 +199,7 @@ async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = 
                    JOIN restaurants r ON r.whatsapp_number = o.bot_number
                    WHERE o.order_type IN ('domicilio', 'recoger')
                      AND o.status = ANY($1)
-                     AND (r.id = $2 OR r.parent_restaurant_id = $2)
+                     AND r.id = $2
                    ORDER BY o.created_at ASC""",
                 status_list, restaurant_id
             )
