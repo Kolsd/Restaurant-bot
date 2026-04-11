@@ -440,16 +440,32 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
                     "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC"
                 )
         else:
-            # Staff en restaurante principal (branch_id IS NULL = restaurante matriz)
-            if status:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id IS NULL ORDER BY created_at ASC",
-                    status
-                )
+            # Staff en restaurante principal: branch_id mapeado a None por get_current_user.
+            # Usamos restaurant_id (disponible en staff tokens) para cubrir órdenes
+            # guardadas con branch_id explícito Y legacy branch_id IS NULL.
+            rest_id = user.get("restaurant_id")
+            if rest_id:
+                if status:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status = $1 AND (branch_id = $2 OR branch_id IS NULL) ORDER BY created_at ASC",
+                        status, rest_id
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND (branch_id = $1 OR branch_id IS NULL) ORDER BY created_at ASC",
+                        rest_id
+                    )
             else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id IS NULL ORDER BY created_at ASC"
-                )
+                # Fallback legacy: usuario sin restaurant_id conocido
+                if status:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status = $1 AND branch_id IS NULL ORDER BY created_at ASC",
+                        status
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id IS NULL ORDER BY created_at ASC"
+                    )
 
     import json as _json
     result = []

@@ -5,7 +5,7 @@ import base64
 import json
 import pypdf
 from collections import defaultdict
-from fastapi import APIRouter, Request, HTTPException, File, UploadFile
+from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from pathlib import Path
@@ -14,7 +14,8 @@ import httpx
 
 from app.services.auth import login, logout, create_user, get_users, hash_password
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_user, get_current_restaurant
+from app.routes.deps import require_auth, get_current_user, get_current_restaurant, verify_superadmin
+from app.repositories import sessions_repo
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -53,11 +54,12 @@ async def geocode_address(address: str) -> tuple:
     return None, None, None
 
 class LoginRequest(BaseModel): username: str; password: str
-class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str
-class CreateRestaurantRequest(BaseModel): admin_key: str; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
-class SetSubscriptionRequest(BaseModel): admin_key: str; restaurant_id: int; status: str
+class AdminLoginRequest(BaseModel): key: str
+class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str = ""
+class CreateRestaurantRequest(BaseModel): admin_key: str = ""; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
+class SetSubscriptionRequest(BaseModel): admin_key: str = ""; restaurant_id: int; status: str
 class UpdateRestaurantRequest(BaseModel):
-    admin_key: str; restaurant_id: int
+    admin_key: str = ""; restaurant_id: int
     name: str = None; address: str = None; whatsapp_number: str = None
     wa_phone_id: str = None; wa_access_token: str = None
     features: dict = None; menu: str = None
@@ -417,10 +419,25 @@ async def geocode_endpoint(address: str):
     return {"latitude": lat, "longitude": lon, "display_name": display, "maps_url": f"https://www.google.com/maps?q={lat},{lon}"}
 
 # ── SUPER DASHBOARD (HQ) ─────────────────────────────────────────────
-@router.get("/api/admin/stats")
-async def admin_get_stats(admin_key: str):
-    if admin_key != os.getenv("ADMIN_KEY"): 
+
+@router.post("/api/admin/login")
+async def admin_login(payload: AdminLoginRequest):
+    """Exchange ADMIN_KEY for a session token. The raw key is never stored client-side."""
+    if not payload.key or payload.key != os.getenv("ADMIN_KEY"):
         raise HTTPException(status_code=403, detail="Clave incorrecta")
+    token = await sessions_repo.create_session("superadmin")
+    return {"token": token}
+
+@router.post("/api/admin/logout")
+async def admin_logout_session(req: Request):
+    """Invalidate the current superadmin session token."""
+    token = req.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if token:
+        await sessions_repo.delete_session(token)
+    return {"success": True}
+
+@router.get("/api/admin/stats")
+async def admin_get_stats(_: None = Depends(verify_superadmin)):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         total_rest  = await conn.fetchval("SELECT COUNT(*) FROM restaurants")
@@ -436,14 +453,11 @@ async def admin_get_stats(admin_key: str):
         }
 
 @router.get("/api/admin/restaurants")
-async def admin_get_restaurants(admin_key: str):
-    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
+async def admin_get_restaurants(_: None = Depends(verify_superadmin)):
     return {"restaurants": await db.db_get_all_restaurants()}
 
 @router.post("/api/admin/create-user")
-async def admin_create_user(request: CreateUserRequest):
-    if request.admin_key != os.getenv("ADMIN_KEY"): 
-        raise HTTPException(status_code=403, detail="Clave incorrecta")
+async def admin_create_user(request: CreateUserRequest, _: None = Depends(verify_superadmin)):
     
     # 🛡️ Obtenemos el restaurante por ID para asegurar el vínculo
     rest = await db.db_get_restaurant_by_id(request.restaurant_id)
@@ -465,9 +479,7 @@ async def admin_create_user(request: CreateUserRequest):
 
 # 🗑️ NUEVO: Endpoint para borrar usuarios desde el SuperAdmin
 @router.post("/api/admin/delete-user")
-async def admin_delete_user(admin_key: str, username: str):
-    if admin_key != os.getenv("ADMIN_KEY"): 
-        raise HTTPException(status_code=403, detail="No autorizado")
+async def admin_delete_user(username: str, _: None = Depends(verify_superadmin)):
     
     pool = await db.get_pool()
     async with pool.acquire() as conn:
@@ -475,13 +487,11 @@ async def admin_delete_user(admin_key: str, username: str):
     return {"success": True}
 
 @router.get("/api/admin/users")
-async def admin_list_users(admin_key: str = ""):
-    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="No autorizado")
+async def admin_list_users(_: None = Depends(verify_superadmin)):
     return {"users": await get_users()}
 
 @router.post("/api/admin/create-restaurant")
-async def admin_create_restaurant(request: CreateRestaurantRequest):
-    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
+async def admin_create_restaurant(request: CreateRestaurantRequest, _: None = Depends(verify_superadmin)):
     try: menu_dict = json.loads(request.menu)
     except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
     lat, lon, _ = await geocode_address(request.address)
@@ -503,8 +513,7 @@ async def admin_create_restaurant(request: CreateRestaurantRequest):
     return {"success": True}
     
 @router.post("/api/admin/set-subscription")
-async def admin_set_subscription(request: SetSubscriptionRequest):
-    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
+async def admin_set_subscription(request: SetSubscriptionRequest, _: None = Depends(verify_superadmin)):
     await db.db_update_subscription(request.restaurant_id, request.status)
     return {"success": True}
 
@@ -749,8 +758,7 @@ async def delete_branch(branch_id: int, request: Request):
     return {"success": True}
 
 @router.post("/api/admin/parse-menu")
-async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
-    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403, detail="Clave incorrecta")
+async def admin_parse_menu(file: UploadFile = File(...), _: None = Depends(verify_superadmin)):
     content  = await file.read()
     filename = file.filename.lower()
     client   = Anthropic()
@@ -770,8 +778,7 @@ async def admin_parse_menu(admin_key: str, file: UploadFile = File(...)):
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.get("/api/admin/restaurant/{restaurant_id}")
-async def admin_get_restaurant_detail(restaurant_id: int, admin_key: str):
-    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
+async def admin_get_restaurant_detail(restaurant_id: int, _: None = Depends(verify_superadmin)):
     rest = await db.db_get_restaurant_by_id(restaurant_id)
     if not rest: raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     wa = rest.get("whatsapp_number", "")
@@ -809,9 +816,8 @@ async def admin_get_restaurant_detail(restaurant_id: int, admin_key: str):
     }
 
 @router.post("/api/admin/update-restaurant")
-async def admin_update_restaurant(request: UpdateRestaurantRequest):
+async def admin_update_restaurant(request: UpdateRestaurantRequest, _: None = Depends(verify_superadmin)):
     import json
-    if request.admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
     rest = await db.db_get_restaurant_by_id(request.restaurant_id)
     if not rest: raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     
@@ -849,8 +855,7 @@ async def admin_update_restaurant(request: UpdateRestaurantRequest):
     return {"success": True, "restaurant": await db.db_get_restaurant_by_id(request.restaurant_id)}
     
 @router.get("/api/admin/billing-stats")
-async def admin_billing_stats(admin_key: str):
-    if admin_key != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
+async def admin_billing_stats(_: None = Depends(verify_superadmin)):
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         table_exists = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
@@ -872,10 +877,8 @@ async def admin_billing_stats(admin_key: str):
         return {"stats": [dict(r) for r in rows]}
 
 @router.post("/api/admin/fix-branch-ids")
-async def fix_branch_ids(request: Request):
+async def fix_branch_ids(request: Request, _: None = Depends(verify_superadmin)):
     body = await request.json()
-    if body.get("admin_key") != os.getenv("ADMIN_KEY"):
-        raise HTTPException(status_code=403, detail="No autorizado")
     pool  = await db.get_pool()
     fixed = []
     async with pool.acquire() as conn:
@@ -891,9 +894,8 @@ async def fix_branch_ids(request: Request):
     return {"success": True, "fixed": fixed}
 
 @router.post("/api/admin/fix-conversations")
-async def fix_conversations_bot_number(request: Request):
+async def fix_conversations_bot_number(request: Request, _: None = Depends(verify_superadmin)):
     body = await request.json()
-    if body.get("admin_key") != os.getenv("ADMIN_KEY"): raise HTTPException(status_code=403)
     pool = await db.get_pool()
     async with pool.acquire() as conn: await conn.execute("UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL", body.get("bot_number", ""))
     return {"success": True}

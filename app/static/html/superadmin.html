@@ -543,7 +543,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 
 <script>
 // ── Estado global ──────────────────────────────────────────────────────
-let ADMIN_KEY = '';
+// ADMIN_KEY is never stored in browser storage — we use a session token instead
 let ALL_RESTAURANTS = [];
 let _currentRestFilter = 'all';
 let _currentDetailId = null;
@@ -587,17 +587,33 @@ function updateTime() {
 }
 updateTime(); setInterval(updateTime, 60000);
 
+// ── Session helpers (token stored in sessionStorage, never the raw key) ──
+const SESSION_KEY = 'hq_session';
+function _getToken()  { return sessionStorage.getItem(SESSION_KEY) || ''; }
+function _authHdr()   { return { 'Authorization': 'Bearer ' + _getToken(), 'Content-Type': 'application/json' }; }
+async function _hqFetch(url, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers || {}, { 'Authorization': 'Bearer ' + _getToken() });
+  return fetch(url, opts);
+}
+
 // ── Login ──────────────────────────────────────────────────────────
 async function doLogin() {
   const key = $('admin-key-input').value.trim();
   if(!key) return;
   try {
-    const r = await fetch(`/api/admin/stats?admin_key=${encodeURIComponent(key)}`);
+    const r = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key })
+    });
     if(!r.ok) { $('login-err').textContent = 'Clave incorrecta'; return; }
-    const data = await r.json();
-    ADMIN_KEY = key;
-    localStorage.setItem('hq_key', key);
-    localStorage.setItem('mesio_admin_key', key);
+    const { token } = await r.json();
+    sessionStorage.setItem(SESSION_KEY, token);
+    // Also set mesio_admin_key in sessionStorage (not localStorage) for crm.js compat
+    sessionStorage.setItem('mesio_admin_key', token);
+    const statsR = await _hqFetch('/api/admin/stats');
+    if(!statsR.ok) { $('login-err').textContent = 'Error al cargar stats'; return; }
+    const data = await statsR.json();
     $('login-overlay').style.display = 'none';
     $('app').style.display = 'block';
     renderKPIs(data);
@@ -605,22 +621,26 @@ async function doLogin() {
   } catch(e) { $('login-err').textContent = 'Error de conexión'; }
 }
 
-function doLogout() {
-  localStorage.removeItem('hq_key');
+async function doLogout() {
+  const token = _getToken();
+  if(token) {
+    try { await fetch('/api/admin/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } }); }
+    catch(e) {}
+  }
+  sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem('mesio_admin_key');
   location.reload();
 }
 
-// Auto-login si hay clave guardada
+// Auto-login si hay sesión guardada
 window.addEventListener('DOMContentLoaded', async () => {
-  const saved = localStorage.getItem('hq_key');
+  const saved = _getToken();
   if(saved) {
-    $('admin-key-input').value = saved;
-    ADMIN_KEY = saved;
     try {
-      const r = await fetch(`/api/admin/stats?admin_key=${encodeURIComponent(saved)}`);
+      const r = await _hqFetch('/api/admin/stats');
       if(r.ok) {
         const data = await r.json();
-        localStorage.setItem('mesio_admin_key', saved);
+        sessionStorage.setItem('mesio_admin_key', saved);
         const redirect = new URLSearchParams(window.location.search).get('redirect');
         if(redirect) { window.location.href = '/' + redirect; return; }
         $('login-overlay').style.display = 'none';
@@ -630,7 +650,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         return;
       }
     } catch(e) {}
-    localStorage.removeItem('hq_key');
+    sessionStorage.removeItem(SESSION_KEY);
   }
 });
 
@@ -655,7 +675,7 @@ async function loadAll() {
 
 async function loadStats() {
   try {
-    const r = await fetch(`/api/admin/stats?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    const r = await _hqFetch('/api/admin/stats');
     if(r.ok) renderKPIs(await r.json());
   } catch(e){}
 }
@@ -670,7 +690,7 @@ function renderKPIs(data) {
 // ── Restaurantes ──────────────────────────────────────────────────
 async function loadRestaurants() {
   try {
-    const r = await fetch(`/api/admin/restaurants?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    const r = await _hqFetch('/api/admin/restaurants');
     if(!r.ok) return;
     const data = await r.json();
     ALL_RESTAURANTS = data.restaurants || [];
@@ -794,7 +814,7 @@ async function openDetail(id) {
 
   // Load real stats async
   try {
-    const sr = await fetch(`/api/admin/restaurant/${id}?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    const sr = await _hqFetch(`/api/admin/restaurant/${id}`);
     if(sr.ok) {
       const sd = await sr.json();
       const s = sd.stats;
@@ -838,13 +858,13 @@ async function saveRestaurantInfo() {
   if(!_currentDetailId) return;
   const feats = { timezone: $('dp-timezone').value, currency: $('dp-currency').value, locale: $('dp-locale').value };
   const body = {
-    admin_key: ADMIN_KEY, restaurant_id: _currentDetailId,
+    restaurant_id: _currentDetailId,
     name:    $('dp-name-input').value.trim() || undefined,
     address: $('dp-addr-input').value.trim() || undefined,
     whatsapp_number: $('dp-wa-input').value.trim() || undefined,
     features: feats,
   };
-  const r = await fetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const r = await _hqFetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if(r.ok) {
     const d = await r.json();
     // Update local cache
@@ -862,8 +882,8 @@ async function saveModules() {
   if(!_currentDetailId) return;
   const features = {};
   MODULES_CONFIG.forEach(m=>{ features[m.key] = $('mod-'+m.key)?.checked; });
-  const r = await fetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({admin_key:ADMIN_KEY, restaurant_id:_currentDetailId, features})});
+  const r = await _hqFetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({restaurant_id:_currentDetailId, features})});
   if(r.ok) {
     const d = await r.json();
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
@@ -876,20 +896,20 @@ async function saveModules() {
 async function saveCredentials() {
   if(!_currentDetailId) return;
   const body = {
-    admin_key: ADMIN_KEY, restaurant_id: _currentDetailId,
+    restaurant_id: _currentDetailId,
     wa_phone_id:     $('dp-phoneid-input').value.trim() || undefined,
     wa_access_token: $('dp-token-input').value.trim()   || undefined,
   };
   if(!body.wa_phone_id && !body.wa_access_token) { showFeedback('creds-feedback','Sin cambios', true); return; }
-  const r = await fetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const r = await _hqFetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if(r.ok) showFeedback('creds-feedback','✅ Credenciales actualizadas', true);
   else showFeedback('creds-feedback','❌ Error', false);
 }
 
 async function setSubStatus(status) {
   if(!_currentDetailId) return;
-  const r = await fetch('/api/admin/set-subscription', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({admin_key:ADMIN_KEY, restaurant_id:_currentDetailId, status})});
+  const r = await _hqFetch('/api/admin/set-subscription', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({restaurant_id:_currentDetailId, status})});
   if(r.ok) {
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
     if(idx>=0) ALL_RESTAURANTS[idx].subscription_status = status;
@@ -924,11 +944,11 @@ async function createRestaurant() {
     locale:               $('r_locale').value,
   };
 
-  const body = { admin_key:ADMIN_KEY, name, whatsapp_number:wa, address:addr, menu:menuJson, features,
+  const body = { name, whatsapp_number:wa, address:addr, menu:menuJson, features,
     wa_phone_id:$('r_wa_phone_id').value.trim(), wa_access_token:$('r_wa_access_token').value.trim() };
 
   try {
-    const r = await fetch('/api/admin/create-restaurant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await _hqFetch('/api/admin/create-restaurant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(r.ok) {
       showFeedback('nuevo-feedback','✅ Restaurante creado exitosamente', true);
       clearNewForm();
@@ -954,7 +974,7 @@ async function parseMenuFile() {
   try {
     const fd = new FormData();
     fd.append('file', file);
-    const r = await fetch(`/api/admin/parse-menu?admin_key=${encodeURIComponent(ADMIN_KEY)}`,{method:'POST',body:fd});
+    const r = await _hqFetch('/api/admin/parse-menu',{method:'POST',body:fd});
     const d = await r.json();
     if(d.success) $('r_menu').value = JSON.stringify(d.json_menu, null, 2);
     else alert('Error al extraer el menú: '+(d.detail||''));
@@ -965,7 +985,7 @@ async function parseMenuFile() {
 // ── Usuarios ──────────────────────────────────────────────────────
 async function loadUsers() {
   try {
-    const r = await fetch(`/api/admin/users?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    const r = await _hqFetch('/api/admin/users');
     if(!r.ok) return;
     const d = await r.json();
     renderUsersTable(d.users||[]);
@@ -1001,14 +1021,13 @@ async function createUser() {
   }
   
   const payload = {
-    admin_key: ADMIN_KEY,
-    restaurant_id: parseInt(restId), 
+    restaurant_id: parseInt(restId),
     username: email,
     password: pass
   };
 
   try {
-    const r = await fetch('/api/admin/create-user',{
+    const r = await _hqFetch('/api/admin/create-user',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
@@ -1044,7 +1063,7 @@ async function createUser() {
 // ── DIAN & Folios ─────────────────────────────────────────────────
 async function loadDIAN() {
   try {
-    const r = await fetch(`/api/admin/billing-stats?admin_key=${encodeURIComponent(ADMIN_KEY)}`);
+    const r = await _hqFetch('/api/admin/billing-stats');
     if(!r.ok) return;
     const d = await r.json();
     renderDIAN(d.stats||[]);
@@ -1082,7 +1101,7 @@ async function deleteGlobalUser(username) {
   if(!confirm(`¿Estás seguro de eliminar permanentemente al usuario ${username}?`)) return;
   
   try {
-    const r = await fetch(`/api/admin/delete-user?admin_key=${encodeURIComponent(ADMIN_KEY)}&username=${encodeURIComponent(username)}`, {
+    const r = await _hqFetch(`/api/admin/delete-user?username=${encodeURIComponent(username)}`, {
       method:'POST'
     });
     if(r.ok) {

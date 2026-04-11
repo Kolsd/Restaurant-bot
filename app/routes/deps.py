@@ -8,6 +8,19 @@ from app.services.auth import verify_token
 from app.services import database as db
 
 
+async def verify_superadmin(request: Request) -> None:
+    """Validates that the Bearer token belongs to an active superadmin session.
+    Raises 401 if missing, 403 if not a superadmin session.
+    """
+    from app.repositories import sessions_repo
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Autenticación requerida")
+    identity = await sessions_repo.get_session(token)
+    if identity != "superadmin":
+        raise HTTPException(status_code=403, detail="Acceso exclusivo para el equipo Mesio")
+
+
 async def require_auth(request: Request) -> str:
     """Validates Bearer token; returns username or raises 401."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")

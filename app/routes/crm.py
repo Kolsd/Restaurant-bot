@@ -17,14 +17,21 @@ META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 CRM_TEMPLATE_LANGUAGE = os.getenv("CRM_TEMPLATE_LANGUAGE", "en")
 
 async def _require_auth(request: Request) -> dict:
+    from app.repositories import sessions_repo
     key = (
         request.headers.get("X-Admin-Key", "")
         or request.headers.get("Authorization", "").replace("Bearer ", "")
-    )
-    # Bloqueamos si el servidor no tiene llave o si la llave es incorrecta
-    if not ADMIN_KEY or not key or key != ADMIN_KEY:
+    ).strip()
+    if not key:
         raise HTTPException(status_code=401, detail="Acceso exclusivo para el equipo Mesio")
-    return {"username": "mesio_admin", "role": "superadmin"}
+    # Preferred: session token issued by /api/admin/login
+    identity = await sessions_repo.get_session(key)
+    if identity == "superadmin":
+        return {"username": "mesio_admin", "role": "superadmin"}
+    # Legacy fallback: raw ADMIN_KEY comparison (for backward compat during transition)
+    if ADMIN_KEY and key == ADMIN_KEY:
+        return {"username": "mesio_admin", "role": "superadmin"}
+    raise HTTPException(status_code=401, detail="Acceso exclusivo para el equipo Mesio")
 
 # ── MODELOS ───────────────────────────────────────────────────────────
 class ProspectCreate(BaseModel):

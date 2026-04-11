@@ -4,12 +4,12 @@ Mesio — Rutas de Billing / Facturación
 
 import json
 import os
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 
 from app.services import database as db
-from app.routes.deps import get_current_user
+from app.routes.deps import get_current_user, verify_superadmin
 from app.services.billing import (
     get_billing_config,
     save_billing_config,
@@ -95,7 +95,7 @@ class EmitInvoicePayload(BaseModel):
     customer:  Optional[dict] = None  # {nit, name, email, alegra_id}
 
 class AdminConfigPayload(BaseModel):
-    admin_key:     str
+    admin_key:     str = ""
     restaurant_id: int
     config:        dict
 
@@ -254,16 +254,12 @@ async def list_providers():
 # ── ADMIN ENDPOINT (solo para superadmin) ────────────────────────────
 
 @router.post("/admin/config")
-async def admin_set_config(payload: AdminConfigPayload):
-    if payload.admin_key != os.getenv("ADMIN_KEY"):
-        raise HTTPException(status_code=403, detail="No autorizado")
+async def admin_set_config(payload: AdminConfigPayload, _: None = Depends(verify_superadmin)):
     await save_billing_config(payload.restaurant_id, payload.config)
     return {"success": True}
 
 
 @router.get("/admin/logs")
-async def admin_logs(admin_key: str, restaurant_id: int, limit: int = 100):
-    if admin_key != os.getenv("ADMIN_KEY"):
-        raise HTTPException(status_code=403, detail="No autorizado")
+async def admin_logs(restaurant_id: int, limit: int = 100, _: None = Depends(verify_superadmin)):
     log = await get_billing_log(restaurant_id, limit)
     return {"log": log}

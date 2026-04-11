@@ -2,7 +2,8 @@
    Mesio CRM Enterprise — v3.0
    ═══════════════════════════════════════════════════ */
 
-const ADMIN_KEY = localStorage.getItem('mesio_admin_key');
+// Session token from sessionStorage (set by superadmin.html after /api/admin/login)
+const ADMIN_KEY = sessionStorage.getItem('mesio_admin_key') || sessionStorage.getItem('hq_session');
 if (!ADMIN_KEY) window.location.href = '/superadmin?redirect=crm';
 
 // ── STATE ────────────────────────────────────────────
@@ -1012,9 +1013,13 @@ function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('mob-overlay').classList.remove('show');
 }
-function doLogout() {
-  localStorage.removeItem('mesio_admin_key');
-  localStorage.removeItem('hq_key');
+async function doLogout() {
+  if(ADMIN_KEY) {
+    try { await fetch('/api/admin/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + ADMIN_KEY } }); }
+    catch(e) {}
+  }
+  sessionStorage.removeItem('mesio_admin_key');
+  sessionStorage.removeItem('hq_session');
   window.location.href = '/superadmin';
 }
 
