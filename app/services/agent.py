@@ -939,7 +939,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     "base_order_id": base_order_id,
                     "sub_number":    sub_num,
                     "station":       station,
-                    "branch_id":     table_context.get("branch_id"),
+                    "branch_id":     table_context.get("branch_id") or (restaurant_obj.get("id") if restaurant_obj else None),
                 }
 
             if separate_bill or base_order_id is None:

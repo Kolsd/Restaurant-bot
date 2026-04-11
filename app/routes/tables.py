@@ -400,17 +400,34 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         if branch_id is not None:
-            # Sucursal específica: filtro exacto
-            if status:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
-                    status, branch_id
-                )
+            # Determinar si es restaurante principal (sin parent) para incluir legacy NULLs
+            is_main = await conn.fetchval(
+                "SELECT parent_restaurant_id IS NULL FROM restaurants WHERE id = $1", branch_id
+            )
+            if is_main:
+                # Restaurante principal: órdenes con branch_id exacto O legacy NULL
+                if status:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status = $1 AND (branch_id = $2 OR branch_id IS NULL) ORDER BY created_at ASC",
+                        status, branch_id
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND (branch_id = $1 OR branch_id IS NULL) ORDER BY created_at ASC",
+                        branch_id
+                    )
             else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
-                    branch_id
-                )
+                # Sucursal real: filtro exacto
+                if status:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
+                        status, branch_id
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
+                        branch_id
+                    )
         elif is_admin:
             # Owner/admin sin sucursal seleccionada: ve todas
             if status:
