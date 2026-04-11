@@ -391,23 +391,33 @@ async def pause_bot_for_conversation(phone: str, request: Request):
 async def manual_reply(phone: str, request: Request):
     import httpx as _httpx
     restaurant  = await get_current_restaurant(request)
-    bot_number  = restaurant["whatsapp_number"]
     message     = (await request.json()).get("message", "").strip()
     if not message: raise HTTPException(status_code=400, detail="Mensaje vacio")
-    details = await db.db_get_conversation_details(phone, bot_number)
-    history = details.get("history", [])
+
+    # Usar bot_number real de la conversación (puede diferir en setup multi-sucursal)
+    details    = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
+    actual_bot = details.get("bot_number") or restaurant["whatsapp_number"]
+    history    = details.get("history", [])
     history.append({"role": "assistant", "content": f"[Humano] {message}"})
-    await db.db_save_history(phone, bot_number, history)
-    meta_token = os.getenv("META_ACCESS_TOKEN", "")
-    phone_id   = os.getenv("META_PHONE_NUMBER_ID", "")
+    await db.db_save_history(phone, actual_bot, history)
+
+    # wa_phone_id y wa_access_token viven en la tabla restaurants, no en env vars
+    meta_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
+    phone_id   = restaurant.get("wa_phone_id")    or os.getenv("META_PHONE_NUMBER_ID", "")
     if meta_token and phone_id:
         try:
             async with _httpx.AsyncClient(timeout=8) as client:
-                await client.post(
+                res = await client.post(
                     f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
                     headers={"Authorization": f"Bearer {meta_token}"},
-                    json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}}
+                    json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": message}},
                 )
+                if res.status_code != 200:
+                    raise HTTPException(status_code=502, detail=f"Meta error {res.status_code}: {res.text[:200]}")
+        except HTTPException:
+            raise
         except Exception as e:
-            print(f"Meta send error: {e}")
+            raise HTTPException(status_code=502, detail=f"Error enviando a WhatsApp: {e}")
+    else:
+        raise HTTPException(status_code=503, detail="wa_phone_id o wa_access_token no configurados para este restaurante")
     return {"success": True}

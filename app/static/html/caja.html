@@ -1701,11 +1701,20 @@ async function sendManualReply() {
     if(!msg || !currentChatPhone) return;
     input.value = '';
     try {
-        await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
+        const r = await fetch('/api/conversations/' + encodeURIComponent(currentChatPhone) + '/reply', {
             method: 'POST', headers: reqHeaders, body: JSON.stringify({ message: msg })
         });
-        openChatModal(currentChatPhone); // recargar
-    } catch(e) {}
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            alert('Error al enviar: ' + (err.detail || r.status));
+            input.value = msg; // restaurar para que no se pierda
+            return;
+        }
+        openChatModal(currentChatPhone);
+    } catch(e) {
+        alert('Error de red: ' + e.message);
+        input.value = msg;
+    }
 }
 
 function _apiHeaders() {
