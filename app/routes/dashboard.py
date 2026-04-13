@@ -1,37 +1,30 @@
-import os
-import io
-import time
-import base64
-import json
-import pypdf
-from collections import defaultdict
-from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from pydantic import BaseModel
-from pathlib import Path
-from anthropic import Anthropic
-import httpx
+"""
+Dashboard page router: serves HTML pages, the public restaurant/menu APIs,
+the geocode helper, and the service worker.
 
-from app.services.auth import login, logout, create_user, get_users, hash_password
+Business logic is split into:
+  - app.routes.auth_routes   → /api/auth/*, /api/admin/*
+  - app.routes.settings_routes → /api/settings, /api/dashboard/*, /api/ai/proxy,
+                                  /api/orders/{id}/status, /api/table-sessions/*
+  - app.routes.team_routes   → /api/team/*
+"""
+import json
+import httpx
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from pathlib import Path
+
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_user, get_current_restaurant, verify_superadmin
-from app.repositories import sessions_repo
+from app.repositories import restaurant_repo
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
 
-# ── LOGIN RATE LIMITER (in-process, resets on restart) ────────────────
-_login_attempts: dict = defaultdict(list)
-_LOGIN_MAX    = 10   # max attempts
-_LOGIN_WINDOW = 900  # 15 minutes in seconds
 
-def _check_login_rate_limit(ip: str) -> None:
-    now = time.time()
-    attempts = _login_attempts[ip]
-    _login_attempts[ip] = [t for t in attempts if now - t < _LOGIN_WINDOW]
-    if len(_login_attempts[ip]) >= _LOGIN_MAX:
-        raise HTTPException(status_code=429, detail="Too many login attempts. Try again in 15 minutes.")
-    _login_attempts[ip].append(now)
+# ── GEOCODE HELPER (shared — imported by auth_routes and team_routes) ─
 
 async def geocode_address(address: str) -> tuple:
     """
@@ -40,7 +33,6 @@ async def geocode_address(address: str) -> tuple:
     Retorna (lat, lon, display_name) o (None, None, None).
     """
     headers = {"User-Agent": "Mesio-Bot/1.0 (contacto@mesioai.com)"}
-    # Añadir "Colombia" si la dirección no parece incluir país
     query = address if any(c in address.lower() for c in ("colombia", "bogotá", "medellin", "cali")) else f"{address}, Colombia"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -57,41 +49,9 @@ async def geocode_address(address: str) -> tuple:
         pass
     return None, None, None
 
-class LoginRequest(BaseModel): username: str; password: str
-class AdminLoginRequest(BaseModel): key: str
-class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str = ""
-class CreateRestaurantRequest(BaseModel): admin_key: str = ""; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
-class SetSubscriptionRequest(BaseModel): admin_key: str = ""; restaurant_id: int; status: str
-class UpdateRestaurantRequest(BaseModel):
-    admin_key: str = ""; restaurant_id: int
-    name: str = None; address: str = None; whatsapp_number: str = None
-    wa_phone_id: str = None; wa_access_token: str = None
-    features: dict = None; menu: str = None
-class TeamInviteRequest(BaseModel):
-    username: str
-    password: str = ""
-    pin: str = ""
-    role: str = "mesero"
-    phone: str = ""
-    branch_id: int = None
-class CreateBranchRequest(BaseModel): 
-    name: str
-    whatsapp_number: str = ""
-    address: str
-    menu: dict = {}
-    latitude: float = None
-    longitude: float = None
 
-# --- Función de apoyo para validar roles ---
-def check_role_permission(user: dict, allowed_roles: list):
-    user_role = str(user.get("role", "")).lower()
-    # Los dueños y admins siempre pueden entrar a todo
-    if any(r in user_role for r in ["owner", "admin", "gerente"]):
-        return True
-    # Verificamos si el rol específico del staff está permitido
-    return any(r in user_role for r in allowed_roles)
-    
 # ── SERVICE WORKER (must be served at root scope, not /static/) ───────
+
 @router.get("/sw.js")
 async def service_worker():
     content = (STATIC / "js" / "sw.js").read_text(encoding="utf-8")
@@ -101,49 +61,56 @@ async def service_worker():
         headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
     )
 
-# ── PÁGINAS PÚBLICAS / AUTENTICADAS ──────────────────────────────────
+
+# ── HTML PAGES ────────────────────────────────────────────────────────
+
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(): return (STATIC / "html" / "login.html").read_text(encoding="utf-8")
+async def login_page():
+    return (STATIC / "html" / "login.html").read_text(encoding="utf-8")
+
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(): return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")
+async def dashboard_page():
+    return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")
+
 @router.get("/demo", response_class=HTMLResponse)
 @router.get("/dashboard-demo", response_class=HTMLResponse)
-async def demo_page(): return (STATIC / "html" / "dashboard-demo.html").read_text(encoding="utf-8")
+async def demo_page():
+    return (STATIC / "html" / "dashboard-demo.html").read_text(encoding="utf-8")
+
 @router.get("/landing", response_class=HTMLResponse)
-async def landing_page(): return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
+async def landing_page():
+    return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
+
 @router.get("/", response_class=HTMLResponse)
-async def root_redirect(): return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
+async def root_redirect():
+    return (STATIC / "html" / "landing.html").read_text(encoding="utf-8")
+
 @router.get("/superadmin", response_class=HTMLResponse)
 async def superadmin_page():
     p = STATIC / "html" / "superadmin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>")
+
 @router.get("/staff")
 async def staff_portal_redirect(request: Request):
     r = request.query_params.get("r", "")
     target = f"/login?r={r}" if r else "/login"
     return RedirectResponse(url=target, status_code=302)
 
-@router.get("/api/public/restaurant-info")
-async def public_restaurant_info(id: int):
-    """Return the restaurant name for a given restaurant ID (public, read-only)."""
-    restaurant = await db.db_get_restaurant_by_id(id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    return {"name": restaurant.get("name", "")}
-
 @router.get("/mesero", response_class=HTMLResponse)
-async def mesero_page(): return (STATIC / "html" / "mesero.html").read_text(encoding="utf-8")
+async def mesero_page():
+    return (STATIC / "html" / "mesero.html").read_text(encoding="utf-8")
 
 @router.get("/caja", response_class=HTMLResponse)
-async def caja_page(): 
+async def caja_page():
     p = STATIC / "html" / "caja.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Caja no disponible</h1>")
+
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page():
-    return (STATIC / "html" / "crm.html").read_text(encoding="utf-8")  
+    return (STATIC / "html" / "crm.html").read_text(encoding="utf-8")
 
 @router.get("/demo-chat", response_class=HTMLResponse)
-async def demo_chat_bot_page(): 
+async def demo_chat_bot_page():
     p = STATIC / "html" / "demo-chat.html"
     if p.exists():
         return HTMLResponse(p.read_text(encoding="utf-8"))
@@ -151,85 +118,17 @@ async def demo_chat_bot_page():
 
 @router.get("/catalog", response_class=HTMLResponse)
 async def catalog_page():
-    # Renderiza el frontend del carrito/catálogo móvil
     p = STATIC / "html" / "catalog.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Catálogo no disponible</h1>")
 
-@router.get("/api/public/menu/{bot_number}")
-async def get_public_menu(bot_number: str):
-    import json
-    # Normalize: strip +, spaces. Handles URLSearchParams + → space decoding.
-    normalized = bot_number.replace("+", "").replace(" ", "").strip()
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rest = await conn.fetchrow("""
-            SELECT
-                r.id AS restaurant_id,
-                r.name,
-                r.menu,
-                p.menu AS parent_menu,
-                r.features,
-                p.features AS parent_features
-            FROM restaurants r
-            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
-            WHERE replace(replace(r.whatsapp_number, '+', ''), ' ', '') = $1
-        """, normalized)
-        
-        if not rest:
-            raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-        # 🛡️ FALLBACK INTELIGENTE CON AUTO-SANADOR PARA MENÚ
-        menu_data = rest["menu"]
-        if (not menu_data or menu_data == '{}' or menu_data == "{}") and rest["parent_menu"]:
-            menu_data = rest["parent_menu"]
-
-        if isinstance(menu_data, str):
-            try: 
-                menu_data = json.loads(menu_data)
-                if isinstance(menu_data, str): 
-                    menu_data = json.loads(menu_data)
-            except: menu_data = {}
-        elif not menu_data:
-            menu_data = {}
-
-        # 🛡️ FALLBACK INTELIGENTE CON AUTO-SANADOR PARA FEATURES
-        features = rest["features"]
-        if (not features or features == '{}' or features == "{}") and rest["parent_features"]:
-            features = rest["parent_features"]
-            
-        if isinstance(features, str):
-            try: 
-                features = json.loads(features)
-                if isinstance(features, str): 
-                    features = json.loads(features)
-            except: features = {}
-        elif not features:
-            features = {}
-
-        inv_rows = await conn.fetch(
-            "SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1",
-            rest["restaurant_id"]
-        )
-        availability = {r["dish_name"]: r["available"] for r in inv_rows}
-
-        return {
-            "restaurant_name": rest["name"],
-            "menu": menu_data,
-            "availability": availability,
-            "bot_number": bot_number,
-            "locale": features.get("locale", "en-US"),
-            "currency": features.get("currency", "USD")
-        }
-
 @router.get("/privacidad", response_class=HTMLResponse)
-async def privacidad_page(): 
+async def privacidad_page():
     return (STATIC / "html" / "privacidad.html").read_text(encoding="utf-8")
 
 @router.get("/terminos", response_class=HTMLResponse)
-async def terminos_page(): 
+async def terminos_page():
     return (STATIC / "html" / "terminos.html").read_text(encoding="utf-8")
 
-# ── BILLING PAGE (NUEVO) ──────────────────────────────────────────────
 @router.get("/billing", response_class=HTMLResponse)
 async def billing_page():
     p = STATIC / "html" / "billing.html"
@@ -240,998 +139,79 @@ async def domiciliario_page():
     p = STATIC / "html" / "domiciliario.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Página no encontrada</h1>", status_code=404)
 
-
 @router.get("/staff-hq", response_class=HTMLResponse)
 async def staff_hq_page():
     p = STATIC / "html" / "staff-hq.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
-# ── SETTINGS ─────────────────────────────────────────────────────────
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page():
     p = STATIC / "html" / "settings.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Settings no disponible</h1>")
 
-@router.get("/api/settings")
-async def get_settings(request: Request):
-    user = await get_current_user(request)
-    # 🛡️ LEER SUCURSAL DEL HEADER (Igual que en el resto del dashboard)
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-    
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-    
-    # Buscamos el restaurante específico que queremos configurar
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
+
+# ── PUBLIC APIs ───────────────────────────────────────────────────────
+
+@router.get("/api/public/restaurant-info")
+async def public_restaurant_info(id: int):
+    """Return the restaurant name for a given restaurant ID (public, read-only)."""
+    restaurant = await db.db_get_restaurant_by_id(id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    return {"name": restaurant.get("name", "")}
 
-    raw_features = restaurant.get("features", {}) or {}
-    if isinstance(raw_features, str):
+
+@router.get("/api/public/menu/{bot_number}")
+async def get_public_menu(bot_number: str):
+    normalized = bot_number.replace("+", "").replace(" ", "").strip()
+    data = await restaurant_repo.db_get_public_menu_data(normalized)
+    if not data:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    menu_data = data["menu"]
+    if (not menu_data or menu_data == '{}' or menu_data == "{}") and data["parent_menu"]:
+        menu_data = data["parent_menu"]
+    if isinstance(menu_data, str):
         try:
-            import json as _json
-            features = _json.loads(raw_features)
-        except Exception: features = {}
-    else: features = raw_features
+            menu_data = json.loads(menu_data)
+            if isinstance(menu_data, str):
+                menu_data = json.loads(menu_data)
+        except Exception:
+            menu_data = {}
+    elif not menu_data:
+        menu_data = {}
+
+    features = data["features"]
+    if (not features or features == '{}' or features == "{}") and data["parent_features"]:
+        features = data["parent_features"]
+    if isinstance(features, str):
+        try:
+            features = json.loads(features)
+            if isinstance(features, str):
+                features = json.loads(features)
+        except Exception:
+            features = {}
+    elif not features:
+        features = {}
 
     return {
-        "restaurant_id": restaurant["id"],
-        "name": restaurant["name"],
-        "whatsapp_number": restaurant.get("whatsapp_number", ""),
-        "address": restaurant.get("address", ""),
-        "features": features,
-        "payment_methods": features.get("payment_methods", []),
-        "payment_instructions": features.get("payment_instructions", {}), # 🛡️ NUEVA LÍNEA
-        "google_maps_url": features.get("google_maps_url", ""),
-        "bot_active": features.get("bot_active", True),
-        "upsell_active": features.get("upsell_active", True),
-        "domicilio_active": features.get("domicilio_active", True),
-        "recoger_active": features.get("recoger_active", True),
-        "delivery_fee": features.get("delivery_fee", 0),
-        "min_order": features.get("min_order", 0),
-        "delivery_radius_km": features.get("delivery_radius_km", 5),
-        "timezone": features.get("timezone", "America/Bogota"),
-        "currency": features.get("currency", "COP"),
-        "locale": features.get("locale", "es-CO"),
-        "latitude": restaurant.get("latitude"),
-        "longitude": restaurant.get("longitude"),
+        "restaurant_name": data["name"],
+        "menu": menu_data,
+        "availability": data["availability"],
+        "bot_number": bot_number,
+        "locale": features.get("locale", "en-US"),
+        "currency": features.get("currency", "USD")
     }
 
-@router.post("/api/settings")
-async def save_settings(request: Request):
-    import json as _json
-    user = await get_current_user(request)
-    
-    # 🛡️ DETERMINAR SUCURSAL DESTINO
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-    
-    if branch_header == "all":
-        raise HTTPException(status_code=400, detail="No puedes editar configuración en modo 'Todas las sucursales'. Selecciona una específica.")
-    
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    body = await request.json()
-
-    raw_features = restaurant.get("features", {}) or {}
-    current_features = _json.loads(raw_features) if isinstance(raw_features, str) else dict(raw_features)
-
-    updatable = [
-        "payment_methods", "payment_instructions", "google_maps_url", "bot_active",
-        "upsell_active", "domicilio_active", "recoger_active",
-        "delivery_fee", "min_order", "delivery_radius_km", "delivery_message",
-        "pickup_message", "welcome_message",
-        "timezone", "currency", "locale"
-    ]
-    for key in updatable:
-        if key in body:
-            current_features[key] = body[key]
-
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        # Actualizar Features
-        await conn.execute(
-            "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
-            _json.dumps(current_features), restaurant["id"]
-        )
-        
-        # 🛡️ FIX ERROR 500: Validar lat/lon antes de convertir a float
-        try:
-            if "latitude" in body and body["latitude"] not in [None, ""]:
-                await conn.execute("UPDATE restaurants SET latitude=$1 WHERE id=$2", float(body["latitude"]), restaurant["id"])
-            if "longitude" in body and body["longitude"] not in [None, ""]:
-                await conn.execute("UPDATE restaurants SET longitude=$1 WHERE id=$2", float(body["longitude"]), restaurant["id"])
-        except ValueError:
-            pass # Ignoramos errores de formato en coordenadas para no tumbar el servidor
-
-    return {"success": True, "features": current_features}
-
-# ── AUTH ──────────────────────────────────────────────────────────────
-@router.post("/api/auth/login")
-async def auth_login(request: Request, body: LoginRequest):
-    ip = request.client.host if request.client else "unknown"
-    _check_login_rate_limit(ip)
-    result = await login(body.username, body.password)
-    if not result["success"]:
-        raise HTTPException(status_code=401, detail=result["error"])
-    return result
-
-@router.post("/api/auth/logout")
-async def auth_logout(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    await logout(token)
-    return {"success": True}
-
-# ↓ PEGA AQUÍ EL ENDPOINT NUEVO ↓
-
-_ADMIN_ROLES = {"owner", "admin", "gerente"}
-_ROLE_REDIRECT = {
-    "mesero":       "/mesero",   "waiter":   "/mesero",
-    "cocina":       "/cocina",   "cook":     "/cocina",   "cocinero": "/cocina",
-    "caja":         "/caja",     "cashier":  "/caja",     "cajero":   "/caja",
-    "bar":          "/bar",
-    "domiciliario": "/domiciliario", "delivery": "/domiciliario",
-}
-
-@router.get("/api/auth/verify-role")
-async def verify_role_for_page(request: Request, page: str):
-    _PAGE_ROLES = {
-        "mesero":       {"mesero", "waiter"},
-        "caja":         {"caja", "cashier", "cajero"},
-        "domiciliario": {"domiciliario", "delivery"},
-        "cocina":       {"cocina", "cook", "cocinero"},
-        "bar":          {"bar"},
-        "staff-hq":     {"mesero", "waiter", "cocina", "cook", "cocinero", "caja", "cashier", "cajero", "bar", "domiciliario", "delivery", "otro"},
-        "dashboard":    _ADMIN_ROLES,
-        "settings":     _ADMIN_ROLES,
-        "billing":      _ADMIN_ROLES,
-    }
-
-    try:
-        user = await get_current_user(request)
-    except HTTPException:
-        raise HTTPException(status_code=401, detail="Token inválido o expirado")
-
-    # LOG TEMPORAL
-    print(f"DEBUG verify-role: user={user}, page={page}", flush=True)
-
-    user_roles = {r.strip().lower() for r in (user.get("role") or "").split(",") if r.strip()}
-
-    print(f"DEBUG verify-role: user_roles={user_roles}", flush=True)
-
-    if user_roles & _ADMIN_ROLES:
-        return {"ok": True}
-
-    allowed = _PAGE_ROLES.get(page, set())
-    if not (user_roles & allowed):
-        redirect_to = "/staff-hq"
-        for role in user_roles:
-            if role in _ROLE_REDIRECT:
-                redirect_to = _ROLE_REDIRECT[role]
-                break
-        raise HTTPException(status_code=403, detail={"redirect": redirect_to})
-
-    return {"ok": True}
 
 @router.get("/api/geocode")
 async def geocode_endpoint(address: str):
     lat, lon, display = await geocode_address(address)
-    if lat is None: raise HTTPException(status_code=404, detail="No se encontró la dirección.")
-    return {"latitude": lat, "longitude": lon, "display_name": display, "maps_url": f"https://www.google.com/maps?q={lat},{lon}"}
-
-# ── SUPER DASHBOARD (HQ) ─────────────────────────────────────────────
-
-@router.post("/api/admin/login")
-async def admin_login(payload: AdminLoginRequest):
-    """Exchange ADMIN_KEY for a session token. The raw key is never stored client-side."""
-    if not payload.key or payload.key != os.getenv("ADMIN_KEY"):
-        raise HTTPException(status_code=403, detail="Clave incorrecta")
-    token = await sessions_repo.create_session("superadmin")
-    return {"token": token}
-
-@router.post("/api/admin/logout")
-async def admin_logout_session(req: Request):
-    """Invalidate the current superadmin session token."""
-    token = req.headers.get("Authorization", "").replace("Bearer ", "").strip()
-    if token:
-        await sessions_repo.delete_session(token)
-    return {"success": True}
-
-@router.get("/api/admin/stats")
-async def admin_get_stats(_: None = Depends(verify_superadmin)):
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        total_rest  = await conn.fetchval("SELECT COUNT(*) FROM restaurants")
-        active_rest = await conn.fetchval("SELECT COUNT(*) FROM restaurants WHERE subscription_status='active'")
-        total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
-        total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders")
-        mrr = (active_rest or 0) * 99
-        return {
-            "total_restaurants": total_rest or 0,
-            "active_restaurants": active_rest or 0,
-            "total_orders": total_orders or 0,
-            "mrr": mrr
-        }
-
-@router.get("/api/admin/restaurants")
-async def admin_get_restaurants(_: None = Depends(verify_superadmin)):
-    return {"restaurants": await db.db_get_all_restaurants()}
-
-@router.post("/api/admin/create-user")
-async def admin_create_user(request: CreateUserRequest, _: None = Depends(verify_superadmin)):
-    
-    # 🛡️ Obtenemos el restaurante por ID para asegurar el vínculo
-    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
-    if not rest: 
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    
-    # Creamos el usuario owner amarrado al branch_id
-    success = await db.db_create_user(
-        username=request.username, 
-        password_hash=hash_password(request.password), 
-        restaurant_name=rest["name"],
-        role="owner",
-        branch_id=request.restaurant_id
-    )
-    
-    if not success: 
-        raise HTTPException(status_code=400, detail="El usuario ya existe")
-    return {"success": True}
-
-# 🗑️ NUEVO: Endpoint para borrar usuarios desde el SuperAdmin
-@router.post("/api/admin/delete-user")
-async def admin_delete_user(username: str, _: None = Depends(verify_superadmin)):
-    
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM users WHERE username=$1", username.lower().strip())
-    return {"success": True}
-
-@router.get("/api/admin/users")
-async def admin_list_users(_: None = Depends(verify_superadmin)):
-    return {"users": await get_users()}
-
-@router.post("/api/admin/create-restaurant")
-async def admin_create_restaurant(request: CreateRestaurantRequest, _: None = Depends(verify_superadmin)):
-    try: menu_dict = json.loads(request.menu)
-    except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
-    lat, lon, _ = await geocode_address(request.address)
-    
-    # 1. Crear el restaurante (como antes)
-    await db.db_create_restaurant(request.name, request.whatsapp_number, request.address, menu_dict, lat, lon, request.features)
-    
-    # 2. Si vienen credenciales de Meta, actualizamos el registro
-    if request.wa_access_token:
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """UPDATE restaurants 
-                   SET wa_phone_id = $1, wa_access_token = $2 
-                   WHERE whatsapp_number = $3""",
-                request.wa_phone_id, request.wa_access_token, request.whatsapp_number
-            )
-            
-    return {"success": True}
-    
-@router.post("/api/admin/set-subscription")
-async def admin_set_subscription(request: SetSubscriptionRequest, _: None = Depends(verify_superadmin)):
-    await db.db_update_subscription(request.restaurant_id, request.status)
-    return {"success": True}
-
-# ── TEAM / BRANCHES ──────────────────────────────────────────────────
-
-@router.get("/api/team/branches")
-async def list_team_branches(request: Request):
-    user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"):
-        raise HTTPException(status_code=403, detail="Acceso restringido a dueños")
-    
-    my_restaurant_id = user.get("branch_id")
-    if not my_restaurant_id:
-        return {"branches": []}
-
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY id ASC", 
-            my_restaurant_id
-        )
-        return {"branches": [db._serialize(dict(r)) for r in rows]}
-
-@router.post("/api/team/branches")
-async def create_branch(request: Request, body: CreateBranchRequest):
-    import time
-    import json
-    user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"): 
-        raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
-        
-    my_restaurant_id = user.get("branch_id")
-    if not my_restaurant_id:
-        raise HTTPException(status_code=400, detail="Tu usuario no tiene un branch_id (Matriz) asignado.")
-
-    pool = await db.get_pool()
-    wa_number = body.whatsapp_number.strip()
-    
-    async with pool.acquire() as conn:
-        matriz_row = await conn.fetchrow(
-            "SELECT whatsapp_number, menu, features, wa_phone_id, wa_access_token FROM restaurants WHERE id = $1", 
-            my_restaurant_id
-        )
-        
-        if not matriz_row:
-            raise HTTPException(status_code=404, detail="No se encontró la Casa Matriz.")
-
-        if not wa_number:
-            wa_number = f"{matriz_row['whatsapp_number']}_b{int(time.time())}"
-        
-        # 🛡️ AUTO-SANADOR AL HEREDAR: Evita arrastrar el error de doble JSON
-        menu_heredado = matriz_row['menu']
-        if isinstance(menu_heredado, str):
-            try: 
-                menu_heredado = json.loads(menu_heredado)
-                if isinstance(menu_heredado, str): menu_heredado = json.loads(menu_heredado)
-            except: menu_heredado = {}
-        elif not menu_heredado:
-            menu_heredado = {}
-        
-        features_heredado = matriz_row['features']
-        if isinstance(features_heredado, str):
-            try: 
-                features_heredado = json.loads(features_heredado)
-                if isinstance(features_heredado, str): features_heredado = json.loads(features_heredado)
-            except: features_heredado = {}
-        elif not features_heredado:
-            features_heredado = {}
-
-    lat = body.latitude
-    lon = body.longitude
-    display = ""
-    
-    if lat is None or lon is None:
-        lat, lon, display = await geocode_address(body.address)
-    
-    # Se envía el diccionario directo, sin json.dumps()
-    await db.db_create_restaurant(
-        name=body.name, 
-        whatsapp_number=wa_number, 
-        address=body.address, 
-        menu=menu_heredado,
-        latitude=lat, 
-        longitude=lon,
-        features=features_heredado
-    )
-    
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE restaurants 
-            SET parent_restaurant_id = $1,
-                wa_phone_id = $3,
-                wa_access_token = $4
-            WHERE whatsapp_number = $2
-        """, 
-        my_restaurant_id, 
-        wa_number, 
-        matriz_row.get('wa_phone_id', ''), 
-        matriz_row.get('wa_access_token', '')
-        )
-            
-    return {"success": True, "latitude": lat, "longitude": lon, "display_name": display}
-
-_STAFF_ROLES = {"mesero", "cocina", "caja", "gerente", "domiciliario", "bar", "otro"}
-
-
-@router.get("/api/team/users")
-async def list_team_users(request: Request, branch_id: int = None):
-    user = await get_current_user(request)
-    
-    # 🛡️ FILTRO GLOBAL: Leer cabecera X-Branch-ID
-    branch_header = request.headers.get("X-Branch-ID")
-    if not branch_id and branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
-    elif not branch_id:
-        branch_id = user.get("branch_id")
-
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        # 🔍 Consulta estricta por branch_id
-        rows = await conn.fetch("""
-            SELECT u.username, u.role, u.branch_id, r.name as branch_name 
-            FROM users u
-            LEFT JOIN restaurants r ON u.branch_id = r.id
-            WHERE u.branch_id = $1
-            ORDER BY u.created_at DESC
-        """, branch_id)
-        return {"users": [dict(r) for r in rows]}
-
-@router.post("/api/team/invite")
-async def team_invite(request: Request, body: TeamInviteRequest):
-    from passlib.context import CryptContext as _CC
-    _pin_ctx = _CC(schemes=["bcrypt"], deprecated="auto")
-
-    creator = await get_current_user(request)
-    role = creator.get("role", "owner")
-    if "owner" not in role and "admin" not in role:
-        raise HTTPException(status_code=403, detail="No autorizado")
-
-    branch_id = body.branch_id if "owner" in role else creator.get("branch_id")
-    
-    # 🛡️ Si no manda ID, usamos el ID real de su cuenta
-    if not branch_id and "owner" in role:
-        branch_id = creator.get("branch_id")
-
-    if not branch_id:
-        raise HTTPException(status_code=400, detail="Sucursal requerida")
-        
-    branch = await db.db_get_restaurant_by_id(branch_id)
-
-    # Admin/Gerente → dashboard user account (password login)
-    if body.role in ("admin", "gerente"):
-        if not body.password:
-            raise HTTPException(status_code=400, detail="Contraseña requerida para administrador o gerente")
-        success = await db.db_create_user(
-            body.username, hash_password(body.password), branch["name"],
-            role=body.role, branch_id=branch_id, parent_user=creator["username"],
-        )
-        if not success:
-            raise HTTPException(status_code=400, detail="Usuario ya existe")
-    else:
-        # Operational roles → staff table with PIN
-        if not body.pin:
-            raise HTTPException(status_code=400, detail="PIN requerido para este rol")
-        if len(body.pin) < 4:
-            raise HTTPException(status_code=400, detail="El PIN debe tener al menos 4 dígitos")
-        roles = [r.strip() for r in body.role.split(",") if r.strip() in _STAFF_ROLES]
-        if not roles:
-            roles = ["mesero"]
-        pin_hash = _pin_ctx.hash(body.pin)
-        await db.db_create_staff(
-            restaurant_id=branch_id,
-            name=body.username,
-            role=roles[0],
-            pin_hash=pin_hash,
-            phone=body.phone,
-            roles=roles,
-        )
-
-    return {"success": True}
-
-
-@router.delete("/api/team/users/{user_id}")
-async def delete_user(user_id: str, request: Request):
-    creator = await get_current_user(request)
-    role = creator.get("role", "owner")
-    if "owner" not in role and "admin" not in role:
-        raise HTTPException(status_code=403, detail="No autorizado")
-
-    # Try dashboard user first
-    target = await db.db_get_user(user_id)
-    if target:
-        if "admin" in role and "owner" not in role and target.get("branch_id") != creator.get("branch_id"):
-            raise HTTPException(status_code=403, detail="No autorizado")
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM users WHERE username=$1", user_id.lower().strip())
-        return {"success": True}
-
-    # Try staff member by UUID
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        deleted = await conn.fetchval(
-            "DELETE FROM staff WHERE id=$1::uuid RETURNING id", user_id
-        )
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    return {"success": True}
-
-
-@router.delete("/api/team/branches/{branch_id}")
-async def delete_branch(branch_id: int, request: Request):
-    user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"): 
-        raise HTTPException(status_code=403, detail="Solo el dueño puede eliminar sucursales")
-    
-    # Obtenemos mi ID principal
-    my_main_id = user.get("branch_id")
-    if not my_main_id:
-        all_r = await db.db_get_all_restaurants()
-        my_main_id = all_r[0]["id"] if all_r else None
-
-    # 🛡️ ESCUDO ANTI-SUICIDIO: Si intentas borrarte a ti mismo, el sistema te detiene.
-    if branch_id == my_main_id:
-        raise HTTPException(status_code=400, detail="No puedes eliminar la Casa Matriz desde aquí.")
-
-    pool = await db.get_pool()
-    async with pool.acquire() as conn: 
-        # 🛡️ SEGUNDO FILTRO: Aseguramos que el restaurante a borrar sea REALMENTE una sucursal nuestra
-        is_my_branch = await conn.fetchval(
-            "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
-            branch_id, my_main_id
-        )
-        if not is_my_branch:
-            raise HTTPException(status_code=404, detail="La sucursal no existe o no pertenece a tu cuenta.")
-
-        # Eliminamos usuarios de la sucursal
-        await conn.execute("DELETE FROM users WHERE branch_id=$1", branch_id)
-        # Eliminamos la sucursal
-        await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
-        
-    return {"success": True}
-
-@router.post("/api/admin/parse-menu")
-async def admin_parse_menu(file: UploadFile = File(...), _: None = Depends(verify_superadmin)):
-    content  = await file.read()
-    filename = file.filename.lower()
-    client   = Anthropic()
-    messages_content = []
-    try:
-        if filename.endswith(".pdf"):
-            pdf_reader = pypdf.PdfReader(io.BytesIO(content))
-            text = "".join(p.extract_text() + "\n" for p in pdf_reader.pages)
-            messages_content.append({"type": "text", "text": f"Extrae el menú:\n{text}"})
-        elif filename.endswith((".png", ".jpg", ".jpeg")):
-            mt = "image/png" if filename.endswith(".png") else "image/jpeg"
-            messages_content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": base64.b64encode(content).decode()}})
-            messages_content.append({"type": "text", "text": "Extrae el menú de esta imagen."})
-        else: raise HTTPException(status_code=400, detail="Sube PDF, PNG o JPG")
-        response = client.messages.create(model="claude-3-haiku-20240307", max_tokens=4000, temperature=0, system='Extrae menús a JSON puro: {"Categoría": [{"name":"","price":0.0,"description":""}]}', messages=[{"role": "user", "content": messages_content}])
-        return {"success": True, "json_menu": json.loads(response.content[0].text.replace("```json","").replace("```","").strip())}
-    except Exception as e: raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-@router.get("/api/admin/restaurant/{restaurant_id}")
-async def admin_get_restaurant_detail(restaurant_id: int, _: None = Depends(verify_superadmin)):
-    rest = await db.db_get_restaurant_by_id(restaurant_id)
-    if not rest: raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    wa = rest.get("whatsapp_number", "")
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        orders_30d  = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS rev FROM orders WHERE bot_number=$1 AND created_at >= NOW()-INTERVAL '30 days'", wa)
-        orders_today = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM orders WHERE bot_number=$1 AND created_at >= CURRENT_DATE", wa)
-        table_30d   = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM table_orders WHERE created_at >= NOW()-INTERVAL '30 days' AND status NOT IN ('cancelado') AND (SELECT whatsapp_number FROM restaurants WHERE id=table_orders.branch_id OR id=$1 LIMIT 1)=$1", restaurant_id)
-        convs       = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE bot_number=$1", wa)
-        users_cnt   = await conn.fetchval("SELECT COUNT(*) FROM users WHERE branch_id=$1", restaurant_id)
-        invoices_30d = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_cents),0) AS total FROM fiscal_invoices WHERE restaurant_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
-            restaurant_id) if await conn.fetchval("SELECT to_regclass('fiscal_invoices')") else None
-        invoices_all = await conn.fetchval(
-            "SELECT COUNT(*) FROM fiscal_invoices WHERE restaurant_id=$1", restaurant_id
-        ) if await conn.fetchval("SELECT to_regclass('fiscal_invoices')") else 0
-        last_order  = await conn.fetchval(
-            "SELECT MAX(created_at) FROM orders WHERE bot_number=$1", wa)
+    if lat is None:
+        raise HTTPException(status_code=404, detail="No se encontró la dirección.")
     return {
-        "restaurant": rest,
-        "stats": {
-            "orders_30d":       int(orders_30d["cnt"])  if orders_30d else 0,
-            "revenue_30d":      float(orders_30d["rev"]) if orders_30d else 0,
-            "orders_today":     int(orders_today["cnt"]) if orders_today else 0,
-            "table_orders_30d": int(table_30d["cnt"])   if table_30d else 0,
-            "active_convs":     int(convs or 0),
-            "users":            int(users_cnt or 0),
-            "invoices_30d":     int(invoices_30d["cnt"]) if invoices_30d else 0,
-            "invoices_all":     int(invoices_all or 0),
-            "last_order":       last_order.isoformat() if last_order else None,
-        }
+        "latitude": lat,
+        "longitude": lon,
+        "display_name": display,
+        "maps_url": f"https://www.google.com/maps?q={lat},{lon}"
     }
-
-@router.post("/api/admin/update-restaurant")
-async def admin_update_restaurant(request: UpdateRestaurantRequest, _: None = Depends(verify_superadmin)):
-    import json
-    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
-    if not rest: raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        if request.name is not None:
-            await conn.execute("UPDATE restaurants SET name=$1 WHERE id=$2", request.name, request.restaurant_id)
-        if request.address is not None:
-            lat, lon, _ = await geocode_address(request.address)
-            await conn.execute("UPDATE restaurants SET address=$1, latitude=$2, longitude=$3 WHERE id=$4",
-                               request.address, lat, lon, request.restaurant_id)
-        if request.whatsapp_number is not None:
-            await conn.execute("UPDATE restaurants SET whatsapp_number=$1 WHERE id=$2", request.whatsapp_number, request.restaurant_id)
-        if request.wa_phone_id is not None:
-            await conn.execute("UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2", request.wa_phone_id, request.restaurant_id)
-        if request.wa_access_token is not None:
-            await conn.execute("UPDATE restaurants SET wa_access_token=$1 WHERE id=$2", request.wa_access_token, request.restaurant_id)
-        if request.features is not None:
-            raw = rest.get("features") or {}
-            current = json.loads(raw) if isinstance(raw, str) else dict(raw)
-            # Limpiamos si el features actual estaba doblemente codificado
-            if isinstance(current, str):
-                try: current = json.loads(current)
-                except: current = {}
-            current.update(request.features)
-            # 🛡️ FIX: Se quita json.dumps()
-            await conn.execute("UPDATE restaurants SET features=$1::jsonb WHERE id=$2",
-                               current, request.restaurant_id)
-        if request.menu is not None:
-            try: menu_dict = json.loads(request.menu)
-            except: raise HTTPException(status_code=400, detail="Menú no es JSON válido")
-            # 🛡️ FIX: Se quita json.dumps()
-            await conn.execute("UPDATE restaurants SET menu=$1::jsonb WHERE id=$2",
-                               menu_dict, request.restaurant_id)
-    return {"success": True, "restaurant": await db.db_get_restaurant_by_id(request.restaurant_id)}
-    
-@router.get("/api/admin/billing-stats")
-async def admin_billing_stats(_: None = Depends(verify_superadmin)):
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        table_exists = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
-        if not table_exists:
-            return {"stats": []}
-        rows = await conn.fetch("""
-            SELECT fi.restaurant_id, r.name AS restaurant_name,
-                   COUNT(fi.id) AS total_invoices,
-                   COUNT(fi.id) FILTER (WHERE fi.created_at >= NOW()-INTERVAL '30 days') AS invoices_30d,
-                   COUNT(fi.id) FILTER (WHERE fi.dian_status='accepted') AS accepted,
-                   COUNT(fi.id) FILTER (WHERE fi.dian_status='pending')  AS pending,
-                   COALESCE(SUM(fi.total_cents) FILTER (WHERE fi.dian_status='accepted'),0) AS total_billed_cents,
-                   MAX(fi.created_at) AS last_invoice_at
-            FROM fiscal_invoices fi
-            JOIN restaurants r ON r.id = fi.restaurant_id
-            GROUP BY fi.restaurant_id, r.name
-            ORDER BY total_invoices DESC
-        """)
-        return {"stats": [dict(r) for r in rows]}
-
-@router.post("/api/admin/fix-branch-ids")
-async def fix_branch_ids(request: Request, _: None = Depends(verify_superadmin)):
-    body = await request.json()
-    pool  = await db.get_pool()
-    fixed = []
-    async with pool.acquire() as conn:
-        restaurants = await conn.fetch("SELECT id, name, whatsapp_number FROM restaurants")
-        rest_map    = {r['name'].lower().strip(): dict(r) for r in restaurants}
-        users       = await conn.fetch("SELECT username, restaurant_name, role FROM users WHERE branch_id IS NULL")
-        for user in users:
-            rname = user['restaurant_name'].lower().strip()
-            if rname in rest_map:
-                rest = rest_map[rname]
-                await conn.execute("UPDATE users SET branch_id=$1, role='owner' WHERE username=$2", rest['id'], user['username'])
-                fixed.append({"username": user['username'], "branch_id": rest['id']})
-    return {"success": True, "fixed": fixed}
-
-@router.post("/api/admin/fix-conversations")
-async def fix_conversations_bot_number(request: Request, _: None = Depends(verify_superadmin)):
-    body = await request.json()
-    pool = await db.get_pool()
-    async with pool.acquire() as conn: await conn.execute("UPDATE conversations SET bot_number=$1 WHERE bot_number='' OR bot_number IS NULL", body.get("bot_number", ""))
-    return {"success": True}
-# ════════════════════════════════════════════════════════════════
-# ── MÓDULOS DE DATOS PARA EL DASHBOARD (FRONTEND JAVASCRIPT) ──
-# ════════════════════════════════════════════════════════════════
-from datetime import datetime, timedelta
-
-async def get_dashboard_filters(request: Request, period: str, custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    user = await get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-    
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-    
-    # 🛡️ CAPTURAMOS "ALL"
-    if branch_header == "all" and user.get("role", "") in ("owner", "admin"):
-        branch_id = "all"
-    elif branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    bot_number = None
-    if branch_id and branch_id != "all":
-        r = await db.db_get_restaurant_by_id(branch_id)
-        if r: bot_number = r.get("whatsapp_number")
-    elif branch_id == "all":
-        # Si es all, buscamos el bot de la matriz para usarlo como referencia
-        r = await db.db_get_restaurant_by_id(user.get("branch_id"))
-        if r: bot_number = r.get("whatsapp_number")
-
-    now_utc = datetime.utcnow()
-    now_local = now_utc - timedelta(minutes=tz_offset)
-    end_local = now_local + timedelta(days=1)
-    end_local = end_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    if period == "custom" and custom_start and custom_end:
-        start_local = datetime.strptime(custom_start, "%Y-%m-%d")
-        end_local = datetime.strptime(custom_end, "%Y-%m-%d") + timedelta(days=1)
-    elif period == "week": start_local = now_local - timedelta(days=7)
-    elif period == "month": start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    elif period == "semester": start_local = now_local - timedelta(days=180)
-    elif period == "year": start_local = now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-    else: start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    start_date = start_local + timedelta(minutes=tz_offset)
-    end_date = end_local + timedelta(minutes=tz_offset)
-    
-    return branch_id, bot_number, start_date, end_date
-
-@router.get("/api/dashboard/orders")
-async def get_dashboard_orders(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    branch_id, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
-    
-    pool = await db.get_pool()
-    orders = []
-    async with pool.acquire() as conn:
-        try:
-            q_wa = "SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2"
-            p_wa = [start_date, end_date]
-            
-            if bot_number:
-                # 🛡️ FIX: Si es "all", usamos LIKE para atrapar el bot principal y sus sub-bots (_b...)
-                if branch_id == "all":
-                    q_wa += " AND bot_number LIKE $3"
-                    p_wa.append(f"{bot_number}%")
-                else:
-                    q_wa += " AND bot_number = $3"
-                    p_wa.append(bot_number)
-                    
-            q_wa += " ORDER BY created_at DESC"
-            
-            rows_wa = await conn.fetch(q_wa, *p_wa)
-            for r in rows_wa:
-                orders.append({
-                    "id": r["id"],
-                    "items": r["items"],
-                    "type": r.get("order_type", "domicilio"),
-                    "status": r.get("status", "pendiente"),
-                    "paid": r.get("payment_status") == "paid" or r.get("paid") == True,
-                    "total": float(r["total"] or 0),
-                    "time": r["created_at"].strftime("%H:%M"),
-                    "created_at": r["created_at"].isoformat() + "Z",
-                    "address": r.get("address", ""),
-                    "payment_method": r.get("payment_method", ""),
-                    "notes": r.get("notes", ""),
-                    "phone": r.get("phone", ""),
-                })
-        except Exception as e:
-            print(f"Error cargando orders: {e}", flush=True)
-
-        try:
-            # 🛡️ FIX: Ignoramos "all" explícitamente para que Postgres no explote esperando un Int
-            if branch_id and branch_id != "all":
-                q_mesa = """
-                    SELECT o.* FROM table_orders o
-                    LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                    WHERE o.created_at >= $1 AND o.created_at < $2
-                    AND t.branch_id = $3
-                    ORDER BY o.created_at DESC
-                """
-                p_mesa = [start_date, end_date, branch_id]
-            else:
-                # 🌐 MODO ALL: Carga mesas de toda la franquicia
-                q_mesa = """
-                    SELECT * FROM table_orders
-                    WHERE created_at >= $1 AND created_at < $2
-                    ORDER BY created_at DESC
-                """
-                p_mesa = [start_date, end_date]
-
-            rows_mesa = await conn.fetch(q_mesa, *p_mesa)
-            
-            mesa_groups = {}
-            for r in rows_mesa:
-                if not r["created_at"]:
-                    continue  # skip rows with NULL timestamp
-                base_id = r["base_order_id"] if r.get("base_order_id") else r["id"]
-                if base_id not in mesa_groups:
-                    mesa_groups[base_id] = {
-                        "id": base_id, "items": [], "status": r.get("status") or "recibido",
-                        "total": 0.0, "is_paid": False,
-                        "time": r["created_at"].strftime("%H:%M"),
-                        "created_at": r["created_at"].isoformat() + "Z"
-                    }
-                mesa_groups[base_id]["total"] += float(r["total"] or 0)
-
-                try:
-                    import json
-                    raw_items = r["items"]
-                    if isinstance(raw_items, str):
-                        parsed_items = json.loads(raw_items)
-                    elif isinstance(raw_items, list):
-                        parsed_items = raw_items
-                    else:
-                        parsed_items = []
-                    if isinstance(parsed_items, list):
-                        mesa_groups[base_id]["items"].extend(parsed_items)
-                except Exception:
-                    pass
-
-                row_status = r.get("status") or ""
-                if row_status in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
-                    mesa_groups[base_id]["is_paid"] = True
-                    mesa_groups[base_id]["status"] = row_status
-
-            for base_id, g in mesa_groups.items():
-                import json
-                orders.append({
-                    "id": g["id"], "items": json.dumps(g["items"], default=str), "type": "mesa",
-                    "status": g["status"], "paid": g["is_paid"], "total": g["total"],
-                    "time": g["time"], "created_at": g["created_at"]
-                })
-        except Exception as e:
-            print(f"Error cargando table_orders: {e}", flush=True)
-
-    orders.sort(key=lambda x: x["created_at"], reverse=True)
-    return {"orders": orders}
-
-@router.post("/api/orders/{order_id}/status")
-async def update_order_status(order_id: str, request: Request):
-    await require_auth(request)
-    body = await request.json()
-    new_status = body.get("status", "")
-    if not new_status:
-        raise HTTPException(status_code=400, detail="status requerido")
-    await db.db_update_order_status(order_id, new_status)
-    return {"success": True}
-
-@router.get("/api/table-sessions/closed")
-async def get_closed_sessions(request: Request, hours: int = 24):
-    hours = max(1, min(hours, 720))  # clamp: 1h – 30 days
-    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
-
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        try:
-            if bot_number:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
-                    " AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')"
-                    " AND bot_number = $2 ORDER BY closed_at DESC",
-                    hours, bot_number,
-                )
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
-                    " AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')"
-                    " ORDER BY closed_at DESC",
-                    hours,
-                )
-        except Exception as e:
-            print(f"Warning - table_sessions query error: {e}", flush=True)
-            rows = []
-            
-    sessions = []
-    for r in rows:
-        s = dict(r)
-        if s.get("started_at"): s["started_at"] = s["started_at"].isoformat() + "Z"
-        if s.get("closed_at"): s["closed_at"] = s["closed_at"].isoformat() + "Z"
-        sessions.append(s)
-        
-    return {"sessions": sessions}
-
-@router.get("/api/dashboard/reservations")
-async def get_dashboard_reservations(request: Request, period: str = "today", custom_start: str = None, custom_end: str = None, tz_offset: int = 0):
-    _, bot_number, start_date, end_date = await get_dashboard_filters(request, period, custom_start, custom_end, tz_offset)
-    
-    pool = await db.get_pool()
-    reservations = []
-    async with pool.acquire() as conn:
-        try:
-            query = "SELECT * FROM reservations WHERE created_at >= $1 AND created_at < $2"
-            params = [start_date, end_date]
-            if bot_number:
-                query += " AND bot_number = $3"
-                params.append(bot_number)
-            query += " ORDER BY date ASC, time ASC"
-            rows = await conn.fetch(query, *params)
-            
-            for r in rows:
-                reservations.append({
-                    "id": r["id"], "name": r["name"], "date": str(r["date"]),
-                    "time": str(r["time"])[:5], "guests": r["guests"],
-                    "phone": r["phone"], "notes": r["notes"]
-                })
-        except Exception as e: pass
-            
-    return {"reservations": reservations}
-
-@router.get("/api/dashboard/conversations")
-async def get_dashboard_conversations(request: Request):
-    branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
-
-    if bot_number: bot_number = bot_number.split("_b")[0]
-
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        query = "SELECT * FROM conversations"
-        conditions = []
-        params = []
-        idx = 1
-
-        if branch_id == "all":
-            pass  # Sin filtro, trae todo
-        elif branch_id:
-            conditions.append(f"branch_id = ${idx}")
-            params.append(branch_id)
-            idx += 1
-        elif bot_number:
-            conditions.append(f"bot_number = ${idx}")
-            params.append(bot_number)
-            idx += 1
-            
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-            
-        query += " ORDER BY updated_at DESC"
-        rows = await conn.fetch(query, *params)
-        
-    convs = []
-    for r in rows:
-        try:
-            import json
-            history = json.loads(r["history"]) if isinstance(r["history"], str) else r["history"]
-            preview = history[-1]["content"] if history else "Conversación iniciada..."
-            if isinstance(preview, dict): preview = "Multimedia/Sistema"
-        except:
-            history = []
-            preview = "Conversación activa..."
-
-        has_voucher = any(
-            "/api/media/" in (m.get("content") or "")
-            for m in history if isinstance(m.get("content"), str)
-        )
-
-        convs.append({
-            "phone": r["phone"],
-            "messages": len(history),
-            "preview": preview[:60] + "..." if len(preview) > 60 else preview,
-            "last_updated": r["updated_at"].isoformat() + "Z",
-            "has_voucher": has_voucher,
-        })
-    return {"conversations": convs}
-    
-@router.get("/api/dashboard/menu")
-async def get_dashboard_menu(request: Request):
-    # Ahora el menú también respeta el selector de la sucursal
-    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
-    menu = await db.db_get_menu(bot_number) or {}
-    return {"menu": menu}
-
-@router.get("/api/table-sessions/{session_id}/history")
-async def get_session_history(request: Request, session_id: int):
-    await require_auth(request)
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
-        if not session: 
-            raise HTTPException(404, "Sesión no encontrada")
-        
-        conv = await conn.fetchrow("SELECT history FROM conversations WHERE phone = $1", session["phone"])
-        history = []
-        if conv and conv["history"]:
-            try: 
-                history = json.loads(conv["history"]) if isinstance(conv["history"], str) else conv["history"]
-            except: 
-                pass
-            
-    s_dict = dict(session)
-    if s_dict.get("started_at"): s_dict["started_at"] = s_dict["started_at"].isoformat()
-    if s_dict.get("closed_at"): s_dict["closed_at"] = s_dict["closed_at"].isoformat()
-    
-    return {"session": s_dict, "history": history}
-
-@router.post("/api/table-sessions/{session_id}/reopen")
-async def reopen_session(request: Request, session_id: int):
-    await require_auth(request)
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE table_sessions SET closed_at = NULL, closed_by = NULL, closed_by_username = NULL WHERE id = $1", session_id)
-    return {"success": True}
-
-@router.post("/api/table-sessions/{session_id}/alert-waiter")
-async def session_alert_waiter(request: Request, session_id: int):
-    body = await request.json()
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
-        if session:
-            await conn.execute(
-                "INSERT INTO waiter_alerts (table_id, table_name, message, status) VALUES ($1, $2, $3, 'active')",
-                session["table_id"], session["table_name"], body.get("message", "Alerta de dashboard")
-            )
-    return {"success": True}

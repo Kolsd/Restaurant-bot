@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
-from app.repositories import reviews_repo as rr
+from app.repositories import reviews_repo as rr, conversations_repo
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -32,17 +32,8 @@ async def filter_conversations_for_branch(conversations: list, branch_id: int | 
     """Si el usuario es de una sucursal, solo muestra los chats de sus mesas."""
     if not branch_id or branch_id == "all" or not conversations:
         return conversations
-    
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT DISTINCT ts.phone 
-            FROM table_sessions ts
-            JOIN restaurant_tables rt ON ts.table_id = rt.id
-            WHERE rt.branch_id = $1 AND ts.bot_number = $2
-        """, branch_id, bot_number)
-        allowed_phones = {r["phone"] for r in rows}
-    
+    from app.repositories import tables_repo
+    allowed_phones = await tables_repo.db_get_session_phones_by_branch(branch_id, bot_number)
     return [c for c in conversations if c.get("phone") in allowed_phones]
         
 async def _get_effective_bot_number(restaurant: dict) -> str:

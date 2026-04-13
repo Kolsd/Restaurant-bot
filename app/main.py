@@ -33,6 +33,9 @@ from starlette.responses import RedirectResponse
 from app.routes.chat import router as chat_router
 from app.routes.orders_routes import router as orders_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.auth_routes import router as auth_router
+from app.routes.settings_routes import router as settings_router
+from app.routes.team_routes import router as team_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
 from app.routes.billing import router as billing_router
@@ -134,7 +137,7 @@ async def startup():
     _redis_configured = bool(_os.getenv("REDIS_URL"))
     _log.info("redis_url_configured", configured=_redis_configured)
 
-    print("Mesio v6.0 started", flush=True)
+    _log.info("app.started", version="6.0")
 
 
 @app.on_event("shutdown")
@@ -158,6 +161,9 @@ async def shutdown():
 
 
 app.include_router(dashboard_router)
+app.include_router(auth_router)
+app.include_router(settings_router)
+app.include_router(team_router)
 app.include_router(stats_router)
 app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")

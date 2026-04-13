@@ -13,6 +13,9 @@ from abc import ABC, abstractmethod
 from datetime import datetime, date
 from typing import Optional
 from app.services import database as db
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 # ── HELPERS ──────────────────────────────────────────────────────────
 
@@ -63,17 +66,16 @@ async def _get_matias_token() -> str:
     }
     req_body = {"email": email, "password": password}
 
-    print(f"[MATIAS AUTH] POST {auth_url}  headers={list(req_headers.keys())}")
+    log.info("billing.matias_auth_request", url=auth_url)
 
     async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
         resp = await client.post(auth_url, json=req_body, headers=req_headers)
 
         if resp.status_code not in (200, 201):
-            print(
-                f"[MATIAS AUTH] HTTP {resp.status_code}  url={auth_url}\n"
-                f"  Location : {resp.headers.get('location', '(sin Location)')}\n"
-                f"  Body     : {resp.text[:600]}"
-            )
+            log.error("billing.matias_auth_failed",
+                      status=resp.status_code, url=auth_url,
+                      location=resp.headers.get("location", ""),
+                      body=resp.text[:600])
             resp.raise_for_status()
 
         data = resp.json()
@@ -1053,15 +1055,7 @@ class MesioNativeAdapter(BillingAdapter):
             "Accept":        "application/json",
         }
 
-        # DEBUG — muestra exactamente lo que se envía a MATIAS
-        print(
-            f"[MATIAS INVOICE] POST {endpoint}\n"
-            f"  Authorization : Bearer {bearer_token[:16]}...\n"
-            f"  Accept        : {req_headers['Accept']}\n"
-            f"  Content-Type  : {req_headers['Content-Type']}"
-        )
-        print("[MATIAS INVOICE] Payload UBL 2.1:")
-        print(json.dumps(ubl_payload, indent=2, ensure_ascii=False))
+        log.info("billing.matias_invoice_request", endpoint=endpoint, token_prefix=bearer_token[:16])
 
         async with httpx.AsyncClient(
             timeout=30,
@@ -1071,11 +1065,10 @@ class MesioNativeAdapter(BillingAdapter):
 
             # Mostrar respuesta completa si no es 2xx
             if resp.status_code not in (200, 201):
-                print(
-                    f"[MATIAS INVOICE] HTTP {resp.status_code}\n"
-                    f"  Location : {resp.headers.get('location', '(sin Location)')}\n"
-                    f"  Body     : {resp.text[:800]}"
-                )
+                log.error("billing.matias_invoice_failed",
+                          status=resp.status_code,
+                          location=resp.headers.get("location", ""),
+                          body=resp.text[:800])
                 resp.raise_for_status()
 
             matias_response = resp.json()
@@ -1086,12 +1079,7 @@ class MesioNativeAdapter(BillingAdapter):
         qr_data = resp_data.get("qrDian", "")
         pdf_url = resp_data.get("url_invoice_pdf", "")
 
-        print(
-            f"[MATIAS INVOICE] Respuesta exitosa:\n"
-            f"  CUFE    : {cufe}\n"
-            f"  QR      : {qr_data[:80]}{'...' if len(qr_data) > 80 else ''}\n"
-            f"  PDF URL : {pdf_url}"
-        )
+        log.info("billing.matias_invoice_success", cufe=cufe, pdf_url=pdf_url)
 
         # Actualizar fila con los datos definitivos
         await db.db_update_invoice_dian_data(

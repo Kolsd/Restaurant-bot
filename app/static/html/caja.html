@@ -1698,10 +1698,7 @@ async function sendManualReply() {
     }
 }
 
-function _apiHeaders() {
-  const token = localStorage.getItem('rb_token') || '';
-  return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
-}
+// _apiHeaders removed — mesioHeaders() from mesio-utils.js is used instead
 
 function _isAdminOrOwner() {
     try {
@@ -1915,7 +1912,7 @@ async function confirmProposal(baseOrderId) {
   let bill = typeof _billsCache !== 'undefined' ? _billsCache[baseOrderId] : null;
   if (!bill) {
     try {
-      const r = await fetch('/api/table-orders', { headers: _apiHeaders() });
+      const r = await fetch('/api/table-orders', { headers: mesioHeaders() });
       const data = await r.json();
       const all = data.orders || data || [];
       const matches = all.filter(o => o.base_order_id === baseOrderId || o.id === baseOrderId);
@@ -1970,7 +1967,7 @@ async function confirmProposal(baseOrderId) {
 
 async function _executeConfirmProposal(baseOrderId) {
   try {
-    const res = await fetch(`/api/table-orders/${baseOrderId}/checks`, { headers: _apiHeaders() });
+    const res = await fetch(`/api/table-orders/${baseOrderId}/checks`, { headers: mesioHeaders() });
     if (!res.ok) throw new Error('No se pudieron obtener los checks');
     const data = await res.json();
     const checks = (data.checks || []).filter(c => c.status === 'open');
@@ -1980,7 +1977,7 @@ async function _executeConfirmProposal(baseOrderId) {
         `/api/table-orders/${baseOrderId}/checks/${check.id}/pay`,
         {
           method: 'POST',
-          headers: { ..._apiHeaders(), 'Content-Type': 'application/json' },
+          headers: { ...mesioHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({
             payments: [],
             customer_name: 'Consumidor Final',

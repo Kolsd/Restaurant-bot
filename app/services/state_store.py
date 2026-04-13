@@ -13,12 +13,14 @@ Key schemas
   mesio:nps_done:{phone}:{bot_number}      → "1" flag (12h TTL) — NPS already completed/skipped
   mesio:checkout:{phone}:{bot_number}      → checkout state machine dict
   mesio:cooldown:table:{table_id}:{bot}    → "1" (SET NX, atomic cooldown flag)
+  mesio:cart_lock:{phone}:{bot_number}     → "1" (SET NX EX, distributed mutex for cart ops)
 
 Fallback in-process dict entries are tuples of (expire_at: float, value: Any).
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -33,6 +35,7 @@ _fb_nps: dict[str, tuple[float, Any]] = {}
 _fb_nps_done: dict[str, float] = {}  # key → expire_at_monotonic (12h guard)
 _fb_checkout: dict[str, tuple[float, Any]] = {}
 _fb_cooldown: dict[str, float] = {}  # key → expire_at_monotonic
+_fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:bot_number → asyncio.Lock (fallback only)
 
 # Rate-limit fallback warnings: family → last_warned_monotonic
 _fb_warn_last: dict[str, float] = {}
@@ -224,3 +227,59 @@ async def table_cooldown_acquire(
         _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
         return True
     return False
+
+
+# ── Cart distributed mutex ────────────────────────────────────────────────────
+# Prevents concurrent cart mutations from different workers for the same phone+bot.
+# Redis path: SET key "1" NX EX ttl (atomic, multi-worker-safe).
+# Fallback path: per-key asyncio.Lock (single-worker only, no cross-worker guarantee).
+
+def _cart_lock_redis_key(phone: str, bot_number: str) -> str:
+    return f"mesio:cart_lock:{phone}:{bot_number}"
+
+
+async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) -> bool:
+    """
+    Acquire a distributed lock for cart operations on (phone, bot_number).
+
+    Redis path: SET key "1" NX EX ttl — atomic, multi-worker-safe.
+    Returns True if the lock was acquired, False if already held.
+
+    Fallback (Redis unavailable): always returns True and acquires an asyncio.Lock
+    instead. The asyncio.Lock is stored in _fb_cart_locks so that within a single
+    worker concurrent coroutines still serialize correctly, but cross-worker
+    exclusion is lost.
+    """
+    key = _cart_lock_redis_key(phone, bot_number)
+    r = await _rc.get_redis()
+    if r is not None:
+        result = await r.set(key, "1", nx=True, ex=ttl_seconds)
+        return result is not None  # True → acquired, None → already held
+    _maybe_warn("cart_lock")
+    # Fallback: in-process asyncio.Lock
+    if key not in _fb_cart_locks:
+        _fb_cart_locks[key] = asyncio.Lock()
+    lock = _fb_cart_locks[key]
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=ttl_seconds)
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
+async def cart_lock_release(phone: str, bot_number: str) -> None:
+    """
+    Release a previously acquired cart lock.
+
+    Redis path: DEL key.
+    Fallback path: release the asyncio.Lock if held.
+    """
+    key = _cart_lock_redis_key(phone, bot_number)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.delete(key)
+        return
+    _maybe_warn("cart_lock")
+    lock = _fb_cart_locks.get(key)
+    if lock is not None and lock.locked():
+        lock.release()

@@ -15,6 +15,10 @@ from app.services.agent import trigger_nps
 from app.routes.deps import require_auth, get_current_user, get_current_restaurant
 from app.services import loyalty as loyalty_svc
 from app.services.money import to_decimal, money_mul, quantize_money
+from app.services.logging import get_logger
+from app.repositories import tables_repo as tr
+
+log = get_logger(__name__)
 
 router = APIRouter()
 STATIC = Path(__file__).parent.parent / "static"
@@ -130,29 +134,21 @@ async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
     After migration 0018, branch_id is always NOT NULL and equals the owning
     restaurant's id (parent or branch).
     """
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT branch_id FROM restaurant_tables WHERE id = $1", table_id,
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Table not found")
-        rest_id = restaurant["id"]
-        table_branch_id = row["branch_id"]
+    row = await tr.db_verify_table_in_restaurant(table_id, restaurant["id"])
+    if not row:
+        raise HTTPException(status_code=404, detail="Table not found")
+    rest_id = restaurant["id"]
+    table_branch_id = row["branch_id"]
 
-        # Direct ownership: table belongs to this restaurant
-        if table_branch_id == rest_id:
+    # Direct ownership: table belongs to this restaurant
+    if table_branch_id == rest_id:
+        return
+    # Parent access: if current restaurant is the parent, allow branch tables
+    is_parent = restaurant.get("parent_restaurant_id") is None
+    if is_parent:
+        if await tr.db_verify_branch_is_child(table_branch_id, rest_id):
             return
-        # Parent access: if current restaurant is the parent, allow branch tables
-        is_parent = restaurant.get("parent_restaurant_id") is None
-        if is_parent:
-            branch = await conn.fetchrow(
-                "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
-                table_branch_id, rest_id,
-            )
-            if branch:
-                return
-        raise HTTPException(status_code=403, detail="Table does not belong to this restaurant")
+    raise HTTPException(status_code=403, detail="Table does not belong to this restaurant")
 
 
 @router.delete("/api/tables/{table_id}")
@@ -274,15 +270,12 @@ async def get_qr_sheet(request: Request, table_id: str):
 @router.get("/api/waiter-alerts")
 async def get_waiter_alerts(request: Request):
     await require_auth(request)
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        try:
-            # Quitamos status=active para prevenir error 500
-            rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
-        except Exception as e:
-            print(f"Error leyendo alertas: {e}")
-            rows = []
-    return {"alerts": [dict(r) for r in rows]}
+    try:
+        alerts = await tr.db_get_waiter_alerts()
+    except Exception as e:
+        log.error("tables.alerts_read_failed", error=str(e))
+        alerts = []
+    return {"alerts": alerts}
 
 class AdminCallRequest(BaseModel):
     phone: str = ""
@@ -307,12 +300,10 @@ async def admin_call_waiter(request: Request, body: AdminCallRequest):
 @router.post("/api/waiter-alerts/{alert_id}/dismiss")
 async def dismiss_waiter_alert(request: Request, alert_id: int):
     await require_auth(request)
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        try:
-            await conn.execute("DELETE FROM waiter_alerts WHERE id = $1", alert_id)
-        except Exception:
-            pass
+    try:
+        await tr.db_dismiss_waiter_alert(alert_id)
+    except Exception:
+        pass
     return {"success": True}
 
 # ── ELIMINAR CONVERSACIONES (MANUAL) ─────────────────────────────────
@@ -320,14 +311,10 @@ async def dismiss_waiter_alert(request: Request, alert_id: int):
 async def force_delete_conversation(request: Request, phone: str):
     """Permite al mesero limpiar un chat manualmente (ej. pruebas atascadas)"""
     username = await require_auth(request)
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        try:
-            await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
-            await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
-            await conn.execute("UPDATE table_sessions SET status = 'closed', closed_at = NOW(), closed_by = 'manual_delete', closed_by_username = $2 WHERE phone = $1 AND closed_at IS NULL", phone, username)
-        except Exception as e:
-            print(f"Error forzando limpieza de chat: {e}")
+    try:
+        await tr.db_force_delete_conversation_data(phone, username)
+    except Exception as e:
+        log.error("tables.chat_cleanup_failed", error=str(e))
     return {"success": True}
 
 # ── DELIVERY ORDERS ───────────────────────────────────────────────────
@@ -336,16 +323,7 @@ async def get_delivery_orders(request: Request):
     await require_auth(request)
     import json as _json
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """SELECT * FROM orders
-               WHERE order_type IN ('domicilio','recoger')
-               AND created_at >= NOW() - INTERVAL '24 hours'
-               AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
-               ORDER BY created_at DESC"""
-        )
-
+    rows = await tr.db_get_delivery_orders_for_caja()
     orders = []
     for r in rows:
         items = r["items"]
@@ -371,11 +349,7 @@ async def get_delivery_orders(request: Request):
 async def delivery_check_updates(request: Request):
     await require_auth(request)
     import hashlib as _hashlib
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, status FROM orders WHERE order_type IN ('domicilio','recoger') AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
-        )
+    rows = await tr.db_get_delivery_status_hash()
     h = _hashlib.md5(str([(r["id"], r["status"]) for r in rows]).encode()).hexdigest()
     return {"hash": h}
 
@@ -389,71 +363,68 @@ async def update_delivery_order_status(request: Request, order_id: str):
     if new_status not in valid:
         raise HTTPException(status_code=400, detail="Estado inválido")
         
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
-        
-        if new_status in ("confirmado", "en_camino", "entregado"):
-            row = await conn.fetchrow("SELECT phone, address, total FROM orders WHERE id=$1", order_id)
-            if row:
-                phone = row["phone"]
-                if new_status == "confirmado":
-                    msg = f"✅ ¡Tu pedido fue confirmado! Ya está en preparación y pronto estará listo. 🍽️"
-                elif new_status == "en_camino":
-                    msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
-                else:
-                    msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
+    await tr.db_update_delivery_order_status(order_id, new_status)
+
+    if new_status in ("confirmado", "en_camino", "entregado"):
+        row = await tr.db_get_delivery_order_contact(order_id)
+        if row:
+            phone = row["phone"]
+            if new_status == "confirmado":
+                msg = f"✅ ¡Tu pedido fue confirmado! Ya está en preparación y pronto estará listo. 🍽️"
+            elif new_status == "en_camino":
+                msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
+            else:
+                msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
+            try:
+                db_phone_id = await tr.db_get_meta_phone_id_for_session(phone)
+            except Exception:
+                db_phone_id = None
+            await send_wa_msg(phone, msg, db_phone_id)
+
+    if new_status == "confirmado":
+        order_row = await tr.db_get_delivery_order_full(order_id)
+        if order_row:
+            restaurant = await get_current_restaurant(request)
+            config = await billing.get_billing_config(restaurant["id"])
+
+            features = restaurant.get("features") or {}
+            if isinstance(features, str):
+                import json as _json
                 try:
-                    session = await conn.fetchrow("SELECT meta_phone_id FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1", phone)
-                    db_phone_id = session["meta_phone_id"] if session else None
+                    features = _json.loads(features)
                 except Exception:
-                    db_phone_id = None
-                await send_wa_msg(phone, msg, db_phone_id)
-                
-        if new_status == "confirmado":
-            order_row = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
-            if order_row:
-                restaurant = await get_current_restaurant(request)
-                config = await billing.get_billing_config(restaurant["id"])
-                
-                features = restaurant.get("features") or {}
-                if isinstance(features, str):
-                    import json as _json
-                    try:
-                        features = _json.loads(features)
-                    except Exception:
-                        features = {}
-                
-                raw_dian = features.get("dian_active", False)
-                if isinstance(raw_dian, str):
-                    dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
-                else:
-                    dian_active = bool(raw_dian)
+                    features = {}
 
-                items = order_row["items"]
-                if isinstance(items, str):
-                    import json as _json
-                    items = _json.loads(items)
+            raw_dian = features.get("dian_active", False)
+            if isinstance(raw_dian, str):
+                dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
+            else:
+                dian_active = bool(raw_dian)
 
-                if config and dian_active:
-                    config["_restaurant_id"] = restaurant["id"]
-                    provider = config.get("provider", "mesio_native")
-                    adapter = billing.get_adapter(provider)
-                    
-                    order_for_billing = {
-                        "id": order_id,
-                        "total": float(to_decimal(order_row["total"])),      # JSON boundary
-                        "subtotal": float(to_decimal(order_row["subtotal"])), # JSON boundary
-                        "service_charge": 0.0,
-                        "items": items,
-                        "payment_method": order_row.get("payment_method", "cash"),
-                        "order_ref": order_id,
-                        "customer": {"name": "Consumidor Final", "nit": "222222222", "email": ""}
-                    }
-                    try:
-                        await adapter.create_invoice(order_for_billing, config)
-                    except Exception:
-                        pass
+            items = order_row["items"]
+            if isinstance(items, str):
+                import json as _json
+                items = _json.loads(items)
+
+            if config and dian_active:
+                config["_restaurant_id"] = restaurant["id"]
+                provider = config.get("provider", "mesio_native")
+                adapter = billing.get_adapter(provider)
+
+                order_for_billing = {
+                    "id": order_id,
+                    "total": float(to_decimal(order_row["total"])),       # JSON boundary
+                    "subtotal": float(to_decimal(order_row["subtotal"])), # JSON boundary
+                    "service_charge": 0.0,
+                    "items": items,
+                    "payment_method": order_row.get("payment_method", "cash"),
+                    "order_ref": order_id,
+                    "customer": {"name": "Consumidor Final", "nit": "222222222", "email": ""}
+                }
+                try:
+                    await adapter.create_invoice(order_for_billing, config)
+                except Exception:
+                    pass
 
     return {"success": True}
 
@@ -474,35 +445,11 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
     role = user.get("role", "")
     is_admin = any(r in role for r in ("owner", "admin", "gerente"))
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        # Resolve effective branch_id: from header, user, or staff context
-        effective_bid = branch_id or user.get("restaurant_id")
-
-        if effective_bid is not None:
-            if status:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
-                    status, effective_bid
-                )
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
-                    effective_bid
-                )
-        elif is_admin:
-            # Owner/admin sin sucursal seleccionada: ve todas
-            if status:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status = $1 ORDER BY created_at ASC",
-                    status
-                )
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC"
-                )
-        else:
-            rows = []
+    # Resolve effective branch_id: from header, user, or staff context
+    effective_bid = branch_id or user.get("restaurant_id")
+    rows = await tr.db_get_table_orders_for_branch(
+        branch_id=effective_bid, status=status, is_admin=is_admin
+    )
 
     import json as _json
     result = []
@@ -531,47 +478,35 @@ async def get_order_ticket(request: Request, order_id: str):
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        if branch_id is not None:
-            rows = await conn.fetch(
-                """SELECT * FROM table_orders
-                   WHERE (id = $1 OR base_order_id = $1) AND branch_id = $2
-                   ORDER BY created_at ASC""",
-                order_id, branch_id)
-        else:
-            rows = await conn.fetch(
-                """SELECT * FROM table_orders
-                   WHERE id = $1 OR base_order_id = $1
-                   ORDER BY created_at ASC""",
-                order_id)
+    rows = await tr.db_get_table_orders_by_base_id(order_id, branch_id)
 
-        if not rows:
-            raise HTTPException(status_code=404, detail="Orden no encontrada")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-        # Agregar ítems y totales de todas las sub-órdenes
-        all_items: list = []
-        total: Decimal = Decimal("0")
-        notes_parts: list = []
-        first = dict(rows[0])
+    # Agregar ítems y totales de todas las sub-órdenes
+    all_items: list = []
+    total: Decimal = Decimal("0")
+    notes_parts: list = []
+    first = rows[0]
 
-        for row in rows:
-            d = dict(row)
-            items = d.get("items", [])
-            if isinstance(items, str):
-                try:
-                    items = _json.loads(items)
-                except Exception:
-                    items = []
-            if isinstance(items, list):
-                all_items.extend(items)
-            total += to_decimal(d.get("total") or 0)
-            if d.get("notes"):
-                notes_parts.append(d["notes"])
+    for row in rows:
+        items = row.get("items", [])
+        if isinstance(items, str):
+            try:
+                items = _json.loads(items)
+            except Exception:
+                items = []
+        if isinstance(items, list):
+            all_items.extend(items)
+        total += to_decimal(row.get("total") or 0)
+        if row.get("notes"):
+            notes_parts.append(row["notes"])
 
-        # Datos fiscales: última factura emitida para esta orden
-        fiscal = None
-        try:
+    # Datos fiscales: última factura emitida para esta orden (deferred to billing layer)
+    fiscal = None
+    try:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
             fiscal_row = await conn.fetchrow(
                 """SELECT cufe, qr_data, invoice_number, issue_date,
                           tax_regime, tax_pct, dian_status, uuid_dian
@@ -581,8 +516,8 @@ async def get_order_ticket(request: Request, order_id: str):
                 order_id)
             if fiscal_row:
                 fiscal = dict(fiscal_row)
-        except Exception:
-            pass  # tabla puede no existir en entornos sin billing
+    except Exception:
+        pass  # tabla puede no existir en entornos sin billing
 
     created = first.get("created_at")
     if created and hasattr(created, "isoformat"):
@@ -611,11 +546,11 @@ async def send_wa_msg(phone: str, text: str, db_phone_id: str = None):
                     headers={"Authorization": f"Bearer {token}"},
                     json={"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": text}}
                 )
-                print(f"✅ WA Notificación a {phone}: {resp.status_code}")
+                log.info("tables.wa_notification_sent", phone=phone, status=resp.status_code)
         except Exception as e:
-            print(f"❌ Error enviando WhatsApp: {e}")
+            log.error("tables.wa_notification_failed", phone=phone, error=str(e))
     else:
-        print(f"⚠️ No se envió WA a {phone} -> Faltan variables (Token: {bool(token)}, PhoneID: {final_phone_id})")
+        log.warning("tables.wa_notification_skipped_no_credentials", phone=phone, has_token=bool(token), phone_id=final_phone_id)
 
 
 async def send_wa_interactive_nps(phone: str, nps_label: str, db_phone_id: str = None):
@@ -624,7 +559,7 @@ async def send_wa_interactive_nps(phone: str, nps_label: str, db_phone_id: str =
     final_phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_ID", "")
 
     if not token or not final_phone_id:
-        print(f"⚠️ No se envió NPS interactivo a {phone} -> Faltan variables")
+        log.warning("tables.nps_interactive_skipped_no_credentials", phone=phone)
         return
 
     nps_text = (
@@ -653,9 +588,9 @@ async def send_wa_interactive_nps(phone: str, nps_label: str, db_phone_id: str =
                 headers={"Authorization": f"Bearer {token}"},
                 json=payload
             )
-            print(f"✅ WA NPS interactivo a {phone}: {resp.status_code}")
+            log.info("tables.nps_interactive_sent", phone=phone, status=resp.status_code)
     except Exception as e:
-        print(f"❌ Error enviando NPS interactivo: {e}")
+        log.error("tables.nps_interactive_failed", phone=phone, error=str(e))
 
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
@@ -667,31 +602,24 @@ async def update_order_status(request: Request, order_id: str):
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail="Estado inválido")
     
-    pool = await db.get_pool()
-    
-    async with pool.acquire() as conn:
-        # 🛡️ FIX: Agregamos table_id a la consulta
-        order_record = await conn.fetchrow("SELECT phone, table_name, base_order_id, table_id FROM table_orders WHERE id=$1", order_id)
-        
+    order_record = await tr.db_get_table_order_record(order_id)
     if not order_record:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-    order = dict(order_record)
+    order = order_record
     phone = order.get("phone")
     table_name = order.get("table_name", "tu mesa")
-    
+
     db_phone_id = None
     session_data = None
     if phone and phone != "manual":
-        async with pool.acquire() as conn:
-            try:
-                session = await conn.fetchrow("SELECT * FROM table_sessions WHERE phone=$1 AND closed_at IS NULL", phone)
-                if session:
-                    session_data = dict(session)
-                    db_phone_id = session_data.get("meta_phone_id")
-            except Exception:
-                from app.services.logging import get_logger as _gl  # noqa: PLC0415
-                _gl(__name__).exception("tables.session_lookup_error", phone=phone)
+        try:
+            session = await tr.db_get_open_table_session_by_phone(phone)
+            if session:
+                session_data = session
+                db_phone_id = session_data.get("meta_phone_id")
+        except Exception:
+            log.exception("tables.session_lookup_error", phone=phone)
 
     if status == "generar_factura":
         base_id = order.get("base_order_id") or order_id
@@ -770,16 +698,9 @@ async def get_tables_status(request: Request):
 
     tables = await db.db_get_tables(branch_id=branch_id)
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
+    session_map = await tr.db_get_active_session_table_ids()
+    pending_orders = await tr.db_get_pending_orders_by_branch(branch_id)
 
-        pending_orders = await conn.fetch(
-            "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
-            branch_id
-        )
-        
-    session_map = {s['table_id'] for s in active_sessions}
     order_map = {}
     for o in pending_orders:
         if o['table_id'] not in order_map:
@@ -806,27 +727,11 @@ async def adjust_table_bill(request: Request, base_order_id: str):
     if new_total < 0:
         raise HTTPException(status_code=400, detail="El total no puede ser negativo")
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        base_row = await conn.fetchrow(
-            "SELECT id FROM table_orders WHERE id=$1", base_order_id
-        )
-        if not base_row:
-            raise HTTPException(status_code=404, detail="Orden no encontrada")
+    found = await tr.db_adjust_table_bill(base_order_id, adjusted_items, new_total)
+    if not found:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-        # Update base order with the adjusted items and new total
-        await conn.execute(
-            "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1",
-            base_order_id, _json.dumps(adjusted_items), new_total
-        )
-        # Zero out sub-orders so they don't double-count in the bill sum
-        # Exclude the base order itself (base_order_id = id for the first order)
-        await conn.execute(
-            "UPDATE table_orders SET items='[]'::jsonb, total=0, updated_at=NOW() WHERE base_order_id=$1 AND id != $1",
-            base_order_id
-        )
-
-    print(f"✏️ Factura ajustada: {base_order_id} → total={new_total}", flush=True)
+    log.info("tables.invoice_adjusted", base_order_id=base_order_id, new_total=str(new_total))
     return {"success": True, "base_order_id": base_order_id, "new_total": float(new_total)}
 
 
@@ -1093,7 +998,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 total_cop=float(to_decimal(check["total"]) + to_decimal(body.service_charge)),
             ))
         else:
-            print(f"⚠️ Aviso: 'accrue_on_check' no está implementado en loyalty.py. Saltando puntos para el check {check_id}.")
+            log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
 
         order_row = await db.db_get_first_table_order(base_order_id)
         if order_row and order_row["status"] == "factura_entregada":

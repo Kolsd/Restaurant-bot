@@ -1101,8 +1101,15 @@ async function loadPOSData(forceRefresh = false) {
 function renderPOSFromCache() {
   if (!posCache.data) return;
   const { mainText, stockText, upsells, horaCounts, avgTicket, topPlato, topHora } = posCache.data;
-  document.getElementById('ai-main-text').innerHTML = mainText + ' <span style="font-size:10px;color:#888;">(caché)</span>';
-  document.getElementById('ai-stock-text').innerHTML = stockText;
+  const mainEl = document.getElementById('ai-main-text');
+  mainEl.textContent = mainText || '';
+  if (mainText) {
+    const cacheTag = document.createElement('span');
+    cacheTag.style.cssText = 'font-size:10px;color:#888;';
+    cacheTag.textContent = ' (caché)';
+    mainEl.appendChild(cacheTag);
+  }
+  document.getElementById('ai-stock-text').textContent = stockText || '';
   if (upsells) document.getElementById('upsell-container').innerHTML = upsells;
   if (topHora) document.getElementById('pos-hora-pico').textContent = topHora[0] + 'h';
   if (avgTicket) document.getElementById('pos-ticket').textContent = '$' + avgTicket.toLocaleString('es-CO');
@@ -1186,35 +1193,37 @@ async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
   const hoy   = dias[new Date().getDay()];
   const ctx   = `Datos semana "${(rest&&rest.name)||'el restaurante'}":\n- Pedidos: ${orders.length} (${domicilio} dom, ${recoger} recoger)\n- Ingresos: $${totalRevenue.toLocaleString('es-CO')}\n- Ticket prom: $${avgTicket.toLocaleString('es-CO')}\n- Top plato: ${topPlato?topPlato[0]+' ('+topPlato[1]+')':'sin datos'}\n- Hora pico: ${topHora?topHora[0]:'sin datos'}\n- Hoy: ${hoy}`;
 
+  // Proxy server-side — the API key never leaves the server.
   const callAI = async (sys, usr) => {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/ai/proxy', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1000, system:sys, messages:[{ role:'user', content:usr }] })
+      headers: { ...window._dashHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system: sys, user: usr, max_tokens: 1000 })
     });
+    if (!resp.ok) throw new Error('AI proxy ' + resp.status);
     const d = await resp.json();
-    return d.content?.[0]?.text || '';
+    return d.text || '';
   };
 
   document.getElementById('ai-main-text').innerHTML = '<span class="ai-loading">Analizando...</span>';
   try {
     const mainText = await callAI(
-      'Eres Mesio IA para restaurantes colombianos. Español, directo, máx 3 oraciones. Usa <strong> para resaltar.',
+      'Eres Mesio IA para restaurantes colombianos. Español, directo, máx 3 oraciones. Sin HTML.',
       ctx + '\n\nGenera un insight accionable para el gerente hoy.'
     );
-    document.getElementById('ai-main-text').innerHTML = mainText;
+    document.getElementById('ai-main-text').textContent = mainText;
     if (!posCache.data) posCache.data = {};
     posCache.data.mainText = mainText;
-  } catch(e) { document.getElementById('ai-main-text').innerHTML = 'Conecta más pedidos para análisis.'; }
+  } catch(e) { document.getElementById('ai-main-text').textContent = 'Conecta más pedidos para análisis.'; }
 
   try {
     const stockText = await callAI(
-      'Eres Mesio IA. Español, máx 2 oraciones, enfocado en inventario.',
+      'Eres Mesio IA. Español, máx 2 oraciones, enfocado en inventario. Sin HTML.',
       ctx + '\n\nHoy es ' + hoy + '. ¿Qué ingredientes asegurar con base en el plato top?'
     );
-    document.getElementById('ai-stock-text').innerHTML = stockText;
+    document.getElementById('ai-stock-text').textContent = stockText;
     if (posCache.data) posCache.data.stockText = stockText;
-  } catch(e) { document.getElementById('ai-stock-text').innerHTML = 'Datos insuficientes.'; }
+  } catch(e) { document.getElementById('ai-stock-text').textContent = 'Datos insuficientes.'; }
 
   try {
     const raw = await callAI(
@@ -1239,14 +1248,18 @@ async function askMesioAI() {
   responseDiv.style.display = 'block';
   responseDiv.textContent   = '✦ Analizando tu pregunta...';
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1000,
-        system:'Eres Mesio IA, experto en restaurantes colombianos. Español, directo, máx 150 palabras.',
-        messages:[{ role:'user', content:question }] })
+    // Proxy server-side — the API key never leaves the server.
+    const resp = await fetch('/api/ai/proxy', {
+      method: 'POST',
+      headers: { ...window._dashHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: 'Eres Mesio IA, experto en restaurantes colombianos. Español, directo, máx 150 palabras. Sin HTML.',
+        user: question,
+        max_tokens: 1000
+      })
     });
     const d = await resp.json();
-    responseDiv.innerHTML = '✦ ' + _escHtml(d.content?.[0]?.text || 'No pude procesar.');
+    responseDiv.textContent = '✦ ' + (d.text || 'No pude procesar.');
   } catch(e) { responseDiv.textContent = 'Error al conectar.'; }
   btn.textContent = 'Preguntar a Mesio IA →'; btn.disabled = false;
 }
@@ -1675,31 +1688,6 @@ async function deleteStaff(id, name) {
     }
   } catch(e) {
     alert('Error de conexión.');
-  }
-}
-
-async function _loadStaffBranchesSelect() {
-  const select = document.getElementById('invite-branch-id');
-  if (!select) return;
-
-  try {
-    const r = await fetch('/api/team/branches', { headers: window._dashHeaders });
-    if (r.ok) {
-      const data = await r.json();
-      const branches = data.branches || [];
-      
-      // Limpiamos y añadimos la opción por defecto (Matriz)
-      select.innerHTML = '<option value="">— Casa Matriz —</option>';
-      
-      branches.forEach(b => {
-        const opt = document.createElement('option');
-        opt.value = b.id;
-        opt.textContent = b.name;
-        select.appendChild(opt);
-      });
-    }
-  } catch (e) {
-    console.error('Error al cargar el selector de sucursales en Staff:', e);
   }
 }
 

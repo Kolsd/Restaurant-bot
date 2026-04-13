@@ -10,6 +10,10 @@ from app.services.orders import cart_summary, clear_cart
 from app.routes.deps import require_auth, get_current_restaurant
 from app.services.agent import trigger_nps
 from app.services import loyalty as loyalty_svc
+from app.services.logging import get_logger
+from app.repositories import tables_repo as tr
+
+log = get_logger(__name__)
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -63,7 +67,7 @@ async def view_cart(request: Request, phone: str, bot_number: str):
 async def wompi_webhook(request: Request):
     # 🚨 FIX DE SEGURIDAD CON INDENTACIÓN CORRECTA
     if not WOMPI_EVENTS_SECRET:
-        print("🚨 ALERTA: Intento de webhook de Wompi, pero WOMPI_EVENTS_SECRET no está configurado.", flush=True)
+        log.error("orders.wompi_secret_not_configured")
         raise HTTPException(status_code=500, detail="Configuración de pasarela de pagos incompleta")
 
     body_bytes = await request.body()
@@ -94,7 +98,7 @@ async def wompi_webhook(request: Request):
 
                 result = await db.db_confirm_payment(reference, transaction_id)
                 if result:
-                    print(f"Payment confirmed — Order: {reference} — {result['total']}", flush=True)
+                    log.info("orders.payment_confirmed", reference=reference, total=str(result['total']))
                     # Acumulación de puntos loyalty en background (silenciosa)
                     asyncio.create_task(loyalty_svc.accrue_on_order(
                         bot_number=result.get("bot_number", ""),
@@ -132,7 +136,7 @@ class UpdateOrderStatusRequest(BaseModel):
 
 async def send_delivery_notification(phone: str, status: str, bot_number: str = "", order_type: str = "domicilio"):
     """Envía un mensaje automático de WhatsApp según el estado del pedido"""
-    print(f"🔔 send_delivery_notification: status={status} phone={phone} bot_number={bot_number}", flush=True)
+    log.info("orders.delivery_notification", status=status, phone=phone, bot_number=bot_number)
 
     # Fetch restaurant credentials first (restaurant-specific phone_id takes priority)
     rest_name = ""
@@ -145,7 +149,7 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                 rest_name = rest.get("name", "")
                 rest_phone_id = rest.get("wa_phone_id", "") or ""
                 rest_token = rest.get("wa_access_token", "") or ""
-                print(f"🏪 Restaurante encontrado: {rest_name} | phone_id={'SET' if rest_phone_id else 'NULL'} | token={'SET' if rest_token else 'NULL'}", flush=True)
+                log.info("orders.restaurant_resolved", name=rest_name, has_phone_id=bool(rest_phone_id), has_token=bool(rest_token))
 
                 # Si la sucursal no tiene credenciales propias, heredar del restaurante padre
                 if (not rest_phone_id or not rest_token) and rest.get("parent_restaurant_id"):
@@ -157,17 +161,17 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                             rest_token = parent.get("wa_access_token", "") or ""
                         if not rest_name:
                             rest_name = parent.get("name", "")
-                        print(f"🔄 Credenciales heredadas del padre: phone_id={'SET' if rest_phone_id else 'NULL'} | token={'SET' if rest_token else 'NULL'}", flush=True)
+                        log.info("orders.restaurant_credentials_inherited", has_phone_id=bool(rest_phone_id), has_token=bool(rest_token))
             else:
-                print(f"⚠️ No se encontró restaurante para bot_number={bot_number}", flush=True)
+                log.warning("orders.restaurant_not_found", bot_number=bot_number)
         except Exception as e:
-            print(f"❌ Error buscando restaurante para notificación: {e}", flush=True)
+            log.error("orders.restaurant_lookup_failed", bot_number=bot_number, error=str(e))
 
     token = rest_token or os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     phone_id = rest_phone_id or os.getenv("META_PHONE_NUMBER_ID", "")
 
     has_credentials = bool(token and phone_id)
-    print(f"🔑 Credenciales: token={'OK' if token else 'FALTA'} | phone_id={'OK: '+phone_id if phone_id else 'FALTA'}", flush=True)
+    log.info("orders.delivery_credentials_check", has_token=bool(token), has_phone_id=bool(phone_id))
 
     is_pickup = order_type == "recoger"
 
@@ -206,22 +210,22 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                     }
                 )
                 if res.status_code == 200:
-                    print(f"📤 Notificación de delivery enviada a {clean_phone} (status={status})", flush=True)
+                    log.info("orders.delivery_notification_sent", phone=clean_phone, status=status)
                 else:
-                    print(f"❌ Meta rechazó notificación delivery: {res.status_code} — {res.text[:200]}", flush=True)
+                    log.error("orders.delivery_notification_rejected", phone=clean_phone, status=res.status_code, body=res.text[:200])
         except Exception as e:
-            print(f"❌ Error enviando notificación de delivery: {e}", flush=True)
+            log.error("orders.delivery_notification_failed", phone=clean_phone, error=str(e))
     else:
-        print(f"🚫 Sin credenciales para notificación delivery — token={'missing' if not token else 'ok'} phone_id={'missing' if not phone_id else 'ok'} bot={bot_number}", flush=True)
+        log.warning("orders.delivery_notification_no_credentials", phone=phone, bot_number=bot_number, has_token=bool(token), has_phone_id=bool(phone_id))
 
     # NPS dispara en entregado para ambos tipos de orden.
     # trigger_nps sets Redis state; the next inbound message will handle the score.
     if status == 'entregado' and bot_number:
         try:
             await trigger_nps(phone, bot_number, rest_name)
-            print(f"⭐ NPS iniciado post-entrega: {phone}", flush=True)
+            log.info("orders.nps_triggered_post_delivery", phone=phone)
         except Exception as e:
-            print(f"❌ Error iniciando NPS post-entrega: {e}", flush=True)
+            log.error("orders.nps_trigger_failed", phone=phone, error=str(e))
 
         if has_credentials:
             # Send interactive NPS message with "No calificar" button
@@ -252,26 +256,15 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                         }
                     )
             except Exception as e:
-                print(f"❌ Error enviando NPS interactivo delivery: {e}")
+                log.error("orders.nps_interactive_delivery_failed", phone=phone, error=str(e))
 
 
 @router.get("/delivery/check-updates")
 async def check_delivery_updates(request: Request):
     restaurant = await get_current_restaurant(request)
-    restaurant_id = restaurant["id"]
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT o.id, o.status
-            FROM orders o
-            JOIN restaurants r ON r.whatsapp_number = o.bot_number
-            WHERE o.order_type IN ('domicilio', 'recoger')
-              AND o.status IN ('pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
-              AND r.id = $1
-            ORDER BY o.id
-        """, restaurant_id)
-        current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
-        return {"hash": current_state_hash}
+    rows = await tr.db_get_delivery_status_hash_for_restaurant(restaurant["id"])
+    current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
+    return {"hash": current_state_hash}
 
 @router.get("/delivery/orders")
 async def get_delivery_orders(request: Request):

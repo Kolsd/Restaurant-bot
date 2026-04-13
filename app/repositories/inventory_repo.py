@@ -55,100 +55,21 @@ async def _sync_dish_availability(dish_names: list, available: bool, restaurant_
         await _sync_dish_availability_conn(conn, dish_names, available, restaurant_id)
 
 
-# ── DDL init (legacy — schema managed by Alembic) ────────────────────────────
+# ── DDL init (legacy stubs — schema is fully managed by Alembic) ─────────────
+# Tables: nps_responses, inventory, inventory_history, nps_waiting → 0001_initial_schema.py
+# Table:  dish_recipes → 0001_initial_schema.py
+# Indexes: idx_table_orders_base, idx_table_orders_station → 0001_initial_schema.py
+# Index:   idx_rest_tables_lookup → 0020_missing_runtime_tables.py
+# Columns: conversations.created_at, restaurants.google_maps_url → 0001_initial_schema.py
 
 async def db_init_nps_inventory():
-    """Inicializa las tablas de NPS e Inventario — llamar desde main.py en el startup"""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS nps_responses (
-                id          SERIAL PRIMARY KEY,
-                phone       TEXT NOT NULL,
-                bot_number  TEXT NOT NULL DEFAULT '',
-                score       INTEGER NOT NULL CHECK (score BETWEEN 1 AND 5),
-                comment     TEXT DEFAULT '',
-                created_at  TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS inventory (
-                id              SERIAL PRIMARY KEY,
-                restaurant_id   INTEGER NOT NULL,
-                name            TEXT NOT NULL,
-                unit            TEXT NOT NULL DEFAULT 'unidades',
-                current_stock   NUMERIC(10,2) NOT NULL DEFAULT 0,
-                min_stock       NUMERIC(10,2) NOT NULL DEFAULT 0,
-                linked_dishes   JSONB NOT NULL DEFAULT '[]'::jsonb,
-                cost_per_unit   NUMERIC(10,2) DEFAULT 0,
-                created_at      TIMESTAMP DEFAULT NOW(),
-                updated_at      TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS inventory_history (
-                id              SERIAL PRIMARY KEY,
-                inventory_id    INTEGER NOT NULL,
-                quantity_delta  NUMERIC(10,2) NOT NULL,
-                stock_after     NUMERIC(10,2) NOT NULL,
-                reason          TEXT NOT NULL DEFAULT 'ajuste_manual',
-                created_at      TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS nps_waiting (
-                phone       TEXT NOT NULL,
-                bot_number  TEXT NOT NULL,
-                created_at  TIMESTAMP DEFAULT NOW(),
-                PRIMARY KEY (phone, bot_number)
-            );
-        """)
-
-        # Índices (ignoramos si ya existen)
-        for idx_sql in [
-            "CREATE INDEX IF NOT EXISTS idx_table_orders_base    ON table_orders(base_order_id)",
-            "CREATE INDEX IF NOT EXISTS idx_table_orders_station ON table_orders(station)",
-            "CREATE INDEX IF NOT EXISTS idx_rest_tables_lookup   ON restaurant_tables(number, branch_id)",
-        ]:
-            try: await conn.execute(idx_sql)
-            except Exception: pass
-
-        # Migraciones de columnas nuevas en tablas existentes
-        for col_sql in [
-            "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
-            "ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS google_maps_url TEXT DEFAULT ''",
-        ]:
-            try:
-                await conn.execute(col_sql)
-            except Exception:
-                pass
-
-    print("✅ Tablas NPS e Inventario listas", flush=True)
+    """No-op: schema handled by Alembic (run `alembic upgrade head` before deploying)."""
+    pass
 
 
 async def db_init_dish_recipes():
-    """
-    Crea la tabla dish_recipes (escandallos).
-    Mapea platos del menú a sus ingredientes con cantidad exacta por porción.
-    Llamar desde main.py en el startup, después de db_init_fiscal_tables().
-    """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS dish_recipes (
-                id              SERIAL PRIMARY KEY,
-                restaurant_id   INTEGER       NOT NULL,
-                dish_name       TEXT          NOT NULL,
-                ingredient_id   INTEGER       NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
-                quantity        NUMERIC(10,4) NOT NULL CHECK (quantity > 0),
-                created_at      TIMESTAMP DEFAULT NOW(),
-                updated_at      TIMESTAMP DEFAULT NOW(),
-                UNIQUE (restaurant_id, dish_name, ingredient_id)
-            )
-        """)
-        for idx_sql in [
-            "CREATE INDEX IF NOT EXISTS idx_dish_recipes_lookup     ON dish_recipes(restaurant_id, dish_name)",
-            "CREATE INDEX IF NOT EXISTS idx_dish_recipes_ingredient ON dish_recipes(ingredient_id)",
-        ]:
-            await conn.execute(idx_sql)
-    print("Dish recipes table ready", flush=True)
+    """No-op: schema handled by Alembic (run `alembic upgrade head` before deploying)."""
+    pass
 
 
 # ── Inventory CRUD ────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import os
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
+from app.repositories import conversations_repo
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 
 _NPS_INTERNAL_KEY = os.getenv("NPS_INTERNAL_KEY", "")
@@ -64,8 +65,5 @@ async def set_google_maps_url(request: Request):
     if isinstance(features, str):
         import json; features = json.loads(features)
     features["google_maps_url"] = url
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        import json
-        await conn.execute("UPDATE restaurants SET features = $1::jsonb WHERE id = $2", json.dumps(features), restaurant["id"])
+    await conversations_repo.db_update_restaurant_features(restaurant["id"], features)
     return {"success": True, "url": url}

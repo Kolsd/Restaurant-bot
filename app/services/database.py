@@ -4,6 +4,9 @@ import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from app.services.money import to_decimal, money_mul, money_sum, quantize_money, ZERO
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -641,7 +644,7 @@ async def db_cleanup_expired_sessions():
         result = await conn.execute("DELETE FROM sessions WHERE expires_at < NOW()")
         count = int(result.split()[-1]) if result else 0
         if count > 0:
-            print(f"🧹 Sesiones expiradas eliminadas: {count}", flush=True)
+            log.info("database.sessions_expired_cleaned", count=count)
 
 
 # === Conversations (carts): moved to app.repositories.conversations_repo (Fase 6) ===
@@ -810,86 +813,8 @@ from app.repositories.inventory_repo import (
 # ══════════════════════════════════════════════════════════════════════
 
 async def db_init_fiscal_tables():
-    """
-    Crea las tablas de Facturación Electrónica DIAN.
-    fiscal_resolution: resolución DIAN por restaurante (prefijo, rango, ClTec).
-    fiscal_invoices:   registro inmutable de cada factura emitida con sus datos fiscales.
-    Llamar desde main.py en el startup, después de db_init_nps_inventory().
-    """
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS fiscal_resolution (
-                id                SERIAL PRIMARY KEY,
-                restaurant_id     INTEGER NOT NULL UNIQUE,
-                resolution_number TEXT    NOT NULL,
-                resolution_date   DATE    NOT NULL,
-                prefix            TEXT    NOT NULL DEFAULT '',
-                from_number       INTEGER NOT NULL,
-                to_number         INTEGER NOT NULL,
-                valid_from        DATE    NOT NULL,
-                valid_to          DATE    NOT NULL,
-                technical_key     TEXT    NOT NULL,
-                current_number    INTEGER NOT NULL DEFAULT 0,
-                environment       TEXT    NOT NULL DEFAULT 'test',
-                software_id       TEXT    NOT NULL DEFAULT '',
-                software_pin      TEXT    NOT NULL DEFAULT '',
-                updated_at        TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS fiscal_invoices (
-                id                  SERIAL PRIMARY KEY,
-                billing_log_id      INTEGER REFERENCES billing_log(id) ON DELETE SET NULL,
-                restaurant_id       INTEGER NOT NULL,
-                order_id            TEXT    NOT NULL,
-
-                resolution_number   TEXT    NOT NULL,
-                prefix              TEXT    NOT NULL DEFAULT '',
-                invoice_number      INTEGER NOT NULL,
-
-                issue_date          DATE      NOT NULL DEFAULT CURRENT_DATE,
-                issue_time          TIME      NOT NULL DEFAULT CURRENT_TIME,
-
-                subtotal_cents      BIGINT    NOT NULL DEFAULT 0,
-                tax_regime          TEXT      NOT NULL DEFAULT 'iva',
-                tax_pct             NUMERIC(5,2) NOT NULL DEFAULT 19.00,
-                tax_cents           BIGINT    NOT NULL DEFAULT 0,
-                total_cents         BIGINT    NOT NULL DEFAULT 0,
-
-                cufe                TEXT      NOT NULL DEFAULT '',
-                qr_data             TEXT      NOT NULL DEFAULT '',
-                uuid_dian           TEXT      NOT NULL DEFAULT '',
-
-                xml_content         TEXT,
-                pdf_url             TEXT,
-
-                customer_nit        TEXT      NOT NULL DEFAULT '222222222',
-                customer_name       TEXT      NOT NULL DEFAULT 'Consumidor Final',
-                customer_email      TEXT      NOT NULL DEFAULT '',
-                customer_id_type    TEXT      NOT NULL DEFAULT '13',
-
-                payment_method      TEXT      NOT NULL DEFAULT 'cash',
-
-                dian_status         TEXT      NOT NULL DEFAULT 'draft',
-                dian_response       JSONB     DEFAULT NULL,
-
-                created_at          TIMESTAMP DEFAULT NOW(),
-
-                UNIQUE (restaurant_id, resolution_number, invoice_number)
-            );
-        """)
-
-        for idx_sql in [
-            "CREATE INDEX IF NOT EXISTS idx_fiscal_invoices_restaurant ON fiscal_invoices(restaurant_id, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_fiscal_invoices_order ON fiscal_invoices(order_id)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fiscal_invoices_cufe ON fiscal_invoices(cufe) WHERE cufe != ''",
-        ]:
-            try:
-                await conn.execute(idx_sql)
-            except Exception:
-                pass
-
-    print("Fiscal tables initialized", flush=True)
+    """No-op: fiscal_resolution and fiscal_invoices managed by Alembic (0001_initial_schema.py)."""
+    pass
 
 
 async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
@@ -1090,27 +1015,9 @@ async def db_update_invoice_dian_data(
 # SUBSCRIPTION USAGE — consumo diario de tokens y facturas
 # ══════════════════════════════════════════════════════════════════════
 
-_usage_table_ensured = False
-
 async def _ensure_usage_table() -> None:
-    """Crea subscription_usage si no existe (DDL idempotente, ejecuta una vez por proceso)."""
-    global _usage_table_ensured
-    if _usage_table_ensured:
-        return
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS subscription_usage (
-                id             BIGSERIAL   PRIMARY KEY,
-                restaurant_id  INTEGER     NOT NULL,
-                usage_date     DATE        NOT NULL DEFAULT CURRENT_DATE,
-                total_tokens   INTEGER     NOT NULL DEFAULT 0,
-                total_invoices INTEGER     NOT NULL DEFAULT 0,
-                updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE (restaurant_id, usage_date)
-            )
-        """)
-    _usage_table_ensured = True
+    """No-op: subscription_usage managed by Alembic (0020_missing_runtime_tables.py)."""
+    pass
 
 
 async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
@@ -1246,47 +1153,9 @@ from app.repositories.staff_repo import (
 #   "loyalty_point_value_cop": valor en COP de cada punto al canjear        (default: 10)
 # ══════════════════════════════════════════════════════════════════════
 
-_loyalty_tables_ensured = False
-
-
 async def _ensure_loyalty_tables() -> None:
-    global _loyalty_tables_ensured
-    if _loyalty_tables_ensured:
-        return
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS loyalty_customers (
-                id             SERIAL PRIMARY KEY,
-                restaurant_id  INTEGER NOT NULL,
-                phone          TEXT    NOT NULL,
-                points_balance INTEGER NOT NULL DEFAULT 0,
-                total_earned   INTEGER NOT NULL DEFAULT 0,
-                total_redeemed INTEGER NOT NULL DEFAULT 0,
-                created_at     TIMESTAMP DEFAULT NOW(),
-                updated_at     TIMESTAMP DEFAULT NOW(),
-                UNIQUE (restaurant_id, phone)
-            );
-            CREATE TABLE IF NOT EXISTS loyalty_ledger (
-                id            BIGSERIAL PRIMARY KEY,
-                restaurant_id INTEGER NOT NULL,
-                phone         TEXT    NOT NULL,
-                delta         INTEGER NOT NULL,
-                reason        TEXT    NOT NULL DEFAULT 'purchase',
-                order_id      TEXT,
-                created_at    TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        for idx in [
-            "CREATE INDEX IF NOT EXISTS idx_loyalty_cust_lookup   ON loyalty_customers (restaurant_id, phone)",
-            "CREATE INDEX IF NOT EXISTS idx_loyalty_ledger_lookup  ON loyalty_ledger    (restaurant_id, phone, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_loyalty_ledger_order   ON loyalty_ledger    (order_id) WHERE order_id IS NOT NULL",
-        ]:
-            try:
-                await conn.execute(idx)
-            except Exception:
-                pass
-    _loyalty_tables_ensured = True
+    """No-op: loyalty_customers and loyalty_ledger managed by Alembic (0020_missing_runtime_tables.py)."""
+    pass
 
 
 async def _loyalty_cfg(conn, restaurant_id: int) -> dict:

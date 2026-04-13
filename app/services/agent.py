@@ -345,7 +345,7 @@ async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
         await db.db_save_nps_waiting(phone, bot_number)
     except Exception:
         log.exception("nps_save_waiting_failed", phone=phone, bot_number=bot_number)
-    print(f"⭐ NPS iniciado para {phone}", flush=True)
+    log.info("nps.triggered", phone=phone, bot_number=bot_number)
 
 
 # ── Module restriction rules ──────────────────────────────────────────────────
@@ -541,10 +541,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     continue
                 res = await orders.add_to_cart(phone, name, qty, bot_number)
                 if res["success"]:
-                    print(f"🛒 '{res['dish']['name']}' x{qty}", flush=True)
+                    log.info("cart.item_added", dish=res['dish']['name'], qty=qty, phone=phone)
                 else:
                     cart_errors.append(name)
-                    print(f"⚠️ No encontrado en menú: '{name}'", flush=True)
+                    log.warning("cart.item_not_found", name=name, phone=phone)
 
             if cart_errors and len(cart_errors) == len([i for i in items if i.get("name")]):
                 names = ", ".join(cart_errors)
@@ -557,7 +557,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         # ── Salon actions (order, bill, waiter) ───────────────────────────
         elif action == "order":
             if not table_context:
-                print(f"Warning: 'order' attempted without table context for {phone}. Blocked.", flush=True)
+                log.warning("agent.order_without_table_context", phone=phone)
                 base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
                 menu_url = f"{base_url}/catalog?bot={bot_number}" if base_url else f"/catalog?bot={bot_number}"
                 return f"Para tomar tu pedido, necesito saber en qué mesa estás. ¿En qué número de mesa te encuentras?\n\nSi prefieres Domicilio o Recoger, usa nuestro menú digital: {menu_url}"
@@ -663,11 +663,11 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         # ── End session (shared, both flows) ──────────────────────────────
         elif action == "end_session":
             if session_state.get("has_order") and not session_state.get("order_delivered"):
-                print(f"⚠️ end_session bloqueado — pedido en cocina {phone}", flush=True)
+                log.warning("agent.end_session_blocked_order_pending", phone=phone)
                 return reply
             if session_state.get("order_delivered"):
                 if await db.db_has_pending_invoice(phone):
-                    print(f"⚠️ end_session bloqueado — factura pendiente {phone}", flush=True)
+                    log.warning("agent.end_session_blocked_invoice_pending", phone=phone)
                     return reply
             await db.db_close_session(phone=phone, bot_number=bot_number,
                                       reason="client_goodbye", closed_by_username="")
@@ -675,7 +675,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             async with pool.acquire() as conn:
                 await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
                                    phone, bot_number)
-            print(f"👋 Sesión cerrada: {phone}", flush=True)
+            log.info("agent.session_closed", phone=phone)
             await trigger_nps(phone, bot_number, "")
 
     except Exception:
@@ -685,109 +685,173 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
 HISTORY_WINDOW = 5
 
-async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
-    user_message_clean = _sanitize_user_input(user_message)
-    user_message_clean = re.sub(r'\s*\[(?:table_id|t):[^\]]+\]', '', user_message_clean).strip()
 
-    # ── GUARD POST-NPS: si la encuesta fue completada recientemente y no hay sesión activa ──
-    if await state_store.nps_is_done(user_phone, bot_number):
-        _active_sess = await db.db_get_active_session(user_phone, bot_number)
-        if not _active_sess:
-            if len(user_message_clean.strip()) > 30:
-                await state_store.nps_delete(user_phone, bot_number)
-                log.info("nps_done_cleared_new_order", phone=user_phone, bot_number=bot_number)
-            else:
-                return None
+# ─────────────────────────────────────────────────────────────────────────────
+# chat() helpers — private, used only by the orchestrator below
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # ── FLUJO DE ENCUESTA (NPS) ──
-    if await state_store.nps_get(user_phone, bot_number) is not None:
-        restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number) or {}
-        nps_restaurant_name = restaurant_data.get("name", "nuestro restaurante")
+def _clean_incoming_message(user_message: str) -> str:
+    """Sanitize raw incoming text and strip table-id tags left by old QR links."""
+    cleaned = _sanitize_user_input(user_message)
+    cleaned = re.sub(r'\s*\[(?:table_id|t):[^\]]+\]', '', cleaned).strip()
+    return cleaned
 
-        features = restaurant_data.get("features", {})
-        if isinstance(features, str):
-            try:
-                import json as _json
-                features = _json.loads(features)
-            except (json.JSONDecodeError, ValueError):
-                features = {}
-        nps_google_maps_url = features.get("google_maps_url", "")
 
-        nps_reply = await _handle_nps_flow(
-            user_phone, bot_number, user_message_clean,
-            nps_restaurant_name, nps_google_maps_url
+async def _handle_nps_guard(user_phone: str, bot_number: str,
+                             user_message_clean: str) -> bool:
+    """
+    Handle the post-NPS cooldown guard.
+
+    Returns True when the message was consumed by the guard and chat() should
+    return None (i.e. stay silent).  Returns False when processing should
+    continue normally.
+    """
+    if not await state_store.nps_is_done(user_phone, bot_number):
+        return False
+    _active_sess = await db.db_get_active_session(user_phone, bot_number)
+    if _active_sess:
+        return False
+    if len(user_message_clean.strip()) > 30:
+        await state_store.nps_delete(user_phone, bot_number)
+        log.info("nps_done_cleared_new_order", phone=user_phone, bot_number=bot_number)
+        return False   # cleared — let the normal flow proceed
+    return True        # short message while NPS done and no session → stay silent
+
+
+async def _try_nps_active_flow(user_phone: str, bot_number: str,
+                                user_message_clean: str) -> dict | None:
+    """
+    If an NPS flow is active, handle the message inside it and return a ready
+    response dict.  Returns None when there is no active NPS flow.
+    """
+    if await state_store.nps_get(user_phone, bot_number) is None:
+        return None
+
+    restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number) or {}
+    nps_restaurant_name = restaurant_data.get("name", "nuestro restaurante")
+
+    features = restaurant_data.get("features", {})
+    if isinstance(features, str):
+        try:
+            features = json.loads(features)
+        except (json.JSONDecodeError, ValueError):
+            features = {}
+    nps_google_maps_url = features.get("google_maps_url", "")
+
+    nps_reply = await _handle_nps_flow(
+        user_phone, bot_number, user_message_clean,
+        nps_restaurant_name, nps_google_maps_url,
+    )
+
+    if nps_reply == "":
+        # Silent response from NPS handler
+        if len(user_message_clean.strip()) > 30:
+            await state_store.nps_delete(user_phone, bot_number)
+            return None   # cleared → fall through to normal flow
+        return {}         # sentinel: caller should return None (stay silent)
+
+    current_nps = await state_store.nps_get(user_phone, bot_number)
+    if current_nps is None or current_nps.get("state") == "cooldown":
+        try:
+            await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
+        except Exception:
+            log.exception("nps_close_session_failed", phone=user_phone, bot_number=bot_number)
+
+    return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
+
+
+async def _try_checkout_flow(user_phone: str, bot_number: str,
+                              user_message_clean: str) -> dict | None:
+    """
+    If a checkout flow is active, handle the message and return a response dict.
+    Returns None when there is no active checkout.
+    """
+    if await state_store.checkout_get(user_phone, bot_number) is None:
+        return None
+
+    ck_reply = await handle_checkout_flow(user_phone, bot_number, user_message_clean, None)
+    if ck_reply:
+        await db.db_save_history(
+            user_phone, bot_number,
+            [{"role": "user", "content": user_message_clean},
+             {"role": "assistant", "content": ck_reply}],
+            branch_id=None,
         )
+        return {"message": ck_reply}
+    return None
 
-        if nps_reply == "":
-            if len(user_message_clean.strip()) > 30:
-                await state_store.nps_delete(user_phone, bot_number)
-            else:
-                return None
-        else:
-            current_nps = await state_store.nps_get(user_phone, bot_number)
-            if current_nps is None or current_nps.get("state") == "cooldown":
-                try:
-                    await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
-                except Exception:
-                    log.exception("nps_close_session_failed", phone=user_phone, bot_number=bot_number)
 
-            return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
+def _parse_features(raw_feats) -> dict:
+    """Normalise a features value that may arrive as a JSON string or dict."""
+    if isinstance(raw_feats, str):
+        try:
+            raw_feats = json.loads(raw_feats)
+        except (json.JSONDecodeError, ValueError):
+            raw_feats = {}
+    return raw_feats if isinstance(raw_feats, dict) else {}
 
-    # ── FLUJO DE CHECKOUT (bot-driven payment) — delegated to agent_salon ──
-    if await state_store.checkout_get(user_phone, bot_number) is not None:
-        ck_reply = await handle_checkout_flow(user_phone, bot_number, user_message_clean, None)
-        if ck_reply:
-            await db.db_save_history(
-                user_phone, bot_number,
-                [{"role": "user", "content": user_message_clean},
-                 {"role": "assistant", "content": ck_reply}],
-                branch_id=None,
-            )
-            return {"message": ck_reply}
 
-    table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
-    session_state = await get_session_state(user_phone, bot_number)
+async def _load_restaurant_context(
+    bot_number: str,
+    table_context: dict | None,
+    user_phone: str,
+    meta_phone_id: str,
+) -> dict | None:
+    """
+    Resolve restaurant data, features, and payment-method text.
 
-    restaurant_name = "nuestro restaurante"
-    google_maps_url = ""
-    payment_methods_text = ""
-    inst_text = ""
-    feats: dict = {}  # resolved features — used for module restrictions in system prompt
-
+    Returns a dict with keys:
+        restaurant_obj, restaurant_name, feats, google_maps_url,
+        payment_methods_text
+    Returns None when the restaurant is not found (caller should return early).
+    """
     restaurant_obj = await db.db_get_restaurant_by_bot_number(bot_number)
     if restaurant_obj is None:
-        print(f"⚠️ Bot number {bot_number} no está asociado a ningún restaurante.", flush=True)
-        return {"message": ""}
+        log.warning("agent.restaurant_not_found", bot_number=bot_number)
+        return None
 
     restaurant_name = restaurant_obj.get("name", "nuestro restaurante")
-    feats = restaurant_obj.get("features", {})
-    if isinstance(feats, str):
-        try: feats = json.loads(feats)
-        except (json.JSONDecodeError, ValueError): feats = {}
-    if not isinstance(feats, dict): feats = {}
-    google_maps_url = feats.get("google_maps_url", "")
+    feats = _parse_features(restaurant_obj.get("features", {}))
     payment_methods = feats.get("payment_methods", [])
-    if payment_methods:
-        payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
+    payment_methods_text = "\n".join(f"• {m}" for m in payment_methods) if payment_methods else ""
 
-    # Buscar por branch_id si hay contexto de mesa
+    # Override with branch-specific data when the client is sitting at a table
     if table_context and table_context.get("branch_id"):
         r = await db.db_get_restaurant_by_id(table_context["branch_id"])
         if r:
             restaurant_name = r.get("name", restaurant_name)
-            feats = r.get("features", {})
-            if isinstance(feats, str):
-                try: feats = json.loads(feats)
-                except (json.JSONDecodeError, ValueError): feats = {}
-            if not isinstance(feats, dict): feats = {}
-            google_maps_url = feats.get("google_maps_url", "")
+            feats = _parse_features(r.get("features", {}))
             payment_methods = feats.get("payment_methods", [])
-            if payment_methods:
-                payment_methods_text = "\n".join(f"• {m}" for m in payment_methods)
+            payment_methods_text = "\n".join(f"• {m}" for m in payment_methods) if payment_methods else ""
 
     if meta_phone_id and table_context:
         await db.db_touch_session_with_phone_id(user_phone, bot_number, meta_phone_id)
 
+    return {
+        "restaurant_obj": restaurant_obj,
+        "restaurant_name": restaurant_name,
+        "feats": feats,
+        "google_maps_url": feats.get("google_maps_url", ""),
+        "payment_methods_text": payment_methods_text,
+    }
+
+
+async def _build_enriched_user_message(
+    user_message_clean: str,
+    user_phone: str,
+    bot_number: str,
+    restaurant_obj: dict,
+    restaurant_name: str,
+    feats: dict,
+    payment_methods_text: str,
+    table_context: dict | None,
+    session_state: dict,
+) -> tuple[str, str]:
+    """
+    Assemble the enriched user message that is injected into the LLM context.
+
+    Returns (enriched_message, menu_url).
+    """
     full_history = await db.db_get_history(user_phone, bot_number)
     cart_text    = await orders.cart_summary(user_phone, bot_number)
 
@@ -812,7 +876,11 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
                     user_phone, bot_number
                 )
             if transit_row:
-                in_transit_note = f"\n[ALERTA: TU PEDIDO #{transit_row['id']} YA VA EN CAMINO - NO SE PUEDEN AGREGAR ITEMS A ÉL. Si el cliente quiere pedir más, debe hacer un PEDIDO NUEVO completo.]"
+                in_transit_note = (
+                    f"\n[ALERTA: TU PEDIDO #{transit_row['id']} YA VA EN CAMINO - "
+                    f"NO SE PUEDEN AGREGAR ITEMS A ÉL. "
+                    f"Si el cliente quiere pedir más, debe hacer un PEDIDO NUEVO completo.]"
+                )
         except Exception:
             log.exception("transit_check_failed", phone=user_phone, bot_number=bot_number)
 
@@ -827,13 +895,20 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     elif session_state.get("order_delivered"):
         session_note = "\n[Pedido entregado, factura pendiente. NO uses end_session.]"
 
-    metodos_bloque = f"\n[MÉTODOS_DE_PAGO:\n{payment_methods_text}]" if payment_methods_text else "\n[MÉTODOS_DE_PAGO: Pregunta al cliente cómo prefiere pagar]"
+    metodos_bloque = (
+        f"\n[MÉTODOS_DE_PAGO:\n{payment_methods_text}]"
+        if payment_methods_text
+        else "\n[MÉTODOS_DE_PAGO: Pregunta al cliente cómo prefiere pagar]"
+    )
 
-    # Tarifa de domicilio — solo para pedidos externos
     _delivery_fee_val = feats.get("delivery_fee", 0) or 0
-    delivery_fee_note = f"\n[TARIFA_DOMICILIO: ${int(_delivery_fee_val):,}]" if _delivery_fee_val and not table_context else ""
+    delivery_fee_note = (
+        f"\n[TARIFA_DOMICILIO: ${int(_delivery_fee_val):,}]"
+        if _delivery_fee_val and not table_context
+        else ""
+    )
 
-    # Sucursales para selección de sucursal en pedidos a recoger (solo Matriz con hijos, sin mesa)
+    # Sucursales — only for Matriz with children, external flow
     branches_note = ""
     if not table_context and restaurant_obj and not restaurant_obj.get("parent_restaurant_id"):
         try:
@@ -847,7 +922,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         except Exception:
             log.exception("branches_context_failed", bot_number=bot_number)
 
-    # [PUNTOS] — inyección ultra-ligera solo si loyalty está activo y el cliente tiene saldo
+    # Loyalty points — ultra-light injection only when module is active
     loyalty_note = ""
     if feats.get("loyalty") is True or feats.get("loyalty") == "true":
         balance = await db.db_get_loyalty_balance(restaurant_obj.get("id"), user_phone)
@@ -872,19 +947,37 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         f"{session_note}"
     )
 
+    return enriched, menu_url, full_history
+
+
+async def _call_llm_and_execute(
+    enriched: str,
+    full_history: list,
+    feats: dict,
+    table_context: dict | None,
+    session_state: dict,
+    restaurant_obj: dict,
+    user_phone: str,
+    bot_number: str,
+    user_message_clean: str,
+    menu_url: str,
+) -> tuple[str, dict]:
+    """
+    Build messages list, call Claude, parse the response, execute the action.
+
+    Returns (assistant_message, routing_context).
+    """
     messages = full_history[-(HISTORY_WINDOW * 2):]
     messages.append({"role": "user", "content": enriched})
 
-    # Route to the correct prompt based on table context
     sys_prompt = await build_system_prompt(feats, table_context, restaurant_id=restaurant_obj.get("id"))
-
-    raw    = await call_claude(sys_prompt, messages, model=MODEL_FAST,
-                               restaurant_id=restaurant_obj.get("id"))
+    raw = await call_claude(sys_prompt, messages, model=MODEL_FAST,
+                             restaurant_id=restaurant_obj.get("id"))
     parsed = _parse_bot_response(raw)
 
-    routing_context = {}
+    routing_context: dict = {}
     if parsed is None:
-        print(f"❌ JSON inválido. Raw: {raw[:120]}", flush=True)
+        log.error("agent.invalid_json_response", raw_preview=raw[:120], bot_number=bot_number)
         assistant_message = "Lo siento, hubo un problema. ¿Puedes repetir tu pedido?"
     else:
         assistant_message = await execute_action(
@@ -894,54 +987,148 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         )
         assistant_message = assistant_message.replace("[LINK_MENU]", menu_url)
 
-    nps_interactive = None
+    return assistant_message, routing_context
+
+
+async def _maybe_append_nps_prompt(
+    assistant_message: str,
+    user_phone: str,
+    bot_number: str,
+    restaurant_name: str,
+) -> tuple[str, dict | None]:
+    """
+    Append NPS question to the reply when the NPS flow just reached waiting_score.
+
+    Returns (updated_assistant_message, nps_interactive_or_None).
+    """
     _nps_current = await state_store.nps_get(user_phone, bot_number)
-    if _nps_current is not None and _nps_current.get("state") == "waiting_score":
-        nps_question = (
-            f"⭐ Antes de irte, ¿cómo calificarías tu experiencia en *{restaurant_name}* hoy?\n"
-            f"Responde con un número del *1 al 5*\n"
-            f"_(1 = Muy mala · 5 = Excelente)_"
-        )
-        assistant_message += f"\n\n{nps_question}"
-        nps_interactive = {
-            "type": "button",
-            "body": {"text": nps_question},
-            "action": {
-                "buttons": [
-                    {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
-                ]
-            }
-        }
+    if _nps_current is None or _nps_current.get("state") != "waiting_score":
+        return assistant_message, None
 
-    full_history.append({"role": "user",      "content": user_message_clean})
-    full_history.append({"role": "assistant", "content": assistant_message})
+    nps_question = (
+        f"⭐ Antes de irte, ¿cómo calificarías tu experiencia en *{restaurant_name}* hoy?\n"
+        f"Responde con un número del *1 al 5*\n"
+        f"_(1 = Muy mala · 5 = Excelente)_"
+    )
+    assistant_message += f"\n\n{nps_question}"
+    nps_interactive = {
+        "type": "button",
+        "body": {"text": nps_question},
+        "action": {
+            "buttons": [
+                {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
+            ]
+        },
+    }
+    return assistant_message, nps_interactive
 
-    # RE-ENRUTAMIENTO INTELIGENTE Y PROACTIVO
+
+async def _resolve_branch_id(
+    table_context: dict | None,
+    routing_context: dict,
+    user_phone: str,
+    bot_number: str,
+) -> int | None:
+    """
+    Determine the branch_id for history storage via table context, routing
+    context, or active order lookup — in that priority order.
+    """
     branch_id = table_context.get("branch_id") if table_context else None
 
     if not branch_id and routing_context.get("branch_id"):
-        branch_id = routing_context.get("branch_id")
-    elif not branch_id:
+        return routing_context["branch_id"]
+
+    if not branch_id:
         try:
             pool = await db.get_pool()
             async with pool.acquire() as conn:
                 active_order = await conn.fetchrow(
-                    "SELECT bot_number FROM orders WHERE phone=$1 AND status NOT IN ('entregado', 'cancelado') ORDER BY created_at DESC LIMIT 1", user_phone
+                    "SELECT bot_number FROM orders "
+                    "WHERE phone=$1 AND status NOT IN ('entregado', 'cancelado') "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    user_phone,
                 )
                 if active_order and active_order["bot_number"] != bot_number:
-                    b_id = await conn.fetchval("SELECT id FROM restaurants WHERE whatsapp_number=$1", active_order["bot_number"])
+                    b_id = await conn.fetchval(
+                        "SELECT id FROM restaurants WHERE whatsapp_number=$1",
+                        active_order["bot_number"],
+                    )
                     if b_id:
                         branch_id = b_id
         except Exception:
             log.exception("branch_detection_failed", phone=user_phone, bot_number=bot_number)
 
+    return branch_id
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main orchestrator
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
+    # 1. Sanitize incoming text
+    user_message_clean = _clean_incoming_message(user_message)
+
+    # 2. Post-NPS silence guard
+    if await _handle_nps_guard(user_phone, bot_number, user_message_clean):
+        return None
+
+    # 3. Active NPS flow — handle and return early when consumed
+    nps_result = await _try_nps_active_flow(user_phone, bot_number, user_message_clean)
+    if nps_result is not None:
+        return nps_result if nps_result else None  # {} sentinel → return None
+
+    # 4. Active checkout flow — handle and return early when consumed
+    checkout_result = await _try_checkout_flow(user_phone, bot_number, user_message_clean)
+    if checkout_result is not None:
+        return checkout_result
+
+    # 5. Detect table/session context
+    table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
+    session_state = await get_session_state(user_phone, bot_number)
+
+    # 6. Load restaurant context (name, features, payment methods, branch override)
+    ctx = await _load_restaurant_context(bot_number, table_context, user_phone, meta_phone_id)
+    if ctx is None:
+        return {"message": ""}
+
+    restaurant_obj       = ctx["restaurant_obj"]
+    restaurant_name      = ctx["restaurant_name"]
+    feats                = ctx["feats"]
+    payment_methods_text = ctx["payment_methods_text"]
+
+    # 7. Build enriched user message (menu, cart, notes, loyalty, transit alert…)
+    enriched, menu_url, full_history = await _build_enriched_user_message(
+        user_message_clean, user_phone, bot_number,
+        restaurant_obj, restaurant_name, feats,
+        payment_methods_text, table_context, session_state,
+    )
+
+    # 8. Call LLM and execute the parsed action
+    assistant_message, routing_context = await _call_llm_and_execute(
+        enriched, full_history, feats, table_context, session_state,
+        restaurant_obj, user_phone, bot_number, user_message_clean, menu_url,
+    )
+
+    # 9. Optionally append NPS prompt when the flow just opened
+    assistant_message, nps_interactive = await _maybe_append_nps_prompt(
+        assistant_message, user_phone, bot_number, restaurant_name,
+    )
+
+    # 10. Persist conversation history
+    full_history.append({"role": "user",      "content": user_message_clean})
+    full_history.append({"role": "assistant", "content": assistant_message})
+
+    branch_id = await _resolve_branch_id(table_context, routing_context, user_phone, bot_number)
+
     await db.db_save_history(
         user_phone,
         bot_number,
         full_history[-(HISTORY_WINDOW * 2 + 2):],
-        branch_id=branch_id
+        branch_id=branch_id,
     )
 
+    # 11. Return result
     result_payload = {"message": assistant_message}
     if nps_interactive:
         result_payload["interactive"] = nps_interactive

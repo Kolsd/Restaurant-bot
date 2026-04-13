@@ -4,6 +4,9 @@ import httpx
 from app.services import database as db
 from app.services import state_store
 from app.repositories import reviews_repo as rr
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -15,7 +18,7 @@ async def _send_whatsapp(phone: str, message: str, bot_number: str, db_phone_id:
     token    = os.getenv("META_ACCESS_TOKEN", "")
     phone_id = db_phone_id or os.getenv("META_PHONE_NUMBER_ID", "")
     if not token or not phone_id:
-        print("Scheduler: META_ACCESS_TOKEN or META_PHONE_NUMBER_ID not configured", flush=True)
+        log.warning("scheduler.whatsapp_not_configured", phone=phone)
         return False
     clean_phone = phone.lstrip("+").replace(" ", "")
     url  = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
@@ -33,7 +36,7 @@ async def _send_whatsapp(phone: str, message: str, bot_number: str, db_phone_id:
             )
             return resp.status_code == 200
     except Exception as e:
-        print(f"⚠️ Scheduler send error: {e}", flush=True)
+        log.error("scheduler.whatsapp_send_failed", phone=phone, error=str(e))
         return False
 
 
@@ -48,7 +51,7 @@ async def _create_inactivity_alert(session: dict):
             table_name=session.get("table_name", ""),
         )
     except Exception as e:
-        print(f"⚠️ Scheduler alert error: {e}", flush=True)
+        log.error("scheduler.inactivity_alert_failed", phone=session.get("phone"), error=str(e))
 
 
 async def _process_stale_session(session: dict):
@@ -86,7 +89,7 @@ async def _process_stale_session(session: dict):
         sent = await _send_whatsapp(phone, msg, bot_number, db_phone_id)
         if sent:
             await _create_inactivity_alert(session)
-            print(f"Scheduler: inactivity warning sent to {phone} ({table_name})", flush=True)
+            log.info("scheduler.inactivity_warning_sent", phone=phone, table_name=table_name)
 
 
 async def _process_closeable_session(session: dict):
@@ -122,7 +125,7 @@ async def _process_closeable_session(session: dict):
         try:
             await state_store.nps_delete(phone, bot_number)
         except Exception as e:
-            print(f"⚠️ Scheduler: error clearing NPS state for {phone}: {e}", flush=True)
+            log.error("scheduler.nps_state_clear_failed", phone=phone, error=str(e))
 
         pool = await db.get_pool()
         async with pool.acquire() as conn:
@@ -131,7 +134,7 @@ async def _process_closeable_session(session: dict):
                 phone, bot_number
             )
 
-        print(f"Scheduler: session closed due to inactivity for {phone} ({table_name})", flush=True)
+        log.info("scheduler.session_closed_inactivity", phone=phone, table_name=table_name)
 
 
 async def _run_inactivity_check():
@@ -161,8 +164,7 @@ async def _run_inactivity_check():
             await db.db_cleanup_expired_sessions()
 
     except Exception:
-        import traceback
-        print(f"❌ Scheduler error: {traceback.format_exc()}", flush=True)
+        log.exception("scheduler.inactivity_check_failed")
 
 
 async def _run_deposit_expiry():
@@ -179,15 +181,11 @@ async def _run_deposit_expiry():
                 continue
             try:
                 await db.db_cancel_reservation(reservation_id, "deposit_expired")
-                print(
-                    f"Scheduler: reservation {reservation_id} cancelled — deposit expired",
-                    flush=True,
-                )
+                log.info("scheduler.reservation_deposit_expired", reservation_id=reservation_id)
             except Exception as e:
-                print(f"⚠️ Scheduler: error cancelling reservation {reservation_id}: {e}", flush=True)
+                log.error("scheduler.reservation_cancel_failed", reservation_id=reservation_id, error=str(e))
     except Exception:
-        import traceback
-        print(f"❌ Deposit expiry error: {traceback.format_exc()}", flush=True)
+        log.exception("scheduler.deposit_expiry_failed")
 
 
 async def _run_occupancy_snapshot():
@@ -230,8 +228,7 @@ async def _run_occupancy_snapshot():
                     seated_guests=tables_row["seated_guests"],
                 )
     except Exception:
-        import traceback
-        print(f"Scheduler: occupancy snapshot error: {traceback.format_exc()}", flush=True)
+        log.exception("scheduler.occupancy_snapshot_failed")
 
 
 async def _run_reservation_reminders():
@@ -259,12 +256,11 @@ async def _run_reservation_reminders():
             if ok:
                 await db.db_mark_confirmation_sent(res["id"])
     except Exception:
-        import traceback
-        print(f"❌ Reservation reminder error: {traceback.format_exc()}", flush=True)
+        log.exception("scheduler.reservation_reminder_failed")
 
 
 async def _scheduler_loop():
-    print("⏰ Scheduler de inactividad iniciado", flush=True)
+    log.info("scheduler.started")
     _reminder_counter = 0
     while True:
         await asyncio.sleep(60)

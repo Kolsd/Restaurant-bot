@@ -30,6 +30,17 @@ def _serialize(d: dict) -> dict:
     return _db_serialize(d)
 
 
+async def db_verify_review_ownership(nps_id: int, bot_number: str) -> bool:
+    """Return True if the NPS response exists and belongs to this bot_number."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM nps_responses WHERE id = $1 AND bot_number = $2",
+            nps_id, bot_number,
+        )
+    return row is not None
+
+
 async def db_get_public_reviews(bot_number: str, limit: int = 50) -> list[dict]:
     """Return public reviews for a restaurant ordered by most recent."""
     pool = await _get_pool()

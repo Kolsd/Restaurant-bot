@@ -54,14 +54,8 @@ async def get_review_summary(restaurant=Depends(get_current_restaurant)):
 
 async def _verify_review_ownership(nps_id: int, bot_number: str) -> None:
     """Verify the NPS response belongs to this restaurant's bot_number."""
-    from app.services.database import get_pool  # noqa: PLC0415
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id FROM nps_responses WHERE id = $1 AND bot_number = $2",
-            nps_id, bot_number,
-        )
-    if not row:
+    exists = await rr.db_verify_review_ownership(nps_id, bot_number)
+    if not exists:
         raise HTTPException(status_code=404, detail="Review not found")
 
 

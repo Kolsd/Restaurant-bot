@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from anthropic import AsyncAnthropic
 from app.services.agent import chat, reset_conversation
 from app.services import database as db
-from app.repositories import inbox_repo
+from app.repositories import inbox_repo, conversations_repo
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
@@ -23,37 +23,19 @@ RATE_LIMIT_MESSAGES = 20   # max mensajes por ventana
 RATE_LIMIT_WINDOW   = 60   # segundos
 
 async def _is_rate_limited(phone: str) -> bool:
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        # 1. Borrar el historial viejo de este número (mantiene la tabla liviana)
-        await conn.execute(
-            "DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - make_interval(secs => $2)",
-            phone, RATE_LIMIT_WINDOW
-        )
-
-        # 2. Contar cuántos mensajes ha enviado en los últimos N segundos
-        count = await conn.fetchval(
-            "SELECT COUNT(*) FROM meta_rate_limits WHERE phone = $1",
-            phone
-        )
-
-        if count >= RATE_LIMIT_MESSAGES:
-            return True
-
-        await conn.execute("INSERT INTO meta_rate_limits (phone) VALUES ($1)", phone)
-        return False
+    return await conversations_repo.db_check_rate_limit(
+        phone, RATE_LIMIT_WINDOW, RATE_LIMIT_MESSAGES
+    )
 
 # ── META SIGNATURE VERIFICATION (V-02) ──────────────────────────────
 def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
     """Verifica X-Hub-Signature-256 de Meta para autenticar el webhook."""
     app_secret = os.getenv("META_APP_SECRET", "")
     if not app_secret:
-        from app.services.logging import get_logger as _get_log  # noqa: PLC0415
-        _get_log(__name__).error("meta.signature.no_secret_configured")
+        log.error("meta.signature.no_secret_configured")
         return False
     if not signature_header or not signature_header.startswith("sha256="):
-        from app.services.logging import get_logger as _get_log  # noqa: PLC0415
-        _get_log(__name__).warning("meta.signature.missing_or_invalid_header")
+        log.warning("meta.signature.missing_or_invalid_header")
         return False
     expected = "sha256=" + hmac.new(
         app_secret.encode(), body, hashlib.sha256
@@ -133,7 +115,7 @@ async def _process_message(user_phone: str, user_text: str, bot_number: str,
     """Procesamiento real de la IA — corre en background, desacoplado del ACK."""
     try:
         result = await chat(user_phone, user_text, bot_number, meta_phone_id=phone_id)
-        print(f"🤖 Resultado IA: {result}", flush=True)
+        log.info("chat.ai_result", phone=user_phone, has_message=bool(result and result.get("message")))
 
         if result and result.get("message"):
             url = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
@@ -155,11 +137,11 @@ async def _process_message(user_phone: str, user_text: str, bot_number: str,
                         "text": {"body": result["message"]}
                     }
                 res = await client.post(url, headers=headers, json=wa_payload)
-                print(f"📤 Meta Status: {res.status_code}", flush=True)
+                log.info("chat.meta_send", phone=user_phone, status=res.status_code)
                 if res.status_code != 200:
-                    print(f"🚨 ERROR META: {res.text}", flush=True)
+                    log.error("chat.meta_send_failed", phone=user_phone, status=res.status_code, body=res.text[:200])
     except Exception:
-        print(f"❌ ERROR en _process_message:\n{traceback.format_exc()}", flush=True)
+        log.exception("chat.process_message_failed", phone=user_phone)
 
 
 async def _is_image_safe(image_id: str, access_token: str) -> bool:
@@ -238,9 +220,9 @@ async def _send_wa_text(user_phone: str, text: str, phone_id: str, access_token:
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.post(url, headers=headers, json=payload)
             if res.status_code != 200:
-                print(f"🚨 _send_wa_text ERROR: {res.text}", flush=True)
+                log.error("chat.send_wa_text_failed", phone=user_phone, status=res.status_code, body=res.text[:200])
     except Exception:
-        print(f"❌ ERROR en _send_wa_text:\n{traceback.format_exc()}", flush=True)
+        log.exception("chat.send_wa_text_error", phone=user_phone)
 
 
 @router.post("/webhook/meta")
@@ -260,8 +242,6 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
     except Exception:
         return JSONResponse(content={"status": "ok"})
 
-    print("\n--- 📥 NUEVO MENSAJE DE META ---", flush=True)
-
     try:
         entry   = data.get("entry", [{}])[0]
         changes = entry.get("changes", [{}])[0]
@@ -277,7 +257,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         # 3. Deduplicación por WAM_ID — descarta reintentos de Meta
         wam_id = message.get("id", "")
         if wam_id and await db.db_is_duplicate_wam(wam_id):
-            print(f"⚡ WAM duplicado ignorado: {wam_id}", flush=True)
+            log.info("chat.wam_duplicate_ignored", wam_id=wam_id)
             return JSONResponse(content={"status": "ok"})
 
         user_phone    = message.get("from", "")
@@ -298,12 +278,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         # wa_phone_id comes from Meta webhook metadata — always authoritative.
         if restaurant and phone_id and not restaurant.get("wa_phone_id"):
             try:
-                pool_tmp = await db.get_pool()
-                async with pool_tmp.acquire() as _conn:
-                    await _conn.execute(
-                        "UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2",
-                        phone_id, restaurant["id"],
-                    )
+                await conversations_repo.db_update_restaurant_phone_id(restaurant["id"], phone_id)
             except Exception:
                 pass  # non-critical, next message will retry
 
@@ -317,15 +292,15 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             else:
                 user_text = message.get("text", {}).get("body", "")
             if user_text and user_phone:
-                print(f"💬 [CRM Inbound] De: {user_phone} | ID: {phone_id}", flush=True)
+                log.info("chat.crm_inbound", phone=user_phone, phone_id=phone_id)
                 await register_inbound_from_prospect(user_phone, user_text, wam_id)
-                print("👤 Mensaje del CRM guardado en BD exitosamente", flush=True)
+                log.info("chat.crm_message_saved", phone=user_phone)
             return JSONResponse(content={"status": "ok"})
 
         # 6. Rate limiting
         is_limited = await _is_rate_limited(user_phone)
         if user_phone and is_limited:
-            print(f"🚫 Rate limit activado para: {user_phone}", flush=True)
+            log.warning("chat.rate_limited", phone=user_phone)
             return JSONResponse(content={"status": "ok"})
 
         # 7. Extraer texto del mensaje
@@ -340,7 +315,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                 cart["longitude"] = lon
                 await db.db_save_cart(user_phone, bot_number, cart)
             except Exception as e:
-                print(f"Error guardando GPS en carrito: {e}")
+                log.error("chat.gps_cart_save_failed", phone=user_phone, error=str(e))
                 
             maps_url = f"https://maps.google.com/?q={lat},{lon}"
             user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
@@ -382,7 +357,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         )
                         return JSONResponse(content={"status": "ok"})
             except Exception as e:
-                print(f"⚠️ Error en atajo de comprobante: {e}", flush=True)
+                log.error("chat.proof_shortcut_failed", phone=user_phone, error=str(e))
 
             user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: {media_url}"
         else:
@@ -391,8 +366,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         if not user_text or not user_phone:
             return JSONResponse(content={"status": "ok"})
 
-        print(f"💬 [Bot Inbound] De: {user_phone} | Bot: {bot_number} | WAM: {wam_id}", flush=True)
-        print(f"📝 Texto: {user_text[:200]}", flush=True)
+        log.info("chat.inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, text_preview=user_text[:200])
 
         # 8. Persist to webhook_inbox — durable processing survives worker restarts.
         #    The inbox worker (inbox_worker.py) will call _process_message asynchronously.
@@ -414,10 +388,9 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
 
     except Exception:
-        print(f"❌ ERROR CRÍTICO EN WEBHOOK:\n{traceback.format_exc()}", flush=True)
+        log.exception("chat.webhook_critical_error")
 
     # 9. ACK inmediato a Meta (<200ms) — evita reintentos
-    print("✅ 200 OK enviado a Meta\n--------------------------------\n", flush=True)
     return JSONResponse(content={"status": "received"})
 
 @router.post("/webhook/twilio")

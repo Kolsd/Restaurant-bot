@@ -302,6 +302,53 @@ async def db_migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
                 await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
 
 
+# ── RATE LIMITING ─────────────────────────────────────────────────────
+
+async def db_check_rate_limit(phone: str, window_seconds: int, max_messages: int) -> bool:
+    """
+    Check and update rate limit for a phone number in meta_rate_limits table.
+    Returns True if the phone is rate-limited (should be blocked), False if allowed.
+    Deletes stale rows, counts recent messages, and inserts a new row atomically.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - make_interval(secs => $2)",
+            phone, window_seconds,
+        )
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM meta_rate_limits WHERE phone = $1",
+            phone,
+        )
+        if count >= max_messages:
+            return True
+        await conn.execute("INSERT INTO meta_rate_limits (phone) VALUES ($1)", phone)
+        return False
+
+
+# ── RESTAURANT WA_PHONE_ID AUTO-PERSIST ───────────────────────────────
+
+async def db_update_restaurant_phone_id(restaurant_id: int, wa_phone_id: str) -> None:
+    """Persist a discovered wa_phone_id back to the restaurant row. Non-critical."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2",
+            wa_phone_id, restaurant_id,
+        )
+
+
+async def db_update_restaurant_features(restaurant_id: int, features: dict) -> None:
+    """Overwrite the features JSONB column for a restaurant row."""
+    import json as _json
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
+            _json.dumps(features), restaurant_id,
+        )
+
+
 # ── WAM DEDUPLICATION ─────────────────────────────────────────────────
 
 async def db_is_duplicate_wam(wam_id: str) -> bool:

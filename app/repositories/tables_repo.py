@@ -21,6 +21,9 @@ from __future__ import annotations
 import json
 
 from app.services.money import to_decimal, ZERO
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 
 # Lazy accessors — break circular import with app.services.database.
@@ -37,53 +40,15 @@ def _serialize(d: dict) -> dict:
 
 
 # ── restaurant_tables ────────────────────────────────────────────────────────
+# Schema managed by Alembic — do NOT add DDL here.
+# restaurant_tables, table_orders             → 0001_initial_schema.py
+# capacity, table_type, zone, position_x/y   → 0014_reservation_tables_v2.py
+# base_order_id, sub_number, station cols    → 0001_initial_schema.py
+# idx_table_orders_base, idx_table_orders_station → 0001_initial_schema.py
 
 async def db_init_tables():
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS restaurant_tables (
-                id TEXT PRIMARY KEY,
-                number INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                branch_id INTEGER,
-                active BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-            CREATE TABLE IF NOT EXISTS table_orders (
-                id TEXT PRIMARY KEY,
-                table_id TEXT NOT NULL,
-                table_name TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                items JSONB NOT NULL DEFAULT '[]',
-                status TEXT DEFAULT 'recibido',
-                notes TEXT DEFAULT '',
-                total INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW()
-            );
-        """)
-        for col_sql in [
-            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER",
-            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 4",
-            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS table_type TEXT NOT NULL DEFAULT 'interior'",
-            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS zone TEXT NOT NULL DEFAULT ''",
-            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS position_x FLOAT NOT NULL DEFAULT 0",
-            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS position_y FLOAT NOT NULL DEFAULT 0",
-            "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS base_order_id TEXT DEFAULT NULL",
-            "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS sub_number INTEGER DEFAULT 1",
-            # FASE 2: enrutamiento multi-estación Cocina / Bar
-            # DEFAULT 'all' → pedidos existentes siguen apareciendo en todos los KDS
-            "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS station TEXT NOT NULL DEFAULT 'all'",
-        ]:
-            try: await conn.execute(col_sql)
-            except Exception: pass
-        for idx_sql in [
-            "CREATE INDEX IF NOT EXISTS idx_table_orders_base    ON table_orders(base_order_id)",
-            "CREATE INDEX IF NOT EXISTS idx_table_orders_station ON table_orders(station)",
-        ]:
-            try: await conn.execute(idx_sql)
-            except Exception: pass
+    """No-op: schema handled by Alembic (run `alembic upgrade head` before deploying)."""
+    pass
 
 
 async def db_get_tables(branch_id: int = None, is_main: bool = False):
@@ -430,21 +395,8 @@ async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) ->
 # ── waiter_alerts ─────────────────────────────────────────────────────────────
 
 async def db_init_waiter_alerts():
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS waiter_alerts (
-                id         SERIAL PRIMARY KEY,
-                table_id   TEXT    NOT NULL DEFAULT '',
-                table_name TEXT    NOT NULL DEFAULT '',
-                phone      TEXT    NOT NULL,
-                bot_number TEXT    NOT NULL DEFAULT '',
-                alert_type TEXT    NOT NULL DEFAULT 'waiter',
-                message    TEXT    NOT NULL DEFAULT '',
-                dismissed  BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-        """)
+    """No-op: waiter_alerts managed by Alembic (0001_initial_schema.py)."""
+    pass
 
 
 async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, message: str, table_id: str = "", table_name: str = "") -> dict:
@@ -471,37 +423,8 @@ async def db_dismiss_waiter_alert(alert_id: int) -> bool:
 # ── table_sessions ────────────────────────────────────────────────────────────
 
 async def db_init_table_sessions():
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS table_sessions (
-                id                 SERIAL PRIMARY KEY,
-                table_id           TEXT    NOT NULL DEFAULT '',
-                table_name         TEXT    NOT NULL DEFAULT '',
-                phone              TEXT    NOT NULL,
-                bot_number         TEXT    NOT NULL DEFAULT '',
-                status             TEXT    NOT NULL DEFAULT 'active',
-                has_order          BOOLEAN DEFAULT FALSE,
-                order_delivered    BOOLEAN DEFAULT FALSE,
-                inactivity_warned  BOOLEAN DEFAULT FALSE,
-                last_activity      TIMESTAMP DEFAULT NOW(),
-                started_at         TIMESTAMP DEFAULT NOW(),
-                closed_at          TIMESTAMP,
-                total_spent        INTEGER DEFAULT 0,
-                closed_by          TEXT    DEFAULT '',
-                closed_by_username TEXT    DEFAULT '',
-                summary            JSONB   DEFAULT '{}'::jsonb
-            );
-            CREATE INDEX IF NOT EXISTS idx_table_sessions_active ON table_sessions (phone, bot_number, status);
-            CREATE INDEX IF NOT EXISTS idx_table_sessions_closed ON table_sessions (bot_number, closed_at DESC);
-        """)
-        for col_sql in [
-            "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS closed_by TEXT DEFAULT ''",
-            "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS closed_by_username TEXT DEFAULT ''",
-            "ALTER TABLE table_sessions ADD COLUMN IF NOT EXISTS meta_phone_id TEXT DEFAULT ''",
-        ]:
-            try: await conn.execute(col_sql)
-            except Exception: pass
+    """No-op: table_sessions managed by Alembic (0001_initial_schema.py)."""
+    pass
 
 
 async def db_get_active_session(phone: str, bot_number: str) -> dict | None:
@@ -631,39 +554,8 @@ async def db_reopen_session(session_id: int) -> dict | None:
 # ── table_checks ──────────────────────────────────────────────────────────────
 
 async def db_init_table_checks():
-    """
-    Crea la tabla table_checks para división de cuentas y pagos mixtos.
-    Cada check es una unidad de cobro independiente con su propia factura DIAN.
-    Llamar desde main.py en el startup.
-    """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS table_checks (
-                id                TEXT PRIMARY KEY,
-                base_order_id     TEXT NOT NULL,
-                check_number      SMALLINT NOT NULL,
-                items             JSONB NOT NULL DEFAULT '[]',
-                subtotal          NUMERIC(10,2) NOT NULL DEFAULT 0,
-                tax_amount        NUMERIC(10,2) NOT NULL DEFAULT 0,
-                total             NUMERIC(10,2) NOT NULL DEFAULT 0,
-                payments          JSONB NOT NULL DEFAULT '[]',
-                change_amount     NUMERIC(10,2) NOT NULL DEFAULT 0,
-                status            TEXT NOT NULL DEFAULT 'open',
-                fiscal_invoice_id INTEGER REFERENCES fiscal_invoices(id),
-                customer_name     TEXT,
-                customer_nit      TEXT,
-                customer_email    TEXT,
-                created_at        TIMESTAMP DEFAULT NOW(),
-                paid_at           TIMESTAMP,
-                UNIQUE (base_order_id, check_number)
-            )
-        """)
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_table_checks_base "
-            "ON table_checks(base_order_id)"
-        )
-    print("Table checks table ready", flush=True)
+    """No-op: table_checks managed by Alembic (0001_initial_schema.py)."""
+    pass
 
 
 async def db_create_checks(base_order_id: str, checks: list) -> list:
@@ -1011,3 +903,373 @@ async def db_get_floor_plan(branch_id: int = None, is_main: bool = False):
         sql += " ORDER BY t.zone, t.number"
         rows = await conn.fetch(sql, *params)
         return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_session_phones_by_branch(branch_id: int, bot_number: str) -> set:
+    """
+    Return the set of phone numbers that have table sessions in a given branch.
+    Used by stats.py to filter conversations to those belonging to branch tables.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ts.phone
+            FROM table_sessions ts
+            JOIN restaurant_tables rt ON ts.table_id = rt.id
+            WHERE rt.branch_id = $1 AND ts.bot_number = $2
+            """,
+            branch_id, bot_number,
+        )
+    return {r["phone"] for r in rows}
+
+
+async def db_get_active_session_table_ids() -> set:
+    """Return set of table_ids that have active or nps_pending sessions."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')"
+        )
+    return {r["table_id"] for r in rows}
+
+
+async def db_get_pending_orders_by_branch(branch_id: int) -> list:
+    """Return table_id + status for non-closed orders in a branch (for POS tables-status)."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT table_id, status FROM table_orders "
+            "WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
+            branch_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def db_get_waiter_alerts() -> list:
+    """Return the 30 most recent waiter alerts."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
+    return [dict(r) for r in rows]
+
+
+async def db_dismiss_waiter_alert(alert_id: int) -> None:
+    """Delete a waiter alert by id."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM waiter_alerts WHERE id = $1", alert_id)
+
+
+async def db_get_table_orders_for_branch(
+    branch_id: int | None,
+    status: str | None = None,
+    is_admin: bool = False,
+) -> list:
+    """
+    Return table orders filtered by branch and optional status.
+    If branch_id is None and is_admin=True, returns all orders.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        if branch_id is not None:
+            if status:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
+                    status, branch_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
+                    branch_id,
+                )
+        elif is_admin:
+            if status:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status = $1 ORDER BY created_at ASC",
+                    status,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC"
+                )
+        else:
+            rows = []
+    return [dict(r) for r in rows]
+
+
+async def db_get_table_orders_by_base_id(
+    order_id: str,
+    branch_id: int | None = None,
+) -> list:
+    """
+    Return all orders belonging to a base_order_id group (for ticket aggregation).
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        if branch_id is not None:
+            rows = await conn.fetch(
+                """SELECT * FROM table_orders
+                   WHERE (id = $1 OR base_order_id = $1) AND branch_id = $2
+                   ORDER BY created_at ASC""",
+                order_id, branch_id,
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT * FROM table_orders
+                   WHERE id = $1 OR base_order_id = $1
+                   ORDER BY created_at ASC""",
+                order_id,
+            )
+    return [dict(r) for r in rows]
+
+
+async def db_adjust_table_bill(
+    base_order_id: str,
+    adjusted_items: list,
+    new_total,
+) -> bool:
+    """
+    Update base order with adjusted items/total and zero out sub-orders.
+    Returns False if the base order does not exist.
+    """
+    import json as _json
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        base_row = await conn.fetchrow(
+            "SELECT id FROM table_orders WHERE id=$1", base_order_id
+        )
+        if not base_row:
+            return False
+        await conn.execute(
+            "UPDATE table_orders SET items=$2, total=$3, updated_at=NOW() WHERE id=$1",
+            base_order_id, _json.dumps(adjusted_items), new_total,
+        )
+        await conn.execute(
+            "UPDATE table_orders SET items='[]'::jsonb, total=0, updated_at=NOW() WHERE base_order_id=$1 AND id != $1",
+            base_order_id,
+        )
+    return True
+
+
+async def db_get_table_order_record(order_id: str) -> dict | None:
+    """Return phone, table_name, base_order_id, table_id for a table order."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT phone, table_name, base_order_id, table_id FROM table_orders WHERE id=$1",
+            order_id,
+        )
+    return dict(row) if row else None
+
+
+async def db_get_open_table_session_by_phone(phone: str) -> dict | None:
+    """Return the active table session for a phone, or None."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM table_sessions WHERE phone=$1 AND closed_at IS NULL",
+            phone,
+        )
+    return dict(row) if row else None
+
+
+async def db_verify_table_in_restaurant(table_id: str, rest_id: int) -> dict | None:
+    """Return branch_id for a table, or None if not found."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT branch_id FROM restaurant_tables WHERE id = $1", table_id
+        )
+
+
+async def db_verify_branch_is_child(branch_id: int, parent_id: int) -> bool:
+    """Return True if branch_id is a direct child of parent_id."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
+            branch_id, parent_id,
+        )
+    return row is not None
+
+
+async def db_get_delivery_orders_for_caja() -> list:
+    """
+    Return pending delivery/pickup orders for the kitchen/caja view (last 24h,
+    excluding terminal statuses).
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT * FROM orders
+               WHERE order_type IN ('domicilio','recoger')
+               AND created_at >= NOW() - INTERVAL '24 hours'
+               AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
+               ORDER BY created_at DESC"""
+        )
+    return [dict(r) for r in rows]
+
+
+async def db_get_delivery_status_hash() -> list:
+    """Return id+status pairs for active delivery orders (for hash-based polling)."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, status FROM orders WHERE order_type IN ('domicilio','recoger')"
+            " AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
+        )
+    return [dict(r) for r in rows]
+
+
+async def db_get_delivery_status_hash_for_restaurant(restaurant_id: int) -> list:
+    """Return id+status pairs for active delivery orders scoped to a restaurant."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT o.id, o.status
+            FROM orders o
+            JOIN restaurants r ON r.whatsapp_number = o.bot_number
+            WHERE o.order_type IN ('domicilio', 'recoger')
+              AND o.status IN ('pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
+              AND r.id = $1
+            ORDER BY o.id
+            """,
+            restaurant_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def db_update_delivery_order_status(order_id: str, new_status: str) -> None:
+    """Update delivery order status."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
+
+
+async def db_get_delivery_order_contact(order_id: str) -> dict | None:
+    """Return phone, address, total for a delivery order (for WA notification)."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT phone, address, total FROM orders WHERE id=$1", order_id
+        )
+    return dict(row) if row else None
+
+
+async def db_get_meta_phone_id_for_session(phone: str) -> str | None:
+    """Return the most recent meta_phone_id from a table session for a phone."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT meta_phone_id FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1",
+            phone,
+        )
+    return row["meta_phone_id"] if row else None
+
+
+async def db_get_delivery_order_full(order_id: str) -> dict | None:
+    """Return full order row for billing/DIAN processing."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
+    return dict(row) if row else None
+
+
+async def db_force_delete_conversation_data(phone: str, username: str) -> None:
+    """
+    Force-delete conversation, cart, and close active table session for a phone.
+    Called from the manual chat cleanup endpoint.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
+        await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
+        await conn.execute(
+            "UPDATE table_sessions SET status = 'closed', closed_at = NOW(), "
+            "closed_by = 'manual_delete', closed_by_username = $2 "
+            "WHERE phone = $1 AND closed_at IS NULL",
+            phone, username,
+        )
+
+
+async def db_insert_session_waiter_alert(
+    table_id: str, table_name: str, message: str
+) -> None:
+    """Insert a waiter alert triggered from a dashboard session alert."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO waiter_alerts (table_id, table_name, message, status) "
+            "VALUES ($1, $2, $3, 'active')",
+            table_id, table_name, message,
+        )
+
+
+async def db_get_closed_sessions(hours: int, bot_number: str | None) -> list[dict]:
+    """Return closed table sessions within the given hours window."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        if bot_number:
+            rows = await conn.fetch(
+                "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
+                " AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')"
+                " AND bot_number = $2 ORDER BY closed_at DESC",
+                hours, bot_number,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
+                " AND closed_at >= NOW() - ($1 * INTERVAL '1 hour')"
+                " ORDER BY closed_at DESC",
+                hours,
+            )
+    return [dict(r) for r in rows]
+
+
+async def db_get_session_with_history(session_id: int) -> tuple[dict | None, list]:
+    """Return (session_dict, conversation_history) for a table session."""
+    pool = await _get_pool()
+    import json as _json
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
+        if not session:
+            return None, []
+        conv = await conn.fetchrow(
+            "SELECT history FROM conversations WHERE phone = $1", session["phone"]
+        )
+    history: list = []
+    if conv and conv["history"]:
+        try:
+            history = _json.loads(conv["history"]) if isinstance(conv["history"], str) else conv["history"]
+        except Exception:
+            pass
+    return dict(session), history
+
+
+async def db_reopen_session(session_id: int) -> None:
+    """Clear closed_at / closed_by fields to re-open a table session."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE table_sessions SET closed_at = NULL, closed_by = NULL, closed_by_username = NULL WHERE id = $1",
+            session_id,
+        )
+
+
+async def db_session_alert_waiter(session_id: int, message: str) -> bool:
+    """
+    Look up the table session and insert a waiter alert for its table.
+    Returns True if the session was found, False otherwise.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
+        if session:
+            await conn.execute(
+                "INSERT INTO waiter_alerts (table_id, table_name, message, status) VALUES ($1, $2, $3, 'active')",
+                session["table_id"], session["table_name"], message,
+            )
+            return True
+    return False

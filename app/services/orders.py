@@ -1,26 +1,38 @@
+import contextlib
 import hashlib
 import json
 import uuid
 import os
-import asyncio
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
+from app.services import state_store
+from app.services.logging import get_logger
 from app.services.money import to_decimal, money_mul, money_sum, ZERO
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
-# 🚨 FIX SEGURIDAD
 WOMPI_PUBLIC_KEY = os.getenv("WOMPI_PUBLIC_KEY")
 WOMPI_INTEGRITY_SECRET = os.getenv("WOMPI_INTEGRITY_SECRET")
 
-# 🚀 FIX CARRERA: Diccionario de candados (Locks) por teléfono
-_cart_locks = {}
+log = get_logger(__name__)
 
-def _get_cart_lock(phone: str) -> asyncio.Lock:
-    if phone not in _cart_locks:
-        _cart_locks[phone] = asyncio.Lock()
-    return _cart_locks[phone]
+
+@contextlib.asynccontextmanager
+async def _cart_lock(phone: str, bot_number: str, ttl_seconds: int = 30):
+    """
+    Async context manager that acquires a distributed cart lock for (phone, bot_number).
+    Uses Redis SET NX EX when available, falls back to an asyncio.Lock per worker.
+    Raises RuntimeError if the lock cannot be acquired (e.g. already held by another request).
+    """
+    acquired = await state_store.cart_lock_acquire(phone, bot_number, ttl_seconds=ttl_seconds)
+    if not acquired:
+        log.warning("cart_lock.contention", phone=phone, bot_number=bot_number)
+        raise RuntimeError("cart_lock_contention")
+    try:
+        yield
+    finally:
+        await state_store.cart_lock_release(phone, bot_number)
 
 async def find_dish(dish_name: str, bot_number: str) -> dict | None:
     menu = await db.db_get_menu(bot_number)
@@ -37,9 +49,8 @@ async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str
     dish = await find_dish(dish_name, bot_number)
     if not dish:
         return {"success": False, "error": f"No encontré '{dish_name}' en el menú"}
-    
-    # 🚀 FIX CARRERA: Bloqueamos el acceso al carrito SOLO para este usuario
-    async with _get_cart_lock(phone):
+
+    async with _cart_lock(phone, bot_number):
         cart = await db.db_get_cart(phone, bot_number)
         
         found = False
@@ -63,11 +74,10 @@ async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str
 
 async def remove_from_cart(phone: str, dish_name: str, bot_number: str) -> dict:
     dish = await find_dish(dish_name, bot_number)
-    if not dish: 
+    if not dish:
         return {"success": False, "error": "Plato no encontrado"}
 
-    # Bloqueamos también al eliminar, por si acaso
-    async with _get_cart_lock(phone):
+    async with _cart_lock(phone, bot_number):
         cart = await db.db_get_cart(phone, bot_number)
         cart["items"] = [i for i in cart["items"] if i["name"] != dish["name"]]
         await db.db_save_cart(phone, bot_number, cart)
@@ -75,12 +85,13 @@ async def remove_from_cart(phone: str, dish_name: str, bot_number: str) -> dict:
     return {"success": True, "cart": cart}
 
 async def clear_cart(phone: str, bot_number: str):
-    async with _get_cart_lock(phone):
+    async with _cart_lock(phone, bot_number):
         await db.db_clear_cart(phone, bot_number)
 
-# 🛡️ NUEVO: Wrapper respetando el lock transaccional por usuario
+
 async def migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
-    async with _get_cart_lock(phone):
+    """Migrate cart from one bot_number to another under a distributed lock."""
+    async with _cart_lock(phone, from_bot_number):
         await db.db_migrate_cart(phone, from_bot_number, to_bot_number)
         
 async def get_cart_total(phone: str, bot_number: str) -> int:
@@ -114,7 +125,7 @@ def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP
     return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
 
 async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "") -> dict:
-    async with _get_cart_lock(phone):
+    async with _cart_lock(phone, bot_number):
         cart = await db.db_get_cart(phone, bot_number)
         if not cart["items"]:
             return {"success": False, "error": "El carrito está vacío"}

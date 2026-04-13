@@ -11,7 +11,6 @@ Layer rules:
   - Raw SQL lives exclusively in database.py.
 """
 import json
-import secrets
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -26,6 +25,10 @@ from app.services.money import to_decimal
 
 from app.routes.deps import get_current_restaurant, require_module
 from app.services import database as db
+from app.repositories import sessions_repo, staff_repo
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/staff", tags=["staff"])
 
@@ -175,8 +178,7 @@ async def staff_pin_login(body: StaffPinLoginRequest):
     if not _pwd_ctx.verify(body.pin, member["pin"]):
         raise HTTPException(status_code=401, detail="PIN incorrecto.")
 
-    token = secrets.token_hex(32)
-    await db.db_save_session(token, f"staff:{member['id']}")
+    token = await sessions_repo.create_session(f"staff:{member['id']}")
 
     roles = member.get("roles") or [member.get("role", "mesero")]
 
@@ -250,17 +252,15 @@ async def delete_staff(
 async def self_clock_in(request: Request):
     """El operativo registra su propia entrada usando su Bearer token."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    session_key = await db.db_get_session(token)
+    session_key = await sessions_repo.get_session(token)
     if not session_key or not session_key.startswith("staff:"):
         raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
     staff_id = session_key[6:]
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id)
-    if not row:
+    restaurant_id = await staff_repo.db_get_staff_restaurant_id(staff_id)
+    if not restaurant_id:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
     try:
-        shift = await db.db_clock_in(staff_id, row["restaurant_id"])
+        shift = await db.db_clock_in(staff_id, restaurant_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"shift": shift}
@@ -270,16 +270,14 @@ async def self_clock_in(request: Request):
 async def self_clock_out(request: Request):
     """El operativo registra su propia salida usando su Bearer token."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    session_key = await db.db_get_session(token)
+    session_key = await sessions_repo.get_session(token)
     if not session_key or not session_key.startswith("staff:"):
         raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
     staff_id = session_key[6:]
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id)
-    if not row:
+    restaurant_id = await staff_repo.db_get_staff_restaurant_id(staff_id)
+    if not restaurant_id:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
-    shift = await db.db_clock_out(staff_id, row["restaurant_id"])
+    shift = await db.db_clock_out(staff_id, restaurant_id)
     if not shift:
         raise HTTPException(status_code=404, detail="No hay turno abierto para este empleado.")
     return {"shift": shift}
@@ -390,14 +388,7 @@ async def update_tip_distribution(
     if abs(total - 100.0) > 0.01 and total > 0:
         if total > 100.0:
             raise HTTPException(status_code=400, detail=f"Los porcentajes suman {total:.1f}%, no pueden superar 100%")
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """UPDATE restaurants
-               SET features = jsonb_set(COALESCE(features, '{}'), '{tip_distribution}', $1::jsonb)
-               WHERE id = $2""",
-            json.dumps(body.config), restaurant["id"],
-        )
+    await staff_repo.db_update_tip_distribution(restaurant["id"], body.config)
     return {"success": True, "config": body.config}
 
 
@@ -412,16 +403,14 @@ class BreakRequest(BaseModel):
 async def self_break_start(request: Request):
     """Start a break. Staff must have an open shift."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    session_key = await db.db_get_session(token)
+    session_key = await sessions_repo.get_session(token)
     if not session_key or not session_key.startswith("staff:"):
         raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
     staff_id = session_key.split(":", 1)[1]
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id)
-    if not row:
+    restaurant_id = await staff_repo.db_get_staff_restaurant_id(staff_id)
+    if not restaurant_id:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
-    shifts = await db.db_get_open_shifts(row["restaurant_id"])
+    shifts = await db.db_get_open_shifts(restaurant_id)
     open_shift = next((s for s in shifts if str(s["staff_id"]) == staff_id), None)
     if not open_shift:
         raise HTTPException(status_code=404, detail="No tienes un turno abierto.")
@@ -436,7 +425,7 @@ async def self_break_start(request: Request):
 async def self_break_end(request: Request):
     """End current break."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    session_key = await db.db_get_session(token)
+    session_key = await sessions_repo.get_session(token)
     if not session_key or not session_key.startswith("staff:"):
         raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
     staff_id = session_key.split(":", 1)[1]
@@ -451,26 +440,14 @@ async def self_break_end(request: Request):
 async def _resolve_staff_from_token(request: Request) -> dict:
     """Helper: extrae staff_id desde Bearer token y retorna su fila completa."""
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    session_key = await db.db_get_session(token)
+    session_key = await sessions_repo.get_session(token)
     if not session_key or not session_key.startswith("staff:"):
         raise HTTPException(status_code=401, detail="Token inválido o no es un empleado operativo.")
     staff_id = session_key[6:]
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
-            "document_number, hourly_rate, photo_url FROM staff WHERE id=$1::uuid",
-            staff_id,
-        )
-    if not row:
+    member = await staff_repo.db_get_staff_profile(staff_id)
+    if not member:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
-    d = dict(row)
-    d["id"] = str(d["id"])
-    roles_list = d.get("roles") or []
-    if not roles_list and d.get("role"):
-        roles_list = [d["role"]]
-    d["roles"] = roles_list
-    return d
+    return member
 
 
 @router.get("/self/profile", status_code=200)
@@ -480,20 +457,7 @@ async def self_profile(request: Request):
     staff_id = member["id"]
     restaurant_id = member["restaurant_id"]
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        # Turno abierto
-        shift_row = await conn.fetchrow(
-            "SELECT id::text, clock_in FROM staff_shifts "
-            "WHERE staff_id=$1::uuid AND clock_out IS NULL LIMIT 1",
-            staff_id,
-        )
-        # Break abierto
-        break_row = await conn.fetchrow(
-            "SELECT id::text, break_start FROM staff_breaks "
-            "WHERE staff_id=$1::uuid AND break_end IS NULL LIMIT 1",
-            staff_id,
-        )
+    shift_row, break_row = await staff_repo.db_get_staff_open_shift_and_break(staff_id)
 
     return {
         "id":              member["id"],
@@ -506,8 +470,8 @@ async def self_profile(request: Request):
         "hourly_rate":     float(to_decimal(member["hourly_rate"] or 0)),  # JSON boundary
         "photo_url":       member["photo_url"],
         "restaurant_id":   restaurant_id,
-        "current_shift":   db._serialize(dict(shift_row)) if shift_row else None,
-        "current_break":   db._serialize(dict(break_row)) if break_row else None,
+        "current_shift":   db._serialize(shift_row) if shift_row else None,
+        "current_break":   db._serialize(break_row) if break_row else None,
     }
 
 
@@ -530,50 +494,9 @@ async def self_timecard(request: Request, week_start: str = None, week_end: str 
     ws_date = date.fromisoformat(week_start)
     we_date = date.fromisoformat(week_end)
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT
-                s.id::text      AS shift_id,
-                s.clock_in,
-                s.clock_out,
-                s.clock_in::date AS work_date,
-                COALESCE(
-                    EXTRACT(EPOCH FROM (COALESCE(s.clock_out, NOW()) - s.clock_in)) / 3600,
-                    0
-                )::numeric(8,2) AS gross_hours,
-                COALESCE((
-                    SELECT SUM(EXTRACT(EPOCH FROM (COALESCE(b.break_end, NOW()) - b.break_start)) / 3600)
-                    FROM staff_breaks b
-                    WHERE b.shift_id = s.id
-                ), 0)::numeric(8,2) AS break_hours
-            FROM staff_shifts s
-            WHERE s.staff_id = $1::uuid
-              AND s.clock_in::date BETWEEN $2 AND $3
-            ORDER BY s.clock_in ASC
-            """,
-            staff_id, ws_date, we_date,
-        )
-
-    # Fetch schedules for the week
-    async with pool.acquire() as conn:
-        sched_rows = await conn.fetch(
-            "SELECT day_of_week, start_time, end_time FROM staff_schedules "
-            "WHERE staff_id=$1::uuid AND active=true",
-            staff_id,
-        )
+    rows, sched_rows, ded_rows = await staff_repo.db_get_staff_timecard_rows(staff_id, ws_date, we_date)
 
     sched_map = {r["day_of_week"]: {"start": str(r["start_time"]), "end": str(r["end_time"])} for r in sched_rows}
-
-    # Fetch attendance deductions for the period
-    async with pool.acquire() as conn:
-        ded_rows = await conn.fetch(
-            "SELECT shift_id::text, type, minutes_diff, deduction_amount "
-            "FROM attendance_deductions "
-            "WHERE staff_id=$1::uuid AND created_at::date BETWEEN $2 AND $3",
-            staff_id, ws_date, we_date,
-        )
 
     ded_map: dict = {}
     for d in ded_rows:
@@ -621,14 +544,7 @@ async def self_schedule(request: Request):
     """Retorna el horario semanal del operativo autenticado."""
     member = await _resolve_staff_from_token(request)
     staff_id = member["id"]
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id::text, day_of_week, start_time, end_time, active "
-            "FROM staff_schedules WHERE staff_id=$1::uuid AND active=true "
-            "ORDER BY day_of_week ASC",
-            staff_id,
-        )
+    rows = await staff_repo.db_get_staff_schedule(staff_id)
     days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     return {
         "schedule": [

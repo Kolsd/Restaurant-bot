@@ -40,6 +40,7 @@ from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
 
 from app.routes.deps import get_current_restaurant, require_auth, require_module
 from app.services import database as db
+from app.repositories import staff_repo
 from app.services.auth import verify_token
 
 router = APIRouter(prefix="/api/staff/webauthn", tags=["staff-webauthn"])
@@ -107,12 +108,7 @@ async def register_options(request: Request):
     staff_id = await _get_staff_id_from_token(request)
 
     # Fetch staff details to populate the user entity
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        staff = await conn.fetchrow(
-            "SELECT id::text, name, restaurant_id FROM staff WHERE id = $1::uuid AND active = TRUE",
-            staff_id,
-        )
+    staff = await staff_repo.db_get_active_staff_basic(staff_id)
     if not staff:
         raise HTTPException(status_code=404, detail="Empleado no encontrado o inactivo")
 

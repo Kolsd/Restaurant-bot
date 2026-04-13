@@ -1629,3 +1629,137 @@ async def db_review_overtime_request(
             approved_by, notes,
         )
     return _serialize(dict(row)) if row else None
+
+
+# ── Self-service helpers (Staff HQ) ──────────────────────────────────────────
+
+async def db_get_staff_restaurant_id(staff_id: str) -> int | None:
+    """Return the restaurant_id for a staff member by UUID. Used for self clock-in/out."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id
+        )
+    return row["restaurant_id"] if row else None
+
+
+async def db_get_staff_profile(staff_id: str) -> dict | None:
+    """Return full staff profile row for the Staff HQ self-service view."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
+            "document_number, hourly_rate, photo_url FROM staff WHERE id=$1::uuid",
+            staff_id,
+        )
+    if not row:
+        return None
+    d = dict(row)
+    d["id"] = str(d["id"])
+    roles_list = d.get("roles") or []
+    if not roles_list and d.get("role"):
+        roles_list = [d["role"]]
+    d["roles"] = roles_list
+    return d
+
+
+async def db_get_staff_open_shift_and_break(staff_id: str) -> tuple:
+    """Return (open_shift_dict, open_break_dict) for the self-profile endpoint."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        shift_row = await conn.fetchrow(
+            "SELECT id::text, clock_in FROM staff_shifts "
+            "WHERE staff_id=$1::uuid AND clock_out IS NULL LIMIT 1",
+            staff_id,
+        )
+        break_row = await conn.fetchrow(
+            "SELECT id::text, break_start FROM staff_breaks "
+            "WHERE staff_id=$1::uuid AND break_end IS NULL LIMIT 1",
+            staff_id,
+        )
+    return (dict(shift_row) if shift_row else None, dict(break_row) if break_row else None)
+
+
+async def db_get_staff_timecard_rows(staff_id: str, ws_date, we_date) -> tuple:
+    """
+    Return (shift_rows, schedule_rows, deduction_rows) for a staff timecard week.
+    All date params must be date objects (asyncpg requirement).
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        shift_rows = await conn.fetch(
+            """
+            SELECT
+                s.id::text      AS shift_id,
+                s.clock_in,
+                s.clock_out,
+                s.clock_in::date AS work_date,
+                COALESCE(
+                    EXTRACT(EPOCH FROM (COALESCE(s.clock_out, NOW()) - s.clock_in)) / 3600,
+                    0
+                )::numeric(8,2) AS gross_hours,
+                COALESCE((
+                    SELECT SUM(EXTRACT(EPOCH FROM (COALESCE(b.break_end, NOW()) - b.break_start)) / 3600)
+                    FROM staff_breaks b
+                    WHERE b.shift_id = s.id
+                ), 0)::numeric(8,2) AS break_hours
+            FROM staff_shifts s
+            WHERE s.staff_id = $1::uuid
+              AND s.clock_in::date BETWEEN $2 AND $3
+            ORDER BY s.clock_in ASC
+            """,
+            staff_id, ws_date, we_date,
+        )
+        sched_rows = await conn.fetch(
+            "SELECT day_of_week, start_time, end_time FROM staff_schedules "
+            "WHERE staff_id=$1::uuid AND active=true",
+            staff_id,
+        )
+        ded_rows = await conn.fetch(
+            "SELECT shift_id::text, type, minutes_diff, deduction_amount "
+            "FROM attendance_deductions "
+            "WHERE staff_id=$1::uuid AND created_at::date BETWEEN $2 AND $3",
+            staff_id, ws_date, we_date,
+        )
+    return (
+        [dict(r) for r in shift_rows],
+        [dict(r) for r in sched_rows],
+        [dict(r) for r in ded_rows],
+    )
+
+
+async def db_get_staff_schedule(staff_id: str) -> list:
+    """Return active weekly schedule entries for a staff member."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id::text, day_of_week, start_time, end_time, active "
+            "FROM staff_schedules WHERE staff_id=$1::uuid AND active=true "
+            "ORDER BY day_of_week ASC",
+            staff_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def db_update_tip_distribution(restaurant_id: int, config: dict) -> None:
+    """Persist tip distribution % config into restaurants.features JSONB."""
+    import json as _json
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE restaurants
+               SET features = jsonb_set(COALESCE(features, '{}'), '{tip_distribution}', $1::jsonb)
+               WHERE id = $2""",
+            _json.dumps(config), restaurant_id,
+        )
+
+
+async def db_get_active_staff_basic(staff_id: str) -> dict | None:
+    """Return id, name, restaurant_id for an active staff member. Used by WebAuthn registration."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text, name, restaurant_id FROM staff WHERE id = $1::uuid AND active = TRUE",
+            staff_id,
+        )
+    return dict(row) if row else None
