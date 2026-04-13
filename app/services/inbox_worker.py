@@ -104,7 +104,7 @@ async def run_worker(stop_event: asyncio.Event) -> None:
                         # dispatch and mark happen under the same lock
                         _t0 = _time.monotonic()
                         try:
-                            await _dispatch(provider, payload)
+                            await asyncio.wait_for(_dispatch(provider, payload), timeout=120)
                             await inbox_repo.mark_processed(conn, inbox_id)
                             _elapsed = _time.monotonic() - _t0
                             _latencies.append(_elapsed)
@@ -114,6 +114,24 @@ async def run_worker(stop_event: asyncio.Event) -> None:
                                 inbox_id=inbox_id,
                                 provider=provider,
                                 latency_ms=round(_elapsed * 1000, 1),
+                            )
+                            processed_count += 1
+                        except asyncio.TimeoutError:
+                            _elapsed = _time.monotonic() - _t0
+                            _latencies.append(_elapsed)
+                            _metrics["errors"] += 1
+                            error_str = "dispatch_timeout: handler exceeded 120s"
+                            log.error(
+                                "inbox_dispatch_timeout",
+                                inbox_id=inbox_id,
+                                provider=provider,
+                                attempts=attempts + 1,
+                                latency_ms=round(_elapsed * 1000, 1),
+                                customer_phone=payload.get("user_phone", "unknown"),
+                                bot_number=payload.get("bot_number", "unknown"),
+                            )
+                            await inbox_repo.mark_failed(
+                                conn, inbox_id, error_str, attempts
                             )
                             processed_count += 1
                         except Exception as exc:
@@ -128,6 +146,8 @@ async def run_worker(stop_event: asyncio.Event) -> None:
                                 attempts=attempts + 1,
                                 error=str(exc),
                                 latency_ms=round(_elapsed * 1000, 1),
+                                customer_phone=payload.get("user_phone", "unknown"),
+                                bot_number=payload.get("bot_number", "unknown"),
                             )
                             await inbox_repo.mark_failed(
                                 conn, inbox_id, error_str, attempts

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from typing import Any
 
 from app.services.logging import get_logger
@@ -36,6 +37,7 @@ _fb_nps_done: dict[str, float] = {}  # key → expire_at_monotonic (12h guard)
 _fb_checkout: dict[str, tuple[float, Any]] = {}
 _fb_cooldown: dict[str, float] = {}  # key → expire_at_monotonic
 _fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:bot_number → asyncio.Lock (fallback only)
+_fb_cart_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
 
 # Rate-limit fallback warnings: family → last_warned_monotonic
 _fb_warn_last: dict[str, float] = {}
@@ -51,6 +53,26 @@ def _maybe_warn(family: str) -> None:
                     note="Using in-process fallback — multi-worker state consistency not guaranteed")
 
 
+_FB_MAX_SIZE = 10_000
+
+
+def _fb_purge_expired(store: dict) -> None:
+    now = time.monotonic()
+    expired = [k for k, v in store.items() if (v[0] if isinstance(v, tuple) else v) <= now]
+    for k in expired:
+        store.pop(k, None)
+
+
+def _fb_enforce_size_cap(store: dict) -> None:
+    if len(store) <= _FB_MAX_SIZE:
+        return
+    _fb_purge_expired(store)
+    if len(store) > _FB_MAX_SIZE:
+        drop = sorted(store.items(), key=lambda x: x[1][0] if isinstance(x[1], tuple) else x[1])
+        for k, _ in drop[: len(store) // 2]:
+            store.pop(k, None)
+
+
 def _fb_get(store: dict, key: str) -> Any | None:
     entry = store.get(key)
     if entry is None:
@@ -63,6 +85,7 @@ def _fb_get(store: dict, key: str) -> Any | None:
 
 
 def _fb_set(store: dict, key: str, value: Any, ttl_seconds: int) -> None:
+    _fb_enforce_size_cap(store)
     store[key] = (time.monotonic() + ttl_seconds, value)
 
 
@@ -124,6 +147,14 @@ async def nps_mark_done(phone: str, bot_number: str) -> None:
         return
     _maybe_warn("nps")
     now = time.monotonic()
+    if len(_fb_nps_done) >= _FB_MAX_SIZE:
+        expired = [k for k, exp in _fb_nps_done.items() if now >= exp]
+        for k in expired:
+            _fb_nps_done.pop(k, None)
+        if len(_fb_nps_done) >= _FB_MAX_SIZE:
+            drop = sorted(_fb_nps_done.items(), key=lambda x: x[1])
+            for k, _ in drop[: len(_fb_nps_done) // 2]:
+                _fb_nps_done.pop(k, None)
     _fb_nps_done[key] = now + _NPS_DONE_TTL
 
 
@@ -212,6 +243,17 @@ async def table_cooldown_acquire(
         return False
     _maybe_warn("cooldown")
     now = time.monotonic()
+    if len(_fb_cooldown) >= _FB_MAX_SIZE:
+        expired = [
+            k for k, v in _fb_cooldown.items()
+            if now >= (v[1] if isinstance(v, tuple) else v)
+        ]
+        for k in expired:
+            _fb_cooldown.pop(k, None)
+        if len(_fb_cooldown) >= _FB_MAX_SIZE:
+            drop = sorted(_fb_cooldown.items(), key=lambda x: x[1][1] if isinstance(x[1], tuple) else x[1])
+            for k, _ in drop[: len(_fb_cooldown) // 2]:
+                _fb_cooldown.pop(k, None)
     stored = _fb_cooldown.get(key)  # (base_order_id, expire_at) or float (legacy)
     if stored is None or (isinstance(stored, tuple) and now >= stored[1]):
         _fb_cooldown[key] = (base_order_id, now + ttl_seconds)
@@ -238,23 +280,23 @@ def _cart_lock_redis_key(phone: str, bot_number: str) -> str:
     return f"mesio:cart_lock:{phone}:{bot_number}"
 
 
-async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) -> bool:
+async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) -> str | None:
     """
     Acquire a distributed lock for cart operations on (phone, bot_number).
 
-    Redis path: SET key "1" NX EX ttl — atomic, multi-worker-safe.
-    Returns True if the lock was acquired, False if already held.
+    Redis path: SET key <token> NX EX ttl — atomic, multi-worker-safe.
+    Returns the lock token (str) if acquired, None if already held.
+    The caller must pass the returned token to cart_lock_release.
 
-    Fallback (Redis unavailable): always returns True and acquires an asyncio.Lock
-    instead. The asyncio.Lock is stored in _fb_cart_locks so that within a single
-    worker concurrent coroutines still serialize correctly, but cross-worker
-    exclusion is lost.
+    Fallback (Redis unavailable): acquires an asyncio.Lock instead and returns
+    a token for ownership tracking within a single worker.
     """
     key = _cart_lock_redis_key(phone, bot_number)
+    token = str(uuid.uuid4())
     r = await _rc.get_redis()
     if r is not None:
-        result = await r.set(key, "1", nx=True, ex=ttl_seconds)
-        return result is not None  # True → acquired, None → already held
+        result = await r.set(key, token, nx=True, ex=ttl_seconds)
+        return token if result is not None else None
     _maybe_warn("cart_lock")
     # Fallback: in-process asyncio.Lock
     if key not in _fb_cart_locks:
@@ -262,24 +304,35 @@ async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) 
     lock = _fb_cart_locks[key]
     try:
         await asyncio.wait_for(lock.acquire(), timeout=ttl_seconds)
-        return True
+        _fb_cart_lock_tokens[key] = token
+        return token
     except asyncio.TimeoutError:
-        return False
+        return None
 
 
-async def cart_lock_release(phone: str, bot_number: str) -> None:
+async def cart_lock_release(phone: str, bot_number: str, token: str | None = None) -> None:
     """
     Release a previously acquired cart lock.
 
-    Redis path: DEL key.
-    Fallback path: release the asyncio.Lock if held.
+    Redis path: only DEL if the stored token matches (ownership check).
+    Fallback path: release the asyncio.Lock only if this token is the holder.
     """
     key = _cart_lock_redis_key(phone, bot_number)
     r = await _rc.get_redis()
     if r is not None:
+        if token is not None:
+            stored = await r.get(key)
+            stored_str = stored.decode() if isinstance(stored, bytes) else stored
+            if stored_str != token:
+                log.warning("cart_lock.release_ownership_mismatch", key=key)
+                return
         await r.delete(key)
         return
     _maybe_warn("cart_lock")
+    if token is not None and _fb_cart_lock_tokens.get(key) != token:
+        log.warning("cart_lock.release_ownership_mismatch_fallback", key=key)
+        return
+    _fb_cart_lock_tokens.pop(key, None)
     lock = _fb_cart_locks.get(key)
     if lock is not None and lock.locked():
         lock.release()
@@ -302,17 +355,22 @@ async def rate_limit_check(key: str, max_requests: int, window_seconds: int) -> 
     redis_key = f"mesio:ratelimit:{key}"
     r = await _rc.get_redis()
     if r is not None:
-        pipe = r.pipeline()
-        pipe.incr(redis_key)
-        pipe.expire(redis_key, window_seconds)
-        results = await pipe.execute()
-        count = results[0]
+        count = await r.incr(redis_key)
+        if count == 1:
+            await r.expire(redis_key, window_seconds)
         return count <= max_requests
 
     _maybe_warn("rate_limit")
     now = time.monotonic()
+    if len(_fb_rate_limits) >= _FB_MAX_SIZE:
+        empty = [k for k, v in _fb_rate_limits.items() if not v]
+        for k in empty:
+            _fb_rate_limits.pop(k, None)
+        if len(_fb_rate_limits) >= _FB_MAX_SIZE:
+            drop = list(_fb_rate_limits.keys())[: len(_fb_rate_limits) // 2]
+            for k in drop:
+                _fb_rate_limits.pop(k, None)
     timestamps = _fb_rate_limits.get(redis_key, [])
-    # Clean expired entries
     cutoff = now - window_seconds
     timestamps = [t for t in timestamps if t > cutoff]
     timestamps.append(now)
@@ -336,6 +394,8 @@ async def scheduler_leader_acquire(ttl_seconds: int = 90) -> bool:
     r = await _rc.get_redis()
     if r is not None:
         result = await r.set(key, "1", nx=True, ex=ttl_seconds)
+        if result is not None:
+            log.info("scheduler.leader_acquired")
         return result is not None  # True → acquired, None → already held
     # No Redis → fall back to running on all workers (degraded but functional)
     _maybe_warn("scheduler_leader")

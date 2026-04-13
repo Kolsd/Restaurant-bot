@@ -1,10 +1,11 @@
+import asyncio
 import os
 import uuid
 import json
 import re
-import traceback
+import hashlib
 from datetime import datetime, timezone as _dt_utc
-from anthropic import Anthropic
+from anthropic import AsyncAnthropic, APIStatusError, APITimeoutError, APIConnectionError
 from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
@@ -23,25 +24,41 @@ from app.services.agent_external import (
     build_external_prompt,
     execute_external_action,
 )
+from app.services.agent_tools import TOOLS_SALON, TOOLS_EXTERNAL
 
 log = get_logger(__name__)
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "mesioai.com")
 
-client = Anthropic()
+client = AsyncAnthropic(timeout=30.0)
 
-MODEL_FAST    = "claude-haiku-4-5-20251001"
-MODEL_PRECISE = "claude-sonnet-4-6"
+MODEL_FAST    = os.environ.get("BOT_MODEL_FAST", "claude-haiku-4-5-20251001")
+MODEL_PRECISE = os.environ.get("BOT_MODEL_PRECISE", "claude-sonnet-4-6")
+MAX_TOKENS    = int(os.environ.get("BOT_MAX_TOKENS", "2048"))
 
 _INJECTION_PATTERNS = [
     r'\[MENÚ[:\s]',
     r'\[CARRITO[:\s]',
     r'\[RESTAURANTE[:\s]',
     r'\[MESA[:\s]',
+    # Spanish
     r'Ignora (todo|las instrucciones|el sistema)',
     r'Olvida (todo|tus instrucciones)',
-    r'Actúa como',
+    r'(?:^|\n)\s*Actúa\s+como\s+(?:un|una|el|la|mi)\b',
     r'Eres ahora',
+    # English
+    r'Ignore (all|the|your|previous) (instructions|prompts?|rules)',
+    r'Forget (all|your|previous) (instructions|rules)',
+    r'(?:^|\n)\s*Act\s+as\s+(?:a|an|my|the)\b',
+    r'You are now',
+    r'Pretend (to be|you are)',
+    r'From now on',
+    # Portuguese
+    r'Ignore (tudo|as instruções|o sistema)',
+    r'Esqueça (tudo|suas instruções)',
+    r'(?:^|\n)\s*Aja\s+como\s+(?:um|uma|o|a|meu|minha)\b',
+    r'Você agora é',
+    # General
     r'system\s*prompt',
     r'<\|im_start\|>',
     r'<\|im_end\|>',
@@ -267,7 +284,10 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
                 f"¿Nos podrías contar qué podríamos mejorar? Tu comentario llega directo al equipo."
             )
         else:
-            await db.db_save_nps_response(phone, bot_number, score, "")
+            try:
+                await db.db_save_nps_response(phone, bot_number, score, "")
+            except Exception:
+                log.exception("nps_save_response_failed", phone=phone, bot_number=bot_number, score=score)
             await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
             await state_store.nps_mark_done(phone, bot_number)
             try:
@@ -478,46 +498,227 @@ async def call_claude(
     messages: list,
     model: str = MODEL_FAST,
     restaurant_id: int | None = None,
-) -> str:
-    # Verificar límites antes de consumir tokens
+    tools: list | None = None,
+) -> dict:
+    """
+    Call Claude and return a structured result dict:
+    {
+        "reply": str,           # text response (WhatsApp message)
+        "tool_name": str|None,  # tool called, if any
+        "tool_input": dict|None # tool parameters, if any
+    }
+    """
     if restaurant_id is not None:
         await db.db_check_usage_limits(restaurant_id)
 
-    msgs = messages.copy()
-    msgs.append({"role": "assistant", "content": "{"})
-    response = client.messages.create(
-        model=model, max_tokens=1024, system=system, messages=msgs
-    )
+    kwargs = {"model": model, "max_tokens": MAX_TOKENS, "system": system, "messages": messages}
+    if tools:
+        kwargs["tools"] = tools
+
+    last_exc = None
+    for attempt in range(3):
+        try:
+            response = await client.messages.create(**kwargs)
+            break
+        except (APITimeoutError, APIConnectionError) as exc:
+            last_exc = exc
+            if attempt < 2:
+                await asyncio.sleep(1 * (attempt + 1))
+                continue
+            raise
+        except APIStatusError as exc:
+            if exc.status_code in (429, 503, 529) and attempt < 2:
+                last_exc = exc
+                await asyncio.sleep(1 * (attempt + 1))
+                continue
+            raise
 
     # Registrar tokens reales consumidos
     if restaurant_id is not None:
         total_tokens = (
-            getattr(response.usage, "input_tokens",  0) +
+            getattr(response.usage, "input_tokens", 0) +
             getattr(response.usage, "output_tokens", 0)
         )
         if total_tokens > 0:
             await db.db_increment_token_usage(restaurant_id, total_tokens)
 
-    for block in response.content:
-        text = _block_attr(block, "text")
-        if text:
-            return "{" + text
-    return ""
+    # Guard: truncated responses may contain partial tool calls
+    stop_reason = getattr(response, "stop_reason", None)
+    if stop_reason == "max_tokens":
+        log.warning("call_claude.truncated_response", model=model, restaurant_id=restaurant_id)
+        # Extract any text that was generated before truncation
+        safe_reply = ""
+        for block in response.content:
+            if _block_attr(block, "type") == "text":
+                text = _block_attr(block, "text")
+                if text:
+                    safe_reply = text.strip()
+                    break
+        return {"reply": safe_reply or "¿Puedes repetirme lo que necesitas?", "tool_name": None, "tool_input": {}}
 
-def _parse_bot_response(raw: str) -> dict | None:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-    try:
-        data = json.loads(raw)
-        if "reply" in data:
-            return data
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return None
+    # Parse response blocks
+    reply_parts = []
+    tool_name = None
+    tool_input = None
+    for block in response.content:
+        block_type = _block_attr(block, "type")
+        if block_type == "text":
+            text = _block_attr(block, "text")
+            if text:
+                reply_parts.append(text.strip())
+        elif block_type == "tool_use":
+            if tool_name is not None:
+                log.warning("call_claude.multiple_tool_calls",
+                            kept=tool_name, dropped=_block_attr(block, "name"))
+            else:
+                tool_name = _block_attr(block, "name")
+                tool_input = _block_attr(block, "input")
+
+    return {
+        "reply": "\n".join(reply_parts) if reply_parts else "",
+        "tool_name": tool_name,
+        "tool_input": tool_input or {},
+    }
+
+
+# ── Tool-use → legacy parsed format bridge ───────────────────────────────────
+
+_TOOL_TO_ACTION = {
+    "place_order": "order",
+    "request_bill": "bill",
+    "call_waiter": "waiter",
+    "create_delivery_order": "delivery",
+    "create_pickup_order": "pickup",
+    "change_payment_method": "change_payment",
+    "make_reservation": "reserve",
+    "end_session": "end_session",
+}
+
+
+def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> dict:
+    """Convert tool_use response into the legacy parsed dict format for execute_action."""
+    if tool_name and tool_name not in _TOOL_TO_ACTION:
+        log.warning("tool_use_to_parsed.unknown_tool", tool_name=tool_name)
+    action = _TOOL_TO_ACTION.get(tool_name, "chat") if tool_name else "chat"
+
+    parsed = {
+        "action": action,
+        "reply": reply,
+        "items": tool_input.get("items", []),
+        "notes": tool_input.get("notes", "") or tool_input.get("reason", ""),
+        "separate_bill": tool_input.get("separate_bill", False),
+    }
+
+    # External order fields
+    if action in ("delivery", "pickup"):
+        parsed["address"] = tool_input.get("address", "")
+        parsed["payment_method"] = tool_input.get("payment_method", "")
+        parsed["branch_id"] = tool_input.get("branch_id", 0)
+
+    if action == "change_payment":
+        parsed["payment_method"] = tool_input.get("payment_method", "")
+
+    if action == "reserve":
+        parsed["reservation"] = {
+            "name": tool_input.get("name", ""),
+            "date": tool_input.get("date", ""),
+            "time": tool_input.get("time", ""),
+            "guests": tool_input.get("guests", 1),
+            "notes": tool_input.get("notes", ""),
+        }
+
+    return parsed
+
+
+# ── Pre-execution validation layer ───────────────────────────────────────────
+
+_SALON_ONLY_TOOLS = {"place_order", "request_bill", "call_waiter"}
+_EXTERNAL_ONLY_TOOLS = {"create_delivery_order", "create_pickup_order", "change_payment_method"}
+
+
+def _make_order_fingerprint(items: list) -> str:
+    """Create a fingerprint of ordered items for dedup."""
+    normalized = sorted(
+        f"{i.get('name', '').lower().strip()}:{i.get('qty', 1)}"
+        for i in items if i.get("name")
+    )
+    return hashlib.md5("|".join(normalized).encode()).hexdigest()[:12]
+
+
+async def _validate_tool_call(
+    tool_name: str | None,
+    tool_input: dict,
+    reply: str,
+    table_context: dict | None,
+    bot_number: str,
+    phone: str,
+) -> tuple[str | None, str | None, dict]:
+    """
+    Validate a tool call before execution. Returns (tool_name, reply, tool_input).
+    May nullify tool_name (downgrade to chat) or modify reply with warnings.
+    """
+    if tool_name is None:
+        return None, reply, tool_input
+
+    # 1. Context mismatch — salon tool in external mode (or vice versa)
+    if tool_name in _SALON_ONLY_TOOLS and not table_context:
+        log.warning("guard.salon_tool_without_table", tool=tool_name, phone=phone)
+        return None, reply, {}
+
+    if tool_name in _EXTERNAL_ONLY_TOOLS and table_context:
+        log.warning("guard.external_tool_at_table", tool=tool_name, phone=phone)
+        return None, reply, {}
+
+    # 2. Empty items on order tools
+    if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
+        items = tool_input.get("items", [])
+        if not isinstance(items, list):
+            log.warning("guard.order_tool_items_not_list", tool=tool_name, phone=phone, items_type=type(items).__name__)
+            return None, reply, {}
+        if not items:
+            log.warning("guard.order_tool_empty_items", tool=tool_name, phone=phone)
+            return None, reply, {}
+
+    # 3. Duplicate order detection — same items within 60 seconds
+    if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
+        items = tool_input.get("items", [])
+        item_key = _make_order_fingerprint(items)
+        is_ok = await state_store.rate_limit_check(
+            f"order_dedup:{phone}:{bot_number}:{item_key}", max_requests=1, window_seconds=60
+        )
+        if not is_ok:
+            log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=phone, fingerprint=item_key)
+            return None, reply, {}
+
+    # 4. Delivery without address
+    if tool_name == "create_delivery_order":
+        address = tool_input.get("address", "").strip()
+        if not address:
+            log.warning("guard.delivery_no_address", phone=phone)
+            return None, reply + "\n\nNecesito tu dirección de entrega para procesar el pedido.", {}
+
+    # 5. Pickup/Delivery without payment method
+    if tool_name in ("create_delivery_order", "create_pickup_order"):
+        pm = tool_input.get("payment_method", "").strip()
+        if not pm:
+            log.warning("guard.order_no_payment", tool=tool_name, phone=phone)
+            return None, reply, {}
+
+    # 6. Reservation with missing required fields
+    if tool_name == "make_reservation":
+        missing = [f for f in ("name", "date", "time") if not str(tool_input.get(f, "")).strip()]
+        if missing:
+            log.warning("guard.reservation_incomplete", missing=missing, phone=phone)
+            return None, reply, {}
+        try:
+            _guests = int(tool_input.get("guests", 1))
+            if _guests <= 0:
+                raise ValueError("guests must be positive")
+        except (ValueError, TypeError):
+            log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=phone)
+            return None, reply, {}
+
+    return tool_name, reply, tool_input
 
 
 # ── Action dispatcher (delegates to salon/external handlers) ─────────────────
@@ -536,7 +737,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         if items and action in ("order", "delivery", "pickup"):
             for item in items:
                 name = item.get("name", "")
-                qty  = int(item.get("qty", 1))
+                try:
+                    qty = int(item.get("qty", 1) or 1)
+                except (ValueError, TypeError):
+                    qty = 1
                 if not name:
                     continue
                 res = await orders.add_to_cart(phone, name, qty, bot_number)
@@ -639,7 +843,18 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     )
                     # Auto-assign best-fit table (smallest capacity that fits)
                     table = available[0]  # already sorted by capacity ASC
-                    await db.db_assign_table_to_reservation(reservation["id"], table["id"])
+                    try:
+                        await db.db_assign_table_to_reservation(reservation["id"], table["id"])
+                    except Exception:
+                        log.exception("reservation.table_assignment_failed",
+                                      id=reservation["id"], table_id=table["id"])
+                        # Don't leave orphan reservation
+                        try:
+                            await db.db_cancel_reservation(reservation["id"], reason="table_assignment_failed")
+                        except Exception:
+                            log.exception("reservation.cleanup_failed", id=reservation["id"])
+                        reply += "\n\nHubo un problema asignando la mesa. Por favor intenta de nuevo."
+                        return reply
                     if auto_confirm:
                         await db.db_confirm_reservation(reservation["id"])
                         log.info("reservation.auto_confirmed",
@@ -678,6 +893,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             log.info("agent.session_closed", phone=phone)
             await trigger_nps(phone, bot_number, "")
 
+    except InsufficientStockError as e:
+        log.warning("execute_action.insufficient_stock", sku=str(e), phone=phone, bot_number=bot_number)
+        return f"Lo siento, '{e}' ya no está disponible en el inventario. ¿Te gustaría elegir otra opción?"
     except Exception:
         log.exception("execute_action_failed", action=action, phone=phone, bot_number=bot_number)
 
@@ -819,6 +1037,7 @@ async def _load_restaurant_context(
     if table_context and table_context.get("branch_id"):
         r = await db.db_get_restaurant_by_id(table_context["branch_id"])
         if r:
+            restaurant_obj = r
             restaurant_name = r.get("name", restaurant_name)
             feats = _parse_features(r.get("features", {}))
             payment_methods = feats.get("payment_methods", [])
@@ -902,8 +1121,12 @@ async def _build_enriched_user_message(
     )
 
     _delivery_fee_val = feats.get("delivery_fee", 0) or 0
+    try:
+        _delivery_fee_int = int(to_decimal(_delivery_fee_val))
+    except (ValueError, TypeError):
+        _delivery_fee_int = 0
     delivery_fee_note = (
-        f"\n[TARIFA_DOMICILIO: ${int(_delivery_fee_val):,}]"
+        f"\n[TARIFA_DOMICILIO: ${_delivery_fee_int:,}]"
         if _delivery_fee_val and not table_context
         else ""
     )
@@ -971,21 +1194,44 @@ async def _call_llm_and_execute(
     messages.append({"role": "user", "content": enriched})
 
     sys_prompt = await build_system_prompt(feats, table_context, restaurant_id=restaurant_obj.get("id"))
-    raw = await call_claude(sys_prompt, messages, model=MODEL_FAST,
-                             restaurant_id=restaurant_obj.get("id"))
-    parsed = _parse_bot_response(raw)
+    tools = TOOLS_SALON if table_context else TOOLS_EXTERNAL
+    try:
+        result = await call_claude(
+            sys_prompt, messages, model=MODEL_FAST,
+            restaurant_id=restaurant_obj.get("id"),
+            tools=tools,
+        )
+    except Exception:
+        log.exception("call_llm_and_execute.claude_error", phone=user_phone, bot_number=bot_number)
+        return "Lo siento, tengo un problema técnico. Por favor intenta de nuevo en un momento.", {}
+
+    reply = result["reply"]
+    tool_name = result["tool_name"]
+    tool_input = result["tool_input"]
+    if not isinstance(tool_input, dict):
+        try:
+            tool_input = dict(tool_input)
+        except Exception:
+            tool_input = {}
+
+    # ── Validate tool call before execution ──
+    tool_name, reply, tool_input = await _validate_tool_call(
+        tool_name, tool_input, reply, table_context, bot_number, user_phone,
+    )
+
+    parsed = _tool_use_to_parsed(reply, tool_name, tool_input)
 
     routing_context: dict = {}
-    if parsed is None:
-        log.error("agent.invalid_json_response", raw_preview=raw[:120], bot_number=bot_number)
-        assistant_message = "Lo siento, hubo un problema. ¿Puedes repetir tu pedido?"
-    else:
-        assistant_message = await execute_action(
-            parsed, user_phone, bot_number, table_context, session_state,
-            full_history=full_history, restaurant_obj=restaurant_obj,
-            routing_context=routing_context, message=user_message_clean,
-        )
-        assistant_message = assistant_message.replace("[LINK_MENU]", menu_url)
+    assistant_message = await execute_action(
+        parsed, user_phone, bot_number, table_context, session_state,
+        full_history=full_history, restaurant_obj=restaurant_obj,
+        routing_context=routing_context, message=user_message_clean,
+    )
+    assistant_message = (assistant_message or "").replace("[LINK_MENU]", menu_url)
+
+    if not assistant_message.strip():
+        log.warning("call_claude.empty_reply", bot_number=bot_number, phone=user_phone)
+        assistant_message = "¿En qué te puedo ayudar?"
 
     return assistant_message, routing_context
 

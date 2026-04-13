@@ -918,7 +918,7 @@ class TestBotWhatsAppFlows:
         """Build a mock Anthropic client whose messages.create returns reply_text."""
         content_block = MagicMock()
         content_block.type = "text"
-        content_block.text = f'"reply": "{reply_text}", "action": "chat"}}'
+        content_block.text = reply_text  # plain text, not JSON
 
         usage_mock = MagicMock()
         usage_mock.input_tokens = 100
@@ -927,10 +927,11 @@ class TestBotWhatsAppFlows:
         msg_mock = MagicMock()
         msg_mock.content = [content_block]
         msg_mock.usage = usage_mock
+        msg_mock.stop_reason = "end_turn"
 
         anthropic_mock = MagicMock()
         anthropic_mock.messages = MagicMock()
-        anthropic_mock.messages.create = MagicMock(return_value=msg_mock)
+        anthropic_mock.messages.create = AsyncMock(return_value=msg_mock)
         return anthropic_mock
 
     def _patch_db_for_chat(self, monkeypatch, bot_number: str = "+573009876543"):
@@ -954,6 +955,8 @@ class TestBotWhatsAppFlows:
                             AsyncMock(return_value=None))
         monkeypatch.setattr(db, "db_get_all_restaurants",
                             AsyncMock(return_value=[restaurant]))
+        monkeypatch.setattr(db, "db_get_cart",
+                            AsyncMock(return_value={"items": []}))
 
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=None)
@@ -1066,7 +1069,7 @@ class TestBotWhatsAppFlows:
         import app.services.agent as agent_mod
         bad_client = MagicMock()
         bad_client.messages = MagicMock()
-        bad_client.messages.create = MagicMock(side_effect=Exception("Anthropic down"))
+        bad_client.messages.create = AsyncMock(side_effect=Exception("Anthropic down"))
         monkeypatch.setattr(agent_mod, "client", bad_client)
         monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))

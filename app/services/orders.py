@@ -25,51 +25,84 @@ async def _cart_lock(phone: str, bot_number: str, ttl_seconds: int = 30):
     Uses Redis SET NX EX when available, falls back to an asyncio.Lock per worker.
     Raises RuntimeError if the lock cannot be acquired (e.g. already held by another request).
     """
-    acquired = await state_store.cart_lock_acquire(phone, bot_number, ttl_seconds=ttl_seconds)
-    if not acquired:
+    token = await state_store.cart_lock_acquire(phone, bot_number, ttl_seconds=ttl_seconds)
+    if not token:
         log.warning("cart_lock.contention", phone=phone, bot_number=bot_number)
         raise RuntimeError("cart_lock_contention")
     try:
         yield
     finally:
-        await state_store.cart_lock_release(phone, bot_number)
+        await state_store.cart_lock_release(phone, bot_number, token=token)
 
 async def find_dish(dish_name: str, bot_number: str) -> dict | None:
     menu = await db.db_get_menu(bot_number)
-    if not menu: 
+    if not menu:
         return None
     name_lower = dish_name.lower().strip()
+
+    # Pass 1: exact match (case-insensitive)
     for category, dishes in menu.items():
         for dish in dishes:
-            if name_lower in dish["name"].lower() or dish["name"].lower() in name_lower:
+            if dish["name"].lower().strip() == name_lower:
                 return {**dish, "category": category}
-    return None
+
+    # Pass 2: substring matches — collect all and pick the one whose length is
+    # closest to the query (avoids always returning the first-inserted item).
+    # Require the search term to be at least 40% of the menu item name length
+    # to avoid matching a 2-char query against a 30-char name.
+    candidates = []
+    for category, dishes in menu.items():
+        for dish in dishes:
+            dish_lower = dish["name"].lower()
+            item_len = len(dish_lower)
+            query_len = len(name_lower)
+            if item_len == 0:
+                continue
+            if name_lower in dish_lower and query_len / item_len >= 0.4:
+                candidates.append({**dish, "category": category})
+            elif dish_lower in name_lower and item_len / query_len >= 0.4 if query_len > 0 else False:
+                candidates.append({**dish, "category": category})
+
+    if not candidates:
+        return None
+
+    # Prefer the dish whose name length is closest to the query length
+    candidates.sort(key=lambda d: abs(len(d["name"]) - len(dish_name)))
+    return candidates[0]
 
 async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str) -> dict:
+    if quantity <= 0:
+        return {"success": False, "error": "La cantidad debe ser mayor a cero"}
+
     dish = await find_dish(dish_name, bot_number)
     if not dish:
         return {"success": False, "error": f"No encontré '{dish_name}' en el menú"}
 
-    async with _cart_lock(phone, bot_number):
-        cart = await db.db_get_cart(phone, bot_number)
-        
-        found = False
-        for item in cart["items"]:
-            if item["name"] == dish["name"]:
-                item["quantity"] += quantity
-                item["subtotal"] = float(money_mul(to_decimal(item["price"]), item["quantity"]))  # JSON boundary
-                found = True
-                break
+    try:
+        async with _cart_lock(phone, bot_number):
+            cart = await db.db_get_cart(phone, bot_number)
 
-        if not found:
-            cart["items"].append({
-                "name": dish["name"], "price": dish["price"],
-                "quantity": quantity, "subtotal": float(money_mul(to_decimal(dish["price"]), quantity)),  # JSON boundary
-                "category": dish["category"]
-            })
-            
-        await db.db_save_cart(phone, bot_number, cart)
-        
+            found = False
+            for item in cart["items"]:
+                if item["name"] == dish["name"]:
+                    item["quantity"] += quantity
+                    item["subtotal"] = float(money_mul(to_decimal(item["price"]), item["quantity"]))  # JSON boundary
+                    found = True
+                    break
+
+            if not found:
+                cart["items"].append({
+                    "name": dish["name"], "price": dish["price"],
+                    "quantity": quantity, "subtotal": float(money_mul(to_decimal(dish["price"]), quantity)),  # JSON boundary
+                    "category": dish["category"]
+                })
+
+            await db.db_save_cart(phone, bot_number, cart)
+    except RuntimeError as exc:
+        if "cart_lock_contention" in str(exc):
+            return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
+        raise
+
     return {"success": True, "cart": cart, "dish": dish}
 
 async def remove_from_cart(phone: str, dish_name: str, bot_number: str) -> dict:
@@ -77,11 +110,16 @@ async def remove_from_cart(phone: str, dish_name: str, bot_number: str) -> dict:
     if not dish:
         return {"success": False, "error": "Plato no encontrado"}
 
-    async with _cart_lock(phone, bot_number):
-        cart = await db.db_get_cart(phone, bot_number)
-        cart["items"] = [i for i in cart["items"] if i["name"] != dish["name"]]
-        await db.db_save_cart(phone, bot_number, cart)
-        
+    try:
+        async with _cart_lock(phone, bot_number):
+            cart = await db.db_get_cart(phone, bot_number)
+            cart["items"] = [i for i in cart["items"] if i["name"] != dish["name"]]
+            await db.db_save_cart(phone, bot_number, cart)
+    except RuntimeError as exc:
+        if "cart_lock_contention" in str(exc):
+            return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
+        raise
+
     return {"success": True, "cart": cart}
 
 async def clear_cart(phone: str, bot_number: str):
@@ -125,110 +163,145 @@ def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP
     return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
 
 async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "") -> dict:
-    async with _cart_lock(phone, bot_number):
-        cart = await db.db_get_cart(phone, bot_number)
-        if not cart["items"]:
-            return {"success": False, "error": "El carrito está vacío"}
-        if order_type == "domicilio" and not address:
-            return {"success": False, "error": "Se necesita dirección de entrega"}
+    from app.repositories.orders_repo import commit_order_transaction, OrderCommitError, InsufficientStockError
 
-        rest_data = await db.db_get_restaurant_by_phone(bot_number)
-        delivery_fee = 0
-        tz_str = "UTC"
-        if rest_data:
-            _raw_feats = rest_data.get("features") or {}
-            if isinstance(_raw_feats, str):
-                try:
-                    _raw_feats = json.loads(_raw_feats)
-                except Exception:
+    try:
+        async with _cart_lock(phone, bot_number):
+            cart = await db.db_get_cart(phone, bot_number)
+            if not cart["items"]:
+                return {"success": False, "error": "El carrito está vacío"}
+            if order_type == "domicilio" and not address:
+                return {"success": False, "error": "Se necesita dirección de entrega"}
+
+            rest_data = await db.db_get_restaurant_by_phone(bot_number)
+            delivery_fee = ZERO
+            tz_str = "UTC"
+            restaurant_id = None
+            if rest_data:
+                restaurant_id = rest_data.get("id")
+                _raw_feats = rest_data.get("features") or {}
+                if isinstance(_raw_feats, str):
+                    try:
+                        _raw_feats = json.loads(_raw_feats)
+                    except Exception:
+                        _raw_feats = {}
+                if not isinstance(_raw_feats, dict):
                     _raw_feats = {}
-            if not isinstance(_raw_feats, dict):
-                _raw_feats = {}
-            
-            delivery_fee = to_decimal(_raw_feats.get("delivery_fee", 0)) if order_type == "domicilio" else ZERO
-            tz_str = _raw_feats.get("timezone", "UTC")
 
-        subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
-        total = subtotal + delivery_fee
+                delivery_fee = to_decimal(_raw_feats.get("delivery_fee", 0)) if order_type == "domicilio" else ZERO
+                tz_str = _raw_feats.get("timezone", "UTC")
 
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            base_order = await conn.fetchrow(
-                """SELECT id, address, notes, payment_method, status
-                   FROM orders
-                   WHERE phone=$1 AND bot_number=$2
-                     AND order_type=$3
-                     AND (base_order_id IS NULL OR base_order_id = id)
-                     AND status NOT IN ('entregado','cancelado')
-                   ORDER BY created_at DESC LIMIT 1""",
-                phone, bot_number, order_type
-            )
+            subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
+            total = subtotal + delivery_fee
 
-        if base_order:
-            current_status = base_order["status"]
-
-            if current_status in ("en_camino", "en_puerta"):
-                return {"success": False, "error": "in_transit", "blocked_in_transit": True}
-
-            base_id = base_order["id"]
+            # Use a SINGLE connection for all transit/status reads to eliminate TOCTOU races
+            pool = await db.get_pool()
             async with pool.acquire() as conn:
-                locked = await conn.fetchrow(
-                    "SELECT status FROM orders WHERE id=$1 AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')",
-                    base_id
+                base_order = await conn.fetchrow(
+                    """SELECT id, address, notes, payment_method, status
+                       FROM orders
+                       WHERE phone=$1 AND bot_number=$2
+                         AND order_type=$3
+                         AND (base_order_id IS NULL OR base_order_id = id)
+                         AND status NOT IN ('entregado','cancelado')
+                       ORDER BY created_at DESC LIMIT 1""",
+                    phone, bot_number, order_type
                 )
-                if not locked:
-                    return {"success": False, "error": "in_transit", "blocked_in_transit": True}
 
-                max_sub = await conn.fetchval(
-                    "SELECT COALESCE(MAX(sub_number), 1) FROM orders WHERE base_order_id=$1 OR id=$1",
-                    base_id
-                )
-            sub_number = max_sub + 1
-            order_id   = f"{base_id}-{sub_number}"
+                if base_order:
+                    current_status = base_order["status"]
+                    if current_status in ("en_camino", "en_puerta"):
+                        return {"success": False, "error": "in_transit", "blocked_in_transit": True}
 
+                    base_id = base_order["id"]
+                    # Re-check status within the same connection to close the TOCTOU window
+                    locked = await conn.fetchrow(
+                        "SELECT status FROM orders WHERE id=$1 AND status NOT IN ('en_camino','en_puerta','entregado','cancelado')",
+                        base_id
+                    )
+                    if not locked:
+                        return {"success": False, "error": "in_transit", "blocked_in_transit": True}
+
+                    # sub_number is intentionally a hint only; commit_order_transaction
+                    # recomputes it atomically inside the transaction to prevent races.
+                    max_sub = await conn.fetchval(
+                        "SELECT COALESCE(MAX(sub_number), 1) FROM orders WHERE base_order_id=$1 OR id=$1",
+                        base_id
+                    )
+                    sub_number = max_sub + 1
+                    order_id   = f"{base_id}-{sub_number}"
+
+                    order = {
+                        "id":             order_id,
+                        "phone":          phone,
+                        "items":          cart["items"].copy(),
+                        "order_type":     order_type,
+                        "address":        address or base_order.get("address", ""),
+                        "notes":          notes or base_order.get("notes", ""),
+                        "subtotal":       subtotal,
+                        "delivery_fee":   ZERO,
+                        "total":          subtotal,
+                        "status":         "pendiente",
+                        "paid":           False,
+                        "created_at":     datetime.now(ZoneInfo(tz_str)).isoformat(),
+                        "bot_number":     bot_number,
+                        "payment_method": payment_method or base_order.get("payment_method", ""),
+                        "payment_url":    generate_wompi_payment_link(order_id, subtotal),
+                        "is_additional":  True,
+                        "base_order_id":  base_id,
+                        "sub_number":     sub_number,
+                    }
+                    try:
+                        await commit_order_transaction(
+                            pool,
+                            restaurant_id=restaurant_id or 0,
+                            conversation_id=phone,
+                            cart=cart,
+                            order_payload=order,
+                        )
+                    except InsufficientStockError as exc:
+                        return {"success": False, "error": f"Stock insuficiente para '{exc.sku}'"}
+                    except OrderCommitError as exc:
+                        log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
+                        return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
+                    return {"success": True, "order": order}
+
+            order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
             order = {
-                "id":            order_id,
-                "phone":         phone,
-                "items":         cart["items"].copy(),
-                "order_type":    order_type,
-                "address":       address or base_order.get("address", ""),
-                "notes":         notes or base_order.get("notes", ""),
-                "subtotal":      subtotal,
-                "delivery_fee":  0,
-                "total":         subtotal,
-                "status":        "pendiente",
-                "paid":          False,
-                "created_at":    datetime.now(ZoneInfo(tz_str)).isoformat(),
-                "bot_number":    bot_number,
-                "payment_method": payment_method or base_order.get("payment_method", ""),
-                "payment_url":   generate_wompi_payment_link(order_id, subtotal),
-                "is_additional": True,
-                "base_order_id": base_id,
-                "sub_number":    sub_number,
+                "id":             order_id,
+                "phone":          phone,
+                "items":          cart["items"].copy(),
+                "order_type":     order_type,
+                "address":        address or "",
+                "notes":          notes,
+                "subtotal":       subtotal,
+                "delivery_fee":   delivery_fee,
+                "total":          total,
+                "status":         "pendiente",
+                "paid":           False,
+                "created_at":     datetime.now(ZoneInfo(tz_str)).isoformat(),
+                "bot_number":     bot_number,
+                "payment_method": payment_method,
+                "payment_url":    generate_wompi_payment_link(order_id, total),
+                "is_additional":  False,
+                "base_order_id":  None,
+                "sub_number":     1,
             }
-            await db.db_clear_cart(phone, bot_number)
+            try:
+                await commit_order_transaction(
+                    pool,
+                    restaurant_id=restaurant_id or 0,
+                    conversation_id=phone,
+                    cart=cart,
+                    order_payload=order,
+                )
+            except InsufficientStockError as exc:
+                return {"success": False, "error": f"Stock insuficiente para '{exc.sku}'"}
+            except OrderCommitError as exc:
+                log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
+                return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
             return {"success": True, "order": order}
-
-        order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
-        order = {
-            "id":            order_id,
-            "phone":         phone,
-            "items":         cart["items"].copy(),
-            "order_type":    order_type,
-            "address":       address or "",
-            "notes":         notes,
-            "subtotal":      subtotal,
-            "delivery_fee":  delivery_fee,
-            "total":         total,
-            "status":        "pendiente",
-            "paid":          False,
-            "created_at":    datetime.now(ZoneInfo(tz_str)).isoformat(),
-            "bot_number":    bot_number,
-            "payment_method": payment_method,
-            "payment_url":   generate_wompi_payment_link(order_id, total),
-            "is_additional": False,
-            "base_order_id": None,
-            "sub_number":    1,
-        }
-        await db.db_clear_cart(phone, bot_number)
-        return {"success": True, "order": order}
+    except RuntimeError as exc:
+        if "cart_lock_contention" in str(exc):
+            return {"success": False, "error": "Tu pedido está siendo procesado, por favor espera un momento."}
+        raise

@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from decimal import Decimal
+
 from app.services.logging import get_logger
 from app.services.money import to_decimal
 
@@ -57,7 +59,7 @@ async def _deduct_inventory_in_tx(
     """
     for item in items:
         dish_name = item.get("name", "")
-        qty = float(item.get("quantity", item.get("qty", 1)))
+        qty = to_decimal(item.get("quantity", item.get("qty", 1)))
         if not dish_name or qty <= 0:
             continue
 
@@ -82,7 +84,7 @@ async def _deduct_inventory_in_tx(
 
             for rline in recipe_rows:
                 ing_id = rline["ingredient_id"]
-                deduct = float(rline["recipe_qty"]) * qty
+                deduct = to_decimal(rline["recipe_qty"]) * qty
                 inv = locked_map.get(ing_id)
                 if not inv:
                     continue
@@ -98,14 +100,14 @@ async def _deduct_inventory_in_tx(
                     deduct, ing_id,
                 )
                 if updated is None:
-                    available = float(inv["current_stock"])
+                    available = to_decimal(inv["current_stock"])
                     raise InsufficientStockError(
                         sku=f"{dish_name} (ingrediente id={ing_id})",
                         requested=deduct,
                         available=available,
                     )
 
-                new_stock = float(updated["current_stock"])
+                new_stock = to_decimal(updated["current_stock"])
                 await conn.execute(
                     """INSERT INTO inventory_history
                        (inventory_id, quantity_delta, stock_after, reason)
@@ -113,7 +115,7 @@ async def _deduct_inventory_in_tx(
                     ing_id, -deduct, new_stock,
                 )
 
-                min_stock = float(inv["min_stock"] or 0)
+                min_stock = to_decimal(inv["min_stock"] or 0)
                 if new_stock <= min_stock:
                     dishes = inv["linked_dishes"]
                     if isinstance(dishes, str):
@@ -132,7 +134,7 @@ async def _deduct_inventory_in_tx(
                 restaurant_id, json.dumps([dish_name]),
             )
             for row in rows:
-                available = float(row["current_stock"])
+                available = to_decimal(row["current_stock"])
                 updated = await conn.fetchrow(
                     """UPDATE inventory
                        SET current_stock = current_stock - $1,
@@ -149,7 +151,7 @@ async def _deduct_inventory_in_tx(
                         available=available,
                     )
 
-                new_stock = float(updated["current_stock"])
+                new_stock = to_decimal(updated["current_stock"])
                 await conn.execute(
                     """INSERT INTO inventory_history
                        (inventory_id, quantity_delta, stock_after, reason)
@@ -160,7 +162,7 @@ async def _deduct_inventory_in_tx(
                 dishes = row["linked_dishes"]
                 if isinstance(dishes, str):
                     dishes = json.loads(dishes)
-                min_stock = float(row["min_stock"] or 0)
+                min_stock = to_decimal(row["min_stock"] or 0)
                 if new_stock <= min_stock and dishes:
                     await _sync_dish_availability_conn(conn, dishes, False, restaurant_id)
 
@@ -226,45 +228,93 @@ async def commit_order_transaction(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # 1. Insert / upsert the order row
-                await conn.execute(
-                    """INSERT INTO orders
-                           (id, phone, items, order_type, address, notes,
-                            subtotal, delivery_fee, total, status, paid,
-                            payment_url, bot_number, payment_method,
-                            base_order_id, sub_number)
-                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-                       ON CONFLICT (id) DO UPDATE SET
-                           items          = EXCLUDED.items,
-                           subtotal       = EXCLUDED.subtotal,
-                           total          = EXCLUDED.total,
-                           status         = CASE
-                               WHEN orders.status IN (
-                                   'en_preparacion','listo','en_camino','en_puerta','entregado'
-                               ) THEN orders.status
-                               ELSE EXCLUDED.status
-                           END,
-                           paid           = EXCLUDED.paid,
-                           payment_url    = EXCLUDED.payment_url,
-                           notes          = EXCLUDED.notes,
-                           payment_method = EXCLUDED.payment_method""",
-                    order_payload["id"],
-                    order_payload["phone"],
-                    json.dumps(order_payload["items"]),
-                    order_payload["order_type"],
-                    order_payload.get("address", ""),
-                    order_payload.get("notes", ""),
-                    order_payload["subtotal"],
-                    order_payload["delivery_fee"],
-                    order_payload["total"],
-                    order_payload["status"],
-                    order_payload["paid"],
-                    order_payload.get("payment_url", ""),
-                    bot_number,
-                    order_payload.get("payment_method", ""),
-                    order_payload.get("base_order_id"),
-                    order_payload.get("sub_number", 1),
-                )
+                # 1a. For sub-orders: recompute sub_number atomically inside the
+                #     transaction to prevent two concurrent workers from calculating
+                #     the same sub_number and silently overwriting each other.
+                base_order_id = order_payload.get("base_order_id")
+                if base_order_id:
+                    # Lock the base order row so concurrent sub-order inserts serialize here
+                    await conn.fetchrow(
+                        "SELECT id FROM orders WHERE id=$1 FOR UPDATE",
+                        base_order_id,
+                    )
+                    max_sub = await conn.fetchval(
+                        "SELECT COALESCE(MAX(sub_number), 1) FROM orders WHERE base_order_id=$1 OR id=$1",
+                        base_order_id,
+                    )
+                    sub_number = max_sub + 1
+                    order_payload["sub_number"] = sub_number
+                    order_payload["id"] = f"{base_order_id}-{sub_number}"
+                    order_id = order_payload["id"]
+
+                # 1b. Insert the order row — no ON CONFLICT DO UPDATE for sub-orders;
+                #     a genuine id collision (which should not happen after the atomic
+                #     sub_number computation above) raises a unique-violation error that
+                #     the outer except block converts to OrderCommitError.
+                if base_order_id:
+                    await conn.execute(
+                        """INSERT INTO orders
+                               (id, phone, items, order_type, address, notes,
+                                subtotal, delivery_fee, total, status, paid,
+                                payment_url, bot_number, payment_method,
+                                base_order_id, sub_number)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                        order_payload["id"],
+                        order_payload["phone"],
+                        json.dumps(order_payload["items"]),
+                        order_payload["order_type"],
+                        order_payload.get("address", ""),
+                        order_payload.get("notes", ""),
+                        order_payload["subtotal"],
+                        order_payload["delivery_fee"],
+                        order_payload["total"],
+                        order_payload["status"],
+                        order_payload["paid"],
+                        order_payload.get("payment_url", ""),
+                        bot_number,
+                        order_payload.get("payment_method", ""),
+                        base_order_id,
+                        order_payload["sub_number"],
+                    )
+                else:
+                    await conn.execute(
+                        """INSERT INTO orders
+                               (id, phone, items, order_type, address, notes,
+                                subtotal, delivery_fee, total, status, paid,
+                                payment_url, bot_number, payment_method,
+                                base_order_id, sub_number)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                           ON CONFLICT (id) DO UPDATE SET
+                               items          = EXCLUDED.items,
+                               subtotal       = EXCLUDED.subtotal,
+                               total          = EXCLUDED.total,
+                               status         = CASE
+                                   WHEN orders.status IN (
+                                       'en_preparacion','listo','en_camino','en_puerta','entregado'
+                                   ) THEN orders.status
+                                   ELSE EXCLUDED.status
+                               END,
+                               paid           = EXCLUDED.paid,
+                               payment_url    = EXCLUDED.payment_url,
+                               notes          = EXCLUDED.notes,
+                               payment_method = EXCLUDED.payment_method""",
+                        order_payload["id"],
+                        order_payload["phone"],
+                        json.dumps(order_payload["items"]),
+                        order_payload["order_type"],
+                        order_payload.get("address", ""),
+                        order_payload.get("notes", ""),
+                        order_payload["subtotal"],
+                        order_payload["delivery_fee"],
+                        order_payload["total"],
+                        order_payload["status"],
+                        order_payload["paid"],
+                        order_payload.get("payment_url", ""),
+                        bot_number,
+                        order_payload.get("payment_method", ""),
+                        None,
+                        order_payload.get("sub_number", 1),
+                    )
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)
                 if items:
@@ -280,8 +330,8 @@ async def commit_order_transaction(
         # Let callers handle this with a user-friendly message
         raise
     except Exception as exc:
-        _log.exception("order_commit_failed", error=str(exc))
-        raise OrderCommitError(str(exc)) from exc
+        _log.exception("order_commit_failed", order_id=order_payload.get("id"), error=str(exc))
+        raise OrderCommitError(f"Order commit failed for order '{order_payload.get('id')}': {exc}") from exc
 
 
 # ── Lazy wrappers (break circular import with database.py) ────────────────────
