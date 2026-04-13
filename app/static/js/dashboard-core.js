@@ -31,7 +31,7 @@ const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
             else if (roles.includes('cocina')) window.location.href = '/cocina';
             else if (roles.includes('bar')) window.location.href = '/bar';
             else if (roles.includes('caja')) window.location.href = '/caja';
-            else window.location.href = '/staff';
+            else window.location.href = '/staff-hq';
             return;
         }
     }

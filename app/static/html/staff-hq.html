@@ -411,6 +411,7 @@
       <div class="hq-avatar" id="hdr-avatar">?</div>
       <div>
         <div class="hq-name" id="hdr-name">Cargando...</div>
+        <div id="hdr-username" style="font-size:12px;color:#1D9E75;font-weight:600;margin-bottom:2px;display:none;"></div>
         <div class="hq-restaurant" id="hdr-restaurant"></div>
         <div id="hdr-roles"></div>
       </div>
@@ -518,7 +519,7 @@
     const REST_STR = localStorage.getItem('rb_restaurant');
     const REST     = REST_STR ? JSON.parse(REST_STR) : {};
 
-    if (!TOKEN) { window.location.href = '/staff'; }
+    if (!TOKEN) { window.location.href = '/login'; }
 
     const ROLE_META = {
       mesero:       { icon: '🍽️', label: 'Mesero',     url: '/mesero'       },
@@ -564,6 +565,11 @@
       const initials = p.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
       document.getElementById('hdr-avatar').textContent     = initials;
       document.getElementById('hdr-name').textContent       = p.name;
+      const usernameEl = document.getElementById('hdr-username');
+      if (p.username) {
+        usernameEl.textContent = '@' + p.username;
+        usernameEl.style.display = 'block';
+      }
       document.getElementById('hdr-restaurant').textContent = REST.name || '';
       const rolesEl = document.getElementById('hdr-roles');
       rolesEl.innerHTML = '';
@@ -797,7 +803,7 @@
     function doHQLogout() {
       const rid = localStorage.getItem('rb_staff_restaurant_id');
       localStorage.clear();
-      window.location.href = rid ? '/staff?r=' + rid : '/staff';
+      window.location.href = rid ? '/login?r=' + rid : '/login';
     }
 
     // ── Init ───────────────────────────────────────────────────────

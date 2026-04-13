@@ -369,22 +369,22 @@ async def auth_logout(request: Request):
 
 _ADMIN_ROLES = {"owner", "admin", "gerente"}
 _ROLE_REDIRECT = {
-    "mesero":       "/mesero",
-    "cocina":       "/cocina",
-    "caja":         "/caja",
+    "mesero":       "/mesero",   "waiter":   "/mesero",
+    "cocina":       "/cocina",   "cook":     "/cocina",   "cocinero": "/cocina",
+    "caja":         "/caja",     "cashier":  "/caja",     "cajero":   "/caja",
     "bar":          "/bar",
-    "domiciliario": "/domiciliario",
+    "domiciliario": "/domiciliario", "delivery": "/domiciliario",
 }
 
 @router.get("/api/auth/verify-role")
 async def verify_role_for_page(request: Request, page: str):
     _PAGE_ROLES = {
-        "mesero":       {"mesero"},
-        "caja":         {"caja", "cashier"},
+        "mesero":       {"mesero", "waiter"},
+        "caja":         {"caja", "cashier", "cajero"},
         "domiciliario": {"domiciliario", "delivery"},
-        "cocina":       {"cocina"},
+        "cocina":       {"cocina", "cook", "cocinero"},
         "bar":          {"bar"},
-        "staff-hq":     {"mesero", "cocina", "caja", "bar", "domiciliario", "otro"},
+        "staff-hq":     {"mesero", "waiter", "cocina", "cook", "cocinero", "caja", "cashier", "cajero", "bar", "domiciliario", "delivery", "otro"},
         "dashboard":    _ADMIN_ROLES,
         "settings":     _ADMIN_ROLES,
         "billing":      _ADMIN_ROLES,
@@ -407,7 +407,7 @@ async def verify_role_for_page(request: Request, page: str):
 
     allowed = _PAGE_ROLES.get(page, set())
     if not (user_roles & allowed):
-        redirect_to = "/staff"
+        redirect_to = "/staff-hq"
         for role in user_roles:
             if role in _ROLE_REDIRECT:
                 redirect_to = _ROLE_REDIRECT[role]

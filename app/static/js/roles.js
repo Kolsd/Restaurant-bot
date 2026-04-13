@@ -4,7 +4,7 @@ function doStaffLogout() {
     } else {
         const restId = localStorage.getItem('rb_staff_restaurant_id');
         localStorage.clear();
-        window.location.href = restId ? `/staff?r=${restId}` : '/login';
+        window.location.href = restId ? `/login?r=${restId}` : '/login';
     }
 }
 
@@ -27,7 +27,7 @@ function doStaffLogout() {
 
         if (res.status === 403) {
             const body = await res.json();
-            window.location.href = (body.detail && body.detail.redirect) || '/staff';
+            window.location.href = (body.detail && body.detail.redirect) || '/login';
             return;
         }
 

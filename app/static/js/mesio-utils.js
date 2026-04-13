@@ -46,7 +46,7 @@ function mesioLogout() {
   const isStaff = !!localStorage.getItem('rb_staff_token');
   localStorage.clear();
   if (isStaff && restId) {
-    window.location.href = `/staff?r=${restId}`;
+    window.location.href = `/login?r=${restId}`;
   } else {
     window.location.href = '/login';
   }

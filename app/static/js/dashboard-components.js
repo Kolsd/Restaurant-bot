@@ -335,14 +335,64 @@ function _openStaffModal(self, existing = null) {
   title.style.cssText = 'font-size:17px;font-weight:700;margin-bottom:1.5rem;color:#111;';
   box.appendChild(title);
 
-  const nameLabel = document.createElement('div');
-  nameLabel.textContent = 'Nombre completo';
-  nameLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
-  box.appendChild(nameLabel);
-  const nameIn = _makeInput('Nombre del empleado');
-  if (existing) nameIn.value = existing.name;
-  nameIn.style.cssText += 'width:100%;box-sizing:border-box;margin-bottom:1rem;font-size:14px;padding:10px 12px;';
-  box.appendChild(nameIn);
+  // ── Nombre + Apellidos (two fields, combined into `name` on submit)
+  const nameRow = document.createElement('div');
+  nameRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1rem;';
+
+  const nombreWrap = document.createElement('div');
+  const nombreLabel = document.createElement('div');
+  nombreLabel.textContent = 'Nombre(s)';
+  nombreLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
+  nombreWrap.appendChild(nombreLabel);
+  const nombreIn = _makeInput('Ej: Juan Carlos');
+  nombreIn.style.cssText += 'width:100%;box-sizing:border-box;font-size:14px;padding:10px 12px;';
+  nombreWrap.appendChild(nombreIn);
+
+  const apellidosWrap = document.createElement('div');
+  const apellidosLabel = document.createElement('div');
+  apellidosLabel.textContent = 'Apellidos';
+  apellidosLabel.style.cssText = 'font-size:12px;font-weight:700;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em;';
+  apellidosWrap.appendChild(apellidosLabel);
+  const apellidosIn = _makeInput('Ej: Pérez Gómez');
+  apellidosIn.style.cssText += 'width:100%;box-sizing:border-box;font-size:14px;padding:10px 12px;';
+  apellidosWrap.appendChild(apellidosIn);
+
+  nameRow.appendChild(nombreWrap);
+  nameRow.appendChild(apellidosWrap);
+  box.appendChild(nameRow);
+
+  // Pre-fill on edit: split existing name into first/last parts
+  if (existing) {
+    const parts = (existing.name || '').trim().split(' ');
+    if (parts.length >= 2) {
+      nombreIn.value    = parts.slice(0, Math.ceil(parts.length / 2)).join(' ');
+      apellidosIn.value = parts.slice(Math.ceil(parts.length / 2)).join(' ');
+    } else {
+      nombreIn.value = existing.name || '';
+    }
+  }
+
+  // Fake nameIn shim so the rest of the function (which reads nameIn.value) still works
+  const nameIn = { get value() { return (nombreIn.value.trim() + ' ' + apellidosIn.value.trim()).trim(); } };
+
+  // Username preview (read-only, only shown on create)
+  let usernamePreviewEl = null;
+  if (!isEdit) {
+    usernamePreviewEl = document.createElement('div');
+    usernamePreviewEl.style.cssText = 'font-size:12px;color:#888;margin-bottom:1rem;min-height:18px;';
+    function _updateUsernamePreview() {
+      const nombre    = nombreIn.value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+      const apellido  = apellidosIn.value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+      if (nombre) {
+        usernamePreviewEl.textContent = 'Usuario: ' + nombre + (apellido ? '.' + apellido : '');
+      } else {
+        usernamePreviewEl.textContent = '';
+      }
+    }
+    nombreIn.addEventListener('input', _updateUsernamePreview);
+    apellidosIn.addEventListener('input', _updateUsernamePreview);
+    box.appendChild(usernamePreviewEl);
+  }
 
   const docLabel = document.createElement('div');
   docLabel.textContent = 'Número de documento (cédula / ID)';
@@ -793,6 +843,13 @@ function _renderRosterTab(state, el, self) {
       
       info.appendChild(badgeRow);
 
+      if (member.username) {
+        const usernameEl = document.createElement('div');
+        usernameEl.textContent = '@' + member.username;
+        usernameEl.style.cssText = 'font-size:11px;color:#1D9E75;font-weight:600;margin-top:3px;';
+        info.appendChild(usernameEl);
+      }
+
       if (member.phone) {
         const phoneEl = document.createElement('div');
         phoneEl.textContent = member.phone;
@@ -896,7 +953,7 @@ function _renderRosterTab(state, el, self) {
   copyBtn.addEventListener('click', () => {
     const rest = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
     const rid  = rest.branch_id || '';
-    const url  = window.location.origin + '/staff' + (rid ? '?r=' + rid : '');
+    const url  = window.location.origin + '/login' + (rid ? '?r=' + rid : '');
     navigator.clipboard.writeText(url).then(() => {
       copyBtn.textContent = '✓ ¡Copiado!';
       setTimeout(() => { copyBtn.textContent = 'Copiar enlace'; }, 2200);

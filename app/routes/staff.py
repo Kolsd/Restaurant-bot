@@ -43,7 +43,8 @@ _MODULE_DEPS = [Depends(require_module("staff_tips"))]
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
 class StaffCreate(BaseModel):
-    name:            str       = Field(..., min_length=1, max_length=100)
+    name:            str       = Field(..., min_length=1, max_length=100, description="Nombre(s)")
+    last_name:       str       = Field("", max_length=100, description="Apellido(s)")
     role:            str       = Field("mesero", min_length=1, max_length=50)
     roles:           list[str] = Field(default_factory=list)
     password:        str       = Field(..., min_length=4, max_length=100)
@@ -62,7 +63,7 @@ class StaffUpdate(BaseModel):
 
 class StaffPinLoginRequest(BaseModel):
     restaurant_id: int
-    name: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=100, description="Nombre completo o usuario (ej: juan.perez)")
     pin:  str = Field(..., min_length=4, max_length=100)
 
 
@@ -131,10 +132,11 @@ async def create_staff(
 
     pin_hash = _pwd_ctx.hash(body.password)
     roles = [r.strip().lower() for r in body.roles if r.strip()] if body.roles else [body.role.strip().lower()]
-    
+    full_name = f"{body.name.strip()} {body.last_name.strip()}".strip() if body.last_name else body.name.strip()
+
     member = await db.db_create_staff(
         restaurant_id=branch_id,
-        name=body.name,
+        name=full_name,
         role=roles[0] if roles else "mesero",
         pin_hash=pin_hash,
         phone=body.phone,
@@ -192,6 +194,7 @@ async def staff_pin_login(body: StaffPinLoginRequest):
         "staff_id": member["id"],
         "roles":    roles,
         "name":     member["name"],
+        "username": member.get("username", ""),
         "redirect": _staff_redirect(roles),
         "restaurant": {
             "name":             restaurant_data.get("name", "") if restaurant_data else "",
@@ -455,7 +458,7 @@ async def _resolve_staff_from_token(request: Request) -> dict:
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id::text, restaurant_id, name, role, roles, active, phone, "
+            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
             "document_number, hourly_rate, photo_url FROM staff WHERE id=$1::uuid",
             staff_id,
         )
@@ -495,6 +498,7 @@ async def self_profile(request: Request):
     return {
         "id":              member["id"],
         "name":            member["name"],
+        "username":        member.get("username", ""),
         "roles":           member["roles"],
         "role":            member["role"],
         "phone":           member["phone"],

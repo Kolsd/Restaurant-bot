@@ -22,6 +22,8 @@ re-export shim added to that module.
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -92,6 +94,41 @@ async def _record_attendance_deduction(
     )
 
 
+# ── Username generation ──────────────────────────────────────────────────────
+
+def _normalize_for_username(text: str) -> str:
+    """Remove accents, lowercase, keep only a-z0-9."""
+    nfkd = unicodedata.normalize('NFKD', text.lower().strip())
+    ascii_text = nfkd.encode('ascii', 'ignore').decode('ascii')
+    return re.sub(r'[^a-z0-9]', '', ascii_text)
+
+
+async def _generate_username(name: str, exclude_id: str | None = None) -> str:
+    """Generate unique username as firstname.lastname from full name.
+    If a duplicate exists, appends an incrementing number: juan.perez1, juan.perez2..."""
+    parts = name.strip().split()
+    fname = _normalize_for_username(parts[0]) if parts else 'user'
+    lname = _normalize_for_username(parts[1]) if len(parts) > 1 else ''
+
+    base = f"{fname}.{lname}" if lname else fname
+
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT username FROM staff WHERE username LIKE $1 || '%'",
+            base,
+        )
+    existing = {r['username'] for r in rows}
+
+    candidate = base
+    counter = 0
+    while candidate in existing:
+        counter += 1
+        candidate = f"{base}{counter}"
+
+    return candidate
+
+
 # ── Staff roster ─────────────────────────────────────────────────────────────
 
 async def db_get_staff(restaurant_id: int) -> list:
@@ -99,7 +136,7 @@ async def db_get_staff(restaurant_id: int) -> list:
     pool = await _get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id::text, restaurant_id, name, role, roles, active, phone, "
+            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
             "document_number, created_at, updated_at FROM staff "
             "WHERE restaurant_id=$1 ORDER BY name ASC",
             restaurant_id,
@@ -134,9 +171,10 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
     pool = await _get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin, "
+            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
             "document_number, hourly_rate, photo_url "
-            "FROM staff WHERE restaurant_id=$1 AND LOWER(name)=LOWER($2) AND active=true",
+            "FROM staff WHERE restaurant_id=$1 "
+            "AND (LOWER(username)=LOWER($2) OR LOWER(name)=LOWER($2)) AND active=true",
             restaurant_id, name,
         )
     if not row:
@@ -155,9 +193,9 @@ async def db_get_staff_candidates_by_name(name: str) -> list:
     pool = await _get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id::text, restaurant_id, name, role, roles, active, phone, pin, "
+            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
             "document_number, hourly_rate "
-            "FROM staff WHERE LOWER(name)=LOWER($1) AND active=true "
+            "FROM staff WHERE (LOWER(name)=LOWER($1) OR LOWER(username)=LOWER($1)) AND active=true "
             "ORDER BY restaurant_id",
             name,
         )
@@ -180,18 +218,22 @@ async def db_create_staff(
     phone: str = "",
     roles: list = None,
     document_number: str = "",
+    username: str = "",
 ) -> dict:
-    """Insert a new staff member. Returns the created row."""
+    """Insert a new staff member. Returns the created row.
+    username is auto-generated from name if not provided."""
     if roles is None:
         roles = [role] if role else []
+    if not username:
+        username = await _generate_username(name)
     pool = await _get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO staff (restaurant_id, name, role, pin, phone, roles, document_number)
-               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-               RETURNING id::text, restaurant_id, name, role, roles, active, phone,
+            """INSERT INTO staff (restaurant_id, name, username, role, pin, phone, roles, document_number)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+               RETURNING id::text, restaurant_id, name, username, role, roles, active, phone,
                          document_number, created_at, updated_at""",
-            restaurant_id, name, role, pin_hash, phone, json.dumps(roles), document_number,
+            restaurant_id, name, username, role, pin_hash, phone, json.dumps(roles), document_number,
         )
     return _serialize(dict(row))
 
@@ -203,10 +245,14 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
     Only updates columns that are explicitly passed in fields.
     All values are passed as parameters — no f-string SQL.
     """
-    allowed = {"name", "role", "roles", "pin", "phone", "active", "document_number"}
+    allowed = {"name", "username", "role", "roles", "pin", "phone", "active", "document_number"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return None
+
+    # When name changes, regenerate username unless caller explicitly provides one
+    if "name" in updates and "username" not in updates:
+        updates["username"] = await _generate_username(updates["name"], exclude_id=staff_id)
 
     # Serialize roles list to JSON string for JSONB column
     if "roles" in updates and isinstance(updates["roles"], list):
@@ -225,7 +271,7 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
         sql = (
             f"UPDATE staff SET {', '.join(set_parts)}, updated_at=NOW() "
             f"WHERE id=$1::uuid AND restaurant_id=$2 "
-            f"RETURNING id::text, restaurant_id, name, role, roles, active, phone, "
+            f"RETURNING id::text, restaurant_id, name, username, role, roles, active, phone, "
             f"document_number, created_at, updated_at"
         )
         row = await conn.fetchrow(sql, staff_id, restaurant_id, *values)
