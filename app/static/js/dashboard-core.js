@@ -109,6 +109,11 @@ document.addEventListener('DOMContentLoaded', () => {
   loadMenu();
   refreshAll();
   setInterval(() => { if (document.visibilityState !== 'hidden') refreshAll(); }, 30000);
+
+  // Mount setup wizard if container exists
+  if (document.getElementById('setup-wizard') && typeof SetupWizard !== 'undefined') {
+    SetupWizard.mount('#setup-wizard');
+  }
 });
 
 function updateTime() {
