@@ -3,10 +3,9 @@
    app/static/dashboard-nps-inventory.js
 ═══════════════════════════════════════════════════ */
 
-// ── HTML escape helper (XSS prevention for innerHTML patterns) ───────
-function _escHtml(s) {
-  if (s == null) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// _escHtml provided by mesio-utils.js
+if (typeof _escHtml === 'undefined') {
+  function _escHtml(s) { if(s==null)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 }
 
 // ══════════════════════════════════════════════════

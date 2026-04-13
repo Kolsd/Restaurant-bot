@@ -541,7 +541,7 @@ function _fpApplyFilters() {
 function _fpStartPolling() {
   _fpStopPolling();
   _fpPollTimer = setInterval(async () => {
-    if (_fpEditMode) return;
+    if (_fpEditMode || document.visibilityState === 'hidden') return;
     try {
       const r = await fetch('/api/tables/floor-plan', { headers: window._dashHeaders });
       if (!r.ok) return;

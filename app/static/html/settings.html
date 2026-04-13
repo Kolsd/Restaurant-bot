@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Configuración</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/dashboard.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -46,8 +47,11 @@
 </head>
 <body>
 <div class="container">
+  <nav aria-label="Breadcrumb" style="margin-bottom:16px;font-size:13px;">
+    <a href="/dashboard" style="color:#1D9E75;text-decoration:none;">← Volver al Dashboard</a>
+  </nav>
   <div class="header">
-    <a href="/dashboard" class="back-btn">← Volver al Dashboard</a>
+    <a href="/dashboard" class="back-btn" aria-label="Volver al Dashboard">← Volver al Dashboard</a>
     <h1>⚙️ Configuración del restaurante</h1>
   </div>
 
@@ -73,19 +77,19 @@
     <div class="card-title">🔧 Módulos del bot</div>
     <div class="toggle-row">
       <div><div class="toggle-label">Bot activo</div><div class="toggle-sub">El bot responde mensajes de WhatsApp automáticamente</div></div>
-      <label class="toggle-switch"><input type="checkbox" id="toggle-bot" checked><span class="toggle-slider"></span></label>
+      <label class="toggle-switch" title="Activa o desactiva el bot de WhatsApp por completo"><input type="checkbox" id="toggle-bot" checked><span class="toggle-slider"></span></label>
     </div>
     <div class="toggle-row">
       <div><div class="toggle-label">Domicilios</div><div class="toggle-sub">Permitir pedidos a domicilio por WhatsApp</div></div>
-      <label class="toggle-switch"><input type="checkbox" id="toggle-domicilio" checked><span class="toggle-slider"></span></label>
+      <label class="toggle-switch" title="Habilita el flujo de pedidos a domicilio en el bot"><input type="checkbox" id="toggle-domicilio" checked><span class="toggle-slider"></span></label>
     </div>
     <div class="toggle-row">
       <div><div class="toggle-label">Pedidos para recoger</div><div class="toggle-sub">Permitir pedidos para recoger por WhatsApp</div></div>
-      <label class="toggle-switch"><input type="checkbox" id="toggle-recoger" checked><span class="toggle-slider"></span></label>
+      <label class="toggle-switch" title="Habilita el flujo de pedidos para recoger en el bot"><input type="checkbox" id="toggle-recoger" checked><span class="toggle-slider"></span></label>
     </div>
     <div class="toggle-row">
       <div><div class="toggle-label">Upselling automático</div><div class="toggle-sub">El bot sugiere productos adicionales al confirmar un pedido</div></div>
-      <label class="toggle-switch"><input type="checkbox" id="toggle-upsell" checked><span class="toggle-slider"></span></label>
+      <label class="toggle-switch" title="El bot ofrecerá complementos o productos relacionados durante el pedido"><input type="checkbox" id="toggle-upsell" checked><span class="toggle-slider"></span></label>
     </div>
   </div>
 
@@ -181,6 +185,7 @@
   <div class="feedback" id="feedback"></div>
 </div>
 
+<script src="/static/js/mesio-utils.js"></script>
 <script>
   const token = localStorage.getItem('rb_token');
   if (!token) window.location.href = '/login';

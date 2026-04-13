@@ -144,8 +144,15 @@ const ConnectionStatus = MesioComponent({
   },
 
   onMount(self) {
-    window.addEventListener('online',  () => self.setState({ online: true }));
-    window.addEventListener('offline', () => self.setState({ online: false }));
+    self._onOnline  = () => self.setState({ online: true });
+    self._onOffline = () => self.setState({ online: false });
+    window.addEventListener('online',  self._onOnline);
+    window.addEventListener('offline', self._onOffline);
+  },
+
+  onUnmount(self) {
+    window.removeEventListener('online',  self._onOnline);
+    window.removeEventListener('offline', self._onOffline);
   },
 });
 
@@ -277,10 +284,13 @@ async function _staffFetch(path, methodOrOpts = 'GET', body = null) {
   return res.json();
 }
 
+let _staffFmtRestaurant = null;
 function _staffFmt(n) {
-  const restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-  const locale   = restData.locale   || 'es-CO';
-  const currency = restData.currency || 'COP';
+  if (!_staffFmtRestaurant) {
+    try { _staffFmtRestaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}'); } catch { _staffFmtRestaurant = {}; }
+  }
+  const locale   = _staffFmtRestaurant.locale   || 'es-CO';
+  const currency = _staffFmtRestaurant.currency || 'COP';
   return new Intl.NumberFormat(locale, {
     style: 'currency', currency,
     minimumFractionDigits: ['COP','CLP','PYG','JPY'].includes(currency) ? 0 : 2,

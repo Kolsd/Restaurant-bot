@@ -1,10 +1,10 @@
 function doStaffLogout() {
-    const staffRestaurantId = localStorage.getItem('rb_staff_restaurant_id');
-    localStorage.clear();
-    if (staffRestaurantId) {
-        window.location.href = '/staff?r=' + staffRestaurantId;
+    if (typeof mesioLogout === 'function') {
+        mesioLogout();
     } else {
-        window.location.href = '/staff';
+        const restId = localStorage.getItem('rb_staff_restaurant_id');
+        localStorage.clear();
+        window.location.href = restId ? `/staff?r=${restId}` : '/login';
     }
 }
 

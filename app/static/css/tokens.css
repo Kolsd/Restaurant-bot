@@ -1,0 +1,171 @@
+/* ══ Mesio Design Tokens ═════════════════════════════════════════════
+   Single source of truth. Every page imports this file.
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Brand ── */
+  --brand: #1D9E75;
+  --brand-dark: #0F6E56;
+  --brand-light: #E1F5EE;
+  --brand-bg: #f0faf5;
+
+  /* ── Surfaces ── */
+  --bg: #f5f5f0;
+  --surface: #ffffff;
+  --surface-hover: #fafaf8;
+  --border: #e0e0d8;
+  --border-strong: #c8c8c0;
+
+  /* ── Text ── */
+  --text: #111827;
+  --text-2: #4B5563;   /* was #555, improved contrast */
+  --text-3: #6B7280;   /* was #888, improved contrast */
+  --text-4: #9CA3AF;   /* was #bbb, improved contrast */
+
+  /* ── Semantic ── */
+  --success: #059669;
+  --success-light: #ECFDF5;
+  --warning: #F59E0B;
+  --warning-light: #FAEEDA;
+  --danger: #EF4444;
+  --danger-light: #FEE2E2;
+  --info: #3B82F6;
+  --info-light: #E6F1FB;
+
+  /* ── Spacing (8pt grid) ── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* ── Radii ── */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+  --shadow: 0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.1);
+
+  /* ── Transitions ── */
+  --ease: 0.2s ease;
+
+  /* ── Dark surfaces (for operational pages: kitchen, bar, topbar) ── */
+  --dark: #111827;
+  --dark-2: #1F2937;
+  --dark-3: #374151;
+}
+
+/* ── Accessibility: Focus ring ── */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ── Accessibility: Screen reader only ── */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ── Unified button system ── */
+.m-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--s-2); padding: 8px 16px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 600; line-height: 1.2;
+  border: none; cursor: pointer;
+  font-family: inherit;
+  min-height: 44px; /* WCAG touch target */
+  transition: background var(--ease), color var(--ease), box-shadow var(--ease);
+}
+.m-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.m-btn--primary { background: var(--brand); color: #fff; }
+.m-btn--primary:hover:not(:disabled) { background: var(--brand-dark); }
+.m-btn--secondary { background: var(--brand-light); color: var(--brand-dark); }
+.m-btn--secondary:hover:not(:disabled) { background: #c8ede0; }
+.m-btn--danger { background: var(--danger); color: #fff; }
+.m-btn--danger:hover:not(:disabled) { background: #DC2626; }
+.m-btn--ghost { background: transparent; color: var(--text-2); border: 1px solid var(--border); }
+.m-btn--ghost:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); }
+.m-btn--sm { padding: 6px 12px; font-size: 12px; min-height: 36px; }
+.m-btn--lg { padding: 12px 24px; font-size: 15px; min-height: 48px; }
+
+/* ── Unified modal overlay ── */
+.m-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 2000;
+  display: none; align-items: center; justify-content: center;
+  padding: var(--s-4);
+}
+.m-modal-overlay.open { display: flex; }
+.m-modal-box {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 560px; width: 100%;
+  max-height: 90vh; overflow-y: auto;
+  padding: var(--s-5);
+}
+.m-modal-box h3 { font-size: 16px; font-weight: 600; margin-bottom: var(--s-4); }
+
+/* ── Unified confirm dialog (replaces window.confirm) ── */
+.m-confirm-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--s-4);
+}
+.m-confirm-box {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  max-width: 400px; width: 100%;
+  padding: var(--s-5);
+  text-align: center;
+}
+.m-confirm-box p { color: var(--text); font-size: 14px; margin-bottom: var(--s-5); }
+.m-confirm-actions { display: flex; gap: var(--s-3); justify-content: center; }
+
+/* ── Toast notification ── */
+.m-toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  padding: 12px 24px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500;
+  z-index: 10000;
+  animation: m-toast-in 0.3s ease;
+  max-width: 90vw;
+}
+.m-toast--success { background: var(--brand-dark); color: #fff; }
+.m-toast--error   { background: var(--danger); color: #fff; }
+.m-toast--warning { background: var(--warning); color: #000; }
+@keyframes m-toast-in { from { opacity: 0; transform: translateX(-50%) translateY(12px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+/* ── Connection status badge ── */
+.m-live-status { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
+.m-live-status.online  { color: var(--brand); }
+.m-live-status.offline { color: var(--warning); }
+.m-live-status .dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.m-live-status.online .dot  { background: var(--brand); animation: m-pulse 2s infinite; }
+.m-live-status.offline .dot { background: var(--warning); animation: m-pulse-warn 1.2s infinite; }
+@keyframes m-pulse      { 0%,100%{opacity:1} 50%{opacity:.3} }
+@keyframes m-pulse-warn { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+/* ── Skeleton loader ── */
+.m-skeleton {
+  background: linear-gradient(90deg, #e8e8e4 25%, #f0f0ec 50%, #e8e8e4 75%);
+  background-size: 200% 100%;
+  animation: m-shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+@keyframes m-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }

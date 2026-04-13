@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — POS Mesero</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -107,6 +107,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .msg-user { background: #DCF8C6; align-self: flex-end; }
 .msg-bot  { background: #fff; align-self: flex-start; }
 </style>
+  <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/mesio-role.css">
 </head>
 <body>
@@ -173,10 +174,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <span id="toast-text">Notificación</span>
   </div>
 
-  <div class="pos-modal" id="pos-modal">
+  <div class="pos-modal" id="pos-modal" role="dialog" aria-modal="true" aria-labelledby="pos-table-name">
     <div class="pos-header">
       <div class="pos-title" id="pos-table-name">Mesa</div>
-      <button class="pos-close" onclick="closePOS()">✕</button>
+      <button class="pos-close" onclick="closePOS()" aria-label="Cerrar POS">✕</button>
     </div>
     <div class="pos-body">
       <div class="pos-menu-area" id="pos-menu-area">
@@ -221,6 +222,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     </div>
   </div>
 
+<script src="/static/js/mesio-utils.js"></script>
 <script
 
 console.log('rb_restaurant:', localStorage.getItem('rb_restaurant'));

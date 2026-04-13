@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Dashboard Manager</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/dashboard.css">
 <style>
   .role-card { border: 1.5px solid #e0e0d8; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fff; user-select: none; position: relative; overflow: hidden; }
@@ -39,9 +40,6 @@
   .week-nav button { padding:6px 12px; border:1px solid var(--border,#e5e7eb); background:var(--surface,#fff); border-radius:6px; cursor:pointer; }
   .week-label { font-weight:600; min-width:160px; text-align:center; }
   /* Shifts editor grid */
-  .staff-subtabs { display:flex; gap:0; margin-bottom:20px; border-bottom:2px solid #e5e7eb; }
-  .staff-subtabs .subtab-btn { background:none; border:none; padding:10px 20px; cursor:pointer; font-size:14px; font-weight:600; color:#9CA3AF; border-bottom:2px solid transparent; margin-bottom:-2px; }
-  .staff-subtabs .subtab-btn.active { color:#6366F1; border-bottom:2px solid #6366F1; }
 </style>
 </head>
 <body>
@@ -53,7 +51,7 @@
   <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
 </div>
 
-<div class="sidebar" id="sidebar">
+<div class="sidebar" id="sidebar" role="navigation" aria-label="Menú principal">
   <div class="sidebar-logo">
     <div class="logo-icon">M</div>
     <div><div class="logo-text" id="sidebar-name">Cargando...</div><div class="logo-sub">Panel de control</div></div>
@@ -88,7 +86,7 @@
 <!-- ══════════════════════════════════════════════════════════════ -->
 <!-- MAIN                                                          -->
 <!-- ══════════════════════════════════════════════════════════════ -->
-<div class="main">
+<div class="main" role="main">
   <div class="topbar">
     <div class="topbar-left">
       <div class="page-title" id="page-title">Resumen</div>
@@ -843,7 +841,7 @@
   </div>
 </div>
 
-<<div id="full-menu-editor" style="display:none; position:fixed; inset:0; background:#f5f5f0; z-index:9999; overflow-y:auto; padding-bottom: 5rem;">
+<div id="full-menu-editor" style="display:none; position:fixed; inset:0; background:#f5f5f0; z-index:9999; overflow-y:auto; padding-bottom: 5rem;">
   
   <div style="position:sticky; top:0; background:#fff; border-bottom:1px solid #e0e0d8; padding:15px 2rem; display:flex; justify-content:space-between; align-items:center; z-index:10; box-shadow:0 4px 12px rgba(0,0,0,0.05); flex-wrap: wrap; gap: 10px;">
     <div>
@@ -870,6 +868,7 @@
   </div>
 </div>
 
+<script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/offline-sync.js?v=1"></script>
 <script src="/static/js/dashboard-components.js?v=4"></script>
 <script src="/static/js/dashboard-core.js?v=3"></script>

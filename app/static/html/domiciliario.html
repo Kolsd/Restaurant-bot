@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mesio — Domiciliario</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
         body { background: #f0f2f5; color: #333; padding-bottom: 70px; }
@@ -31,7 +32,7 @@
         .btn-wa { background: #e8f5e9; color: #2e7d32; }
         
         .btn-main { width: 100%; padding: 16px; font-size: 18px; color: white; border-radius: 10px; margin-top: 10px; }
-        .btn-start { background: #1976d2; }
+        .btn-start { background: var(--brand, #1D9E75); }
         .btn-deliver { background: #1D9E75; }
 
         /* Navegación Inferior (Tabs móviles) */
@@ -65,17 +66,17 @@
     <div class="container">
         <div id="tab-recoger" class="tab-content active">
             <h3 style="margin-bottom: 15px; color: #555;">Esperando en Cocina 🧑‍🍳</h3>
-            <div id="list-recoger">Cargando...</div>
+            <div id="list-recoger" role="status" aria-live="polite">Cargando...</div>
         </div>
 
         <div id="tab-ruta" class="tab-content">
             <h3 style="margin-bottom: 15px; color: #555;">En mi maleta 🛵</h3>
-            <div id="list-ruta">Cargando...</div>
+            <div id="list-ruta" role="status" aria-live="polite">Cargando...</div>
         </div>
 
         <div id="tab-entregados" class="tab-content">
             <h3 style="margin-bottom: 15px; color: #555;">Completados hoy ✅</h3>
-            <div id="list-entregados">Cargando...</div>
+            <div id="list-entregados" role="status" aria-live="polite">Cargando...</div>
         </div>
     </div>
 
@@ -86,6 +87,7 @@
     </div>
 
     <script src="/static/js/roles.js"></script>
+    <script src="/static/js/mesio-utils.js"></script>
     <script>
 // --- 1. Autenticación, Permisos y Localización ---
 const token = localStorage.getItem('rb_token');
@@ -119,9 +121,15 @@ const token = localStorage.getItem('rb_token');
         }
 
         // --- 3. Cargar Pedidos ---
+        let _loadingTimer = null;
         async function fetchOrders() {
+            if (_loadingTimer) clearTimeout(_loadingTimer);
+            _loadingTimer = setTimeout(() => {
+                mesioToast('Error al cargar pedidos', 'error');
+            }, 15000);
             try {
                 const res = await fetch('/api/delivery/orders', { headers });
+                clearTimeout(_loadingTimer);
                 if (!res.ok) {
                     if(res.status === 401) logout();
                     return;
@@ -129,7 +137,8 @@ const token = localStorage.getItem('rb_token');
                 const data = await res.json();
                 renderOrders(data.orders || []);
             } catch (err) {
-                console.error("Error al cargar pedidos:", err);
+                clearTimeout(_loadingTimer);
+                mesioToast('Error al cargar pedidos', 'error');
             }
         }
 

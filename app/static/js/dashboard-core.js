@@ -3,10 +3,9 @@
    app/static/dashboard-core.js
 ═══════════════════════════════════════════════════ */
 
-// ── HTML escape helper (XSS prevention for innerHTML patterns) ───────
-function _escHtml(s) {
-  if (s == null) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// _escHtml provided by mesio-utils.js
+if (typeof _escHtml === 'undefined') {
+  function _escHtml(s) { if(s==null)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 }
 
 const token = localStorage.getItem('rb_token');
@@ -109,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadMenu();
   refreshAll();
-  setInterval(refreshAll, 30000);
+  setInterval(() => { if (document.visibilityState !== 'hidden') refreshAll(); }, 30000);
 });
 
 function updateTime() {
@@ -761,7 +760,7 @@ window.addEventListener('load', () => {
         if (typeof window.loadGlobalBranches === 'function') {
             window.loadGlobalBranches();
         }
-    }, 300); // Un pequeño retraso de 300ms para asegurar que tu token de sesión ya esté listo
+    }, 0);
 });
 
 // 🚀 NAVEGACIÓN SEGURA POR URL A SETTINGS

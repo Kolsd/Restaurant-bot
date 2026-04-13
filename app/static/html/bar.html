@@ -2,8 +2,9 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Bar</title>
+<link rel="stylesheet" href="/static/css/tokens.css">
 <style>
 * { box-sizing:border-box; margin:0; padding:0; }
 body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#0A0C14; color:#fff; min-height:100vh; }
@@ -11,55 +12,57 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
 /* ── BOARD ── */
 .main { padding:1.5rem; }
 .board { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+@media(max-width:900px) and (min-width:601px){ .board{grid-template-columns:1fr 1fr;} }
 @media(max-width:900px){ .board{grid-template-columns:1fr;} }
+@media(max-width:600px){ .board{grid-template-columns:1fr;} }
 @media(max-width:600px){
   .main { padding:1rem; }
   .btn { padding:12px; font-size:14px; }
 }
 
 .col-header { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin-bottom:.75rem; padding:.5rem .75rem; border-radius:6px; display:flex; align-items:center; gap:8px; }
-.col-recibido    .col-header { color:#F5C542; background:rgba(245,197,66,.08); }
-.col-preparacion .col-header { color:#7B8CDE; background:rgba(123,140,222,.08); }
-.col-listo       .col-header { color:#5BC4A0; background:rgba(91,196,160,.08); }
-.badge { background:#7B8CDE; color:#000; font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; margin-left:auto; }
+.col-recibido    .col-header { color:#FAC775; background:rgba(250,199,117,.08); }
+.col-preparacion .col-header { color:#378ADD; background:rgba(55,138,221,.08); }
+.col-listo       .col-header { color:#1D9E75; background:rgba(29,158,117,.08); }
+.badge { background:#1D9E75; color:#000; font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; margin-left:auto; }
 
 /* ── TARJETAS ── */
 .order-card { background:#111526; border:1px solid #1E2340; border-radius:12px; padding:1rem; margin-bottom:.75rem; transition:border-color .2s; }
 .order-card:hover { border-color:#2A2F50; }
-.order-card.recibido       { border-left:3px solid #F5C542; }
-.order-card.en_preparacion { border-left:3px solid #7B8CDE; }
-.order-card.listo          { border-left:3px solid #5BC4A0; }
+.order-card.recibido       { border-left:3px solid #FAC775; }
+.order-card.en_preparacion { border-left:3px solid #378ADD; }
+.order-card.listo          { border-left:3px solid #1D9E75; }
 
 .sub-tag { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600; padding:2px 8px; border-radius:8px; margin-bottom:6px; }
-.sub-tag.first { background:rgba(91,196,160,.12); color:#5BC4A0; }
-.sub-tag.add   { background:rgba(245,197,66,.12); color:#F5C542; }
+.sub-tag.first { background:rgba(29,158,117,.12); color:#1D9E75; }
+.sub-tag.add   { background:rgba(250,199,117,.12); color:#FAC775; }
 
 .order-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:.5rem; }
 .order-table { font-size:15px; font-weight:700; color:#fff; }
-.order-id { font-size:10px; color:#444; margin-top:2px; }
+.order-id { font-size:10px; color:#888; margin-top:2px; }
 
 .elapsed { font-size:10px; padding:2px 6px; border-radius:8px; font-weight:500; flex-shrink:0; }
-.elapsed.ok   { background:rgba(91,196,160,.15); color:#5BC4A0; }
-.elapsed.warn { background:rgba(245,197,66,.15); color:#F5C542; }
+.elapsed.ok   { background:rgba(29,158,117,.15); color:#1D9E75; }
+.elapsed.warn { background:rgba(250,199,117,.15); color:#FAC775; }
 .elapsed.late { background:rgba(226,75,74,.15); color:#E24B4A; }
 
 .order-items { margin-bottom:.75rem; }
 .order-item { font-size:13px; color:#ccc; padding:3px 0; display:flex; gap:6px; }
-.order-item-qty { color:#7B8CDE; font-weight:600; flex-shrink:0; }
-.order-notes { font-size:11px; color:#555; background:#0A0C14; border-radius:6px; padding:5px 8px; margin-bottom:.75rem; font-style:italic; }
+.order-item-qty { color:#378ADD; font-weight:600; flex-shrink:0; }
+.order-notes { font-size:11px; color:#999; background:#0A0C14; border-radius:6px; padding:5px 8px; margin-bottom:.75rem; font-style:italic; }
 
 .btn { width:100%; padding:8px; border:none; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; transition:all .15s; }
 .btn:active { transform:scale(.97); }
-.btn-prep { background:rgba(123,140,222,.2); color:#7B8CDE; border:1px solid rgba(123,140,222,.3); }
-.btn-prep:hover { background:rgba(123,140,222,.35); }
-.btn-listo { background:rgba(91,196,160,.2); color:#5BC4A0; border:1px solid rgba(91,196,160,.3); }
-.btn-listo:hover { background:rgba(91,196,160,.35); }
-.listo-badge { width:100%; padding:8px; border-radius:8px; font-size:12px; font-weight:600; text-align:center; background:rgba(91,196,160,.08); color:#5BC4A0; border:1px solid rgba(91,196,160,.2); }
+.btn-prep { background:rgba(55,138,221,.2); color:#378ADD; border:1px solid rgba(55,138,221,.3); }
+.btn-prep:hover { background:rgba(55,138,221,.35); }
+.btn-listo { background:rgba(29,158,117,.2); color:#1D9E75; border:1px solid rgba(29,158,117,.3); }
+.btn-listo:hover { background:rgba(29,158,117,.35); }
+.listo-badge { width:100%; padding:8px; border-radius:8px; font-size:12px; font-weight:600; text-align:center; background:rgba(29,158,117,.08); color:#1D9E75; border:1px solid rgba(29,158,117,.2); }
 
-.empty { text-align:center; padding:2rem; color:#2A2F50; font-size:13px; }
-.notification { position:fixed; top:1rem; right:1rem; background:#7B8CDE; color:#000; padding:12px 20px; border-radius:10px; font-size:13px; font-weight:600; transform:translateY(-100px); transition:transform .3s; z-index:100; max-width:300px; }
+.empty { text-align:center; padding:2rem; color:#444; font-size:13px; }
+.notification { position:fixed; top:1rem; right:1rem; background:#1D9E75; color:#000; padding:12px 20px; border-radius:10px; font-size:13px; font-weight:600; transform:translateY(-100px); transition:transform .3s; z-index:100; max-width:300px; }
 .notification.show { transform:translateY(0); }
-.btn-print { background:rgba(255,255,255,.04); color:#555; border:1px solid #1E2340; margin-bottom:6px; }
+.btn-print { background:rgba(255,255,255,.04); color:#888; border:1px solid #1E2340; margin-bottom:6px; }
 </style>
 <link rel="stylesheet" href="/static/css/mesio-role.css">
 </head>
@@ -97,9 +100,10 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; backg
   </div>
 </div>
 
-<div class="notification" id="notif"></div>
+<div class="notification" id="notif" role="alert" aria-live="polite"></div>
 
 <script src="/static/js/roles.js"></script>
+<script src="/static/js/mesio-utils.js"></script>
 <script>
 const token = localStorage.getItem('rb_token');
 if (!token) window.location.href = '/login';
@@ -137,7 +141,7 @@ async function setStatus(orderId, status) {
     if (status === 'listo')          notify('✅ Listo para servir — avisa al mesero');
     if (status === 'en_preparacion') notify('🧪 Preparando...');
     loadOrders();
-  } catch(e) { console.error(e); }
+  } catch(e) { mesioToast('Error al actualizar estado', 'error'); }
 }
 
 function renderCard(o) {
@@ -234,6 +238,7 @@ ${notesHtml}
 let prevIds = new Set();
 
 async function loadOrders() {
+  if (document.visibilityState === 'hidden') return;
   try {
     // Solo cargamos pedidos con station='bar' (o 'all' para compatibilidad)
     const r = await fetch('/api/table-orders?station=bar', { headers: hdr });
@@ -263,7 +268,8 @@ async function loadOrders() {
       if (cnt) cnt.textContent = groups[status].length;
     });
 
-  } catch(e) { console.error('loadOrders error:', e); }
+    mesioTrackFetch(true);
+  } catch(e) { mesioTrackFetch(false); }
 }
 
 loadOrders();

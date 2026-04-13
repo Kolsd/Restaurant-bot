@@ -2,9 +2,10 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mesio — Mi HQ</title>
   <link rel="icon" type="image/png" href="/static/img/logo.png">
+  <link rel="stylesheet" href="/static/css/tokens.css">
   <style>
     :root {
       --green:      #1D9E75;
@@ -231,6 +232,8 @@
       font-size: 13px;
       color: var(--text-muted);
       transition: background 0.1s;
+      min-height: 44px;
+      min-width: 44px;
     }
     .week-nav button:hover { background: var(--bg); }
     .week-label { font-size: 13px; color: var(--text-muted); font-weight: 600; min-width: 130px; text-align: center; }
@@ -434,22 +437,22 @@
 
     <!-- ACTION BUTTONS -->
     <div class="action-grid">
-      <button class="action-btn btn-clock-in"    id="btn-clock-in"    onclick="doAction('clock-in')">
-        <span class="btn-icon">▶</span>Entrada
+      <button class="action-btn btn-clock-in"    id="btn-clock-in"    onclick="doAction('clock-in')" aria-label="Entrada">
+        <span class="btn-icon" aria-hidden="true">▶</span>Entrada
       </button>
-      <button class="action-btn btn-clock-out"   id="btn-clock-out"   onclick="doAction('clock-out')">
-        <span class="btn-icon">■</span>Salida
+      <button class="action-btn btn-clock-out"   id="btn-clock-out"   onclick="doAction('clock-out')" aria-label="Salida">
+        <span class="btn-icon" aria-hidden="true">■</span>Salida
       </button>
-      <button class="action-btn btn-break-start" id="btn-break-start" onclick="doAction('break-start')">
-        <span class="btn-icon">☕</span>Iniciar break
+      <button class="action-btn btn-break-start" id="btn-break-start" onclick="doAction('break-start')" aria-label="Iniciar break">
+        <span class="btn-icon" aria-hidden="true">☕</span>Iniciar break
       </button>
-      <button class="action-btn btn-break-end"   id="btn-break-end"   onclick="doAction('break-end')">
-        <span class="btn-icon">↩</span>Fin de break
+      <button class="action-btn btn-break-end"   id="btn-break-end"   onclick="doAction('break-end')" aria-label="Fin de break">
+        <span class="btn-icon" aria-hidden="true">↩</span>Fin de break
       </button>
     </div>
 
     <!-- FEEDBACK -->
-    <div id="action-feedback"></div>
+    <div id="action-feedback" role="alert" aria-live="polite"></div>
 
     <!-- ROLE STATIONS -->
     <div>
@@ -508,6 +511,7 @@
     </div>
   </div>
 
+  <script src="/static/js/mesio-utils.js"></script>
   <script src="/static/js/roles.js"></script>
   <script>
     const TOKEN    = localStorage.getItem('rb_token');

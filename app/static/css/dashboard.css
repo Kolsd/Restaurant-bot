@@ -4,6 +4,7 @@
 ═══════════════════════════════════════════════════ */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+:focus-visible { outline: 2px solid #1D9E75; outline-offset: 2px; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #111; }
 
 /* ── LAYOUT ── */
@@ -14,14 +15,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   overflow-y: auto;
 }
 .nav-group-label {
-  font-size: 10px; font-weight: 700; color: #bbb; letter-spacing: 0.08em;
+  font-size: 10px; font-weight: 700; color: #9CA3AF; letter-spacing: 0.08em;
   text-transform: uppercase; padding: 10px 12px 3px; margin-top: 4px;
 }
 .sidebar-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 0.5px solid #e0e0d8; }
 .logo-icon { width: 36px; height: 36px; background: #1D9E75; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 14px; flex-shrink: 0; }
 .logo-text { font-size: 14px; font-weight: 600; }
-.logo-sub  { font-size: 11px; color: #888; }
-.nav-item  { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #555; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; }
+.logo-sub  { font-size: 11px; color: #6B7280; }
+.nav-item  { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #4B5563; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; }
 .nav-item:hover  { background: #f5f5f0; color: #111; }
 .nav-item.active { background: #E1F5EE; color: #0F6E56; font-weight: 500; }
 .live-badge { margin-top: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #1D9E75; background: #E1F5EE; padding: 8px 12px; border-radius: 8px; transition: background .3s, color .3s; }
@@ -46,20 +47,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 /* ── MÉTRICAS ── */
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 1.5rem; }
 .metric { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem 1.25rem; }
-.metric-label { font-size: 12px; color: #888; margin-bottom: 6px; }
+.metric-label { font-size: 12px; color: #6B7280; margin-bottom: 6px; }
 .metric-value { font-size: 26px; font-weight: 600; }
-.metric-delta { font-size: 11px; margin-top: 4px; color: #888; }
+.metric-delta { font-size: 11px; margin-top: 4px; color: #6B7280; }
 .delta-up   { color: #1D9E75; }
 .delta-warn { color: #BA7517; }
+.delta-down { color: #EF4444; }
 
 /* ── CARDS Y GRID ── */
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
 .card  { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; }
-.card-title { font-size: 13px; font-weight: 500; color: #888; margin-bottom: 1rem; }
+.card-title { font-size: 13px; font-weight: 500; color: #6B7280; margin-bottom: 1rem; }
 .chart-wrap { position: relative; width: 100%; height: 220px; }
 .section     { display: none; }
 .section.active { display: block; }
-.empty-state { text-align: center; padding: 2.5rem; color: #aaa; font-size: 13px; }
+.empty-state { text-align: center; padding: 2.5rem; color: #9CA3AF; font-size: 13px; }
 
 /* ── TABLA ── */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -67,6 +69,7 @@ th    { text-align: left; padding: 8px 12px; font-size: 12px; color: #888; borde
 td    { padding: 10px 12px; border-bottom: 0.5px solid #f0f0e8; vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: #fafaf8; }
+tbody tr:nth-child(even) td { background: #fafaf8; }
 
 /* ── BADGES ── */
 .badge         { font-size: 11px; padding: 3px 8px; border-radius: 10px; font-weight: 500; }
@@ -263,6 +266,9 @@ input:checked + .toggle-slider:before { transform: translateX(16px); }
 .mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 280; }
 .mobile-overlay.open { display: block; }
 
+@media (max-width: 1023px) and (min-width: 769px) {
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
 @media (max-width: 768px) {
   .hamburger-btn { display: flex; }
   .mobile-topbar { display: flex; }

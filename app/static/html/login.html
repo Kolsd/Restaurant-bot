@@ -4,20 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Acceso</title>
+<link rel="stylesheet" href="/static/css/tokens.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
   .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 16px; padding: 2rem; width: 100%; max-width: 380px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
   .logo { width: 44px; height: 44px; background: #1D9E75; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 18px; margin-bottom: 1.5rem; }
   h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; color: #111; }
-  .sub { font-size: 14px; color: #777; margin-bottom: 1.5rem; }
-  label { font-size: 13px; color: #555; display: block; margin-bottom: 4px; font-weight: 500; }
+  .sub { font-size: 14px; color: #6B7280; margin-bottom: 1.5rem; }
+  label { font-size: 13px; color: #4B5563; display: block; margin-bottom: 4px; font-weight: 500; }
   input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; margin-bottom: 1rem; transition: border-color 0.2s; }
   input:focus { border-color: #1D9E75; }
   button { width: 100%; padding: 12px; background: #1D9E75; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
   button:hover { opacity: 0.9; }
   .error { font-size: 13px; color: #c0392b; background: #fdf0ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 1rem; display: none; }
-  .footer { text-align: center; font-size: 12px; color: #aaa; margin-top: 1.5rem; }
+  .footer { text-align: center; font-size: 12px; color: #9CA3AF; margin-top: 1.5rem; }
   
   /* Estilos para el Hub Multirol */
   .role-btn { margin-bottom: 10px; border: 1px solid transparent; }
@@ -32,11 +33,13 @@
     <h1>Bienvenido</h1>
     <p class="sub">Ingresa a tu panel de control</p>
     <div class="error" id="error-msg"></div>
-    <label>Email o Nombre de Empleado</label>
-    <input type="text" id="username" placeholder="usuario@email.com o Nombre" />
-    <label>Contraseña</label>
-    <input type="password" id="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" />
-    <button onclick="doLogin()">Ingresar</button>
+    <form onsubmit="event.preventDefault(); doLogin();">
+      <label for="username">Email o Nombre de Empleado</label>
+      <input type="text" id="username" name="username" placeholder="usuario@email.com o Nombre" autocomplete="username" />
+      <label for="password">Contraseña</label>
+      <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" />
+      <button type="submit">Ingresar</button>
+    </form>
   </div>
 
   <div id="role-selector" style="display:none; text-align:center;">
@@ -44,10 +47,10 @@
     <h1>Selecciona tu Panel</h1>
     <p class="sub">Tienes acceso a múltiples áreas operativas</p>
     <div id="role-buttons" style="display:flex; flex-direction:column;"></div>
-    <button onclick="location.reload()" style="background:none; color:#555; border:1px solid #ddd; margin-top:1rem; padding: 8px;">Cerrar sesión</button>
+    <button onclick="location.reload()" style="background:none; color:#4B5563; border:1px solid #ddd; margin-top:1rem; padding: 8px;">Cerrar sesión</button>
   </div>
 
-  <div class="footer">Mesio v2.0 · Powered by Claude AI</div>
+  <div class="footer">Mesio · Powered by Claude AI</div>
 </div>
 
 <script>
@@ -118,23 +121,33 @@ async function doLogin() {
       const selector = document.getElementById('role-buttons');
       selector.innerHTML = '';
 
+      function addRoleBtn(label, href, bg, color) {
+        const btn = document.createElement('button');
+        btn.className = 'role-btn';
+        btn.textContent = label;
+        btn.style.background = bg;
+        btn.style.color = color;
+        btn.addEventListener('click', function() { window.location.href = href; });
+        selector.appendChild(btn);
+      }
+
       if (hasRole('gerente')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/dashboard'" style="background:#F0E6FF; color:#6B21A8;">📊 Entrar al Dashboard</button>`;
+        addRoleBtn('Entrar al Dashboard', '/dashboard', '#F0E6FF', '#6B21A8');
       }
       if (hasRole('waiter', 'mesero')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/mesero'" style="background:#E1F5EE; color:#0F6E56;">🍽️ Entrar como Mesero</button>`;
+        addRoleBtn('Entrar como Mesero', '/mesero', '#E1F5EE', '#0F6E56');
       }
       if (hasRole('cashier', 'cajero', 'caja')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/caja'" style="background:#FFF8E6; color:#BA7517;">💰 Entrar a Caja</button>`;
+        addRoleBtn('Entrar a Caja', '/caja', '#FFF8E6', '#BA7517');
       }
       if (hasRole('cook', 'cocina', 'cocinero')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/cocina'" style="background:#FAEEDA; color:#854F0B;">👨‍🍳 Entrar a Cocina</button>`;
+        addRoleBtn('Entrar a Cocina', '/cocina', '#FAEEDA', '#854F0B');
       }
       if (hasRole('delivery', 'domiciliario')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/domiciliario'" style="background:#E3F2FD; color:#1565C0;">🛵 Entrar a Domicilios</button>`;
+        addRoleBtn('Entrar a Domicilios', '/domiciliario', '#E3F2FD', '#1565C0');
       }
       if (hasRole('bar')) {
-        selector.innerHTML += `<button class="role-btn" onclick="window.location.href='/bar'" style="background:#FEF3C7; color:#92400E;">🍹 Entrar a Bar</button>`;
+        addRoleBtn('Entrar a Bar', '/bar', '#FEF3C7', '#92400E');
       }
 
     } else {
@@ -151,5 +164,6 @@ async function doLogin() {
   }
 }
 </script>
+<script src="/static/js/mesio-utils.js" defer></script>
 </body>
 </html>

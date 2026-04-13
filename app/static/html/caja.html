@@ -3,14 +3,15 @@
 <head>
   
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Módulo de Caja</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
 <style>
 :root {
-  --primary: #7C3AED;
-  --primary-light: #F3E8FF;
-  --primary-dark: #6D28D9;
+  --primary: #1D9E75;
+  --primary-light: #E1F5EE;
+  --primary-dark: #0F6E56;
   --success: #059669;
   --success-light: #ECFDF5;
   --warning: #F59E0B;
@@ -208,7 +209,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .adj-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #F4F4F5; }
 .adj-item-name { flex: 1; font-size: 14px; font-weight: 600; }
 .adj-qty-ctrl { display: flex; align-items: center; gap: 8px; }
-.adj-qty-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #E4E4E7; background: #F4F4F5; cursor: pointer; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.adj-qty-btn { width: 44px; height: 44px; min-width: 44px; min-height: 44px; border-radius: 8px; border: 1px solid #E4E4E7; background: #F4F4F5; cursor: pointer; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center; line-height: 1; }
 .adj-qty-val { font-weight: 700; min-width: 22px; text-align: center; }
 .adj-item-price { font-size: 13px; color: #52525B; min-width: 75px; text-align: right; font-weight: 600; }
 .adj-removed .adj-item-name { opacity: 0.4; text-decoration: line-through; }
@@ -403,7 +404,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <div id="mesas-right" class="caja-preview-pane" style="display:none;">
       <div class="caja-preview-header">
         <span>Vista previa de factura</span>
-        <button onclick="closeMesasPreview()">✕</button>
+        <button onclick="closeMesasPreview()" aria-label="Cerrar vista previa">✕</button>
       </div>
       <div class="thermal-paper" id="mesas-receipt-preview"></div>
       <div class="preview-actions">
@@ -428,11 +429,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 </div>
 
-<div class="modal-overlay" id="adj-modal" onclick="if(event.target===this)closeAdjModal()">
+<div class="modal-overlay" id="adj-modal" onclick="if(event.target===this)closeAdjModal()" role="dialog" aria-modal="true" aria-labelledby="adj-modal-title">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>✏️ Ajustar Factura</h3>
-      <button class="modal-close" onclick="closeAdjModal()">✕</button>
+      <h3 id="adj-modal-title">✏️ Ajustar Factura</h3>
+      <button class="modal-close" onclick="closeAdjModal()" aria-label="Cerrar">✕</button>
     </div>
     <div id="adj-items-list"></div>
     <div class="adj-tip-row">
@@ -447,11 +448,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </div>
 
-<div class="sp-overlay" id="split-modal" onclick="if(event.target===this)closeSplitModal()">
+<div class="sp-overlay" id="split-modal" onclick="if(event.target===this)closeSplitModal()" role="dialog" aria-modal="true" aria-labelledby="split-modal-title">
   <div class="sp-box">
     <div class="sp-head">
       <h3 id="split-modal-title">✂️ Dividir Cuenta</h3>
-      <button class="modal-close" onclick="closeSplitModal()">✕</button>
+      <button class="modal-close" onclick="closeSplitModal()" aria-label="Cerrar">✕</button>
     </div>
     <div class="sp-body">
 
@@ -496,7 +497,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         <h2 id="pay-modal-title" style="font-size:1.5rem; font-weight:800; color:#18181B;">💰 Cobrar Cuenta</h2>
         <div id="pay-modal-subtitle" style="font-size:12px; color:#71717A; font-family:monospace; margin-top:4px;"></div>
       </div>
-      <button onclick="closePayModal()" style="padding:10px 20px; border-radius:10px; border:1px solid #D1D5DB; background:#fff; font-weight:600; cursor:pointer;">✕ Volver</button>
+      <button onclick="closePayModal()" aria-label="Cerrar cobro" style="padding:10px 20px; border-radius:10px; border:1px solid #D1D5DB; background:#fff; font-weight:600; cursor:pointer;">✕ Volver</button>
     </div>
 
     <div style="padding:2rem; flex:1;">
@@ -533,7 +534,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         <input type="text" id="pay-customer-nit" placeholder="CC / NIT (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
         <input type="email" id="pay-customer-email" placeholder="Email (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;">
       </div>
-      <div id="pay-feedback" style="display:none; margin-top:1.5rem; padding:12px; border-radius:10px; font-size:14px; font-weight:600;"></div>
+      <div id="pay-feedback" role="alert" aria-live="polite" style="display:none; margin-top:1.5rem; padding:12px; border-radius:10px; font-size:14px; font-weight:600;"></div>
     </div>
 
     <div style="padding:1.5rem; border-top:1px solid #E4E4E7; background:#FAFAFA; position:sticky; bottom:0;">
@@ -551,11 +552,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 </div>
 
-<div class="sp-overlay" id="chat-modal" onclick="if(event.target===this)closeChatModal()">
+<div class="sp-overlay" id="chat-modal" onclick="if(event.target===this)closeChatModal()" role="dialog" aria-modal="true" aria-labelledby="chat-modal-title">
   <div class="sp-box">
     <div class="sp-head">
       <h3 id="chat-modal-title">Chat</h3>
-      <button class="modal-close" onclick="closeChatModal()">✕</button>
+      <button class="modal-close" onclick="closeChatModal()" aria-label="Cerrar">✕</button>
     </div>
     <div class="sp-body" id="chat-modal-msgs" style="background:#efeae2;min-height:300px;"></div>
     <div class="sp-foot" style="gap:8px;">
@@ -565,8 +566,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </div>
 
+<script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/roles.js"></script>
 <script>
+// XSS helper — escapes all HTML special chars before injecting into innerHTML
+function _escHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const reqHeaders = { 'Authorization': 'Bearer ' + localStorage.getItem('rb_token'), 'Content-Type': 'application/json' };
 let _billsCache = {}; // id → bill object, used by Ajustar Factura modal
 let _adjBill = null;
@@ -836,17 +849,17 @@ async function loadCajaOrders() {
       // Renderizar items agrupados
       const itemsHtml = b.items.map(i => `
         <div class="t-item">
-          <div><span class="t-qty">${i.quantity||1}x</span> <span style="font-weight:500;">${i.name}</span></div>
+          <div><span class="t-qty">${_escHtml(String(i.quantity||1))}x</span> <span style="font-weight:500;">${_escHtml(i.name)}</span></div>
           <div style="font-weight:600;">${fmt((i.price || 0) * (i.quantity || 1))}</div>
         </div>
       `).join('');
 
       return `
-        <div class="ticket-card" onclick="selectTicketCard('${b.id}', this)">
+        <div class="ticket-card" onclick="selectTicketCard('${_escHtml(b.id)}', this)">
           <div class="t-header">
             <div>
-              <div class="t-table">${b.table_name}</div>
-              <div style="font-size:11px; color:#A1A1AA; margin-top:4px; font-family:monospace;">ID: ${b.id.substring(0,8)}...</div>
+              <div class="t-table">${_escHtml(b.table_name)}</div>
+              <div style="font-size:11px; color:#A1A1AA; margin-top:4px; font-family:monospace;">ID: ${_escHtml(b.id.substring(0,8))}...</div>
             </div>
             <div class="t-time">⏱ ${time}</div>
           </div>
@@ -1073,9 +1086,9 @@ function _renderSplitTable() {
   // Body
   let tbHtml = '';
   items.forEach((item, idx) => {
-    let tdHtml = `<td style="font-weight:500;">${item.name}</td>
+    let tdHtml = `<td style="font-weight:500;">${_escHtml(item.name)}</td>
       <td style="color:#71717A;">${fmt(item.unit_price)}</td>
-      <td style="text-align:center;font-weight:700;">${item.qty}</td>`;
+      <td style="text-align:center;font-weight:700;">${_escHtml(String(item.qty))}</td>`;
     for (let c = 1; c <= n; c++) {
       const defaultQty = c === 1 ? item.qty : 0;
       tdHtml += `<td class="chk-cell">
@@ -1537,11 +1550,11 @@ function renderAdjItems() {
   const container = document.getElementById('adj-items-list');
   container.innerHTML = _adjBill.items.map((item, idx) => `
     <div class="adj-item ${item.adjQty === 0 ? 'adj-removed' : ''}" id="adj-row-${idx}">
-      <div class="adj-item-name">${item.name}</div>
+      <div class="adj-item-name">${_escHtml(item.name)}</div>
       <div class="adj-qty-ctrl">
-        <button class="adj-qty-btn" onclick="adjQty(${idx},-1)">−</button>
-        <span class="adj-qty-val" id="adj-qty-${idx}">${item.adjQty}</span>
-        <button class="adj-qty-btn" onclick="adjQty(${idx},1)">+</button>
+        <button class="adj-qty-btn" onclick="adjQty(${idx},-1)" aria-label="Reducir cantidad">−</button>
+        <span class="adj-qty-val" id="adj-qty-${idx}">${_escHtml(String(item.adjQty))}</span>
+        <button class="adj-qty-btn" onclick="adjQty(${idx},1)" aria-label="Aumentar cantidad">+</button>
       </div>
       <div class="adj-item-price" id="adj-price-${idx}">${fmt(item.price * item.adjQty)}</div>
     </div>
@@ -1621,11 +1634,11 @@ async function loadChats() {
         if (convs.length === 0) { list.innerHTML = '<div class="empty-state">No hay comprobantes pendientes.</div>'; return; }
 
         list.innerHTML = convs.map(c => `
-            <div class="conv-row" onclick="openChatModal('${c.phone}')">
-                <div class="conv-avatar">${c.phone.slice(-4)}</div>
+            <div class="conv-row" onclick="openChatModal('${_escHtml(c.phone)}')">
+                <div class="conv-avatar">${_escHtml(c.phone.slice(-4))}</div>
                 <div style="flex:1;">
-                    <div style="font-weight:700;font-size:14px;">${c.phone}</div>
-                    <div style="color:#71717A;font-size:12px;">${c.preview}</div>
+                    <div style="font-weight:700;font-size:14px;">${_escHtml(c.phone)}</div>
+                    <div style="color:#71717A;font-size:12px;">${_escHtml(c.preview)}</div>
                 </div>
             </div>
         `).join('');
@@ -1647,9 +1660,11 @@ async function openChatModal(phone) {
         container.innerHTML = msgs.map(m => {
             const isUser = m.role === 'user';
             let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-            
-            content = content.replace(/(\/api\/media\/\S+)/g, '<a href="$1" target="_blank" style="color:#1D9E75;text-decoration:none;font-weight:800;background:#E1F5EE;padding:6px 12px;border-radius:8px;display:inline-block;margin-top:6px;border:1px solid #1D9E75;">📎 Abrir Comprobante</a>');
-            
+
+            // Escape all HTML first, then selectively restore safe media links
+            content = _escHtml(content);
+            content = content.replace(/(\/api\/media\/\S+)/g, '<a href="$1" target="_blank" style="color:#1D9E75;text-decoration:none;font-weight:800;background:#E1F5EE;padding:6px 12px;border-radius:8px;display:inline-block;margin-top:6px;border:1px solid #1D9E75;">&#128206; Abrir Comprobante</a>');
+
             return `<div class="msg-bubble ${isUser ? 'user' : ''}"><div class="bubble ${isUser ? 'user' : 'bot'}">${content}</div></div>`;
         }).join('');
         container.scrollTop = container.scrollHeight;
@@ -1746,7 +1761,7 @@ function renderDeliveryCard(o, hasVoucher) {
   let itemsHtml = '';
   try {
     const arr = typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []);
-    itemsHtml = arr.map(i => `<div style="font-size:13px;padding:1px 0;">${i.quantity||1}× ${i.name}</div>`).join('');
+    itemsHtml = arr.map(i => `<div style="font-size:13px;padding:1px 0;">${_escHtml(String(i.quantity||1))}× ${_escHtml(i.name)}</div>`).join('');
   } catch(e) {}
 
   const typeLabel = o.order_type === 'recoger' ? '🛍️ Recoger' : '🛵 Domicilio';
@@ -1778,7 +1793,7 @@ function renderDeliveryCard(o, hasVoucher) {
       <div style="margin:8px 0;border-top:1px solid #eee;padding-top:8px;">
         ${itemsHtml}
         ${o.order_type === 'domicilio' && o.address
-          ? `<div style="font-size:12px;color:#666;margin-top:4px;">📍 ${document.createTextNode(o.address).nodeValue}</div>`
+          ? `<div style="font-size:12px;color:#666;margin-top:4px;">&#128205; ${_escHtml(o.address)}</div>`
           : o.order_type === 'recoger'
             ? `<div style="font-size:12px;color:#8b5cf6;margin-top:4px;font-weight:600;">🛍️ Pasa a recoger en restaurante</div>`
             : ''}
@@ -2208,7 +2223,7 @@ setInterval(() => {
   <div class="qim-header">
     <div class="qim-header-title">🧾 Nueva Factura</div>
     <div class="qim-header-right">
-      <button class="qim-close-btn" onclick="closeQuickInvoiceModal()">✕</button>
+      <button class="qim-close-btn" onclick="closeQuickInvoiceModal()" aria-label="Cerrar nueva factura">✕</button>
     </div>
   </div>
 
@@ -2343,12 +2358,13 @@ function _qimRenderMenu(menu) {
   let html = '';
   for (const [cat, dishes] of Object.entries(menu)) {
     if (!Array.isArray(dishes) || !dishes.length) continue;
-    html += `<div class="qim-cat-title">${cat}</div><div class="qim-grid">`;
+    html += `<div class="qim-cat-title">${_escHtml(cat)}</div><div class="qim-grid">`;
     dishes.forEach(d => {
       if (d.available === false) return;
-      const safe = d.name.replace(/'/g,"\\'").replace(/"/g,'&quot;');
-      html += `<div class="qim-card" onclick="qimAddItem('${safe}',${d.price})">
-        <div class="qim-card-name">${d.name}</div>
+      // Encode name for safe use in both the onclick attribute and the display text
+      const safeAttr = _escHtml(d.name).replace(/'/g, '&#39;');
+      html += `<div class="qim-card" onclick="qimAddItem('${safeAttr}',${Number(d.price)})">
+        <div class="qim-card-name">${_escHtml(d.name)}</div>
         <div class="qim-card-price">${_qimFmt(d.price)}</div>
       </div>`;
     });
@@ -2405,11 +2421,11 @@ function _qimRenderCart() {
   el.className = '';
   el.innerHTML = _qimItems.map((it, i) => `
     <div class="qim-cart-item">
-      <div class="qim-ci-name">${it.name}</div>
+      <div class="qim-ci-name">${_escHtml(it.name)}</div>
       <div class="qim-qty-wrap">
-        <button class="qim-qty-btn" onclick="qimQty(${i},-1)">−</button>
-        <span style="font-weight:700;min-width:16px;text-align:center;font-size:13px;">${it.qty}</span>
-        <button class="qim-qty-btn" onclick="qimQty(${i},+1)">+</button>
+        <button class="qim-qty-btn" onclick="qimQty(${i},-1)" aria-label="Reducir cantidad">−</button>
+        <span style="font-weight:700;min-width:16px;text-align:center;font-size:13px;">${_escHtml(String(it.qty))}</span>
+        <button class="qim-qty-btn" onclick="qimQty(${i},+1)" aria-label="Aumentar cantidad">+</button>
       </div>
       <div class="qim-ci-price">${_qimFmt(it.unit_price * it.qty)}</div>
     </div>`).join('');

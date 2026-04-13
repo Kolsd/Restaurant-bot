@@ -3,10 +3,9 @@
    app/static/dashboard-features.js
 ═══════════════════════════════════════════════════ */
 
-// ── HTML escape helper (XSS prevention for innerHTML patterns) ───────
-function _escHtml(s) {
-  if (s == null) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// _escHtml provided by mesio-utils.js
+if (typeof _escHtml === 'undefined') {
+  function _escHtml(s) { if(s==null)return''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 }
 
 // ── MENÚ ─────────────────────────────────────────────────────────────
@@ -1564,12 +1563,12 @@ const _origRefreshAll = window.refreshAll;
 if (typeof _origRefreshAll === 'function') {
   window.refreshAll = async function() {
     await _origRefreshAll();
-    loadTableOrdersSection();
+    if (document.visibilityState !== 'hidden') loadTableOrdersSection();
   };
 }
 document.addEventListener('DOMContentLoaded', () => {
   loadTableOrdersSection();
-  setInterval(loadTableOrdersSection, 15000);
+  setInterval(() => { if (document.visibilityState !== 'hidden') loadTableOrdersSection(); }, 15000);
 });
 
 // ── GESTIÓN DE STAFF OPERATIVO (ROSTER) ─────────────────────────────────
