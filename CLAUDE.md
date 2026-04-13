@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v10.1 (Code Quality Refactor: Security, Architecture, Logging)
+# Mesio Restaurant Bot — v10.2 (Hardening + Observability + Full Repo Extraction)
 
 ## Entorno y Comandos
 
@@ -6,12 +6,16 @@
 Server:  uvicorn app.main:app --reload --port 8000
 Migrate: alembic upgrade head          # SIEMPRE antes de arrancar en producción
 Tests:   pytest | pytest tests/test_file.py -v
-Deploy:  Railway — alembic upgrade head && uvicorn ... --workers 4 --loop uvloop
+Deploy:  Railway — railway.toml conditional start (web vs inbox worker)
+Worker:  WORKER_MODE=inbox → python scripts/run_inbox_worker.py (Railway separate service)
 
 Variables de entorno críticas:
   DATABASE_URL, ANTHROPIC_API_KEY, META_APP_SECRET, ADMIN_KEY,
   META_ACCESS_TOKEN, WOMPI_PUBLIC_KEY, WOMPI_INTEGRITY_SECRET, APP_DOMAIN,
-  REDIS_URL          # NUEVO: estado compartido entre 4 workers (NPS, checkout, cooldowns)
+  REDIS_URL,                    # Estado compartido entre 4 workers (NPS, checkout, cooldowns)
+  ALERT_WEBHOOK_URL,            # (opcional) Webhook para alertas operativas (Slack/Discord)
+  DISABLE_EMBEDDED_WORKER,      # "1" para desactivar inbox worker embebido en web service
+  WORKER_MODE                   # "inbox" para Railway worker service separado
 ```
 
 ## Estructura del Proyecto
@@ -19,7 +23,7 @@ Variables de entorno críticas:
 ```
 Restaurant-bot/
 ├── app/
-│   ├── main.py                      # FastAPI entry point. Lifespan: arranca inbox_worker, cierra Redis
+│   ├── main.py                      # FastAPI entry point. @asynccontextmanager lifespan: scheduler, inbox_worker, Redis
 │   ├── routes/                      # Capa HTTP — solo validación y respuesta (zero SQL directo)
 │   │   ├── deps.py                  # Dependencias: auth, get_current_restaurant, require_module
 │   │   ├── chat.py                  # Webhook Meta → ENCOLA en webhook_inbox (no más create_task)
@@ -30,7 +34,9 @@ Restaurant-bot/
 │   │   ├── stats.py                 # Métricas, conversaciones, gráficas
 │   │   ├── tables.py                # POS, órdenes de mesa, split checks, tip_amount al pagar
 │   │   ├── orders_routes.py         # Órdenes externas (domicilio/recoger) y Webhook Wompi
-│   │   ├── billing.py               # DIAN, facturación electrónica (único route con SQL directo — diferido)
+│   │   ├── billing.py               # DIAN, facturación electrónica
+│   │   ├── health.py               # GET /health, GET /health/metrics (pool, inbox, business), GET /monitoring
+│   │   ├── analytics.py            # GET /analytics, GET /api/analytics/{overview,restaurants,trends} (ADMIN_KEY)
 │   │   ├── staff.py                 # Personal, turnos, propinas, nómina, contratos, overtime
 │   │   ├── staff_webauthn.py        # Autenticación biométrica FIDO2 para clock-in/out
 │   │   ├── crm.py                   # Clientes, prospectos, campañas
@@ -40,33 +46,37 @@ Restaurant-bot/
 │   │   ├── discounts.py             # Descuentos dinámicos por franja horaria (yield management)
 │   │   └── reviews.py               # Reseñas públicas (extiende NPS) + analytics
 │   ├── services/
-│   │   ├── database.py              # Shims re-export + agregados sin extraer (fiscal, loyalty, subscription). ~1500 LOC
+│   │   ├── database.py              # Infraestructura pura (get_pool, _serialize, UsageLimitExceeded) + re-exports. ~383 LOC
 │   │   ├── agent.py                 # Prompt engineering. chat() descompuesto en orquestador + 10 helpers
 │   │   ├── auth.py                  # JWT y passwords. Sesiones via sessions_repo (token hasheado)
 │   │   ├── orders.py                # Lógica de carrito y pagos. Decimal end-to-end. Cart lock via Redis
 │   │   ├── money.py                 # Helpers Decimal: to_decimal, quantize_money, money_sum/mul, ZERO
 │   │   ├── logging.py               # structlog wrapper con fallback stdlib. get_logger(name, **ctx)
 │   │   ├── redis_client.py          # Singleton lazy redis.asyncio. Circuit breaker 30s
-│   │   ├── state_store.py           # API alto nivel: nps_*, checkout_*, table_cooldown_acquire, cart_lock_*
-│   │   ├── inbox_worker.py          # Loop FOR UPDATE SKIP LOCKED procesando webhook_inbox
+│   │   ├── state_store.py           # API alto nivel: nps_*, checkout_*, table_cooldown_*, cart_lock_*, rate_limit_check, scheduler_leader_acquire
+│   │   ├── inbox_worker.py          # Loop FOR UPDATE SKIP LOCKED procesando webhook_inbox + latency metrics
+│   │   ├── alerts.py               # Health checks automáticos: dead letters, pool, latency, queue, errors → webhook
+│   │   ├── scheduler.py            # Background loop: inactivity, reminders, deposits, occupancy, alerts. Leader election via Redis
 │   │   └── reservation_payments.py  # Generación de links Wompi para depósitos de reserva
 │   ├── repositories/                # Patrón Repository — extracción completa de SQL desde routes
 │   │   ├── __init__.py              # Re-exporta InsufficientStockError, OrderCommitError, commit_order_transaction
-│   │   ├── orders_repo.py           # commit_order_transaction (ACID), InsufficientStockError, OrderCommitError
+│   │   ├── orders_repo.py           # commit_order_transaction (ACID) + 8 CRUD órdenes delivery
 │   │   ├── inbox_repo.py            # enqueue, fetch_batch (FOR UPDATE SKIP LOCKED), mark_processed, mark_failed
-│   │   ├── sessions_repo.py         # create/get/delete con SHA-256 hash + fallback legacy
+│   │   ├── sessions_repo.py         # create/get/delete con SHA-256 hash + fallback legacy + cleanup
 │   │   ├── inventory_repo.py        # 17 funciones inventario + recetas + sync availability
 │   │   ├── staff_repo.py            # 62+ funciones: staff, shifts, breaks, schedules, payroll, tips, contracts, overtime, webauthn, self-service
 │   │   ├── tables_repo.py           # 62+ funciones: restaurant_tables (+ floor plan), table_orders, table_sessions, table_checks, waiter_alerts
 │   │   ├── conversations_repo.py    # 20+ funciones: history, conversations, NPS per-conv, carts, wam dedup, features
-│   │   ├── restaurant_repo.py       # 20 funciones: admin stats, settings, dashboard data, branches, team, public menu
+│   │   ├── restaurant_repo.py       # 50+ funciones: users, restaurants, menu, branches, NPS stats, sync, subscription usage
+│   │   ├── fiscal_repo.py           # 8 funciones: fiscal_invoices, resoluciones DIAN, numeración
+│   │   ├── loyalty_repo.py          # 8 funciones: loyalty_customers, loyalty_ledger, acumulación/canje puntos
 │   │   ├── reservations_repo.py     # 14 funciones: reservas, disponibilidad, stats, confirmación
 │   │   ├── discounts_repo.py        # 5 funciones: descuentos dinámicos por horario
 │   │   ├── reservation_deposits_repo.py  # 5 funciones: depósitos Wompi para reservas
 │   │   ├── reviews_repo.py          # 8 funciones: reseñas públicas, snapshots ocupación, turn time
 │   │   └── crm_repo.py             # Funciones CRM extraídas de crm.py
 │   └── static/
-│       ├── html/                    # dashboard, staff-hq, login, caja, cocina, landing, dashboard-demo, etc.
+│       ├── html/                    # dashboard, staff-hq, login, caja, cocina, landing, monitoring, analytics, etc.
 │       ├── js/                      # mesio-utils.js (shared), dashboard-core/components/features/nps-inventory/floorplan, roles.js, sw.js
 │       └── css/                     # tokens.css (design system), dashboard.css
 ├── alembic/versions/
@@ -90,7 +100,7 @@ Restaurant-bot/
 │   └── 0020_missing_runtime_tables.py # subscription_usage, loyalty_*, CRM tables (antes eran runtime DDL)
 ```
 
-## Refactor Blindaje (Fases 1–7) — Estado Actual
+## Refactor Blindaje (Fases 1–8) — Estado Actual
 
 | Fase | Tema | Estado |
 |---|---|---|
@@ -101,6 +111,20 @@ Restaurant-bot/
 | 5 | `Decimal` end-to-end en capa financiera (orders, tables, staff/payroll) | ✅ |
 | 6 | Repository Pattern: orders, sessions, inventory, staff, tables, conversations extraídos | ✅ |
 | 7 | Code Quality: logging, god files, security, architecture cleanup | ✅ |
+| 8 | Hardening: observabilidad, alertas, extracción completa database.py, analytics | ✅ |
+
+### Fase 8 — Detalle (v10.2)
+- **Lifespan**: `@app.on_event` deprecado → `@asynccontextmanager lifespan(app)` con shutdown graceful
+- **Scheduler dedup**: Leader election via Redis `SET NX EX` (`state_store.scheduler_leader_acquire`). Solo 1 worker ejecuta el scheduler tick.
+- **Rate limiting**: `state_store.rate_limit_check()` (Redis INCR+EXPIRE / fallback in-process). Aplicado a `pay_check` (3 req/10s anti doble-click).
+- **Observabilidad**: `/monitoring` dashboard real-time (pool, inbox, latency, business metrics). `/health/metrics` extendido con orders_today, active_table_sessions, active_conversations, restaurants_total, staff_clocked_in.
+- **Alertas**: `services/alerts.py` — 5 checks automáticos cada 60s (dead letters, pool exhaustion, high latency, queue backup, error spike). Cooldown 5min. Webhook opcional via `ALERT_WEBHOOK_URL`.
+- **Analytics**: `/analytics` dashboard de producto — KPIs plataforma, onboarding score por restaurante (5 criterios × 20%), trends diarios 30 días.
+- **Worker separado**: `scripts/run_inbox_worker.py` + `railway.toml` condicional (`WORKER_MODE=inbox`). `DISABLE_EMBEDDED_WORKER` para web service.
+- **Inbox metrics**: Latency tracking (deque rolling p95), processed/errors counters, expuesto en `/health/metrics`.
+- **database.py completo**: Extracción TOTAL a repos. 4022 → **383 LOC (−90%)**. Solo queda infraestructura (`get_pool`, `_serialize`, `UsageLimitExceeded`) + re-exports.
+- **Repos nuevos**: `fiscal_repo.py` (8 fn), `loyalty_repo.py` (8 fn). `orders_repo.py` (+8 fn), `restaurant_repo.py` (+31 fn), `sessions_repo.py` (+3 aliases).
+- **16 repos totales**: 7,716 LOC distribuidas por dominio. Zero SQL en routes o services.
 
 ### Fase 7 — Detalle (v10.1)
 - **Logging**: 92 `print()` → `get_logger(__name__)` structlog en 12 archivos Python
@@ -113,8 +137,6 @@ Restaurant-bot/
 - **Dead code**: `sales_agent.py` (962 LOC) eliminado
 - **Migrations**: Colisión de revisiones `0008`/`0009` corregida. Cadena `0001→0020` limpia
 - **Frontend**: Design system unificado (`tokens.css`), utils compartidos (`mesio-utils.js`), login unificado, sistema de usernames para staff
-
-`database.py` pasó de **4022 → ~1500 LOC (−63%)** tras Fase 6 + Apparta. `restaurant_repo.py` absorbió queries de dashboard/settings/team. Lo que queda: fiscal/DIAN, loyalty, subscription, menu.
 
 ## Integración Apparta (Fases 1–7) — Estado Actual
 
@@ -166,7 +188,7 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 ### Limitaciones conocidas (no críticas)
 
 - `quantize_money` interno NO recibe `currency` en la mayoría de sitios → default 2 decimales. Solo el endpoint `pay_check` propaga `features.currency`. Para COP/CLP la columna NUMERIC del schema ya enforce la precisión final. Propagar `currency` a `db_calculate_payroll`, `db_calculate_tips_by_attendance`, etc. requeriría cambios de signature en repos — diferido.
-- `billing.py` es el único route file que aún tiene SQL directo — diferido porque es capa fiscal/DIAN con lógica muy específica.
+- `/api/analytics/*` endpoints tienen SQL directo (read-only aggregate queries, admin-only) — aceptable para analytics que no son lógica de negocio.
 
 ## Arquitectura de Base de Datos
 
@@ -254,6 +276,17 @@ inbox_worker.py (uno por uvicorn worker, todos compiten via SKIP LOCKED)
 - Handler `meta_whatsapp` → llama a `app.routes.chat._process_message(...)` con los args reconstruidos del payload.
 - Doble dedup: `db_is_duplicate_wam` (tabla in-memory 2min) primera línea + `ux_webhook_inbox_dedup` red de seguridad para carreras concurrentes.
 - Wompi sigue intacto (no migrado al inbox), futuro provider.
+- **Worker separado** (Fase 8): `scripts/run_inbox_worker.py` — standalone entrypoint con signal handling (SIGTERM/SIGINT). En Railway: service con `WORKER_MODE=inbox`. Web service puede desactivar worker embebido con `DISABLE_EMBEDDED_WORKER=1`.
+- **Inbox metrics**: `inbox_worker.get_metrics()` expone `processed_total`, `errors_total`, `latency_avg_ms`, `latency_p95_ms` (rolling deque maxlen=100).
+
+### Railway Deployment (Fase 8)
+```toml
+# railway.toml — conditional start
+startCommand = "alembic upgrade head && if [ \"$WORKER_MODE\" = 'inbox' ]; then python scripts/run_inbox_worker.py; else uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop; fi"
+```
+- **Web service**: 4 uvicorn workers, scheduler con leader election, inbox worker embebido (desactivable)
+- **Worker service**: `WORKER_MODE=inbox`, dedicado a procesar webhook_inbox
+- Ambos comparten la misma DB y Redis. Compiten via `FOR UPDATE SKIP LOCKED`.
 
 ## Estado Compartido en Redis (Fase 3)
 
@@ -282,6 +315,51 @@ await state_store.cart_lock_release(phone, bot_number)
 - Keys con prefijo `mesio:`. Valores como JSON strings.
 - Si `REDIS_URL` no está seteado o Redis cae → fallback a dict in-process del worker actual con TTL via timestamp. Log warning rate-limited (1/min por familia). Comportamiento degradado pero operativo.
 - Circuit breaker 30s entre intentos de reconexión tras fallo.
+
+### Nuevas funciones en state_store (Fase 8)
+```python
+# Rate limiting (Redis INCR+EXPIRE / fallback in-process sliding window)
+ok = await state_store.rate_limit_check(key, max_requests=3, window_seconds=10)
+
+# Scheduler leader election (Redis SET NX / fallback always-leader)
+ok = await state_store.scheduler_leader_acquire(ttl_seconds=90)
+```
+
+## Observabilidad (Fase 8)
+
+### Monitoring (`/monitoring`)
+Dashboard admin real-time con auth via `ADMIN_KEY` (sessionStorage). Polling cada 10s.
+- **Infraestructura**: DB pool gauge (color-coded), inbox queue depth + dead letters badge, worker latency avg/p95
+- **Business**: orders today, active sessions, conversations, restaurants, staff clocked in
+- **History**: tabla scrollable con últimos 20 polls
+
+### Health Metrics (`GET /health/metrics`)
+Requiere `Authorization: Bearer <ADMIN_KEY>`. Retorna:
+- Pool: `db_pool_size`, `db_pool_free`, `db_pool_used`
+- Inbox: `inbox_queue_depth`, `inbox_dead_letters`, `inbox_processed_total`, `inbox_errors_total`, `inbox_latency_avg_ms`, `inbox_latency_p95_ms`
+- Business: `orders_today`, `active_table_sessions`, `active_conversations`, `restaurants_total`, `staff_clocked_in`
+
+### Alertas (`services/alerts.py`)
+Ejecutadas cada tick del scheduler (~60s, solo el worker líder):
+
+| Check | Condición | Severidad |
+|---|---|---|
+| Dead letters | `count > 0` | HIGH |
+| Pool exhaustion | `pool_free == 0` | CRITICAL |
+| Inbox latency | `p95 > 500ms` | MEDIUM |
+| Queue backup | `depth > 50` | HIGH |
+| Error spike | `errors > 10% of processed` | HIGH |
+
+- Cooldown 5min por alert key (evita spam)
+- Log via structlog siempre
+- Webhook POST opcional a `ALERT_WEBHOOK_URL` (Slack/Discord format: `{"text": "[SEVERITY] Title", "severity": "...", "key": "...", "timestamp": "..."}`)
+
+### Analytics (`/analytics`)
+Dashboard de producto para decisiones de negocio. Auth via `ADMIN_KEY`. Refresh cada 60s.
+- **KPIs**: restaurantes (total, active 7d/30d, new), orders (today, week, month, avg daily), conversations, billing
+- **Onboarding**: score por restaurante (5 criterios × 20%: menu, staff, billing, WhatsApp, orders). Color-coded: green ≥80%, yellow ≥50%, red <50%
+- **Trends**: gráficas CSS puras de órdenes y conversaciones diarias (30 días)
+- **API**: `GET /api/analytics/overview`, `GET /api/analytics/restaurants`, `GET /api/analytics/trends`
 
 ## Seguridad Anti Prompt Injection (Fase 4)
 
@@ -336,14 +414,16 @@ currency_exponent(currency) -> int               # 0 o 2
 ### Mapa de repos
 | Repo | Funciones | Tablas que toca |
 |---|---|---|
-| `orders_repo` | `commit_order_transaction` + excepciones | `orders`, `inventory`, `carts` |
+| `orders_repo` | `commit_order_transaction` + 8 CRUD delivery | `orders`, `inventory`, `carts` |
 | `inbox_repo` | `enqueue`, `fetch_batch`, `mark_processed`, `mark_failed` | `webhook_inbox` |
-| `sessions_repo` | `create_session`, `get_session`, `delete_session`, `cleanup_expired_sessions` | `sessions` |
+| `sessions_repo` | `create_session`, `get_session`, `delete_session`, `cleanup_expired_sessions` + aliases `db_*` | `sessions` |
 | `inventory_repo` | 17 funciones | `inventory`, `dish_recipes`, `inventory_movements` |
 | `staff_repo` | 62+ funciones | `staff`, `staff_shifts`, `staff_breaks`, `staff_schedules`, `attendance_deductions`, `staff_deduction_items`, `payroll_runs`, `contract_templates`, `overtime_requests`, `tip_distributions`, `webauthn_*` |
 | `tables_repo` | 62+ funciones | `restaurant_tables`, `table_orders`, `table_sessions`, `table_checks`, `waiter_alerts` |
 | `conversations_repo` | 20+ funciones | `conversations`, `carts`, NPS per-conv, processed_wam_ids, features |
-| `restaurant_repo` | 20 funciones | `restaurants`, `users`, `orders`, `reservations`, `conversations`, `branches` |
+| `restaurant_repo` | 50+ funciones | `restaurants`, `users`, `orders`, `nps_responses`, `branches`, `subscription_usage` |
+| `fiscal_repo` | 8 funciones | `fiscal_invoices`, `fiscal_resolutions` |
+| `loyalty_repo` | 8 funciones | `loyalty_customers`, `loyalty_ledger` |
 | `crm_repo` | funciones CRM | `prospects`, `prospect_notes`, `crm_templates` |
 | `reservations_repo` | 14 funciones | `reservations`, disponibilidad, stats |
 | `discounts_repo` | 5 funciones | `time_slot_discounts` |

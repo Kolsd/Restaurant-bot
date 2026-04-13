@@ -282,3 +282,137 @@ async def commit_order_transaction(
     except Exception as exc:
         _log.exception("order_commit_failed", error=str(exc))
         raise OrderCommitError(str(exc)) from exc
+
+
+# ── Lazy wrappers (break circular import with database.py) ────────────────────
+
+def _get_pool():
+    from app.services.database import get_pool
+    return get_pool()
+
+def _serialize(d):
+    from app.services.database import _serialize
+    return _serialize(d)
+
+def _to_date(s):
+    from app.services.database import _to_date
+    return _to_date(s)
+
+
+# ── ORDENES DELIVERY ─────────────────────────────────────────────────────────
+
+async def db_save_order(order: dict):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO orders (id, phone, items, order_type, address, notes,
+                subtotal, delivery_fee, total, status, paid, payment_url, bot_number,
+                payment_method, base_order_id, sub_number)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+            ON CONFLICT (id) DO UPDATE SET
+                items=EXCLUDED.items,
+                subtotal=EXCLUDED.subtotal,
+                total=EXCLUDED.total,
+                status=CASE
+                    WHEN orders.status IN ('en_preparacion','listo','en_camino','en_puerta','entregado')
+                    THEN orders.status
+                    ELSE EXCLUDED.status
+                END,
+                paid=EXCLUDED.paid,
+                payment_url=EXCLUDED.payment_url,
+                notes=EXCLUDED.notes,
+                payment_method=EXCLUDED.payment_method
+        """,
+        order["id"], order["phone"], json.dumps(order["items"]),
+        order["order_type"], order.get("address", ""), order.get("notes", ""),
+        order["subtotal"], order["delivery_fee"], order["total"],
+        order["status"], order["paid"], order.get("payment_url", ""),
+        order.get("bot_number", ""), order.get("payment_method", ""),
+        order.get("base_order_id"), order.get("sub_number", 1))
+
+async def db_confirm_payment(order_id: str, transaction_id: str):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            UPDATE orders SET paid=TRUE, status='confirmado', transaction_id=$2, paid_at=NOW()
+            WHERE id=$1 RETURNING *
+        """, order_id, transaction_id)
+        return _serialize(dict(row)) if row else None
+
+async def db_get_orders_range(date_from: str, date_to: str, bot_number: str = None):
+    from datetime import timedelta
+    pool = await _get_pool()
+    d_from = _to_date(date_from)
+    d_to_inclusive = _to_date(date_to) + timedelta(days=1)
+    async with pool.acquire() as conn:
+        if bot_number:
+            rows = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 AND bot_number=$3 ORDER BY created_at DESC", d_from, d_to_inclusive, bot_number)
+        else:
+            rows = await conn.fetch("SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at DESC", d_from, d_to_inclusive)
+        return [_serialize(dict(r)) for r in rows]
+
+async def db_get_order(order_id: str):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
+        return _serialize(dict(row)) if row else None
+
+async def db_get_all_orders(bot_number: str = None):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        if bot_number:
+            rows = await conn.fetch("SELECT * FROM orders WHERE bot_number=$1 ORDER BY created_at DESC", bot_number)
+        else:
+            rows = await conn.fetch("SELECT * FROM orders ORDER BY created_at DESC")
+        return [_serialize(dict(r)) for r in rows]
+
+async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = None):
+    """Obtiene los pedidos de domicilio filtrados por una lista de estados.
+    Si restaurant_id se provee, filtra exactamente por ese restaurante/sucursal (r.id = restaurant_id).
+    Cada caja ve únicamente sus propios pedidos — sin herencia de sucursales."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        if restaurant_id is not None:
+            rows = await conn.fetch(
+                """SELECT o.* FROM orders o
+                   JOIN restaurants r ON r.whatsapp_number = o.bot_number
+                   WHERE o.order_type IN ('domicilio', 'recoger')
+                     AND o.status = ANY($1)
+                     AND r.id = $2
+                   ORDER BY o.created_at ASC""",
+                status_list, restaurant_id
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM orders WHERE order_type IN ('domicilio', 'recoger') AND status = ANY($1) ORDER BY created_at ASC",
+                status_list
+            )
+        return [_serialize(dict(r)) for r in rows]
+
+async def db_update_pending_order_payment_method(phone: str, bot_number: str, payment_method: str):
+    """Updates payment_method on the most recent pending delivery/pickup order for a phone+bot."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE orders SET payment_method=$3
+               WHERE id = (
+                 SELECT id FROM orders
+                 WHERE phone=$1 AND bot_number=$2
+                   AND order_type IN ('domicilio','recoger')
+                   AND paid=false
+                   AND status NOT IN ('cancelado','entregado')
+                 ORDER BY created_at DESC LIMIT 1
+               )""",
+            phone, bot_number, payment_method
+        )
+
+async def db_update_order_status(order_id: str, new_status: str):
+    """Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
+        # Cascade to sub-orders (base order id matches both base_order_id column and the passed id)
+        await conn.execute(
+            "UPDATE orders SET status=$2 WHERE base_order_id=$1 AND id != $1",
+            order_id, new_status
+        )

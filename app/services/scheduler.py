@@ -264,7 +264,18 @@ async def _scheduler_loop():
     _reminder_counter = 0
     while True:
         await asyncio.sleep(60)
+
+        # Leader election: only one worker runs the scheduler tick.
+        # TTL=90s covers the 60s sleep + processing time.
+        from app.services import state_store
+        if not await state_store.scheduler_leader_acquire(ttl_seconds=90):
+            continue
+
         await _run_inactivity_check()
+
+        from app.services.alerts import check_alerts  # late import — avoids circular
+        await check_alerts()
+
         _reminder_counter += 1
         # Run reservation reminders every 5 minutes
         if _reminder_counter % 5 == 0:

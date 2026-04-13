@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesio — Monitoring</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--dark);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: var(--dark-2);
+      border-bottom: 1px solid var(--dark-3);
+      padding: var(--s-4) var(--s-6);
+      display: flex;
+      align-items: center;
+      gap: var(--s-4);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .header-brand {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--brand);
+      letter-spacing: -0.02em;
+    }
+
+    .header-title {
+      font-size: 1rem;
+      font-weight: 500;
+      color: #fff;
+    }
+
+    .header-spacer { flex: 1; }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: var(--s-2);
+      font-size: 0.8rem;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--dark-3);
+      transition: background var(--ease);
+    }
+    .status-dot.ok    { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .status-dot.error { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
+
+    .status-label { color: #9CA3AF; }
+
+    .last-update {
+      font-size: 0.75rem;
+      color: var(--text-4);
+      white-space: nowrap;
+    }
+
+    /* ── Main layout ── */
+    .main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: var(--s-6) var(--s-5);
+      display: flex;
+      flex-direction: column;
+      gap: var(--s-6);
+    }
+
+    /* ── Section headings ── */
+    .section-title {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-4);
+      margin-bottom: var(--s-4);
+    }
+
+    /* ── Card grid ── */
+    .card-grid {
+      display: grid;
+      gap: var(--s-4);
+    }
+    .card-grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .card-grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .card-grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+    /* ── Card ── */
+    .card {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius);
+      padding: var(--s-5);
+    }
+
+    .card-label {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-3);
+      margin-bottom: var(--s-2);
+    }
+
+    .card-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .card-value.placeholder {
+      color: var(--dark-3);
+    }
+
+    .card-sub {
+      font-size: 0.75rem;
+      color: var(--text-4);
+      margin-top: var(--s-2);
+    }
+
+    /* ── Color helpers ── */
+    .text-ok      { color: var(--success) !important; }
+    .text-warn    { color: var(--warning) !important; }
+    .text-danger  { color: var(--danger)  !important; }
+    .text-muted   { color: var(--text-4)  !important; }
+
+    /* ── DB Pool gauge ── */
+    .pool-card { grid-column: span 2; }
+
+    .gauge-track {
+      height: 10px;
+      background: var(--dark-3);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+      margin: var(--s-3) 0;
+    }
+
+    .gauge-fill {
+      height: 100%;
+      border-radius: var(--radius-pill);
+      background: var(--success);
+      transition: width 0.5s ease, background 0.5s ease;
+      width: 0%;
+    }
+
+    .gauge-fill.warn   { background: var(--warning); }
+    .gauge-fill.danger { background: var(--danger); }
+
+    .gauge-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-4);
+    }
+
+    /* ── Inbox metrics row ── */
+    .inbox-big {
+      font-size: 3rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .badge-danger  { background: var(--danger-light); color: var(--danger); }
+    .badge-success { background: var(--success-light); color: var(--success); }
+    .badge-muted   { background: var(--dark-3); color: var(--text-4); }
+
+    /* ── Latency card ── */
+    .latency-row {
+      display: flex;
+      gap: var(--s-5);
+      margin-top: var(--s-2);
+    }
+
+    .latency-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .latency-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .latency-label {
+      font-size: 0.65rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-4);
+    }
+
+    /* ── Business placeholder cards ── */
+    .placeholder-card .card-value {
+      color: var(--dark-3);
+      font-size: 1.6rem;
+    }
+
+    .coming-soon {
+      font-size: 0.65rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--dark-3);
+      margin-top: var(--s-2);
+    }
+
+    /* ── History log ── */
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .history-table th {
+      text-align: left;
+      padding: var(--s-2) var(--s-3);
+      border-bottom: 1px solid var(--dark-3);
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-4);
+    }
+
+    .history-table td {
+      padding: var(--s-2) var(--s-3);
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: #9CA3AF;
+    }
+
+    .history-table tr:first-child td { color: #fff; }
+
+    .history-table td.mono {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    /* ── Auth overlay ── */
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .auth-box {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg);
+      padding: var(--s-7) var(--s-6);
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+    }
+
+    .auth-box h2 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: var(--s-2);
+    }
+
+    .auth-box p {
+      font-size: 0.82rem;
+      color: var(--text-4);
+      margin-bottom: var(--s-5);
+    }
+
+    .auth-input {
+      width: 100%;
+      padding: var(--s-3) var(--s-4);
+      background: var(--dark-3);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: var(--radius-sm);
+      color: #fff;
+      font-size: 0.9rem;
+      margin-bottom: var(--s-4);
+      outline: none;
+    }
+    .auth-input:focus {
+      border-color: var(--brand);
+    }
+
+    .auth-btn {
+      width: 100%;
+      padding: var(--s-3) var(--s-4);
+      background: var(--brand);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background var(--ease);
+    }
+    .auth-btn:hover { background: var(--brand-dark); }
+
+    .auth-error {
+      font-size: 0.78rem;
+      color: var(--danger);
+      margin-top: var(--s-2);
+      min-height: 18px;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .header { padding: var(--s-3) var(--s-4); }
+      .main   { padding: var(--s-4) var(--s-4); gap: var(--s-5); }
+      .card-grid-2,
+      .card-grid-3,
+      .card-grid-4 { grid-template-columns: 1fr 1fr; }
+      .pool-card { grid-column: span 2; }
+    }
+
+    @media (max-width: 500px) {
+      .card-grid-2,
+      .card-grid-3,
+      .card-grid-4 { grid-template-columns: 1fr; }
+      .pool-card { grid-column: unset; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Auth overlay ── -->
+<div class="auth-overlay" id="authOverlay">
+  <div class="auth-box">
+    <h2>Mesio Monitoring</h2>
+    <p>Enter your Admin Key to continue.</p>
+    <input
+      class="auth-input"
+      id="adminKeyInput"
+      type="password"
+      placeholder="ADMIN_KEY"
+      autocomplete="current-password"
+    >
+    <button class="auth-btn" id="authBtn">Connect</button>
+    <div class="auth-error" id="authError"></div>
+  </div>
+</div>
+
+<!-- ── Header ── -->
+<header class="header">
+  <span class="header-brand">Mesio</span>
+  <span class="header-title">Monitoring</span>
+  <div class="header-spacer"></div>
+  <div class="status-indicator">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-label" id="statusLabel">Connecting…</span>
+  </div>
+  <span class="last-update" id="lastUpdate"></span>
+</header>
+
+<!-- ── Main ── -->
+<main class="main">
+
+  <!-- Infrastructure section -->
+  <section>
+    <div class="section-title">Infrastructure</div>
+
+    <div class="card-grid card-grid-3">
+
+      <!-- DB Pool -->
+      <div class="card pool-card">
+        <div class="card-label">DB Connection Pool</div>
+        <div class="gauge-track">
+          <div class="gauge-fill" id="poolGaugeFill"></div>
+        </div>
+        <div class="gauge-labels">
+          <span id="poolUsedLabel">— used</span>
+          <span id="poolTotalLabel">— total</span>
+        </div>
+        <div class="card-sub" id="poolPct" style="margin-top:var(--s-3)">—</div>
+      </div>
+
+      <!-- Inbox queue -->
+      <div class="card">
+        <div class="card-label">Inbox Queue</div>
+        <div class="inbox-big" id="inboxDepth">—</div>
+        <div style="margin-top:var(--s-2);display:flex;align-items:center;gap:var(--s-2);">
+          <span class="badge badge-muted" id="deadLetterBadge">— dead</span>
+        </div>
+        <div class="card-sub" id="inboxProcessed">—</div>
+      </div>
+
+      <!-- Error rate + latency -->
+      <div class="card">
+        <div class="card-label">Worker Performance</div>
+        <div class="latency-row">
+          <div class="latency-item">
+            <span class="latency-value" id="latAvg">—</span>
+            <span class="latency-label">Avg ms</span>
+          </div>
+          <div class="latency-item">
+            <span class="latency-value" id="latP95">—</span>
+            <span class="latency-label">p95 ms</span>
+          </div>
+          <div class="latency-item">
+            <span class="latency-value" id="errorRate">—</span>
+            <span class="latency-label">Err %</span>
+          </div>
+        </div>
+        <div class="card-sub" id="latSamples">—</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Business section -->
+  <section>
+    <div class="section-title">Business</div>
+    <div class="card-grid card-grid-4">
+
+      <div class="card placeholder-card">
+        <div class="card-label">Orders Today</div>
+        <div class="card-value" id="bizOrders">--</div>
+        <div class="coming-soon" id="bizOrdersSub">Upcoming</div>
+      </div>
+
+      <div class="card placeholder-card">
+        <div class="card-label">Open Table Sessions</div>
+        <div class="card-value" id="bizSessions">--</div>
+        <div class="coming-soon" id="bizSessionsSub">Upcoming</div>
+      </div>
+
+      <div class="card placeholder-card">
+        <div class="card-label">Active Conversations</div>
+        <div class="card-value" id="bizConversations">--</div>
+        <div class="coming-soon" id="bizConversationsSub">Upcoming</div>
+      </div>
+
+      <div class="card placeholder-card">
+        <div class="card-label">Restaurants</div>
+        <div class="card-value" id="bizRestaurants">--</div>
+        <div class="coming-soon" id="bizRestaurantsSub">Upcoming</div>
+      </div>
+
+      <div class="card placeholder-card">
+        <div class="card-label">Staff Clocked In</div>
+        <div class="card-value" id="bizStaff">--</div>
+        <div class="coming-soon" id="bizStaffSub">Upcoming</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- History section -->
+  <section>
+    <div class="section-title">Poll History (last 20)</div>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="history-table" id="historyTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Queue</th>
+            <th>Dead</th>
+            <th>DB Used/Total</th>
+            <th>Avg ms</th>
+            <th>p95 ms</th>
+            <th>Err %</th>
+            <th>Processed</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody">
+          <tr>
+            <td colspan="8" style="text-align:center;color:var(--dark-3);padding:var(--s-6);">
+              Waiting for first poll…
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script>
+  'use strict';
+
+  /* ── Constants ── */
+  const POLL_INTERVAL_MS = 10_000;
+  const HISTORY_MAX      = 20;
+  const STORAGE_KEY      = 'mesio_admin_key';
+
+  /* ── State ── */
+  let adminKey    = sessionStorage.getItem(STORAGE_KEY) || '';
+  let pollTimer   = null;
+  let history     = [];   // array of {ts, metrics}
+
+  /* ── DOM refs ── */
+  const authOverlay   = document.getElementById('authOverlay');
+  const adminKeyInput = document.getElementById('adminKeyInput');
+  const authBtn       = document.getElementById('authBtn');
+  const authError     = document.getElementById('authError');
+
+  const statusDot     = document.getElementById('statusDot');
+  const statusLabel   = document.getElementById('statusLabel');
+  const lastUpdate    = document.getElementById('lastUpdate');
+
+  /* ── Auth flow ── */
+  function startIfAuthed() {
+    if (adminKey) {
+      authOverlay.style.display = 'none';
+      startPolling();
+    }
+  }
+
+  authBtn.addEventListener('click', tryAuth);
+  adminKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryAuth(); });
+
+  async function tryAuth() {
+    const key = adminKeyInput.value.trim();
+    if (!key) { authError.textContent = 'Please enter a key.'; return; }
+
+    authBtn.disabled = true;
+    authBtn.textContent = 'Connecting…';
+    authError.textContent = '';
+
+    try {
+      const resp = await fetch('/health/metrics', {
+        headers: { 'Authorization': `Bearer ${key}` }
+      });
+      if (resp.status === 401) {
+        authError.textContent = 'Invalid key.';
+        authBtn.disabled = false;
+        authBtn.textContent = 'Connect';
+        return;
+      }
+      // Any non-401 (even 500) is treated as a valid key
+      adminKey = key;
+      sessionStorage.setItem(STORAGE_KEY, adminKey);
+      authOverlay.style.display = 'none';
+      startPolling();
+    } catch {
+      authError.textContent = 'Network error. Check console.';
+      authBtn.disabled = false;
+      authBtn.textContent = 'Connect';
+    }
+  }
+
+  /* ── Polling ── */
+  function startPolling() {
+    poll();
+    pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+  }
+
+  async function poll() {
+    try {
+      const resp = await fetch('/health/metrics', {
+        headers: { 'Authorization': `Bearer ${adminKey}` }
+      });
+
+      if (resp.status === 401) {
+        // Key expired/invalid — show auth overlay again
+        clearInterval(pollTimer);
+        adminKey = '';
+        sessionStorage.removeItem(STORAGE_KEY);
+        authOverlay.style.display = 'flex';
+        authError.textContent = 'Session expired. Re-enter key.';
+        setStatus('error', 'Auth required');
+        return;
+      }
+
+      const data = await resp.json();
+      const ts = new Date();
+
+      setStatus('ok', 'Live');
+      lastUpdate.textContent = 'Updated ' + ts.toLocaleTimeString();
+
+      renderMetrics(data);
+      addHistory(ts, data);
+      mesioTrackFetch(true);
+
+    } catch {
+      setStatus('error', 'Connection lost');
+      mesioTrackFetch(false);
+    }
+  }
+
+  /* ── Status indicator ── */
+  function setStatus(state, label) {
+    statusDot.className   = 'status-dot ' + state;
+    statusLabel.textContent = label;
+  }
+
+  /* ── Number formatting ── */
+  function fmt(n) {
+    if (n === null || n === undefined) return '—';
+    return Number(n).toLocaleString();
+  }
+
+  function fmtMs(n) {
+    if (n === null || n === undefined) return '—';
+    return Number(n).toFixed(1);
+  }
+
+  /* ── Latency color class ── */
+  function latColor(ms) {
+    if (ms === null || ms === undefined) return '';
+    if (ms < 100)  return 'text-ok';
+    if (ms < 500)  return 'text-warn';
+    return 'text-danger';
+  }
+
+  /* ── Pool color class ── */
+  function poolColor(pct) {
+    if (pct < 60) return '';          // default (fill uses success)
+    if (pct < 80) return 'warn';
+    return 'danger';
+  }
+
+  /* ── Render infrastructure metrics ── */
+  function renderMetrics(m) {
+    // DB Pool gauge
+    const used  = m.db_pool_used  ?? 0;
+    const total = m.db_pool_size  ?? 0;
+    const free  = m.db_pool_free  ?? 0;
+    const pct   = total > 0 ? Math.round((used / total) * 100) : 0;
+    const fill  = document.getElementById('poolGaugeFill');
+    fill.style.width = pct + '%';
+    fill.className   = 'gauge-fill ' + poolColor(pct);
+    document.getElementById('poolUsedLabel').textContent  = fmt(used) + ' used';
+    document.getElementById('poolTotalLabel').textContent = fmt(total) + ' total';
+    document.getElementById('poolPct').textContent =
+      total !== null && total > 0
+        ? `${pct}% utilization — ${fmt(free)} free connections`
+        : '—';
+
+    // Inbox queue depth
+    const depth = m.inbox_queue_depth;
+    const depthEl = document.getElementById('inboxDepth');
+    depthEl.textContent = depth !== null && depth !== undefined ? fmt(depth) : '—';
+    depthEl.className = 'inbox-big' + (depth > 0 ? ' text-warn' : '');
+
+    // Dead letters badge
+    const dead    = m.inbox_dead_letters ?? 0;
+    const deadBdg = document.getElementById('deadLetterBadge');
+    deadBdg.textContent = fmt(dead) + ' dead';
+    deadBdg.className   = 'badge ' + (dead > 0 ? 'badge-danger' : 'badge-muted');
+
+    // Processed total + error rate
+    const processed = m.inbox_processed_total ?? null;
+    const errors    = m.inbox_errors_total    ?? 0;
+    const errRate   = (processed !== null && processed > 0)
+      ? ((errors / (processed + errors)) * 100).toFixed(2)
+      : '0.00';
+
+    document.getElementById('inboxProcessed').textContent =
+      processed !== null
+        ? `${fmt(processed)} processed · ${fmt(errors)} errors`
+        : '—';
+
+    // Latency
+    const avg     = m.inbox_latency_avg_ms;
+    const p95     = m.inbox_latency_p95_ms;
+    const samples = m.inbox_latency_samples;
+
+    const avgEl = document.getElementById('latAvg');
+    avgEl.textContent  = fmtMs(avg);
+    avgEl.className    = 'latency-value ' + latColor(avg);
+
+    const p95El = document.getElementById('latP95');
+    p95El.textContent  = fmtMs(p95);
+    p95El.className    = 'latency-value ' + latColor(p95);
+
+    const errEl = document.getElementById('errorRate');
+    errEl.textContent = errRate + '%';
+    errEl.className   = 'latency-value ' + (parseFloat(errRate) > 1 ? 'text-warn' : 'text-ok');
+
+    document.getElementById('latSamples').textContent =
+      samples !== null && samples !== undefined
+        ? `${fmt(samples)} latency samples`
+        : '—';
+
+    // Business metrics — populate when available, keep "--" until then
+    renderBusiness('bizOrders',        'bizOrdersSub',        m.orders_today,           'orders today');
+    renderBusiness('bizSessions',      'bizSessionsSub',      m.active_table_sessions,  'open tables');
+    renderBusiness('bizConversations', 'bizConversationsSub', m.active_conversations,   'last 30 min');
+    renderBusiness('bizRestaurants',   'bizRestaurantsSub',   m.restaurants_total,      'restaurants');
+    renderBusiness('bizStaff',         'bizStaffSub',         m.staff_clocked_in,       'on shift');
+  }
+
+  function renderBusiness(valueId, subId, value, subText) {
+    const valEl = document.getElementById(valueId);
+    const subEl = document.getElementById(subId);
+    if (value !== null && value !== undefined) {
+      valEl.textContent = fmt(value);
+      valEl.className   = 'card-value';
+      subEl.textContent = subText;
+      subEl.className   = 'card-sub';
+    } else {
+      valEl.textContent = '--';
+      valEl.className   = 'card-value placeholder';
+      subEl.textContent = 'Upcoming';
+      subEl.className   = 'coming-soon';
+    }
+  }
+
+  /* ── History ── */
+  function addHistory(ts, m) {
+    history.unshift({ ts, m });
+    if (history.length > HISTORY_MAX) history.pop();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const tbody = document.getElementById('historyBody');
+    const rows  = history.map((entry, idx) => {
+      const { ts, m } = entry;
+      const used   = m.db_pool_used  ?? '—';
+      const total  = m.db_pool_size  ?? '—';
+      const errors = m.inbox_errors_total ?? 0;
+      const proc   = m.inbox_processed_total ?? 0;
+      const errRate = proc > 0 ? ((errors / (proc + errors)) * 100).toFixed(2) + '%' : '0.00%';
+
+      return `<tr>
+        <td class="mono">${ts.toLocaleTimeString()}</td>
+        <td class="mono">${fmt(m.inbox_queue_depth)}</td>
+        <td class="mono${m.inbox_dead_letters > 0 ? ' text-danger' : ''}">${fmt(m.inbox_dead_letters)}</td>
+        <td class="mono">${used !== '—' ? used + '/' + total : '—'}</td>
+        <td class="mono${latClass(m.inbox_latency_avg_ms)}">${fmtMs(m.inbox_latency_avg_ms)}</td>
+        <td class="mono${latClass(m.inbox_latency_p95_ms)}">${fmtMs(m.inbox_latency_p95_ms)}</td>
+        <td class="mono">${errRate}</td>
+        <td class="mono">${fmt(proc)}</td>
+      </tr>`;
+    });
+
+    tbody.innerHTML = rows.join('');
+  }
+
+  function latClass(ms) {
+    const c = latColor(ms);
+    return c ? ' ' + c : '';
+  }
+
+  /* ── Boot ── */
+  startIfAuthed();
+</script>
+</body>
+</html>

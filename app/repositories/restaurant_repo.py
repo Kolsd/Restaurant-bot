@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import json as _json
+import json
 
 
 # Lazy accessors — break circular import with app.services.database.
@@ -24,6 +25,15 @@ async def _get_pool():
 def _serialize(d: dict) -> dict:
     from app.services.database import _serialize as _db_serialize  # noqa: PLC0415
     return _db_serialize(d)
+
+
+def _normalize_phone(n: str) -> str:
+    from app.services.database import _normalize_phone as _np  # noqa: PLC0415
+    return _np(n)
+
+
+from app.services.logging import get_logger  # noqa: E402
+log = get_logger(__name__)
 
 
 # ── Superadmin global stats ───────────────────────────────────────────────────
@@ -501,3 +511,554 @@ async def db_delete_staff_by_id(staff_id: str) -> bool:
             "DELETE FROM staff WHERE id=$1::uuid RETURNING id", staff_id
         )
     return deleted is not None
+
+
+async def db_find_restaurant_id_by_name(name: str) -> int | None:
+    """Lookup restaurant ID by case-insensitive name match. Legacy fallback."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, name FROM restaurants")
+        name_lower = name.lower().strip()
+        for r in rows:
+            if r["name"].lower().strip() == name_lower:
+                return r["id"]
+    return None
+
+
+# ── User functions ────────────────────────────────────────────────────────────
+
+async def db_get_user(username: str):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE username=$1", username.lower().strip())
+        return dict(row) if row else None
+
+
+async def db_create_user(username: str, password_hash: str, restaurant_name: str,
+                          role: str = "owner", branch_id: int = None, parent_user: str = None):
+    import asyncpg  # noqa: PLC0415
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute("""
+                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, parent_user)
+                VALUES ($1,$2,$3,$4,$5,$6)
+            """, username.lower().strip(), password_hash, restaurant_name, role, branch_id, parent_user)
+            return True
+        except asyncpg.UniqueViolationError:
+            return False
+
+
+async def db_get_all_users():
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT username, restaurant_name, role, branch_id, parent_user FROM users")
+        return [dict(r) for r in rows]
+
+
+# ── Restaurant lookup functions ───────────────────────────────────────────────
+
+async def db_get_restaurant_by_phone(whatsapp_number: str):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM restaurants WHERE whatsapp_number=$1", _normalize_phone(whatsapp_number.strip()))
+        return _serialize(dict(row)) if row else None
+
+
+async def db_get_restaurant_by_bot_number(whatsapp_number: str):
+    return await db_get_restaurant_by_phone(whatsapp_number)
+
+
+async def db_get_restaurant_by_name(name: str):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM restaurants WHERE name=$1", name)
+        return _serialize(dict(row)) if row else None
+
+
+async def db_get_restaurant_by_id(restaurant_id: int):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM restaurants WHERE id=$1", restaurant_id)
+        return _serialize(dict(row)) if row else None
+
+
+async def db_get_all_restaurants(parent_id: int = None):
+    """
+    Si se pasa parent_id, solo devuelve las sucursales de ese padre.
+    Si no, devuelve todos los restaurantes principales.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        if parent_id:
+            # Solo devuelve hijos reales
+            rows = await conn.fetch(
+                "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name ASC",
+                parent_id
+            )
+        else:
+            # Devuelve solo los que no tienen padre (Matrices)
+            rows = await conn.fetch(
+                "SELECT * FROM restaurants WHERE parent_restaurant_id IS NULL ORDER BY id ASC"
+            )
+        return [_serialize(dict(r)) for r in rows]
+
+
+async def db_find_nearest_branch(customer_lat: float, customer_lon: float, parent_id: int) -> dict | None:
+    """Finds the nearest branch to the customer's location within its delivery_radius_km.
+    Uses the Haversine formula via PostgreSQL.
+    Returns the nearest branch within coverage, or None if no branch covers that area."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, whatsapp_number, latitude, longitude,
+                   features->>'delivery_radius_km' AS radius_km,
+                   (
+                     6371 * acos(
+                       cos(radians($1)) * cos(radians(latitude::float))
+                       * cos(radians(longitude::float) - radians($2))
+                       + sin(radians($1)) * sin(radians(latitude::float))
+                     )
+                   ) AS distance_km
+            FROM restaurants
+            WHERE parent_restaurant_id = $3
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY distance_km ASC
+        """, customer_lat, customer_lon, parent_id)
+        for r in rows:
+            radius = float(r["radius_km"] or 5.0)
+            if r["distance_km"] is not None and r["distance_km"] <= radius:
+                return _serialize(dict(r))
+    return None
+
+
+async def db_find_nearest_branch_any(customer_lat: float, customer_lon: float, parent_id: int) -> dict | None:
+    """Finds the geographically nearest branch with no delivery-radius constraint.
+    Used for pickup routing where any branch is reachable by the customer."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, name, address, whatsapp_number,
+                   (6371 * acos(
+                     cos(radians($1)) * cos(radians(latitude::float))
+                     * cos(radians(longitude::float) - radians($2))
+                     + sin(radians($1)) * sin(radians(latitude::float))
+                   )) AS distance_km
+            FROM restaurants
+            WHERE parent_restaurant_id = $3
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+            ORDER BY distance_km ASC
+            LIMIT 1
+        """, customer_lat, customer_lon, parent_id)
+        return _serialize(dict(row)) if row else None
+
+
+async def db_check_module(bot_number: str, module_name: str) -> bool:
+    """
+    Return True if module_name is explicitly enabled (true) in the restaurant's
+    features JSONB column.
+
+    Returns False for:
+      - Restaurant not found for bot_number
+      - Key not present in features
+      - Key present but value is not the boolean true (e.g. false, null, string)
+
+    Query is fully parametrized ($1, $2) — no f-strings, no injection risk.
+
+    Example features structure:
+        {"staff_tips": true, "reservations": true, "delivery": false}
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        # ->> extracts the key as TEXT; comparing to 'true' safely handles any
+        # non-boolean value stored in the JSONB without risking a cast error.
+        # COALESCE turns NULL (restaurant not found, or key absent) into false.
+        val = await conn.fetchval(
+            "SELECT COALESCE((features->>$2) = 'true', false) "
+            "FROM restaurants WHERE whatsapp_number=$1",
+            _normalize_phone(bot_number),
+            module_name,
+        )
+    # fetchval returns None when no rows match; bool(None) == False
+    return bool(val)
+
+
+async def db_create_restaurant(name: str, whatsapp_number: str, address: str, menu: dict,
+                                latitude: float = None, longitude: float = None, features: dict = None):
+    if features is None:
+        features = {}
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        # 🛡️ FIX: Los diccionarios entran directo a asyncpg (sin json.dumps)
+        await conn.execute("""
+            INSERT INTO restaurants (name, whatsapp_number, address, menu, latitude, longitude, features)
+            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+            ON CONFLICT (whatsapp_number) DO UPDATE
+            SET name=EXCLUDED.name, address=EXCLUDED.address, menu=EXCLUDED.menu,
+                latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, features=EXCLUDED.features
+        """, name, whatsapp_number, address, menu, latitude, longitude, features)
+
+
+async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
+    """
+    Sincroniza (sobrescribe) la columna 'menu' de todas las sucursales hijas
+    con el JSON exacto de la Casa Matriz.
+    Devuelve el número de sucursales actualizadas.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        # 1. Obtener el menú de la matriz
+        parent = await conn.fetchrow("SELECT menu FROM restaurants WHERE id = $1", parent_restaurant_id)
+        if not parent or not parent["menu"]:
+            return 0
+
+        menu_jsonb = parent["menu"]
+
+        # 2. Hacer UPDATE masivo en las sucursales hijas
+        result = await conn.execute(
+            "UPDATE restaurants SET menu = $1 WHERE parent_restaurant_id = $2",
+            menu_jsonb, parent_restaurant_id
+        )
+
+        # El result de execute suele ser un string como "UPDATE 3"
+        try:
+            count = int(result.split()[-1])
+        except Exception:
+            count = 0
+
+        return count
+
+
+async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
+    """Sobrescribe el JSON del menú para un restaurante específico."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE restaurants SET menu = $1::jsonb WHERE id = $2",
+            json.dumps(menu_data), restaurant_id
+        )
+        return result == "UPDATE 1"
+
+
+# ── Offline Sync Batch ────────────────────────────────────────────────────────
+# Dispatch table for POST /api/sync operations.
+# Keys are the `type` field sent by offline-sync.js.
+# Each handler receives (conn, restaurant_id, op_data) and performs an upsert.
+_SYNC_HANDLERS: dict = {}
+
+
+def _register_sync_handler(type_name: str):
+    """Decorator to register a sync handler function."""
+    def decorator(fn):
+        _SYNC_HANDLERS[type_name] = fn
+        return fn
+    return decorator
+
+
+@_register_sync_handler("staff_shift")
+async def _sync_staff_shift(conn, restaurant_id: int, data: dict):
+    """Upsert a staff_shifts record by its client-generated UUID."""
+    await conn.execute(
+        """
+        INSERT INTO staff_shifts
+            (id, staff_id, restaurant_id, clock_in, clock_out, notes)
+        VALUES ($1, $2::uuid, $3, $4::timestamptz, $5::timestamptz, $6)
+        ON CONFLICT (id) DO UPDATE
+            SET clock_out = EXCLUDED.clock_out,
+                notes     = EXCLUDED.notes
+        """,
+        data.get("id"),
+        data.get("staff_id"),
+        restaurant_id,
+        data.get("clock_in"),
+        data.get("clock_out"),
+        data.get("notes", ""),
+    )
+
+
+@_register_sync_handler("staff")
+async def _sync_staff(conn, restaurant_id: int, data: dict):
+    """Upsert a staff record by its client-generated UUID."""
+    await conn.execute(
+        """
+        INSERT INTO staff
+            (id, restaurant_id, name, role, pin, active)
+        VALUES ($1::uuid, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO UPDATE
+            SET name   = EXCLUDED.name,
+                role   = EXCLUDED.role,
+                pin    = EXCLUDED.pin,
+                active = EXCLUDED.active
+        """,
+        data.get("id"),
+        restaurant_id,
+        data.get("name", ""),
+        data.get("role", "staff"),
+        data.get("pin", ""),
+        data.get("active", True),
+    )
+
+
+async def db_sync_batch(restaurant_id: int, operations: list) -> list:
+    """
+    Process a batch of offline operations.
+    Each operation: {id, type, action, data, client_ts}.
+    Returns [{id, status: 'ok'|'error'|'unsupported_type', error?}].
+    All operations use fully parametrized upserts — no f-string SQL.
+    """
+    pool = await _get_pool()
+    results = []
+    async with pool.acquire() as conn:
+        for op in operations:
+            op_id   = op.get("id", "unknown")
+            op_type = op.get("type", "")
+            handler = _SYNC_HANDLERS.get(op_type)
+            if handler is None:
+                results.append({
+                    "id":     op_id,
+                    "status": "unsupported_type",
+                    "error":  f"No sync handler registered for type '{op_type}'",
+                })
+                continue
+            try:
+                async with conn.transaction():
+                    await handler(conn, restaurant_id, op.get("data", {}))
+                results.append({"id": op_id, "status": "ok"})
+            except Exception as exc:
+                results.append({"id": op_id, "status": "error", "error": str(exc)})
+    return results
+
+
+# ── Menu functions ────────────────────────────────────────────────────────────
+
+async def db_get_menu(whatsapp_number: str):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT
+                r.menu,
+                p.menu AS parent_menu
+            FROM restaurants r
+            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
+            WHERE r.whatsapp_number = $1
+        """, whatsapp_number)
+
+        if not row:
+            return None
+
+        menu_data = row['menu']
+
+        if (not menu_data or menu_data == '{}' or menu_data == "{}") and row['parent_menu']:
+            menu_data = row['parent_menu']
+
+        # 🛡️ AUTO-SANADOR: Repara cadenas doblemente codificadas al vuelo
+        if menu_data:
+            if isinstance(menu_data, str):
+                try:
+                    parsed = json.loads(menu_data)
+                    if isinstance(parsed, str):
+                        parsed = json.loads(parsed)
+                    return parsed
+                except Exception:
+                    return {}
+            return menu_data
+        return {}
+
+
+async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
+    menu = await db_get_menu(whatsapp_number)
+    if not menu:
+        return []
+    all_dishes = []
+    if isinstance(menu, dict):
+        for cat, dishes in menu.items():
+            if isinstance(dishes, list):
+                all_dishes.extend(dishes)
+    return all_dishes[:top_n]
+
+
+async def db_update_subscription(restaurant_id: int, new_status: str):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE restaurants SET subscription_status=$2 WHERE id=$1", restaurant_id, new_status)
+
+
+# ── Menu availability ─────────────────────────────────────────────────────────
+
+async def db_get_menu_availability(restaurant_id: int):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1", restaurant_id)
+        return {r['dish_name']: r['available'] for r in rows}
+
+
+async def db_set_dish_availability(restaurant_id: int, dish_name: str, available: bool):
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO menu_availability (dish_name, restaurant_id, available, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (dish_name, restaurant_id) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
+        """, dish_name, restaurant_id, available)
+
+
+# ── Settings wrapper ──────────────────────────────────────────────────────────
+
+async def db_get_restaurant_settings() -> dict:
+    all_r = await db_get_all_restaurants()
+    return all_r[0] if all_r else {}
+
+
+# ── NPS analytics ─────────────────────────────────────────────────────────────
+
+async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: int | str = None) -> dict:
+    pool = await _get_pool()
+    period_map = {"today": "1 day", "week": "7 days", "month": "30 days", "semester": "180 days", "year": "365 days"}
+    interval_str = period_map.get(period, "30 days")
+
+    async with pool.acquire() as conn:
+        conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+        params = [bot_number]
+
+        # 🛡️ LA MAGIA DEL "ALL"
+        if branch_id == "all":
+            pass
+        elif branch_id is not None:
+            conditions.append("branch_id = $2")
+            params.append(branch_id)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT COUNT(*) as total_responses, COALESCE(AVG(score), 0) as average_score,
+            COUNT(*) FILTER (WHERE score = 5) as promoters, COUNT(*) FILTER (WHERE score = 4) as passives,
+            COUNT(*) FILTER (WHERE score <= 3) as detractors
+            FROM nps_responses WHERE {where_clause}
+        """
+        row = await conn.fetchrow(query, *params)
+
+        total = row["total_responses"]
+        nps_score = round(((row["promoters"] / total) - (row["detractors"] / total)) * 100) if total > 0 else 0
+
+        return {
+            "total_responses": total, "average_score": round(row["average_score"], 1),
+            "nps_score": nps_score, "promoters": row["promoters"], "passives": row["passives"], "detractors": row["detractors"]
+        }
+
+
+async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50, branch_id: int | str = None) -> list:
+    pool = await _get_pool()
+    period_map = {"today": "1 day", "week": "7 days", "month": "30 days", "semester": "180 days", "year": "365 days"}
+    interval_str = period_map.get(period, "30 days")
+
+    async with pool.acquire() as conn:
+        conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+        params = [bot_number]
+
+        # 🛡️ LA MAGIA DEL "ALL"
+        if branch_id == "all":
+            pass
+        elif branch_id is not None:
+            conditions.append("branch_id = $2")
+            params.append(branch_id)
+
+        where_clause = " AND ".join(conditions)
+        limit_idx = len(params) + 1
+        params.append(limit)
+
+        query = f"SELECT * FROM nps_responses WHERE {where_clause} ORDER BY created_at DESC LIMIT ${limit_idx}"
+        rows = await conn.fetch(query, *params)
+
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("created_at"):
+                d["created_at"] = d["created_at"].isoformat() + "Z"
+            result.append(d)
+        return result
+
+
+# ── Subscription usage ────────────────────────────────────────────────────────
+
+async def _ensure_usage_table() -> None:
+    """No-op: subscription_usage managed by Alembic (0020_missing_runtime_tables.py)."""
+    pass
+
+
+async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
+    """Suma `tokens` al contador diario del restaurante (upsert atómico)."""
+    if tokens <= 0:
+        return
+    await _ensure_usage_table()
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens)
+               VALUES ($1, CURRENT_DATE, $2)
+               ON CONFLICT (restaurant_id, usage_date) DO UPDATE
+               SET total_tokens = subscription_usage.total_tokens + $2,
+                   updated_at   = NOW()""",
+            restaurant_id, tokens,
+        )
+
+
+async def db_increment_invoice_usage(restaurant_id: int) -> None:
+    """Incrementa en 1 el contador de facturas diarias del restaurante (upsert atómico)."""
+    await _ensure_usage_table()
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO subscription_usage (restaurant_id, usage_date, total_invoices)
+               VALUES ($1, CURRENT_DATE, 1)
+               ON CONFLICT (restaurant_id, usage_date) DO UPDATE
+               SET total_invoices = subscription_usage.total_invoices + 1,
+                   updated_at     = NOW()""",
+            restaurant_id,
+        )
+
+
+async def db_check_usage_limits(restaurant_id: int) -> None:
+    """
+    Verifica que el restaurante no haya superado sus límites diarios.
+    Lee restaurants.features.plan_limits → { daily_tokens, daily_invoices }.
+    Si plan_limits está ausente, no se aplica ningún límite.
+    Lanza UsageLimitExceeded si se superó algún límite.
+    """
+    from app.services.database import UsageLimitExceeded  # noqa: PLC0415
+    await _ensure_usage_table()
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        # Leer límites del plan desde features
+        row = await conn.fetchrow(
+            "SELECT features FROM restaurants WHERE id = $1", restaurant_id
+        )
+        if not row:
+            return
+        feats = row["features"] or {}
+        if isinstance(feats, str):
+            try:
+                feats = json.loads(feats)
+            except Exception:
+                feats = {}
+        limits = feats.get("plan_limits") if isinstance(feats, dict) else None
+        if not limits:
+            return  # sin límites configurados → acceso libre
+
+        # Leer consumo del día actual
+        usage = await conn.fetchrow(
+            """SELECT total_tokens, total_invoices
+               FROM subscription_usage
+               WHERE restaurant_id = $1 AND usage_date = CURRENT_DATE""",
+            restaurant_id,
+        )
+        used_tokens   = usage["total_tokens"]   if usage else 0
+        used_invoices = usage["total_invoices"] if usage else 0
+
+        token_limit   = limits.get("daily_tokens")
+        invoice_limit = limits.get("daily_invoices")
+
+        if token_limit and used_tokens >= int(token_limit):
+            raise UsageLimitExceeded("tokens", used_tokens, int(token_limit))
+        if invoice_limit and used_invoices >= int(invoice_limit):
+            raise UsageLimitExceeded("facturas", used_invoices, int(invoice_limit))

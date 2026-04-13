@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesio — Analytics</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--dark);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Auth overlay ── */
+    #auth-overlay {
+      position: fixed; inset: 0;
+      background: var(--dark);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .auth-box {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg);
+      padding: var(--s-8);
+      width: 100%; max-width: 380px;
+      display: flex; flex-direction: column; gap: var(--s-4);
+    }
+    .auth-box h2 { font-size: 1.1rem; font-weight: 700; color: var(--brand); }
+    .auth-box p  { font-size: 0.85rem; color: var(--text-4); }
+    .auth-box input {
+      width: 100%; padding: var(--s-3) var(--s-4);
+      background: var(--dark-3); border: 1px solid transparent;
+      border-radius: var(--radius); color: #fff; font-size: 0.9rem;
+      outline: none; transition: border-color var(--ease);
+    }
+    .auth-box input:focus { border-color: var(--brand); }
+    .auth-box button {
+      width: 100%; padding: var(--s-3);
+      background: var(--brand); color: #fff; font-weight: 600;
+      border: none; border-radius: var(--radius); cursor: pointer;
+      font-size: 0.9rem; transition: opacity var(--ease);
+    }
+    .auth-box button:hover { opacity: 0.85; }
+    #auth-error { color: var(--danger); font-size: 0.82rem; display: none; }
+
+    /* ── Header ── */
+    .header {
+      background: var(--dark-2);
+      border-bottom: 1px solid var(--dark-3);
+      padding: var(--s-4) var(--s-6);
+      display: flex; align-items: center; gap: var(--s-4);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .header-brand { font-size: 1.1rem; font-weight: 700; color: var(--brand); letter-spacing: -0.02em; }
+    .header-title { font-size: 1rem; font-weight: 500; color: #fff; }
+    .header-spacer { flex: 1; }
+    .last-update { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
+
+    /* ── Main ── */
+    .main {
+      max-width: 1200px; margin: 0 auto;
+      padding: var(--s-6) var(--s-5);
+      display: flex; flex-direction: column; gap: var(--s-8);
+    }
+
+    /* ── Section ── */
+    .section-title {
+      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-4);
+      margin-bottom: var(--s-4);
+    }
+
+    /* ── KPI grid ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: var(--s-4);
+    }
+    .kpi-card {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg);
+      padding: var(--s-5);
+    }
+    .kpi-label { font-size: 0.75rem; color: var(--text-4); margin-bottom: var(--s-2); }
+    .kpi-value { font-size: 2rem; font-weight: 700; color: #fff; line-height: 1; }
+    .kpi-value.brand { color: var(--brand); }
+    .kpi-sub { font-size: 0.72rem; color: var(--text-4); margin-top: var(--s-2); }
+
+    /* ── Onboarding table ── */
+    .table-wrap {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table th {
+      padding: var(--s-3) var(--s-4);
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--text-4);
+      text-align: left; background: var(--dark-3);
+      cursor: pointer; user-select: none;
+    }
+    .data-table th:hover { color: var(--text); }
+    .data-table td {
+      padding: var(--s-3) var(--s-4);
+      font-size: 0.85rem; color: var(--text);
+      border-top: 1px solid var(--dark-3);
+    }
+    .data-table tr { cursor: pointer; transition: background var(--ease); }
+    .data-table tr:hover td { background: var(--dark-3); }
+    .data-table tr.expanded td { background: var(--dark-3); }
+    .data-table tr.detail-row td {
+      background: #1a1f2e;
+      cursor: default;
+      padding: var(--s-4) var(--s-5);
+    }
+    .data-table tr.detail-row:hover td { background: #1a1f2e; }
+
+    .score-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.78rem; font-weight: 600;
+    }
+    .score-green  { background: rgba(16,185,129,.15); color: #10b981; }
+    .score-yellow { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .score-red    { background: rgba(239,68,68,.15);  color: #ef4444; }
+
+    .check-icon { font-size: 0.85rem; }
+    .check-ok   { color: #10b981; }
+    .check-miss { color: #6b7280; }
+
+    .setup-grid {
+      display: flex; gap: var(--s-3); flex-wrap: wrap;
+    }
+    .setup-item {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 0.78rem;
+    }
+
+    /* ── Bar chart ── */
+    .chart-wrap {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg);
+      padding: var(--s-5);
+    }
+    .chart-title { font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: var(--s-4); }
+    .bar-chart {
+      display: flex; align-items: flex-end; gap: 3px;
+      height: 120px; overflow-x: auto; overflow-y: hidden;
+      padding-bottom: var(--s-5);
+      position: relative;
+    }
+    .bar-col {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 4px; flex: 1; min-width: 18px;
+    }
+    .bar {
+      width: 100%; background: var(--brand);
+      border-radius: 3px 3px 0 0;
+      transition: opacity var(--ease);
+      min-height: 2px;
+    }
+    .bar:hover { opacity: 0.75; }
+    .bar-label {
+      font-size: 0.6rem; color: var(--text-4);
+      writing-mode: vertical-rl; transform: rotate(180deg);
+      white-space: nowrap;
+    }
+    .bar-label.hidden { visibility: hidden; }
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--s-4);
+    }
+    @media (max-width: 700px) { .charts-row { grid-template-columns: 1fr; } }
+
+    /* ── Loading / empty states ── */
+    .loading-text { color: var(--text-4); font-size: 0.85rem; padding: var(--s-4) 0; }
+    .empty-row td { color: var(--text-4); font-size: 0.85rem; text-align: center; padding: var(--s-6) !important; }
+
+    /* ── Skeleton ── */
+    .skeleton {
+      background: linear-gradient(90deg, var(--dark-3) 25%, var(--dark-2) 50%, var(--dark-3) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: var(--radius);
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .skel-kpi { height: 2rem; width: 60%; margin-top: var(--s-2); }
+  </style>
+</head>
+<body>
+
+<!-- ── Auth overlay ──────────────────────────────────────────────────────── -->
+<div id="auth-overlay">
+  <div class="auth-box">
+    <h2>Mesio Analytics</h2>
+    <p>Enter your admin key to access platform analytics.</p>
+    <input type="password" id="key-input" placeholder="ADMIN_KEY" autocomplete="off">
+    <div id="auth-error">Incorrect key — please try again.</div>
+    <button id="auth-btn">Continue</button>
+  </div>
+</div>
+
+<!-- ── App ──────────────────────────────────────────────────────────────── -->
+<div id="app" style="display:none">
+  <header class="header">
+    <span class="header-brand">Mesio</span>
+    <span class="header-title">Analytics</span>
+    <span class="header-spacer"></span>
+    <span class="last-update" id="last-update">Loading…</span>
+  </header>
+
+  <main class="main">
+    <!-- KPI cards -->
+    <section>
+      <div class="section-title">Platform Overview</div>
+      <div class="kpi-grid" id="kpi-grid">
+        <div class="kpi-card"><div class="kpi-label">Total Restaurants</div><div class="skeleton skel-kpi" id="kpi-total"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Active (7d)</div><div class="skeleton skel-kpi" id="kpi-active7"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Orders Today</div><div class="skeleton skel-kpi" id="kpi-orders-today"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Orders This Month</div><div class="skeleton skel-kpi" id="kpi-orders-month"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Conversations Today</div><div class="skeleton skel-kpi" id="kpi-conv-today"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Invoices Today</div><div class="skeleton skel-kpi" id="kpi-inv-today"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Daily Orders (30d)</div><div class="skeleton skel-kpi" id="kpi-avg-daily"></div></div>
+        <div class="kpi-card"><div class="kpi-label">New This Month</div><div class="skeleton skel-kpi" id="kpi-new-month"></div></div>
+      </div>
+    </section>
+
+    <!-- Trends charts -->
+    <section>
+      <div class="section-title">30-Day Trends</div>
+      <div class="charts-row">
+        <div class="chart-wrap">
+          <div class="chart-title">Daily Orders</div>
+          <div class="bar-chart" id="chart-orders"><p class="loading-text">Loading…</p></div>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-title">Daily Conversations</div>
+          <div class="bar-chart" id="chart-convs"><p class="loading-text">Loading…</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Restaurant onboarding table -->
+    <section>
+      <div class="section-title">Restaurant Onboarding</div>
+      <div class="table-wrap">
+        <table class="data-table" id="rest-table">
+          <thead>
+            <tr>
+              <th data-col="name" onclick="sortTable('name')">Restaurant</th>
+              <th data-col="onboarding_score" onclick="sortTable('onboarding_score')">Score</th>
+              <th data-col="orders_30d" onclick="sortTable('orders_30d')">Orders 30d</th>
+              <th data-col="conversations_30d" onclick="sortTable('conversations_30d')">Convs 30d</th>
+              <th data-col="staff_count" onclick="sortTable('staff_count')">Staff</th>
+              <th data-col="last_order_at" onclick="sortTable('last_order_at')">Last Order</th>
+              <th>Setup</th>
+            </tr>
+          </thead>
+          <tbody id="rest-tbody">
+            <tr><td colspan="7" class="loading-text" style="text-align:center;padding:2rem">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script>
+  // ── Auth ────────────────────────────────────────────────────────────────────
+  let _adminKey = sessionStorage.getItem('mesio_admin_key') || '';
+
+  function applyKey(key) {
+    _adminKey = key;
+    sessionStorage.setItem('mesio_admin_key', key);
+    document.getElementById('auth-overlay').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    loadAll();
+  }
+
+  document.getElementById('auth-btn').addEventListener('click', () => {
+    const val = document.getElementById('key-input').value.trim();
+    if (!val) return;
+    // Try a quick ping to validate the key
+    fetch('/api/analytics/overview', { headers: { 'Authorization': `Bearer ${val}` } })
+      .then(r => {
+        if (r.status === 401) {
+          document.getElementById('auth-error').style.display = 'block';
+        } else {
+          document.getElementById('auth-error').style.display = 'none';
+          applyKey(val);
+        }
+      })
+      .catch(() => { document.getElementById('auth-error').style.display = 'block'; });
+  });
+
+  document.getElementById('key-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('auth-btn').click();
+  });
+
+  if (_adminKey) applyKey(_adminKey);
+
+  // ── Data helpers ────────────────────────────────────────────────────────────
+  function apiGet(path) {
+    return fetch(path, { headers: { 'Authorization': `Bearer ${_adminKey}` } })
+      .then(r => {
+        if (r.status === 401) { sessionStorage.removeItem('mesio_admin_key'); location.reload(); }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
+  }
+
+  function setKpi(id, value, cls) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('skeleton', 'skel-kpi');
+    el.className = 'kpi-value' + (cls ? ' ' + cls : '');
+    el.textContent = value != null ? String(value) : '—';
+  }
+
+  // ── Load overview ───────────────────────────────────────────────────────────
+  function loadOverview() {
+    return apiGet('/api/analytics/overview').then(data => {
+      const r = data.restaurants || {};
+      const o = data.orders       || {};
+      const c = data.conversations|| {};
+      const b = data.billing      || {};
+
+      setKpi('kpi-total',       r.total,            'brand');
+      setKpi('kpi-active7',     r.active_7d);
+      setKpi('kpi-orders-today',o.today);
+      setKpi('kpi-orders-month',o.this_month);
+      setKpi('kpi-conv-today',  c.today);
+      setKpi('kpi-inv-today',   b.invoices_today);
+      setKpi('kpi-avg-daily',   o.avg_daily_30d);
+      setKpi('kpi-new-month',   r.new_this_month);
+    });
+  }
+
+  // ── Bar chart renderer ──────────────────────────────────────────────────────
+  function renderChart(containerId, data, color) {
+    const container = document.getElementById(containerId);
+    if (!data || !data.length) {
+      container.innerHTML = '<p class="loading-text">No data</p>';
+      return;
+    }
+    const max = Math.max(...data.map(d => d.count), 1);
+    container.innerHTML = '';
+    data.forEach((d, i) => {
+      const col = document.createElement('div');
+      col.className = 'bar-col';
+
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      bar.style.height = Math.max(2, Math.round((d.count / max) * 100)) + 'px';
+      if (color) bar.style.background = color;
+      bar.title = `${d.date}: ${d.count}`;
+
+      const label = document.createElement('div');
+      label.className = 'bar-label' + (i % 5 === 0 ? '' : ' hidden');
+      label.textContent = d.date ? d.date.slice(5) : ''; // MM-DD
+
+      col.appendChild(bar);
+      col.appendChild(label);
+      container.appendChild(col);
+    });
+  }
+
+  function loadTrends() {
+    return apiGet('/api/analytics/trends').then(data => {
+      renderChart('chart-orders', data.daily_orders);
+      renderChart('chart-convs',  data.daily_conversations, '#6366f1');
+    });
+  }
+
+  // ── Restaurant table ────────────────────────────────────────────────────────
+  let _restaurants = [];
+  let _sortCol    = 'onboarding_score';
+  let _sortAsc    = true;
+  let _expandedId = null;
+
+  function scoreClass(s) {
+    if (s >= 80) return 'score-green';
+    if (s >= 50) return 'score-yellow';
+    return 'score-red';
+  }
+
+  function checkIcon(ok) {
+    const span = document.createElement('span');
+    span.className = 'check-icon ' + (ok ? 'check-ok' : 'check-miss');
+    span.textContent = ok ? '✓' : '○';
+    return span;
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('rest-tbody');
+    tbody.innerHTML = '';
+
+    if (!_restaurants.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="7" class="loading-text" style="text-align:center;padding:2rem">No restaurants found</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    const sorted = [..._restaurants].sort((a, b) => {
+      let va = a[_sortCol], vb = b[_sortCol];
+      if (va == null) va = -Infinity;
+      if (vb == null) vb = -Infinity;
+      if (typeof va === 'string') va = va.toLowerCase(), vb = (vb || '').toLowerCase();
+      return _sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+    });
+
+    sorted.forEach(rest => {
+      const setup = rest._setup || {};
+
+      // Main row
+      const tr = document.createElement('tr');
+      if (_expandedId === rest.id) tr.classList.add('expanded');
+
+      const nameCell = document.createElement('td');
+      nameCell.textContent = rest.name || '—';
+
+      const scoreCell = document.createElement('td');
+      const pill = document.createElement('span');
+      pill.className = 'score-pill ' + scoreClass(rest.onboarding_score);
+      pill.textContent = rest.onboarding_score + '%';
+      scoreCell.appendChild(pill);
+
+      const o30 = document.createElement('td'); o30.textContent = rest.orders_30d ?? '—';
+      const c30 = document.createElement('td'); c30.textContent = rest.conversations_30d ?? '—';
+      const sc  = document.createElement('td'); sc.textContent  = rest.staff_count ?? '—';
+      const lo  = document.createElement('td'); lo.textContent  = rest.last_order_at ?? '—';
+
+      // Setup icons
+      const setupCell = document.createElement('td');
+      const grid = document.createElement('div');
+      grid.className = 'setup-grid';
+
+      const steps = [
+        { key: 'menu',      label: 'Menu'      },
+        { key: 'staff',     label: 'Staff'     },
+        { key: 'billing',   label: 'Billing'   },
+        { key: 'whatsapp',  label: 'WA'        },
+        { key: 'orders',    label: 'Orders'    },
+      ];
+      steps.forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'setup-item';
+        item.appendChild(checkIcon(setup[s.key]));
+        const lbl = document.createElement('span');
+        lbl.style.color = setup[s.key] ? '#e5e7eb' : '#6b7280';
+        lbl.textContent = s.label;
+        item.appendChild(lbl);
+        grid.appendChild(item);
+      });
+      setupCell.appendChild(grid);
+
+      tr.append(nameCell, scoreCell, o30, c30, sc, lo, setupCell);
+
+      tr.addEventListener('click', () => {
+        const isExpanded = _expandedId === rest.id;
+        _expandedId = isExpanded ? null : rest.id;
+        renderTable();
+      });
+
+      tbody.appendChild(tr);
+
+      // Detail row (expanded)
+      if (_expandedId === rest.id) {
+        const dtr = document.createElement('tr');
+        dtr.className = 'detail-row';
+        const dtd = document.createElement('td');
+        dtd.colSpan = 7;
+        dtd.innerHTML = `
+          <strong style="color:#fff">${_escHtml(rest.name)}</strong>
+          <div style="display:flex;gap:2rem;margin-top:.5rem;flex-wrap:wrap;font-size:.82rem;color:#9ca3af">
+            <span>WhatsApp: <strong style="color:#fff">${_escHtml(rest.whatsapp_number || '—')}</strong></span>
+            <span>Created: <strong style="color:#fff">${_escHtml(String(rest.created_at || '—'))}</strong></span>
+            <span>Last Conv: <strong style="color:#fff">${_escHtml(String(rest.last_conversation_at || '—'))}</strong></span>
+            <span>Billing: <strong style="color:#fff">${rest.has_billing ? 'Configured' : 'Not set'}</strong></span>
+          </div>`;
+        dtr.appendChild(dtd);
+        tbody.appendChild(dtr);
+      }
+    });
+  }
+
+  function sortTable(col) {
+    if (_sortCol === col) _sortAsc = !_sortAsc;
+    else { _sortCol = col; _sortAsc = col === 'onboarding_score' ? true : false; }
+    renderTable();
+  }
+
+  function loadRestaurants() {
+    return apiGet('/api/analytics/restaurants').then(data => {
+      _restaurants = data.restaurants || [];
+      renderTable();
+    });
+  }
+
+  // ── Refresh loop ────────────────────────────────────────────────────────────
+  function updateTimestamp() {
+    const el = document.getElementById('last-update');
+    if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();
+  }
+
+  function loadAll() {
+    Promise.allSettled([
+      loadOverview(),
+      loadTrends(),
+      loadRestaurants(),
+    ]).then(() => updateTimestamp());
+  }
+
+  // Auto-refresh every 60 seconds
+  setInterval(() => {
+    if (_adminKey) loadAll();
+  }, 60_000);
+</script>
+</body>
+</html>

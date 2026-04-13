@@ -34,6 +34,12 @@ async def health_check():
     return checks
 
 
+@router.get("/monitoring")
+async def monitoring_page():
+    from fastapi.responses import FileResponse
+    return FileResponse("app/static/html/monitoring.html")
+
+
 @router.get("/health/metrics")
 async def health_metrics(request: Request):
     admin_key = os.environ.get("ADMIN_KEY", "")
@@ -80,5 +86,67 @@ async def health_metrics(request: Request):
     except Exception as exc:
         log.exception("health.metrics.dead_letters_error", exc_type=type(exc).__name__)
         metrics["inbox_dead_letters"] = None
+
+    # Inbox worker processing metrics (in-process, not from DB)
+    try:
+        from app.services.inbox_worker import get_metrics as _get_worker_metrics
+        metrics.update(_get_worker_metrics())
+    except Exception as exc:
+        log.exception("health.metrics.worker_metrics_error", exc_type=type(exc).__name__)
+
+    # Orders created today
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics["orders_today"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM orders WHERE created_at::date = CURRENT_DATE"
+            )
+    except Exception as exc:
+        log.exception("health.metrics.orders_today_error", exc_type=type(exc).__name__)
+        metrics["orders_today"] = None
+
+    # Open table sessions right now
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics["active_table_sessions"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM table_sessions WHERE closed_at IS NULL"
+            )
+    except Exception as exc:
+        log.exception("health.metrics.active_table_sessions_error", exc_type=type(exc).__name__)
+        metrics["active_table_sessions"] = None
+
+    # Conversations with activity in last 30 minutes
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics["active_conversations"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM conversations WHERE updated_at > NOW() - INTERVAL '30 minutes'"
+            )
+    except Exception as exc:
+        log.exception("health.metrics.active_conversations_error", exc_type=type(exc).__name__)
+        metrics["active_conversations"] = None
+
+    # Total restaurant count
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics["restaurants_total"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM restaurants"
+            )
+    except Exception as exc:
+        log.exception("health.metrics.restaurants_total_error", exc_type=type(exc).__name__)
+        metrics["restaurants_total"] = None
+
+    # Staff currently on shift
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics["staff_clocked_in"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM staff_shifts WHERE clock_out IS NULL"
+            )
+    except Exception as exc:
+        log.exception("health.metrics.staff_clocked_in_error", exc_type=type(exc).__name__)
+        metrics["staff_clocked_in"] = None
 
     return metrics

@@ -36,15 +36,12 @@ async def _get_restaurant_id(user: dict) -> int:
     restaurant_name = user.get("restaurant_name")
     if not restaurant_name:
         raise HTTPException(status_code=400, detail="Usuario sin restaurante asignado")
-        
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT id, name FROM restaurants")
-        for r in rows:
-            if r["name"].lower().strip() == restaurant_name.lower().strip():
-                return r["id"]
-                
-    raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    from app.repositories import restaurant_repo
+    rid = await restaurant_repo.db_find_restaurant_id_by_name(restaurant_name)
+    if rid is None:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    return rid
 
 # ── MODELOS ──────────────────────────────────────────────────────────
 

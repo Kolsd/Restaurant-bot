@@ -318,3 +318,25 @@ async def rate_limit_check(key: str, max_requests: int, window_seconds: int) -> 
     timestamps.append(now)
     _fb_rate_limits[redis_key] = timestamps
     return len(timestamps) <= max_requests
+
+
+# ── Scheduler leader election ────────────────────────────────────────────────
+
+async def scheduler_leader_acquire(ttl_seconds: int = 90) -> bool:
+    """
+    Try to acquire the scheduler leader lock.
+
+    Only one worker should run the scheduler tick. Uses Redis SET NX with a TTL
+    slightly longer than the scheduler tick interval (60s tick → 90s TTL).
+
+    Returns True if this worker is the leader, False otherwise.
+    Falls back to True (run everywhere) if Redis is unavailable.
+    """
+    key = "mesio:scheduler_leader"
+    r = await _rc.get_redis()
+    if r is not None:
+        result = await r.set(key, "1", nx=True, ex=ttl_seconds)
+        return result is not None  # True → acquired, None → already held
+    # No Redis → fall back to running on all workers (degraded but functional)
+    _maybe_warn("scheduler_leader")
+    return True

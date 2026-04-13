@@ -107,3 +107,39 @@ async def cleanup_expired_sessions() -> int:
         if count > 0:
             log.info("sessions.expired_cleaned", count=count)
         return count
+
+
+# ---------------------------------------------------------------------------
+# database.py-compatible aliases (Fase 6 re-export)
+# Call sites using `db.db_save_session / db.db_get_session /
+# db.db_cleanup_expired_sessions` are preserved via these names.
+# ---------------------------------------------------------------------------
+
+async def db_save_session(token: str, username: str) -> None:
+    """Persist a new session storing both the SHA-256 hash and the raw token."""
+    raw = token
+    token_hash = _hash_token(raw)
+    expires = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute(
+                "INSERT INTO sessions (token, token_hash, username, expires_at) VALUES ($1, $2, $3, $4)",
+                raw, token_hash, username, expires,
+            )
+        except Exception:
+            # Fallback: migration 0009 not yet applied in this environment.
+            await conn.execute(
+                "INSERT INTO sessions (token, username, expires_at) VALUES ($1, $2, $3)",
+                raw, username, expires,
+            )
+
+
+async def db_get_session(token: str) -> str | None:
+    """Return the username for a valid session token (hash-first, plaintext fallback)."""
+    return await get_session(token)
+
+
+async def db_cleanup_expired_sessions() -> int:
+    """Delete expired sessions and return the count removed."""
+    return await cleanup_expired_sessions()

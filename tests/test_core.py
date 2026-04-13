@@ -41,17 +41,18 @@ async def test_login_success():
         "role":            "owner",
         "password_hash":   hashed,
     }
-    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro"}
+    mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
+    fake_token = "a" * 64
 
     with (
         patch.object(auth.db, "db_get_user",           AsyncMock(return_value=mock_user)),
-        patch.object(auth.db, "db_save_session",       AsyncMock()),
         patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
+        patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value=fake_token)),
     ):
         result = await auth.login("owner", "supersecreta")
 
     assert result["success"] is True
-    assert len(result["token"]) == 64        # secrets.token_hex(32) → 64 hex chars
+    assert result["token"] == fake_token
     assert result["restaurant"]["role"] == "owner"
 
 
@@ -81,7 +82,10 @@ async def test_login_user_not_found():
     """Non-existent username returns success=False."""
     from app.services import auth
 
-    with patch.object(auth.db, "db_get_user", AsyncMock(return_value=None)):
+    with (
+        patch.object(auth.db, "db_get_user", AsyncMock(return_value=None)),
+        patch.object(auth.db, "db_get_staff_candidates_by_name", AsyncMock(return_value=[])),
+    ):
         result = await auth.login("nadie", "pass")
 
     assert result["success"] is False
@@ -96,20 +100,20 @@ def test_login_rate_limit(client, monkeypatch):
     After _LOGIN_MAX failed attempts from the same IP, subsequent calls
     to POST /api/auth/login must return 429.
     """
-    import app.routes.dashboard as dash_mod
+    import app.routes.auth_routes as auth_mod
 
     # Reset the in-process counter so this test is independent of run order
-    dash_mod._login_attempts.clear()
+    auth_mod._login_attempts.clear()
 
     # Mock auth.login to always fail quickly (no DB needed).
-    # dashboard.py does `from app.services.auth import login` so `login` is a
-    # direct name in dashboard's namespace — patch it there.
+    # auth_routes.py does `from app.services.auth import login` so `login` is a
+    # direct name in auth_routes's namespace — patch it there.
     async def mock_login(username, password):
         return {"success": False, "error": "bad credentials"}
 
-    monkeypatch.setattr(dash_mod, "login", mock_login)
+    monkeypatch.setattr(auth_mod, "login", mock_login)
 
-    max_attempts = dash_mod._LOGIN_MAX  # 10
+    max_attempts = auth_mod._LOGIN_MAX  # 10
 
     # Exhaust all allowed attempts
     for i in range(max_attempts):
