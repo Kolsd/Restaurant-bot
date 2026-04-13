@@ -89,17 +89,13 @@ async def db_init_tables():
 async def db_get_tables(branch_id: int = None, is_main: bool = False):
     """
     Devuelve las mesas.
-    Si is_main es True, trae SOLO las mesas de la matriz (branch_id IS NULL).
-    Si branch_id tiene un número, trae SOLO las de esa sucursal.
-    Si ambas son False/None, trae TODAS las mesas.
+    Si branch_id tiene un número, trae las de esa sucursal/matriz.
+    Si branch_id es None, trae TODAS las mesas (admin global).
+    (is_main ya no se usa — branch_id siempre es NOT NULL tras migración 0018)
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        if is_main:
-            # Es la Matriz. Obligamos a buscar branch_id IS NULL
-            rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id IS NULL ORDER BY number")
-        elif branch_id is not None:
-            # Es una sucursal. Buscamos su ID específico
+        if branch_id is not None:
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id=$1 ORDER BY number", branch_id)
         else:
             # Modo Admin Global: Trae todo
@@ -127,15 +123,13 @@ async def db_auto_create_table(restaurant_id: int, is_main_restaurant: bool) -> 
     El nombre será {restaurant_id}-{numero}. (Ej. "1-1", "2-1").
     Reutiliza automáticamente los números de las mesas que hayan sido borradas.
     """
-    branch_id = None if is_main_restaurant else restaurant_id
+    # branch_id is always the restaurant_id (parent or branch)
+    branch_id = restaurant_id
 
     pool = await _get_pool()
     async with pool.acquire() as conn:
         # 1. Obtener todos los números actualmente en uso (ignorando los borrados)
-        if branch_id is None:
-            rows = await conn.fetch("SELECT number FROM restaurant_tables WHERE branch_id IS NULL AND active=TRUE")
-        else:
-            rows = await conn.fetch("SELECT number FROM restaurant_tables WHERE branch_id=$1 AND active=TRUE", branch_id)
+        rows = await conn.fetch("SELECT number FROM restaurant_tables WHERE branch_id=$1 AND active=TRUE", branch_id)
 
         used_numbers = {r["number"] for r in rows}
 
@@ -878,7 +872,7 @@ async def db_get_open_proposal_for_phone(
                JOIN table_orders tor ON tor.base_order_id = tc.base_order_id
               WHERE tc.proposal_customer_phone = $2
                 AND tc.proposal_status IN ('pending', 'awaiting_proof')
-                AND (tor.branch_id = $1 OR tor.branch_id IS NULL)
+                AND tor.branch_id = $1
               ORDER BY tc.proposal_created_at DESC
               LIMIT 1""",
             restaurant_id,
@@ -906,7 +900,7 @@ async def db_list_checkout_proposals(
                  json_agg(tc.* ORDER BY tc.check_number) AS checks
                FROM table_orders tor
                JOIN table_checks tc ON tc.base_order_id = tor.base_order_id
-              WHERE (tor.branch_id = ANY($1::int[]) OR tor.branch_id IS NULL)
+              WHERE tor.branch_id = ANY($1::int[])
                 AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
                 AND tc.status = 'open'
               GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.branch_id
@@ -1011,9 +1005,7 @@ async def db_get_floor_plan(branch_id: int = None, is_main: bool = False):
             WHERE t.active = TRUE
         """
         params = []
-        if is_main:
-            sql += " AND (t.branch_id IS NULL)"
-        elif branch_id is not None:
+        if branch_id is not None:
             sql += " AND t.branch_id = $1"
             params.append(branch_id)
         sql += " ORDER BY t.zone, t.number"

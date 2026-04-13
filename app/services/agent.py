@@ -170,7 +170,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 SELECT t.* FROM restaurant_tables t
                 LEFT JOIN restaurants r ON t.branch_id = r.id
                 WHERE t.active = TRUE
-                  AND (t.branch_id IS NULL OR t.branch_id = $1 OR r.parent_restaurant_id = $1)
+                  AND (t.branch_id = $1 OR r.parent_restaurant_id = $1)
             """
             all_tables = await conn.fetch(query, root_id)
             for row in all_tables:

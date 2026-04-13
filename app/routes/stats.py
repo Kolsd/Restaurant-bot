@@ -215,13 +215,11 @@ async def get_conversations(request: Request):
     
     bot_number = restaurant.get("whatsapp_number", "")
     
-    is_main = restaurant.get("parent_restaurant_id") is None
-    branch_id = None if is_main else restaurant["id"]
-    
+    branch_id = restaurant["id"]
+
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and any(r in user.get("role", "") for r in ["owner", "admin"]):
         branch_id = int(branch_header)
-        is_main = False
 
     conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
     

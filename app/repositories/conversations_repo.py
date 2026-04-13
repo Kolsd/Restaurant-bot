@@ -83,7 +83,7 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int | str 
             params.append(branch_id)
             idx += 1
         elif bot_number:
-            conditions.append("branch_id IS NULL")
+            pass  # bot_number filter already applied above
 
         if date_from:
             conditions.append(f"created_at >= ${idx}")

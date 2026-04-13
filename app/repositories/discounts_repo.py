@@ -62,49 +62,30 @@ async def db_get_active_discount(
     """
     Return the best active discount for *this restaurant right now*, or None.
 
-    Prefers branch-specific rows (branch_id IS NOT NULL) over restaurant-wide
-    rows.  If branch_id is provided, the query checks both the branch row and
-    the restaurant-wide row (branch_id IS NULL) and returns whichever gives
-    the higher discount.
+    branch_id is always set (NOT NULL after migration 0018).
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
         dow = _dow_expr(tz)
         now_t = _now_time_expr(tz)
-        if branch_id is not None:
-            row = await conn.fetchrow(
-                f"""
-                SELECT *
-                FROM   time_slot_discounts
-                WHERE  restaurant_id   = $1
-                  AND  active          = TRUE
-                  AND  day_of_week     = {dow}
-                  AND  start_time     <= {now_t}
-                  AND  end_time       >  {now_t}
-                  AND  (branch_id = $2 OR branch_id IS NULL)
-                ORDER BY branch_id NULLS LAST, discount_percent DESC
-                LIMIT 1
-                """,
-                restaurant_id,
-                branch_id,
-            )
-        else:
-            row = await conn.fetchrow(
-                f"""
-                SELECT *
-                FROM   time_slot_discounts
-                WHERE  restaurant_id   = $1
-                  AND  active          = TRUE
-                  AND  day_of_week     = {dow}
-                  AND  start_time     <= {now_t}
-                  AND  end_time       >  {now_t}
-                  AND  branch_id IS NULL
-                ORDER BY discount_percent DESC
-                LIMIT 1
-                """,
-                restaurant_id,
-            )
-
+        # branch_id defaults to restaurant_id if not provided
+        bid = branch_id if branch_id is not None else restaurant_id
+        row = await conn.fetchrow(
+            f"""
+            SELECT *
+            FROM   time_slot_discounts
+            WHERE  restaurant_id   = $1
+              AND  active          = TRUE
+              AND  day_of_week     = {dow}
+              AND  start_time     <= {now_t}
+              AND  end_time       >  {now_t}
+              AND  branch_id = $2
+            ORDER BY discount_percent DESC
+            LIMIT 1
+            """,
+            restaurant_id,
+            bid,
+        )
         return _serialize(dict(row)) if row else None
 
 

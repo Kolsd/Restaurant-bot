@@ -110,7 +110,7 @@ def test_create_table_returns_name(client, monkeypatch):
 def test_delete_table_success(client, monkeypatch):
     """DELETE /api/tables/{id} → 200."""
     _auth(monkeypatch)
-    conn = _mock_pool(monkeypatch, fetchrow_result=make_row({"restaurant_id": 1}))
+    conn = _mock_pool(monkeypatch, fetchrow_result=make_row({"branch_id": None}))
     monkeypatch.setattr(db_mod, "db_delete_table", AsyncMock())
     r = client.delete("/api/tables/TBL-001", headers=_HEADERS)
     assert r.status_code == 200
@@ -120,7 +120,7 @@ def test_delete_table_success(client, monkeypatch):
 def test_delete_table_calls_db(client, monkeypatch):
     """DELETE /api/tables/{id} llama a db_delete_table con el id correcto."""
     _auth(monkeypatch)
-    _mock_pool(monkeypatch, fetchrow_result=make_row({"restaurant_id": 1}))
+    _mock_pool(monkeypatch, fetchrow_result=make_row({"branch_id": None}))
     mock_del = AsyncMock()
     monkeypatch.setattr(db_mod, "db_delete_table", mock_del)
     client.delete("/api/tables/TBL-SPEC", headers=_HEADERS)

@@ -725,9 +725,7 @@ async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: in
         elif branch_id is not None:
             conditions.append("branch_id = $2")
             params.append(branch_id)
-        else:
-            conditions.append("branch_id IS NULL")
-            
+
         where_clause = " AND ".join(conditions)
         query = f"""
             SELECT COUNT(*) as total_responses, COALESCE(AVG(score), 0) as average_score,
@@ -761,9 +759,7 @@ async def db_get_nps_responses(bot_number: str, period: str = "month", limit: in
         elif branch_id is not None:
             conditions.append("branch_id = $2")
             params.append(branch_id)
-        else:
-            conditions.append("branch_id IS NULL")
-            
+
         where_clause = " AND ".join(conditions)
         limit_idx = len(params) + 1
         params.append(limit)

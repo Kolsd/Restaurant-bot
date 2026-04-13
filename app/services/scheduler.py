@@ -216,14 +216,14 @@ async def _run_occupancy_snapshot():
                     FROM restaurant_tables rt
                     LEFT JOIN table_sessions ts
                         ON ts.table_id = rt.id AND ts.closed_at IS NULL
-                    WHERE rt.restaurant_id = $1 AND rt.active = TRUE
+                    WHERE rt.branch_id = $1 AND rt.active = TRUE
                     """,
                     rid,
                 )
             if tables_row:
                 await rr.db_save_occupancy_snapshot(
                     restaurant_id=rid,
-                    branch_id=None,
+                    branch_id=rid,
                     total_tables=tables_row["total_tables"],
                     occupied_tables=tables_row["occupied_tables"],
                     total_capacity=tables_row["total_capacity"],

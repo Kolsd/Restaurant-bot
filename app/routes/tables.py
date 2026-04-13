@@ -91,21 +91,15 @@ async def get_tables(request: Request):
     
     # Por defecto, asumimos el branch_id del usuario (útil para meseros/gerentes)
     branch_id = user.get("branch_id")
-    is_main = branch_id is None
-    
+
     # 🛡️ Si el dueño usa el selector del Topbar:
     branch_header = request.headers.get("X-Branch-ID")
     if "owner" in user.get("role", "") or "admin" in user.get("role", ""):
         if branch_header and branch_header.isdigit():
-            # Eligió una sucursal específica
             branch_id = int(branch_header)
-            is_main = False
-        else:
-            # No hay header (eligió "Casa Matriz")
-            branch_id = None
-            is_main = True
-        
-    tables = await db.db_get_tables(branch_id=branch_id, is_main=is_main)
+        # else: branch_id stays None → db_get_tables returns all
+
+    tables = await db.db_get_tables(branch_id=branch_id)
     return {"tables": tables}
     
 @router.post("/api/tables")
@@ -116,8 +110,7 @@ async def create_table(request: Request):
     restaurant = await get_current_restaurant(request)
     
     restaurant_id = restaurant["id"]
-    is_main = restaurant.get("parent_restaurant_id") is None
-    
+
     # 🛡️ Forzamos la lectura del selector de sucursales igual que en el GET
     # Esto asegura que la mesa se cree donde el dueño está mirando
     branch_header = request.headers.get("X-Branch-ID")
@@ -126,35 +119,39 @@ async def create_table(request: Request):
         branch_rest = await db.db_get_restaurant_by_id(branch_id)
         if branch_rest:
             restaurant_id = branch_id
-            is_main = False
-    
-    # Llama a la creación automática que hicimos en database.py
-    new_table = await db.db_auto_create_table(restaurant_id, is_main)
+
+    new_table = await db.db_auto_create_table(restaurant_id, is_main_restaurant=False)
     
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
 
 async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
-    """Verify the table belongs to this restaurant (or its branches)."""
+    """Verify the table belongs to this restaurant (or its branches).
+
+    After migration 0018, branch_id is always NOT NULL and equals the owning
+    restaurant's id (parent or branch).
+    """
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT restaurant_id FROM restaurant_tables WHERE id = $1", table_id,
+            "SELECT branch_id FROM restaurant_tables WHERE id = $1", table_id,
         )
         if not row:
             raise HTTPException(status_code=404, detail="Table not found")
         rest_id = restaurant["id"]
-        table_rest_id = row["restaurant_id"]
-        if table_rest_id == rest_id:
-            return  # Direct ownership
-        # If current restaurant is a parent (matriz), allow access to branch tables
+        table_branch_id = row["branch_id"]
+
+        # Direct ownership: table belongs to this restaurant
+        if table_branch_id == rest_id:
+            return
+        # Parent access: if current restaurant is the parent, allow branch tables
         is_parent = restaurant.get("parent_restaurant_id") is None
         if is_parent:
             branch = await conn.fetchrow(
                 "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
-                table_rest_id, rest_id,
+                table_branch_id, rest_id,
             )
             if branch:
-                return  # Table belongs to a branch of this parent
+                return
         raise HTTPException(status_code=403, detail="Table does not belong to this restaurant")
 
 
@@ -170,11 +167,8 @@ async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant)
 async def get_floor_plan(request: Request, restaurant=Depends(get_current_restaurant)):
     """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta."""
     branch_id_str = request.headers.get("x-branch-id")
-    is_main = restaurant.get("parent_restaurant_id") is None
-    branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else None
-    if branch_id is None and is_main:
-        branch_id = restaurant["id"]
-    return await db.db_get_floor_plan(branch_id=branch_id, is_main=is_main)
+    branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else restaurant["id"]
+    return await db.db_get_floor_plan(branch_id=branch_id)
 
 
 class TablePositionBody(BaseModel):
@@ -482,35 +476,20 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
-        if branch_id is not None:
-            # Determinar si es restaurante principal (sin parent) para incluir legacy NULLs
-            is_main = await conn.fetchval(
-                "SELECT parent_restaurant_id IS NULL FROM restaurants WHERE id = $1", branch_id
-            )
-            if is_main:
-                # Restaurante principal: órdenes con branch_id exacto O legacy NULL
-                if status:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status = $1 AND (branch_id = $2 OR branch_id IS NULL) ORDER BY created_at ASC",
-                        status, branch_id
-                    )
-                else:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND (branch_id = $1 OR branch_id IS NULL) ORDER BY created_at ASC",
-                        branch_id
-                    )
+        # Resolve effective branch_id: from header, user, or staff context
+        effective_bid = branch_id or user.get("restaurant_id")
+
+        if effective_bid is not None:
+            if status:
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
+                    status, effective_bid
+                )
             else:
-                # Sucursal real: filtro exacto
-                if status:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
-                        status, branch_id
-                    )
-                else:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
-                        branch_id
-                    )
+                rows = await conn.fetch(
+                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
+                    effective_bid
+                )
         elif is_admin:
             # Owner/admin sin sucursal seleccionada: ve todas
             if status:
@@ -523,32 +502,7 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
                     "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC"
                 )
         else:
-            # Staff en restaurante principal: branch_id mapeado a None por get_current_user.
-            # Usamos restaurant_id (disponible en staff tokens) para cubrir órdenes
-            # guardadas con branch_id explícito Y legacy branch_id IS NULL.
-            rest_id = user.get("restaurant_id")
-            if rest_id:
-                if status:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status = $1 AND (branch_id = $2 OR branch_id IS NULL) ORDER BY created_at ASC",
-                        status, rest_id
-                    )
-                else:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND (branch_id = $1 OR branch_id IS NULL) ORDER BY created_at ASC",
-                        rest_id
-                    )
-            else:
-                # Fallback legacy: usuario sin restaurant_id conocido
-                if status:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status = $1 AND branch_id IS NULL ORDER BY created_at ASC",
-                        status
-                    )
-                else:
-                    rows = await conn.fetch(
-                        "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id IS NULL ORDER BY created_at ASC"
-                    )
+            rows = []
 
     import json as _json
     result = []
@@ -812,25 +766,18 @@ async def get_tables_status(request: Request):
     
     # 1. Resolución de contexto inteligente
     restaurant = await get_current_restaurant(request)
-    is_main = restaurant.get("parent_restaurant_id") is None
-    branch_id = None if is_main else restaurant["id"]
-        
-    tables = await db.db_get_tables(branch_id=branch_id, is_main=is_main)
+    branch_id = restaurant["id"]
+
+    tables = await db.db_get_tables(branch_id=branch_id)
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         active_sessions = await conn.fetch("SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')")
-        
-        # 2. Separar las órdenes pendientes según arquitectura
-        if not is_main:
-            pending_orders = await conn.fetch(
-                "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
-                branch_id
-            )
-        else:
-            pending_orders = await conn.fetch(
-                "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id IS NULL"
-            )
+
+        pending_orders = await conn.fetch(
+            "SELECT table_id, status FROM table_orders WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
+            branch_id
+        )
         
     session_map = {s['table_id'] for s in active_sessions}
     order_map = {}

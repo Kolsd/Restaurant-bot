@@ -46,8 +46,8 @@ async def get_current_user(request: Request) -> dict:
             staff_member = await conn.fetchrow(query, str(staff_id))
 
             if staff_member:
-                is_main_restaurant = staff_member["parent_restaurant_id"] is None
-                mapped_branch_id = None if is_main_restaurant else staff_member["restaurant_id"]
+                # branch_id is always the restaurant_id (parent or branch)
+                mapped_branch_id = staff_member["restaurant_id"]
 
                 raw_roles = staff_member["roles"]
                 if isinstance(raw_roles, list):
