@@ -614,6 +614,8 @@ async function doLogin() {
     const statsR = await _hqFetch('/api/admin/stats');
     if(!statsR.ok) { $('login-err').textContent = 'Error al cargar stats'; return; }
     const data = await statsR.json();
+    const redirect = new URLSearchParams(window.location.search).get('redirect');
+    if(redirect) { window.location.href = '/' + redirect; return; }
     $('login-overlay').style.display = 'none';
     $('app').style.display = 'block';
     renderKPIs(data);
