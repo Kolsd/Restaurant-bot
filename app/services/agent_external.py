@@ -128,9 +128,10 @@ async def execute_external_action(
 
     if action == "change_payment":
         payment_method = parsed.get("payment_method", "")
-        if payment_method:
-            await db.db_update_pending_order_payment_method(phone, bot_number, payment_method)
-            log.info("order.payment_method_changed", phone=phone, new_method=payment_method)
+        if not payment_method:
+            return "¿A cuál método de pago deseas cambiar? Puedes elegir: efectivo, Nequi, Daviplata, tarjeta o transferencia."
+        await db.db_update_pending_order_payment_method(phone, bot_number, payment_method)
+        log.info("order.payment_method_changed", phone=phone, new_method=payment_method)
         return reply
 
     if action not in ("delivery", "pickup"):

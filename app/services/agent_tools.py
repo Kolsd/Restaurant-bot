@@ -127,7 +127,8 @@ _CREATE_DELIVERY_ORDER = {
             },
             "payment_method": {
                 "type": "string",
-                "description": "Payment method chosen by the customer (e.g. 'efectivo', 'transferencia', 'tarjeta')."
+                "description": "Payment method chosen by the customer (e.g. 'efectivo', 'transferencia', 'tarjeta').",
+                "enum": ["efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "wompi"]
             },
             "notes": {
                 "type": "string",
@@ -175,7 +176,8 @@ _CREATE_PICKUP_ORDER = {
             },
             "payment_method": {
                 "type": "string",
-                "description": "Payment method chosen by the customer (e.g. 'efectivo', 'transferencia', 'tarjeta')."
+                "description": "Payment method chosen by the customer (e.g. 'efectivo', 'transferencia', 'tarjeta').",
+                "enum": ["efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "wompi"]
             },
             "notes": {
                 "type": "string",
@@ -203,7 +205,8 @@ _CHANGE_PAYMENT_METHOD = {
         "properties": {
             "payment_method": {
                 "type": "string",
-                "description": "The new payment method the customer wants to use (e.g. 'efectivo', 'transferencia', 'tarjeta')."
+                "description": "The new payment method the customer wants to use (e.g. 'efectivo', 'transferencia', 'tarjeta').",
+                "enum": ["efectivo", "transferencia", "tarjeta", "nequi", "daviplata", "wompi"]
             }
         },
         "required": ["payment_method"]

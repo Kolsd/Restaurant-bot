@@ -60,7 +60,7 @@ async def find_dish(dish_name: str, bot_number: str) -> dict | None:
                 continue
             if name_lower in dish_lower and query_len / item_len >= 0.4:
                 candidates.append({**dish, "category": category})
-            elif dish_lower in name_lower and item_len / query_len >= 0.4 if query_len > 0 else False:
+            elif (dish_lower in name_lower) and (query_len / item_len >= 0.4 if item_len > 0 else False):
                 candidates.append({**dish, "category": category})
 
     if not candidates:
@@ -113,7 +113,10 @@ async def remove_from_cart(phone: str, dish_name: str, bot_number: str) -> dict:
     try:
         async with _cart_lock(phone, bot_number):
             cart = await db.db_get_cart(phone, bot_number)
-            cart["items"] = [i for i in cart["items"] if i["name"] != dish["name"]]
+            original_count = len(cart["items"])
+            cart["items"] = [i for i in cart["items"] if i["name"].lower() != dish["name"].lower()]
+            if len(cart["items"]) == original_count:
+                return {"success": False, "error": f"{dish['name']} no está en tu pedido."}
             await db.db_save_cart(phone, bot_number, cart)
     except RuntimeError as exc:
         if "cart_lock_contention" in str(exc):
@@ -123,16 +126,30 @@ async def remove_from_cart(phone: str, dish_name: str, bot_number: str) -> dict:
     return {"success": True, "cart": cart}
 
 async def clear_cart(phone: str, bot_number: str):
-    async with _cart_lock(phone, bot_number):
-        await db.db_clear_cart(phone, bot_number)
+    try:
+        async with _cart_lock(phone, bot_number):
+            await db.db_clear_cart(phone, bot_number)
+    except RuntimeError as e:
+        if str(e) == "cart_lock_contention":
+            log.warning("cart.clear_lock_contention", phone=phone)
+            return
+        raise
 
 
 async def migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
     """Migrate cart from one bot_number to another under a distributed lock."""
-    async with _cart_lock(phone, from_bot_number):
-        await db.db_migrate_cart(phone, from_bot_number, to_bot_number)
+    keys = sorted([from_bot_number, to_bot_number])
+    try:
+        async with _cart_lock(phone, keys[0]):
+            async with _cart_lock(phone, keys[1]):
+                await db.db_migrate_cart(phone, from_bot_number, to_bot_number)
+    except RuntimeError as e:
+        if str(e) == "cart_lock_contention":
+            log.warning("cart.migrate_lock_contention", phone=phone)
+            return
+        raise
         
-async def get_cart_total(phone: str, bot_number: str) -> int:
+async def get_cart_total(phone: str, bot_number: str) -> float:
     cart = await db.db_get_cart(phone, bot_number)
     return sum(item["subtotal"] for item in cart["items"])
 

@@ -1099,13 +1099,16 @@ class TestBotWhatsAppFlows:
             })
 
         monkeypatch.setattr("app.routes.chat._process_message", fake_process)
+        monkeypatch.setattr(
+            "app.services.database.db_get_restaurant_by_phone",
+            AsyncMock(return_value={"wa_access_token": "tok-abc"}),
+        )
 
         payload = {
             "user_phone": "573001234567",
             "user_text": "Quiero pedir",
             "bot_number": "+573009876543",
             "phone_id": "phone-id-123",
-            "access_token": "tok-abc",
         }
 
         asyncio.get_event_loop().run_until_complete(
@@ -1166,7 +1169,6 @@ class TestBotWhatsAppFlows:
                 "user_text": "Hola",
                 "bot_number": "+573009876543",
                 "phone_id": "pid",
-                "access_token": "tok",
             },
             "attempts": 0,
         }
@@ -1200,6 +1202,10 @@ class TestBotWhatsAppFlows:
             pass
 
         monkeypatch.setattr("app.routes.chat._process_message", fake_process)
+        monkeypatch.setattr(
+            db, "db_get_restaurant_by_phone",
+            AsyncMock(return_value={"wa_access_token": "tok"}),
+        )
 
         stop = asyncio.Event()
 

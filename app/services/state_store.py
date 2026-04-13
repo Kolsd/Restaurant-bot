@@ -234,7 +234,7 @@ async def table_cooldown_acquire(
             # No cooldown active — acquire for this session
             await r.set(key, base_order_id or "1", ex=ttl_seconds)
             return True
-        stored_id = current.decode() if isinstance(current, bytes) else current
+        stored_id = current
         if base_order_id and stored_id != base_order_id:
             # Different session at the same table — override cooldown and notify
             await r.set(key, base_order_id, ex=ttl_seconds)
@@ -303,7 +303,7 @@ async def cart_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 30) 
         _fb_cart_locks[key] = asyncio.Lock()
     lock = _fb_cart_locks[key]
     try:
-        await asyncio.wait_for(lock.acquire(), timeout=ttl_seconds)
+        await asyncio.wait_for(lock.acquire(), timeout=5.0)
         _fb_cart_lock_tokens[key] = token
         return token
     except asyncio.TimeoutError:
@@ -318,24 +318,30 @@ async def cart_lock_release(phone: str, bot_number: str, token: str | None = Non
     Fallback path: release the asyncio.Lock only if this token is the holder.
     """
     key = _cart_lock_redis_key(phone, bot_number)
+    if token is None:
+        log.error("cart_lock.release_without_token", key=key)
+        return
     r = await _rc.get_redis()
     if r is not None:
-        if token is not None:
-            stored = await r.get(key)
-            stored_str = stored.decode() if isinstance(stored, bytes) else stored
-            if stored_str != token:
-                log.warning("cart_lock.release_ownership_mismatch", key=key)
-                return
+        stored = await r.get(key)
+        stored_str = stored
+        if stored_str != token:
+            log.warning("cart_lock.release_ownership_mismatch", key=key)
+            return
         await r.delete(key)
         return
     _maybe_warn("cart_lock")
-    if token is not None and _fb_cart_lock_tokens.get(key) != token:
+    if _fb_cart_lock_tokens.get(key) != token:
         log.warning("cart_lock.release_ownership_mismatch_fallback", key=key)
         return
     _fb_cart_lock_tokens.pop(key, None)
     lock = _fb_cart_locks.get(key)
     if lock is not None and lock.locked():
         lock.release()
+    lock = _fb_cart_locks.get(key)
+    if lock is not None and not lock.locked():
+        _fb_cart_locks.pop(key, None)
+        _fb_cart_lock_tokens.pop(key, None)
 
 
 # ── Rate limiting (sliding window) ───────────────────────────────────────────
@@ -363,12 +369,13 @@ async def rate_limit_check(key: str, max_requests: int, window_seconds: int) -> 
     _maybe_warn("rate_limit")
     now = time.monotonic()
     if len(_fb_rate_limits) >= _FB_MAX_SIZE:
-        empty = [k for k, v in _fb_rate_limits.items() if not v]
-        for k in empty:
+        now = time.monotonic()
+        expired = [k for k, v in _fb_rate_limits.items() if not v or max(v) < now - 60]
+        for k in expired:
             _fb_rate_limits.pop(k, None)
         if len(_fb_rate_limits) >= _FB_MAX_SIZE:
-            drop = list(_fb_rate_limits.keys())[: len(_fb_rate_limits) // 2]
-            for k in drop:
+            by_oldest = sorted(_fb_rate_limits.items(), key=lambda x: min(x[1]) if x[1] else 0)
+            for k, _ in by_oldest[: len(_fb_rate_limits) // 2]:
                 _fb_rate_limits.pop(k, None)
     timestamps = _fb_rate_limits.get(redis_key, [])
     cutoff = now - window_seconds

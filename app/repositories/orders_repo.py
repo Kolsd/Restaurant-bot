@@ -12,7 +12,7 @@ db_save_table_order in agent.py which has its own multi-station logic.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Union
 
 from decimal import Decimal
 
@@ -27,7 +27,7 @@ log = get_logger(__name__)
 class InsufficientStockError(Exception):
     """Raised when an inventory row does not have enough stock to fulfil an order."""
 
-    def __init__(self, sku: str, requested: float, available: float):
+    def __init__(self, sku: str, requested: Union[Decimal, float, int], available: Union[Decimal, float, int]):
         self.sku = sku
         self.requested = requested
         self.available = available

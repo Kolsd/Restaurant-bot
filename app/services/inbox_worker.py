@@ -6,6 +6,27 @@ Design:
 - FOR UPDATE SKIP LOCKED ensures multiple workers don't double-process rows.
 - Graceful shutdown via asyncio.Event.
 - Exponential backoff and dead-letter are handled by inbox_repo.mark_failed.
+
+Claim-then-ack pattern (three phases):
+  Phase 1 — short transaction (~ms):
+    Acquire conn → BEGIN → fetch_batch (FOR UPDATE SKIP LOCKED) →
+    claim_rows (next_attempt_at = NOW() + 3 min, attempts += 1) →
+    COMMIT → release conn.
+  Phase 2 — no DB connection held (up to 120 s):
+    dispatch via asyncio.wait_for(timeout=120).
+  Phase 3 — short transaction (~ms):
+    Acquire NEW conn → mark_processed or mark_failed → COMMIT → release conn.
+
+This eliminates three structural bugs in the original design:
+  1. Connection pool starvation: connections were held for 120 s during dispatch,
+     blocking every other query (including chat() itself).
+  2. mark_failed inside transaction: on DB error inside the same transaction the
+     attempt counter rolled back → infinite retry with no backoff.
+  3. mark_processed inside transaction: on DB error the row was never marked done
+     → customer received duplicate responses on the re-dispatch.
+
+Crash safety: if the worker dies between Phase 1 and Phase 3, the claimed row
+becomes visible again after the 3-minute window and is retried automatically.
 """
 from __future__ import annotations
 
@@ -36,7 +57,8 @@ def get_metrics() -> dict:
     """Return a snapshot of worker processing metrics."""
     lats = list(_latencies)
     avg_ms = (sum(lats) / len(lats) * 1000) if lats else 0.0
-    p95_ms = (sorted(lats)[int(len(lats) * 0.95)] * 1000) if len(lats) >= 2 else avg_ms
+    idx    = min(int(len(lats) * 0.95), len(lats) - 1) if lats else 0
+    p95_ms = sorted(lats)[idx] * 1000 if lats else avg_ms
     return {
         "inbox_processed_total": _metrics["processed"],
         "inbox_errors_total": _metrics["errors"],
@@ -67,10 +89,7 @@ async def run_worker(stop_event: asyncio.Event) -> None:
     Main worker loop.  Runs until *stop_event* is set.
     Call this from the FastAPI lifespan startup as an asyncio.Task.
 
-    IMPORTANT: fetch, dispatch, and mark_processed/mark_failed must all happen
-    within the SAME transaction on the SAME connection.  FOR UPDATE SKIP LOCKED
-    only holds the row lock while the transaction is open — closing it early
-    releases the lock and lets other workers grab the same row.
+    Uses the claim-then-ack pattern — see module docstring for details.
     """
     from app.services import database as db  # late import avoids circular
 
@@ -82,79 +101,34 @@ async def run_worker(stop_event: asyncio.Event) -> None:
         try:
             processed_count = 0
 
-            # Process up to _BATCH_SIZE rows, one per transaction so a single
-            # failure doesn't roll back the others.
-            for _ in range(_BATCH_SIZE):
-                if stop_event.is_set():
-                    break
+            # ── Phase 1: claim a batch in a short transaction ─────────────────
+            # fetch_batch uses FOR UPDATE SKIP LOCKED to atomically select rows
+            # that no other worker has locked.  claim_rows immediately sets
+            # next_attempt_at 3 minutes ahead so the rows are invisible to other
+            # workers even after we release the connection.  The whole thing
+            # commits in under a millisecond — no long-held connections.
+            claimed: list[dict] = []
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    rows = await inbox_repo.fetch_batch(conn, limit=_BATCH_SIZE)
+                    if rows:
+                        await inbox_repo.claim_rows(
+                            conn, [r["id"] for r in rows]
+                        )
+                        # Snapshot the fields we need; the connection is released
+                        # after this block so we cannot touch these records again.
+                        for r in rows:
+                            claimed.append({
+                                "id":       r["id"],
+                                "provider": r["provider"],
+                                "payload":  r["payload"],
+                                # attempts as read from DB; claim_rows already
+                                # incremented the DB value by 1.
+                                "attempts": r["attempts"] + 1,
+                            })
+            # Connection fully released here — pool is free for chat() etc.
 
-                async with pool.acquire() as conn:
-                    async with conn.transaction():
-                        # fetch_batch holds FOR UPDATE lock inside this transaction
-                        rows = await inbox_repo.fetch_batch(conn, limit=1)
-                        if not rows:
-                            break  # no more pending rows
-
-                        row      = rows[0]
-                        inbox_id = row["id"]
-                        provider = row["provider"]
-                        payload  = row["payload"]
-                        attempts = row["attempts"]
-
-                        # dispatch and mark happen under the same lock
-                        _t0 = _time.monotonic()
-                        try:
-                            await asyncio.wait_for(_dispatch(provider, payload), timeout=120)
-                            await inbox_repo.mark_processed(conn, inbox_id)
-                            _elapsed = _time.monotonic() - _t0
-                            _latencies.append(_elapsed)
-                            _metrics["processed"] += 1
-                            log.info(
-                                "inbox_processed",
-                                inbox_id=inbox_id,
-                                provider=provider,
-                                latency_ms=round(_elapsed * 1000, 1),
-                            )
-                            processed_count += 1
-                        except asyncio.TimeoutError:
-                            _elapsed = _time.monotonic() - _t0
-                            _latencies.append(_elapsed)
-                            _metrics["errors"] += 1
-                            error_str = "dispatch_timeout: handler exceeded 120s"
-                            log.error(
-                                "inbox_dispatch_timeout",
-                                inbox_id=inbox_id,
-                                provider=provider,
-                                attempts=attempts + 1,
-                                latency_ms=round(_elapsed * 1000, 1),
-                                customer_phone=payload.get("user_phone", "unknown"),
-                                bot_number=payload.get("bot_number", "unknown"),
-                            )
-                            await inbox_repo.mark_failed(
-                                conn, inbox_id, error_str, attempts
-                            )
-                            processed_count += 1
-                        except Exception as exc:
-                            _elapsed = _time.monotonic() - _t0
-                            _latencies.append(_elapsed)
-                            _metrics["errors"] += 1
-                            error_str = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-                            log.error(
-                                "inbox_dispatch_failed",
-                                inbox_id=inbox_id,
-                                provider=provider,
-                                attempts=attempts + 1,
-                                error=str(exc),
-                                latency_ms=round(_elapsed * 1000, 1),
-                                customer_phone=payload.get("user_phone", "unknown"),
-                                bot_number=payload.get("bot_number", "unknown"),
-                            )
-                            await inbox_repo.mark_failed(
-                                conn, inbox_id, error_str, attempts
-                            )
-                            processed_count += 1
-
-            if processed_count == 0:
+            if not claimed:
                 # Nothing to do — wait before polling again
                 try:
                     await asyncio.wait_for(
@@ -162,7 +136,108 @@ async def run_worker(stop_event: asyncio.Event) -> None:
                     )
                 except asyncio.TimeoutError:
                     pass
-            else:
+                continue
+
+            # ── Phase 2: dispatch (no DB connection held) ─────────────────────
+            for item in claimed:
+                if stop_event.is_set():
+                    break
+
+                inbox_id = item["id"]
+                provider = item["provider"]
+                payload  = item["payload"]
+                attempts = item["attempts"]  # already incremented by Phase 1
+
+                _t0 = _time.monotonic()
+                dispatch_error: str | None = None
+
+                try:
+                    await asyncio.wait_for(_dispatch(provider, payload), timeout=120)
+                    # success
+                except asyncio.TimeoutError:
+                    _metrics["errors"] += 1
+                    dispatch_error = "dispatch_timeout: handler exceeded 120s"
+                    log.error(
+                        "inbox_dispatch_timeout",
+                        inbox_id=inbox_id,
+                        provider=provider,
+                        attempts=attempts,
+                        latency_ms=round((_time.monotonic() - _t0) * 1000, 1),
+                        customer_phone=payload.get("user_phone", "unknown"),
+                        bot_number=payload.get("bot_number", "unknown"),
+                    )
+                except Exception as exc:
+                    _metrics["errors"] += 1
+                    # Unregistered provider → dead-letter immediately, no retries
+                    if isinstance(exc, ValueError) and "No handler registered" in str(exc):
+                        dispatch_error = f"DEAD_LETTER: {exc}"
+                    else:
+                        dispatch_error = (
+                            f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+                        )
+                    log.error(
+                        "inbox_dispatch_failed",
+                        inbox_id=inbox_id,
+                        provider=provider,
+                        attempts=attempts,
+                        error=str(exc),
+                        latency_ms=round((_time.monotonic() - _t0) * 1000, 1),
+                        customer_phone=payload.get("user_phone", "unknown"),
+                        bot_number=payload.get("bot_number", "unknown"),
+                    )
+
+                _elapsed = _time.monotonic() - _t0
+                _latencies.append(_elapsed)
+
+                # ── Phase 3: ack in a new short transaction ───────────────────
+                # A fresh connection is acquired here; no transaction has been
+                # open since Phase 1 completed.  If Phase 3 itself fails (e.g.
+                # transient DB error), the row stays claimed with
+                # next_attempt_at = NOW() + 3 min and will be retried
+                # automatically — no duplicate dispatch within that window.
+                if dispatch_error is None:
+                    try:
+                        async with pool.acquire() as conn:
+                            await inbox_repo.mark_processed(conn, inbox_id)
+                        _metrics["processed"] += 1
+                        log.info(
+                            "inbox_processed",
+                            inbox_id=inbox_id,
+                            provider=provider,
+                            latency_ms=round(_elapsed * 1000, 1),
+                        )
+                    except Exception:
+                        # Row is claimed; won't be re-dispatched for 3 minutes.
+                        # The next worker that picks it up will also call
+                        # _dispatch and mark_processed — acceptable rare duplicate
+                        # versus holding the connection for 120 s.
+                        log.exception(
+                            "inbox_mark_processed_failed",
+                            inbox_id=inbox_id,
+                            provider=provider,
+                        )
+                else:
+                    try:
+                        async with pool.acquire() as conn:
+                            await inbox_repo.mark_failed(
+                                conn,
+                                inbox_id,
+                                dispatch_error,
+                                attempts,
+                                already_incremented=True,
+                            )
+                    except Exception:
+                        # Same crash-safety argument as above.
+                        log.exception(
+                            "inbox_mark_failed_failed",
+                            inbox_id=inbox_id,
+                            provider=provider,
+                            dispatch_error=dispatch_error,
+                        )
+
+                processed_count += 1
+
+            if processed_count > 0:
                 # Had work — yield to event loop then poll immediately
                 await asyncio.sleep(0)
 
@@ -188,18 +263,31 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
     was already parsed + enriched by the webhook route before enqueuing.
 
     Expected keys (set by routes/chat.py before enqueue):
-        user_phone, user_text, bot_number, phone_id, access_token
+        user_phone, user_text, bot_number, phone_id
+
+    access_token is fetched from the DB at dispatch time so it is never
+    stored in the inbox table (including dead-letter rows).
     """
+    import os
     from app.routes.chat import _process_message
+    from app.services import database as _db
+
+    bot_number = payload["bot_number"]
+    restaurant = await _db.db_get_restaurant_by_phone(bot_number)
+    if restaurant and restaurant.get("wa_access_token"):
+        access_token = restaurant["wa_access_token"]
+    else:
+        access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
 
     await _process_message(
         user_phone   = payload["user_phone"],
         user_text    = payload["user_text"],
-        bot_number   = payload["bot_number"],
+        bot_number   = bot_number,
         phone_id     = payload["phone_id"],
-        access_token = payload["access_token"],
+        access_token = access_token,
     )
 
 
 # Register at import time so the worker is ready before any message arrives.
 register_handler("meta_whatsapp", _handle_meta_whatsapp)
+assert "meta_whatsapp" in _handlers, "meta_whatsapp handler not registered"

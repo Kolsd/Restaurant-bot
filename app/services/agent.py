@@ -90,6 +90,10 @@ def _wrap_user_message(text: str) -> str:
     # Strip control characters except newline and tab
     sanitized = re.sub(r'[^\S\n\t]', ' ', text)  # normalise non-newline/tab whitespace
     sanitized = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', sanitized)
+    # Block known injection patterns before they reach the LLM
+    if _INJECTION_RE.search(sanitized):
+        log.warning("injection_pattern_blocked")
+        return ""
     # Neutralise any attempt to close the wrapper tag by escaping all '<'
     # This is intentionally broad: the user content is already plain text
     # and angle brackets have no special meaning in WhatsApp messages.
@@ -244,6 +248,11 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
 
     # Handle skip button — customer opted out of rating
     if message.strip().lower() in ("skip_nps", "no calificar", "omitir encuesta"):
+        if state.get("state") == "waiting_comment":
+            try:
+                await db.db_update_nps_comment(phone, bot_number, "Sin comentario")
+            except Exception:
+                pass  # best-effort cleanup of orphaned __pending__ row
         await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
         await state_store.nps_mark_done(phone, bot_number)
         try:
@@ -688,7 +697,7 @@ async def _validate_tool_call(
         )
         if not is_ok:
             log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=phone, fingerprint=item_key)
-            return None, reply, {}
+            return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
 
     # 4. Delivery without address
     if tool_name == "create_delivery_order":
@@ -879,11 +888,11 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         elif action == "end_session":
             if session_state.get("has_order") and not session_state.get("order_delivered"):
                 log.warning("agent.end_session_blocked_order_pending", phone=phone)
-                return reply
+                return "Tu pedido aún está en preparación. Seguimos aquí por si necesitas algo más."
             if session_state.get("order_delivered"):
                 if await db.db_has_pending_invoice(phone):
                     log.warning("agent.end_session_blocked_invoice_pending", phone=phone)
-                    return reply
+                    return "Tu cuenta aún está pendiente de pago. El mesero llegará en un momento."
             await db.db_close_session(phone=phone, bot_number=bot_number,
                                       reason="client_goodbye", closed_by_username="")
             pool = await db.get_pool()
@@ -891,7 +900,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
                                    phone, bot_number)
             log.info("agent.session_closed", phone=phone)
-            await trigger_nps(phone, bot_number, "")
+            await trigger_nps(phone, bot_number, (restaurant_obj or {}).get("name", ""))
 
     except InsufficientStockError as e:
         log.warning("execute_action.insufficient_stock", sku=str(e), phone=phone, bot_number=bot_number)
@@ -961,6 +970,9 @@ async def _try_nps_active_flow(user_phone: str, bot_number: str,
         nps_restaurant_name, nps_google_maps_url,
     )
 
+    if nps_reply is None:
+        return None
+
     if nps_reply == "":
         # Silent response from NPS handler
         if len(user_message_clean.strip()) > 30:
@@ -979,7 +991,8 @@ async def _try_nps_active_flow(user_phone: str, bot_number: str,
 
 
 async def _try_checkout_flow(user_phone: str, bot_number: str,
-                              user_message_clean: str) -> dict | None:
+                              user_message_clean: str,
+                              table_context: dict | None) -> dict | None:
     """
     If a checkout flow is active, handle the message and return a response dict.
     Returns None when there is no active checkout.
@@ -987,13 +1000,14 @@ async def _try_checkout_flow(user_phone: str, bot_number: str,
     if await state_store.checkout_get(user_phone, bot_number) is None:
         return None
 
-    ck_reply = await handle_checkout_flow(user_phone, bot_number, user_message_clean, None)
+    ck_reply = await handle_checkout_flow(user_phone, bot_number, user_message_clean, table_context)
     if ck_reply:
+        branch_id = (table_context or {}).get("branch_id") or (table_context or {}).get("id")
         await db.db_save_history(
             user_phone, bot_number,
             [{"role": "user", "content": user_message_clean},
              {"role": "assistant", "content": ck_reply}],
-            branch_id=None,
+            branch_id=branch_id,
         )
         return {"message": ck_reply}
     return None
@@ -1324,14 +1338,14 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     if nps_result is not None:
         return nps_result if nps_result else None  # {} sentinel → return None
 
-    # 4. Active checkout flow — handle and return early when consumed
-    checkout_result = await _try_checkout_flow(user_phone, bot_number, user_message_clean)
-    if checkout_result is not None:
-        return checkout_result
-
-    # 5. Detect table/session context
+    # 4. Detect table/session context (needed by checkout flow for branch_id in history)
     table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
+
+    # 5. Active checkout flow — handle and return early when consumed
+    checkout_result = await _try_checkout_flow(user_phone, bot_number, user_message_clean, table_context)
+    if checkout_result is not None:
+        return checkout_result
 
     # 6. Load restaurant context (name, features, payment methods, branch override)
     ctx = await _load_restaurant_context(bot_number, table_context, user_phone, meta_phone_id)

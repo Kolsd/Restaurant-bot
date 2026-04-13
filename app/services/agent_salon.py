@@ -157,7 +157,13 @@ async def _auto_confirm_checks(check_ids: list[str], base_order_id: str, payment
     factura_nit  = state.get("factura_nit", "222222222")
     for i, check_id in enumerate(check_ids):
         pmts = payments_per_check[i] if i < len(payments_per_check) else []
-        payments_list = [{"method": p.get("method", "efectivo"), "amount": p.get("amount", 0)} for p in pmts]
+        payments_list = [
+            {
+                "method": p.get("method", "efectivo"),
+                "amount": float(quantize_money(to_decimal(p.get("amount", 0)) + to_decimal(tip_per_check))),  # JSON boundary
+            }
+            for p in pmts
+        ]
         try:
             await db.db_finalize_check_payment(
                 check_id=check_id,
@@ -329,7 +335,7 @@ async def handle_checkout_flow(
         if tip is None:
             return "Elige una opción del 1 al 5, o escribe el valor de propina que deseas dejar."
 
-        state["tip_amount"] = tip
+        state["tip_amount"] = float(quantize_money(tip))  # JSON boundary
         if state.get("wants_factura") and not state.get("factura_name"):
             state["step"] = "asking_factura_nit"
             await state_store.checkout_set(phone, bot_number, state)
@@ -411,14 +417,13 @@ async def handle_checkout_flow(
             return _ask_payment_for_check(state, idx)
 
         # Todos los métodos recolectados → confirmar y enviar a caja
-        state["step"] = "confirming"
-        await state_store.checkout_set(phone, bot_number, state)
-
         digital = {"nequi", "daviplata", "transferencia"}
         needs_proof = any(
             p[0]["method"] in digital for p in state["payments"] if p
         )
+        state["step"] = "confirming"
         state["requires_proof"] = needs_proof
+        await state_store.checkout_set(phone, bot_number, state)
 
         total_with_tip = float(quantize_money(to_decimal(state["subtotal"]) + to_decimal(state["tip_amount"])))  # JSON boundary
         lines = ["✅ ¡Listo! Aquí está el resumen de tu pago:"]
@@ -467,6 +472,12 @@ async def handle_checkout_flow(
             await state_store.checkout_delete(phone, bot_number)
 
         return "\n".join(lines)
+
+    # ── Estado: esperando comprobante de pago ────────────────────────────
+    if state["step"] == "confirming":
+        if state.get("requires_proof"):
+            return "Por favor envía la foto del comprobante de pago para confirmar tu pedido."
+        return None  # auto-confirmed, shouldn't reach here
 
     return None
 

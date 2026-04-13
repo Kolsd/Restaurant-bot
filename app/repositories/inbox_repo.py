@@ -88,18 +88,45 @@ async def mark_processed(conn: asyncpg.Connection, inbox_id: int) -> None:
     )
 
 
+async def claim_rows(conn: asyncpg.Connection, row_ids: list[int]) -> None:
+    """
+    Atomically claim rows so no other worker can pick them up during dispatch.
+
+    Sets next_attempt_at 3 minutes into the future and increments attempts by 1.
+    Must be called inside an open transaction (together with fetch_batch).
+    If the worker crashes after claiming but before ack, the row becomes visible
+    again after the 3-minute window and will be retried.
+    """
+    await conn.execute(
+        """
+        UPDATE webhook_inbox
+        SET next_attempt_at = NOW() + INTERVAL '3 minutes',
+            attempts        = attempts + 1
+        WHERE id = ANY($1::bigint[])
+        """,
+        row_ids,
+    )
+
+
 async def mark_failed(
     conn: asyncpg.Connection,
     inbox_id: int,
     error: str,
     attempts: int,
+    *,
+    already_incremented: bool = False,
 ) -> None:
     """
-    Increment attempt counter and schedule next retry with exponential backoff.
+    Schedule the next retry with exponential backoff, or dead-letter the row.
+
     After _BACKOFF_SECONDS is exhausted, mark as DEAD_LETTER (processed_at set
-    so it stops being polled, but row is kept for auditing).
+    so it stops being polled, but the row is kept for auditing).
+
+    ``attempts`` is the value *before* this failure unless ``already_incremented``
+    is True (used by the claim-then-ack pattern where Phase 1 already bumped the
+    counter).
     """
-    new_attempts = attempts + 1
+    new_attempts = attempts if already_incremented else attempts + 1
 
     if new_attempts > len(_BACKOFF_SECONDS):
         # Dead-letter: no more retries

@@ -14,13 +14,11 @@ from app.services.agent import chat, reset_conversation
 from app.services import database as db
 from app.repositories import inbox_repo, conversations_repo
 from app.services.logging import get_logger
+from app.services.state_store import rate_limit_check
 
 log = get_logger(__name__)
 
 router = APIRouter()
-
-_webhook_global_count = 0
-_webhook_global_window_start = 0.0
 
 # ── RATE LIMITING BACKED BY POSTGRES (Workers Safe) ──────────────────
 RATE_LIMIT_MESSAGES = 20   # max mensajes por ventana
@@ -231,15 +229,9 @@ async def _send_wa_text(user_phone: str, text: str, phone_id: str, access_token:
 
 @router.post("/webhook/meta")
 async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
-    global _webhook_global_count, _webhook_global_window_start
     import json as _json
 
-    now = time.time()
-    if now - _webhook_global_window_start > 1.0:
-        _webhook_global_count = 0
-        _webhook_global_window_start = now
-    _webhook_global_count += 1
-    if _webhook_global_count > 200:
+    if not await rate_limit_check("webhook_global", max_requests=200, window_seconds=1):
         log.warning("webhook.global_rate_limit")
         return JSONResponse(content={"status": "ok"})
 
@@ -257,19 +249,26 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
     except Exception:
         return JSONResponse(content={"status": "ok"})
 
+    any_enqueue_failed = False
     try:
         entries = data.get("entry", [])
         if not entries:
             return JSONResponse(content={"status": "ok"})
 
         for entry in entries:
-            changes = entry.get("changes", [{}])[0]
+            changes_list = entry.get("changes", [])
+            if not changes_list:
+                continue
+            changes = changes_list[0]
             value   = changes.get("value", {})
 
             if "messages" not in value:
                 continue
 
-            message = value.get("messages", [{}])[0]
+            messages_list = value.get("messages", [])
+            if not messages_list:
+                continue
+            message = messages_list[0]
             if not message:
                 continue
 
@@ -394,30 +393,39 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             #    The inbox worker (inbox_worker.py) will call _process_message asynchronously.
             try:
                 pool = await db.get_pool()
+                # Ensure dedup coverage even when Meta sends no WAM ID.
+                # Synthetic ID hashes content in 10s windows so retries within
+                # the same window hit the unique index and are skipped.
+                external_id = wam_id or None
+                if not external_id:
+                    dedup_content = f"{user_phone}:{user_text}:{bot_number}:{int(time.time() // 10)}"
+                    external_id = f"synth_{hashlib.sha256(dedup_content.encode()).hexdigest()[:16]}"
                 enqueue_payload = {
-                    "user_phone":   user_phone,
-                    "user_text":    user_text,
-                    "bot_number":   bot_number,
-                    "phone_id":     phone_id,
-                    "access_token": access_token,
+                    "user_phone": user_phone,
+                    "user_text":  user_text,
+                    "bot_number": bot_number,
+                    "phone_id":   phone_id,
                 }
                 inserted = await inbox_repo.enqueue(
                     pool,
                     provider="meta_whatsapp",
-                    external_id=wam_id or None,
+                    external_id=external_id,
                     payload=enqueue_payload,
                 )
                 if not inserted:
                     log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
             except Exception:
                 log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
-                return JSONResponse(content={"status": "error"}, status_code=503)
+                any_enqueue_failed = True
+                continue
 
     except Exception:
         log.exception("chat.webhook_critical_error")
 
     # 9. ACK inmediato a Meta (<200ms) — evita reintentos
-    return JSONResponse(content={"status": "received"})
+    if any_enqueue_failed:
+        return JSONResponse(content={"status": "partial_failure"}, status_code=503)
+    return JSONResponse(content={"status": "ok"}, status_code=200)
 
 @router.post("/webhook/twilio")
 async def twilio_webhook(request: Request):
