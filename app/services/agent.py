@@ -1169,11 +1169,16 @@ async def _build_enriched_user_message(
                 f" | equiv. ${balance['equivalencia_cop']:,} COP]"
             )
 
+    empty_menu_alert = ""
+    if not compact_menu or compact_menu.strip() == "Sin menú.":
+        empty_menu_alert = "\n[ALERTA: El restaurante aún no ha configurado su menú. Informa amablemente al cliente que el menú estará disponible pronto y que puede contactar al restaurante directamente.]"
+
     enriched = (
         f"{_wrap_user_message(user_message_clean)}"
         f"\n[RESTAURANTE: {restaurant_name}]"
         f"\n[LINK_MENU: {menu_url}]"
         f"\n[MENÚ:\n{compact_menu}]"
+        f"{empty_menu_alert}"
         f"\n[CARRITO: {cart_text}]"
         f"{table_note}"
         f"{metodos_bloque}"
@@ -1350,7 +1355,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     # 6. Load restaurant context (name, features, payment methods, branch override)
     ctx = await _load_restaurant_context(bot_number, table_context, user_phone, meta_phone_id)
     if ctx is None:
-        return {"message": ""}
+        return {"message": "Este número aún no está configurado. Si eres el dueño del restaurante, contacta a soporte en mesio.co"}
 
     restaurant_obj       = ctx["restaurant_obj"]
     restaurant_name      = ctx["restaurant_name"]

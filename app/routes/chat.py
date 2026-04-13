@@ -319,6 +319,10 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             is_limited = await _is_rate_limited(user_phone)
             if user_phone and is_limited:
                 log.warning("chat.rate_limited", phone=user_phone, bot_number=bot_number)
+                try:
+                    await _send_wa_text(user_phone, "Un momento por favor, estoy procesando tu mensaje anterior.", phone_id, access_token)
+                except Exception:
+                    pass  # best-effort
                 continue
 
             # 7. Extraer texto del mensaje

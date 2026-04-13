@@ -1039,7 +1039,7 @@ class TestBotWhatsAppFlows:
             json={"phone": "573001234567", "message": "Hola", "bot_number": "+00000000000"},
         )
         assert resp.status_code == 200
-        assert resp.json()["response"] == ""
+        assert "no está configurado" in resp.json()["response"] or "soporte" in resp.json()["response"]
 
     def test_bot_handles_empty_message(self, client, monkeypatch):
         """Empty message body does not crash the bot."""
