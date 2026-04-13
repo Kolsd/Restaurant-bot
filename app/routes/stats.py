@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
+from app.repositories import reviews_repo as rr
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -421,3 +422,63 @@ async def manual_reply(phone: str, request: Request):
     else:
         raise HTTPException(status_code=503, detail="wa_phone_id o wa_access_token no configurados para este restaurante")
     return {"success": True}
+
+
+# ── ADVANCED ANALYTICS ───────────────────────────────────────────────────────
+
+@router.get("/api/stats/turn-time")
+async def get_turn_time_stats(
+    request: Request,
+    period_start: str = Query(...),
+    period_end: str = Query(...),
+    branch_id: str | None = Query(None),
+):
+    """Average, min and max table turn times (closed sessions) for a period."""
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    stats = await rr.db_get_turn_time_stats(bot_number, period_start, period_end, branch_id=bid)
+    return stats
+
+
+@router.get("/api/stats/occupancy")
+async def get_occupancy_stats(
+    request: Request,
+    period_start: str = Query(...),
+    period_end: str = Query(...),
+    branch_id: str | None = Query(None),
+):
+    """Aggregated occupancy and utilization rates from 15-min snapshots."""
+    restaurant = await get_current_restaurant(request)
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    stats = await rr.db_get_occupancy_stats(
+        restaurant["id"], period_start, period_end, branch_id=bid
+    )
+    return stats
+
+
+@router.get("/api/stats/no-show-rate")
+async def get_no_show_rate(
+    request: Request,
+    period_start: str = Query(...),
+    period_end: str = Query(...),
+    branch_id: str | None = Query(None),
+):
+    """No-show rate derived from reservation stats for the given period."""
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant["whatsapp_number"]
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    stats = await db.db_get_reservation_stats(
+        bot_number,
+        date_from=period_start,
+        date_to=period_end,
+        branch_id=bid,
+    )
+    total = stats.get("total", 0) or 0
+    no_shows = stats.get("no_show", 0) or 0
+    rate = round(no_shows / total * 100, 1) if total > 0 else 0.0
+    return {
+        "total_reservations": total,
+        "no_shows": no_shows,
+        "no_show_rate_pct": rate,
+    }

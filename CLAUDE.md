@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v9.0 (Refactor Blindaje: ACID, Inbox Durable, Redis, Decimal, Repository Pattern)
+# Mesio Restaurant Bot — v10.0 (Apparta Integration: Reservas Inteligentes, Floor Plan, Descuentos, Reseñas)
 
 ## Entorno y Comandos
 
@@ -32,9 +32,12 @@ Restaurant-bot/
 │   │   ├── staff_webauthn.py        # Autenticación biométrica FIDO2 para clock-in/out
 │   │   ├── crm.py                   # Clientes, prospectos, campañas
 │   │   ├── inventory.py             # Inventario, recetas (escandallos)
-│   │   └── loyalty.py               # Sistema de puntos y recompensas
+│   │   ├── loyalty.py               # Sistema de puntos y recompensas
+│   │   ├── reservations.py          # NUEVO. Gestión avanzada de reservas, disponibilidad, stats
+│   │   ├── discounts.py             # NUEVO. Descuentos dinámicos por franja horaria (yield management)
+│   │   └── reviews.py               # NUEVO. Reseñas públicas (extiende NPS) + analytics
 │   ├── services/
-│   │   ├── database.py              # Ahora ~1534 LOC. Mantiene shims de re-export + agregados sin extraer (fiscal, loyalty, restaurants, orders delivery, reservaciones, usuarios, subscription)
+│   │   ├── database.py              # Ahora ~1500 LOC. Mantiene shims de re-export + agregados sin extraer (fiscal, loyalty, restaurants, orders delivery, usuarios, subscription)
 │   │   ├── agent.py                 # Prompt engineering. Usa state_store (Redis) en lugar de dicts en RAM
 │   │   ├── auth.py                  # JWT y passwords. Sesiones via sessions_repo (token hasheado)
 │   │   ├── orders.py                # Lógica de carrito y pagos. Decimal end-to-end
@@ -42,7 +45,8 @@ Restaurant-bot/
 │   │   ├── logging.py               # NUEVO. structlog wrapper con fallback stdlib. get_logger(name, **ctx)
 │   │   ├── redis_client.py          # NUEVO. Singleton lazy redis.asyncio. Circuit breaker 30s
 │   │   ├── state_store.py           # NUEVO. API alto nivel: nps_*, checkout_*, table_cooldown_acquire. Fallback in-process
-│   │   └── inbox_worker.py          # NUEVO. Loop FOR UPDATE SKIP LOCKED procesando webhook_inbox
+│   │   ├── inbox_worker.py           # NUEVO. Loop FOR UPDATE SKIP LOCKED procesando webhook_inbox
+│   │   └── reservation_payments.py  # NUEVO. Generación de links Wompi para depósitos de reserva
 │   ├── repositories/                # NUEVO. Patrón Repository — extracción progresiva de database.py
 │   │   ├── __init__.py              # Re-exporta InsufficientStockError, OrderCommitError, commit_order_transaction
 │   │   ├── orders_repo.py           # commit_order_transaction (ACID), InsufficientStockError, OrderCommitError
@@ -50,8 +54,12 @@ Restaurant-bot/
 │   │   ├── sessions_repo.py         # create/get/delete con SHA-256 hash + fallback legacy
 │   │   ├── inventory_repo.py        # 17 funciones inventario + recetas + sync availability
 │   │   ├── staff_repo.py            # 55 funciones: staff, shifts, breaks, schedules, payroll, tips, contracts, overtime, webauthn
-│   │   ├── tables_repo.py           # 54 funciones: restaurant_tables, table_orders, table_sessions, table_checks, waiter_alerts
-│   │   └── conversations_repo.py    # 19 funciones: history, conversations, NPS per-conv, carts, wam dedup
+│   │   ├── tables_repo.py           # 57 funciones: restaurant_tables (+ floor plan), table_orders, table_sessions, table_checks, waiter_alerts
+│   │   ├── conversations_repo.py    # 19 funciones: history, conversations, NPS per-conv, carts, wam dedup
+│   │   ├── reservations_repo.py     # NUEVO. 14 funciones: reservas, disponibilidad, stats, confirmación
+│   │   ├── discounts_repo.py        # NUEVO. 5 funciones: descuentos dinámicos por horario
+│   │   ├── reservation_deposits_repo.py  # NUEVO. 5 funciones: depósitos Wompi para reservas
+│   │   └── reviews_repo.py          # NUEVO. 7 funciones: reseñas públicas, snapshots ocupación, turn time
 │   └── static/
 │       ├── html/                    # dashboard, staff-hq, staff-portal, caja, cocina, landing, dashboard-demo, etc.
 │       ├── js/                      # dashboard-core.js, dashboard-components.js, roles.js, sw.js
@@ -65,7 +73,11 @@ Restaurant-bot/
 │   ├── 0006_staff_hq_deductions.py  # staff.document_number, staff_deduction_items, attendance_deductions, payroll_runs
 │   ├── 0007_payroll_contracts.py    # contract_templates, overtime_requests, staff.{contract_template_id, contract_overrides, contract_start}
 │   ├── 0008_webhook_inbox.py        # NUEVO. Tabla webhook_inbox + índice parcial pending + unique parcial dedup
-│   └── 0009_session_token_hash.py   # NUEVO. sessions.token_hash BYTEA + pgcrypto backfill + UNIQUE INDEX
+│   ├── 0009_session_token_hash.py   # NUEVO. sessions.token_hash BYTEA + pgcrypto backfill + UNIQUE INDEX
+│   ├── 0014_reservation_tables_v2.py  # Apparta: capacity/type/zone en mesas, status workflow en reservas
+│   ├── 0015_dynamic_discounts.py    # Apparta: tabla time_slot_discounts (yield management)
+│   ├── 0016_reservation_deposits.py # Apparta: tabla reservation_deposits (prepago Wompi)
+│   └── 0017_reviews_analytics.py    # Apparta: reseñas públicas en NPS + occupancy_snapshots
 ```
 
 ## Refactor Blindaje (Fases 1–6) — Estado Actual
@@ -79,7 +91,47 @@ Restaurant-bot/
 | 5 | `Decimal` end-to-end en capa financiera (orders, tables, staff/payroll) | ✅ |
 | 6 | Repository Pattern: orders, sessions, inventory, staff, tables, conversations extraídos | ✅ |
 
-`database.py` pasó de **4022 → 1534 LOC (−62%)** tras Fase 6. Lo que queda son agregados sin extraer (fiscal/DIAN, loyalty, restaurants, delivery orders, reservaciones, usuarios, subscription, menu) más los shims de re-export.
+`database.py` pasó de **4022 → ~1500 LOC (−63%)** tras Fase 6 + Apparta. Reservaciones migradas a `reservations_repo.py`. Lo que queda: fiscal/DIAN, loyalty, restaurants, delivery orders, usuarios, subscription, menu.
+
+## Integración Apparta (Fases 1–7) — Estado Actual
+
+| Fase | Tema | Estado |
+|---|---|---|
+| 1 | Schema Foundation: capacity/type/zone en mesas, status workflow en reservas | ✅ |
+| 2 | Dashboard de Gestión de Reservas: filtros, acciones, stats | ✅ |
+| 3 | Bot Inteligente: verificación de disponibilidad + recordatorios WhatsApp | ✅ |
+| 4 | Floor Plan: editor visual drag-and-drop de mesas | ✅ |
+| 5 | Depósitos Wompi para garantizar reservas | ✅ |
+| 6 | Descuentos Dinámicos (yield management) por franja horaria | ✅ |
+| 7 | Reseñas Públicas (extiende NPS) + Analytics avanzados | ✅ |
+
+### Feature Flags Nuevos (Apparta)
+
+| Flag | Tipo | Default | Fase | Controla |
+|---|---|---|---|---|
+| `module_reservations` | opt-out | true | existente | Gates `action="reserve"` en bot |
+| `reservation_auto_confirm` | opt-in | false | 3 | Reservas van directo a "confirmed" |
+| `reservation_deposits` | opt-in | false | 5 | Cobra depósito Wompi antes de confirmar |
+| `reservation_deposit_amount` | config | 50000 | 5 | Monto del depósito en moneda local |
+| `dynamic_discounts` | opt-in | false | 6 | Descuentos 5-50% por franja horaria |
+| `module_reviews` | opt-in | false | 7 | Publicación de reseñas del NPS |
+
+### Nuevas Tablas (Apparta)
+
+| Tabla | Migración | Propósito |
+|---|---|---|
+| `time_slot_discounts` | 0015 | Descuentos por día/hora con UNIQUE constraint |
+| `reservation_deposits` | 0016 | Pagos anticipados Wompi vinculados a reservas |
+| `occupancy_snapshots` | 0017 | Fotos periódicas de ocupación para analytics |
+
+### Columnas Nuevas en Tablas Existentes
+
+**`restaurant_tables`** (0014): `capacity INT`, `table_type TEXT`, `zone TEXT`, `position_x REAL`, `position_y REAL`
+**`reservations`** (0014): `status`, `table_id`, `confirmation_sent`, `confirmed_at`, `cancelled_at`, `cancellation_reason`, `deposit_amount`, `deposit_paid`, `deposit_transaction_id`, `no_show`, `branch_id`, `source`, `restaurant_id`
+**`nps_responses`** (0017): `is_public`, `owner_reply`, `owner_reply_at`, `customer_name`
+
+### Diferido: Mesio Pay (Billetera Digital + Cashback)
+Requiere regulación financiera colombiana. Alternativa viable: extender loyalty como "crédito".
 
 ### Pendientes de calendario (no de código)
 

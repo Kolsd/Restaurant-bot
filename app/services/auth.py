@@ -40,8 +40,9 @@ async def login(username: str, password: str) -> dict:
                     whatsapp_number = restaurant.get("whatsapp_number", "")
                     raw = restaurant.get("features") or {}
                     features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
-        except Exception as e:
-            print(f"Warning login staff: {e}")
+        except Exception:
+            from app.services.logging import get_logger as _get_log  # noqa: PLC0415
+            _get_log(__name__).exception("auth.staff_login.features_parse_error")
 
         return {
             "success":  True,
@@ -90,8 +91,9 @@ async def login(username: str, password: str) -> dict:
                 branch_id = all_restaurants[0].get("id")
                 raw = all_restaurants[0].get("features") or {}
                 features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
-    except Exception as e:
-        print(f"Warning login: {e}")
+    except Exception:
+        from app.services.logging import get_logger as _get_log  # noqa: PLC0415
+        _get_log(__name__).exception("auth.admin_login.restaurant_resolve_error")
 
     return {
         "success": True,

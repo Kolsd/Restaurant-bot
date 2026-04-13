@@ -6,7 +6,7 @@ import urllib.parse
 import uuid
 from decimal import Decimal
 from pathlib import Path
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from app.services import database as db
@@ -133,12 +133,90 @@ async def create_table(request: Request):
     
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
 
+async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
+    """Verify the table belongs to this restaurant (or its branches)."""
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT restaurant_id FROM restaurant_tables WHERE id = $1", table_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Table not found")
+        rest_id = restaurant["id"]
+        table_rest_id = row["restaurant_id"]
+        if table_rest_id == rest_id:
+            return  # Direct ownership
+        # If current restaurant is a parent (matriz), allow access to branch tables
+        is_parent = restaurant.get("parent_restaurant_id") is None
+        if is_parent:
+            branch = await conn.fetchrow(
+                "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
+                table_rest_id, rest_id,
+            )
+            if branch:
+                return  # Table belongs to a branch of this parent
+        raise HTTPException(status_code=403, detail="Table does not belong to this restaurant")
+
+
 @router.delete("/api/tables/{table_id}")
-async def delete_table(request: Request, table_id: str):
+async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant)):
     """Elimina una mesa por su ID."""
-    await require_auth(request)
+    await _verify_table_ownership(table_id, restaurant)
     await db.db_delete_table(table_id)
     return {"success": True}
+
+
+@router.get("/api/tables/floor-plan")
+async def get_floor_plan(request: Request, restaurant=Depends(get_current_restaurant)):
+    """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta."""
+    branch_id_str = request.headers.get("x-branch-id")
+    is_main = restaurant.get("parent_restaurant_id") is None
+    branch_id = None if not branch_id_str or branch_id_str == "all" else int(branch_id_str)
+    if branch_id is None and is_main:
+        branch_id = restaurant["id"]
+    return await db.db_get_floor_plan(branch_id=branch_id, is_main=is_main)
+
+
+class TablePositionBody(BaseModel):
+    position_x: float = Field(0, ge=-10000, le=10000)
+    position_y: float = Field(0, ge=-10000, le=10000)
+
+
+_VALID_TABLE_TYPES = {"interior", "terraza", "barra", "privado", "vip"}
+
+
+class TablePropertiesBody(BaseModel):
+    capacity: int | None = Field(None, ge=1, le=100)
+    table_type: str | None = None
+    zone: str | None = None
+
+
+@router.put("/api/tables/{table_id}/position")
+async def update_table_position(table_id: str, body: TablePositionBody, restaurant=Depends(get_current_restaurant)):
+    """Actualiza la posición (x, y) de una mesa en el mapa de planta."""
+    await _verify_table_ownership(table_id, restaurant)
+    result = await db.db_update_table_position(
+        table_id, body.position_x, body.position_y
+    )
+    if not result:
+        return JSONResponse({"detail": "Table not found"}, status_code=404)
+    return result
+
+
+@router.put("/api/tables/{table_id}/properties")
+async def update_table_properties(table_id: str, body: TablePropertiesBody, restaurant=Depends(get_current_restaurant)):
+    """Actualiza propiedades de una mesa (capacity, table_type, zone)."""
+    await _verify_table_ownership(table_id, restaurant)
+    updates = body.model_dump(exclude_none=True)
+    if "table_type" in updates and updates["table_type"] not in _VALID_TABLE_TYPES:
+        raise HTTPException(status_code=400, detail=f"table_type must be one of: {', '.join(sorted(_VALID_TABLE_TYPES))}")
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.db_update_table_properties(table_id, **updates)
+    if not result:
+        return JSONResponse({"detail": "Table not found"}, status_code=404)
+    return result
+
 
 @router.get("/menu/{table_id}", response_class=HTMLResponse)
 async def menu_page(table_id: str):
@@ -478,7 +556,7 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
         d = dict(r)
         if isinstance(d.get('items'), str):
             try: d['items'] = _json.loads(d['items'])
-            except: pass
+            except (ValueError, TypeError): pass
         if d.get('created_at') and hasattr(d['created_at'], 'isoformat'):
             d['created_at'] = d['created_at'].isoformat() + 'Z'
         result.append(d)
@@ -657,7 +735,9 @@ async def update_order_status(request: Request, order_id: str):
                 if session:
                     session_data = dict(session)
                     db_phone_id = session_data.get("meta_phone_id")
-            except Exception: pass
+            except Exception:
+                from app.services.logging import get_logger as _gl  # noqa: PLC0415
+                _gl(__name__).exception("tables.session_lookup_error", phone=phone)
 
     if status == "generar_factura":
         base_id = order.get("base_order_id") or order_id

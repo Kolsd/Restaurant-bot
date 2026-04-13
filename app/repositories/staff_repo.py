@@ -60,8 +60,16 @@ async def _record_attendance_deduction(
     actual_time: timezone-aware datetime from asyncpg
     """
     from datetime import datetime, timedelta
-    # Strip timezone for arithmetic (comparisons are done in the DB server's local representation)
-    actual_naive = actual_time.replace(tzinfo=None)
+    from zoneinfo import ZoneInfo
+    # Convert to restaurant's timezone for proper comparison with scheduled time
+    # actual_time is timestamptz from DB; scheduled_time is a naive time in local tz
+    # Use restaurant_id to look up tz — for now, default to America/Bogota (most restaurants)
+    tz = ZoneInfo("America/Bogota")
+    if actual_time.tzinfo is not None:
+        actual_local = actual_time.astimezone(tz)
+    else:
+        actual_local = actual_time
+    actual_naive = actual_local.replace(tzinfo=None)
     sched_dt = datetime.combine(actual_naive.date(), scheduled_time)
 
     if deduction_type == "tardiness":
@@ -760,7 +768,7 @@ async def db_delete_webauthn_credential(credential_id: str) -> bool:
         result = await conn.execute(
             "DELETE FROM webauthn_credentials WHERE credential_id = $1", credential_id
         )
-    return "DELETE 1" in result
+    return result == "DELETE 1"
 
 
 async def db_save_webauthn_challenge(
@@ -876,18 +884,19 @@ async def db_upsert_schedule(
     """Create or replace the schedule for a staff member on a specific day."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
-            staff_id, day_of_week,
-        )
-        row = await conn.fetchrow(
-            """INSERT INTO staff_schedules
-                   (staff_id, restaurant_id, day_of_week, start_time, end_time)
-               VALUES ($1::uuid, $2, $3, $4, $5)
-               RETURNING id::text, staff_id::text, restaurant_id,
-                         day_of_week, start_time::text, end_time::text, active""",
-            staff_id, restaurant_id, day_of_week, start_time, end_time,
-        )
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
+                staff_id, day_of_week,
+            )
+            row = await conn.fetchrow(
+                """INSERT INTO staff_schedules
+                       (staff_id, restaurant_id, day_of_week, start_time, end_time)
+                   VALUES ($1::uuid, $2, $3, $4, $5)
+                   RETURNING id::text, staff_id::text, restaurant_id,
+                             day_of_week, start_time::text, end_time::text, active""",
+                staff_id, restaurant_id, day_of_week, start_time, end_time,
+            )
         return _serialize(dict(row))
 
 
@@ -899,21 +908,22 @@ async def db_bulk_upsert_schedules(
     pool = await _get_pool()
     results = []
     async with pool.acquire() as conn:
-        for entry in entries:
-            await conn.execute(
-                "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
-                entry["staff_id"], entry["day_of_week"],
-            )
-            row = await conn.fetchrow(
-                """INSERT INTO staff_schedules (staff_id, restaurant_id, day_of_week, start_time, end_time)
-                   VALUES ($1::uuid, $2, $3, $4, $5)
-                   RETURNING id::text, staff_id::text, restaurant_id, day_of_week,
-                             start_time::text, end_time::text""",
-                entry["staff_id"], restaurant_id, entry["day_of_week"],
-                entry["start_time"], entry["end_time"],
-            )
-            if row:
-                results.append(_serialize(dict(row)))
+        async with conn.transaction():
+            for entry in entries:
+                await conn.execute(
+                    "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
+                    entry["staff_id"], entry["day_of_week"],
+                )
+                row = await conn.fetchrow(
+                    """INSERT INTO staff_schedules (staff_id, restaurant_id, day_of_week, start_time, end_time)
+                       VALUES ($1::uuid, $2, $3, $4, $5)
+                       RETURNING id::text, staff_id::text, restaurant_id, day_of_week,
+                                 start_time::text, end_time::text""",
+                    entry["staff_id"], restaurant_id, entry["day_of_week"],
+                    entry["start_time"], entry["end_time"],
+                )
+                if row:
+                    results.append(_serialize(dict(row)))
     return results
 
 
@@ -941,7 +951,7 @@ async def db_delete_schedule(schedule_id: str) -> bool:
         result = await conn.execute(
             "DELETE FROM staff_schedules WHERE id = $1::uuid", schedule_id
         )
-    return "DELETE 1" in result
+    return result == "DELETE 1"
 
 
 # ── Shift editing ─────────────────────────────────────────────────────────────

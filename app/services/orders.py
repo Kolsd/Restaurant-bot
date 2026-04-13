@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
-from app.services.money import to_decimal, ZERO
+from app.services.money import to_decimal, money_mul, money_sum, ZERO
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
@@ -46,14 +46,14 @@ async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str
         for item in cart["items"]:
             if item["name"] == dish["name"]:
                 item["quantity"] += quantity
-                item["subtotal"] = item["price"] * item["quantity"]
+                item["subtotal"] = float(money_mul(to_decimal(item["price"]), item["quantity"]))  # JSON boundary
                 found = True
                 break
-                
+
         if not found:
             cart["items"].append({
                 "name": dish["name"], "price": dish["price"],
-                "quantity": quantity, "subtotal": dish["price"] * quantity,
+                "quantity": quantity, "subtotal": float(money_mul(to_decimal(dish["price"]), quantity)),  # JSON boundary
                 "category": dish["category"]
             })
             
@@ -97,14 +97,21 @@ async def cart_summary(phone: str, bot_number: str) -> str:
     lines.append(f"\n*Total: {total:,}*")
     return "\n".join(lines)
 
-def generate_wompi_payment_link(order_id: str, amount_cop: int) -> str:
-    amount_cents = amount_cop * 100
+# Zero-decimal currencies (no cents multiplier needed)
+_ZERO_DECIMAL_CURRENCIES = {"COP", "CLP", "JPY", "KRW", "VND", "PYG", "ISK"}
+
+
+def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP") -> str:
+    if currency in _ZERO_DECIMAL_CURRENCIES:
+        amount_cents = int(amount)
+    else:
+        amount_cents = int(amount * 100)
     secret = WOMPI_INTEGRITY_SECRET or ""
-    signature_string = f"{order_id}{amount_cents}COP{secret}"
+    signature_string = f"{order_id}{amount_cents}{currency}{secret}"
     signature = hashlib.sha256(signature_string.encode()).hexdigest()
     redirect_base = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
     redirect_url = f"{redirect_base}/api/payment/confirm"
-    return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency=COP&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
+    return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
 
 async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "") -> dict:
     async with _get_cart_lock(phone):

@@ -8,6 +8,7 @@ from anthropic import Anthropic
 from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
+from app.services.money import to_decimal
 from app.repositories.orders_repo import (
     InsufficientStockError,
     OrderCommitError,
@@ -376,6 +377,11 @@ _MODULE_RULES: dict = {
         [],
         "no cuenta con programa de puntos ni recompensas",
     ),
+    "dynamic_discounts": (
+        "Descuentos Dinámicos",
+        [],
+        "no cuenta con sistema de descuentos por horario",
+    ),
 }
 
 
@@ -418,15 +424,53 @@ def _build_module_restrictions(features: dict) -> str:
 
 # ── System prompt builder (routes to salon or external) ──────────────────────
 
-async def build_system_prompt(features: dict = None, table_context: dict | None = None) -> list:
+async def build_system_prompt(
+    features: dict = None,
+    table_context: dict | None = None,
+    restaurant_id: int | None = None,
+) -> list:
     """
     Build the system prompt block list for Claude.
     Routes to the salon or external prompt based on table_context.
+    Appends an active-discount block when dynamic_discounts is enabled.
     """
-    restrictions = _build_module_restrictions(features or {})
+    features = features or {}
+    restrictions = _build_module_restrictions(features)
+
+    # Inject active discount block when the module is enabled
+    discount_block = ""
+    if features.get("dynamic_discounts") and restaurant_id:
+        try:
+            from app.repositories.discounts_repo import db_get_active_discount  # noqa: PLC0415
+            tz = features.get("timezone", "America/Bogota")
+            discount = await db_get_active_discount(restaurant_id, tz=tz)
+            if discount:
+                end_str = str(discount.get("end_time", ""))[:5]  # HH:MM
+                pct = discount.get("discount_percent", "")
+                label = discount.get("label", "")
+                label_text = f" ({label})" if label else ""
+                discount_block = (
+                    "\n[DESCUENTO_ACTIVO]\n"
+                    f"Hay un descuento activo del {pct}%{label_text} hasta las {end_str}.\n"
+                    "Menciónalo al cliente al inicio de la conversación de forma natural.\n"
+                    f"Aplica SOLO a pedidos realizados antes de las {end_str}.\n"
+                )
+        except Exception:
+            log.exception("build_system_prompt.discount_lookup_error", restaurant_id=restaurant_id)
+
     if table_context:
-        return build_salon_prompt(restrictions)
-    return build_external_prompt(restrictions)
+        prompt = build_salon_prompt(restrictions)
+    else:
+        prompt = build_external_prompt(restrictions)
+
+    if discount_block:
+        # Append discount block to the last text entry in the system prompt list
+        for block in reversed(prompt):
+            if isinstance(block, dict) and block.get("type") == "text":
+                block["text"] = block["text"] + discount_block
+                break
+
+    return prompt
 
 
 async def call_claude(
@@ -561,15 +605,60 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             if cart_errors:
                 reply += f" (Nota: No pude agregar '{', '.join(cart_errors)}')"
 
-        # ── Reserve (shared, both flows) ──────────────────────────────────
+        # ── Reserve (shared, both flows) — with availability check ───────
         elif action == "reserve":
             rv = parsed.get("reservation", {})
             if rv.get("name") and rv.get("date") and rv.get("time"):
-                await db.db_add_reservation(
-                    rv["name"], rv["date"], rv["time"],
-                    int(rv.get("guests", 1)), phone, bot_number, rv.get("notes", "")
+                try:
+                    guests = int(rv.get("guests", 1) or 1)
+                except (ValueError, TypeError):
+                    guests = 1
+                # Check availability before creating reservation
+                available = await db.db_get_available_tables(
+                    rv["date"], rv["time"], guests, bot_number
                 )
-                print(f"📅 Reservación {rv['name']} {rv['date']} (upsert)", flush=True)
+                if not available:
+                    log.info("reservation.no_availability",
+                             date=rv["date"], time=rv["time"], guests=guests,
+                             phone=phone, bot_number=bot_number)
+                    # Bot already included a reply — append availability note
+                    reply += "\n\n⚠️ No hay mesas disponibles para esa fecha/hora y número de personas. Por favor intenta otro horario."
+                else:
+                    # Determine initial status based on auto-confirm feature flag
+                    _raw_feats = restaurant_obj.get("features", {}) if restaurant_obj else {}
+                    if isinstance(_raw_feats, str):
+                        try:
+                            _raw_feats = json.loads(_raw_feats)
+                        except Exception:
+                            _raw_feats = {}
+                    features = _raw_feats if isinstance(_raw_feats, dict) else {}
+                    auto_confirm = features.get("reservation_auto_confirm", False)
+                    reservation = await db.db_add_reservation(
+                        rv["name"], rv["date"], rv["time"],
+                        guests, phone, bot_number, rv.get("notes", "")
+                    )
+                    # Auto-assign best-fit table (smallest capacity that fits)
+                    table = available[0]  # already sorted by capacity ASC
+                    await db.db_assign_table_to_reservation(reservation["id"], table["id"])
+                    if auto_confirm:
+                        await db.db_confirm_reservation(reservation["id"])
+                        log.info("reservation.auto_confirmed",
+                                 id=reservation["id"], table=table["id"],
+                                 phone=phone, bot_number=bot_number)
+                    else:
+                        log.info("reservation.created_pending",
+                                 id=reservation["id"], table=table["id"],
+                                 phone=phone, bot_number=bot_number)
+                        # Check if deposit is required
+                        if features.get("reservation_deposits"):
+                            deposit_amount_raw = features.get("reservation_deposit_amount", 50000)
+                            deposit_amount = to_decimal(deposit_amount_raw)
+                            currency = features.get("currency", "COP")
+                            from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
+                            payment_url = await generate_deposit_link(reservation["id"], deposit_amount, currency)
+                            reply += f"\n\nPara confirmar tu reserva, necesitamos un depósito de ${int(deposit_amount):,}. Paga aquí: {payment_url}"
+                            log.info("reservation.deposit_link_sent",
+                                     id=reservation["id"], amount=str(deposit_amount))
 
         # ── End session (shared, both flows) ──────────────────────────────
         elif action == "end_session":
@@ -787,7 +876,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     messages.append({"role": "user", "content": enriched})
 
     # Route to the correct prompt based on table context
-    sys_prompt = await build_system_prompt(feats, table_context)
+    sys_prompt = await build_system_prompt(feats, table_context, restaurant_id=restaurant_obj.get("id"))
 
     raw    = await call_claude(sys_prompt, messages, model=MODEL_FAST,
                                restaurant_id=restaurant_obj.get("id"))

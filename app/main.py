@@ -43,6 +43,9 @@ from app.routes.staff import router as staff_router
 from app.routes.staff_webauthn import router as staff_webauthn_router
 from app.routes.staff_payroll import router as staff_payroll_router
 from app.routes.loyalty import router as loyalty_router
+from app.routes.reservations import router as reservations_router
+from app.routes.discounts import router as discounts_router
+from app.routes.reviews import router as reviews_router
 from app.services import database as db  # ← FIX: import directo de db
 from app.services.logging import get_logger as _get_logger
 
@@ -168,3 +171,6 @@ app.include_router(staff_router)
 app.include_router(staff_webauthn_router)
 app.include_router(staff_payroll_router)
 app.include_router(loyalty_router)
+app.include_router(reservations_router)
+app.include_router(discounts_router)
+app.include_router(reviews_router)

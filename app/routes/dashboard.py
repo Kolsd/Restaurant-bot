@@ -252,14 +252,13 @@ async def settings_page():
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Settings no disponible</h1>")
 
 @router.get("/api/settings")
-@router.get("/api/settings")
 async def get_settings(request: Request):
     user = await get_current_user(request)
     # 🛡️ LEER SUCURSAL DEL HEADER (Igual que en el resto del dashboard)
     branch_id = user.get("branch_id")
     branch_header = request.headers.get("X-Branch-ID")
     
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
         branch_id = int(branch_header)
     
     # Buscamos el restaurante específico que queremos configurar
@@ -310,7 +309,7 @@ async def save_settings(request: Request):
     if branch_header == "all":
         raise HTTPException(status_code=400, detail="No puedes editar configuración en modo 'Todas las sucursales'. Selecciona una específica.")
     
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
         branch_id = int(branch_header)
 
     restaurant = await db.db_get_restaurant_by_id(branch_id)
@@ -917,9 +916,9 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     branch_header = request.headers.get("X-Branch-ID")
     
     # 🛡️ CAPTURAMOS "ALL"
-    if branch_header == "all" and "owner" in user.get("role", ""):
+    if branch_header == "all" and user.get("role", "") in ("owner", "admin"):
         branch_id = "all"
-    elif branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
+    elif branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
         branch_id = int(branch_header)
 
     bot_number = None

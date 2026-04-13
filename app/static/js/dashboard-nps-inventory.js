@@ -3,6 +3,12 @@
    app/static/dashboard-nps-inventory.js
 ═══════════════════════════════════════════════════ */
 
+// ── HTML escape helper (XSS prevention for innerHTML patterns) ───────
+function _escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // ══════════════════════════════════════════════════
 // NPS
 // ══════════════════════════════════════════════════
@@ -129,10 +135,10 @@ function renderNPSResponses(responses) {
     // Extract comment from either field name; treat '__pending__' as empty
     const rawComment = r.comment || r.feedback || '';
     const displayComment = (rawComment && rawComment !== '__pending__')
-      ? `<span>${rawComment}</span>`
+      ? `<span>${_escHtml(rawComment)}</span>`
       : '<span style="color:#bbb;">—</span>';
     html += `<tr>
-      <td style="font-size:12px;color:#888;">${r.phone}</td>
+      <td style="font-size:12px;color:#888;">${_escHtml(r.phone)}</td>
       <td>${stars(r.score)}</td>
       <td>${typeLabel(r.score)}</td>
       <td style="font-size:12px;color:#555;max-width:280px;">${displayComment}</td>
@@ -240,7 +246,7 @@ function renderInventoryAlerts(alerts) {
       color:${isOut ? '#C0392B' : '#7A4F00'};
       border:1px solid ${isOut ? '#FCA5A5' : '#FDE68A'};
       padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500;">
-      ${isOut ? '🔴' : '🟡'} ${a.name}: ${a.current_stock} ${a.unit}
+      ${isOut ? '🔴' : '🟡'} ${_escHtml(a.name)}: ${_escHtml(a.current_stock)} ${_escHtml(a.unit)}
     </span>`;
   }).join('');
 }
@@ -274,24 +280,24 @@ function renderInventoryTable(items) {
         : '<span style="background:#E1F5EE;color:#0F6E56;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600;">OK</span>';
 
     const dishTags = dishes.map(d =>
-      `<span style="background:#f0f0e8;color:#555;padding:2px 7px;border-radius:5px;font-size:10px;margin:1px;">${d}</span>`
+      `<span style="background:#f0f0e8;color:#555;padding:2px 7px;border-radius:5px;font-size:10px;margin:1px;">${_escHtml(d)}</span>`
     ).join('') || '<span style="color:#bbb;font-size:11px;">Sin vincular</span>';
 
     html += `<tr style="${isOut ? 'background:#fff8f8;' : isLow ? 'background:#fffdf0;' : ''}">
-      <td style="font-weight:500;">${item.name}</td>
+      <td style="font-weight:500;">${_escHtml(item.name)}</td>
       <td>
         <div style="display:flex;align-items:center;gap:6px;">
           <span style="font-size:15px;font-weight:600;color:${isOut?'#C0392B':isLow?'#BA7517':'#111'};">
-            ${stock} ${item.unit}
+            ${stock} ${_escHtml(item.unit)}
           </span>
         </div>
       </td>
-      <td style="color:#888;font-size:13px;">${minSt} ${item.unit}</td>
+      <td style="color:#888;font-size:13px;">${minSt} ${_escHtml(item.unit)}</td>
       <td style="max-width:200px;line-height:1.8;">${dishTags}</td>
       <td>${statusBadge}</td>
       <td>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button onclick="openAdjustModal(${item.id},'${item.name.replace(/'/g,"\\'")}',${stock},'${item.unit}')"
+          <button onclick="openAdjustModal(${item.id},'${item.name.replace(/'/g,"\\'")}',${stock},'${item.unit.replace(/'/g,"\\'")}')"
             style="font-size:11px;padding:4px 9px;background:#E6F1FB;color:#185FA5;border:none;border-radius:6px;cursor:pointer;font-weight:500;">
             ± Ajustar
           </button>
@@ -346,7 +352,7 @@ function renderDishSelector(containerId, preSelected = []) {
   let html = '';
   Object.entries(byCategory).forEach(([cat, dishes]) => {
     html += `<div style="margin-bottom:8px;">
-      <div style="font-size:11px;color:#888;font-weight:600;text-transform:uppercase;margin-bottom:4px;">${cat}</div>
+      <div style="font-size:11px;color:#888;font-weight:600;text-transform:uppercase;margin-bottom:4px;">${_escHtml(cat)}</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;">`;
     dishes.forEach(name => {
       const safe = name.replace(/'/g, "\\'");
@@ -358,7 +364,7 @@ function renderDishSelector(containerId, preSelected = []) {
                ${isSelected
                  ? 'background:#E1F5EE;color:#0F6E56;border-color:#1D9E75;font-weight:600;'
                  : 'background:#fff;color:#555;border-color:#e0e0d8;'
-               }">${name}</button>`;
+               }">${_escHtml(name)}</button>`;
     });
     html += '</div></div>';
   });
@@ -661,11 +667,11 @@ function renderFoodCostTable(costs) {
   costs.forEach(row => {
     const breakdown = Array.isArray(row.breakdown) ? row.breakdown : [];
     const ingredientTags = breakdown.map(b =>
-      `<span style="background:#f0f0e8;color:#555;padding:2px 7px;border-radius:5px;font-size:10px;margin:1px;" title="${b.quantity} ${b.unit} × $${b.cost_per_unit}">${b.ingredient}</span>`
+      `<span style="background:#f0f0e8;color:#555;padding:2px 7px;border-radius:5px;font-size:10px;margin:1px;" title="${_escHtml(b.quantity)} ${_escHtml(b.unit)} × $${_escHtml(b.cost_per_unit)}">${_escHtml(b.ingredient)}</span>`
     ).join('');
     const dishEsc = (row.dish_name || '').replace(/'/g, "\\'");
     html += `<tr>
-      <td style="font-weight:500;">${row.dish_name}</td>
+      <td style="font-weight:500;">${_escHtml(row.dish_name)}</td>
       <td style="font-weight:700;color:#7B5EA7;">$${parseFloat(row.food_cost).toLocaleString('es-CO')}</td>
       <td style="max-width:240px;line-height:1.8;">${ingredientTags}</td>
       <td>
@@ -737,7 +743,7 @@ function addRecipeLine(ingredientId, quantity) {
   const lineId = 'rl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
 
   const options = inventoryItems.map(i =>
-    `<option value="${i.id}" data-unit="${i.unit}" data-cost="${i.cost_per_unit || 0}" ${String(i.id) === String(ingredientId) ? 'selected' : ''}>${i.name} (${i.unit})</option>`
+    `<option value="${i.id}" data-unit="${_escHtml(i.unit)}" data-cost="${i.cost_per_unit || 0}" ${String(i.id) === String(ingredientId) ? 'selected' : ''}>${_escHtml(i.name)} (${_escHtml(i.unit)})</option>`
   ).join('');
 
   const div = document.createElement('div');
@@ -866,6 +872,171 @@ async function deleteRecipe(dishName) {
     if (r.ok) loadFoodCosts();
     else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo eliminar')); }
   } catch(e) { alert('Error de conexión'); }
+}
+
+// ── NPS / Reviews sub-tab switch ──────────────────────────────────────────
+
+function switchNPSSubtab(tab, btn) {
+  document.querySelectorAll('#nps .subtab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('nps-panel-nps').style.display     = tab === 'nps'     ? '' : 'none';
+  document.getElementById('nps-panel-reviews').style.display = tab === 'reviews' ? '' : 'none';
+  if (tab === 'reviews') loadReviews();
+}
+
+// ── Reviews ───────────────────────────────────────────────────────────────
+
+let _reviewsAllCache = [];
+
+async function loadReviews() {
+  const h = window._dashHeaders;
+  document.getElementById('reviews-all-list').innerHTML =
+    '<div class="empty-state">Cargando...</div>';
+  try {
+    const [rSummary, rAll] = await Promise.all([
+      fetch('/api/reviews/summary', { headers: h }),
+      fetch('/api/nps/responses?period=year&limit=200', { headers: h }),
+    ]);
+    if (rSummary.ok) {
+      const s = await rSummary.json();
+      renderReviewsSummary(s);
+    }
+    if (rAll.ok) {
+      const { responses } = await rAll.json();
+      _reviewsAllCache = responses || [];
+      renderAllReviewsForManagement(_reviewsAllCache);
+    }
+  } catch(e) {
+    console.error('loadReviews:', e);
+  }
+}
+
+function renderReviewsSummary(s) {
+  const avgEl  = document.getElementById('reviews-avg-score');
+  const totEl  = document.getElementById('reviews-total');
+  const distEl = document.getElementById('reviews-distribution');
+  if (avgEl) avgEl.textContent = (s.avg_score || 0).toFixed(1);
+  if (totEl) totEl.textContent = s.total_reviews || 0;
+  if (distEl) {
+    const dist = s.score_distribution || {};
+    const maxCount = Math.max(1, ...Object.values(dist));
+    let html = '';
+    for (let i = 5; i >= 1; i--) {
+      const cnt = dist[String(i)] || 0;
+      const pct = Math.round(cnt / maxCount * 100);
+      const color = i >= 4 ? '#1D9E75' : i === 3 ? '#FAC775' : '#E24B4A';
+      html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+        <span style="font-size:11px;width:14px;text-align:right;">${i}</span>
+        <div style="flex:1;height:6px;background:#f0f0e8;border-radius:3px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;"></div>
+        </div>
+        <span style="font-size:11px;color:#888;width:20px;">${cnt}</span>
+      </div>`;
+    }
+    distEl.innerHTML = html;
+  }
+}
+
+function renderAllReviewsForManagement(responses) {
+  const c = document.getElementById('reviews-all-list');
+  if (!c) return;
+  if (!responses || !responses.length) {
+    c.innerHTML = '<div class="empty-state">Sin respuestas NPS aún.</div>';
+    return;
+  }
+
+  const stars = n => '★'.repeat(n) + '☆'.repeat(5 - n);
+
+  let html = '';
+  responses.forEach(r => {
+    const isPublic = r.is_public;
+    const rawComment = r.comment || r.feedback || '';
+    const displayComment = (rawComment && rawComment !== '__pending__') ? rawComment : '';
+    const date = new Date((r.created_at || '') + 'Z').toLocaleDateString('es-CO',
+      { day: '2-digit', month: 'short', year: 'numeric' });
+    const scoreColor = r.score >= 4 ? '#1D9E75' : r.score === 3 ? '#FAC775' : '#E24B4A';
+    const existingReply = r.owner_reply || '';
+    const customerName = r.customer_name || '';
+
+    html += `<div id="review-card-${r.id}" style="border:1px solid #e0e0d8;border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <span style="font-size:18px;color:${scoreColor};">${stars(r.score)}</span>
+            <span style="font-size:12px;color:#888;">${date}</span>
+            ${isPublic ? '<span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:600;">Público</span>' : '<span style="background:#f3f4f6;color:#888;padding:2px 8px;border-radius:5px;font-size:10px;">Privado</span>'}
+          </div>
+          <div style="font-size:12px;color:#888;margin-bottom:4px;">Teléfono: ${_escHtml(r.phone)}</div>
+          ${displayComment ? `<div style="font-size:13px;color:#333;margin-bottom:6px;">"${_escHtml(displayComment)}"</div>` : ''}
+          ${existingReply ? `<div style="background:#f0f9f5;border-left:3px solid #1D9E75;padding:8px 10px;border-radius:0 6px 6px 0;font-size:12px;color:#0F6E56;margin-top:6px;"><strong>Tu respuesta:</strong> ${_escHtml(existingReply)}</div>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:160px;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input id="review-name-${r.id}" type="text" placeholder="Nombre (opcional)" value="${_escHtml(customerName)}"
+              style="flex:1;padding:5px 8px;border:1px solid #e0e0d8;border-radius:6px;font-size:12px;outline:none;min-width:0;">
+          </div>
+          <button onclick="toggleReviewPublic(${r.id}, ${!isPublic})"
+            style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid ${isPublic ? '#E24B4A' : '#1D9E75'};background:${isPublic ? '#FDE8E8' : '#E1F5EE'};color:${isPublic ? '#C0392B' : '#0F6E56'};">
+            ${isPublic ? 'Ocultar' : 'Publicar'}
+          </button>
+          <div style="display:flex;gap:4px;">
+            <input id="reply-input-${r.id}" type="text" placeholder="Escribe tu respuesta..."
+              value="${_escHtml(existingReply)}"
+              style="flex:1;padding:5px 8px;border:1px solid #e0e0d8;border-radius:6px;font-size:12px;outline:none;min-width:0;">
+            <button onclick="submitReviewReply(${r.id})"
+              style="padding:5px 10px;border-radius:6px;font-size:12px;background:#6366F1;color:#fff;border:none;cursor:pointer;white-space:nowrap;">
+              Guardar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  c.innerHTML = html;
+}
+
+async function toggleReviewPublic(npsId, makePublic) {
+  const h = window._dashHeaders;
+  const nameInput = document.getElementById(`review-name-${npsId}`);
+  const customerName = nameInput ? nameInput.value.trim() : '';
+  try {
+    const r = await fetch(`/api/reviews/${npsId}/publish`, {
+      method: 'PUT',
+      headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_public: makePublic, customer_name: customerName }),
+    });
+    if (r.ok) {
+      loadReviews();
+    } else {
+      const e = await r.json();
+      alert('Error: ' + (e.detail || 'No se pudo actualizar'));
+    }
+  } catch(e) {
+    alert('Error de conexión');
+  }
+}
+
+async function submitReviewReply(npsId) {
+  const h = window._dashHeaders;
+  const input = document.getElementById(`reply-input-${npsId}`);
+  const reply = input ? input.value.trim() : '';
+  if (!reply) { alert('Escribe una respuesta antes de guardar.'); return; }
+  try {
+    const r = await fetch(`/api/reviews/${npsId}/reply`, {
+      method: 'PUT',
+      headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reply }),
+    });
+    if (r.ok) {
+      loadReviews();
+    } else {
+      const e = await r.json();
+      alert('Error: ' + (e.detail || 'No se pudo guardar la respuesta'));
+    }
+  } catch(e) {
+    alert('Error de conexión');
+  }
 }
 
 // ── Init ──

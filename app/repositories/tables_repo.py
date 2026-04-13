@@ -65,6 +65,11 @@ async def db_init_tables():
         """)
         for col_sql in [
             "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS branch_id INTEGER",
+            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 4",
+            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS table_type TEXT NOT NULL DEFAULT 'interior'",
+            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS zone TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS position_x FLOAT NOT NULL DEFAULT 0",
+            "ALTER TABLE restaurant_tables ADD COLUMN IF NOT EXISTS position_y FLOAT NOT NULL DEFAULT 0",
             "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS base_order_id TEXT DEFAULT NULL",
             "ALTER TABLE table_orders ADD COLUMN IF NOT EXISTS sub_number INTEGER DEFAULT 1",
             # FASE 2: enrutamiento multi-estación Cocina / Bar
@@ -103,14 +108,17 @@ async def db_get_tables(branch_id: int = None, is_main: bool = False):
         return [_serialize(dict(r)) for r in rows]
 
 
-async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None):
+async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None,
+                          capacity: int = 4, table_type: str = "interior", zone: str = ""):
     pool = await _get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO restaurant_tables (id, number, name, branch_id, active)
-            VALUES ($1,$2,$3,$4,TRUE)
-            ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, name=EXCLUDED.name, branch_id=EXCLUDED.branch_id, active=TRUE
-        """, table_id, number, name, branch_id)
+            INSERT INTO restaurant_tables (id, number, name, branch_id, active, capacity, table_type, zone)
+            VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7)
+            ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, name=EXCLUDED.name,
+                branch_id=EXCLUDED.branch_id, active=TRUE,
+                capacity=EXCLUDED.capacity, table_type=EXCLUDED.table_type, zone=EXCLUDED.zone
+        """, table_id, number, name, branch_id, capacity, table_type, zone)
 
 
 async def db_auto_create_table(restaurant_id: int, is_main_restaurant: bool) -> dict:
@@ -601,7 +609,7 @@ async def db_get_closed_sessions(bot_number: str, hours: int = 24) -> list:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM table_sessions WHERE bot_number=$1 AND status='closed'"
-            " AND closed_at > NOW() - ($2 * INTERVAL '1 hour') ORDER BY closed_at DESC",
+            " AND closed_at > NOW() - make_interval(hours => $2) ORDER BY closed_at DESC",
             bot_number, hours,
         )
         return [_serialize(dict(r)) for r in rows]
@@ -954,3 +962,60 @@ async def db_get_check_ticket(check_id: str) -> dict | None:
     if isinstance(d.get("payments"), str):
         d["payments"] = json.loads(d["payments"])
     return d
+
+
+# ── Floor plan & table properties (Apparta integration) ─────────────────────
+
+async def db_update_table_properties(table_id: str, **kwargs):
+    """Update table properties (capacity, table_type, zone). Only updates provided fields."""
+    allowed = {"capacity", "table_type", "zone"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+    if not updates:
+        return None
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        sets = []
+        vals = []
+        for i, (col, val) in enumerate(updates.items(), 1):
+            sets.append(f"{col}=${i}")
+            vals.append(val)
+        vals.append(table_id)
+        sql = f"UPDATE restaurant_tables SET {', '.join(sets)} WHERE id=${len(vals)} RETURNING *"
+        row = await conn.fetchrow(sql, *vals)
+        return _serialize(dict(row)) if row else None
+
+
+async def db_update_table_position(table_id: str, position_x: float, position_y: float):
+    """Update table position for floor plan."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE restaurant_tables SET position_x=$1, position_y=$2 WHERE id=$3 RETURNING *",
+            position_x, position_y, table_id
+        )
+        return _serialize(dict(row)) if row else None
+
+
+async def db_get_floor_plan(branch_id: int = None, is_main: bool = False):
+    """Get all tables with positions and current occupancy for floor plan view."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        sql = """
+            SELECT t.*,
+                   s.id AS session_id,
+                   s.phone AS session_phone,
+                   s.status AS session_status,
+                   CASE WHEN s.id IS NOT NULL AND s.status = 'active' THEN TRUE ELSE FALSE END AS occupied
+            FROM restaurant_tables t
+            LEFT JOIN table_sessions s ON s.table_id = t.id AND s.status = 'active'
+            WHERE t.active = TRUE
+        """
+        params = []
+        if is_main:
+            sql += " AND (t.branch_id IS NULL)"
+        elif branch_id is not None:
+            sql += " AND t.branch_id = $1"
+            params.append(branch_id)
+        sql += " ORDER BY t.zone, t.number"
+        rows = await conn.fetch(sql, *params)
+        return [_serialize(dict(r)) for r in rows]

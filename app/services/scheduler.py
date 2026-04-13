@@ -3,6 +3,7 @@ import os
 import httpx
 from app.services import database as db
 from app.services import state_store
+from app.repositories import reviews_repo as rr
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -164,11 +165,120 @@ async def _run_inactivity_check():
         print(f"❌ Scheduler error: {traceback.format_exc()}", flush=True)
 
 
+async def _run_deposit_expiry():
+    """
+    Cancel reservations whose deposit was never paid within 2 hours.
+    Runs every 10 minutes via the scheduler loop counter.
+    """
+    try:
+        from app.repositories import reservation_deposits_repo as deposits_repo  # noqa: PLC0415
+        expired = await deposits_repo.db_get_pending_deposits(older_than_hours=2)
+        for deposit in expired:
+            reservation_id = deposit.get("reservation_id")
+            if not reservation_id:
+                continue
+            try:
+                await db.db_cancel_reservation(reservation_id, "deposit_expired")
+                print(
+                    f"Scheduler: reservation {reservation_id} cancelled — deposit expired",
+                    flush=True,
+                )
+            except Exception as e:
+                print(f"⚠️ Scheduler: error cancelling reservation {reservation_id}: {e}", flush=True)
+    except Exception:
+        import traceback
+        print(f"❌ Deposit expiry error: {traceback.format_exc()}", flush=True)
+
+
+async def _run_occupancy_snapshot():
+    """
+    Capture a point-in-time occupancy snapshot for every restaurant.
+    Runs every 15 minutes via the scheduler loop.
+    """
+    try:
+        restaurants = await db.db_get_all_restaurants()
+        pool = await db.get_pool()
+        for rest in restaurants:
+            rid = rest["id"]
+            async with pool.acquire() as conn:
+                # Count distinct active table sessions and sum capacities
+                tables_row = await conn.fetchrow(
+                    """
+                    SELECT
+                        COUNT(rt.id)::int AS total_tables,
+                        COUNT(rt.id) FILTER (
+                            WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
+                        )::int AS occupied_tables,
+                        COALESCE(SUM(rt.capacity), 0)::int AS total_capacity,
+                        COALESCE(SUM(rt.capacity) FILTER (
+                            WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
+                        ), 0)::int AS seated_guests
+                    FROM restaurant_tables rt
+                    LEFT JOIN table_sessions ts
+                        ON ts.table_id = rt.id AND ts.closed_at IS NULL
+                    WHERE rt.restaurant_id = $1 AND rt.active = TRUE
+                    """,
+                    rid,
+                )
+            if tables_row:
+                await rr.db_save_occupancy_snapshot(
+                    restaurant_id=rid,
+                    branch_id=None,
+                    total_tables=tables_row["total_tables"],
+                    occupied_tables=tables_row["occupied_tables"],
+                    total_capacity=tables_row["total_capacity"],
+                    seated_guests=tables_row["seated_guests"],
+                )
+    except Exception:
+        import traceback
+        print(f"Scheduler: occupancy snapshot error: {traceback.format_exc()}", flush=True)
+
+
+async def _run_reservation_reminders():
+    """Send WhatsApp reminders for upcoming confirmed reservations (24h ahead)."""
+    try:
+        upcoming = await db.db_get_upcoming_unconfirmed(hours_ahead=24)
+        for res in upcoming:
+            phone = res.get("phone", "")
+            bot_number = res.get("bot_number", "")
+            name = res.get("name", "")
+            date_str = res.get("date", "")
+            time_str = res.get("time", "")
+            guests = res.get("guests", 1)
+            if not phone or not bot_number:
+                continue
+            msg = (
+                f"Hola {name}, te recordamos tu reserva para el {date_str} "
+                f"a las {time_str} para {guests} persona(s). "
+                f"Responde *CONFIRMAR* para confirmar o *CANCELAR* para cancelar."
+            )
+            # Resolve phone_id from restaurant
+            restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
+            phone_id = (restaurant or {}).get("meta_phone_id", "")
+            ok = await _send_whatsapp(phone, msg, bot_number, phone_id)
+            if ok:
+                await db.db_mark_confirmation_sent(res["id"])
+    except Exception:
+        import traceback
+        print(f"❌ Reservation reminder error: {traceback.format_exc()}", flush=True)
+
+
 async def _scheduler_loop():
     print("⏰ Scheduler de inactividad iniciado", flush=True)
+    _reminder_counter = 0
     while True:
         await asyncio.sleep(60)
         await _run_inactivity_check()
+        _reminder_counter += 1
+        # Run reservation reminders every 5 minutes
+        if _reminder_counter % 5 == 0:
+            await _run_reservation_reminders()
+        # Run deposit expiry every 10 minutes
+        if _reminder_counter % 10 == 0:
+            await _run_deposit_expiry()
+        # Capture occupancy snapshots every 15 minutes
+        if _reminder_counter % 15 == 0:
+            await _run_occupancy_snapshot()
 
 
 async def start_scheduler():

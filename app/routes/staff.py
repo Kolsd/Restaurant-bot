@@ -143,8 +143,30 @@ async def create_staff(
     )
     return {"staff": member}
     
+# Rate limiting for PIN login — max 10 attempts per restaurant+name per 15 min
+_pin_attempts: dict[str, list] = {}  # key -> list of timestamps
+_PIN_MAX_ATTEMPTS = 10
+_PIN_WINDOW = 900  # 15 minutes
+
+
+def _pin_rate_limited(restaurant_id: int, name: str) -> bool:
+    import time
+    key = f"{restaurant_id}:{name.lower().strip()}"
+    now = time.time()
+    attempts = _pin_attempts.get(key, [])
+    attempts = [t for t in attempts if now - t < _PIN_WINDOW]
+    if len(attempts) >= _PIN_MAX_ATTEMPTS:
+        _pin_attempts[key] = attempts
+        return True
+    attempts.append(now)
+    _pin_attempts[key] = attempts
+    return False
+
+
 @router.post("/pin-login", status_code=200)
 async def staff_pin_login(body: StaffPinLoginRequest):
+    if _pin_rate_limited(body.restaurant_id, body.name):
+        raise HTTPException(status_code=429, detail="Demasiados intentos. Intenta en 15 minutos.")
     member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)
     if not member:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
@@ -162,7 +184,7 @@ async def staff_pin_login(body: StaffPinLoginRequest):
     if isinstance(raw_features, str):
         import json as _j
         try: raw_features = _j.loads(raw_features)
-        except: raw_features = {}
+        except (ValueError, TypeError): raw_features = {}
 
     return {
         "token":        token,

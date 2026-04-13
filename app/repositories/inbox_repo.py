@@ -30,13 +30,21 @@ async def enqueue(
     """
     async with pool.acquire() as conn:
         if external_id is not None:
-            existing = await conn.fetchval(
-                "SELECT id FROM webhook_inbox WHERE provider = $1 AND external_id = $2",
+            # Use INSERT ... ON CONFLICT DO NOTHING to avoid TOCTOU race.
+            # The partial unique index ux_webhook_inbox_dedup catches duplicates.
+            result = await conn.execute(
+                """
+                INSERT INTO webhook_inbox (provider, external_id, payload)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (provider, external_id) WHERE external_id IS NOT NULL
+                DO NOTHING
+                """,
                 provider,
                 external_id,
+                payload,
             )
-            if existing is not None:
-                return False
+            # asyncpg returns e.g. "INSERT 0 1" (inserted) or "INSERT 0 0" (conflict)
+            return result.endswith(" 1")
 
         await conn.execute(
             """
@@ -45,7 +53,7 @@ async def enqueue(
             """,
             provider,
             external_id,
-            payload,  # dict — asyncpg's JSONB codec (json.dumps encoder) serializa esto
+            payload,
         )
         return True
 

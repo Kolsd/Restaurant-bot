@@ -74,7 +74,7 @@ async def wompi_webhook(request: Request):
         (body_bytes.decode() + WOMPI_EVENTS_SECRET).encode()
     ).hexdigest()
 
-    if signature_header and signature_header != expected_sig:
+    if not signature_header or signature_header != expected_sig:
         raise HTTPException(status_code=401, detail="Firma inválida")
 
     event = body.get("event", "")
@@ -83,9 +83,15 @@ async def wompi_webhook(request: Request):
     if event == "transaction.updated":
         transaction = data.get("transaction", {})
         if transaction.get("status") == "APPROVED":
-            reference = transaction.get("reference")
+            reference = transaction.get("reference", "")
             transaction_id = transaction.get("id")
             if reference:
+                # Reservation deposit references are prefixed with "dep_"
+                if reference.startswith("dep_"):
+                    from app.services.reservation_payments import confirm_deposit_payment
+                    await confirm_deposit_payment(reference, transaction_id)
+                    return {"status": "ok"}
+
                 result = await db.db_confirm_payment(reference, transaction_id)
                 if result:
                     print(f"Payment confirmed — Order: {reference} — {result['total']}", flush=True)

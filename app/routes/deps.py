@@ -23,7 +23,7 @@ async def verify_superadmin(request: Request) -> None:
 
 async def require_auth(request: Request) -> str:
     """Validates Bearer token; returns username or raises 401."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     username = await verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="Unauthorized")

@@ -3,8 +3,14 @@
    app/static/dashboard-core.js
 ═══════════════════════════════════════════════════ */
 
+// ── HTML escape helper (XSS prevention for innerHTML patterns) ───────
+function _escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 const token = localStorage.getItem('rb_token');
-const rawRole = (localStorage.getItem('rb_role') || '').toLowerCase(); 
+const rawRole = (localStorage.getItem('rb_role') || '').toLowerCase();
 
 if (!token) {
     window.location.href = '/login';
@@ -191,9 +197,10 @@ function showSection(id, btn) {
   }
   if (id === 'equipo')   loadBranches();
   if (id === 'menu')     loadMenu();
-  if (id === 'staff'   && typeof loadStaffSection   === 'function') loadStaffSection();
-  if (id === 'payroll' && typeof loadPayrollSection === 'function') loadPayrollSection();
-  if (id === 'loyalty' && typeof loadLoyaltySection === 'function') loadLoyaltySection();
+  if (id === 'staff'         && typeof loadStaffSection        === 'function') loadStaffSection();
+  if (id === 'payroll'       && typeof loadPayrollSection      === 'function') loadPayrollSection();
+  if (id === 'loyalty'       && typeof loadLoyaltySection      === 'function') loadLoyaltySection();
+  if (id === 'reservaciones' && typeof loadReservationsSection === 'function') loadReservationsSection();
   if (window.innerWidth <= 768) closeSidebar();
 }
 
@@ -218,9 +225,11 @@ function switchMenuTab(id, btn) {
 function switchMesasTab(id, btn) {
   document.querySelectorAll('#mesas .seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('mesas-panel-mesas').style.display = id === 'mesas' ? '' : 'none';
-  document.getElementById('mesas-panel-pos').style.display   = id === 'pos'   ? '' : 'none';
-  if (id === 'pos') loadPOSData();
+  document.getElementById('mesas-panel-mesas').style.display     = id === 'mesas'     ? '' : 'none';
+  document.getElementById('mesas-panel-pos').style.display       = id === 'pos'       ? '' : 'none';
+  document.getElementById('mesas-panel-floorplan').style.display = id === 'floorplan' ? '' : 'none';
+  if (id === 'pos')       loadPOSData();
+  if (id === 'floorplan' && typeof loadFloorPlan === 'function') loadFloorPlan();
 }
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('mobile-overlay').classList.toggle('open'); }
@@ -257,7 +266,7 @@ function renderChart(orders) {
   const dataMap = {};
   orders.forEach(o => {
       if(o.paid) {
-          const isoString = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
+          const isoString = (o.created_at && o.created_at.endsWith('Z')) ? o.created_at : (o.created_at || '') + 'Z';
           const d = new Date(isoString);
           const year = d.getFullYear();
           const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -398,9 +407,9 @@ async function refreshAll() {
                } catch(e) { itemsStr = String(o.items); }
                const stFormat = (o.status || 'pendiente').replace(/_/g, ' ').toUpperCase();
                domHtml += `<tr>
-                 <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
-                 <td style="color:#555;font-size:12px;">${itemsStr}</td>
-                 <td><span class="badge" style="background:#E6F1FB;color:#185FA5;">${stFormat}</span></td>
+                 <td style="font-weight:500;font-size:12px;">${_escHtml(o.id.substring(0,8))}</td>
+                 <td style="color:#555;font-size:12px;">${_escHtml(itemsStr)}</td>
+                 <td><span class="badge" style="background:#E6F1FB;color:#185FA5;">${_escHtml(stFormat)}</span></td>
                  <td style="font-weight:700;">${fmt(o.total)}</td>
                </tr>`;
            });
@@ -432,7 +441,7 @@ function renderOrders(orders) {
   
   let html = '<table><thead><tr><th>ID</th><th>Platos</th><th>Origen</th><th>Estado</th><th>Total</th><th>Fecha</th><th>Hora</th></tr></thead><tbody>';
   orders.forEach(o => {
-    const isoStr = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
+    const isoStr = (o.created_at && o.created_at.endsWith('Z')) ? o.created_at : (o.created_at || '') + 'Z';
     const dateObj = new Date(isoStr);
     const localTime = dateObj.toLocaleTimeString(_locale, {hour: '2-digit', minute: '2-digit'});
     const localDate = dateObj.toLocaleDateString(_locale, {day: '2-digit', month: 'short', year: 'numeric'});
@@ -445,14 +454,14 @@ function renderOrders(orders) {
 
     const origenBadge = o.type === 'mesa'
       ? '<span class="badge" style="background:#E1F5EE;color:#0F6E56;">🪑 Salón</span>'
-      : `<span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">🛵 ${o.type}</span>`;
+      : `<span class="badge ${o.type==='domicilio'?'badge-delivery':'badge-pickup'}">🛵 ${_escHtml(o.type)}</span>`;
     const stFormat = (o.status || 'pendiente').replace(/_/g, ' ').toUpperCase();
 
     html += `<tr>
-      <td style="font-weight:500;font-size:12px;">${o.id.substring(0,8)}</td>
-      <td style="color:#555;font-size:12px;max-width:300px;">${itemsStr}</td>
+      <td style="font-weight:500;font-size:12px;">${_escHtml(o.id.substring(0,8))}</td>
+      <td style="color:#555;font-size:12px;max-width:300px;">${_escHtml(itemsStr)}</td>
       <td>${origenBadge}</td>
-      <td><span class="badge" style="background:#f0f0e8;color:#555;">${stFormat}</span></td>
+      <td><span class="badge" style="background:#f0f0e8;color:#555;">${_escHtml(stFormat)}</span></td>
       <td style="font-weight:700;">${fmt(o.total)}</td>
       <td style="color:#888;">${localDate}</td>
       <td style="color:#888;">${localTime}</td>
@@ -486,12 +495,12 @@ function renderReservations(reservations) {
   let html = '<table><thead><tr><th>Nombre</th><th>Fecha</th><th>Hora</th><th>Personas</th><th>Teléfono</th><th>Notas</th></tr></thead><tbody>';
   reservations.forEach(r => {
     html += `<tr>
-      <td style="font-weight:500;">${r.name}</td>
-      <td>${r.date}</td>
-      <td>${r.time}</td>
+      <td style="font-weight:500;">${_escHtml(r.name)}</td>
+      <td>${_escHtml(r.date)}</td>
+      <td>${_escHtml(r.time)}</td>
       <td>${r.guests}</td>
-      <td style="color:#888;font-size:12px;">${r.phone}</td>
-      <td style="color:#888;font-size:12px;">${r.notes || '—'}</td>
+      <td style="color:#888;font-size:12px;">${_escHtml(r.phone)}</td>
+      <td style="color:#888;font-size:12px;">${_escHtml(r.notes) || '—'}</td>
     </tr>`;
   });
   html += '</tbody></table>';
@@ -514,11 +523,11 @@ function renderConversations(conversations) {
   if (cAvg) cAvg.textContent = avg;
 
   container.innerHTML = conversations.map(c => `
-    <div class="conv-row" onclick="openChat('${c.phone}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
-      <div class="conv-avatar">${c.phone.slice(-4)}</div>
+    <div class="conv-row" onclick="openChat('${_escHtml(c.phone)}')" style="cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f5f5f0'" onmouseout="this.style.background=''">
+      <div class="conv-avatar">${_escHtml(c.phone.slice(-4))}</div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:500;">${c.phone}</div>
-        <div style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">${c.preview}</div>
+        <div style="font-size:13px;font-weight:500;">${_escHtml(c.phone)}</div>
+        <div style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:500px;">${_escHtml(c.preview)}</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <div style="font-size:11px;color:#aaa;white-space:nowrap;">${c.messages} mensajes</div>
@@ -575,7 +584,7 @@ async function loadChatHistory(phone) {
     container.innerHTML = msgs.map(m => {
       const isUser = m.role === 'user';
       const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      return `<div class="msg-bubble ${isUser ? 'user' : ''}"><div class="bubble ${isUser ? 'user' : 'bot'}">${content}</div></div>`;
+      return `<div class="msg-bubble ${isUser ? 'user' : ''}"><div class="bubble ${isUser ? 'user' : 'bot'}">${_escHtml(content)}</div></div>`;
     }).join('');
     container.scrollTop = container.scrollHeight;
   } catch(e) { console.error('loadChatHistory:', e); }

@@ -3,6 +3,12 @@
    app/static/dashboard-features.js
 ═══════════════════════════════════════════════════ */
 
+// ── HTML escape helper (XSS prevention for innerHTML patterns) ───────
+function _escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // ── MENÚ ─────────────────────────────────────────────────────────────
 let menuAvailability = {};
 let MENU_ITEMS = [];
@@ -76,7 +82,7 @@ function renderMenu() {
 
     return `<div class="menu-category">
       <div class="menu-cat-header" onclick="toggleCat(this)">
-        <div class="menu-cat-title"><span>${displayCat}</span><span class="menu-cat-meta">${avail}/${items.length} disponibles</span></div>
+        <div class="menu-cat-title"><span>${_escHtml(displayCat)}</span><span class="menu-cat-meta">${avail}/${items.length} disponibles</span></div>
         <span class="menu-cat-arrow ${isOpen?'open':''}">▼</span>
       </div>
       <div class="menu-cat-body ${isOpen?'open':''}">
@@ -84,8 +90,8 @@ function renderMenu() {
           const av = menuAvailability[m.name] !== false;
           const safe = m.name.replace(/'/g,"\\'");
           return `<div class="menu-row" style="${av?'':'opacity:.55;'}">
-            <div style="flex:1;min-width:0;"><div class="menu-row-name" style="${av?'':'text-decoration:line-through;color:#bbb;'}">${m.name}</div></div>
-            <div class="menu-row-price">${m.price}</div>
+            <div style="flex:1;min-width:0;"><div class="menu-row-name" style="${av?'':'text-decoration:line-through;color:#bbb;'}">${_escHtml(m.name)}</div></div>
+            <div class="menu-row-price">${_escHtml(m.price)}</div>
             <div class="menu-row-status ${av?'status-on':'status-off'}">${av?'Disponible':'No disponible'}</div>
             <label class="toggle-switch"><input type="checkbox" ${av?'checked':''} onchange="toggleDish('${safe}',this.checked)"><span class="toggle-slider"></span></label>
           </div>`;
@@ -395,8 +401,8 @@ async function loadTables() {
     grid.innerHTML = tables.map(t => `
       <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;text-align:center;">
         <div style="font-size:28px;margin-bottom:6px;">🪑</div>
-        <div style="font-size:15px;font-weight:600;margin-bottom:2px;">${t.name}</div>
-        <div style="font-size:11px;color:#888;margin-bottom:12px;">ID: ${t.id}</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:2px;">${_escHtml(t.name)}</div>
+        <div style="font-size:11px;color:#888;margin-bottom:12px;">ID: ${_escHtml(t.id)}</div>
         <div id="qr-${t.id}" style="width:120px;height:120px;margin:0 auto 10px;"></div>
         <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
           <a href="/api/tables/${t.id}/qr-sheet" target="_blank" style="font-size:11px;padding:5px 10px;background:#E1F5EE;color:#0F6E56;border-radius:6px;text-decoration:none;font-weight:500;">🖨️ Imprimir QR</a>
@@ -510,8 +516,8 @@ function renderBranches(branches) {
     <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;margin-bottom:12px;overflow:hidden;">
       <div data-branch-id="${b.id}" style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:0.5px solid #f0f0e8;flex-wrap:wrap;gap:8px;">
         <div>
-          <div style="font-size:15px;font-weight:600;">${b.name}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${cleanWa}</span>${b.address||''}</div>
+          <div style="font-size:15px;font-weight:600;">${_escHtml(b.name)}</div>
+          <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${_escHtml(cleanWa)}</span>${_escHtml(b.address||'')}</div>
         </div>
         <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Añadir Admin</button>
       </div>
@@ -554,13 +560,13 @@ async function loadBranchUsers(branchId) {
         return `
         <div style="display:flex;align-items:center;gap:12px;background:#f8f8f5;border-radius:8px;padding:8px 12px;width:100%;max-width:340px;justify-content:space-between;border:1px solid #f0f0e8;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:34px;height:34px;border-radius:50%;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#555;">${displayName[0].toUpperCase()}</div>
+            <div style="width:34px;height:34px;border-radius:50%;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#555;">${_escHtml(displayName[0].toUpperCase())}</div>
             <div>
-              <div style="font-size:13px;font-weight:600;color:#333;">${displayName}</div>
+              <div style="font-size:13px;font-weight:600;color:#333;">${_escHtml(displayName)}</div>
               <div style="font-size:11px;color:#888;margin-top:2px;">🛡️ Administrador</div>
             </div>
           </div>
-          <button onclick="deleteUser('${u.username}')" style="background:#FDE8E8;border:none;color:#C0392B;border-radius:6px;font-size:16px;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">×</button>
+          <button onclick="deleteUser('${(u.username||'').replace(/'/g,"\\'")}')" style="background:#FDE8E8;border:none;color:#C0392B;border-radius:6px;font-size:16px;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">×</button>
         </div>`;
       }).join('') + '</div>';
   } catch(e) {}
@@ -892,18 +898,22 @@ async function loadSessions() {
     </tr></thead><tbody>`;
     sessions.forEach(s => {
       const warn = s.closed_by === 'waiter_manual';
+      const safeTableName = (s.table_name||'').replace(/'/g,"\\'");
+      const safeBotNumber = (s.bot_number||'').replace(/'/g,"\\'");
+      const safePhone     = (s.phone||'').replace(/'/g,"\\'");
+      const safeTableId   = (s.table_id||'').replace(/'/g,"\\'");
       html += `<tr class="${warn ? 'ses-warn-row' : ''}">
-        <td style="font-weight:500;">${s.table_name||'—'}</td>
-        <td style="color:#888;font-size:11px;">${s.phone}</td>
+        <td style="font-weight:500;">${_escHtml(s.table_name||'—')}</td>
+        <td style="color:#888;font-size:11px;">${_escHtml(s.phone)}</td>
         <td style="color:#888;">${fmtTime(s.started_at)}</td>
         <td style="color:#888;">${fmtTime(s.closed_at)}</td>
         <td>${fmtDur(s.started_at, s.closed_at)}</td>
         <td>${reasonBadge(s.closed_by)}</td>
-        <td style="font-size:12px;${warn?'color:#BA7517;font-weight:500;':'color:#888;'}">${s.closed_by_username||'—'}${warn?' ⚠️':''}</td>
+        <td style="font-size:12px;${warn?'color:#BA7517;font-weight:500;':'color:#888;'}">${_escHtml(s.closed_by_username||'—')}${warn?' ⚠️':''}</td>
         <td style="font-weight:500;">${s.total_spent?'$'+Number(s.total_spent).toLocaleString('es-CO'):'—'}</td>
         <td>
           ${!s.total_spent
-            ? `<button onclick="callWaiterAdmin('${s.bot_number||''}','${s.phone}','${(s.table_name||'').replace(/'/g,"\\'")}','${s.table_id||''}')"
+            ? `<button onclick="callWaiterAdmin('${safeBotNumber}','${safePhone}','${safeTableName}','${safeTableId}')"
                 style="font-size:11px;padding:4px 9px;background:#FFF8E6;color:#BA7517;border:1px solid #FDE68A;border-radius:6px;cursor:pointer;font-weight:500;">
                 📞 Llamar al Mesero
               </button>`
@@ -938,23 +948,42 @@ async function viewSession(id, tableName, phone, closedBy) {
     const msgs    = d.history  || [];
     const reason  = CLOSE_REASON[session.closed_by] || { text:session.closed_by||'?', icon:'❓' };
     const infoEl  = document.getElementById('ses-close-info');
-    infoEl.innerHTML = `Cerrada por: <strong>${reason.icon} ${reason.text}</strong>`
-      + (session.closed_by_username ? ` · usuario: <strong>${session.closed_by_username}</strong>` : '')
-      + ` · duración: ${fmtDur(session.started_at, session.closed_at)}`
-      + (session.total_spent ? ` · total: <strong>$${Number(session.total_spent).toLocaleString('es-CO')}</strong>` : '');
+    infoEl.textContent = '';
+    const _addBold = (parent, txt) => { const b = document.createElement('strong'); b.textContent = txt; parent.appendChild(b); };
+    const _addText = (parent, txt) => parent.appendChild(document.createTextNode(txt));
+    _addText(infoEl, 'Cerrada por: '); _addBold(infoEl, `${reason.icon} ${reason.text}`);
+    if (session.closed_by_username) { _addText(infoEl, ' · usuario: '); _addBold(infoEl, session.closed_by_username); }
+    _addText(infoEl, ` · duración: ${fmtDur(session.started_at, session.closed_at)}`);
+    if (session.total_spent) { _addText(infoEl, ' · total: '); _addBold(infoEl, `$${Number(session.total_spent).toLocaleString('es-CO')}`); }
     const chatEl = document.getElementById('ses-modal-msgs');
     if (!msgs.length) {
-      chatEl.innerHTML = '<div style="text-align:center;font-size:12px;color:#888;padding:1rem;">Historial no disponible.</div>';
+      chatEl.textContent = '';
+      const emptyDiv = document.createElement('div');
+      emptyDiv.style.cssText = 'text-align:center;font-size:12px;color:#888;padding:1rem;';
+      emptyDiv.textContent = 'Historial no disponible.';
+      chatEl.appendChild(emptyDiv);
       return;
     }
-    chatEl.innerHTML = msgs.map(m => {
+    chatEl.textContent = '';
+    msgs.forEach(m => {
       const isUser = m.role === 'user';
       const text   = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      return `<div class="msg-bubble ${isUser?'user':''}"><div class="bubble ${isUser?'user':'bot'}">${text}</div></div>`;
-    }).join('');
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-bubble' + (isUser ? ' user' : '');
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble ' + (isUser ? 'user' : 'bot');
+      bubble.textContent = text;
+      wrap.appendChild(bubble);
+      chatEl.appendChild(wrap);
+    });
     chatEl.scrollTop = chatEl.scrollHeight;
   } catch(e) {
-    document.getElementById('ses-modal-msgs').innerHTML = '<div style="text-align:center;font-size:12px;color:#888;padding:1rem;">Error al cargar.</div>';
+    const errEl = document.getElementById('ses-modal-msgs');
+    errEl.textContent = '';
+    const errDiv = document.createElement('div');
+    errDiv.style.cssText = 'text-align:center;font-size:12px;color:#888;padding:1rem;';
+    errDiv.textContent = 'Error al cargar.';
+    errEl.appendChild(errDiv);
   }
 }
 
@@ -1195,7 +1224,7 @@ async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
     );
     const sugerencias = JSON.parse(raw.replace(/```json|```/g,'').trim());
     const upsellHtml = sugerencias.map(s => `
-      <div class="upsell-card"><span class="upsell-icon">${s.icon}</span><span class="upsell-text">${s.texto}</span><span class="upsell-badge">${s.ganancia}</span></div>`).join('');
+      <div class="upsell-card"><span class="upsell-icon">${_escHtml(s.icon)}</span><span class="upsell-text">${_escHtml(s.texto)}</span><span class="upsell-badge">${_escHtml(s.ganancia)}</span></div>`).join('');
     document.getElementById('upsell-container').innerHTML = upsellHtml;
     if (posCache.data) posCache.data.upsells = upsellHtml;
   } catch(e) { document.getElementById('upsell-container').innerHTML = '<div class="empty-state">Conecta más pedidos.</div>'; }
@@ -1218,7 +1247,7 @@ async function askMesioAI() {
         messages:[{ role:'user', content:question }] })
     });
     const d = await resp.json();
-    responseDiv.innerHTML = '✦ ' + (d.content?.[0]?.text || 'No pude procesar.');
+    responseDiv.innerHTML = '✦ ' + _escHtml(d.content?.[0]?.text || 'No pude procesar.');
   } catch(e) { responseDiv.textContent = 'Error al conectar.'; }
   btn.textContent = 'Preguntar a Mesio IA →'; btn.disabled = false;
 }
@@ -1344,13 +1373,13 @@ async function loadTableOrdersSection() {
           const stFormat = (o.status || 'pendiente').replace(/_/g,' ').toUpperCase();
           const nextStatus = getNextDeliveryStatus(o.status);
           domHtml += `<tr>
-            <td style="font-size:12px;">${o.phone || '—'}</td>
-            <td style="color:#555;font-size:12px;max-width:200px;">${itemsStr}</td>
-            <td style="font-size:11px;color:#888;max-width:150px;">${o.address || (o.type === 'recoger' ? '🏠 Recoger' : '—')}</td>
-            <td style="font-size:11px;color:#0F6E56;font-weight:500;">${o.payment_method || '—'}</td>
-            <td><span class="badge" style="background:#E6F1FB;color:#185FA5;">${stFormat}</span></td>
+            <td style="font-size:12px;">${_escHtml(o.phone) || '—'}</td>
+            <td style="color:#555;font-size:12px;max-width:200px;">${_escHtml(itemsStr)}</td>
+            <td style="font-size:11px;color:#888;max-width:150px;">${_escHtml(o.address) || (o.type === 'recoger' ? '🏠 Recoger' : '—')}</td>
+            <td style="font-size:11px;color:#0F6E56;font-weight:500;">${_escHtml(o.payment_method) || '—'}</td>
+            <td><span class="badge" style="background:#E6F1FB;color:#185FA5;">${_escHtml(stFormat)}</span></td>
             <td style="font-weight:700;">${fmt(o.total)}</td>
-            <td>${nextStatus ? `<button onclick="updateDeliveryStatus('${o.id}','${nextStatus.status}')" style="font-size:11px;padding:4px 8px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">${nextStatus.label}</button>` : '<span style="font-size:11px;color:#888;">—</span>'}</td>
+            <td>${nextStatus ? `<button onclick="updateDeliveryStatus('${_escHtml(o.id)}','${_escHtml(nextStatus.status)}')" style="font-size:11px;padding:4px 8px;background:#1D9E75;color:#fff;border:none;border-radius:6px;cursor:pointer;">${_escHtml(nextStatus.label)}</button>` : '<span style="font-size:11px;color:#888;">—</span>'}</td>
           </tr>`;
         });
         domHtml += '</tbody></table>';
@@ -1367,9 +1396,9 @@ async function loadTableOrdersSection() {
         html += '<div style="font-size:13px;font-weight:bold;margin-bottom:10px;color:#6B21A8;">🧾 PENDIENTES DE FACTURA / PAGO</div>';
         html += '<table><thead><tr><th>Mesa</th><th>Platos Consolidados</th><th>Total</th><th>Acción</th></tr></thead><tbody>';
         groupedBills.forEach(b => {
-          const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+i.name).join(', ');
+          const itemsJoined = b.items.map(i => (i.quantity||1)+'x '+_escHtml(i.name)).join(', ');
           html += `<tr>
-            <td style="font-weight:600;">${b.table_name||'—'}</td>
+            <td style="font-weight:600;">${_escHtml(b.table_name||'—')}</td>
             <td style="color:#555;font-size:12px;max-width:300px;">${itemsJoined}</td>
             <td style="font-weight:700;color:#6B21A8;">${fmt(b.total)}</td>
             <td><button onclick="markTableInvoiced('${b.id}')" style="font-size:11px;padding:5px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;cursor:pointer;">Cobrar</button></td>
@@ -1384,8 +1413,8 @@ async function loadTableOrdersSection() {
           let items = '';
           try {
             const arr = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
-            items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${i.name||''}`).join(', ') : String(o.items);
-          } catch(e) { items = String(o.items||'—'); }
+            items = Array.isArray(arr) ? arr.map(i => `${i.quantity||1}× ${_escHtml(i.name||'')}`).join(', ') : _escHtml(String(o.items));
+          } catch(e) { items = _escHtml(String(o.items||'—')); }
           const isoStr = (o.created_at||'').endsWith('Z') ? o.created_at : (o.created_at||'')+'Z';
           const hora = new Date(isoStr).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
           const st    = o.status || 'recibido';
@@ -1394,11 +1423,11 @@ async function loadTableOrdersSection() {
           const label = STATUS_LABEL[st] || st;
           const nextSt = getNextTableStatus(st);
           html += `<tr>
-            <td style="font-weight:600;">${o.table_name||'—'}</td>
+            <td style="font-weight:600;">${_escHtml(o.table_name||'—')}</td>
             <td style="color:#555;font-size:12px;max-width:280px;">${items}</td>
-            <td><span style="font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;background:${bg};color:${color};">${label}</span></td>
+            <td><span style="font-size:11px;padding:3px 8px;border-radius:10px;font-weight:500;background:${bg};color:${color};">${_escHtml(label)}</span></td>
             <td style="color:#888;">${hora}</td>
-            <td>${nextSt ? `<button onclick="updateTableOrderStatus('${o.id}','${nextSt.status}')" style="font-size:11px;padding:4px 8px;background:#378ADD;color:#fff;border:none;border-radius:6px;cursor:pointer;">${nextSt.label}</button>` : ''}</td>
+            <td>${nextSt ? `<button onclick="updateTableOrderStatus('${o.id}','${nextSt.status}')" style="font-size:11px;padding:4px 8px;background:#378ADD;color:#fff;border:none;border-radius:6px;cursor:pointer;">${_escHtml(nextSt.label)}</button>` : ''}</td>
           </tr>`;
         });
         html += '</tbody></table>';
@@ -1673,4 +1702,285 @@ async function _loadStaffBranchesSelect() {
   } catch (e) {
     console.error('Error al cargar el selector de sucursales en Staff:', e);
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// RESERVACIONES
+// ══════════════════════════════════════════════════════════════
+
+let _resData = [];
+
+function loadReservationsSection() {
+  const input = document.getElementById('res-date');
+  if (!input) return;
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm   = String(today.getMonth() + 1).padStart(2, '0');
+  const dd   = String(today.getDate()).padStart(2, '0');
+  input.value = `${yyyy}-${mm}-${dd}`;
+  _resLoadDay();
+}
+
+function _resNavDay(delta) {
+  const input = document.getElementById('res-date');
+  if (!input || !input.value) return;
+  const d = new Date(input.value + 'T00:00:00');
+  d.setDate(d.getDate() + delta);
+  const yyyy = d.getFullYear();
+  const mm   = String(d.getMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getDate()).padStart(2, '0');
+  input.value = `${yyyy}-${mm}-${dd}`;
+  _resLoadDay();
+}
+
+async function _resLoadDay() {
+  const input  = document.getElementById('res-date');
+  const filter = document.getElementById('res-status-filter');
+  const list   = document.getElementById('res-list');
+  if (!input || !list) return;
+
+  const date   = input.value;
+  const status = filter ? filter.value : '';
+
+  list.innerHTML = '<div class="empty-state" style="padding:2rem;text-align:center;color:#aaa;">Cargando...</div>';
+
+  let url = `/api/reservations?date_from=${date}&date_to=${date}`;
+  if (status) url += `&status=${encodeURIComponent(status)}`;
+
+  try {
+    const r = await fetch(url, { headers: window._dashHeaders });
+    if (r.ok) {
+      const data = await r.json();
+      _resData = data.reservations || data || [];
+    } else {
+      _resData = [];
+    }
+  } catch (e) {
+    console.error('_resLoadDay fetch:', e);
+    _resData = [];
+  }
+
+  _resRender();
+
+  // Fetch stats for the day
+  try {
+    const rs = await fetch(
+      `/api/reservations/stats?period_start=${date}&period_end=${date}`,
+      { headers: window._dashHeaders }
+    );
+    if (rs.ok) {
+      const stats = await rs.json();
+      _resRenderStats(stats);
+    } else {
+      _resRenderStats(null);
+    }
+  } catch (e) {
+    console.error('_resLoadDay stats:', e);
+    _resRenderStats(null);
+  }
+}
+
+function _resStatusColor(status) {
+  const map = {
+    pending:   '#f59e0b',
+    confirmed: '#22c55e',
+    cancelled: '#ef4444',
+    no_show:   '#f97316',
+    completed: '#3b82f6',
+  };
+  return map[status] || '#9ca3af';
+}
+
+function _resStatusLabel(status) {
+  const map = {
+    pending:   'Pendiente',
+    confirmed: 'Confirmada',
+    cancelled: 'Cancelada',
+    no_show:   'No-Show',
+    completed: 'Completada',
+  };
+  return map[status] || status;
+}
+
+function _resRender() {
+  const list = document.getElementById('res-list');
+  if (!list) return;
+
+  // Clear safely
+  while (list.firstChild) list.removeChild(list.firstChild);
+
+  if (!_resData.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.style.cssText = 'padding:2rem;text-align:center;color:#aaa;font-size:14px;';
+    empty.textContent = 'No hay reservaciones para este día.';
+    list.appendChild(empty);
+    return;
+  }
+
+  _resData.forEach(res => {
+    // Outer card
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.cssText = 'padding:16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;';
+
+    // Left info block
+    const info = document.createElement('div');
+    info.style.flex = '1';
+
+    // Name + guests
+    const nameLine = document.createElement('div');
+    nameLine.style.marginBottom = '4px';
+    const nameStrong = document.createElement('strong');
+    nameStrong.textContent = res.name || res.customer_name || '—';
+    nameLine.appendChild(nameStrong);
+    const guestsSpan = document.createElement('span');
+    guestsSpan.textContent = ` — ${res.guests || res.party_size || '?'} persona${(res.guests || res.party_size || 1) !== 1 ? 's' : ''}`;
+    nameLine.appendChild(guestsSpan);
+    info.appendChild(nameLine);
+
+    // Time + phone
+    const subLine = document.createElement('div');
+    subLine.style.cssText = 'color:var(--text-secondary,#6b7280);font-size:13px;margin-bottom:6px;';
+    const timeStr = res.time || res.reservation_time || res.scheduled_at || '';
+    const phoneStr = res.phone || res.customer_phone || '';
+    subLine.textContent = [timeStr, phoneStr].filter(Boolean).join(' · ');
+    info.appendChild(subLine);
+
+    // Status badge
+    const badge = document.createElement('span');
+    badge.style.cssText = `display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;background:${_resStatusColor(res.status)}22;color:${_resStatusColor(res.status)};`;
+    badge.textContent = _resStatusLabel(res.status);
+    info.appendChild(badge);
+
+    // Table info
+    if (res.table_id || res.table_number) {
+      const tableSpan = document.createElement('span');
+      tableSpan.style.cssText = 'font-size:13px;color:var(--text-secondary,#6b7280);margin-left:8px;';
+      tableSpan.textContent = `· Mesa: ${res.table_number || res.table_id}`;
+      info.appendChild(tableSpan);
+    }
+
+    // Notes
+    if (res.notes) {
+      const noteEl = document.createElement('div');
+      noteEl.style.cssText = 'font-size:12px;color:var(--text-secondary,#6b7280);margin-top:6px;';
+      noteEl.textContent = res.notes;
+      info.appendChild(noteEl);
+    }
+
+    card.appendChild(info);
+
+    // Right actions block
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
+
+    const id = res.id;
+    const st = res.status;
+
+    if (st === 'pending') {
+      const btnConfirm = document.createElement('button');
+      btnConfirm.className = 'btn-sm';
+      btnConfirm.style.cssText = 'background:#22c55e;color:#fff;border-color:#22c55e;';
+      btnConfirm.textContent = '✓ Confirmar';
+      btnConfirm.onclick = () => _resAction(id, 'confirmed');
+      actions.appendChild(btnConfirm);
+    }
+
+    if (st === 'pending' || st === 'confirmed') {
+      const btnCancel = document.createElement('button');
+      btnCancel.className = 'btn-sm';
+      btnCancel.style.cssText = 'background:#ef4444;color:#fff;border-color:#ef4444;';
+      btnCancel.textContent = '✗ Cancelar';
+      btnCancel.onclick = () => _resAction(id, 'cancelled');
+      actions.appendChild(btnCancel);
+    }
+
+    if (st === 'confirmed') {
+      const btnNoShow = document.createElement('button');
+      btnNoShow.className = 'btn-sm';
+      btnNoShow.textContent = 'No-Show';
+      btnNoShow.onclick = () => _resAction(id, 'no_show');
+      actions.appendChild(btnNoShow);
+
+      const btnDone = document.createElement('button');
+      btnDone.className = 'btn-sm';
+      btnDone.style.cssText = 'background:#3b82f6;color:#fff;border-color:#3b82f6;';
+      btnDone.textContent = 'Completada';
+      btnDone.onclick = () => _resAction(id, 'completed');
+      actions.appendChild(btnDone);
+    }
+
+    card.appendChild(actions);
+    list.appendChild(card);
+  });
+}
+
+async function _resAction(id, newStatus) {
+  try {
+    const r = await fetch(`/api/reservations/${id}/status`, {
+      method: 'PUT',
+      headers: { ...window._dashHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(err.detail || `Error al actualizar reservación (HTTP ${r.status})`);
+      return;
+    }
+  } catch (e) {
+    console.error('_resAction:', e);
+    alert('Error de red al actualizar la reservación.');
+    return;
+  }
+  _resLoadDay();
+}
+
+function _resRenderStats(stats) {
+  const el = document.getElementById('res-stats');
+  if (!el) return;
+
+  // Clear safely
+  while (el.firstChild) el.removeChild(el.firstChild);
+
+  if (!stats) return;
+
+  const total      = stats.total      ?? _resData.length;
+  const confirmed  = stats.confirmed  ?? _resData.filter(r => r.status === 'confirmed').length;
+  const cancelled  = stats.cancelled  ?? _resData.filter(r => r.status === 'cancelled').length;
+  const noShow     = stats.no_show    ?? _resData.filter(r => r.status === 'no_show').length;
+  const avgGuests  = stats.avg_guests ?? (
+    _resData.length
+      ? (_resData.reduce((s, r) => s + (r.guests || r.party_size || 0), 0) / _resData.length).toFixed(1)
+      : '—'
+  );
+  const noShowRate = total > 0
+    ? ((noShow / total) * 100).toFixed(0) + '%'
+    : '0%';
+
+  const statItems = [
+    { label: 'Total',         value: total,       color: '' },
+    { label: 'Confirmadas',   value: confirmed,   color: '#22c55e' },
+    { label: 'Canceladas',    value: cancelled,   color: '#ef4444' },
+    { label: 'No-Shows',      value: noShow,      color: '#f97316' },
+    { label: 'Tasa No-Show',  value: noShowRate,  color: '#f97316' },
+    { label: 'Prom. personas', value: avgGuests,  color: '' },
+  ];
+
+  statItems.forEach(item => {
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--card-bg,#fff);border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:8px 14px;min-width:90px;text-align:center;';
+
+    const val = document.createElement('div');
+    val.style.cssText = `font-size:18px;font-weight:700;${item.color ? 'color:' + item.color + ';' : ''}`;
+    val.textContent = String(item.value);
+
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'font-size:11px;color:var(--text-secondary,#6b7280);margin-top:2px;';
+    lbl.textContent = item.label;
+
+    card.appendChild(val);
+    card.appendChild(lbl);
+    el.appendChild(card);
+  });
 }

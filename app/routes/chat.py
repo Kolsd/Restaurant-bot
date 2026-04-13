@@ -27,8 +27,8 @@ async def _is_rate_limited(phone: str) -> bool:
     async with pool.acquire() as conn:
         # 1. Borrar el historial viejo de este número (mantiene la tabla liviana)
         await conn.execute(
-            f"DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - INTERVAL '{RATE_LIMIT_WINDOW} seconds'",
-            phone
+            "DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - make_interval(secs => $2)",
+            phone, RATE_LIMIT_WINDOW
         )
 
         # 2. Contar cuántos mensajes ha enviado en los últimos N segundos
@@ -48,12 +48,12 @@ def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
     """Verifica X-Hub-Signature-256 de Meta para autenticar el webhook."""
     app_secret = os.getenv("META_APP_SECRET", "")
     if not app_secret:
-        # Si no hay secret configurado, logueamos advertencia pero dejamos pasar
-        # (para no romper instancias en dev que no lo tengan aún)
-        print("⚠️  META_APP_SECRET no configurado — verificación de firma desactivada", flush=True)
-        return True
+        from app.services.logging import get_logger as _get_log  # noqa: PLC0415
+        _get_log(__name__).error("meta.signature.no_secret_configured")
+        return False
     if not signature_header or not signature_header.startswith("sha256="):
-        print("🚨 Webhook rechazado: sin firma X-Hub-Signature-256", flush=True)
+        from app.services.logging import get_logger as _get_log  # noqa: PLC0415
+        _get_log(__name__).warning("meta.signature.missing_or_invalid_header")
         return False
     expected = "sha256=" + hmac.new(
         app_secret.encode(), body, hashlib.sha256

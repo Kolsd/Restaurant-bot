@@ -81,45 +81,23 @@ async def init_db():
 
 # db_init_nps_inventory re-exported below alongside the rest of the inventory module (Fase 6)
 
-# ── RESERVACIONES ────────────────────────────────────────────────────
-async def db_add_reservation(name, date_str, time_str, guests, phone, bot_number: str = "", notes=""):
-    """Insert or update reservation. Updates an existing one for same phone/bot/date/time to prevent duplicates."""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        # Use upsert pattern: delete any earlier reservation for same slot, then insert fresh
-        existing_id = await conn.fetchval(
-            'SELECT id FROM reservations WHERE phone=$1 AND bot_number=$2 AND "date"=$3 AND "time"=$4',
-            phone, bot_number, date_str, time_str
-        )
-        if existing_id:
-            row = await conn.fetchrow(
-                'UPDATE reservations SET name=$1, guests=$2, notes=$3 WHERE id=$4 RETURNING *',
-                name, int(guests), notes, existing_id
-            )
-        else:
-            row = await conn.fetchrow(
-                'INSERT INTO reservations (name, "date", "time", guests, phone, bot_number, notes) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-                name, date_str, time_str, int(guests), phone, bot_number, notes
-            )
-        return _serialize(dict(row))
-
-async def db_get_reservations_range(date_from: str, date_to: str, bot_number: str = None):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        if bot_number:
-            rows = await conn.fetch("SELECT * FROM reservations WHERE date >= $1 AND date <= $2 AND bot_number=$3 ORDER BY date, time", date_from, date_to, bot_number)
-        else:
-            rows = await conn.fetch("SELECT * FROM reservations WHERE date >= $1 AND date <= $2 ORDER BY date, time", date_from, date_to)
-        return [_serialize(dict(r)) for r in rows]
-
-async def db_get_all_reservations(bot_number: str = None):
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        if bot_number:
-            rows = await conn.fetch("SELECT * FROM reservations WHERE bot_number=$1 ORDER BY created_at DESC", bot_number)
-        else:
-            rows = await conn.fetch("SELECT * FROM reservations ORDER BY created_at DESC")
-        return [_serialize(dict(r)) for r in rows]
+# === Reservations: moved to app.repositories.reservations_repo (Apparta integration) ===
+from app.repositories.reservations_repo import (
+    db_add_reservation,
+    db_get_reservations_range,
+    db_get_all_reservations,
+    db_get_reservation_by_id,
+    db_update_reservation_status,
+    db_get_available_tables,
+    db_assign_table_to_reservation,
+    db_mark_no_show,
+    db_cancel_reservation,
+    db_get_reservations_by_status,
+    db_get_reservation_stats,
+    db_confirm_reservation,
+    db_get_upcoming_unconfirmed,
+    db_mark_confirmation_sent,
+)
 
 
 # ── ORDENES DELIVERY ─────────────────────────────────────────────────
@@ -1232,6 +1210,9 @@ from app.repositories.tables_repo import (
     db_list_checkout_proposals,
     db_cancel_checkout_proposal,
     db_get_check_ticket,
+    db_update_table_properties,
+    db_update_table_position,
+    db_get_floor_plan,
 )
 
 
