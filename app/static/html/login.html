@@ -1,169 +1,568 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — Acceso</title>
-<link rel="stylesheet" href="/static/css/tokens.css">
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 16px; padding: 2rem; width: 100%; max-width: 380px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-  .logo { width: 44px; height: 44px; background: #1D9E75; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 18px; margin-bottom: 1.5rem; }
-  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; color: #111; }
-  .sub { font-size: 14px; color: #6B7280; margin-bottom: 1.5rem; }
-  label { font-size: 13px; color: #4B5563; display: block; margin-bottom: 4px; font-weight: 500; }
-  input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; outline: none; margin-bottom: 1rem; transition: border-color 0.2s; }
-  input:focus { border-color: #1D9E75; }
-  button { width: 100%; padding: 12px; background: #1D9E75; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-  button:hover { opacity: 0.9; }
-  .error { font-size: 13px; color: #c0392b; background: #fdf0ef; border-radius: 8px; padding: 10px 12px; margin-bottom: 1rem; display: none; }
-  .footer { text-align: center; font-size: 12px; color: #9CA3AF; margin-top: 1.5rem; }
-  
-  /* Estilos para el Hub Multirol */
-  .role-btn { margin-bottom: 10px; border: 1px solid transparent; }
-  .role-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.05); opacity: 1; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesio — Acceso</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(160deg, #0a5c44 0%, #1D9E75 60%, #25c48f 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 22px;
+      padding: 2.5rem 2rem 2rem;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.22);
+    }
+
+    /* ── Shared header ── */
+    .view-header { text-align: center; margin-bottom: 2rem; }
+
+    .logo {
+      width: 60px; height: 60px;
+      background: #1D9E75;
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 800; font-size: 24px;
+      margin: 0 auto 1.25rem;
+      box-shadow: 0 4px 16px rgba(29,158,117,.35);
+    }
+
+    h1 { font-size: 22px; font-weight: 700; color: #111; }
+    .restaurant-name { font-size: 15px; font-weight: 600; color: #1D9E75; margin-top: 4px; }
+    .sub { font-size: 13px; color: #6B7280; margin-top: 6px; }
+
+    /* ── Form fields ── */
+    .field { margin-bottom: 1.1rem; }
+    label {
+      font-size: 12px; font-weight: 600; color: #666;
+      display: block; margin-bottom: 6px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    input {
+      width: 100%; padding: 12px 14px;
+      border: 1.5px solid #e8e8e0;
+      border-radius: 11px;
+      font-size: 15px; color: #111;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      background: #fafaf8;
+    }
+    input:focus {
+      border-color: #1D9E75;
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(29,158,117,0.12);
+    }
+
+    /* ── Error message ── */
+    .error {
+      font-size: 13px; color: #c0392b;
+      background: #fdf0ef;
+      border: 1px solid #f5c6c6;
+      border-radius: 9px;
+      padding: 10px 14px;
+      margin-bottom: 1rem;
+      display: none;
+    }
+
+    /* ── Buttons ── */
+    .btn-primary {
+      width: 100%; padding: 14px;
+      background: #1D9E75; color: #fff;
+      border: none; border-radius: 11px;
+      font-size: 15px; font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      margin-top: 4px;
+      letter-spacing: 0.01em;
+    }
+    .btn-primary:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
+    .btn-primary:active:not(:disabled) { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .btn-ghost {
+      width: 100%; padding: 11px;
+      background: none; color: #aaa;
+      border: 1.5px solid #e8e8e0;
+      border-radius: 11px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; margin-top: 14px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-ghost:hover { background: #f5f5f0; color: #555; }
+
+    /* ── Restaurant selector ── */
+    .restaurant-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .restaurant-tile {
+      display: block;
+      padding: 1rem 1.25rem;
+      border-radius: 12px;
+      background: #f0faf6;
+      color: #0F6E56;
+      border: 2px solid transparent;
+      text-align: left;
+      cursor: pointer;
+      font-size: 15px; font-weight: 600;
+      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+      text-decoration: none;
+    }
+    .restaurant-tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+      border-color: #1D9E75;
+    }
+
+    /* ── Role grid ── */
+    .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .role-tile {
+      display: block;
+      padding: 1.3rem 1rem;
+      border-radius: 14px;
+      text-align: center;
+      cursor: pointer;
+      text-decoration: none;
+      border: 2px solid transparent;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .role-tile:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+    }
+    .tile-icon { font-size: 30px; margin-bottom: 6px; display: block; }
+    .tile-name { font-size: 13px; font-weight: 700; display: block; }
+
+    /* ── Footer ── */
+    .footer { text-align: center; font-size: 11px; color: #9CA3AF; margin-top: 1.75rem; }
+
+    /* ── View visibility ── */
+    .view { display: none; }
+    .view.active { display: block; }
+  </style>
 </head>
 <body>
-
 <div class="card">
-  <div id="login-form">
-    <div class="logo">M</div>
-    <h1>Bienvenido</h1>
-    <p class="sub">Ingresa a tu panel de control</p>
-    <div class="error" id="error-msg"></div>
-    <form onsubmit="event.preventDefault(); doLogin();">
-      <label for="username">Email o Nombre de Empleado</label>
-      <input type="text" id="username" name="username" placeholder="usuario@email.com o Nombre" autocomplete="username" />
-      <label for="password">Contraseña</label>
-      <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" />
-      <button type="submit">Ingresar</button>
+
+  <!-- VIEW 1: LOGIN FORM -->
+  <div id="login-view" class="view active">
+    <div class="view-header">
+      <div class="logo" aria-hidden="true">M</div>
+      <h1>Bienvenido a Mesio</h1>
+      <div id="restaurant-name-el" class="restaurant-name" style="display:none;"></div>
+      <p class="sub">Ingresa con tu email o nombre</p>
+    </div>
+
+    <div id="error-msg" class="error" role="alert" aria-live="polite"></div>
+
+    <form id="login-form" novalidate>
+      <div class="field">
+        <label for="username">Email o nombre</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          placeholder="usuario@email.com o Tu nombre"
+          autocomplete="username"
+          inputmode="text"
+        />
+      </div>
+      <div class="field">
+        <label for="password">Contrase&ntilde;a</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
+          autocomplete="current-password"
+        />
+      </div>
+      <button type="submit" class="btn-primary" id="login-btn">Ingresar</button>
     </form>
   </div>
 
-  <div id="role-selector" style="display:none; text-align:center;">
-    <div class="logo" style="margin: 0 auto 1.5rem;">M</div>
-    <h1>Selecciona tu Panel</h1>
-    <p class="sub">Tienes acceso a múltiples áreas operativas</p>
-    <div id="role-buttons" style="display:flex; flex-direction:column;"></div>
-    <button onclick="location.reload()" style="background:none; color:#4B5563; border:1px solid #ddd; margin-top:1rem; padding: 8px;">Cerrar sesión</button>
+  <!-- VIEW 2: RESTAURANT SELECTOR (staff in multiple restaurants) -->
+  <div id="restaurant-view" class="view">
+    <div class="view-header">
+      <div class="logo" aria-hidden="true">M</div>
+      <h1>Selecciona tu restaurante</h1>
+      <p class="sub">Tu cuenta est&aacute; en m&uacute;ltiples ubicaciones</p>
+    </div>
+    <div id="error-msg-r" class="error" role="alert" aria-live="polite"></div>
+    <div class="restaurant-grid" id="restaurant-grid" role="list" aria-label="Selecciona restaurante"></div>
+    <button type="button" class="btn-ghost" id="back-from-restaurant">Cambiar usuario</button>
   </div>
 
-  <div class="footer">Mesio · Powered by Claude AI</div>
+  <!-- VIEW 3: ROLE SELECTOR (multi-role staff) -->
+  <div id="role-view" class="view">
+    <div class="view-header">
+      <div class="logo" aria-hidden="true">M</div>
+      <h1 id="welcome-name">&#161;Hola!</h1>
+      <p class="sub">&iquest;A qu&eacute; &aacute;rea vas a entrar hoy?</p>
+    </div>
+    <div class="role-grid" id="role-grid" role="list" aria-label="Selecciona tu rol"></div>
+    <button type="button" class="btn-ghost" id="back-from-role">Cambiar usuario</button>
+  </div>
+
+  <p class="footer">Mesio &middot; Powered by Claude AI</p>
 </div>
 
+<script src="/static/js/mesio-utils.js"></script>
 <script>
-async function doLogin() {
-  const username = document.getElementById('username').value.trim();
-  const password = document.getElementById('password').value.trim();
-  const errorEl = document.getElementById('error-msg');
-  errorEl.style.display = 'none';
-  
-  if (!username || !password) {
-    errorEl.textContent = 'Por favor completa todos los campos';
-    errorEl.style.display = 'block';
-    return;
-  }
-  
-  const loginBtn = document.querySelector('#login-form button');
-  const prevText = loginBtn.textContent;
-  loginBtn.textContent = 'Verificando...';
-  loginBtn.disabled = true;
+(function () {
+  'use strict';
 
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+  /* ── Role metadata ─────────────────────────────────────────────────── */
+  const ROLE_META = {
+    mesero:       { icon: '🍽️', label: 'Mesero',      url: '/mesero',       bg: '#E1F5EE', color: '#0F6E56' },
+    cocina:       { icon: '👨‍🍳', label: 'Cocina',       url: '/cocina',       bg: '#FEF3C7', color: '#92400E' },
+    bar:          { icon: '🍹', label: 'Bar',           url: '/bar',          bg: '#F0E6FF', color: '#6B21A8' },
+    caja:         { icon: '💰', label: 'Caja',          url: '/caja',         bg: '#FFF8E6', color: '#BA7517' },
+    domiciliario: { icon: '🛵', label: 'Domicilios',    url: '/domiciliario', bg: '#E3F2FD', color: '#1565C0' },
+    gerente:      { icon: '📊', label: 'Dashboard',     url: '/dashboard',    bg: '#F3E8FF', color: '#7C3AED' },
+    owner:        { icon: '👑', label: 'Dashboard',     url: '/dashboard',    bg: '#F3E8FF', color: '#7C3AED' },
+    admin:        { icon: '⚙️', label: 'Dashboard',     url: '/dashboard',    bg: '#F3E8FF', color: '#7C3AED' },
+    otro:         { icon: '🔧', label: 'Panel',         url: '/staff-hq',     bg: '#F3F4F6', color: '#555555' },
+  };
+
+  /* ── URL param ?r= ─────────────────────────────────────────────────── */
+  const urlParams    = new URLSearchParams(window.location.search);
+  const restaurantId = urlParams.get('r');  // may be null
+
+  /* ── Transient login state (cleared on back) ────────────────────────── */
+  let _pendingRoles       = [];   // normalized role strings after login
+  let _pendingStaffName   = '';   // raw name from response
+  let _pendingRestaurants = [];   // [{id, name, ...}] if multiple
+  let _loginData          = null; // raw API response
+
+  /* ── Fetch restaurant name if ?r= is present ────────────────────────── */
+  if (restaurantId) {
+    fetch('/api/public/restaurant-info?id=' + encodeURIComponent(restaurantId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.name) {
+          var el = document.getElementById('restaurant-name-el');
+          el.textContent = data.name;          // textContent — safe
+          el.style.display = 'block';
+          document.title = data.name + ' — Mesio';
+        }
+      })
+      .catch(function () {});
+  }
+
+  /* ── View switching ─────────────────────────────────────────────────── */
+  function showView(id) {
+    ['login-view', 'restaurant-view', 'role-view'].forEach(function (v) {
+      document.getElementById(v).classList.toggle('active', v === id);
     });
-    const data = await res.json();
-    
-    if (data.success) {
-      localStorage.setItem('rb_token', data.token);
-      localStorage.setItem('rb_restaurant', JSON.stringify(data.restaurant));
-      if (data.staff_id) localStorage.setItem('rb_staff_id', data.staff_id);
-      else localStorage.removeItem('rb_staff_id');
-      
-      const roleStr = data.restaurant.role || 'owner';
-      const userRole = data.role ? data.role.toLowerCase() : roleStr;
-      
-      // Guardar el rol explícitamente para que la barra de navegación lo lea
-      localStorage.setItem('rb_role', userRole);
-      
-      const roles = userRole.split(','); 
-
-      // helpers de roles
-      const hasRole = (...names) => names.some(n => roles.includes(n));
-
-      // 1. Administrador/Owner → dashboard total
-      if (hasRole('owner', 'admin')) {
-        window.location.href = '/dashboard';
-        return;
-      }
-
-      // 2. Si solo tiene 1 rol → redirige directo
-      if (roles.length === 1) {
-        const r = roles[0];
-        if (r === 'cook'   || r === 'cocina'  || r === 'cocinero')    window.location.href = '/cocina';
-        else if (r === 'waiter' || r === 'mesero')                     window.location.href = '/mesero';
-        else if (r === 'cashier'|| r === 'cajero' || r === 'caja')     window.location.href = '/caja';
-        else if (r === 'delivery'|| r === 'domiciliario')              window.location.href = '/domiciliario';
-        else if (r === 'bar')                                          window.location.href = '/bar';
-        else /* gerente, otros */                                      window.location.href = '/dashboard';
-        return;
-      }
-
-      // 3. Multirol → selector de rol
-      document.getElementById('login-form').style.display = 'none';
-      document.getElementById('role-selector').style.display = 'block';
-
-      const selector = document.getElementById('role-buttons');
-      selector.innerHTML = '';
-
-      function addRoleBtn(label, href, bg, color) {
-        const btn = document.createElement('button');
-        btn.className = 'role-btn';
-        btn.textContent = label;
-        btn.style.background = bg;
-        btn.style.color = color;
-        btn.addEventListener('click', function() { window.location.href = href; });
-        selector.appendChild(btn);
-      }
-
-      if (hasRole('gerente')) {
-        addRoleBtn('Entrar al Dashboard', '/dashboard', '#F0E6FF', '#6B21A8');
-      }
-      if (hasRole('waiter', 'mesero')) {
-        addRoleBtn('Entrar como Mesero', '/mesero', '#E1F5EE', '#0F6E56');
-      }
-      if (hasRole('cashier', 'cajero', 'caja')) {
-        addRoleBtn('Entrar a Caja', '/caja', '#FFF8E6', '#BA7517');
-      }
-      if (hasRole('cook', 'cocina', 'cocinero')) {
-        addRoleBtn('Entrar a Cocina', '/cocina', '#FAEEDA', '#854F0B');
-      }
-      if (hasRole('delivery', 'domiciliario')) {
-        addRoleBtn('Entrar a Domicilios', '/domiciliario', '#E3F2FD', '#1565C0');
-      }
-      if (hasRole('bar')) {
-        addRoleBtn('Entrar a Bar', '/bar', '#FEF3C7', '#92400E');
-      }
-
-    } else {
-      errorEl.textContent = data.error || 'Credenciales incorrectas';
-      errorEl.style.display = 'block';
-      loginBtn.textContent = prevText;
-      loginBtn.disabled = false;
-    }
-  } catch(e) {
-    errorEl.textContent = 'Error de conexión. Intenta de nuevo.';
-    errorEl.style.display = 'block';
-    loginBtn.textContent = prevText;
-    loginBtn.disabled = false;
   }
-}
+
+  /* ── Error display ─────────────────────────────────────────────────── */
+  function showError(msg, targetId) {
+    var el = document.getElementById(targetId || 'error-msg');
+    el.textContent = msg;          // textContent — safe
+    el.style.display = 'block';
+  }
+
+  function hideError(targetId) {
+    var el = document.getElementById(targetId || 'error-msg');
+    el.style.display = 'none';
+  }
+
+  /* ── Normalize roles array ─────────────────────────────────────────── */
+  function normalizeRoles(raw) {
+    if (Array.isArray(raw)) {
+      return raw.map(function (r) { return r.trim().toLowerCase(); }).filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+      return raw.replace(/[{}]/g, '').split(',').map(function (r) { return r.trim().toLowerCase(); }).filter(Boolean);
+    }
+    return ['mesero'];
+  }
+
+  /* ── Redirect a single role ────────────────────────────────────────── */
+  function redirectForRole(role) {
+    var meta = ROLE_META[role];
+    if (meta) {
+      window.location.href = meta.url;
+      return;
+    }
+    // legacy role aliases
+    var aliases = {
+      cook:      '/cocina', cocinero:  '/cocina',
+      waiter:    '/mesero',
+      cashier:   '/caja',   cajero:    '/caja',
+      delivery:  '/domiciliario',
+    };
+    window.location.href = aliases[role] || '/staff-hq';
+  }
+
+  /* ── Persist localStorage for a resolved restaurant+role ──────────────
+     Called once we know the exact restaurant and role(s) to use.        */
+  function persistSession(data, rolesArr, restaurantObj, resolvedRestaurantId) {
+    localStorage.setItem('rb_token',      data.token);
+    localStorage.setItem('rb_role',       rolesArr.join(','));
+    localStorage.setItem('rb_restaurant', JSON.stringify({
+      id:              resolvedRestaurantId,
+      branch_id:       resolvedRestaurantId,
+      role:            rolesArr.join(','),
+      name:            restaurantObj.name            || '',
+      whatsapp_number: restaurantObj.whatsapp_number || '',
+      locale:          restaurantObj.locale          || 'es-CO',
+      currency:        restaurantObj.currency        || 'COP',
+      features:        restaurantObj.features        || {},
+    }));
+
+    if (data.staff_id) {
+      localStorage.setItem('rb_staff_id', String(data.staff_id));
+    } else {
+      localStorage.removeItem('rb_staff_id');
+    }
+
+    if (resolvedRestaurantId) {
+      localStorage.setItem('rb_staff_restaurant_id', String(resolvedRestaurantId));
+    }
+  }
+
+  /* ── Decide where to redirect after session is saved ──────────────── */
+  function redirectAfterLogin(rolesArr, staffName) {
+    var hasRole = function (names) {
+      return names.some(function (n) { return rolesArr.includes(n); });
+    };
+
+    // Admin / owner always go to dashboard
+    if (hasRole(['owner', 'admin', 'gerente'])) {
+      window.location.href = '/dashboard';
+      return;
+    }
+
+    // Single operational role — go directly
+    if (rolesArr.length === 1) {
+      redirectForRole(rolesArr[0]);
+      return;
+    }
+
+    // Multiple operational roles — show role selector
+    _pendingRoles     = rolesArr;
+    _pendingStaffName = staffName || '';
+    renderRoleSelector();
+    showView('role-view');
+  }
+
+  /* ── Build role selector grid ──────────────────────────────────────── */
+  function renderRoleSelector() {
+    var firstName = (_pendingStaffName || 'equipo').split(' ')[0];
+    document.getElementById('welcome-name').textContent = '¡Hola, ' + firstName + '!';
+
+    var grid = document.getElementById('role-grid');
+    grid.innerHTML = '';
+
+    _pendingRoles.forEach(function (role) {
+      var meta = ROLE_META[role];
+      if (!meta) return;
+
+      var tile = document.createElement('a');
+      tile.href      = meta.url;
+      tile.className = 'role-tile';
+      tile.setAttribute('role', 'listitem');
+      tile.setAttribute('aria-label', meta.label);
+      tile.style.cssText = 'background:' + meta.bg + ';color:' + meta.color + ';';
+
+      var icon = document.createElement('span');
+      icon.className   = 'tile-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = meta.icon;
+
+      var lbl = document.createElement('span');
+      lbl.className   = 'tile-name';
+      lbl.textContent = meta.label;
+
+      tile.appendChild(icon);
+      tile.appendChild(lbl);
+      grid.appendChild(tile);
+    });
+  }
+
+  /* ── Build restaurant selector grid ───────────────────────────────── */
+  function renderRestaurantSelector(restaurants) {
+    _pendingRestaurants = restaurants;
+    var grid = document.getElementById('restaurant-grid');
+    grid.innerHTML = '';
+
+    restaurants.forEach(function (rest) {
+      var tile = document.createElement('button');
+      tile.type      = 'button';
+      tile.className = 'restaurant-tile';
+      tile.setAttribute('role', 'listitem');
+      tile.textContent = rest.name;   // textContent — safe
+
+      tile.addEventListener('click', function () {
+        selectRestaurant(rest);
+      });
+      grid.appendChild(tile);
+    });
+
+    showView('restaurant-view');
+  }
+
+  function selectRestaurant(rest) {
+    if (!_loginData) return;
+    var data     = _loginData;
+    var rolesArr = normalizeRoles(data.roles || data.role);
+
+    persistSession(data, rolesArr, rest, rest.id);
+    redirectAfterLogin(rolesArr, data.name || '');
+  }
+
+  /* ── Reset to login view ───────────────────────────────────────────── */
+  function resetToLogin() {
+    _pendingRoles       = [];
+    _pendingStaffName   = '';
+    _pendingRestaurants = [];
+    _loginData          = null;
+
+    document.getElementById('username').value = '';
+    document.getElementById('password').value = '';
+    hideError('error-msg');
+    hideError('error-msg-r');
+
+    var btn = document.getElementById('login-btn');
+    btn.disabled    = false;
+    btn.textContent = 'Ingresar';
+
+    showView('login-view');
+    document.getElementById('username').focus();
+  }
+
+  /* ── Main login handler ────────────────────────────────────────────── */
+  async function doLogin() {
+    var username = document.getElementById('username').value.trim();
+    var password = document.getElementById('password').value;
+    hideError('error-msg');
+
+    if (!username) {
+      showError('Por favor ingresa tu email o nombre.');
+      return;
+    }
+    if (!password) {
+      showError('Por favor ingresa tu contraseña.');
+      return;
+    }
+
+    var btn = document.getElementById('login-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Verificando...';
+
+    /* ── Determine which API to call ─────────────────────────────────
+       If ?r= is in the URL, attempt staff PIN login first.
+       Otherwise, use the unified admin login endpoint.               */
+    try {
+      var data;
+
+      if (restaurantId) {
+        /* Staff PIN login (/api/staff/pin-login) */
+        var res = await fetch('/api/staff/pin-login', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            restaurant_id: parseInt(restaurantId, 10),
+            name:          username,
+            pin:           password,
+          }),
+        });
+
+        if (!res.ok) {
+          var err = await res.json().catch(function () { return {}; });
+          showError(err.detail || 'Nombre o contraseña incorrectos.');
+          return;
+        }
+
+        data = await res.json();
+        _loginData = data;
+
+        var rolesArr   = normalizeRoles(data.roles || data.role || 'mesero');
+        var restaurant = data.restaurant || {};
+
+        localStorage.setItem('rb_staff_restaurant_id', restaurantId);
+        persistSession(data, rolesArr, restaurant, parseInt(restaurantId, 10));
+        redirectAfterLogin(rolesArr, data.name || username);
+
+      } else {
+        /* Unified admin login (/api/auth/login) */
+        var res2 = await fetch('/api/auth/login', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ username: username, password: password }),
+        });
+
+        var data2 = await res2.json();
+
+        if (!data2.success) {
+          showError(data2.error || 'Credenciales incorrectas.');
+          return;
+        }
+
+        _loginData = data2;
+
+        var rolesArr2    = normalizeRoles(data2.role || (data2.restaurant && data2.restaurant.role) || 'owner');
+        var restaurant2  = data2.restaurant || {};
+        var resolvedId2  = restaurant2.id || restaurant2.branch_id || null;
+
+        /* Multiple restaurants? Show selector */
+        if (Array.isArray(data2.restaurants) && data2.restaurants.length > 1) {
+          renderRestaurantSelector(data2.restaurants);
+          return;
+        }
+
+        /* Persist with resolved restaurant */
+        persistSession(data2, rolesArr2, restaurant2, resolvedId2);
+        redirectAfterLogin(rolesArr2, data2.name || username);
+      }
+
+    } catch (e) {
+      showError('Error de conexión. Intenta de nuevo.');
+    } finally {
+      /* Only re-enable if we did NOT navigate or show another view */
+      var stillOnLogin = document.getElementById('login-view').classList.contains('active');
+      if (stillOnLogin) {
+        btn.disabled    = false;
+        btn.textContent = 'Ingresar';
+      }
+    }
+  }
+
+  /* ── Form submit ───────────────────────────────────────────────────── */
+  document.getElementById('login-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    doLogin();
+  });
+
+  /* ── Back buttons ──────────────────────────────────────────────────── */
+  document.getElementById('back-from-restaurant').addEventListener('click', resetToLogin);
+  document.getElementById('back-from-role').addEventListener('click', resetToLogin);
+
+  /* ── Auto-focus username on load ───────────────────────────────────── */
+  window.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('username').focus();
+  });
+
+}());
 </script>
-<script src="/static/js/mesio-utils.js" defer></script>
 </body>
 </html>

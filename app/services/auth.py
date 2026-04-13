@@ -33,10 +33,12 @@ async def login(username: str, password: str) -> dict:
         branch_id = member.get("restaurant_id")
         whatsapp_number = ""
         features: dict = {}
+        restaurant_name = ""
         try:
             if branch_id:
                 restaurant = await db.db_get_restaurant_by_id(branch_id)
                 if restaurant:
+                    restaurant_name = restaurant.get("name", "")
                     whatsapp_number = restaurant.get("whatsapp_number", "")
                     raw = restaurant.get("features") or {}
                     features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
@@ -50,7 +52,8 @@ async def login(username: str, password: str) -> dict:
             "role":     role,
             "staff_id": member["id"],
             "restaurant": {
-                "name":             member["name"],
+                "id":               branch_id,
+                "name":             restaurant_name,
                 "username":         member["name"],
                 "role":             role,
                 "branch_id":        branch_id,
@@ -100,6 +103,7 @@ async def login(username: str, password: str) -> dict:
         "token": token,
         "role": role,
         "restaurant": {
+            "id": branch_id,
             "name": user["restaurant_name"],
             "username": username,
             "role": role,
