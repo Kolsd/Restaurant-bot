@@ -6,7 +6,7 @@ import json
 import pypdf
 from collections import defaultdict
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from pathlib import Path
 from anthropic import Anthropic
@@ -117,10 +117,11 @@ async def root_redirect(): return (STATIC / "html" / "landing.html").read_text(e
 async def superadmin_page():
     p = STATIC / "html" / "superadmin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>")
-@router.get("/staff", response_class=HTMLResponse)
-async def staff_portal_page():
-    p = STATIC / "html" / "staff-portal.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Portal no disponible</h1>")
+@router.get("/staff")
+async def staff_portal_redirect(request: Request):
+    r = request.query_params.get("r", "")
+    target = f"/login?r={r}" if r else "/login"
+    return RedirectResponse(url=target, status_code=302)
 
 @router.get("/api/public/restaurant-info")
 async def public_restaurant_info(id: int):
