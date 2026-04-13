@@ -378,23 +378,63 @@
 
     <!-- Panel: Mapa de Mesas -->
     <div id="mesas-panel-floorplan" style="display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-        <div>
-          <div style="font-size:16px;font-weight:600;">Mapa de Mesas</div>
-          <div style="font-size:12px;color:#888;margin-top:2px;">Arrastra las mesas para organizar el plano de tu restaurante</div>
+      <!-- Toolbar -->
+      <div class="fp-toolbar">
+        <div class="fp-toolbar-left">
+          <div class="fp-toolbar-title">Mapa de Mesas</div>
+          <div class="fp-toolbar-sub">Vista en tiempo real del salón</div>
         </div>
-        <div style="display:flex;gap:8px;">
-          <button onclick="_fpToggleEdit()" id="fp-edit-btn" style="background:var(--accent,#1D9E75);color:#fff;border:none;padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;">✏️ Editar</button>
-          <button onclick="_fpRefresh()" style="background:transparent;color:var(--text-secondary,#888);border:1px solid var(--border,#e0e0d8);padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;">🔄 Refrescar</button>
+        <div class="fp-toolbar-actions">
+          <div class="fp-filters">
+            <select class="fp-select" id="fp-zone-filter" onchange="_fpApplyFilters()">
+              <option value="">Todas las zonas</option>
+            </select>
+            <select class="fp-select" id="fp-status-filter" onchange="_fpApplyFilters()">
+              <option value="">Todos</option>
+              <option value="libre">Libre</option>
+              <option value="sentados">Sentados</option>
+              <option value="ocupada">Ocupada</option>
+              <option value="factura">Facturando</option>
+            </select>
+          </div>
+          <div class="fp-zoom">
+            <button class="fp-btn--icon" onclick="_fpZoom(-1)">−</button>
+            <span class="fp-zoom-label" id="fp-zoom-label">100%</span>
+            <button class="fp-btn--icon" onclick="_fpZoom(1)">+</button>
+          </div>
+          <button onclick="_fpToggleEdit()" id="fp-edit-btn" class="fp-btn fp-btn--primary">Editar</button>
+          <button onclick="_fpRefresh()" class="fp-btn fp-btn--outline">Refrescar</button>
         </div>
       </div>
-      <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px;color:#666;flex-wrap:wrap;">
-        <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Libre</span>
-        <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Ocupada</span>
-        <span style="display:flex;align-items:center;gap:5px;"><span style="width:12px;height:12px;border-radius:50%;background:#3b82f6;display:inline-block;"></span>Reservada</span>
-        <span id="fp-edit-hint" style="display:none;color:var(--accent,#1D9E75);font-weight:500;">Modo edición — arrastra las mesas, doble clic para editar propiedades</span>
+      <!-- Legend -->
+      <div class="fp-legend">
+        <span class="fp-legend-item"><span class="fp-legend-dot fp-legend-dot--libre"></span>Libre</span>
+        <span class="fp-legend-item"><span class="fp-legend-dot fp-legend-dot--sentados"></span>Sentados</span>
+        <span class="fp-legend-item"><span class="fp-legend-dot fp-legend-dot--ocupada"></span>Ocupada</span>
+        <span class="fp-legend-item"><span class="fp-legend-dot fp-legend-dot--factura"></span>Facturando</span>
+        <span class="fp-legend-item"><span class="fp-legend-dot fp-legend-dot--reservada"></span>Reservada</span>
       </div>
-      <div id="fp-canvas" style="position:relative;width:100%;min-height:520px;background:var(--card-bg,#fff);border:1px solid var(--border,#e0e0d8);border-radius:12px;overflow:hidden;user-select:none;"></div>
+      <!-- Edit hint banner -->
+      <div class="fp-edit-banner" id="fp-edit-banner">
+        Modo edición — arrastra las mesas para reorganizar. Doble clic para editar propiedades.
+        <button class="fp-btn fp-btn--outline" style="padding:4px 10px;font-size:11px;" id="fp-snap-btn" onclick="_fpToggleSnap()">Snap: ON</button>
+      </div>
+      <!-- Canvas + detail sidebar wrapper -->
+      <div class="fp-canvas-wrap" id="fp-canvas-wrap">
+        <div class="fp-canvas" id="fp-canvas"></div>
+        <!-- Detail sidebar -->
+        <div class="fp-detail" id="fp-detail">
+          <div class="fp-detail__header">
+            <div>
+              <div class="fp-detail__title" id="fp-detail-title"></div>
+              <div class="fp-detail__status" id="fp-detail-status"></div>
+            </div>
+            <button class="fp-detail__close" onclick="_fpCloseDetail()">&times;</button>
+          </div>
+          <div class="fp-detail__body" id="fp-detail-body"></div>
+          <div class="fp-detail__actions" id="fp-detail-actions"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -835,7 +875,7 @@
 <script src="/static/js/dashboard-core.js?v=3"></script>
 <script src="/static/js/dashboard-features.js?v=3"></script>
 <script src="/static/js/dashboard-nps-inventory.js?v=3"></script>
-<script src="/static/js/dashboard-floorplan.js?v=1"></script>
+<script src="/static/js/dashboard-floorplan.js?v=2"></script>
 
 <!-- Offline indicator banner (hidden by default, shown by offline-sync.js) -->
 <div id="offline-indicator" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;font-weight:600;z-index:9999;gap:8px;align-items:center;">
