@@ -30,6 +30,20 @@ from decimal import Decimal
 from app.services.money import to_decimal, money_mul, money_sum, quantize_money, ZERO
 
 
+def _ensure_datetime(val) -> datetime:
+    """Coerce date strings to datetime objects for asyncpg TIMESTAMPTZ binding."""
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, date):
+        return datetime(val.year, val.month, val.day, tzinfo=timezone.utc)
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except ValueError:
+            return datetime.strptime(val, "%Y-%m-%d")
+    return val
+
+
 # Lazy accessors — break circular import with app.services.database.
 # database.py re-exports this module at module level, so a top-level import
 # of database here would create a cycle. We resolve both helpers at call time.
@@ -54,19 +68,21 @@ async def _record_attendance_deduction(
     scheduled_time,
     actual_time,
     hourly_rate,  # Decimal (or anything coercible via to_decimal)
+    restaurant_tz: str = "America/Bogota",
 ) -> None:
     """
     Insert an attendance_deductions row if the deviation exceeds 5 minutes.
     deduction_type: 'tardiness' | 'early_departure'
     scheduled_time: datetime.time object from asyncpg
     actual_time: timezone-aware datetime from asyncpg
+    restaurant_tz: IANA timezone string from restaurant features->>'timezone'
     """
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
-    # Convert to restaurant's timezone for proper comparison with scheduled time
-    # actual_time is timestamptz from DB; scheduled_time is a naive time in local tz
-    # Use restaurant_id to look up tz — for now, default to America/Bogota (most restaurants)
-    tz = ZoneInfo("America/Bogota")
+    # Convert to restaurant's local timezone for comparison with scheduled_time.
+    # actual_time is TIMESTAMPTZ (UTC-aware) from the DB; scheduled_time is a
+    # naive time expressed in the restaurant's local timezone.
+    tz = ZoneInfo(restaurant_tz)
     if actual_time.tzinfo is not None:
         actual_local = actual_time.astimezone(tz)
     else:
@@ -88,9 +104,9 @@ async def _record_attendance_deduction(
         """INSERT INTO attendance_deductions
            (shift_id, staff_id, restaurant_id, type, scheduled_time,
             actual_time, minutes_diff, deduction_amount)
-           VALUES ($1::uuid, $2::uuid, $3, $4, $5::time, $6::timestamptz, $7, $8)""",
+           VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)""",
         shift_id, staff_id, restaurant_id, deduction_type,
-        str(scheduled_time), actual_time, minutes_diff, deduction_amount,
+        scheduled_time, actual_time, minutes_diff, deduction_amount,
     )
 
 
@@ -329,6 +345,12 @@ async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
                 "SELECT hourly_rate FROM staff WHERE id=$1::uuid", staff_id
             )
             hourly_rate = to_decimal(staff_row["hourly_rate"] or 0) if staff_row else ZERO
+            rest_row = await conn.fetchrow(
+                "SELECT COALESCE(features->>'timezone', 'America/Bogota') AS tz "
+                "FROM restaurants WHERE id=$1",
+                restaurant_id,
+            )
+            restaurant_tz = rest_row["tz"] if rest_row else "America/Bogota"
             await _record_attendance_deduction(
                 conn,
                 shift_id=str(row["id"]),
@@ -338,6 +360,7 @@ async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
                 scheduled_time=sched["start_time"],
                 actual_time=clock_in_dt,
                 hourly_rate=hourly_rate,
+                restaurant_tz=restaurant_tz,
             )
     return shift
 
@@ -379,6 +402,12 @@ async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
                 "SELECT hourly_rate FROM staff WHERE id=$1::uuid", staff_id
             )
             hourly_rate = to_decimal(staff_row["hourly_rate"] or 0) if staff_row else ZERO
+            rest_row = await conn.fetchrow(
+                "SELECT COALESCE(features->>'timezone', 'America/Bogota') AS tz "
+                "FROM restaurants WHERE id=$1",
+                restaurant_id,
+            )
+            restaurant_tz = rest_row["tz"] if rest_row else "America/Bogota"
             await _record_attendance_deduction(
                 conn,
                 shift_id=str(row["id"]),
@@ -388,6 +417,7 @@ async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
                 scheduled_time=sched["end_time"],
                 actual_time=clock_out_dt,
                 hourly_rate=hourly_rate,
+                restaurant_tz=restaurant_tz,
             )
     return shift
 
@@ -518,7 +548,7 @@ async def db_calculate_tip_pool(
                 ))
             ) > 0
             """,
-            restaurant_id, period_start, period_end,
+            restaurant_id, _ensure_datetime(period_start), _ensure_datetime(period_end),
         )
 
         # 3. Distribute tips by role
@@ -597,6 +627,8 @@ async def db_calculate_tips_by_attendance(
             rest_ids = [r["id"] for r in branches]
 
         # Fetch all paid checks in period with tip_amount > 0
+        ps = _ensure_datetime(period_start)
+        pe = _ensure_datetime(period_end)
         checks = await conn.fetch(
             """SELECT tc.id, tc.tip_amount, tc.paid_at
                FROM table_checks tc
@@ -606,7 +638,7 @@ async def db_calculate_tips_by_attendance(
                  AND tc.tip_amount > 0
                  AND tc.status = 'invoiced'
                  AND COALESCE(to2.branch_id, $3) = ANY($4::int[])""",
-            period_start, period_end, restaurant_id, rest_ids,
+            ps, pe, restaurant_id, rest_ids,
         )
 
         if not checks:
@@ -620,7 +652,11 @@ async def db_calculate_tips_by_attendance(
         for chk in checks:
             tip = to_decimal(chk["tip_amount"])
             total_tips += tip
+            # paid_at comes from table_checks (timestamp without tz) — make it
+            # tz-aware (UTC) so comparisons with staff_shifts (timestamptz) are correct
             paid_at = chk["paid_at"]
+            if paid_at is not None and paid_at.tzinfo is None:
+                paid_at = paid_at.replace(tzinfo=timezone.utc)
 
             on_shift = await conn.fetch(
                 """SELECT ss.staff_id::text, s.name, s.role
@@ -695,13 +731,13 @@ async def db_save_tip_distribution(
             """INSERT INTO tip_distributions
                (restaurant_id, period_start, period_end,
                 total_tips, distribution, pct_config, created_by)
-               VALUES ($1, $2::timestamptz, $3::timestamptz,
+               VALUES ($1, $2, $3,
                        $4, $5::jsonb, $6::jsonb, $7)
                RETURNING id::text, restaurant_id, period_start, period_end,
                          total_tips, distribution, pct_config, created_by, created_at""",
             restaurant_id,
-            period_start,
-            period_end,
+            _ensure_datetime(period_start),
+            _ensure_datetime(period_end),
             to_decimal(total_tips),
             json.dumps(distribution),
             json.dumps(pct_config),
@@ -1015,12 +1051,12 @@ async def db_edit_shift(
     params: list = []
     idx = 1
     if clock_in is not None:
-        parts.append(f"clock_in = ${idx}::timestamptz")
-        params.append(clock_in)
+        parts.append(f"clock_in = ${idx}")
+        params.append(_ensure_datetime(clock_in))
         idx += 1
     if clock_out is not None:
-        parts.append(f"clock_out = ${idx}::timestamptz")
-        params.append(clock_out)
+        parts.append(f"clock_out = ${idx}")
+        params.append(_ensure_datetime(clock_out))
         idx += 1
     if notes is not None:
         parts.append(f"notes = ${idx}")
@@ -1075,7 +1111,7 @@ async def db_get_timecard(
                  AND ss.clock_in <  $3::timestamptz
                GROUP BY ss.staff_id, s.name, s.role, DATE(ss.clock_in)
                ORDER BY s.name, work_date""",
-            restaurant_id, week_start, week_end,
+            restaurant_id, _ensure_datetime(week_start), _ensure_datetime(week_end),
         )
     result = []
     for r in rows:
@@ -1152,7 +1188,7 @@ async def db_get_attendance_report(
                  AND ss.clock_in >= $2::timestamptz
                  AND ss.clock_in <  $3::timestamptz
                ORDER BY ss.clock_in DESC""",
-            restaurant_id, date_from, date_to,
+            restaurant_id, _ensure_datetime(date_from), _ensure_datetime(date_to),
         )
     result = []
     for r in rows:
@@ -1269,6 +1305,7 @@ async def db_calculate_payroll(
     period_start: str,
     period_end: str,
     config: dict | None = None,
+    branch_id: int | None = None,
 ) -> list:
     """Calculate payroll for all active staff in a period.
 
@@ -1276,6 +1313,12 @@ async def db_calculate_payroll(
       overtime_daily_threshold  — default 8.0 h
       overtime_weekly_threshold — default 40.0 h
       overtime_multiplier       — default 1.5
+
+    branch_id: when provided, tips are scoped to that branch only (not all
+               branches of the matrix). Callers that already resolve the
+               correct restaurant_id for the branch can omit this — it is
+               only needed when restaurant_id is the matrix and you want to
+               restrict tip aggregation to a single branch.
     """
     if config is None:
         config = {}
@@ -1297,7 +1340,7 @@ async def db_calculate_payroll(
     hours_by_staff = {d["staff_id"]: d for d in overtime_data}
 
     tips_result = await db_calculate_tips_by_attendance(
-        restaurant_id, period_start, period_end
+        restaurant_id, period_start, period_end, branch_id=branch_id
     )
     tips_by_staff: dict = {
         e["staff_id"]: to_decimal(e["total_tips"])
@@ -1321,7 +1364,12 @@ async def db_calculate_payroll(
 
         deductions_cfg = s.get("deductions") or {}
         if isinstance(deductions_cfg, str):
-            deductions_cfg = json.loads(deductions_cfg)
+            try:
+                deductions_cfg = json.loads(deductions_cfg)
+            except (json.JSONDecodeError, TypeError):
+                deductions_cfg = {}
+        if not isinstance(deductions_cfg, dict):
+            deductions_cfg = {}
 
         deductions       = {}
         total_deductions = ZERO

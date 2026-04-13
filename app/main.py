@@ -1,6 +1,8 @@
 import os
+import asyncio
 import logging
 import structlog
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -49,6 +51,7 @@ from app.routes.loyalty import router as loyalty_router
 from app.routes.reservations import router as reservations_router
 from app.routes.discounts import router as discounts_router
 from app.routes.reviews import router as reviews_router
+from app.routes.health import router as health_router
 from app.services import database as db  # ← FIX: import directo de db
 from app.services.logging import get_logger as _get_logger
 
@@ -56,12 +59,64 @@ _log = _get_logger(__name__)
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
+
+@asynccontextmanager
+async def lifespan(app):
+    # ── STARTUP ───────────────────────────────────────────────────────
+    # All schema migrations are handled by Alembic (run `alembic upgrade head`
+    # before deploying). Do NOT add DDL calls here — with 4 uvicorn workers,
+    # concurrent CREATE TABLE statements cause race conditions on startup.
+    await db.init_pool()
+
+    from app.services.scheduler import start_scheduler
+    await start_scheduler()
+
+    await db.db_cleanup_expired_sessions()
+
+    _disable_worker = os.getenv("DISABLE_EMBEDDED_WORKER", "").strip().lower() in ("1", "true", "yes")
+    _inbox_stop_event: asyncio.Event | None = None
+    _inbox_task: asyncio.Task | None = None
+
+    if not _disable_worker:
+        # Start the webhook inbox worker (one per uvicorn worker process).
+        # FOR UPDATE SKIP LOCKED in the worker query makes concurrent workers safe.
+        from app.services.inbox_worker import run_worker
+        _inbox_stop_event = asyncio.Event()
+        _inbox_task = asyncio.create_task(run_worker(_inbox_stop_event))
+        _log.info("inbox_worker_task_created")
+    else:
+        _log.info("inbox_worker_disabled", reason="DISABLE_EMBEDDED_WORKER is set")
+
+    _redis_configured = bool(os.getenv("REDIS_URL"))
+    _log.info("redis_url_configured", configured=_redis_configured)
+    _log.info("app.started", version="6.0")
+
+    yield
+
+    # ── SHUTDOWN ──────────────────────────────────────────────────────
+    if _inbox_stop_event is not None:
+        _inbox_stop_event.set()
+
+    if _inbox_task is not None:
+        try:
+            await asyncio.wait_for(_inbox_task, timeout=10.0)
+            _log.info("inbox_worker_shutdown_clean")
+        except asyncio.TimeoutError:
+            _log.warning("inbox_worker_shutdown_timeout", timeout_seconds=10)
+        except Exception:
+            _log.exception("inbox_worker_shutdown_error")
+
+    from app.services.redis_client import close_redis
+    await close_redis()
+
+
 app = FastAPI(
     title="Mesio",
     description="AI assistant for restaurants",
     version="6.1.0",
     docs_url=None,
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 # ── DOMINIO REDIRECT ─────────────────────────────────────────────────
@@ -105,61 +160,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-import asyncio as _asyncio
-
-_inbox_stop_event: _asyncio.Event | None = None
-_inbox_task: "_asyncio.Task | None" = None
-
-
-@app.on_event("startup")
-async def startup():
-    global _inbox_stop_event, _inbox_task
-
-    # Warm up the connection pool.
-    # All schema migrations are handled by Alembic (run `alembic upgrade head`
-    # before deploying). Do NOT add DDL calls here — with 4 uvicorn workers,
-    # concurrent CREATE TABLE statements cause race conditions on startup.
-    await db.init_pool()
-
-    from app.services.scheduler import start_scheduler
-    await start_scheduler()
-
-    await db.db_cleanup_expired_sessions()
-
-    # Start the webhook inbox worker (one per uvicorn worker process).
-    # FOR UPDATE SKIP LOCKED in the worker query makes concurrent workers safe.
-    from app.services.inbox_worker import run_worker
-    _inbox_stop_event = _asyncio.Event()
-    _inbox_task = _asyncio.create_task(run_worker(_inbox_stop_event))
-    _log.info("inbox_worker_task_created")
-
-    import os as _os
-    _redis_configured = bool(_os.getenv("REDIS_URL"))
-    _log.info("redis_url_configured", configured=_redis_configured)
-
-    _log.info("app.started", version="6.0")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    global _inbox_stop_event, _inbox_task
-
-    if _inbox_stop_event is not None:
-        _inbox_stop_event.set()
-
-    if _inbox_task is not None:
-        try:
-            await _asyncio.wait_for(_inbox_task, timeout=10.0)
-            _log.info("inbox_worker_shutdown_clean")
-        except _asyncio.TimeoutError:
-            _log.warning("inbox_worker_shutdown_timeout", timeout_seconds=10)
-        except Exception:
-            _log.exception("inbox_worker_shutdown_error")
-
-    from app.services.redis_client import close_redis
-    await close_redis()
-
-
 app.include_router(dashboard_router)
 app.include_router(auth_router)
 app.include_router(settings_router)
@@ -180,3 +180,4 @@ app.include_router(loyalty_router)
 app.include_router(reservations_router)
 app.include_router(discounts_router)
 app.include_router(reviews_router)
+app.include_router(health_router)

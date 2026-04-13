@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v10.0 (Apparta Integration: Reservas Inteligentes, Floor Plan, Descuentos, Reseñas)
+# Mesio Restaurant Bot — v10.1 (Code Quality Refactor: Security, Architecture, Logging)
 
 ## Entorno y Comandos
 
@@ -20,50 +20,55 @@ Variables de entorno críticas:
 Restaurant-bot/
 ├── app/
 │   ├── main.py                      # FastAPI entry point. Lifespan: arranca inbox_worker, cierra Redis
-│   ├── routes/                      # Capa HTTP — solo validación y respuesta
+│   ├── routes/                      # Capa HTTP — solo validación y respuesta (zero SQL directo)
 │   │   ├── deps.py                  # Dependencias: auth, get_current_restaurant, require_module
 │   │   ├── chat.py                  # Webhook Meta → ENCOLA en webhook_inbox (no más create_task)
-│   │   ├── dashboard.py             # Settings, auth, páginas HTML, team, branches
+│   │   ├── dashboard.py             # Páginas HTML, APIs públicas, geocode (~240 LOC)
+│   │   ├── auth_routes.py           # Login/logout, verify-role, superadmin CRUD (~385 LOC)
+│   │   ├── settings_routes.py       # Settings GET/POST, dashboard data, AI proxy (~290 LOC)
+│   │   ├── team_routes.py           # Branch CRUD, team users (~175 LOC)
 │   │   ├── stats.py                 # Métricas, conversaciones, gráficas
 │   │   ├── tables.py                # POS, órdenes de mesa, split checks, tip_amount al pagar
-│   │   ├── orders.py                # Órdenes externas (domicilio/recoger) y Webhook Wompi
-│   │   ├── billing.py               # DIAN, facturación electrónica
+│   │   ├── orders_routes.py         # Órdenes externas (domicilio/recoger) y Webhook Wompi
+│   │   ├── billing.py               # DIAN, facturación electrónica (único route con SQL directo — diferido)
 │   │   ├── staff.py                 # Personal, turnos, propinas, nómina, contratos, overtime
 │   │   ├── staff_webauthn.py        # Autenticación biométrica FIDO2 para clock-in/out
 │   │   ├── crm.py                   # Clientes, prospectos, campañas
 │   │   ├── inventory.py             # Inventario, recetas (escandallos)
 │   │   ├── loyalty.py               # Sistema de puntos y recompensas
-│   │   ├── reservations.py          # NUEVO. Gestión avanzada de reservas, disponibilidad, stats
-│   │   ├── discounts.py             # NUEVO. Descuentos dinámicos por franja horaria (yield management)
-│   │   └── reviews.py               # NUEVO. Reseñas públicas (extiende NPS) + analytics
+│   │   ├── reservations.py          # Gestión avanzada de reservas, disponibilidad, stats
+│   │   ├── discounts.py             # Descuentos dinámicos por franja horaria (yield management)
+│   │   └── reviews.py               # Reseñas públicas (extiende NPS) + analytics
 │   ├── services/
-│   │   ├── database.py              # Ahora ~1500 LOC. Mantiene shims de re-export + agregados sin extraer (fiscal, loyalty, restaurants, orders delivery, usuarios, subscription)
-│   │   ├── agent.py                 # Prompt engineering. Usa state_store (Redis) en lugar de dicts en RAM
+│   │   ├── database.py              # Shims re-export + agregados sin extraer (fiscal, loyalty, subscription). ~1500 LOC
+│   │   ├── agent.py                 # Prompt engineering. chat() descompuesto en orquestador + 10 helpers
 │   │   ├── auth.py                  # JWT y passwords. Sesiones via sessions_repo (token hasheado)
-│   │   ├── orders.py                # Lógica de carrito y pagos. Decimal end-to-end
-│   │   ├── money.py                 # NUEVO. Helpers Decimal: to_decimal, quantize_money, money_sum/mul, ZERO
-│   │   ├── logging.py               # NUEVO. structlog wrapper con fallback stdlib. get_logger(name, **ctx)
-│   │   ├── redis_client.py          # NUEVO. Singleton lazy redis.asyncio. Circuit breaker 30s
-│   │   ├── state_store.py           # NUEVO. API alto nivel: nps_*, checkout_*, table_cooldown_acquire. Fallback in-process
-│   │   ├── inbox_worker.py           # NUEVO. Loop FOR UPDATE SKIP LOCKED procesando webhook_inbox
-│   │   └── reservation_payments.py  # NUEVO. Generación de links Wompi para depósitos de reserva
-│   ├── repositories/                # NUEVO. Patrón Repository — extracción progresiva de database.py
+│   │   ├── orders.py                # Lógica de carrito y pagos. Decimal end-to-end. Cart lock via Redis
+│   │   ├── money.py                 # Helpers Decimal: to_decimal, quantize_money, money_sum/mul, ZERO
+│   │   ├── logging.py               # structlog wrapper con fallback stdlib. get_logger(name, **ctx)
+│   │   ├── redis_client.py          # Singleton lazy redis.asyncio. Circuit breaker 30s
+│   │   ├── state_store.py           # API alto nivel: nps_*, checkout_*, table_cooldown_acquire, cart_lock_*
+│   │   ├── inbox_worker.py          # Loop FOR UPDATE SKIP LOCKED procesando webhook_inbox
+│   │   └── reservation_payments.py  # Generación de links Wompi para depósitos de reserva
+│   ├── repositories/                # Patrón Repository — extracción completa de SQL desde routes
 │   │   ├── __init__.py              # Re-exporta InsufficientStockError, OrderCommitError, commit_order_transaction
 │   │   ├── orders_repo.py           # commit_order_transaction (ACID), InsufficientStockError, OrderCommitError
 │   │   ├── inbox_repo.py            # enqueue, fetch_batch (FOR UPDATE SKIP LOCKED), mark_processed, mark_failed
 │   │   ├── sessions_repo.py         # create/get/delete con SHA-256 hash + fallback legacy
 │   │   ├── inventory_repo.py        # 17 funciones inventario + recetas + sync availability
-│   │   ├── staff_repo.py            # 55 funciones: staff, shifts, breaks, schedules, payroll, tips, contracts, overtime, webauthn
-│   │   ├── tables_repo.py           # 57 funciones: restaurant_tables (+ floor plan), table_orders, table_sessions, table_checks, waiter_alerts
-│   │   ├── conversations_repo.py    # 19 funciones: history, conversations, NPS per-conv, carts, wam dedup
-│   │   ├── reservations_repo.py     # NUEVO. 14 funciones: reservas, disponibilidad, stats, confirmación
-│   │   ├── discounts_repo.py        # NUEVO. 5 funciones: descuentos dinámicos por horario
-│   │   ├── reservation_deposits_repo.py  # NUEVO. 5 funciones: depósitos Wompi para reservas
-│   │   └── reviews_repo.py          # NUEVO. 7 funciones: reseñas públicas, snapshots ocupación, turn time
+│   │   ├── staff_repo.py            # 62+ funciones: staff, shifts, breaks, schedules, payroll, tips, contracts, overtime, webauthn, self-service
+│   │   ├── tables_repo.py           # 62+ funciones: restaurant_tables (+ floor plan), table_orders, table_sessions, table_checks, waiter_alerts
+│   │   ├── conversations_repo.py    # 20+ funciones: history, conversations, NPS per-conv, carts, wam dedup, features
+│   │   ├── restaurant_repo.py       # 20 funciones: admin stats, settings, dashboard data, branches, team, public menu
+│   │   ├── reservations_repo.py     # 14 funciones: reservas, disponibilidad, stats, confirmación
+│   │   ├── discounts_repo.py        # 5 funciones: descuentos dinámicos por horario
+│   │   ├── reservation_deposits_repo.py  # 5 funciones: depósitos Wompi para reservas
+│   │   ├── reviews_repo.py          # 8 funciones: reseñas públicas, snapshots ocupación, turn time
+│   │   └── crm_repo.py             # Funciones CRM extraídas de crm.py
 │   └── static/
-│       ├── html/                    # dashboard, staff-hq, staff-portal, caja, cocina, landing, dashboard-demo, etc.
-│       ├── js/                      # dashboard-core.js, dashboard-components.js, roles.js, sw.js
-│       └── css/
+│       ├── html/                    # dashboard, staff-hq, login, caja, cocina, landing, dashboard-demo, etc.
+│       ├── js/                      # mesio-utils.js (shared), dashboard-core/components/features/nps-inventory/floorplan, roles.js, sw.js
+│       └── css/                     # tokens.css (design system), dashboard.css
 ├── alembic/versions/
 │   ├── 0001_initial_schema.py
 │   ├── 0002_staff_tips.py           # staff_shifts, staff_schedules, table_checks.tip_amount
@@ -72,15 +77,20 @@ Restaurant-bot/
 │   ├── 0005_...
 │   ├── 0006_staff_hq_deductions.py  # staff.document_number, staff_deduction_items, attendance_deductions, payroll_runs
 │   ├── 0007_payroll_contracts.py    # contract_templates, overtime_requests, staff.{contract_template_id, contract_overrides, contract_start}
-│   ├── 0008_webhook_inbox.py        # NUEVO. Tabla webhook_inbox + índice parcial pending + unique parcial dedup
-│   ├── 0009_session_token_hash.py   # NUEVO. sessions.token_hash BYTEA + pgcrypto backfill + UNIQUE INDEX
+│   ├── 0008_webhook_inbox.py        # Tabla webhook_inbox + índice parcial pending + unique parcial dedup
+│   ├── 0009_session_token_hash.py   # sessions.token_hash BYTEA + pgcrypto backfill + UNIQUE INDEX
+│   ├── 0010_checkout_proposals.py   # Checkout proposals
+│   ├── ...
 │   ├── 0014_reservation_tables_v2.py  # Apparta: capacity/type/zone en mesas, status workflow en reservas
 │   ├── 0015_dynamic_discounts.py    # Apparta: tabla time_slot_discounts (yield management)
 │   ├── 0016_reservation_deposits.py # Apparta: tabla reservation_deposits (prepago Wompi)
-│   └── 0017_reviews_analytics.py    # Apparta: reseñas públicas en NPS + occupancy_snapshots
+│   ├── 0017_reviews_analytics.py    # Apparta: reseñas públicas en NPS + occupancy_snapshots
+│   ├── 0018_...
+│   ├── 0019_staff_username.py       # staff.username TEXT UNIQUE + backfill PL/pgSQL
+│   └── 0020_missing_runtime_tables.py # subscription_usage, loyalty_*, CRM tables (antes eran runtime DDL)
 ```
 
-## Refactor Blindaje (Fases 1–6) — Estado Actual
+## Refactor Blindaje (Fases 1–7) — Estado Actual
 
 | Fase | Tema | Estado |
 |---|---|---|
@@ -90,8 +100,21 @@ Restaurant-bot/
 | 4 | Hash SHA-256 de tokens de sesión + defensas XML contra prompt injection | ✅ |
 | 5 | `Decimal` end-to-end en capa financiera (orders, tables, staff/payroll) | ✅ |
 | 6 | Repository Pattern: orders, sessions, inventory, staff, tables, conversations extraídos | ✅ |
+| 7 | Code Quality: logging, god files, security, architecture cleanup | ✅ |
 
-`database.py` pasó de **4022 → ~1500 LOC (−63%)** tras Fase 6 + Apparta. Reservaciones migradas a `reservations_repo.py`. Lo que queda: fiscal/DIAN, loyalty, restaurants, delivery orders, usuarios, subscription, menu.
+### Fase 7 — Detalle (v10.1)
+- **Logging**: 92 `print()` → `get_logger(__name__)` structlog en 12 archivos Python
+- **Security**: API key de Anthropic removida del browser → proxy `POST /api/ai/proxy`; innerHTML XSS → textContent
+- **God files**: `dashboard.py` (1236→4 módulos), `agent.py chat()` (260→65 LOC orquestador + 10 helpers)
+- **SQL en routes**: ~72 queries extraídas a repos. Nuevo `restaurant_repo.py` (20 fn), `crm_repo.py`
+- **Multi-worker**: Cart locks `asyncio.Lock` → Redis `SET NX EX` via `state_store.cart_lock_*`
+- **Sessions**: Staff routes migradas de plaintext → SHA-256 `sessions_repo`
+- **Runtime DDL**: 7 grupos de `CREATE TABLE IF NOT EXISTS` movidos a Alembic. Nueva migración `0020`
+- **Dead code**: `sales_agent.py` (962 LOC) eliminado
+- **Migrations**: Colisión de revisiones `0008`/`0009` corregida. Cadena `0001→0020` limpia
+- **Frontend**: Design system unificado (`tokens.css`), utils compartidos (`mesio-utils.js`), login unificado, sistema de usernames para staff
+
+`database.py` pasó de **4022 → ~1500 LOC (−63%)** tras Fase 6 + Apparta. `restaurant_repo.py` absorbió queries de dashboard/settings/team. Lo que queda: fiscal/DIAN, loyalty, subscription, menu.
 
 ## Integración Apparta (Fases 1–7) — Estado Actual
 
@@ -135,14 +158,15 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 
 ### Pendientes de calendario (no de código)
 
-1. Tras ~2 semanas de logs `session.legacy_lookup` en cero → crear migración `0010` que dropea `sessions.token` y eliminar el fallback en `sessions_repo.get_session`/`delete_session`.
-2. Setear `REDIS_URL` en Railway antes del deploy de Fase 3 (sin él, el bot funciona pero pierde la garantía multi-worker — fallback in-process).
-3. Correr `alembic upgrade head` para aplicar 0008 y 0009.
+1. Tras ~2 semanas de logs `session.legacy_lookup` en cero → crear migración que dropea `sessions.token` y eliminar el fallback en `sessions_repo.get_session`/`delete_session`.
+2. Setear `REDIS_URL` en Railway antes del deploy (sin él, el bot funciona pero pierde la garantía multi-worker — fallback in-process).
+3. Correr `alembic upgrade head` para aplicar hasta 0020.
+4. Migración `0012_b2b_sales_system.py` crea tablas huérfanas (`sales_inbox`, `sales_knowledge_base`, etc.) — `sales_agent.py` fue eliminado. Crear migración de cleanup cuando convenga.
 
 ### Limitaciones conocidas (no críticas)
 
 - `quantize_money` interno NO recibe `currency` en la mayoría de sitios → default 2 decimales. Solo el endpoint `pay_check` propaga `features.currency`. Para COP/CLP la columna NUMERIC del schema ya enforce la precisión final. Propagar `currency` a `db_calculate_payroll`, `db_calculate_tips_by_attendance`, etc. requeriría cambios de signature en repos — diferido.
-- `db_save_session` / `db_get_session` siguen vivos en `database.py` porque el flujo Bearer token de staff (`pin_login` + 5 sitios self-clock) no migró a `sessions_repo`. Migración pendiente (no urgente).
+- `billing.py` es el único route file que aún tiene SQL directo — diferido porque es capa fiscal/DIAN con lógica muy específica.
 
 ## Arquitectura de Base de Datos
 
@@ -248,6 +272,10 @@ await state_store.checkout_delete(phone, bot_number)
 
 # Cooldown atómico para evitar doble-confirmación de mesa
 ok = await state_store.table_cooldown_acquire(table_id, bot_number, ttl_seconds=300)
+
+# Cart lock distribuido para evitar corrupción en orders concurrentes
+ok = await state_store.cart_lock_acquire(phone, bot_number, ttl_seconds=30)
+await state_store.cart_lock_release(phone, bot_number)
 # Internamente: SET key value NX EX ttl (atómico, multi-worker-safe)
 ```
 
@@ -312,16 +340,23 @@ currency_exponent(currency) -> int               # 0 o 2
 | `inbox_repo` | `enqueue`, `fetch_batch`, `mark_processed`, `mark_failed` | `webhook_inbox` |
 | `sessions_repo` | `create_session`, `get_session`, `delete_session`, `cleanup_expired_sessions` | `sessions` |
 | `inventory_repo` | 17 funciones | `inventory`, `dish_recipes`, `inventory_movements` |
-| `staff_repo` | 55 funciones | `staff`, `staff_shifts`, `staff_breaks`, `staff_schedules`, `attendance_deductions`, `staff_deduction_items`, `payroll_runs`, `contract_templates`, `overtime_requests`, `tip_distributions`, `webauthn_*` |
-| `tables_repo` | 54 funciones | `restaurant_tables`, `table_orders`, `table_sessions`, `table_checks`, `waiter_alerts` |
-| `conversations_repo` | 19 funciones | `conversations`, `carts`, NPS per-conv, processed_wam_ids |
+| `staff_repo` | 62+ funciones | `staff`, `staff_shifts`, `staff_breaks`, `staff_schedules`, `attendance_deductions`, `staff_deduction_items`, `payroll_runs`, `contract_templates`, `overtime_requests`, `tip_distributions`, `webauthn_*` |
+| `tables_repo` | 62+ funciones | `restaurant_tables`, `table_orders`, `table_sessions`, `table_checks`, `waiter_alerts` |
+| `conversations_repo` | 20+ funciones | `conversations`, `carts`, NPS per-conv, processed_wam_ids, features |
+| `restaurant_repo` | 20 funciones | `restaurants`, `users`, `orders`, `reservations`, `conversations`, `branches` |
+| `crm_repo` | funciones CRM | `prospects`, `prospect_notes`, `crm_templates` |
+| `reservations_repo` | 14 funciones | `reservations`, disponibilidad, stats |
+| `discounts_repo` | 5 funciones | `time_slot_discounts` |
+| `reviews_repo` | 8 funciones | `nps_responses`, `occupancy_snapshots` |
+| `reservation_deposits_repo` | 5 funciones | `reservation_deposits` |
 
 ## Módulo Staff HQ (`/staff-hq`)
 
 Portal operativo unificado para todo el staff no-admin. Reemplaza las páginas de rol separadas.
 
-- **Login**: `staff-portal.html` con PIN → redirige a `/staff-hq` (operativos) o `/dashboard` (admin/gerente).
-- **Auth token**: JWT con claim `staff:<uuid>`. Se almacena en `localStorage` como `rb_staff_token` y también como alias `rb_token`.
+- **Login unificado**: `login.html` con 3 vistas: formulario login, selector restaurante, selector rol. `?r=X` para staff PIN login. `staff-portal.html` eliminado (redirect server-side).
+- **Usernames**: Staff usa `nombre.apellido` (auto-generado en creación). Duplicados resueltos con sufijo numérico. Login acepta username o nombre completo.
+- **Auth token**: JWT con claim `staff:<uuid>`. Se almacena en `localStorage` como `rb_staff_token` y también como alias `rb_token`. Sesiones via SHA-256 hash (`sessions_repo`).
 - **Secciones**: Clock card (entrada/salida/break), Timecard semanal con badges de deducción, Biometría (registro/gestión credenciales FIDO2).
 
 ### Biometría WebAuthn (`staff_webauthn.py`)
@@ -416,17 +451,33 @@ DELETE /api/staff/webauthn/credentials/{id}
 - **XSS**: En JS usar `textContent` para datos de usuario, nunca `innerHTML`. `innerHTML` solo para strings estáticos sin datos externos.
 - **JSONB**: asyncpg auto-codifica. No usar `json.dumps()` excepto donde el driver lo requiera explícitamente (e.g. pasar un dict como `$n::jsonb`).
 - **NULL en SQL**: `IS NULL` / `IS NOT NULL`. Nunca `WHERE col = NULL`.
-- **Fetch en JS**: Usar siempre `_staffFetch(path, method, body)` en lugar de `fetch()` raw.
+- **Fetch en JS**: Usar siempre `_staffFetch(path, method, body)` o `mesioHeaders()` en lugar de `fetch()` raw.
+- **AI API**: PROHIBIDO llamar a Anthropic/OpenAI desde el browser. Usar proxy `POST /api/ai/proxy` (auth requerido, server-side).
 - **Logging**: PROHIBIDO `except Exception: pass`. Usar `from app.services.logging import get_logger; log = get_logger(__name__)`. Catch tipado + `log.exception("contexto.evento", **ctx)`. Si afecta consistencia de datos/dinero → re-raise tras loguear.
 - **Money**: PROHIBIDO `float` en aritmética financiera. Usar `Decimal` + helpers de `services/money.py`. `float(...)` solo en el borde JSON con comentario `# JSON boundary`.
 - **Prompt injection**: Cualquier nuevo punto donde se inyecte texto del usuario al LLM debe pasar por `_wrap_user_message(...)`.
 
 ## Frontend — Patrones y Convenciones
 
+### Design System (`tokens.css`)
+Fuente única de verdad para tokens de diseño: `--brand: #1D9E75`, superficies, texto, semánticos, spacing (8pt grid), radii, sombras, transiciones. Incluye sistema unificado de botones (`.m-btn`), modals, toasts, skeletons, badges de conexión.
+
+### Shared Utilities (`mesio-utils.js`)
+Cargado antes de scripts de página. Provee:
+- `_escHtml(s)` — prevención XSS
+- `mesioFmt(n)` — formato moneda (COP zero-decimal)
+- `mesioHeaders()` — auth + branch headers (reemplaza `_apiHeaders()` duplicados)
+- `mesioLogout()` — logout centralizado
+- `mesioToast(msg, type, duration)` — notificaciones accesibles
+- `mesioConfirm(msg, opts)` — reemplaza `window.confirm`
+- `mesioTrackFetch(ok)` — monitor de conexión
+- `mesioInterval(fn, ms)` — setInterval visibility-aware
+- `mesioDate(iso)` — formato fecha locale-aware
+
 ### `_staffFetch(path, method='GET', body=null)`
 Wrapper sobre `fetch` que:
 - Prefija `/api/staff` al path.
-- Usa `_apiHeaders()` (lee token de `localStorage.rb_token` y branch ID del selector global).
+- Usa `mesioHeaders()` (lee token de `localStorage.rb_token` y branch ID del selector global).
 - Lanza `Error(detail || 'HTTP NNN')` si la respuesta no es 2xx.
 
 ### MesioComponent
@@ -477,7 +528,7 @@ Formateador universal que lee `rb_restaurant` de localStorage para obtener `loca
 ## Instrucciones Críticas para Claude Code
 - **No Vaguedad**: Ante una duda técnica, pregunta antes de proponer cambios masivos que consuman tokens.
 - **Aislamiento Multi-Worker**: Al modificar estados (`NPS`, `checkout`), asume siempre que hay 4 workers y usa `state_manager` (Redis).
-- **Patrón Repositorio**: Prohibido añadir lógica SQL compleja en `app/services/`. Debe ir en `app/repositories/`.
+- **Patrón Repositorio**: Prohibido SQL en `app/routes/` y `app/services/` (excepto `billing.py` fiscal). Todo SQL nuevo va en `app/repositories/`.
 - **Precisión Financiera**: Prohibido usar `float` para dinero. Usa `Decimal` y los helpers en `app/services/money.py`.
 - **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
 - **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle.

@@ -443,3 +443,142 @@ def test_get_check_ticket_endpoint(client, monkeypatch):
     assert data["check_number"] == 1
     assert data["dian_status"] == "accepted"
     assert len(data["cufe"]) == 96
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. Regresión: tip cap con service_charge (bug fix v10.0)
+#
+# Before the fix, the 50% cap was checked against check["total"] alone.
+# After the fix, cap_base = check["total"] + service_charge.
+#
+# These three tests pin the corrected behaviour permanently.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _pay_check_mocks(monkeypatch, check_total: float):
+    """
+    Shared setup for pay_check regression tests.
+
+    Patches:
+      - auth / restaurant (features={} so dian_active=False, no fiscal path)
+      - db.db_get_check        → open check with the given total
+      - billing.get_billing_config → None (no DIAN path)
+      - db.db_finalize_check_payment → no-op
+      - loyalty_svc.accrue_on_check  → no-op (avoid AttributeError)
+    """
+    from app.services import database as db_mod
+
+    async def mock_verify_token(token: str):
+        return "caja_user"
+
+    async def mock_get_user(username: str):
+        return {"username": "caja_user", "branch_id": 1, "role": "caja", "restaurant_name": "R"}
+
+    async def mock_get_restaurant(request):
+        # features={} → dian_active=False, currency=None
+        return {"id": 1, "whatsapp_number": "+57300", "name": "R", "features": {}}
+
+    async def mock_get_check(check_id):
+        return {
+            "id":           check_id,
+            "base_order_id": "BASE-001",
+            "status":       "open",
+            "total":        check_total,
+            "items":        "[]",
+            "proposed_payments": None,
+            "proposed_tip":     None,
+        }
+
+    async def mock_get_billing_config(restaurant_id):
+        return None  # no fiscal path
+
+    async def mock_finalize(*args, **kwargs):
+        pass
+
+    async def mock_get_first_table_order(base_order_id):
+        # Return None → skips the farewell/NPS block entirely
+        return None
+
+    monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
+    monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
+    monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
+    monkeypatch.setattr(db_mod, "db_get_check", mock_get_check)
+    monkeypatch.setattr("app.routes.tables.billing.get_billing_config", mock_get_billing_config)
+    monkeypatch.setattr(db_mod, "db_finalize_check_payment", mock_finalize)
+    monkeypatch.setattr(db_mod, "db_get_first_table_order", mock_get_first_table_order)
+    # Avoid loyalty AttributeError if the module has no accrue_on_check
+    monkeypatch.setattr("app.routes.tables.loyalty_svc", MagicMock(spec=[]), raising=False)
+
+    return db_mod
+
+
+def test_tip_accepted_with_service_charge(client, monkeypatch):
+    """
+    Regression: tip cap must be based on (check.total + service_charge).
+
+    check.total   = 90 000
+    service_charge = 10 000
+    combined       = 100 000
+    tip            =  45 000  (45% of combined) → ACCEPTED
+    """
+    _pay_check_mocks(monkeypatch, check_total=90_000)
+
+    resp = client.post(
+        "/api/table-orders/BASE-001/checks/BASE-001-CHK-1/pay",
+        json={
+            "payments":       [{"method": "efectivo", "amount": 145_000}],
+            "service_charge": 10_000,
+            "tip_amount":     45_000,
+        },
+        headers={"Authorization": "Bearer fake"},
+    )
+    # Must NOT be rejected by the tip cap
+    assert resp.status_code == 200, (
+        f"Expected 200 but got {resp.status_code}: {resp.json()}"
+    )
+    assert resp.json()["success"] is True
+
+
+def test_tip_rejected_over_50pct_of_combined(client, monkeypatch):
+    """
+    Tip that exceeds 50% of (check.total + service_charge) must be rejected.
+
+    check.total    = 90 000
+    service_charge = 10 000
+    combined       = 100 000
+    tip            =  51 000  (51% of combined) → REJECTED 400
+    """
+    _pay_check_mocks(monkeypatch, check_total=90_000)
+
+    resp = client.post(
+        "/api/table-orders/BASE-001/checks/BASE-001-CHK-1/pay",
+        json={
+            "payments":       [{"method": "efectivo", "amount": 151_000}],
+            "service_charge": 10_000,
+            "tip_amount":     51_000,
+        },
+        headers={"Authorization": "Bearer fake"},
+    )
+    assert resp.status_code == 400
+    assert "propina" in resp.json()["detail"].lower()
+
+
+def test_tip_rejected_over_50pct_without_service_charge(client, monkeypatch):
+    """
+    Without a service charge the old 50%-of-total cap still applies.
+
+    check.total    = 90 000
+    service_charge =      0
+    tip            = 46 000  (>50% of 90 000) → REJECTED 400
+    """
+    _pay_check_mocks(monkeypatch, check_total=90_000)
+
+    resp = client.post(
+        "/api/table-orders/BASE-001/checks/BASE-001-CHK-1/pay",
+        json={
+            "payments":  [{"method": "efectivo", "amount": 136_000}],
+            "tip_amount": 46_000,
+        },
+        headers={"Authorization": "Bearer fake"},
+    )
+    assert resp.status_code == 400
+    assert "propina" in resp.json()["detail"].lower()

@@ -929,7 +929,8 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         change = float(quantize_money(total_pagado - check_total, _currency))
 
         tip_amount_d = to_decimal(body.tip_amount)
-        if tip_amount_d > 0 and tip_amount_d > money_mul(check["total"], Decimal("0.5")):
+        tip_cap_base = to_decimal(check["total"]) + to_decimal(body.service_charge)
+        if tip_amount_d > 0 and tip_amount_d > money_mul(tip_cap_base, Decimal("0.5")):
             raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
 
         config = await billing.get_billing_config(restaurant["id"])

@@ -4,6 +4,6 @@ builder = "nixpacks"
 [deploy]
 # V-13 FIX: 4 workers uvicorn para soportar carga real
 # (Railway Pro recomendado — 8GB RAM, sin límite CPU)
-startCommand = "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop"
+startCommand = "alembic upgrade head && if [ \"$WORKER_MODE\" = 'inbox' ]; then python scripts/run_inbox_worker.py; else uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop; fi"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

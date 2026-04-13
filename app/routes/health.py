@@ -1,0 +1,84 @@
+"""
+app/routes/health.py
+
+Lightweight liveness + readiness probe.
+GET /health         →  200 {"status": "ok", "db": "ok"}
+                    →  503 {"status": "degraded", "db": "error: <ExcType>"}  if DB is unreachable
+GET /health/metrics →  200 operational metrics (inbox queue depth, pool stats)
+                    →  401 if Authorization: Bearer <ADMIN_KEY> header is missing or wrong
+"""
+
+import os
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from app.services.database import get_pool  # top-level import — needed for test patching
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+async def health_check():
+    checks: dict = {"status": "ok", "db": "ok"}
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+    except Exception as exc:
+        checks["db"] = f"error: {type(exc).__name__}"
+        checks["status"] = "degraded"
+        return JSONResponse(status_code=503, content=checks)
+    return checks
+
+
+@router.get("/health/metrics")
+async def health_metrics(request: Request):
+    admin_key = os.environ.get("ADMIN_KEY", "")
+    auth_header = request.headers.get("Authorization", "")
+    provided_key = auth_header.removeprefix("Bearer ").strip()
+
+    if not admin_key or provided_key != admin_key:
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    metrics: dict = {}
+
+    # Pool stats — may work even if queries fail
+    try:
+        pool = await get_pool()
+        pool_size = pool.get_size()
+        pool_idle = pool.get_idle_size()
+        metrics["db_pool_size"] = pool_size
+        metrics["db_pool_free"] = pool_idle
+        metrics["db_pool_used"] = pool_size - pool_idle
+    except Exception as exc:
+        log.exception("health.metrics.pool_error", exc_type=type(exc).__name__)
+        metrics["db_pool_size"] = None
+        metrics["db_pool_free"] = None
+        metrics["db_pool_used"] = None
+
+    # Inbox queue depth
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics["inbox_queue_depth"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM webhook_inbox WHERE processed_at IS NULL"
+            )
+    except Exception as exc:
+        log.exception("health.metrics.inbox_depth_error", exc_type=type(exc).__name__)
+        metrics["inbox_queue_depth"] = None
+
+    # Dead letters
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics["inbox_dead_letters"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM webhook_inbox WHERE last_error LIKE 'DEAD_LETTER:%'"
+            )
+    except Exception as exc:
+        log.exception("health.metrics.dead_letters_error", exc_type=type(exc).__name__)
+        metrics["inbox_dead_letters"] = None
+
+    return metrics

@@ -142,3 +142,42 @@ def mock_db(monkeypatch):
     monkeypatch.setattr("app.services.billing.log_billing_event",   mock_log_billing_event)
     monkeypatch.setattr("app.routes.deps.verify_token",             mock_verify_token)
     monkeypatch.setattr(db, "db_get_user",          mock_get_user)
+
+
+# ── Real PostgreSQL fixtures (integration tests) ──────────────────────────────
+
+import asyncpg
+import os
+
+
+@pytest.fixture
+async def db_pool():
+    """Real PostgreSQL connection pool for integration tests.
+
+    Reads TEST_DATABASE_URL first, falls back to DATABASE_URL.
+    Skips the test if neither is set so the suite stays green in CI
+    without a database.
+    """
+    url = os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if not url:
+        pytest.skip("No DATABASE_URL or TEST_DATABASE_URL set — skipping integration test")
+    pool = await asyncpg.create_pool(url, min_size=1, max_size=5)
+    yield pool
+    await pool.close()
+
+
+@pytest.fixture
+async def db_conn(db_pool):
+    """Single connection wrapped in a transaction that is always rolled back.
+
+    This gives each test a clean slate without truncating or seeding tables:
+    the transaction is started before the test body runs and rolled back once
+    it finishes, regardless of whether the test passed or failed.
+    """
+    async with db_pool.acquire() as conn:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            yield conn
+        finally:
+            await tx.rollback()  # Always rollback — test isolation
