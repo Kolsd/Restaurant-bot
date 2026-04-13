@@ -4,7 +4,7 @@ Also includes the order-status update and table-session helpers that power the d
 """
 import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from anthropic import Anthropic
 
 from app.services import database as db
