@@ -285,32 +285,34 @@
     el.style.display = 'none';
   }
 
+  /* ── Canonical role aliases ───────────────────────────────────────── */
+  var ROLE_ALIASES = {
+    cook: 'cocina', cocinero: 'cocina',
+    waiter: 'mesero',
+    cashier: 'caja', cajero: 'caja',
+    delivery: 'domiciliario',
+  };
+
   /* ── Normalize roles array ─────────────────────────────────────────── */
   function normalizeRoles(raw) {
+    var arr;
     if (Array.isArray(raw)) {
-      return raw.map(function (r) { return r.trim().toLowerCase(); }).filter(Boolean);
+      arr = raw;
+    } else if (typeof raw === 'string') {
+      arr = raw.replace(/[{}]/g, '').split(',');
+    } else {
+      return ['mesero'];
     }
-    if (typeof raw === 'string') {
-      return raw.replace(/[{}]/g, '').split(',').map(function (r) { return r.trim().toLowerCase(); }).filter(Boolean);
-    }
-    return ['mesero'];
+    return arr.map(function (r) {
+      var k = r.trim().toLowerCase();
+      return ROLE_ALIASES[k] || k;
+    }).filter(Boolean);
   }
 
   /* ── Redirect a single role ────────────────────────────────────────── */
   function redirectForRole(role) {
     var meta = ROLE_META[role];
-    if (meta) {
-      window.location.href = meta.url;
-      return;
-    }
-    // legacy role aliases
-    var aliases = {
-      cook:      '/cocina', cocinero:  '/cocina',
-      waiter:    '/mesero',
-      cashier:   '/caja',   cajero:    '/caja',
-      delivery:  '/domiciliario',
-    };
-    window.location.href = aliases[role] || '/staff-hq';
+    window.location.href = meta ? meta.url : '/staff-hq';
   }
 
   /* ── Persist localStorage for a resolved restaurant+role ──────────────
@@ -359,6 +361,12 @@
     }
 
     // Multiple operational roles — show role selector
+    // But only if at least one role has a matching tile
+    var hasVisibleTile = rolesArr.some(function (r) { return !!ROLE_META[r]; });
+    if (!hasVisibleTile) {
+      window.location.href = '/staff-hq';
+      return;
+    }
     _pendingRoles     = rolesArr;
     _pendingStaffName = staffName || '';
     renderRoleSelector();
