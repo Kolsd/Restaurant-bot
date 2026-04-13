@@ -283,3 +283,38 @@ async def cart_lock_release(phone: str, bot_number: str) -> None:
     lock = _fb_cart_locks.get(key)
     if lock is not None and lock.locked():
         lock.release()
+
+
+# ── Rate limiting (sliding window) ───────────────────────────────────────────
+
+_fb_rate_limits: dict[str, list[float]] = {}  # key → list of timestamps
+
+
+async def rate_limit_check(key: str, max_requests: int, window_seconds: int) -> bool:
+    """
+    Check if a request should be rate-limited using a sliding window counter.
+
+    Returns True if the request is ALLOWED, False if it should be BLOCKED.
+
+    Redis path: Uses INCR + EXPIRE for atomic counter with TTL.
+    Fallback: In-process timestamp list with expiry cleanup.
+    """
+    redis_key = f"mesio:ratelimit:{key}"
+    r = await _rc.get_redis()
+    if r is not None:
+        pipe = r.pipeline()
+        pipe.incr(redis_key)
+        pipe.expire(redis_key, window_seconds)
+        results = await pipe.execute()
+        count = results[0]
+        return count <= max_requests
+
+    _maybe_warn("rate_limit")
+    now = time.monotonic()
+    timestamps = _fb_rate_limits.get(redis_key, [])
+    # Clean expired entries
+    cutoff = now - window_seconds
+    timestamps = [t for t in timestamps if t > cutoff]
+    timestamps.append(now)
+    _fb_rate_limits[redis_key] = timestamps
+    return len(timestamps) <= max_requests

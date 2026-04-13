@@ -25,6 +25,17 @@ def client():
     return TestClient(app)
 
 
+# ── Clear rate limit state between tests ─────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _clear_rate_limit_state():
+    """Reset in-process rate limit fallback dict so tests don't bleed into each other."""
+    from app.services import state_store
+    state_store._fb_rate_limits.clear()
+    yield
+    state_store._fb_rate_limits.clear()
+
+
 # ── DB row / pool factory helpers (reused across async suites) ───────────────
 
 def make_row(d: dict):

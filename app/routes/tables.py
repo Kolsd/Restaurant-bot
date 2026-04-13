@@ -885,6 +885,11 @@ async def get_checks(request: Request, base_order_id: str):
 @router.post("/api/table-orders/{base_order_id}/checks/{check_id}/pay")
 async def pay_check(request: Request, base_order_id: str, check_id: str, body: PayCheckBody):
     try:
+        # Rate limit: 3 payments per check per 10 seconds (prevents double-click)
+        from app.services import state_store
+        rl_key = f"pay:{check_id}"
+        if not await state_store.rate_limit_check(rl_key, max_requests=3, window_seconds=10):
+            raise HTTPException(status_code=429, detail="Demasiadas solicitudes de pago. Intenta de nuevo en unos segundos.")
         restaurant = await get_current_restaurant(request)
         check = await db.db_get_check(check_id)
         

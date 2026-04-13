@@ -49,51 +49,69 @@ Mesio es un SaaS multi-tenant para restaurantes que maneja dinero real (nomina, 
 
 ---
 
-## Fase 2: Monitoring + Worker Separado (Siguiente)
+## Fase 2: Monitoring + Worker Separado  ✅ COMPLETADA
 
-### 2.1 Lifespan moderno
-- `app/main.py`: `@app.on_event` → `@asynccontextmanager lifespan`
-- Eliminar globals `_inbox_stop_event`/`_inbox_task`
-- Esto tambien elimina los DeprecationWarnings que salen en los tests
+### Lo que se hizo
 
-### 2.2 Inbox worker como proceso separado
-- Crear `scripts/run_inbox_worker.py` (entrypoint standalone)
-- Railway: segundo servicio `worker` con `startCommand` propio
-- Remover `create_task(run_worker(...))` del lifespan HTTP
-- **Beneficio: HTTP crash ≠ webhook processing muere**
+**2.1 Lifespan moderno** (`app/main.py`)
+- `@app.on_event("startup")`/`@app.on_event("shutdown")` → `@asynccontextmanager lifespan(app)`
+- Globals `_inbox_stop_event`/`_inbox_task` eliminados → variables locales dentro del lifespan
+- DeprecationWarnings eliminados
 
-### 2.3 Metricas operativas
-- `GET /health/metrics` (auth required):
-  ```json
-  {"inbox_queue_depth": 12, "dead_letters": 3, "pool_size": 20, "pool_idle": 18}
-  ```
+**2.2 Inbox worker como proceso separado**
+- `scripts/run_inbox_worker.py` — entrypoint standalone con signal handling (SIGTERM/SIGINT)
+- `railway.toml` — start command condicional: `WORKER_MODE=inbox` → worker, default → uvicorn
+- `DISABLE_EMBEDDED_WORKER=1` env var para que HTTP no arranque worker interno
+- Railway: servicio `inbox-worker` desplegado y operativo. HTTP crash ya no mata webhook processing.
 
-### Archivos a modificar
-| Archivo | Cambio |
-|---|---|
-| `app/main.py` | Reemplazar `on_event` con lifespan context manager |
-| `app/services/inbox_worker.py` | Extraer loop principal a funcion reutilizable |
-| `scripts/run_inbox_worker.py` | NUEVO — entrypoint standalone para worker |
-| `app/routes/health.py` | Agregar `/health/metrics` endpoint |
+**2.3 Metricas operativas** (`app/routes/health.py`)
+- `GET /health/metrics` con auth via `ADMIN_KEY` env var
+- Retorna: `db_pool_size`, `db_pool_free`, `db_pool_used`, `inbox_queue_depth`, `inbox_dead_letters`
+- Cada metrica en su propio try/except (resiliente a DB down)
+
+### Tests creados
+| Archivo | Tests | Que cubre |
+|---|---|---|
+| `tests/test_lifespan.py` | 3 | Startup OK, worker disabled by env, worker enabled by default |
+| `tests/test_health.py` | +5 | Metrics auth (401), wrong key, valid data, pool arithmetic, no ADMIN_KEY |
+
+### Bugs encontrados: 0
+(Fase 2 fue refactor de arquitectura, no de logica financiera)
 
 ---
 
-## Fase 3: Hardening de Flujos Core
+## Fase 3: Hardening de Flujos Core  ✅ COMPLETADA
 
-### 3.1 Integration tests end-to-end
-- `tests/integration/` con fixtures dedicadas
-- Flujos: delivery order completo, table session → pay → tip, payroll end-to-end
-- Estos son flujos multi-paso que cruzan repos (no unitarios)
+### Lo que se hizo
 
-### 3.2 Rate limiting via Redis
-- `POST /webhook` — 1 req/phone/segundo (prevenir spam)
-- `POST .../checks/{id}/pay` — 3 req/check/10s (prevenir doble-pago)
-- Implementar como middleware o decorador usando `state_store` (Redis con fallback)
+**3.1 Integration tests end-to-end** (`tests/test_integration_flows.py`)
+- 13 tests contra PostgreSQL real (transaction rollback para aislamiento)
+- `TestDeliveryOrderFlow` (3 tests): commit + deduct stock, insufficient stock rollback, order sin inventory link
+- `TestTableCheckFlow` (3 tests): pay con tip persistido, tip cap 50%, unique constraint en split checks
+- `TestTipDistributionFlow` (5 tests): single role, two-role split, staff off-shift → unallocated, non-invoiced exclusion, multi-check accumulation
+- `TestShiftConstraints` (2 tests): partial unique index prevents double open shift
 
-### 3.3 Load testing
-- Script `scripts/load_test.py` — 50 ordenes concurrentes
-- Validar que `FOR UPDATE` en inventory funciona bajo carga
-- Medir latencia de `commit_order_transaction` bajo contention
+**3.2 Rate limiting via Redis** (`app/services/state_store.py`, `app/routes/tables.py`)
+- `rate_limit_check(key, max_requests, window_seconds)` en `state_store.py` — Redis INCR+EXPIRE con fallback in-process sliding window
+- `POST .../checks/{id}/pay` — 3 req/check/10s (previene doble-pago por doble-click)
+- Webhook ya tenia rate limit: 20 msgs/60s por phone via Postgres (`meta_rate_limits`), no se modifico
+- `conftest.py` — autouse fixture que limpia `_fb_rate_limits` entre tests
+
+**3.3 Load testing** (`scripts/load_test.py`)
+- Script standalone: `DATABASE_URL=... python scripts/load_test.py --concurrency 50 --stock 100`
+- Valida que `SELECT FOR UPDATE` + `UPDATE WHERE current_stock >= $1` previene lost updates
+- Verifica consistencia: `final_stock == initial_stock - successes`
+- Reporta latencia p50/p95/p99 y throughput
+- Cleanup automatico de datos de test
+
+### Tests creados
+| Archivo | Tests | Que cubre |
+|---|---|---|
+| `tests/test_integration_flows.py` | 13 | Flujos E2E: delivery, table→pay→tip, payroll, constraints |
+| `tests/test_rate_limit.py` | 4 | rate_limit_check fallback, pay_check 429 |
+
+### Bugs encontrados: 0
+(Los 6 bugs criticos se encontraron en Fase 1. Fases 2-3 validaron que la arquitectura es correcta)
 
 ---
 
