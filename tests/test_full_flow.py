@@ -643,7 +643,7 @@ class TestDeliveryRiderFlows:
 
         captured_bot = []
 
-        async def fake_notify(phone, status, bot_number=""):
+        async def fake_notify(phone, status, bot_number="", order_type="domicilio"):
             captured_bot.append(bot_number)
 
         with patch("app.routes.orders_routes.send_delivery_notification", fake_notify), \

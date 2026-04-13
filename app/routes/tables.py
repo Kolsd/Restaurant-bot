@@ -171,7 +171,7 @@ async def get_floor_plan(request: Request, restaurant=Depends(get_current_restau
     """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta."""
     branch_id_str = request.headers.get("x-branch-id")
     is_main = restaurant.get("parent_restaurant_id") is None
-    branch_id = None if not branch_id_str or branch_id_str == "all" else int(branch_id_str)
+    branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else None
     if branch_id is None and is_main:
         branch_id = restaurant["id"]
     return await db.db_get_floor_plan(branch_id=branch_id, is_main=is_main)

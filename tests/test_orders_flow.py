@@ -342,14 +342,14 @@ def test_wompi_no_reference(client, monkeypatch):
 
 
 def test_wompi_no_signature_header(client, monkeypatch):
-    """Sin header x-event-checksum → se procesa igual (Wompi lo permite en sandbox)."""
+    """Sin header x-event-checksum → se rechaza con 401 (firma requerida)."""
     secret = "test_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
     payload = {"event": "transaction.updated", "data": {}}
     body_bytes = json.dumps(payload).encode()
     r = client.post("/api/payment/wompi-webhook", content=body_bytes,
                     headers={"Content-Type": "application/json"})
-    assert r.status_code == 200  # sin header → vacío → no hay mismatch
+    assert r.status_code == 401  # sin header → firma faltante → rechazado
 
 
 # ══════════════════════════════════════════════════════════════════════════════
