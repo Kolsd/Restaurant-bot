@@ -1125,3 +1125,65 @@ async def db_check_usage_limits(restaurant_id: int) -> None:
             raise UsageLimitExceeded("tokens", used_tokens, int(token_limit))
         if invoice_limit and used_invoices >= int(invoice_limit):
             raise UsageLimitExceeded("facturas", used_invoices, int(invoice_limit))
+
+
+# ── Slug helpers (Catálogo v2 Fase 6 — SEO routes) ───────────────────────────
+
+import re as _re
+
+
+def _slugify(name: str) -> str:
+    """Convert a restaurant or dish name to a URL-safe slug."""
+    s = _re.sub(r'[^a-zA-Z0-9]+', '-', (name or '').lower()).strip('-')
+    return s or 'restaurant'
+
+
+async def db_get_restaurant_by_slug(slug: str) -> dict | None:
+    """Return a restaurant row by its unique slug, or None if not found."""
+    def _get_pool():
+        from app.services.database import get_pool
+        return get_pool()
+
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, name, slug, whatsapp_number, menu, features, address
+            FROM restaurants
+            WHERE slug = $1
+            """,
+            slug,
+        )
+    if not row:
+        return None
+    return dict(row)
+
+
+async def db_slug_exists(slug: str) -> bool:
+    """Return True if a restaurant with this slug already exists."""
+    def _get_pool():
+        from app.services.database import get_pool
+        return get_pool()
+
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        val = await conn.fetchval(
+            "SELECT 1 FROM restaurants WHERE slug = $1", slug
+        )
+    return val is not None
+
+
+async def db_generate_unique_slug(name: str) -> str:
+    """
+    Generate a unique slug for a new restaurant.
+    Tries base slug first; appends -2, -3, … until unique.
+    Uses ON CONFLICT strategy: check-then-insert is acceptable here
+    because slug assignment is infrequent (restaurant creation).
+    """
+    base = _slugify(name)
+    candidate = base
+    suffix = 2
+    while await db_slug_exists(candidate):
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
