@@ -20,6 +20,9 @@ Variables de entorno críticas:
   BOT_MODEL_FAST,               # (opcional) override modelo rápido de Anthropic
   BOT_MODEL_PRECISE,            # (opcional) override modelo preciso de Anthropic
   OPENAI_API_KEY,               # (opcional) Para transcripción de voice notes (Whisper API). Sin esto, audios reciben fallback amigable.
+  CLOUDINARY_CLOUD_NAME,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
+  CLOUDINARY_API_KEY,           # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
+  CLOUDINARY_API_SECRET,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
 ```
 
 ## Estructura del Proyecto
@@ -180,6 +183,8 @@ Restaurant-bot/
 | `reservation_deposit_amount` | config | 50000 | 5 | Monto del depósito en moneda local |
 | `dynamic_discounts` | opt-in | false | 6 | Descuentos 5-50% por franja horaria |
 | `module_reviews` | opt-in | false | 7 | Publicación de reseñas del NPS |
+| `bot_visual_menu` | opt-in | false | Catálogo v2 F1 | Activa envío de platos con foto desde el bot (costo Meta relevante) |
+| `catalog_v2_enabled` | opt-out | true | Catálogo v2 F1 | Kill-switch global del catálogo visual por restaurante |
 
 ### Nuevas Tablas (Apparta)
 
@@ -726,6 +731,59 @@ Formateador universal que lee `rb_restaurant` de localStorage para obtener `loca
 - **Sin Resúmenes Proactivos**: No generes resúmenes de cambios ni explicaciones extensas a menos que se solicite con "explica".
 - **Muestreo de Código**: Para archivos de más de 300 líneas, busca funciones específicas por nombre en lugar de leer el archivo completo.
 - **Reset de Sesión**: Sugiere al usuario usar `/clear` si el historial de la conversación supera los 10 mensajes para limpiar la memoria de trabajo.
+
+## Catálogo Visual v2 — Shape extendido del plato JSONB
+
+### Schema completo (catálogo v2, backward-compatible)
+
+Cada plato en `restaurants.menu` es un JSON object dentro de una lista por categoría:
+```json
+{
+  "name":            "Bandeja Paisa",
+  "description":     "Fríjoles, chicharrón, carne molida, chorizo, arepa, aguacate y arroz",
+  "price":           28000,
+  "image_url":       "https://res.cloudinary.com/mesio/image/upload/c_fill,w_600,h_450/v1/mesio/r_42/dish_abc.webp",
+  "image_public_id": "mesio/r_42/dish_abc",
+  "tags":            ["popular_latam"],
+  "badges":          ["chef_pick"],
+  "allergens":       ["gluten"],
+  "featured":        false,
+  "sort_order":      3,
+  "calories":        850,
+  "prep_time_min":   15,
+  "active":          true
+}
+```
+
+### Campos
+| Campo | Tipo | Default | Notas |
+|---|---|---|---|
+| `name` | str | — | Requerido |
+| `description` | str | `""` | |
+| `price` | Decimal/int | — | Requerido. NUNCA float en cálculos |
+| `image_url` | str\|None | `null` | URL completa Cloudinary |
+| `image_public_id` | str\|None | `null` | `mesio/r_{id}/...` — scoped al restaurante |
+| `tags` | list[str] | `[]` | Slugs estables: `vegan`, `gluten_free`, `spicy`, `popular` |
+| `badges` | list[str] | `[]` | `chef_pick`, `new`, `popular` |
+| `allergens` | list[str] | `[]` | `gluten`, `lacteos`, `nueces`, etc. |
+| `featured` | bool | `false` | Aparece en hero carousel |
+| `sort_order` | int | `999` | Orden dentro de la categoría (menor = primero) |
+| `calories` | int\|None | `null` | |
+| `prep_time_min` | int\|None | `null` | |
+| `active` | bool | `true` | `false` = oculto en catálogo público |
+
+### Backward compatibility
+Los platos viejos (`{name, description, price}`) siguen funcionando. `normalize_dish_shape(dish)` en `app/repositories/restaurant_repo.py` aplica todos los defaults en lectura (`db_get_menu`, `db_get_public_menu_data`) y escritura (`db_update_menu`). Nunca se pierden keys en downstream.
+
+### Seguridad multi-tenant
+`validate_dish_image_ownership(dish, restaurant_id)` en `restaurant_repo.py` verifica que `image_public_id` empiece con `mesio/r_{restaurant_id}/`. `db_update_menu` lanza `ValueError` si hay una imagen de otro restaurante. `image_host.delete_image(public_id, restaurant_id)` hace la misma validación antes de llamar a Cloudinary.
+
+### `app/services/image_host.py`
+Wrapper Cloudinary. Funciones clave:
+- `sign_upload_params(restaurant_id, folder_suffix="menu")` → params para upload directo browser→Cloudinary
+- `delete_image(public_id, restaurant_id)` → borra con validación ownership
+- `build_transform_url(url, variant)` → variantes `"thumb"` (300×300), `"card"` (600×450), `"hero"` (1200×900)
+- `is_cloudinary_url(url)` → bool
 
 ## Instrucciones Críticas para Claude Code
 - **No Vaguedad**: Ante una duda técnica, pregunta antes de proponer cambios masivos que consuman tokens.

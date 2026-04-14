@@ -36,6 +36,75 @@ from app.services.logging import get_logger  # noqa: E402
 log = get_logger(__name__)
 
 
+# ── Catálogo v2 — dish shape helpers ─────────────────────────────────────────
+
+def normalize_dish_shape(dish: dict) -> dict:
+    """
+    Apply defaults for all extended dish fields introduced in catálogo v2.
+
+    Called on every dish before returning from db_get_menu / db_get_public_menu_data,
+    and before saving in db_update_menu.  Acts as a safety net so downstream code
+    never sees missing keys regardless of how old the stored JSONB is.
+
+    Required fields (validated upstream, not coerced here):
+        name (str), price (Decimal/int)
+
+    Extended fields (with defaults):
+        description (str, ""), image_url (str|None), image_public_id (str|None),
+        tags (list[str], []), badges (list[str], []), allergens (list[str], []),
+        featured (bool, False), sort_order (int, 999),
+        calories (int|None), prep_time_min (int|None), active (bool, True)
+    """
+    return {
+        "name":             dish.get("name", ""),
+        "description":      dish.get("description", ""),
+        "price":            dish.get("price", 0),
+        "image_url":        dish.get("image_url"),        # None = no image
+        "image_public_id":  dish.get("image_public_id"),  # None = no Cloudinary asset
+        "tags":             dish.get("tags") if isinstance(dish.get("tags"), list) else [],
+        "badges":           dish.get("badges") if isinstance(dish.get("badges"), list) else [],
+        "allergens":        dish.get("allergens") if isinstance(dish.get("allergens"), list) else [],
+        "featured":         bool(dish.get("featured", False)),
+        "sort_order":       int(dish.get("sort_order", 999)),
+        "calories":         dish.get("calories"),         # None = unknown
+        "prep_time_min":    dish.get("prep_time_min"),    # None = unknown
+        "active":           bool(dish.get("active", True)),
+    }
+
+
+def validate_dish_image_ownership(dish: dict, restaurant_id: int) -> bool:
+    """
+    Return True if the dish's image_public_id belongs to *restaurant_id*.
+
+    A dish without an image (image_public_id is None/empty) always passes.
+    Prevents cross-tenant image references from being saved.
+    """
+    public_id = dish.get("image_public_id")
+    if not public_id:
+        return True
+    expected_prefix = f"mesio/r_{restaurant_id}/"
+    return str(public_id).startswith(expected_prefix)
+
+
+def _normalize_menu_dishes(menu: dict) -> dict:
+    """
+    Walk a {category: [dish, ...]} menu and run normalize_dish_shape on every dish.
+    Returns a new dict; does not mutate the input.
+    """
+    if not isinstance(menu, dict):
+        return menu
+    result: dict = {}
+    for category, dishes in menu.items():
+        if isinstance(dishes, list):
+            result[category] = [
+                normalize_dish_shape(d) if isinstance(d, dict) else d
+                for d in dishes
+            ]
+        else:
+            result[category] = dishes
+    return result
+
+
 # ── Superadmin global stats ───────────────────────────────────────────────────
 
 async def db_get_admin_stats() -> dict:
@@ -464,11 +533,27 @@ async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
             rest["restaurant_id"],
         )
     availability = {r["dish_name"]: r["available"] for r in inv_rows}
+
+    # Catálogo v2: normalize dish shapes on read so consumers always see all fields.
+    def _parse_and_normalize(raw) -> dict | None:
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, str):
+                    parsed = json.loads(parsed)
+            except Exception:
+                return {}
+        else:
+            parsed = raw
+        return _normalize_menu_dishes(parsed)
+
     return {
-        "restaurant_id": rest["restaurant_id"],
+        "restaurant_id":  rest["restaurant_id"],
         "name":           rest["name"],
-        "menu":           rest["menu"],
-        "parent_menu":    rest["parent_menu"],
+        "menu":           _parse_and_normalize(rest["menu"]),
+        "parent_menu":    _parse_and_normalize(rest["parent_menu"]),
         "features":       rest["features"],
         "parent_features": rest["parent_features"],
         "availability":   availability,
@@ -795,7 +880,40 @@ async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
 
 
 async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
-    """Sobrescribe el JSON del menú para un restaurante específico."""
+    """
+    Sobrescribe el JSON del menú para un restaurante específico.
+
+    Catálogo v2: antes de guardar, cada plato pasa por normalize_dish_shape y se
+    valida que image_public_id pertenezca a este restaurante.  Lanza ValueError si
+    algún plato tiene una imagen de otro tenant.
+    """
+    # ── Validate + normalize dishes ───────────────────────────────────────────
+    if isinstance(menu_data, dict):
+        for category, dishes in menu_data.items():
+            if not isinstance(dishes, list):
+                continue
+            normalized: list = []
+            for dish in dishes:
+                if not isinstance(dish, dict):
+                    normalized.append(dish)
+                    continue
+                if not validate_dish_image_ownership(dish, restaurant_id):
+                    bad_pid = dish.get("image_public_id")
+                    log.warning(
+                        "restaurant_repo.db_update_menu.cross_tenant_image",
+                        restaurant_id=restaurant_id,
+                        category=category,
+                        dish_name=dish.get("name"),
+                        image_public_id=bad_pid,
+                    )
+                    raise ValueError(
+                        f"Plato '{dish.get('name')}' tiene una imagen que no pertenece a "
+                        f"este restaurante (public_id='{bad_pid}'). "
+                        "Solo se permiten imágenes bajo mesio/r_{restaurant_id}/."
+                    )
+                normalized.append(normalize_dish_shape(dish))
+            menu_data[category] = normalized
+
     pool = await _get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -923,10 +1041,10 @@ async def db_get_menu(whatsapp_number: str):
                     parsed = json.loads(menu_data)
                     if isinstance(parsed, str):
                         parsed = json.loads(parsed)
-                    return parsed
+                    return _normalize_menu_dishes(parsed)
                 except Exception:
                     return {}
-            return menu_data
+            return _normalize_menu_dishes(menu_data)
         return {}
 
 
