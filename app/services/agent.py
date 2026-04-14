@@ -216,7 +216,7 @@ async def get_session_state(phone: str, bot_number: str) -> dict:
         "order_delivered": session.get("order_delivered", False),
     }
 
-def _build_compact_menu(menu: dict, availability: dict) -> str:
+def _build_compact_menu(menu: dict, availability: dict, bot_visual_menu: bool = False) -> str:
     lines = []
     for category, dishes in menu.items():
         cat_lines = []
@@ -226,7 +226,9 @@ def _build_compact_menu(menu: dict, availability: dict) -> str:
             avail = availability.get(name, True)
             price_str = f"${price:,}" if price else ""
             status    = "" if avail else " [NO DISPONIBLE]"
-            cat_lines.append(f"{name} {price_str}{status}")
+            # Mark dishes with photos so Claude knows send_dish_card is viable
+            photo_marker = " [📷]" if (bot_visual_menu and d.get("image_url")) else ""
+            cat_lines.append(f"{name}{photo_marker} {price_str}{status}")
         if cat_lines:
             lines.append(f"{category}: {', '.join(cat_lines)}")
     return "\n".join(lines) if lines else "Sin menú."
@@ -618,6 +620,7 @@ _TOOL_TO_ACTION = {
     "make_reservation": "reserve",
     "end_session": "end_session",
     "remember_customer_preference": "remember",
+    "send_dish_card": "send_dish_card",
 }
 
 
@@ -660,6 +663,11 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
             "reason": tool_input.get("reason", ""),
         }
 
+    if action == "send_dish_card":
+        parsed["dish_name"] = tool_input.get("dish_name", "")
+        parsed["caption"] = tool_input.get("caption", "")
+        parsed["_resolved_dish"] = tool_input.get("_resolved_dish", {})
+
     return parsed
 
 
@@ -685,6 +693,7 @@ async def _validate_tool_call(
     table_context: dict | None,
     bot_number: str,
     phone: str,
+    features: dict | None = None,
 ) -> tuple[str | None, str | None, dict]:
     """
     Validate a tool call before execution. Returns (tool_name, reply, tool_input).
@@ -751,7 +760,32 @@ async def _validate_tool_call(
             log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=phone)
             return None, reply, {}
 
-    # 7. remember_customer_preference — validate key and rate-limit per conversation
+    # 7. send_dish_card — validate feature flag, dish existence, and image availability
+    if tool_name == "send_dish_card":
+        feats = features or {}
+        if not isinstance(tool_input, dict):
+            log.warning("guard.send_dish_card_input_not_dict", phone=phone)
+            return None, reply, {}
+        if not feats.get("bot_visual_menu"):
+            log.info("guard.send_dish_card_flag_off", phone=phone, bot_number=bot_number)
+            return None, reply + "\n\n(Las fotos de platos no están disponibles en este restaurante.)", {}
+        dish_name = tool_input.get("dish_name", "")
+        if not isinstance(dish_name, str) or not dish_name.strip() or len(dish_name) > 200:
+            log.warning("guard.send_dish_card_invalid_name", dish_name=dish_name, phone=phone)
+            return None, reply, {}
+        # Use find_dish (Regla 12 — same matching logic, no shortcuts)
+        from app.services.orders import find_dish  # noqa: PLC0415
+        matched_dish = await find_dish(dish_name.strip(), bot_number)
+        if matched_dish is None:
+            log.warning("guard.send_dish_card_dish_not_found", dish_name=dish_name, phone=phone)
+            return None, reply, {}
+        if not matched_dish.get("image_url"):
+            log.info("guard.send_dish_card_no_image", dish_name=dish_name, phone=phone)
+            return None, reply, {}
+        # Inject resolved dish into tool_input so execute_action skips a second DB lookup
+        tool_input = {**tool_input, "_resolved_dish": matched_dish}
+
+    # 8. remember_customer_preference — validate key and rate-limit per conversation
     if tool_name == "remember_customer_preference":
         from app.repositories.customer_profiles_repo import VALID_PREFERENCE_KEYS  # noqa: PLC0415
         key = str(tool_input.get("key", "")).strip()
@@ -802,6 +836,58 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         except Exception:
             log.exception("customer.preference_save_failed", phone=phone)
         return reply   # Reply flows through unchanged
+
+    # ── Early: send_dish_card (sends image directly; fallback to text on failure) ──
+    if action == "send_dish_card":
+        dish = parsed.get("_resolved_dish") or {}
+        dish_name = parsed.get("dish_name", dish.get("name", ""))
+        caption = parsed.get("caption", "") or dish.get("description", "")
+        image_url = dish.get("image_url", "")
+        price = dish.get("price", 0)
+
+        # Rate limit: 3 images per phone per bot per 60s (cross-worker via Redis)
+        ok = await state_store.rate_limit_check(
+            f"mesio:dish_img:{phone}:{bot_number}", max_requests=3, window_seconds=60
+        )
+        if not ok:
+            log.warning("send_dish_card.rate_limited", phone=phone, bot_number=bot_number)
+            # Fallback: return the text reply Claude already prepared
+            return reply or f"Te recomiendo {dish_name}" + (f" - {_fmt_cop(price)}" if price else "")
+
+        # Resolve access_token and phone_id from restaurant_obj (same pattern as inbox_worker)
+        rest = restaurant_obj or {}
+        access_token = rest.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
+        phone_id = rest.get("wa_phone_id") or bot_number.lstrip("+")
+
+        if image_url and access_token:
+            from app.services import meta_api  # noqa: PLC0415
+            try:
+                sent = await meta_api.send_image(
+                    bot_number=bot_number,
+                    access_token=access_token,
+                    phone=phone,
+                    image_url=image_url,
+                    caption=caption or None,
+                    phone_id=phone_id,
+                )
+                if sent:
+                    log.info("send_dish_card.image_sent", dish=dish_name, phone=phone)
+                    # Return empty string — the image IS the response; Claude's text reply
+                    # is optional but we return it so the conversation stays natural.
+                    return reply or ""
+            except Exception:
+                log.exception("send_dish_card.image_send_error", dish=dish_name, phone=phone)
+
+        # Fallback: text description (Regla 8 — never silence the client)
+        price_str = _fmt_cop(price) if price else ""
+        desc = dish.get("description", "")
+        fallback = f"Te recomiendo *{dish_name}*"
+        if price_str:
+            fallback += f" - {price_str}"
+        if desc:
+            fallback += f"\n{desc}"
+        log.warning("send_dish_card.fallback_text", dish=dish_name, phone=phone, bot_number=bot_number)
+        return reply or fallback
 
     try:
         # ── Shared: cart population (order, delivery, pickup all need it) ──
@@ -1153,7 +1239,10 @@ async def _build_enriched_user_message(
 
     availability = await db.db_get_menu_availability(restaurant_obj.get("id"))
     menu         = await db.db_get_menu(bot_number) or {}
-    compact_menu = _build_compact_menu(menu, availability)
+    compact_menu = _build_compact_menu(
+        menu, availability,
+        bot_visual_menu=feats.get("bot_visual_menu", False) is True,
+    )
 
     base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
     menu_url = f"{base_url}/catalog?bot={bot_number}" if base_url else f"/catalog?bot={bot_number}"
@@ -1313,6 +1402,7 @@ async def _call_llm_and_execute(
     # ── Validate tool call before execution ──
     tool_name, reply, tool_input = await _validate_tool_call(
         tool_name, tool_input, reply, table_context, bot_number, user_phone,
+        features=feats,
     )
 
     parsed = _tool_use_to_parsed(reply, tool_name, tool_input)
