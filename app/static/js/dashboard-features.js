@@ -206,6 +206,18 @@ function _dishLabel(group, slug) {
   return (DISH_LABELS[group] && DISH_LABELS[group][slug]) || slug;
 }
 
+/** Returns comma-separated labels for an array of slugs in a group */
+function _dishLabelList(group, slugs) {
+  if (!slugs || !slugs.length) return '';
+  return slugs.map(s => _dishLabel(group, s)).join(', ');
+}
+
+/** Builds accessible chip aria-label: "Vegano — activo" / "Vegano — inactivo" */
+function _chipAriaLabel(group, slug, selected) {
+  const label = _dishLabel(group, slug);
+  return `${label}: ${selected ? 'seleccionado' : 'no seleccionado'}`;
+}
+
 // ── Deterministic gradient fallback for dishes without image ─────────
 function _dishGradient(name) {
   // Simple hash to pick from a palette
@@ -500,11 +512,20 @@ function _createDishCard(catIndex, dishIndex, dish) {
 
   card.appendChild(info);
 
-  // Inactive badge
+  // Featured star + inactive badge
+  if (dish.featured) {
+    const star = document.createElement('span');
+    star.title = 'Destacado en el catálogo';
+    star.setAttribute('aria-label', 'Plato destacado');
+    star.style.cssText = 'font-size:14px; flex-shrink:0;';
+    star.textContent = '★';
+    card.appendChild(star);
+  }
   if (dish.active === false) {
     const inactiveSpan = document.createElement('span');
     inactiveSpan.style.cssText = 'font-size:10px; padding:2px 7px; border-radius:999px; background:#FDE8E8; color:#C0392B; font-weight:600; white-space:nowrap;';
     inactiveSpan.textContent = 'Inactivo';
+    inactiveSpan.setAttribute('aria-label', 'Plato inactivo');
     card.appendChild(inactiveSpan);
   }
 
@@ -1102,13 +1123,19 @@ function _makeChipsSection(title, slugs, selected, group, dataAttr, onChange, is
     if (currentSelected.has(slug)) chip.classList.add('selected');
     chip.dataset[dataAttr] = slug;
     chip.textContent = _dishLabel(group, slug);
+    chip.setAttribute('aria-pressed', currentSelected.has(slug) ? 'true' : 'false');
+    chip.setAttribute('aria-label', _chipAriaLabel(group, slug, currentSelected.has(slug)));
     chip.addEventListener('click', () => {
       if (currentSelected.has(slug)) {
         currentSelected.delete(slug);
         chip.classList.remove('selected');
+        chip.setAttribute('aria-pressed', 'false');
+        chip.setAttribute('aria-label', _chipAriaLabel(group, slug, false));
       } else {
         currentSelected.add(slug);
         chip.classList.add('selected');
+        chip.setAttribute('aria-pressed', 'true');
+        chip.setAttribute('aria-label', _chipAriaLabel(group, slug, true));
       }
       onChange([...currentSelected]);
     });
