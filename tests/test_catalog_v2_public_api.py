@@ -180,6 +180,18 @@ class TestMenuHtmlRouting:
 # ─── Tarea 3: POST /api/public/menu/track ─────────────────────────────────────
 
 class TestMenuTrack:
+    @pytest.fixture(autouse=True)
+    def _mock_track_deps(self, monkeypatch):
+        """Fase 5b: track endpoint resolves restaurant + records event. Mock both."""
+        monkeypatch.setattr(
+            "app.repositories.restaurant_repo.db_get_restaurant_by_bot_number",
+            AsyncMock(return_value={"id": 1, "name": "Test"}),
+        )
+        monkeypatch.setattr(
+            "app.repositories.menu_analytics_repo.record_event",
+            AsyncMock(return_value=None),
+        )
+
     def test_valid_event_returns_ok(self, client):
         resp = client.post("/api/public/menu/track", json={
             "dish_name": "Bandeja Paisa",
@@ -190,7 +202,7 @@ class TestMenuTrack:
         assert resp.json() == {"ok": True}
 
     def test_all_valid_event_types(self, client):
-        for evt in ("view", "modal_open", "add_to_cart"):
+        for evt in ("view", "modal_open", "add_to_cart", "ordered"):
             resp = client.post("/api/public/menu/track", json={
                 "dish_name": "Plato",
                 "event_type": evt,
@@ -206,13 +218,19 @@ class TestMenuTrack:
         })
         assert resp.status_code == 422
 
-    def test_dish_name_too_long_rejected(self, client):
+    def test_dish_name_too_long_truncated(self, client, monkeypatch):
+        """Fase 5b: dish_name > 255 is silently truncated (sendBeacon cannot handle 4xx)."""
+        monkeypatch.setattr(
+            "app.repositories.restaurant_repo.db_get_restaurant_by_bot_number",
+            AsyncMock(return_value=None),
+        )
         resp = client.post("/api/public/menu/track", json={
-            "dish_name": "A" * 201,
+            "dish_name": "A" * 400,
             "event_type": "view",
             "bot_number": "573001234567",
         })
-        assert resp.status_code == 422
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
 
     def test_bot_number_too_long_rejected(self, client):
         resp = client.post("/api/public/menu/track", json={
@@ -235,27 +253,16 @@ class TestMenuTrack:
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
 
-    def test_structlog_called(self, client, monkeypatch):
-        """Verify structlog.info is called with catalog.track on a valid event."""
-        logged = []
+    def test_record_event_called(self, client, monkeypatch):
+        """Fase 5b: verify menu_analytics_repo.record_event is invoked with expected args."""
+        calls = []
 
-        async def fake_rate_limit(*args, **kwargs):
-            return True
+        async def fake_record_event(**kwargs):
+            calls.append(kwargs)
 
-        monkeypatch.setattr(state_store, "rate_limit_check", fake_rate_limit)
-
-        import app.routes.dashboard as dash_mod
-        original_log = dash_mod.log
-
-        class _CapLog:
-            def info(self, event, **kw):
-                logged.append({"event": event, **kw})
-            def warning(self, event, **kw):
-                pass
-            def error(self, event, **kw):
-                pass
-
-        monkeypatch.setattr(dash_mod, "log", _CapLog())
+        monkeypatch.setattr(
+            "app.repositories.menu_analytics_repo.record_event", fake_record_event
+        )
 
         resp = client.post("/api/public/menu/track", json={
             "dish_name": "Bandeja Paisa",
@@ -263,5 +270,7 @@ class TestMenuTrack:
             "bot_number": "573001234567",
         })
         assert resp.status_code == 200
-        assert any(e["event"] == "catalog.track" for e in logged)
-        monkeypatch.setattr(dash_mod, "log", original_log)
+        assert len(calls) == 1
+        assert calls[0]["dish_name"] == "Bandeja Paisa"
+        assert calls[0]["event_type"] == "add_to_cart"
+        assert calls[0]["restaurant_id"] == 1

@@ -14,7 +14,6 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pathlib import Path
 from pydantic import BaseModel, field_validator
-from typing import Literal
 
 from app.services import database as db
 from app.repositories import restaurant_repo
@@ -222,33 +221,34 @@ async def geocode_endpoint(address: str):
     }
 
 
-# ── Catalog v2: analytics tracking (fire-and-forget, no DB yet — Fase 5) ──────
+# ── Catalog v2: analytics tracking (fire-and-forget, real DB insert — Fase 5b) ─
 
-_VALID_TRACK_EVENTS = frozenset({"view", "modal_open", "add_to_cart"})
+_VALID_TRACK_EVENTS = frozenset({"view", "modal_open", "add_to_cart", "ordered"})
 
 
 class MenuTrackBody(BaseModel):
-    dish_name: str
+    dish_name:  str
     event_type: str
     bot_number: str
+    phone:      str | None = None
 
     @field_validator("dish_name")
     @classmethod
-    def _validate_dish_name(cls, v: str) -> str:
-        if len(v) > 200:
-            raise ValueError("dish_name max 200 chars")
-        return v
+    def _dish_name_len(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("dish_name required")
+        return v.strip()[:255]
 
     @field_validator("event_type")
     @classmethod
-    def _validate_event_type(cls, v: str) -> str:
+    def _valid_event(cls, v: str) -> str:
         if v not in _VALID_TRACK_EVENTS:
-            raise ValueError(f"event_type must be one of: {sorted(_VALID_TRACK_EVENTS)}")
+            raise ValueError(f"event_type must be one of {sorted(_VALID_TRACK_EVENTS)}")
         return v
 
     @field_validator("bot_number")
     @classmethod
-    def _validate_bot_number(cls, v: str) -> str:
+    def _bot_number_len(cls, v: str) -> str:
         if len(v) > 20:
             raise ValueError("bot_number max 20 chars")
         return v
@@ -258,19 +258,33 @@ class MenuTrackBody(BaseModel):
 async def menu_track(body: MenuTrackBody):
     """
     Fire-and-forget analytics tracking for catalog v2 events.
-    Rate-limited to 120 req/min per bot_number. No DB writes until Fase 5.
+    Rate-limited to 120 req/min per bot_number.
+    Always returns 200 (sendBeacon callers cannot handle 4xx/5xx).
     """
+    from app.repositories import menu_analytics_repo
+
     rate_key = f"catalog_track:{body.bot_number}"
     allowed = await state_store.rate_limit_check(rate_key, max_requests=120, window_seconds=60)
     if not allowed:
-        # Still return 200 — sendBeacon callers cannot handle 429
         log.warning("catalog.track.rate_limited", bot_number=body.bot_number)
         return {"ok": True}
 
-    log.info(
-        "catalog.track",
+    # Resolve restaurant_id from bot_number — fire-and-forget on miss
+    restaurant = await restaurant_repo.db_get_restaurant_by_bot_number(body.bot_number)
+    if not restaurant:
+        log.info(
+            "catalog.track.unknown_bot",
+            bot_number=body.bot_number,
+            dish_name=body.dish_name,
+            event_type=body.event_type,
+        )
+        return {"ok": True}
+
+    await menu_analytics_repo.record_event(
+        restaurant_id=restaurant["id"],
         dish_name=body.dish_name,
         event_type=body.event_type,
+        phone=body.phone,
         bot_number=body.bot_number,
     )
     return {"ok": True}

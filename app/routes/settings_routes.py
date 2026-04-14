@@ -755,3 +755,26 @@ async def delete_menu_image(
         log.info("menu.image.delete", restaurant_id=restaurant_id, public_id=public_id)
 
     return {"success": True, "public_id": public_id}
+
+
+# ── Catalog v2: menu engineering analytics (Fase 5b) ─────────────────────────
+
+@router.get("/api/menu/analytics")
+async def menu_analytics(
+    days: int = 30,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """
+    Return per-dish event counts and menu-engineering quadrant matrix.
+    Auth: admin/owner Bearer token.
+    Query param: days (default 30, max 365).
+    """
+    from app.repositories import menu_analytics_repo
+
+    days = max(1, min(days, 365))
+    restaurant_id = restaurant["id"]
+
+    per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
+    matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
+
+    return {"per_dish": per_dish, "matrix": matrix}
