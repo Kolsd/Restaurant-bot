@@ -8,7 +8,11 @@ Business logic is split into:
                                   /api/orders/{id}/status, /api/table-sessions/*
   - app.routes.team_routes   → /api/team/*
 """
+import html as _html
 import json
+import os
+import re as _re
+import urllib.parse
 import httpx
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -288,3 +292,275 @@ async def menu_track(body: MenuTrackBody):
         bot_number=body.bot_number,
     )
     return {"ok": True}
+
+
+# ── SEO / Growth routes (Catálogo v2 Fase 6) ─────────────────────────────────
+
+_APP_DOMAIN = os.getenv("APP_DOMAIN", "mesioai.com")
+_DISH_PAGE_TEMPLATE = (STATIC / "html" / "dish_page.html").read_text(encoding="utf-8")
+
+# Fallback OG image (served from static or a CDN constant)
+_OG_IMAGE_FALLBACK = f"https://{_APP_DOMAIN}/static/img/mesio-og-default.png"
+
+
+def _slugify_dish(name: str) -> str:
+    s = _re.sub(r'[^a-zA-Z0-9]+', '-', (name or '').lower()).strip('-')
+    return s or 'plato'
+
+
+def _find_dish_by_slug(menu: dict, dish_slug: str) -> dict | None:
+    """Iterate all menu categories and return the first dish whose slug matches."""
+    for dishes in menu.values():
+        if not isinstance(dishes, list):
+            continue
+        for dish in dishes:
+            if not isinstance(dish, dict):
+                continue
+            if _slugify_dish(dish.get("name", "")) == dish_slug:
+                return dish
+    return None
+
+
+def _first_featured_image(menu: dict) -> str | None:
+    """Return image_url of the first featured (or any) dish that has one."""
+    # First pass: featured=True
+    for dishes in menu.values():
+        if not isinstance(dishes, list):
+            continue
+        for dish in dishes:
+            if isinstance(dish, dict) and dish.get("featured") and dish.get("image_url"):
+                return dish["image_url"]
+    # Second pass: any dish with an image
+    for dishes in menu.values():
+        if not isinstance(dishes, list):
+            continue
+        for dish in dishes:
+            if isinstance(dish, dict) and dish.get("image_url"):
+                return dish["image_url"]
+    return None
+
+
+def _get_menu_from_data(data: dict) -> dict:
+    """Resolve menu dict from restaurant data (handles inherited parent_menu)."""
+    menu_data = data.get("menu") or data.get("parent_menu")
+    if isinstance(menu_data, str):
+        try:
+            menu_data = json.loads(menu_data)
+            if isinstance(menu_data, str):
+                menu_data = json.loads(menu_data)
+        except Exception:
+            menu_data = {}
+    return menu_data or {}
+
+
+def _format_price(price, features: dict) -> str:
+    currency = (features or {}).get("currency", "USD")
+    locale   = (features or {}).get("locale", "en-US")
+    try:
+        p = int(price)
+    except (TypeError, ValueError):
+        return str(price or "")
+    # Simple formatting: zero-decimal currencies
+    zero_decimal = {"COP", "CLP", "JPY", "KRW", "VND", "PYG", "ISK"}
+    if currency in zero_decimal:
+        return f"${p:,}"
+    return f"${p:,.2f}"
+
+
+@router.get("/r/{slug}/menu", response_class=HTMLResponse)
+async def seo_menu_page(slug: str):
+    """
+    Server-rendered menu page with Open Graph tags.
+    OG crawlers (WhatsApp, Facebook) read the meta tags.
+    Humans are redirected immediately to the JS catalog (/menu/{bot_number}).
+    """
+    data = await restaurant_repo.db_get_restaurant_by_slug(slug)
+    if not data:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    name        = data.get("name") or "Restaurante"
+    bot_number  = data.get("whatsapp_number") or ""
+    features    = data.get("features") or {}
+    if isinstance(features, str):
+        try:
+            features = json.loads(features)
+        except Exception:
+            features = {}
+
+    menu        = _get_menu_from_data(data)
+    og_image    = _first_featured_image(menu)
+
+    if og_image:
+        try:
+            from app.services.image_host import build_transform_url
+            og_image = build_transform_url(og_image, "hero") or og_image
+        except Exception:
+            pass
+    else:
+        og_image = _OG_IMAGE_FALLBACK
+
+    canonical   = f"https://{_APP_DOMAIN}/r/{_html.escape(slug)}/menu"
+    redirect_to = f"/menu/{urllib.parse.quote(bot_number)}" if bot_number else f"/r/{slug}/menu"
+    esc_name    = _html.escape(name)
+    description = _html.escape(f"Menú de {name} — pide por WhatsApp")
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Menú | {esc_name}</title>
+  <meta property="og:type"        content="website">
+  <meta property="og:title"       content="Menú | {esc_name}">
+  <meta property="og:description" content="{description}">
+  <meta property="og:image"       content="{_html.escape(og_image)}">
+  <meta property="og:url"         content="{canonical}">
+  <meta property="og:site_name"   content="{esc_name}">
+  <meta name="twitter:card"       content="summary_large_image">
+  <link rel="canonical"           href="{canonical}">
+  <meta http-equiv="refresh"      content="0; url={_html.escape(redirect_to)}">
+</head>
+<body>
+  <p>Redirigiendo al menú de <strong>{esc_name}</strong>…</p>
+  <p><a href="{_html.escape(redirect_to)}">Haz clic aquí si no eres redirigido</a></p>
+</body>
+</html>"""
+    return HTMLResponse(content=html_body, status_code=200)
+
+
+@router.get("/r/{slug}/menu/{dish_slug}", response_class=HTMLResponse)
+async def seo_dish_page(slug: str, dish_slug: str):
+    """
+    Server-rendered dish page with per-dish Open Graph tags and WhatsApp CTA.
+    """
+    data = await restaurant_repo.db_get_restaurant_by_slug(slug)
+    if not data:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    name        = data.get("name") or "Restaurante"
+    bot_number  = data.get("whatsapp_number") or ""
+    features    = data.get("features") or {}
+    if isinstance(features, str):
+        try:
+            features = json.loads(features)
+        except Exception:
+            features = {}
+
+    menu = _get_menu_from_data(data)
+    dish = _find_dish_by_slug(menu, dish_slug)
+    if not dish:
+        raise HTTPException(status_code=404, detail="Plato no encontrado")
+
+    dish_name   = dish.get("name", "Plato")
+    description = dish.get("description", "")
+    price       = dish.get("price", 0)
+    image_url   = dish.get("image_url")
+    currency    = (features or {}).get("currency", "USD")
+
+    # OG image — use hero transform if Cloudinary
+    og_image = image_url
+    if og_image:
+        try:
+            from app.services.image_host import build_transform_url
+            og_image = build_transform_url(og_image, "hero") or og_image
+        except Exception:
+            pass
+    if not og_image:
+        og_image = _OG_IMAGE_FALLBACK
+
+    canonical    = f"https://{_APP_DOMAIN}/r/{_html.escape(slug)}/menu/{_html.escape(dish_slug)}"
+    menu_url     = f"https://{_APP_DOMAIN}/r/{_html.escape(slug)}/menu"
+    og_title     = f"{_html.escape(dish_name)} | {_html.escape(name)}"
+    og_desc      = _html.escape((description or "")[:200])
+    price_display = _format_price(price, features)
+
+    # WhatsApp pre-filled link
+    wa_text  = urllib.parse.quote(f"Hola, quiero pedir {dish_name}")
+    wa_link  = f"https://wa.me/{urllib.parse.quote(bot_number.replace('+', ''))}?text={wa_text}" if bot_number else "#"
+
+    # Dish image HTML — XSS-safe: all values escaped
+    if image_url:
+        dish_image_html = (
+            f'<img class="dish-image" src="{_html.escape(image_url)}" '
+            f'alt="{_html.escape(dish_name)}" loading="eager">'
+        )
+    else:
+        dish_image_html = '<div class="placeholder-img">🍽️</div>'
+
+    description_html = (
+        f'<p class="description">{og_desc}</p>' if og_desc else ""
+    )
+
+    page = _DISH_PAGE_TEMPLATE.replace("{{DISH_NAME}}", _html.escape(dish_name))
+    page = page.replace("{{RESTAURANT_NAME}}", _html.escape(name))
+    page = page.replace("{{OG_TITLE}}", og_title)
+    page = page.replace("{{OG_DESCRIPTION}}", og_desc)
+    page = page.replace("{{OG_IMAGE}}", _html.escape(og_image))
+    page = page.replace("{{OG_URL}}", canonical)
+    page = page.replace("{{PRICE_AMOUNT}}", str(price))
+    page = page.replace("{{PRICE_CURRENCY}}", _html.escape(currency))
+    page = page.replace("{{DISH_IMAGE_HTML}}", dish_image_html)
+    page = page.replace("{{PRICE_DISPLAY}}", _html.escape(price_display))
+    page = page.replace("{{DESCRIPTION_HTML}}", description_html)
+    page = page.replace("{{WA_LINK}}", _html.escape(wa_link))
+    page = page.replace("{{MENU_URL}}", menu_url)
+
+    return HTMLResponse(content=page, status_code=200)
+
+
+@router.get("/sitemap-{restaurant_id}.xml")
+async def restaurant_sitemap(restaurant_id: int):
+    """
+    Per-restaurant XML sitemap listing menu page + individual dish pages.
+    Cached for 1 hour.
+    """
+    data = await db.db_get_restaurant_by_id(restaurant_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    slug     = data.get("slug") or f"r-{restaurant_id}"
+    menu_raw = data.get("menu") or {}
+    if isinstance(menu_raw, str):
+        try:
+            menu_raw = json.loads(menu_raw)
+        except Exception:
+            menu_raw = {}
+
+    base     = f"https://{_APP_DOMAIN}"
+    menu_url = f"{base}/r/{slug}/menu"
+
+    urls = [{"loc": menu_url, "changefreq": "weekly"}]
+    for dishes in (menu_raw or {}).values():
+        if not isinstance(dishes, list):
+            continue
+        for dish in dishes:
+            if not isinstance(dish, dict) or not dish.get("name"):
+                continue
+            if dish.get("active") is False:
+                continue
+            d_slug = _slugify_dish(dish["name"])
+            urls.append({
+                "loc":        f"{base}/r/{slug}/menu/{d_slug}",
+                "changefreq": "daily",
+            })
+
+    url_entries = "\n".join(
+        f"  <url>\n"
+        f"    <loc>{_html.escape(u['loc'])}</loc>\n"
+        f"    <changefreq>{u['changefreq']}</changefreq>\n"
+        f"  </url>"
+        for u in urls
+    )
+
+    xml_body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{url_entries}\n"
+        "</urlset>"
+    )
+
+    return Response(
+        content=xml_body,
+        media_type="application/xml",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )

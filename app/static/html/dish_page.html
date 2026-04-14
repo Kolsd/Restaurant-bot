@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{DISH_NAME}} | {{RESTAURANT_NAME}}</title>
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="website">
+  <meta property="og:title"       content="{{OG_TITLE}}">
+  <meta property="og:description" content="{{OG_DESCRIPTION}}">
+  <meta property="og:image"       content="{{OG_IMAGE}}">
+  <meta property="og:url"         content="{{OG_URL}}">
+  <meta property="og:site_name"   content="{{RESTAURANT_NAME}}">
+  <meta property="product:price:amount"   content="{{PRICE_AMOUNT}}">
+  <meta property="product:price:currency" content="{{PRICE_CURRENCY}}">
+
+  <!-- Twitter Card fallback -->
+  <meta name="twitter:card"        content="summary_large_image">
+  <meta name="twitter:title"       content="{{OG_TITLE}}">
+  <meta name="twitter:description" content="{{OG_DESCRIPTION}}">
+  <meta name="twitter:image"       content="{{OG_IMAGE}}">
+
+  <link rel="canonical" href="{{OG_URL}}">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+      color: #222;
+      min-height: 100vh;
+    }
+    .card {
+      max-width: 480px;
+      margin: 0 auto;
+      background: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .dish-image {
+      width: 100%;
+      aspect-ratio: 4/3;
+      object-fit: cover;
+      display: block;
+    }
+    .placeholder-img {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: linear-gradient(135deg, #e8f5ef 0%, #d0ede0 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 4rem;
+    }
+    .content {
+      padding: 1.25rem 1rem;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .restaurant-name {
+      font-size: 0.8rem;
+      color: #1D9E75;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .price {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #1D9E75;
+    }
+    .description {
+      font-size: 0.95rem;
+      color: #555;
+      line-height: 1.6;
+    }
+    .cta {
+      display: block;
+      width: 100%;
+      padding: 0.9rem 1rem;
+      background: #25D366;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      text-align: center;
+      margin-top: auto;
+    }
+    .cta:hover { background: #20bd5a; }
+    .back-link {
+      display: inline-block;
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: #1D9E75;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    {{DISH_IMAGE_HTML}}
+    <div class="content">
+      <div class="restaurant-name">{{RESTAURANT_NAME}}</div>
+      <h1>{{DISH_NAME}}</h1>
+      <div class="price">{{PRICE_DISPLAY}}</div>
+      {{DESCRIPTION_HTML}}
+      <a class="cta" href="{{WA_LINK}}">
+        Pedir por WhatsApp
+      </a>
+      <a class="back-link" href="{{MENU_URL}}">← Ver menú completo</a>
+    </div>
+  </div>
+</body>
+</html>
