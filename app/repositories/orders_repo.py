@@ -116,6 +116,10 @@ async def _deduct_inventory_in_tx(
                 )
 
                 min_stock = to_decimal(inv["min_stock"] or 0)
+                # Sync dish_recipes-based availability (Fase 5c)
+                from app.repositories.inventory_repo import _sync_ingredient_dishes_conn
+                await _sync_ingredient_dishes_conn(conn, ing_id, float(new_stock), float(min_stock), restaurant_id)
+                # Also sync legacy linked_dishes on the same ingredient
                 if new_stock <= min_stock:
                     dishes = inv["linked_dishes"]
                     if isinstance(dishes, str):

@@ -92,9 +92,11 @@ async def test_upsert_dish_recipe_vacio_elimina_escandallo():
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
         result = await db.db_upsert_dish_recipe(1, "Pizza", [])
 
-    insert_calls = [c for c in mock_conn.execute.call_args_list
-                    if "INSERT" in str(c)]
-    assert len(insert_calls) == 0
+    # Fase 5c: _sync_dish_availability_conn inserts into menu_availability when
+    # lines=[] — only dish_recipes INSERTs must be absent (the recipe was deleted).
+    recipe_insert_calls = [c for c in mock_conn.execute.call_args_list
+                           if "INSERT INTO dish_recipes" in str(c)]
+    assert len(recipe_insert_calls) == 0
     assert result == []
 
 
@@ -151,6 +153,7 @@ async def test_deduct_usa_receta_cuando_existe():
     (qty_receta × qty_pedida) y NO usar linked_dishes.
     """
     from app.services import database as db
+    import app.repositories.inventory_repo as inv_repo
 
     restaurant = {"id": 1}
 
@@ -175,11 +178,16 @@ async def test_deduct_usa_receta_cuando_existe():
         __aexit__=AsyncMock(return_value=False),
     ))
 
+    # Fase 5c: stub out the new auto-hide helper so it doesn't consume conn.fetch
+    async def _noop_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id):
+        pass
+
     with (
         patch.object(db, "get_pool",
                      AsyncMock(return_value=_make_pool(mock_conn))),
         patch.object(db, "db_get_restaurant_by_phone",
                      AsyncMock(return_value=restaurant)),
+        patch.object(inv_repo, "_sync_ingredient_dishes_conn", _noop_sync),
     ):
         await db.db_deduct_inventory_for_order(
             bot_number="+57300", items=[{"name": "Pizza", "quantity": 2}]
@@ -283,12 +291,19 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
     async def fake_sync_conn(conn, dish_names, available, restaurant_id):
         sync_calls.append((dish_names, available))
 
+    # Fase 5c: stub out _sync_ingredient_dishes_conn so it doesn't consume
+    # additional conn.fetch calls; the linked_dishes path is what this test
+    # exercises via _sync_dish_availability_conn.
+    async def _noop_ingredient_sync(conn, ingredient_id, new_stock, min_stock, restaurant_id):
+        pass
+
     with (
         patch.object(db, "get_pool",
                      AsyncMock(return_value=_make_pool(mock_conn))),
         patch.object(db, "db_get_restaurant_by_phone",
                      AsyncMock(return_value=restaurant)),
         patch.object(inv_repo, "_sync_dish_availability_conn", fake_sync_conn),
+        patch.object(inv_repo, "_sync_ingredient_dishes_conn", _noop_ingredient_sync),
     ):
         await db.db_deduct_inventory_for_order(
             bot_number="+57300",
