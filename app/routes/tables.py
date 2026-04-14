@@ -257,7 +257,7 @@ async def public_menu_context(table_id: str):
     wa_number = await get_table_wa_number(table)
     if not wa_number:
         raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
-    wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
+    wa_msg = f"Hola! Estoy en {table['name']}"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
     menu = await db.db_get_menu(wa_number) or {}

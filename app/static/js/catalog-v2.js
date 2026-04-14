@@ -659,6 +659,7 @@ function initCatalog() {
     currency: 'COP',
     restaurantName: '',
     tableName: null,
+    tableId: null,
     botNumber: '',
     waUrl: '',
     search: '',
@@ -748,17 +749,22 @@ function initCatalog() {
   }
 
   function buildWaMessage() {
-    let msg = state.tableName ? `[Mesa: ${state.tableName}]\n` : '';
-    msg += 'Hola, me gustaría pedir:\n';
+    const items = [];
     for (const [cat, dishes] of Object.entries(state.menu)) {
       if (!Array.isArray(dishes)) continue;
       for (const dish of dishes) {
         const id = dishId(dish, cat);
         const qty = state.cart[id] || 0;
-        if (qty > 0) msg += `- ${qty}× ${dish.name}\n`;
+        if (qty > 0) items.push(`- ${qty}× ${dish.name}`);
       }
     }
-    return msg.trim();
+    const itemsText = items.join('\n');
+    if (state.tableId) {
+      // Clean message — no machine tags. The bot uses the active session to identify the table.
+      // Session was already established when the user sent the initial QR greeting.
+      return `Quiero pedir:\n${itemsText}`;
+    }
+    return `Hola, me gustaría pedir:\n${itemsText}`;
   }
 
   // ── Render functions ──
@@ -1159,6 +1165,7 @@ function initCatalog() {
       state.currency = data.currency || 'COP';
       state.restaurantName = data.restaurant_name || data.restaurantName || '';
       state.tableName = data.table_name || data.tableName || null;
+      state.tableId   = isTableContext ? paramId : null;
       state.botNumber = data.bot_number || data.botNumber || paramId || '';
       state.waUrl = data.wa_url || data.waUrl || '';
       state.cart = loadCart(state.botNumber);
