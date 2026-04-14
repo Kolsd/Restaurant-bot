@@ -674,7 +674,8 @@ function initCatalog() {
   const path = window.location.pathname;
   const parts = path.split('/').filter(Boolean);
   const lastPart = parts[parts.length - 1];
-  const isTableContext = parts.includes('mesa') || parts.includes('table') || /^\d+$/.test(lastPart);
+  // Bot numbers are 10+ digits only (e.g. 573108187460). Anything else is a table_id.
+  const isTableContext = !/^\d{10,}$/.test(lastPart);
 
   let apiUrl;
   const paramId = lastPart || '';
