@@ -129,7 +129,7 @@ function logout() {
 let currentPeriod = 'today';
 window.customStart = '';
 window.customEnd = '';
-const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', mesas:'Salón', equipo:'Mi Equipo', nps:'NPS', staff:'Equipo', payroll:'Nómina y Propinas', loyalty:'Fidelización', 'reporte-semanal':'Reporte Semanal', clientes:'Clientes en Riesgo' };
+const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', mesas:'Salón', equipo:'Mi Equipo', nps:'NPS', staff:'Equipo', payroll:'Nómina y Propinas', loyalty:'Fidelización', 'reporte-semanal':'Reporte Semanal', clientes:'Clientes en Riesgo', 'menu-engineering':'Menu Engineering' };
 
 function setPeriod(p, btn) {
   currentPeriod = p;
@@ -179,7 +179,7 @@ function showSection(id, btn) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[id] || '';
 
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'mesas', 'nps', 'staff', 'loyalty', 'payroll', 'reporte-semanal', 'clientes'];
+  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'mesas', 'nps', 'staff', 'loyalty', 'payroll', 'reporte-semanal', 'clientes', 'menu-engineering'];
   const periodBar = document.getElementById('period-bar');
   
   if (periodBar) {
@@ -207,6 +207,7 @@ function showSection(id, btn) {
   if (id === 'reservaciones'    && typeof loadReservationsSection   === 'function') loadReservationsSection();
   if (id === 'reporte-semanal'  && typeof loadWeeklyReportSection  === 'function') loadWeeklyReportSection();
   if (id === 'clientes'         && typeof loadClientesSection       === 'function') loadClientesSection();
+  if (id === 'menu-engineering' && typeof loadMenuEngineeringSection === 'function') loadMenuEngineeringSection();
   if (window.innerWidth <= 768) closeSidebar();
 }
 
