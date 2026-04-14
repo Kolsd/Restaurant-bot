@@ -258,9 +258,8 @@ async def public_menu_context(table_id: str):
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
     
     menu = await db.db_get_menu(wa_number) or {}
-    availability = await db.db_get_menu_availability()
-
     restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
+    availability = await db.db_get_menu_availability(restaurant.get("id")) if restaurant.get("id") else {}
     features = restaurant.get("features") or {}
     if isinstance(features, str):
         import json as _json
