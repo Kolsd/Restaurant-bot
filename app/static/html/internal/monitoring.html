@@ -542,7 +542,7 @@
     authError.textContent = '';
 
     try {
-      const resp = await fetch('/health/metrics', {
+      const resp = await fetch('/api/internal/ops/metrics', {
         headers: { 'Authorization': `Bearer ${key}` }
       });
       if (resp.status === 401) {
@@ -571,7 +571,7 @@
 
   async function poll() {
     try {
-      const resp = await fetch('/health/metrics', {
+      const resp = await fetch('/api/internal/ops/metrics', {
         headers: { 'Authorization': `Bearer ${adminKey}` }
       });
 

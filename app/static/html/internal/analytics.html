@@ -293,7 +293,7 @@
     const val = document.getElementById('key-input').value.trim();
     if (!val) return;
     // Try a quick ping to validate the key
-    fetch('/api/analytics/overview', { headers: { 'Authorization': `Bearer ${val}` } })
+    fetch('/api/internal/analytics/overview', { headers: { 'Authorization': `Bearer ${val}` } })
       .then(r => {
         if (r.status === 401) {
           document.getElementById('auth-error').style.display = 'block';
@@ -331,7 +331,7 @@
 
   // ── Load overview ───────────────────────────────────────────────────────────
   function loadOverview() {
-    return apiGet('/api/analytics/overview').then(data => {
+    return apiGet('/api/internal/analytics/overview').then(data => {
       const r = data.restaurants || {};
       const o = data.orders       || {};
       const c = data.conversations|| {};
@@ -378,7 +378,7 @@
   }
 
   function loadTrends() {
-    return apiGet('/api/analytics/trends').then(data => {
+    return apiGet('/api/internal/analytics/trends').then(data => {
       renderChart('chart-orders', data.daily_orders);
       renderChart('chart-convs',  data.daily_conversations, '#6366f1');
     });
@@ -504,7 +504,7 @@
   }
 
   function loadRestaurants() {
-    return apiGet('/api/analytics/restaurants').then(data => {
+    return apiGet('/api/internal/analytics/restaurants').then(data => {
       _restaurants = data.restaurants || [];
       renderTable();
     });
