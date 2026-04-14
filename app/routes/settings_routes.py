@@ -5,6 +5,7 @@ Also includes the order-status update and table-session helpers that power the d
 import json
 import re
 from datetime import datetime, timedelta
+from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Request, HTTPException, Depends
 from anthropic import Anthropic
@@ -15,6 +16,7 @@ from app.routes.deps import require_auth, get_current_user, get_current_restaura
 from app.repositories import restaurant_repo, tables_repo as tr
 from app.repositories import weekly_reports_repo
 from app.services.logging import get_logger
+from app.services import state_store
 from pydantic import BaseModel
 
 log = get_logger(__name__)
@@ -646,3 +648,116 @@ async def ai_proxy(payload: _AIProxyRequest, _user: str = Depends(require_auth))
         return {"text": text}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI service error: {exc}") from exc
+
+
+# ── CATÁLOGO VISUAL v2 — Image endpoints ──────────────────────────────────────
+
+class _ImageSignRequest(BaseModel):
+    folder_suffix: Optional[str] = "menu"
+
+
+class _ImageDeleteRequest(BaseModel):
+    public_id: str
+
+
+@router.post("/api/menu/image/sign")
+async def sign_image_upload(
+    body: _ImageSignRequest,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """
+    Retorna parámetros firmados para upload directo browser→Cloudinary.
+
+    El browser hace POST multipart a:
+        https://api.cloudinary.com/v1_1/{cloud_name}/image/upload
+    usando estos params + el archivo elegido. Nuestro servidor nunca toca los bytes.
+
+    Rate limit: 30 requests/min por restaurante (Redis cross-worker).
+    Auth: Bearer token de admin/owner del restaurante.
+    """
+    from app.services import image_host
+
+    restaurant_id = restaurant["id"]
+    folder_suffix = (body.folder_suffix or "menu").strip() or "menu"
+
+    # ── Rate limit: 30 uploads/min por restaurante ────────────────────────────
+    rl_key = f"menu_image_sign:{restaurant_id}"
+    allowed = await state_store.rate_limit_check(
+        key=rl_key, max_requests=30, window_seconds=60
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Demasiadas solicitudes de upload. Espera un momento e intenta de nuevo.",
+        )
+
+    # ── Firma Cloudinary ──────────────────────────────────────────────────────
+    result = image_host.sign_upload_params(restaurant_id, folder_suffix=folder_suffix)
+
+    if "error" in result:
+        log.warning(
+            "menu.image.sign.config_missing",
+            restaurant_id=restaurant_id,
+            error=result["error"],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Image hosting no configurado. Contacta soporte.",
+        )
+
+    log.info("menu.image.sign", restaurant_id=restaurant_id, folder=result.get("folder"))
+    return result
+
+
+@router.delete("/api/menu/image")
+async def delete_menu_image(
+    body: _ImageDeleteRequest,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """
+    Borra una imagen de Cloudinary por public_id.
+
+    Valida ownership: el public_id DEBE comenzar con mesio/r_{restaurant_id}/.
+    Si no pertenece al restaurante autenticado → 403.
+    Si Cloudinary falla (imagen ya no existe, etc.) → 200 igual (idempotente).
+
+    Auth: Bearer token de admin/owner del restaurante.
+    """
+    from app.services import image_host
+
+    restaurant_id = restaurant["id"]
+    public_id = (body.public_id or "").strip()
+
+    if not public_id:
+        raise HTTPException(status_code=422, detail="public_id es requerido.")
+
+    # ── Ownership check: verificar antes de intentar borrar ───────────────────
+    expected_prefix = f"mesio/r_{restaurant_id}/"
+    if not public_id.startswith(expected_prefix):
+        log.warning(
+            "menu.image.delete.ownership_denied",
+            restaurant_id=restaurant_id,
+            public_id=public_id,
+            expected_prefix=expected_prefix,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="No puedes borrar esta imagen.",
+        )
+
+    # ── Borrar de Cloudinary (idempotente: si ya no existe, igual 200) ────────
+    success = image_host.delete_image(public_id, restaurant_id)
+
+    if not success:
+        # delete_image retorna False tanto si ownership falla (ya verificado arriba)
+        # como si Cloudinary falla o la imagen no existe. En ambos casos loguear
+        # y retornar 200 para mantener idempotencia — el recurso ya no existe.
+        log.warning(
+            "menu.image.delete.cloudinary_noop",
+            restaurant_id=restaurant_id,
+            public_id=public_id,
+        )
+    else:
+        log.info("menu.image.delete", restaurant_id=restaurant_id, public_id=public_id)
+
+    return {"success": True, "public_id": public_id}
