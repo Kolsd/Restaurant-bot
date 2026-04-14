@@ -266,6 +266,33 @@ _END_SESSION = {
     }
 }
 
+_SEND_DISH_CARD = {
+    "name": "send_dish_card",
+    "description": (
+        "Envía al cliente una foto del plato con nombre, precio y descripción corta. "
+        "Úsalo SOLO cuando el cliente pide ver o recomendaciones de un plato específico "
+        "Y el restaurante tiene imágenes configuradas. "
+        "Si el plato no tiene foto disponible, NO uses esta tool — responde con texto normal."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "dish_name": {
+                "type": "string",
+                "description": "Nombre exacto del plato tal como aparece en el menú",
+            },
+            "caption": {
+                "type": "string",
+                "description": (
+                    "Texto opcional de 1-2 líneas. "
+                    "Si se omite, se usa la descripción del plato."
+                ),
+            },
+        },
+        "required": ["dish_name"],
+    },
+}
+
 _REMEMBER_CUSTOMER_PREFERENCE = {
     "name": "remember_customer_preference",
     "description": (
@@ -306,6 +333,7 @@ TOOLS_SALON: list[dict] = [
     _MAKE_RESERVATION,
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
+    _SEND_DISH_CARD,
 ]
 """Tools available in dine-in (salon/table) mode."""
 
@@ -316,6 +344,7 @@ TOOLS_EXTERNAL: list[dict] = [
     _MAKE_RESERVATION,
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
+    _SEND_DISH_CARD,
 ]
 """Tools available in external (delivery/pickup) mode."""
 
@@ -335,6 +364,7 @@ ALL_TOOLS: dict[str, dict] = {
         _MAKE_RESERVATION,
         _END_SESSION,
         _REMEMBER_CUSTOMER_PREFERENCE,
+        _SEND_DISH_CARD,
     ]
 }
 """Maps every tool name to its definition dict for O(1) lookup."""
