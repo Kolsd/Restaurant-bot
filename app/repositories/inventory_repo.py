@@ -55,6 +55,87 @@ async def _sync_dish_availability(dish_names: list, available: bool, restaurant_
         await _sync_dish_availability_conn(conn, dish_names, available, restaurant_id)
 
 
+async def _sync_ingredient_dishes_conn(
+    conn, ingredient_id: int, new_stock: float, min_stock: float, restaurant_id: int
+) -> None:
+    """
+    Cuando un ingrediente baja a <= min_stock, busca TODOS los platos que lo usan
+    vía dish_recipes y los marca unavailable en menu_availability.
+    También sincroniza linked_dishes legacy del mismo ingrediente.
+
+    Llamar dentro de una transacción abierta (conn ya tiene lock sobre el ingrediente).
+    No falla silenciosamente: si hay error en el INSERT de menu_availability,
+    se propagará al caller para que la transacción haga rollback.
+    """
+    from app.services.logging import get_logger
+    log = get_logger(__name__)
+
+    if new_stock > min_stock:
+        # Stock repuesto — re-evaluar platos afectados para marcarlos available
+        # Solo si TODOS sus otros ingredientes también tienen stock > min_stock.
+        await _recheck_dishes_for_ingredient_conn(conn, ingredient_id, restaurant_id)
+        return
+
+    # Stock agotado o en mínimo — marcar platos como no disponibles
+    recipe_rows = await conn.fetch(
+        "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND restaurant_id = $2",
+        ingredient_id, restaurant_id,
+    )
+    dish_names = [r["dish_name"] for r in recipe_rows]
+
+    if dish_names:
+        log.info(
+            "inventory.auto_hide",
+            ingredient_id=ingredient_id,
+            dishes=dish_names,
+            new_stock=new_stock,
+            restaurant_id=restaurant_id,
+        )
+        await _sync_dish_availability_conn(conn, dish_names, False, restaurant_id)
+
+
+async def _recheck_dishes_for_ingredient_conn(
+    conn, ingredient_id: int, restaurant_id: int
+) -> None:
+    """
+    Tras reponer stock, re-evalúa cada plato que usa este ingrediente.
+    Un plato vuelve a estar disponible solo si TODOS sus ingredientes tienen
+    current_stock > min_stock.
+    """
+    from app.services.logging import get_logger
+    log = get_logger(__name__)
+
+    recipe_rows = await conn.fetch(
+        "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND restaurant_id = $2",
+        ingredient_id, restaurant_id,
+    )
+    for row in recipe_rows:
+        dish_name = row["dish_name"]
+        # Contar ingredientes totales vs ingredientes con stock OK
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM dish_recipes WHERE dish_name = $1 AND restaurant_id = $2",
+            dish_name, restaurant_id,
+        )
+        ok = await conn.fetchval(
+            """SELECT COUNT(*)
+               FROM dish_recipes r
+               JOIN inventory i ON i.id = r.ingredient_id
+               WHERE r.dish_name = $1 AND r.restaurant_id = $2
+                 AND i.current_stock > i.min_stock""",
+            dish_name, restaurant_id,
+        )
+        available = (ok == total)
+        log.info(
+            "inventory.recheck_dish",
+            dish=dish_name,
+            available=available,
+            ok_ingredients=ok,
+            total_ingredients=total,
+            restaurant_id=restaurant_id,
+        )
+        await _sync_dish_availability_conn(conn, [dish_name], available, restaurant_id)
+
+
 # ── DDL init (legacy stubs — schema is fully managed by Alembic) ─────────────
 # Tables: nps_responses, inventory, inventory_history, nps_waiting → 0001_initial_schema.py
 # Table:  dish_recipes → 0001_initial_schema.py
@@ -294,8 +375,11 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                                VALUES ($1, $2, $3, 'orden_confirmada')""",
                             ing_id, -deduct, new_stock
                         )
-                        # Desactivar platos vinculados cuando el stock se agota
-                        if new_stock <= float(inv["min_stock"] or 0):
+                        min_stock_val = float(inv["min_stock"] or 0)
+                        # Sync dish_recipes-based availability (Fase 5c)
+                        await _sync_ingredient_dishes_conn(conn, ing_id, new_stock, min_stock_val, restaurant_id)
+                        # Also sync legacy linked_dishes on the same ingredient
+                        if new_stock <= min_stock_val:
                             dishes = inv["linked_dishes"]
                             if isinstance(dishes, str):
                                 dishes = json.loads(dishes)
@@ -349,8 +433,16 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
     """
     Reemplaza el escandallo completo de un plato.
     lines = [{"ingredient_id": int, "quantity": float}, ...]
-    Pasar lines=[] para eliminar la receta.
+    Pasar lines=[] para eliminar la receta (plato vuelve a estar available).
+
+    Tras guardar, re-evalúa la disponibilidad del plato en menu_availability
+    comprobando si algún ingrediente nuevo tiene stock <= min_stock (Fase 5c).
+    Si el escandallo se elimina (lines=[]), el plato se marca available porque
+    sin receta no hay restricción de stock.
     """
+    from app.services.logging import get_logger
+    log = get_logger(__name__)
+
     pool = await _get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -365,6 +457,32 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
                     restaurant_id, dish_name,
                     int(line["ingredient_id"]), float(line["quantity"])
                 )
+
+            # Re-evaluate availability after recipe change (Fase 5c)
+            if not lines:
+                # No recipe → no stock constraint → mark available
+                await _sync_dish_availability_conn(conn, [dish_name], True, restaurant_id)
+                log.info("inventory.recipe_deleted_dish_available", dish=dish_name, restaurant_id=restaurant_id)
+            else:
+                # Check if any new ingredient is already depleted
+                depleted = await conn.fetchval(
+                    """SELECT COUNT(*)
+                       FROM dish_recipes r
+                       JOIN inventory i ON i.id = r.ingredient_id
+                       WHERE r.dish_name = $1 AND r.restaurant_id = $2
+                         AND i.current_stock <= i.min_stock""",
+                    dish_name, restaurant_id,
+                )
+                available = (depleted == 0)
+                await _sync_dish_availability_conn(conn, [dish_name], available, restaurant_id)
+                log.info(
+                    "inventory.recipe_upserted_availability_synced",
+                    dish=dish_name,
+                    available=available,
+                    depleted_ingredients=depleted,
+                    restaurant_id=restaurant_id,
+                )
+
     return await db_get_dish_recipe(restaurant_id, dish_name)
 
 
