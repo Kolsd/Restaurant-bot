@@ -4,12 +4,12 @@ Mesio — Rutas de Billing / Facturación
 
 import json
 import os
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
 from app.services import database as db
-from app.routes.deps import get_current_user, verify_superadmin
+from app.routes.deps import get_current_user
 from app.services.billing import (
     get_billing_config,
     save_billing_config,
@@ -91,13 +91,9 @@ class EmitInvoicePayload(BaseModel):
     order_id:  str
     customer:  Optional[dict] = None  # {nit, name, email, alegra_id}
 
-class AdminConfigPayload(BaseModel):
-    admin_key:     str = ""
-    restaurant_id: int
-    config:        dict
-
-
 # ── ENDPOINTS ────────────────────────────────────────────────────────
+# NOTE: Admin billing endpoints (/api/billing/admin/*) have been moved to
+# app/routes/internal/billing_admin.py under /api/internal/billing/*.
 
 @router.get("/config")
 async def get_config(request: Request):
@@ -247,16 +243,3 @@ async def list_providers():
         ]
     }
 
-
-# ── ADMIN ENDPOINT (solo para superadmin) ────────────────────────────
-
-@router.post("/admin/config")
-async def admin_set_config(payload: AdminConfigPayload, _: None = Depends(verify_superadmin)):
-    await save_billing_config(payload.restaurant_id, payload.config)
-    return {"success": True}
-
-
-@router.get("/admin/logs")
-async def admin_logs(restaurant_id: int, limit: int = 100, _: None = Depends(verify_superadmin)):
-    log = await get_billing_log(restaurant_id, limit)
-    return {"log": log}
