@@ -281,6 +281,22 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                     except OrderCommitError as exc:
                         log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
                         return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
+                    # Update customer memory after successful order (best-effort, never blocks on failure)
+                    try:
+                        from app.repositories.customer_profiles_repo import increment_after_order  # noqa: PLC0415
+                        from decimal import Decimal
+                        item_strs = [f"{i.get('qty', i.get('quantity', 1))}x {i.get('name', 'item')}" for i in cart.get("items", [])][:5]
+                        summary = ", ".join(item_strs) if item_strs else "pedido"
+                        order_total_decimal = Decimal(str(order["total"]))
+                        if restaurant_id:
+                            await increment_after_order(
+                                restaurant_id=restaurant_id,
+                                phone=phone,
+                                order_total=order_total_decimal,
+                                order_summary=summary,
+                            )
+                    except Exception:
+                        log.exception("customer.profile_increment_failed", phone=phone)
                     return {"success": True, "order": order}
 
             order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
@@ -317,6 +333,22 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             except OrderCommitError as exc:
                 log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
                 return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
+            # Update customer memory after successful order (best-effort, never blocks on failure)
+            try:
+                from app.repositories.customer_profiles_repo import increment_after_order  # noqa: PLC0415
+                from decimal import Decimal
+                item_strs = [f"{i.get('qty', i.get('quantity', 1))}x {i.get('name', 'item')}" for i in cart.get("items", [])][:5]
+                summary = ", ".join(item_strs) if item_strs else "pedido"
+                order_total_decimal = Decimal(str(order["total"]))
+                if restaurant_id:
+                    await increment_after_order(
+                        restaurant_id=restaurant_id,
+                        phone=phone,
+                        order_total=order_total_decimal,
+                        order_summary=summary,
+                    )
+            except Exception:
+                log.exception("customer.profile_increment_failed", phone=phone)
             return {"success": True, "order": order}
     except RuntimeError as exc:
         if "cart_lock_contention" in str(exc):

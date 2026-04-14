@@ -76,13 +76,22 @@ GENERAL RULES
 """
 
 
-def build_salon_prompt(restrictions: str = "") -> list:
+def build_salon_prompt(restrictions: str = "", table_context: dict | None = None) -> list:
     """Build the system prompt block list for salon/dine-in mode."""
     blocks: list = [
         {"type": "text", "text": _SYSTEM_SALON, "cache_control": {"type": "ephemeral"}}
     ]
     if restrictions:
         blocks.append({"type": "text", "text": restrictions})
+    if table_context and table_context.get("is_new_session"):
+        table_name = table_context.get("name", "tu mesa")
+        greeting_block = (
+            f"\nIMPORTANTE (primer mensaje del comensal en esta mesa):\n"
+            f"El comensal acaba de sentarse en {table_name}. Empieza tu respuesta con un saludo cálido y breve "
+            f"que confirme la mesa por su nombre (ej: \"¡Hola! Bienvenido a {table_name} 🍽️\"). "
+            f"Si conoces su nombre del perfil, úsalo. No agregues el saludo en mensajes siguientes de esta misma sesión."
+        )
+        blocks.append({"type": "text", "text": greeting_block})
     return blocks
 
 
@@ -726,6 +735,34 @@ async def execute_salon_action(
         if not _skip_inventory:
             tag = f"adicional #{sub_number}" if sub_number > 1 else "orden inicial"
             log.info("table_order_created", order_id=locals().get("order_id", base_order_id), tag=tag, summary=items_summary)
+
+        # Append receipt card for diner (skip on duplicates — dup path must stay silent)
+        if not _is_duplicate_order and reply:
+            try:
+                eta_min = 20
+                try:
+                    eta_min = int(features.get("kitchen_eta_minutes") or 20)
+                except (TypeError, ValueError, AttributeError):
+                    eta_min = 20
+                final_order_id = locals().get("order_id") or base_order_id
+                short_id = str(final_order_id)[-6:] if final_order_id else "------"
+                items_lines = "\n".join(
+                    f"{int(i.get('quantity', 1))}x {i.get('name', 'Ítem')}" for i in cart_items
+                )
+                total_int = int(quantize_money(to_decimal(cart_total)))  # display only, not stored
+                total_fmt = f"${total_int:,}".replace(",", ".")
+                receipt = (
+                    "\n\n━━━━━━━━━━━━━━━\n"
+                    f"🧾 Pedido #{short_id}\n"
+                    f"{items_lines}\n"
+                    f"Total: {total_fmt}\n"
+                    f"⏱️ Estará listo en ~{eta_min} min\n"
+                    "━━━━━━━━━━━━━━━\n"
+                    "¡El equipo ya está en ello! 👨‍🍳"
+                )
+                reply = reply + receipt
+            except Exception:
+                log.exception("salon_receipt_append_failed", order_id=locals().get("order_id"))
 
         return reply
 

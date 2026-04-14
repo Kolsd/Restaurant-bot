@@ -435,14 +435,19 @@ def test_meta_webhook_status_update_returns_200(client, monkeypatch):
 
 
 def test_meta_webhook_invalid_signature(client, monkeypatch):
-    """Firma inválida → 401."""
+    """Firma inválida → 200 (NO 401). Rule 6: 401 causa retry flood infinito en Meta.
+    Meta reintenta si no recibe 2xx. Retornar 200 + log warning es la política correcta."""
     monkeypatch.setenv("META_APP_SECRET", "real_secret")
     payload = _meta_payload()
     body = json.dumps(payload).encode()
+    enqueue_mock = AsyncMock()
+    monkeypatch.setattr("app.repositories.inbox_repo.enqueue", enqueue_mock)
     r = client.post("/api/webhook/meta", content=body,
                     headers={"X-Hub-Signature-256": "sha256=invalidsig",
                              "Content-Type": "application/json"})
-    assert r.status_code == 401
+    assert r.status_code == 200
+    # Signature verification failed → nothing should be enqueued
+    enqueue_mock.assert_not_awaited()
 
 
 def test_meta_webhook_duplicate_not_enqueued(client, monkeypatch):
@@ -513,15 +518,20 @@ async def test_inbox_dispatch_unknown_provider():
 
 
 @pytest.mark.asyncio
-async def test_inbox_handler_passes_correct_fields():
-    """Handler meta_whatsapp pasa los campos correctos a _process_message."""
+async def test_inbox_handler_passes_correct_fields(monkeypatch):
+    """Handler meta_whatsapp pasa los campos correctos a _process_message.
+    Rule 6: access_token NO va en el payload; se busca de la DB en dispatch time."""
     from app.services import inbox_worker
+    # Handler now fetches wa_access_token from DB at dispatch time (Rule 6).
+    monkeypatch.setattr(
+        db_mod, "db_get_restaurant_by_phone",
+        AsyncMock(return_value={"wa_access_token": "META_TOKEN"}),
+    )
     process_mock = AsyncMock()
     with patch("app.routes.chat._process_message", process_mock):
         payload = {
             "user_phone": "+573001111111", "user_text": "Una arepa",
             "bot_number": "+573009999999", "phone_id": "phid-001",
-            "access_token": "META_TOKEN",
         }
         await inbox_worker._handle_meta_whatsapp(payload)
     process_mock.assert_awaited_once_with(

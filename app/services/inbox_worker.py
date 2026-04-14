@@ -265,25 +265,99 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
     Expected keys (set by routes/chat.py before enqueue):
         user_phone, user_text, bot_number, phone_id
 
+    For voice notes: user_text is "" and needs_transcription is True.
+        audio_id is included; transcription happens here before _process_message.
+
     access_token is fetched from the DB at dispatch time so it is never
     stored in the inbox table (including dead-letter rows).
     """
     import os
-    from app.routes.chat import _process_message
+    from app.routes.chat import _process_message, _send_wa_text
     from app.services import database as _db
+    from app.services.transcription import (
+        download_whatsapp_media,
+        transcribe_audio,
+        TranscriptionError,
+        TranscriptionUnavailable,
+        AudioTooLongError,
+    )
 
     bot_number = payload["bot_number"]
+    user_phone = payload["user_phone"]
+    phone_id   = payload["phone_id"]
+
+    # Fetch access_token (same lookup the handler already does for text messages).
+    # Connection is acquired and released here, BEFORE any long I/O — Rule 4.
     restaurant = await _db.db_get_restaurant_by_phone(bot_number)
     if restaurant and restaurant.get("wa_access_token"):
         access_token = restaurant["wa_access_token"]
     else:
         access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
 
+    # ── Voice note: transcribe before calling _process_message ────────────────
+    if payload.get("needs_transcription"):
+        audio_id = payload.get("audio_id", "")
+
+        if not access_token:
+            log.error("audio.no_access_token", bot_number=bot_number, audio_id=audio_id)
+            # Ack (do not raise) — retrying forever won't help without a token.
+            return
+
+        try:
+            audio_bytes, mime_type = await download_whatsapp_media(audio_id, access_token)
+            transcribed = await transcribe_audio(audio_bytes, mime_type=mime_type)
+        except TranscriptionUnavailable:
+            log.warning("audio.key_unavailable", audio_id=audio_id)
+            await _send_wa_text(
+                user_phone,
+                "Aún no proceso audios aquí. ¿Me lo escribes? 🙂",
+                phone_id,
+                access_token,
+            )
+            return  # ack — do not retry, key won't appear on its own
+        except AudioTooLongError:
+            log.warning("audio.too_long", audio_id=audio_id)
+            await _send_wa_text(
+                user_phone,
+                "El audio es muy largo. ¿Me mandas uno más corto o lo escribes?",
+                phone_id,
+                access_token,
+            )
+            return  # ack — retrying won't shrink the file
+        except TranscriptionError:
+            # Transient failure — re-raise so the inbox worker marks this row
+            # as failed and retries with exponential backoff (Rule 13).
+            log.exception("audio.transient_failure", audio_id=audio_id)
+            raise
+        except Exception:
+            # Unknown failure — send fallback and ack (do not retry unknown errors).
+            log.exception("audio.processing_failed", audio_id=audio_id)
+            await _send_wa_text(
+                user_phone,
+                "No pude entender tu audio. ¿Me lo escribes?",
+                phone_id,
+                access_token,
+            )
+            return
+
+        if not transcribed.strip():
+            await _send_wa_text(
+                user_phone,
+                "No escuché nada en tu audio. ¿Intentas de nuevo o me escribes?",
+                phone_id,
+                access_token,
+            )
+            return  # ack — nothing to process
+
+        user_text = transcribed
+    else:
+        user_text = payload.get("user_text", "")
+
     await _process_message(
-        user_phone   = payload["user_phone"],
-        user_text    = payload["user_text"],
+        user_phone   = user_phone,
+        user_text    = user_text,
         bot_number   = bot_number,
-        phone_id     = payload["phone_id"],
+        phone_id     = phone_id,
         access_token = access_token,
     )
 

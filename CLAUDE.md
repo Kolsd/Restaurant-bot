@@ -18,7 +18,8 @@ Variables de entorno críticas:
   WORKER_MODE,                  # "inbox" para Railway worker service separado
   BOT_MAX_TOKENS,               # (opcional, default 2048) max_tokens para respuestas del LLM
   BOT_MODEL_FAST,               # (opcional) override modelo rápido de Anthropic
-  BOT_MODEL_PRECISE             # (opcional) override modelo preciso de Anthropic
+  BOT_MODEL_PRECISE,            # (opcional) override modelo preciso de Anthropic
+  OPENAI_API_KEY,               # (opcional) Para transcripción de voice notes (Whisper API). Sin esto, audios reciben fallback amigable.
 ```
 
 ## Estructura del Proyecto
@@ -292,6 +293,7 @@ inbox_worker.py (claim-then-ack, 3 fases)
 - Doble dedup: `db_is_duplicate_wam` (tabla in-memory 2min) primera línea + `ux_webhook_inbox_dedup` red de seguridad para carreras concurrentes.
 - Mensajes sin wam_id: dedup via `synth_sha256(phone:text:bot:epoch//10)` como external_id.
 - Wompi sigue intacto (no migrado al inbox), futuro provider.
+- **Voice notes (audio)**: El webhook encola mensajes de tipo `audio` con `{needs_transcription: true, audio_id, user_text: ""}`. El worker (`_handle_meta_whatsapp`) descarga el audio de Meta vía `download_whatsapp_media`, transcribe con Whisper (`transcribe_audio`), y alimenta el texto a `_process_message` exactamente igual que un texto normal. Fallos tipados: `TranscriptionUnavailable` (sin `OPENAI_API_KEY`) y `AudioTooLongError` → ack + fallback amigable al cliente. `TranscriptionError` (transiente) → re-raise → inbox retry con backoff. Implementado en `app/services/transcription.py`.
 - **Worker separado** (Fase 8): `scripts/run_inbox_worker.py` — standalone entrypoint con signal handling (SIGTERM/SIGINT). En Railway: service con `WORKER_MODE=inbox`. Web service puede desactivar worker embebido con `DISABLE_EMBEDDED_WORKER=1`.
 - **Inbox metrics**: `inbox_worker.get_metrics()` expone `processed_total`, `errors_total`, `latency_avg_ms`, `latency_p95_ms` (rolling deque maxlen=100).
 

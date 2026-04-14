@@ -266,6 +266,35 @@ _END_SESSION = {
     }
 }
 
+_REMEMBER_CUSTOMER_PREFERENCE = {
+    "name": "remember_customer_preference",
+    "description": (
+        "Save a preference the customer just mentioned in their message (dietary "
+        "restriction, allergy, dislike, favorite dish, or a noteworthy preference). "
+        "Call this ONLY when the customer explicitly states something worth remembering "
+        "for next time. Do NOT invent preferences. Do NOT call more than 3 times per conversation."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "key": {
+                "type": "string",
+                "enum": ["dietary", "allergies", "dislikes", "favorite_dish", "notes"],
+                "description": "Category of the preference."
+            },
+            "value": {
+                "type": "string",
+                "description": "The preference value, exactly as the customer described it (max 200 chars)."
+            },
+            "reason": {
+                "type": "string",
+                "description": "The exact phrase from the customer that motivated saving this. Required to prevent hallucinated preferences."
+            }
+        },
+        "required": ["key", "value", "reason"]
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Exported tool lists by mode
 # ---------------------------------------------------------------------------
@@ -276,6 +305,7 @@ TOOLS_SALON: list[dict] = [
     _CALL_WAITER,
     _MAKE_RESERVATION,
     _END_SESSION,
+    _REMEMBER_CUSTOMER_PREFERENCE,
 ]
 """Tools available in dine-in (salon/table) mode."""
 
@@ -285,6 +315,7 @@ TOOLS_EXTERNAL: list[dict] = [
     _CHANGE_PAYMENT_METHOD,
     _MAKE_RESERVATION,
     _END_SESSION,
+    _REMEMBER_CUSTOMER_PREFERENCE,
 ]
 """Tools available in external (delivery/pickup) mode."""
 
@@ -303,6 +334,7 @@ ALL_TOOLS: dict[str, dict] = {
         _CHANGE_PAYMENT_METHOD,
         _MAKE_RESERVATION,
         _END_SESSION,
+        _REMEMBER_CUSTOMER_PREFERENCE,
     ]
 }
 """Maps every tool name to its definition dict for O(1) lookup."""

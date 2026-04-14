@@ -36,6 +36,18 @@ def _can_send_entregado_notif(phone: str) -> bool:
         return True
     return False
 
+# Rate-limit WA "listo" notifications: max 1 per phone per 5 minutes
+_listo_notif_sent: dict = {}  # phone -> last sent timestamp (epoch seconds)
+_LISTO_COOLDOWN = 300  # seconds
+
+
+def _can_send_listo_notif(phone: str) -> bool:
+    last = _listo_notif_sent.get(phone, 0)
+    if time.time() - last >= _LISTO_COOLDOWN:
+        _listo_notif_sent[phone] = time.time()
+        return True
+    return False
+
 async def get_table_wa_number(table: dict) -> str:
     wa_number = ""
     bid = table.get("branch_id")
@@ -644,6 +656,9 @@ async def update_order_status(request: Request, order_id: str):
         await db.db_update_table_order_status(order_id, status)
         if status == "entregado" and phone and _can_send_entregado_notif(phone):
             msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
+            await send_wa_msg(phone, msg, db_phone_id)
+        if status == "listo" and phone and phone != "manual" and _can_send_listo_notif(phone):
+            msg = f"🍽️ ¡Tu pedido en {table_name} está listo!\n\nUn mesero te lo llevará en un momento. ¡Buen provecho! 😋"
             await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}

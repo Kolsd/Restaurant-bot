@@ -385,6 +385,43 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     log.error("chat.proof_shortcut_failed", phone=user_phone, error=str(e))
 
                 user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: {media_url}"
+            elif msg_type == "audio":
+                # ── Audio / voice note handling ──────────────────────────────
+                # Transcription is intentionally deferred to the inbox worker
+                # so the webhook returns fast to Meta (Rule 6).
+                audio_id = (message.get("audio") or {}).get("id")
+                if not audio_id:
+                    log.warning("audio.no_id", wam_id=wam_id, phone=user_phone)
+                    continue
+                if not user_phone:
+                    continue
+                log.info("chat.audio_inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, audio_id=audio_id)
+                try:
+                    pool = await db.get_pool()
+                    external_id = wam_id or None
+                    if not external_id:
+                        dedup_content = f"{user_phone}:audio:{audio_id}:{bot_number}:{int(time.time() // 10)}"
+                        external_id = f"synth_{hashlib.sha256(dedup_content.encode()).hexdigest()[:16]}"
+                    enqueue_payload = {
+                        "user_phone":          user_phone,
+                        "user_text":           "",
+                        "audio_id":            audio_id,
+                        "needs_transcription": True,
+                        "bot_number":          bot_number,
+                        "phone_id":            phone_id,
+                    }
+                    inserted = await inbox_repo.enqueue(
+                        pool,
+                        provider="meta_whatsapp",
+                        external_id=external_id,
+                        payload=enqueue_payload,
+                    )
+                    if not inserted:
+                        log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
+                except Exception:
+                    log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
+                    any_enqueue_failed = True
+                continue  # audio path is fully handled above; skip text guard
             else:
                 user_text = message.get("text", {}).get("body", "")
 

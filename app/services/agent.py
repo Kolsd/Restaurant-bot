@@ -131,6 +131,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             if session and session.get("table_id") != table["id"]:
                 await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
             await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+            table["is_new_session"] = True
             return table
 
     # 2. Sesión activa existente: Si ya sabemos dónde está, respetamos la sesión
@@ -139,6 +140,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
         table = await db.db_get_table_by_id(session["table_id"])
         if table:
             await db.db_touch_session(phone, bot_number)
+            table["is_new_session"] = False
             return table
 
     clean_message = re.sub(r'\[.*?\]', '', re.sub(r'https?://\S+', '', message)).strip()
@@ -183,6 +185,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 if row:
                     table = dict(row)
                     await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                    table["is_new_session"] = True
                     return table
         else:
             # ── FORMATO LEGACY (Fallback): "Mesa 3" sin prefijo ──
@@ -198,6 +201,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 if row["number"] == num_mesa:
                     table = dict(row)
                     await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                    table["is_new_session"] = True
                     return table
 
     return None
@@ -457,11 +461,13 @@ async def build_system_prompt(
     features: dict = None,
     table_context: dict | None = None,
     restaurant_id: int | None = None,
+    customer_context: str = "",
 ) -> list:
     """
     Build the system prompt block list for Claude.
     Routes to the salon or external prompt based on table_context.
     Appends an active-discount block when dynamic_discounts is enabled.
+    Appends a customer memory block when customer_context is non-empty.
     """
     features = features or {}
     restrictions = _build_module_restrictions(features)
@@ -487,16 +493,26 @@ async def build_system_prompt(
         except Exception:
             log.exception("build_system_prompt.discount_lookup_error", restaurant_id=restaurant_id)
 
+    # Customer memory block — appended after injection-defense, never prepended
+    customer_block = ""
+    if customer_context:
+        customer_block = (
+            "\n[CONTEXTO_CLIENTE]\n"
+            f"{customer_context}\n"
+            "Usa este contexto para personalizar tus respuestas cuando sea natural. "
+            "NO asumas que el cliente quiere lo mismo de antes salvo que lo diga explícitamente."
+        )
+
     if table_context:
-        prompt = build_salon_prompt(restrictions)
+        prompt = build_salon_prompt(restrictions, table_context=table_context)
     else:
         prompt = build_external_prompt(restrictions)
 
-    if discount_block:
-        # Append discount block to the last text entry in the system prompt list
+    if discount_block or customer_block:
+        # Append both blocks to the last text entry in the system prompt list
         for block in reversed(prompt):
             if isinstance(block, dict) and block.get("type") == "text":
-                block["text"] = block["text"] + discount_block
+                block["text"] = block["text"] + discount_block + customer_block
                 break
 
     return prompt
@@ -601,6 +617,7 @@ _TOOL_TO_ACTION = {
     "change_payment_method": "change_payment",
     "make_reservation": "reserve",
     "end_session": "end_session",
+    "remember_customer_preference": "remember",
 }
 
 
@@ -634,6 +651,13 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
             "time": tool_input.get("time", ""),
             "guests": tool_input.get("guests", 1),
             "notes": tool_input.get("notes", ""),
+        }
+
+    if action == "remember":
+        parsed["preference"] = {
+            "key": tool_input.get("key", ""),
+            "value": tool_input.get("value", ""),
+            "reason": tool_input.get("reason", ""),
         }
 
     return parsed
@@ -727,6 +751,26 @@ async def _validate_tool_call(
             log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=phone)
             return None, reply, {}
 
+    # 7. remember_customer_preference — validate key and rate-limit per conversation
+    if tool_name == "remember_customer_preference":
+        from app.repositories.customer_profiles_repo import VALID_PREFERENCE_KEYS  # noqa: PLC0415
+        key = str(tool_input.get("key", "")).strip()
+        value = str(tool_input.get("value", "")).strip()
+        reason = str(tool_input.get("reason", "")).strip()
+        if key not in VALID_PREFERENCE_KEYS:
+            log.warning("guard.remember_invalid_key", key=key, phone=phone)
+            return None, reply, {}
+        if not value or not reason:
+            log.warning("guard.remember_empty_value_or_reason", phone=phone)
+            return None, reply, {}
+        # Rate limit: max 3 remember calls per phone per conversation window (10 min)
+        ok = await state_store.rate_limit_check(
+            f"remember:{phone}:{bot_number}", max_requests=3, window_seconds=600
+        )
+        if not ok:
+            log.warning("guard.remember_rate_limited", phone=phone)
+            return None, reply, {}
+
     return tool_name, reply, tool_input
 
 
@@ -739,6 +783,25 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
     action = parsed.get("action", "chat")
     items  = parsed.get("items", [])
     reply  = parsed.get("reply", "")
+
+    # ── Early: remember_customer_preference (no cart, no DB transaction) ──
+    if action == "remember":
+        # Persist the preference. On any failure, we just skip (log) — never block the reply.
+        try:
+            from app.repositories.customer_profiles_repo import update_preference  # noqa: PLC0415
+            pref = parsed.get("preference", {})
+            restaurant_id = (restaurant_obj or {}).get("id")
+            if restaurant_id and pref.get("key") and pref.get("value"):
+                await update_preference(
+                    restaurant_id=restaurant_id,
+                    phone=phone,
+                    key=pref["key"],
+                    value=pref["value"],
+                )
+                log.info("customer.preference_saved", phone=phone, restaurant_id=restaurant_id, key=pref["key"])
+        except Exception:
+            log.exception("customer.preference_save_failed", phone=phone)
+        return reply   # Reply flows through unchanged
 
     try:
         # ── Shared: cart population (order, delivery, pickup all need it) ──
@@ -1212,7 +1275,21 @@ async def _call_llm_and_execute(
     messages = full_history[-(HISTORY_WINDOW * 2):]
     messages.append({"role": "user", "content": enriched})
 
-    sys_prompt = await build_system_prompt(feats, table_context, restaurant_id=restaurant_obj.get("id"))
+    # Load customer memory (read-only; failure never blocks the chat)
+    customer_ctx = ""
+    try:
+        from app.repositories.customer_profiles_repo import get_profile, serialize_for_prompt, upsert_profile_from_message  # noqa: PLC0415
+        restaurant_id = restaurant_obj.get("id")
+        if restaurant_id:
+            # Upsert first so last_seen is always fresh (creates row for new customers)
+            await upsert_profile_from_message(restaurant_id=restaurant_id, phone=user_phone)
+            profile = await get_profile(restaurant_id, user_phone)
+            customer_ctx = serialize_for_prompt(profile)
+    except Exception:
+        log.exception("customer.profile_load_failed", phone=user_phone)
+        customer_ctx = ""  # Graceful fallback — chat proceeds without memory
+
+    sys_prompt = await build_system_prompt(feats, table_context, restaurant_id=restaurant_obj.get("id"), customer_context=customer_ctx)
     tools = TOOLS_SALON if table_context else TOOLS_EXTERNAL
     try:
         result = await call_claude(
