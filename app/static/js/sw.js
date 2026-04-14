@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v18';  // ← incrementar para limpiar el caché viejo
+const CACHE_VERSION  = 'v19';  // ← incrementar para limpiar el caché viejo
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -64,6 +64,12 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // Catalog/menu pages: never cache — always serve fresh HTML so JS updates take effect.
+  if (url.pathname.startsWith('/menu/') || url.pathname === '/menu' || url.pathname === '/catalog') {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   // roles.js: siempre network-only, nunca cachear.
   if (url.pathname === '/static/js/roles.js') {
     event.respondWith(fetch(request));
@@ -92,6 +98,8 @@ self.addEventListener('fetch', event => {
   }
 
   // HTML pages: network-first, fallback a caché.
+  // caches.match() returns undefined (not null) on miss — must guard to avoid
+  // "Failed to convert value to 'Response'" crash in event.respondWith().
   event.respondWith(
     fetch(request)
       .then(res => {
@@ -101,7 +109,7 @@ self.addEventListener('fetch', event => {
         }
         return res;
       })
-      .catch(() => caches.match(request))
+      .catch(() => caches.match(request).then(r => r || new Response('Sin conexión', { status: 503, headers: { 'Content-Type': 'text/plain' } })))
   );
 });
 
