@@ -1119,6 +1119,40 @@ input:checked + .toggle-slider:before { transform: translateX(16px); }
   background: var(--brand-bg);
 }
 
+/* ── Chips: focus-visible ring (keyboard navigation) ── */
+.dish-chip:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+/* Allergen chips focus: warning ring */
+.dish-chip--allergen:focus-visible {
+  outline-color: var(--warning);
+}
+
+/* ── Dish card: focus ring when navigating by keyboard ── */
+.dish-card:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.dish-drag-handle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Featured star in card list ── */
+.dish-card .dish-featured-star {
+  color: var(--warning);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* ── Image zone: explicit focus ring ── */
+.dish-image-zone:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 /* ── Responsive: fullscreen modal on mobile ── */
 @media (max-width: 600px) {
   .dish-modal-overlay {
@@ -1133,4 +1167,13 @@ input:checked + .toggle-slider:before { transform: translateX(16px); }
   .dish-field-row {
     grid-template-columns: 1fr;
   }
+  /* Tighter chips on mobile */
+  .dish-chips-group { gap: 6px; }
+  .dish-chip { font-size: 11px; padding: 4px 8px; }
+  /* Full-width toggle rows */
+  .dish-toggle-row { padding: var(--s-2) 0; }
+  /* Compact modal header on mobile */
+  .dish-modal-header { padding: var(--s-3) var(--s-4); }
+  .dish-modal-body { padding: var(--s-4); gap: var(--s-4); }
+  .dish-modal-footer { padding: var(--s-3) var(--s-4); }
 }
