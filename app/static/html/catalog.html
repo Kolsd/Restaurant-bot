@@ -12,11 +12,11 @@
     var tableId = params.get('table_id');
     var hash = window.location.hash;
     if (tableId) {
-      // Preserve bot/mesa query params so catalog-v2.js can read them after redirect
-      params.delete('table_id');
-      var remaining = params.toString();
-      var qs = remaining ? '?' + remaining : '';
-      window.location.replace('/menu/' + encodeURIComponent(tableId) + qs + hash);
+      // table_id is now encoded in the path — no extra params needed.
+      // bot_number and mesa are redundant: the API derives them from the table.
+      // Forwarding mesa=8-1 would cause catalog-v2.js to call /menu-context/8-1
+      // instead of /menu-context/table-8-1, returning 404.
+      window.location.replace('/menu/' + encodeURIComponent(tableId) + hash);
     } else {
       window.location.replace('/menu' + window.location.search + hash);
     }

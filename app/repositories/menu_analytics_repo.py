@@ -16,9 +16,9 @@ from app.services.logging import get_logger
 log = get_logger(__name__)
 
 
-def _get_pool():
+async def _get_pool():
     from app.services.database import get_pool
-    return get_pool()
+    return await get_pool()
 
 
 # ── Write ─────────────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ async def record_event(
     Fire-and-forget: exceptions are logged but never re-raised to the caller.
     """
     try:
-        pool = _get_pool()
+        pool = await _get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
                 """
