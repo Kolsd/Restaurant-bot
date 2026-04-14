@@ -5,11 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Menú del Restaurante</title>
 <script>
-  // Redirect to menu.html preserving query string and hash
+  // Redirect to /menu/{table_id} (path param) if table_id is present in query string,
+  // otherwise fall back to /menu with the full query string (legacy).
   (function() {
-    var qs = window.location.search;
+    var params = new URLSearchParams(window.location.search);
+    var tableId = params.get('table_id');
     var hash = window.location.hash;
-    window.location.replace('/menu' + qs + hash);
+    if (tableId) {
+      window.location.replace('/menu/' + encodeURIComponent(tableId) + hash);
+    } else {
+      window.location.replace('/menu' + window.location.search + hash);
+    }
   })();
 </script>
 </head>
