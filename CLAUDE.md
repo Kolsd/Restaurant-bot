@@ -562,6 +562,32 @@ GET    /api/staff/webauthn/credentials
 DELETE /api/staff/webauthn/credentials/{id}
 ```
 
+## Catálogo Visual v2 — Endpoints de Imagen (`/api/menu/image/...`)
+
+Permiten al editor admin subir y borrar imágenes de platos directamente en Cloudinary desde el browser. El backend solo firma — los bytes nunca pasan por nuestro servidor.
+
+```
+POST   /api/menu/image/sign
+  Auth:      Bearer token de admin/owner (get_current_restaurant)
+  Body:      {"folder_suffix": "menu"}  (opcional, default "menu")
+  Response:  {signature, timestamp, api_key, cloud_name, folder, public_id_prefix}
+  Rate limit: 30 req/min por restaurante via state_store.rate_limit_check (Redis cross-worker)
+  503 si CLOUDINARY_* env vars no están configuradas
+  429 si se supera el rate limit
+
+DELETE /api/menu/image
+  Auth:      Bearer token de admin/owner (get_current_restaurant)
+  Body:      {"public_id": "mesio/r_{id}/menu/dish_abc"}
+  Response:  {"success": true, "public_id": "..."}
+  403 si public_id no pertenece al restaurante autenticado (cross-tenant check)
+  200 siempre que ownership sea válida — idempotente (imagen ya borrada → 200)
+  Implementación: app/routes/settings_routes.py | image_host: app/services/image_host.py
+```
+
+Feature flags relacionados:
+- `bot_visual_menu` (opt-in, default false) — activa envío de fotos desde el bot (Fase 4)
+- `catalog_v2_enabled` (opt-out, default true) — kill-switch global del catálogo visual
+
 ## Reglas de Seguridad y Estilo
 
 - **SQL**: PROHIBIDO f-strings para inyectar valores. Siempre `$1, $2, ...` posicionales. Excepción aceptada: f-string solo para construir cláusulas `SET col=$n` dinámicas en updates (ver `db_update_deduction_item`), nunca para valores de usuario.
