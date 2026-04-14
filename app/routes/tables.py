@@ -222,6 +222,15 @@ async def update_table_properties(table_id: str, body: TablePropertiesBody, rest
     return result
 
 
+@router.get("/menu", response_class=HTMLResponse)
+async def menu_page_bot():
+    """Sirve el catálogo para contexto delivery/recoger (?bot=NUMBER)."""
+    p = STATIC / "html" / "menu.html"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="menu.html no encontrado en static/")
+    return HTMLResponse(p.read_text(encoding="utf-8"))
+
+
 @router.get("/menu/{table_id}", response_class=HTMLResponse)
 async def menu_page(table_id: str):
     # Resolve catalog_v2_enabled to pick legacy vs current template.

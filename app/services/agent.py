@@ -943,7 +943,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             if not table_context:
                 log.warning("agent.order_without_table_context", phone=phone)
                 base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
-                menu_url = f"{base_url}/catalog?bot={bot_number}" if base_url else f"/catalog?bot={bot_number}"
+                menu_url = f"{base_url}/menu?bot={bot_number}" if base_url else f"/menu?bot={bot_number}"
                 return f"Para tomar tu pedido, necesito saber en qué mesa estás. ¿En qué número de mesa te encuentras?\n\nSi prefieres Domicilio o Recoger, usa nuestro menú digital: {menu_url}"
 
             result = await execute_salon_action(
@@ -1267,7 +1267,7 @@ async def _build_enriched_user_message(
     )
 
     base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
-    menu_url = f"{base_url}/catalog?bot={bot_number}" if base_url else f"/catalog?bot={bot_number}"
+    menu_url = f"{base_url}/menu?bot={bot_number}" if base_url else f"/menu?bot={bot_number}"
 
     # Check for in-transit delivery order (only for external flow)
     in_transit_note = ""

@@ -799,9 +799,10 @@ function initCatalog() {
     }
     const itemsText = items.join('\n');
     if (state.tableId) {
-      // Clean message — no machine tags. The bot uses the active session to identify the table.
-      // Session was already established when the user sent the initial QR greeting.
-      return `Quiero pedir:\n${itemsText}`;
+      // Include table name so detect_table_context can always identify the table,
+      // even if the user skipped the QR greeting and went straight to ordering.
+      const tablePrefix = state.tableName ? `Estoy en ${state.tableName}\n` : '';
+      return `${tablePrefix}Quiero pedir:\n${itemsText}`;
     }
     return `Hola, me gustaría pedir:\n${itemsText}`;
   }
