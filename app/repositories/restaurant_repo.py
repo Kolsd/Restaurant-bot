@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json as _json
 import json
+from decimal import Decimal
 
 
 # Lazy accessors — break circular import with app.services.database.
@@ -67,7 +68,7 @@ def normalize_dish_shape(dish: dict) -> dict:
             extra_price = entry.get("extra_price")
             if not isinstance(dish_name, str) or not dish_name.strip():
                 continue
-            if not isinstance(extra_price, (int, float)) or extra_price < 0:
+            if not isinstance(extra_price, (int, float, Decimal)) or extra_price < 0:
                 continue
             validated_combos.append({
                 "dish_name":   dish_name.strip(),
@@ -937,7 +938,7 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
                     raise ValueError(
                         f"Plato '{dish.get('name')}' tiene una imagen que no pertenece a "
                         f"este restaurante (public_id='{bad_pid}'). "
-                        "Solo se permiten imágenes bajo mesio/r_{restaurant_id}/."
+                        f"Solo se permiten imágenes bajo mesio/r_{restaurant_id}/."
                     )
                 normalized.append(normalize_dish_shape(dish))
             menu_data[category] = normalized
@@ -946,7 +947,7 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
     async with pool.acquire() as conn:
         result = await conn.execute(
             "UPDATE restaurants SET menu = $1::jsonb WHERE id = $2",
-            json.dumps(menu_data), restaurant_id
+            json.dumps(menu_data, default=lambda o: float(o) if isinstance(o, Decimal) else str(o)), restaurant_id  # JSON boundary
         )
         return result == "UPDATE 1"
 
@@ -1301,9 +1302,11 @@ async def db_get_restaurant_by_slug(slug: str) -> dict | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, name, slug, whatsapp_number, menu, features, address
-            FROM restaurants
-            WHERE slug = $1
+            SELECT r.id, r.name, r.slug, r.whatsapp_number, r.menu, r.features, r.address,
+                   p.menu AS parent_menu
+            FROM restaurants r
+            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
+            WHERE r.slug = $1
             """,
             slug,
         )

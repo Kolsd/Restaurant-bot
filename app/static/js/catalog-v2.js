@@ -149,7 +149,7 @@ function saveCart(botNumber, cart) {
   if (!key) return;
   try {
     localStorage.setItem(key, JSON.stringify(cart));
-  } catch { /* storage quota */ }
+  } catch (e) { console.warn('Cart persist failed (storage quota?):', e); }
 }
 
 /* ── DOM builders ── */
@@ -738,6 +738,7 @@ function initCatalog() {
   function cartTotal() {
     let total = 0;
     for (const [cat, dishes] of Object.entries(state.menu)) {
+      if (!Array.isArray(dishes)) continue;
       for (const dish of dishes) {
         const id = dishId(dish, cat);
         total += (state.cart[id] || 0) * (Number(dish.price) || 0);
@@ -747,8 +748,10 @@ function initCatalog() {
   }
 
   function buildWaMessage() {
-    let msg = 'Hola, me gustaría pedir:\n';
+    let msg = state.tableName ? `[Mesa: ${state.tableName}]\n` : '';
+    msg += 'Hola, me gustaría pedir:\n';
     for (const [cat, dishes] of Object.entries(state.menu)) {
+      if (!Array.isArray(dishes)) continue;
       for (const dish of dishes) {
         const id = dishId(dish, cat);
         const qty = state.cart[id] || 0;
@@ -1091,7 +1094,7 @@ function initCatalog() {
     // Without this, dishId() would produce a cart key detached from state.menu,
     // silently dropping the item from the WhatsApp message and total.
     for (const [c, dishes] of Object.entries(state.menu || {})) {
-      if (dishes.some(d => d.name === dish.name)) return c;
+      if (Array.isArray(dishes) && dishes.some(d => d.name === dish.name)) return c;
     }
     return '';
   }
