@@ -73,7 +73,7 @@ async def get_dish_analytics(
     cart_conversion_rate  = add_to_carts / views      (or 0 if views == 0)
     order_conversion_rate = orders / add_to_carts     (or 0 if add_to_carts == 0)
     """
-    pool = _get_pool()
+    pool = await _get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """

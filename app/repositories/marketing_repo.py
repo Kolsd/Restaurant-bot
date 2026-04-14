@@ -292,7 +292,7 @@ async def get_at_risk_customers(restaurant_id: int, limit: int = 50) -> list[dic
             """
             SELECT
                 phone                                  AS customer_phone,
-                COALESCE(name, phone)                  AS customer_name,
+                COALESCE(display_name, phone)           AS customer_name,
                 last_seen                              AS last_order_at,
                 EXTRACT(DAY FROM NOW() - last_seen)::INT AS days_since,
                 total_orders,
