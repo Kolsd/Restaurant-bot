@@ -447,16 +447,54 @@ function _createDishCard(catIndex, dishIndex, dish) {
   priceEl.textContent = dish.price ? mesioFmt(dish.price) : '';
   info.appendChild(priceEl);
 
-  // Mini badges
-  if (dish.badges && dish.badges.length) {
+  // Mini badges + tag/allergen summary
+  const hasBadges    = dish.badges    && dish.badges.length;
+  const hasTags      = dish.tags      && dish.tags.length;
+  const hasAllergens = dish.allergens && dish.allergens.length;
+
+  if (hasBadges || hasTags || hasAllergens) {
     const badgeRow = document.createElement('div');
     badgeRow.className = 'dish-card-badges';
-    dish.badges.forEach(b => {
-      const span = document.createElement('span');
-      span.className = 'dish-mini-badge' + (b === 'new' ? ' dish-mini-badge--new' : b === 'chef_pick' ? ' dish-mini-badge--chef' : '');
-      span.textContent = _dishLabel('badges', b);
-      badgeRow.appendChild(span);
-    });
+
+    if (hasBadges) {
+      dish.badges.forEach(b => {
+        const span = document.createElement('span');
+        span.className = 'dish-mini-badge' + (b === 'new' ? ' dish-mini-badge--new' : b === 'chef_pick' ? ' dish-mini-badge--chef' : '');
+        span.textContent = _dishLabel('badges', b);
+        badgeRow.appendChild(span);
+      });
+    }
+
+    if (hasTags) {
+      // Show first 2 tags; if more show +N
+      const visible = dish.tags.slice(0, 2);
+      visible.forEach(t => {
+        const span = document.createElement('span');
+        span.className = 'dish-mini-badge';
+        span.style.cssText = 'background:var(--info-light);color:#1D4ED8;';
+        span.textContent = _dishLabel('tags', t);
+        badgeRow.appendChild(span);
+      });
+      if (dish.tags.length > 2) {
+        const more = document.createElement('span');
+        more.className = 'dish-mini-badge';
+        more.style.cssText = 'background:var(--bg);color:var(--text-3);';
+        more.textContent = '+' + (dish.tags.length - 2);
+        badgeRow.appendChild(more);
+      }
+    }
+
+    if (hasAllergens) {
+      const aSpan = document.createElement('span');
+      aSpan.className = 'dish-mini-badge';
+      aSpan.style.cssText = 'background:var(--warning-light);color:#854F0B;';
+      aSpan.title = dish.allergens.map(a => _dishLabel('allergens', a)).join(', ');
+      aSpan.textContent = dish.allergens.length === 1
+        ? _dishLabel('allergens', dish.allergens[0])
+        : dish.allergens.length + ' alérgenos';
+      badgeRow.appendChild(aSpan);
+    }
+
     info.appendChild(badgeRow);
   }
 
