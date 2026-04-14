@@ -12,8 +12,10 @@ Fixtures used:
   patch_auth  — helper from conftest.py that wires up verify_token + db_get_user
                 + db_get_restaurant_by_id
 
-Each test patches get_pool in the settings_routes namespace for the two
-DB queries (staff count and first-order existence check).
+After the repo-extraction refactor, the endpoint delegates to:
+  - app.routes.settings_routes.db_has_staff          (staff_repo)
+  - app.routes.settings_routes.db_has_orders_by_bot_number  (restaurant_repo)
+These are patched directly instead of patching get_pool.
 """
 
 import pytest
@@ -21,36 +23,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services import database as db
 
-# Target for pool patches inside the endpoint module
-_PATCH_POOL = "app.routes.settings_routes.get_pool"
+# Targets for the two repo-function patches now used by the endpoint
+_PATCH_HAS_STAFF  = "app.routes.settings_routes.db_has_staff"
+_PATCH_HAS_ORDERS = "app.routes.settings_routes.db_has_orders_by_bot_number"
 
 URL = "/api/onboarding/status"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _make_pool(staff_count: int = 0, has_order: bool = False):
-    """
-    Build a mock pool whose connections answer the two fetchval calls made
-    by the endpoint: staff COUNT and orders EXISTS.
-    The pool is called twice (once per query), so side_effect is a list.
-    """
-    def _conn(return_value):
-        conn = AsyncMock()
-        conn.fetchval = AsyncMock(return_value=return_value)
-        cm = AsyncMock()
-        cm.__aenter__ = AsyncMock(return_value=conn)
-        cm.__aexit__ = AsyncMock(return_value=False)
-        pool = AsyncMock()
-        pool.acquire = MagicMock(return_value=cm)
-        return pool
-
-    # get_pool is called once for staff, once for first_order
-    get_pool_mock = AsyncMock(side_effect=[
-        _conn(staff_count),   # staff COUNT(*)
-        _conn(has_order),     # orders EXISTS(...)
-    ])
-    return get_pool_mock
+def _make_repo_patches(has_staff: bool = False, has_order: bool = False):
+    """Return (has_staff_mock, has_orders_mock) for use with patch()."""
+    return AsyncMock(return_value=has_staff), AsyncMock(return_value=has_order)
 
 
 def _patch_restaurant(monkeypatch, *, restaurant_id=1,
@@ -114,9 +98,10 @@ class TestOnboardingFullScore:
             },
             menu={"Entradas": [{"name": "Ensalada", "price": 12000}]},
         )
-        get_pool_mock = _make_pool(staff_count=3, has_order=True)
+        has_staff_mock, has_orders_mock = _make_repo_patches(has_staff=True, has_order=True)
 
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, has_staff_mock), \
+             patch(_PATCH_HAS_ORDERS, has_orders_mock):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200
@@ -144,10 +129,10 @@ class TestOnboardingPartialScore:
             features={},   # no billing keys
             menu={"Platos": [{"name": "Burger", "price": 25000}]},
         )
-        # staff_count=2 (has staff), has_order=False (no first order)
-        get_pool_mock = _make_pool(staff_count=2, has_order=False)
+        has_staff_mock, has_orders_mock = _make_repo_patches(has_staff=True, has_order=False)
 
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, has_staff_mock), \
+             patch(_PATCH_HAS_ORDERS, has_orders_mock):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200
@@ -168,10 +153,10 @@ class TestOnboardingPartialScore:
             features={},
             menu=None,
         )
-        # staff_count=0, has_order=False
-        get_pool_mock = _make_pool(staff_count=0, has_order=False)
+        has_staff_mock, has_orders_mock = _make_repo_patches(has_staff=False, has_order=False)
 
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, has_staff_mock), \
+             patch(_PATCH_HAS_ORDERS, has_orders_mock):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200
@@ -187,9 +172,9 @@ class TestOnboardingPartialScore:
             features={"alegra_email": "test@restaurante.com"},
             menu=None,
         )
-        get_pool_mock = _make_pool(staff_count=0, has_order=False)
+        has_staff_mock, _ = _make_repo_patches(has_staff=False, has_order=False)
 
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, has_staff_mock):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200
@@ -205,9 +190,9 @@ class TestOnboardingPartialScore:
             features={"billing_enabled": True},
             menu=None,
         )
-        get_pool_mock = _make_pool(staff_count=0, has_order=False)
+        has_staff_mock, _ = _make_repo_patches(has_staff=False, has_order=False)
 
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, has_staff_mock):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200
@@ -225,21 +210,10 @@ class TestOnboardingEmptyRestaurant:
             features={},
             menu=None,
         )
-        # When whatsapp_number is empty, get_pool is called once (staff only);
-        # first_order query is skipped.
-        def _conn_zero():
-            conn = AsyncMock()
-            conn.fetchval = AsyncMock(return_value=0)
-            cm = AsyncMock()
-            cm.__aenter__ = AsyncMock(return_value=conn)
-            cm.__aexit__ = AsyncMock(return_value=False)
-            pool = AsyncMock()
-            pool.acquire = MagicMock(return_value=cm)
-            return pool
+        # When whatsapp_number is empty, db_has_orders is never called (guarded by `if whatsapp_number`)
+        has_staff_mock = AsyncMock(return_value=False)
 
-        get_pool_mock = AsyncMock(return_value=_conn_zero())
-
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, has_staff_mock):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200
@@ -251,9 +225,10 @@ class TestOnboardingEmptyRestaurant:
     def test_response_shape(self, client, monkeypatch):
         """Response must always have 'score' and 'steps' with all 5 step keys."""
         _patch_restaurant(monkeypatch)
-        get_pool_mock = _make_pool(staff_count=0, has_order=False)
+        has_staff_mock, has_orders_mock = _make_repo_patches(has_staff=False, has_order=False)
 
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, has_staff_mock), \
+             patch(_PATCH_HAS_ORDERS, has_orders_mock):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200
@@ -268,7 +243,7 @@ class TestOnboardingEmptyRestaurant:
             assert "description" in step
 
     def test_db_query_failure_defaults_to_false(self, client, monkeypatch):
-        """If a DB query raises, the step is done=False and the endpoint still returns 200."""
+        """If a repo function raises, the step is done=False and the endpoint still returns 200."""
         _patch_restaurant(
             monkeypatch,
             whatsapp_number="+573001234567",
@@ -276,15 +251,11 @@ class TestOnboardingEmptyRestaurant:
             menu=None,
         )
 
-        # Both pool calls raise an exception
-        def _error_pool():
-            pool = AsyncMock()
-            pool.acquire = MagicMock(side_effect=Exception("DB down"))
-            return pool
+        async def _raise(*_args, **_kwargs):
+            raise Exception("DB down")
 
-        get_pool_mock = AsyncMock(side_effect=[_error_pool(), _error_pool()])
-
-        with patch(_PATCH_POOL, get_pool_mock):
+        with patch(_PATCH_HAS_STAFF, _raise), \
+             patch(_PATCH_HAS_ORDERS, _raise):
             resp = client.get(URL, headers={"Authorization": "Bearer token"})
 
         assert resp.status_code == 200

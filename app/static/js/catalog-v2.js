@@ -132,18 +132,23 @@ const BADGE_SVG = {
 
 /* ── Cart persistence ── */
 function cartKey(botNumber) {
-  return 'mesio_cart_' + (botNumber || 'default');
+  // Returns null when botNumber is absent — callers must guard against null
+  return botNumber ? 'mesio_cart_' + botNumber : null;
 }
 
 function loadCart(botNumber) {
+  const key = cartKey(botNumber);
+  if (!key) return {};
   try {
-    return JSON.parse(localStorage.getItem(cartKey(botNumber)) || '{}');
+    return JSON.parse(localStorage.getItem(key) || '{}');
   } catch { return {}; }
 }
 
 function saveCart(botNumber, cart) {
+  const key = cartKey(botNumber);
+  if (!key) return;
   try {
-    localStorage.setItem(cartKey(botNumber), JSON.stringify(cart));
+    localStorage.setItem(key, JSON.stringify(cart));
   } catch { /* storage quota */ }
 }
 
@@ -151,8 +156,7 @@ function saveCart(botNumber, cart) {
 function buildSkeletons() {
   const grid = document.createElement('div');
   grid.className = 'skeleton-grid';
-  for (let i = 0; i < 6; i++) {
-    grid.innerHTML += `
+  const card = `
       <div class="skeleton-card">
         <div class="m-skeleton skeleton-img"></div>
         <div class="m-skeleton skeleton-text-1"></div>
@@ -162,7 +166,7 @@ function buildSkeletons() {
           <div class="m-skeleton skeleton-btn"></div>
         </div>
       </div>`;
-  }
+  grid.innerHTML = card.repeat(6);
   return grid;
 }
 
@@ -310,10 +314,16 @@ function buildDishCard(dish, cat, state, callbacks) {
       if (entry.isIntersecting) {
         trackEvent(dish.name, 'view', state.botNumber);
         obs.disconnect();
+        // Remove from registry so we don't double-disconnect on re-render
+        if (callbacks.viewObservers) {
+          const idx = callbacks.viewObservers.indexOf(obs);
+          if (idx !== -1) callbacks.viewObservers.splice(idx, 1);
+        }
       }
     });
   }, { threshold: 0.5 });
   viewObserver.observe(card);
+  if (callbacks.viewObservers) callbacks.viewObservers.push(viewObserver);
 
   return card;
 }
@@ -913,6 +923,10 @@ function initCatalog() {
   }
 
   function renderMenu(filteredMenu) {
+    // Disconnect any live view observers before destroying the old cards
+    viewObservers.forEach(o => o.disconnect());
+    viewObservers.length = 0;
+
     mainEl.innerHTML = '';
 
     const allCats = Object.keys(state.menu);
@@ -973,7 +987,8 @@ function initCatalog() {
             updateCart(d, c, 1, false);
             mesioToast(_escHtml(d.name) + ' agregado', 'success', 2000);
             trackEvent(d.name, 'add_to_cart', state.botNumber);
-          }
+          },
+          viewObservers,
         });
         grid.appendChild(card);
       });

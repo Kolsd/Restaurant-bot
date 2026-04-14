@@ -11,10 +11,11 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from anthropic import Anthropic
 
 from app.services import database as db
-from app.services.database import get_pool
 from app.routes.deps import require_auth, get_current_user, get_current_restaurant
 from app.repositories import restaurant_repo, tables_repo as tr
 from app.repositories import weekly_reports_repo
+from app.repositories.staff_repo import db_has_staff
+from app.repositories.restaurant_repo import db_has_orders_by_bot_number
 from app.services.logging import get_logger
 from app.services import state_store
 from pydantic import BaseModel
@@ -306,13 +307,7 @@ async def get_onboarding_status(request: Request):
     # ── 2. has_staff ──────────────────────────────────────────────────
     has_staff = False
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            count = await conn.fetchval(
-                "SELECT COUNT(*) FROM staff WHERE restaurant_id = $1",
-                restaurant_id,
-            )
-        has_staff = (count or 0) > 0
+        has_staff = await db_has_staff(restaurant_id)
     except Exception as exc:
         log.warning("onboarding.staff_check_failed", error=str(exc))
 
@@ -330,13 +325,7 @@ async def get_onboarding_status(request: Request):
     has_first_order = False
     if whatsapp_number:
         try:
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                exists = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM orders WHERE bot_number = $1 LIMIT 1)",
-                    whatsapp_number,
-                )
-            has_first_order = bool(exists)
+            has_first_order = await db_has_orders_by_bot_number(whatsapp_number)
         except Exception as exc:
             log.warning("onboarding.first_order_check_failed", error=str(exc))
 

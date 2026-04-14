@@ -1811,3 +1811,14 @@ async def db_get_active_staff_basic(staff_id: str) -> dict | None:
             staff_id,
         )
     return dict(row) if row else None
+
+
+async def db_has_staff(restaurant_id: int) -> bool:
+    """Return True if the restaurant has at least one staff record. Uses EXISTS for efficiency."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM staff WHERE restaurant_id = $1 LIMIT 1)",
+            restaurant_id,
+        )
+    return bool(exists)

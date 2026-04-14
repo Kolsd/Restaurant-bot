@@ -1243,3 +1243,14 @@ async def db_check_usage_limits(restaurant_id: int) -> None:
             raise UsageLimitExceeded("tokens", used_tokens, int(token_limit))
         if invoice_limit and used_invoices >= int(invoice_limit):
             raise UsageLimitExceeded("facturas", used_invoices, int(invoice_limit))
+
+
+async def db_has_orders_by_bot_number(bot_number: str) -> bool:
+    """Return True if any order exists for this bot_number. Uses EXISTS for efficiency."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM orders WHERE bot_number = $1 LIMIT 1)",
+            bot_number,
+        )
+    return bool(exists)
