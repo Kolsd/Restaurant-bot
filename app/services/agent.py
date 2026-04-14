@@ -30,7 +30,11 @@ log = get_logger(__name__)
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "mesioai.com")
 
-client = AsyncAnthropic(timeout=30.0)
+# h11 ≥0.16.0 enforces strict RFC 9110 header validation — strip accidental
+# leading whitespace/newlines/equals that some env var editors inject.
+_raw_api_key = os.getenv("ANTHROPIC_API_KEY", "")
+_api_key = _raw_api_key.strip().lstrip("=").strip()
+client = AsyncAnthropic(api_key=_api_key, timeout=30.0)
 
 MODEL_FAST    = os.environ.get("BOT_MODEL_FAST", "claude-haiku-4-5-20251001")
 MODEL_PRECISE = os.environ.get("BOT_MODEL_PRECISE", "claude-sonnet-4-6")
@@ -1319,7 +1323,7 @@ async def _build_enriched_user_message(
     branches_note = ""
     if not table_context and restaurant_obj and not restaurant_obj.get("parent_restaurant_id"):
         try:
-            branches = await db.db_get_restaurants(restaurant_obj.get("id"))
+            branches = await db.db_get_branches(restaurant_obj.get("id"))
             if branches:
                 branch_lines = "\n".join(
                     f"  ID:{b['id']} {b['name']} — {b.get('address', 'sin dirección')}"
