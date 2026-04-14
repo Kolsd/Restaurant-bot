@@ -42,7 +42,7 @@ async function api(method, path, body) {
   try {
     const opts = { method, headers: H() };
     if (body !== undefined) opts.body = JSON.stringify(body);
-    const r = await fetch('/api/crm' + path, opts);
+    const r = await fetch('/api/internal/crm' + path, opts);
     if (r.status === 401) { window.location.href = '/superadmin?redirect=crm'; return null; }
     if (!r.ok) { const e = await r.json().catch(()=>({detail:'Error'})); throw new Error(e.detail||'Error'); }
     return r.status === 204 ? {} : await r.json();
@@ -968,7 +968,7 @@ async function handleCSVUpload(e) {
   const fd = new FormData(); fd.append('file', file);
   toast('Procesando CSV…');
   try {
-    const r = await fetch('/api/crm/upload-csv', { method:'POST', headers:{'Authorization':'Bearer '+ADMIN_KEY}, body:fd });
+    const r = await fetch('/api/internal/crm/upload-csv', { method:'POST', headers:{'Authorization':'Bearer '+ADMIN_KEY}, body:fd });
     const d = await r.json();
     if (r.ok) {
       toast(`✅ ${d.inserted} importados, ${d.errors} omitidos`, 'ok');
