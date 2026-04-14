@@ -518,9 +518,11 @@ class TestCustomerMemoryIntegration:
         original_build = agent_mod.build_system_prompt
 
         async def capturing_build_system_prompt(features=None, table_context=None,
-                                                 restaurant_id=None, customer_context=""):
+                                                 restaurant_id=None, customer_context="",
+                                                 **kwargs):
             captured_ctx.append(customer_context)
-            return await original_build(features, table_context, restaurant_id, customer_context)
+            return await original_build(features, table_context, restaurant_id, customer_context,
+                                        **kwargs)
 
         monkeypatch.setattr(agent_mod, "build_system_prompt", capturing_build_system_prompt)
 
@@ -569,9 +571,10 @@ class TestCustomerMemoryIntegration:
         original_build = agent_mod.build_system_prompt
 
         async def capturing_build(features=None, table_context=None,
-                                   restaurant_id=None, customer_context=""):
+                                   restaurant_id=None, customer_context="", **kwargs):
             captured_ctx.append(customer_context)
-            return await original_build(features, table_context, restaurant_id, customer_context)
+            return await original_build(features, table_context, restaurant_id, customer_context,
+                                        **kwargs)
 
         monkeypatch.setattr(agent_mod, "build_system_prompt", capturing_build)
         monkeypatch.setattr(agent_mod, "client", _build_anthropic_mock("Hola."))
