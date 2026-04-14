@@ -303,7 +303,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
             # 5. Ruta CRM — procesamiento inline (no requiere IA)
             crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
             if crm_phone_id and phone_id == crm_phone_id:
-                from app.routes.crm import register_inbound_from_prospect
+                from app.routes.internal.crm import register_inbound_from_prospect
                 if msg_type == "location":
                     loc = message.get("location", {})
                     user_text = f"📍 Ubicación compartida: lat:{loc.get('latitude')} lon:{loc.get('longitude')}"

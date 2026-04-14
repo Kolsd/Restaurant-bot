@@ -36,14 +36,14 @@ def _check_admin_key(request: Request) -> bool:
 
 # ── Page ──────────────────────────────────────────────────────────────────────
 
-@router.get("/analytics")
+@router.get("/internal/analytics")
 async def analytics_page():
-    return FileResponse("app/static/html/analytics.html")
+    return FileResponse("app/static/html/internal/analytics.html")
 
 
 # ── Overview ──────────────────────────────────────────────────────────────────
 
-@router.get("/api/analytics/overview")
+@router.get("/api/internal/analytics/overview")
 async def analytics_overview(request: Request):
     if not _check_admin_key(request):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
@@ -232,7 +232,7 @@ async def analytics_overview(request: Request):
 
 # ── Per-restaurant breakdown ──────────────────────────────────────────────────
 
-@router.get("/api/analytics/restaurants")
+@router.get("/api/internal/analytics/restaurants")
 async def analytics_restaurants(request: Request):
     if not _check_admin_key(request):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
@@ -340,7 +340,7 @@ async def analytics_restaurants(request: Request):
 
 # ── Trends ────────────────────────────────────────────────────────────────────
 
-@router.get("/api/analytics/trends")
+@router.get("/api/internal/analytics/trends")
 async def analytics_trends(request: Request):
     if not _check_admin_key(request):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})

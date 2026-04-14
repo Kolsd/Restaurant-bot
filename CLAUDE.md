@@ -32,23 +32,29 @@ Restaurant-bot/
 │   │   ├── deps.py                  # Dependencias: auth, get_current_restaurant, require_module
 │   │   ├── chat.py                  # Webhook Meta → ENCOLA en webhook_inbox (no más create_task)
 │   │   ├── dashboard.py             # Páginas HTML, APIs públicas, geocode (~240 LOC)
-│   │   ├── auth_routes.py           # Login/logout, verify-role, superadmin CRUD (~385 LOC)
+│   │   ├── auth_routes.py           # /api/auth/login, /api/auth/logout, /api/auth/verify-role
 │   │   ├── settings_routes.py       # Settings GET/POST, dashboard data, AI proxy (~290 LOC)
 │   │   ├── team_routes.py           # Branch CRUD, team users (~175 LOC)
 │   │   ├── stats.py                 # Métricas, conversaciones, gráficas
 │   │   ├── tables.py                # POS, órdenes de mesa, split checks, tip_amount al pagar
 │   │   ├── orders_routes.py         # Órdenes externas (domicilio/recoger) y Webhook Wompi
-│   │   ├── billing.py               # DIAN, facturación electrónica
-│   │   ├── health.py               # GET /health, GET /health/metrics (pool, inbox, business), GET /monitoring
-│   │   ├── analytics.py            # GET /analytics, GET /api/analytics/{overview,restaurants,trends} (ADMIN_KEY)
+│   │   ├── billing.py               # DIAN, facturación electrónica (restaurant-facing)
+│   │   ├── health.py                # GET /health — Railway healthcheck only
+│   │   ├── legacy_redirects.py      # 301 redirects for /api/crm, /api/admin, /api/analytics, etc. (30-day grace)
 │   │   ├── staff.py                 # Personal, turnos, propinas, nómina, contratos, overtime
 │   │   ├── staff_webauthn.py        # Autenticación biométrica FIDO2 para clock-in/out
-│   │   ├── crm.py                   # Clientes, prospectos, campañas
 │   │   ├── inventory.py             # Inventario, recetas (escandallos)
 │   │   ├── loyalty.py               # Sistema de puntos y recompensas
 │   │   ├── reservations.py          # Gestión avanzada de reservas, disponibilidad, stats
 │   │   ├── discounts.py             # Descuentos dinámicos por franja horaria (yield management)
-│   │   └── reviews.py               # Reseñas públicas (extiende NPS) + analytics
+│   │   ├── reviews.py               # Reseñas públicas (extiende NPS) + analytics
+│   │   └── internal/                # Herramientas INTERNAS de Mesio — NO son features de restaurante
+│   │       ├── __init__.py
+│   │       ├── admin.py             # /api/internal/admin/* — Superadmin CRUD (login, restaurants, users)
+│   │       ├── analytics.py         # /internal/analytics, /api/internal/analytics/* — KPIs plataforma
+│   │       ├── billing_admin.py     # /api/internal/billing/* — Config billing por restaurante (soporte)
+│   │       ├── crm.py               # /api/internal/crm/* — CRM prospectos Mesio
+│   │       └── ops.py               # /internal/monitoring, /api/internal/ops/metrics — Observabilidad
 │   ├── services/
 │   │   ├── database.py              # Infraestructura pura (get_pool, _serialize, UsageLimitExceeded) + re-exports. ~383 LOC
 │   │   ├── agent.py                 # Claude tool_use API. chat() orquestador + _validate_tool_call + 10 helpers
@@ -79,10 +85,19 @@ Restaurant-bot/
 │   │   ├── discounts_repo.py        # 5 funciones: descuentos dinámicos por horario
 │   │   ├── reservation_deposits_repo.py  # 5 funciones: depósitos Wompi para reservas
 │   │   ├── reviews_repo.py          # 8 funciones: reseñas públicas, snapshots ocupación, turn time
-│   │   └── crm_repo.py             # Funciones CRM extraídas de crm.py
+│   │   └── internal/                # Repos para herramientas internas Mesio
+│   │       ├── __init__.py
+│   │       └── crm_repo.py          # Funciones CRM prospectos Mesio
 │   └── static/
-│       ├── html/                    # dashboard, staff-hq, login, caja, cocina, landing, monitoring, analytics, etc.
+│       ├── html/                    # dashboard, staff-hq, login, caja, cocina, landing, etc.
+│       │   └── internal/            # HTML para herramientas internas Mesio
+│       │       ├── analytics.html   # Dashboard KPIs plataforma
+│       │       ├── crm.html         # CRM prospectos
+│       │       ├── monitoring.html  # Observabilidad infraestructura
+│       │       └── superadmin.html  # Gestión restaurantes/usuarios
 │       ├── js/                      # mesio-utils.js (shared), dashboard-core/components/features/nps-inventory/floorplan, roles.js, sw.js
+│       │   └── internal/            # JS para herramientas internas Mesio
+│       │       └── crm.js           # Lógica del CRM de prospectos
 │       └── css/                     # tokens.css (design system), dashboard.css
 ├── alembic/versions/
 │   ├── 0001_initial_schema.py
@@ -724,3 +739,38 @@ Formateador universal que lee `rb_restaurant` de localStorage para obtener `loca
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.
+
+## Separación Internal vs App
+
+Las herramientas del equipo Mesio (CRM de prospectos, Superadmin, Analytics de plataforma, Monitoring) viven en el namespace `internal/` bajo URLs `/internal/*` y `/api/internal/*`. Son herramientas para el equipo Mesio — NO son features vendibles a restaurantes.
+
+### Regla de separación
+**Las features de la app (catálogo, órdenes, mesas, staff, bot, billing, reservas, fidelidad) NO deben importar de `app/routes/internal/*` ni de `app/repositories/internal/*`.**
+
+La única excepción permitida es `app/routes/chat.py` que importa `register_inbound_from_prospect` de `app/routes/internal/crm` para registrar mensajes entrantes de prospectos al número CRM.
+
+### Namespace de archivos internos
+
+| Tipo | Ruta |
+|---|---|
+| Routes Python | `app/routes/internal/` |
+| Repos Python | `app/repositories/internal/` |
+| HTML pages | `app/static/html/internal/` |
+| JS scripts | `app/static/js/internal/` |
+
+### URLs internas
+
+| URL | Módulo | Propósito |
+|---|---|---|
+| `/internal/analytics` | `routes/internal/analytics.py` | Dashboard KPIs plataforma |
+| `/internal/monitoring` | `routes/internal/ops.py` | Infraestructura real-time |
+| `/internal/superadmin` | (HTML estático) | Gestión restaurantes |
+| `/internal/crm` | (HTML estático) | CRM prospectos |
+| `/api/internal/admin/*` | `routes/internal/admin.py` | CRUD superadmin |
+| `/api/internal/analytics/*` | `routes/internal/analytics.py` | API KPIs |
+| `/api/internal/billing/*` | `routes/internal/billing_admin.py` | Billing admin soporte |
+| `/api/internal/crm/*` | `routes/internal/crm.py` | API CRM prospectos |
+| `/api/internal/ops/metrics` | `routes/internal/ops.py` | Métricas operacionales |
+
+### Legacy redirects (eliminar después de 30 días con cero hits)
+`app/routes/legacy_redirects.py` redirige con 301 las URLs viejas (`/api/crm/*`, `/api/admin/*`, etc.) a las nuevas. Cada hit loguea `internal.legacy_url` con el path. Cuando `git grep "internal.legacy_url"` en los logs esté en cero durante 2 semanas, se puede borrar el archivo.

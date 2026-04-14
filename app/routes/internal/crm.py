@@ -8,12 +8,12 @@ from typing import Optional, List
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile
 from pydantic import BaseModel
 from app.services import database as db
-from app.repositories import crm_repo
+from app.repositories.internal import crm_repo
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
 
-router = APIRouter(prefix="/api/crm", tags=["crm"])
+router = APIRouter(prefix="/api/internal/crm", tags=["internal-crm"])
 
 # ── CONFIG ────────────────────────────────────────────────────────────
 ADMIN_KEY = os.getenv("ADMIN_KEY")

@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-_PATCH_TARGET = "app.routes.analytics.get_pool"
+_PATCH_TARGET = "app.routes.internal.analytics.get_pool"
 
 ADMIN_KEY = "test-analytics-key"
 AUTH_HEADER = {"Authorization": f"Bearer {ADMIN_KEY}"}
@@ -85,18 +85,18 @@ def _make_row(d: dict):
 class TestOverviewAuth:
     def test_no_auth_returns_401(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        resp = client.get("/api/analytics/overview")
+        resp = client.get("/api/internal/analytics/overview")
         assert resp.status_code == 401
 
     def test_wrong_key_returns_401(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        resp = client.get("/api/analytics/overview",
+        resp = client.get("/api/internal/analytics/overview",
                           headers={"Authorization": "Bearer wrong-key"})
         assert resp.status_code == 401
 
     def test_missing_env_key_returns_401(self, client, monkeypatch):
         monkeypatch.delenv("ADMIN_KEY", raising=False)
-        resp = client.get("/api/analytics/overview",
+        resp = client.get("/api/internal/analytics/overview",
                           headers={"Authorization": "Bearer anything"})
         assert resp.status_code == 401
 
@@ -151,7 +151,7 @@ class TestOverviewData:
     def test_overview_returns_200_with_structure(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         with patch(_PATCH_TARGET, self._build_pool_mock()):
-            resp = client.get("/api/analytics/overview", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
         assert resp.status_code == 200
         body = resp.json()
         assert "restaurants" in body
@@ -162,7 +162,7 @@ class TestOverviewData:
     def test_overview_restaurants_keys(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         with patch(_PATCH_TARGET, self._build_pool_mock()):
-            resp = client.get("/api/analytics/overview", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
         r = resp.json()["restaurants"]
         assert "total" in r
         assert "active_7d" in r
@@ -173,7 +173,7 @@ class TestOverviewData:
     def test_overview_orders_values(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         with patch(_PATCH_TARGET, self._build_pool_mock()):
-            resp = client.get("/api/analytics/overview", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
         o = resp.json()["orders"]
         assert o["today"] == 156
         assert o["this_week"] == 892
@@ -183,7 +183,7 @@ class TestOverviewData:
     def test_overview_billing_keys(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         with patch(_PATCH_TARGET, self._build_pool_mock()):
-            resp = client.get("/api/analytics/overview", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
         b = resp.json()["billing"]
         assert "configured_count" in b
         assert "invoices_today" in b
@@ -224,7 +224,7 @@ class TestOverviewData:
         get_pool_mock = AsyncMock(return_value=pool)
 
         with patch(_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/api/analytics/overview", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/overview", headers=AUTH_HEADER)
 
         assert resp.status_code == 200
         body = resp.json()
@@ -237,7 +237,7 @@ class TestOverviewData:
 class TestRestaurantsList:
     def test_restaurants_requires_auth(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        resp = client.get("/api/analytics/restaurants")
+        resp = client.get("/api/internal/analytics/restaurants")
         assert resp.status_code == 401
 
     def _make_rest_row(self, **kwargs):
@@ -267,7 +267,7 @@ class TestRestaurantsList:
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         rows = [self._make_rest_row()]
         with patch(_PATCH_TARGET, self._pool_with_fetch(rows)):
-            resp = client.get("/api/analytics/restaurants", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/restaurants", headers=AUTH_HEADER)
         assert resp.status_code == 200
         body = resp.json()
         assert "restaurants" in body
@@ -284,7 +284,7 @@ class TestRestaurantsList:
             has_any_order=1,
         )]
         with patch(_PATCH_TARGET, self._pool_with_fetch(rows)):
-            resp = client.get("/api/analytics/restaurants", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/restaurants", headers=AUTH_HEADER)
         score = resp.json()["restaurants"][0]["onboarding_score"]
         assert score == 100
 
@@ -299,7 +299,7 @@ class TestRestaurantsList:
             has_any_order=1,
         )]
         with patch(_PATCH_TARGET, self._pool_with_fetch(rows)):
-            resp = client.get("/api/analytics/restaurants", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/restaurants", headers=AUTH_HEADER)
         score = resp.json()["restaurants"][0]["onboarding_score"]
         assert score == 60   # 3 of 5 steps: whatsapp + staff + orders
 
@@ -314,7 +314,7 @@ class TestRestaurantsList:
             has_any_order=0,
         )]
         with patch(_PATCH_TARGET, self._pool_with_fetch(rows)):
-            resp = client.get("/api/analytics/restaurants", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/restaurants", headers=AUTH_HEADER)
         score = resp.json()["restaurants"][0]["onboarding_score"]
         assert score == 0
 
@@ -322,7 +322,7 @@ class TestRestaurantsList:
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         rows = [self._make_rest_row()]
         with patch(_PATCH_TARGET, self._pool_with_fetch(rows)):
-            resp = client.get("/api/analytics/restaurants", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/restaurants", headers=AUTH_HEADER)
         rest = resp.json()["restaurants"][0]
         for key in ("id", "name", "whatsapp_number", "created_at", "orders_30d",
                     "conversations_30d", "last_order_at", "last_conversation_at",
@@ -332,7 +332,7 @@ class TestRestaurantsList:
     def test_restaurants_empty_list(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         with patch(_PATCH_TARGET, self._pool_with_fetch([])):
-            resp = client.get("/api/analytics/restaurants", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/restaurants", headers=AUTH_HEADER)
         assert resp.status_code == 200
         assert resp.json()["restaurants"] == []
 
@@ -342,7 +342,7 @@ class TestRestaurantsList:
 class TestTrends:
     def test_trends_requires_auth(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        resp = client.get("/api/analytics/trends")
+        resp = client.get("/api/internal/analytics/trends")
         assert resp.status_code == 401
 
     def _pool_with_two_fetches(self, order_rows, conv_rows):
@@ -369,7 +369,7 @@ class TestTrends:
         o_rows = self._make_daily_rows([("2026-03-14", 89), ("2026-03-15", 102)])
         c_rows = self._make_daily_rows([("2026-03-14", 234)])
         with patch(_PATCH_TARGET, self._pool_with_two_fetches(o_rows, c_rows)):
-            resp = client.get("/api/analytics/trends", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/trends", headers=AUTH_HEADER)
         assert resp.status_code == 200
         body = resp.json()
         assert "daily_orders" in body
@@ -381,7 +381,7 @@ class TestTrends:
         o_rows = self._make_daily_rows([("2026-03-14", 89)])
         c_rows = self._make_daily_rows([("2026-03-14", 200)])
         with patch(_PATCH_TARGET, self._pool_with_two_fetches(o_rows, c_rows)):
-            resp = client.get("/api/analytics/trends", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/trends", headers=AUTH_HEADER)
         orders = resp.json()["daily_orders"]
         assert len(orders) == 1
         entry = orders[0]
@@ -394,7 +394,7 @@ class TestTrends:
         o_rows = self._make_daily_rows([("2026-03-14", 89), ("2026-03-15", 102)])
         c_rows = self._make_daily_rows([("2026-03-14", 234), ("2026-03-15", 210)])
         with patch(_PATCH_TARGET, self._pool_with_two_fetches(o_rows, c_rows)):
-            resp = client.get("/api/analytics/trends", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/trends", headers=AUTH_HEADER)
         body = resp.json()
         assert body["daily_orders"][0]["count"] == 89
         assert body["daily_orders"][1]["count"] == 102
@@ -404,7 +404,7 @@ class TestTrends:
         """Empty tables → 200 with empty lists (not 500)."""
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         with patch(_PATCH_TARGET, self._pool_with_two_fetches([], [])):
-            resp = client.get("/api/analytics/trends", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/trends", headers=AUTH_HEADER)
         assert resp.status_code == 200
         body = resp.json()
         assert body["daily_orders"] == []
@@ -421,7 +421,7 @@ class TestTrends:
         pool = AsyncMock()
         pool.acquire = MagicMock(return_value=acquire_cm)
         with patch(_PATCH_TARGET, AsyncMock(return_value=pool)):
-            resp = client.get("/api/analytics/trends", headers=AUTH_HEADER)
+            resp = client.get("/api/internal/analytics/trends", headers=AUTH_HEADER)
         assert resp.status_code == 200
         body = resp.json()
         assert body["daily_orders"] == []
@@ -431,6 +431,6 @@ class TestTrends:
 
 class TestAnalyticsPage:
     def test_page_returns_html(self, client):
-        resp = client.get("/analytics")
+        resp = client.get("/internal/analytics")
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")

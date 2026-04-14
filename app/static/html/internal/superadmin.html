@@ -603,7 +603,7 @@ async function doLogin() {
   const key = $('admin-key-input').value.trim();
   if(!key) return;
   try {
-    const r = await fetch('/api/admin/login', {
+    const r = await fetch('/api/internal/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key })
@@ -613,7 +613,7 @@ async function doLogin() {
     sessionStorage.setItem(SESSION_KEY, token);
     // Also set mesio_admin_key in sessionStorage (not localStorage) for crm.js compat
     sessionStorage.setItem('mesio_admin_key', token);
-    const statsR = await _hqFetch('/api/admin/stats');
+    const statsR = await _hqFetch('/api/internal/admin/stats');
     if(!statsR.ok) { $('login-err').textContent = 'Error al cargar stats'; return; }
     const data = await statsR.json();
     const redirect = new URLSearchParams(window.location.search).get('redirect');
@@ -628,7 +628,7 @@ async function doLogin() {
 async function doLogout() {
   const token = _getToken();
   if(token) {
-    try { await fetch('/api/admin/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } }); }
+    try { await fetch('/api/internal/admin/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } }); }
     catch(e) {}
   }
   sessionStorage.removeItem(SESSION_KEY);
@@ -641,7 +641,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const saved = _getToken();
   if(saved) {
     try {
-      const r = await _hqFetch('/api/admin/stats');
+      const r = await _hqFetch('/api/internal/admin/stats');
       if(r.ok) {
         const data = await r.json();
         sessionStorage.setItem('mesio_admin_key', saved);
@@ -679,7 +679,7 @@ async function loadAll() {
 
 async function loadStats() {
   try {
-    const r = await _hqFetch('/api/admin/stats');
+    const r = await _hqFetch('/api/internal/admin/stats');
     if(r.ok) renderKPIs(await r.json());
   } catch(e){}
 }
@@ -694,7 +694,7 @@ function renderKPIs(data) {
 // ── Restaurantes ──────────────────────────────────────────────────
 async function loadRestaurants() {
   try {
-    const r = await _hqFetch('/api/admin/restaurants');
+    const r = await _hqFetch('/api/internal/admin/restaurants');
     if(!r.ok) return;
     const data = await r.json();
     ALL_RESTAURANTS = data.restaurants || [];
@@ -818,7 +818,7 @@ async function openDetail(id) {
 
   // Load real stats async
   try {
-    const sr = await _hqFetch(`/api/admin/restaurant/${id}`);
+    const sr = await _hqFetch(`/api/internal/admin/restaurant/${id}`);
     if(sr.ok) {
       const sd = await sr.json();
       const s = sd.stats;
@@ -868,7 +868,7 @@ async function saveRestaurantInfo() {
     whatsapp_number: $('dp-wa-input').value.trim() || undefined,
     features: feats,
   };
-  const r = await _hqFetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if(r.ok) {
     const d = await r.json();
     // Update local cache
@@ -886,7 +886,7 @@ async function saveModules() {
   if(!_currentDetailId) return;
   const features = {};
   MODULES_CONFIG.forEach(m=>{ features[m.key] = $('mod-'+m.key)?.checked; });
-  const r = await _hqFetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'},
+  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({restaurant_id:_currentDetailId, features})});
   if(r.ok) {
     const d = await r.json();
@@ -905,14 +905,14 @@ async function saveCredentials() {
     wa_access_token: $('dp-token-input').value.trim()   || undefined,
   };
   if(!body.wa_phone_id && !body.wa_access_token) { showFeedback('creds-feedback','Sin cambios', true); return; }
-  const r = await _hqFetch('/api/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if(r.ok) showFeedback('creds-feedback','✅ Credenciales actualizadas', true);
   else showFeedback('creds-feedback','❌ Error', false);
 }
 
 async function setSubStatus(status) {
   if(!_currentDetailId) return;
-  const r = await _hqFetch('/api/admin/set-subscription', {method:'POST', headers:{'Content-Type':'application/json'},
+  const r = await _hqFetch('/api/internal/admin/set-subscription', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({restaurant_id:_currentDetailId, status})});
   if(r.ok) {
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
@@ -952,7 +952,7 @@ async function createRestaurant() {
     wa_phone_id:$('r_wa_phone_id').value.trim(), wa_access_token:$('r_wa_access_token').value.trim() };
 
   try {
-    const r = await _hqFetch('/api/admin/create-restaurant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const r = await _hqFetch('/api/internal/admin/create-restaurant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(r.ok) {
       showFeedback('nuevo-feedback','✅ Restaurante creado exitosamente', true);
       clearNewForm();
@@ -978,7 +978,7 @@ async function parseMenuFile() {
   try {
     const fd = new FormData();
     fd.append('file', file);
-    const r = await _hqFetch('/api/admin/parse-menu',{method:'POST',body:fd});
+    const r = await _hqFetch('/api/internal/admin/parse-menu',{method:'POST',body:fd});
     const d = await r.json();
     if(d.success) $('r_menu').value = JSON.stringify(d.json_menu, null, 2);
     else alert('Error al extraer el menú: '+(d.detail||''));
@@ -989,7 +989,7 @@ async function parseMenuFile() {
 // ── Usuarios ──────────────────────────────────────────────────────
 async function loadUsers() {
   try {
-    const r = await _hqFetch('/api/admin/users');
+    const r = await _hqFetch('/api/internal/admin/users');
     if(!r.ok) return;
     const d = await r.json();
     renderUsersTable(d.users||[]);
@@ -1031,7 +1031,7 @@ async function createUser() {
   };
 
   try {
-    const r = await _hqFetch('/api/admin/create-user',{
+    const r = await _hqFetch('/api/internal/admin/create-user',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
@@ -1067,7 +1067,7 @@ async function createUser() {
 // ── DIAN & Folios ─────────────────────────────────────────────────
 async function loadDIAN() {
   try {
-    const r = await _hqFetch('/api/admin/billing-stats');
+    const r = await _hqFetch('/api/internal/admin/billing-stats');
     if(!r.ok) return;
     const d = await r.json();
     renderDIAN(d.stats||[]);
@@ -1105,7 +1105,7 @@ async function deleteGlobalUser(username) {
   if(!confirm(`¿Estás seguro de eliminar permanentemente al usuario ${username}?`)) return;
   
   try {
-    const r = await _hqFetch(`/api/admin/delete-user?username=${encodeURIComponent(username)}`, {
+    const r = await _hqFetch(`/api/internal/admin/delete-user?username=${encodeURIComponent(username)}`, {
       method:'POST'
     });
     if(r.ok) {

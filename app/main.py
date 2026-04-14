@@ -41,7 +41,6 @@ from app.routes.team_routes import router as team_router
 from app.routes.stats import router as stats_router
 from app.routes.tables import router as tables_router
 from app.routes.billing import router as billing_router
-from app.routes.crm import router as crm_router
 from app.routes import nps, inventory
 from app.routes.sync import router as sync_router
 from app.routes.staff import router as staff_router
@@ -52,8 +51,14 @@ from app.routes.reservations import router as reservations_router
 from app.routes.discounts import router as discounts_router
 from app.routes.reviews import router as reviews_router
 from app.routes.health import router as health_router
-from app.routes.analytics import router as analytics_router
 from app.routes.marketing import router as marketing_router
+# ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
+from app.routes.internal.crm import router as internal_crm_router
+from app.routes.internal.admin import router as internal_admin_router
+from app.routes.internal.analytics import router as internal_analytics_router
+from app.routes.internal.billing_admin import router as internal_billing_admin_router
+from app.routes.internal.ops import router as internal_ops_router
+from app.routes.legacy_redirects import router as legacy_redirects_router
 from app.services import database as db  # ← FIX: import directo de db
 from app.services.logging import get_logger as _get_logger
 
@@ -171,7 +176,6 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(orders_router, prefix="/api")
 app.include_router(tables_router)
 app.include_router(billing_router)
-app.include_router(crm_router)
 app.include_router(nps.router)
 app.include_router(inventory.router)
 app.include_router(sync_router, prefix="/api")
@@ -183,5 +187,12 @@ app.include_router(reservations_router)
 app.include_router(discounts_router)
 app.include_router(reviews_router)
 app.include_router(health_router)
-app.include_router(analytics_router)
 app.include_router(marketing_router)
+# ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
+app.include_router(internal_crm_router)
+app.include_router(internal_admin_router)
+app.include_router(internal_analytics_router)
+app.include_router(internal_billing_admin_router)
+app.include_router(internal_ops_router)
+# ── Legacy URL redirects (30-day grace period, then remove) ───────────────────
+app.include_router(legacy_redirects_router)
