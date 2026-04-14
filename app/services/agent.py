@@ -464,12 +464,14 @@ async def build_system_prompt(
     table_context: dict | None = None,
     restaurant_id: int | None = None,
     customer_context: str = "",
+    order_history: list | None = None,
 ) -> list:
     """
     Build the system prompt block list for Claude.
     Routes to the salon or external prompt based on table_context.
     Appends an active-discount block when dynamic_discounts is enabled.
     Appends a customer memory block when customer_context is non-empty.
+    Appends a customer history block when order_history has >= 2 items (Fase 5a).
     """
     features = features or {}
     restrictions = _build_module_restrictions(features)
@@ -505,16 +507,32 @@ async def build_system_prompt(
             "NO asumas que el cliente quiere lo mismo de antes salvo que lo diga explícitamente."
         )
 
+    # Customer order history block — only for recurring customers (>= 2 items returned)
+    # Source is internal/trusted (not user input), so XML tag marks it as trusted.
+    history_block = ""
+    if order_history and len(order_history) >= 2:
+        items_txt = ", ".join(
+            f"{item['name']} (×{item['count']})" for item in order_history
+        )
+        history_block = (
+            "\n<customer_history source=\"internal\" trust=\"trusted\">\n"
+            f"El cliente ha pedido antes: {items_txt}.\n"
+            "Si pregunta qué recomiendas y es relevante, menciona estos platos como "
+            "\"lo de siempre\" o \"tu favorito\".\n"
+            "NO insistas. Prioriza lo que el cliente pide HOY.\n"
+            "</customer_history>"
+        )
+
     if table_context:
         prompt = build_salon_prompt(restrictions, table_context=table_context)
     else:
         prompt = build_external_prompt(restrictions)
 
-    if discount_block or customer_block:
-        # Append both blocks to the last text entry in the system prompt list
+    if discount_block or customer_block or history_block:
+        # Append all blocks to the last text entry in the system prompt list
         for block in reversed(prompt):
             if isinstance(block, dict) and block.get("type") == "text":
-                block["text"] = block["text"] + discount_block + customer_block
+                block["text"] = block["text"] + discount_block + customer_block + history_block
                 break
 
     return prompt
@@ -1378,7 +1396,29 @@ async def _call_llm_and_execute(
         log.exception("customer.profile_load_failed", phone=user_phone)
         customer_ctx = ""  # Graceful fallback — chat proceeds without memory
 
-    sys_prompt = await build_system_prompt(feats, table_context, restaurant_id=restaurant_obj.get("id"), customer_context=customer_ctx)
+    # Load order history for personalized recommendations (Fase 5a)
+    # Only for recurring customers — db_get_customer_order_history returns [] for <2 orders.
+    # Failure must never block the chat (Regla 8).
+    order_history: list = []
+    try:
+        from app.repositories.conversations_repo import db_get_customer_order_history  # noqa: PLC0415
+        _rid = restaurant_obj.get("id")
+        if _rid:
+            order_history = await db_get_customer_order_history(
+                phone=user_phone,
+                restaurant_id=_rid,
+            )
+    except Exception:
+        log.exception("customer.order_history_load_failed", phone=user_phone)
+        order_history = []  # Graceful fallback — chat proceeds without history block
+
+    sys_prompt = await build_system_prompt(
+        feats,
+        table_context,
+        restaurant_id=restaurant_obj.get("id"),
+        customer_context=customer_ctx,
+        order_history=order_history,
+    )
     tools = TOOLS_SALON if table_context else TOOLS_EXTERNAL
     try:
         result = await call_claude(
