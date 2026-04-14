@@ -21,6 +21,7 @@ from app.main import app
 # The name to patch: get_pool is imported at module level in health.py,
 # so we patch it in the health module's namespace.
 _PATCH_TARGET = "app.routes.health.get_pool"
+_METRICS_PATCH_TARGET = "app.routes.internal.ops.get_pool"
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
@@ -140,17 +141,17 @@ class TestHealthIntegration:
 # ── Metrics tests (mocked, no real DB) ───────────────────────────────────────
 
 class TestHealthMetrics:
-    """Tests for GET /health/metrics."""
+    """Tests for GET /api/internal/ops/metrics (moved from /health/metrics)."""
 
     def test_metrics_requires_auth(self, client):
         """No auth header → 401."""
-        resp = client.get("/health/metrics")
+        resp = client.get("/api/internal/ops/metrics")
         assert resp.status_code == 401
 
     def test_metrics_wrong_key(self, client, monkeypatch):
         """Wrong ADMIN_KEY → 401."""
         monkeypatch.setenv("ADMIN_KEY", "correct-key")
-        resp = client.get("/health/metrics", headers={"Authorization": "Bearer wrong-key"})
+        resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer wrong-key"})
         assert resp.status_code == 401
 
     def test_metrics_returns_data(self, client, monkeypatch):
@@ -191,8 +192,8 @@ class TestHealthMetrics:
             _make_conn_mock(4),   # staff_clocked_in
         ])
 
-        with patch(_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/health/metrics", headers={"Authorization": "Bearer test-key-123"})
+        with patch(_METRICS_PATCH_TARGET, get_pool_mock):
+            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
 
         assert resp.status_code == 200
         body = resp.json()
@@ -231,8 +232,8 @@ class TestHealthMetrics:
             _make_conn_mock(0),  # staff_clocked_in
         ])
 
-        with patch(_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/health/metrics", headers={"Authorization": "Bearer test-key-123"})
+        with patch(_METRICS_PATCH_TARGET, get_pool_mock):
+            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
 
         body = resp.json()
         assert body["db_pool_size"] == 10
@@ -242,7 +243,7 @@ class TestHealthMetrics:
     def test_metrics_no_admin_key_env(self, client, monkeypatch):
         """If ADMIN_KEY env is not set at all, any request returns 401."""
         monkeypatch.delenv("ADMIN_KEY", raising=False)
-        resp = client.get("/health/metrics", headers={"Authorization": "Bearer anything"})
+        resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer anything"})
         assert resp.status_code == 401
 
     def test_metrics_business_counters(self, client, monkeypatch):
@@ -274,8 +275,8 @@ class TestHealthMetrics:
             _make_conn_mock(8),    # staff_clocked_in
         ])
 
-        with patch(_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/health/metrics", headers={"Authorization": "Bearer test-key-123"})
+        with patch(_METRICS_PATCH_TARGET, get_pool_mock):
+            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
 
         assert resp.status_code == 200
         body = resp.json()
@@ -319,8 +320,8 @@ class TestHealthMetrics:
             _make_conn_mock(1),    # staff_clocked_in — ok
         ])
 
-        with patch(_PATCH_TARGET, get_pool_mock):
-            resp = client.get("/health/metrics", headers={"Authorization": "Bearer test-key-123"})
+        with patch(_METRICS_PATCH_TARGET, get_pool_mock):
+            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer test-key-123"})
 
         assert resp.status_code == 200
         body = resp.json()
