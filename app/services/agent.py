@@ -167,42 +167,65 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
 
         root_id = bot_rest["parent_restaurant_id"] if bot_rest["parent_restaurant_id"] else bot_rest["id"]
 
-        if "-" in extracted_val:
-            # ── FORMATO NUEVO Y EXACTO: "RestauranteID-Mesa" (ej: "1-5") ──
-            r_id_str, t_num_str = extracted_val.split("-")
-            r_id = int(r_id_str)
-            t_num = int(t_num_str)
-
-            # Validar por seguridad que el restaurante extraído pertenece a nuestra franquicia
-            valid_rest = await conn.fetchval(
-                "SELECT id FROM restaurants WHERE id = $1 AND (id = $2 OR parent_restaurant_id = $2)",
-                r_id, root_id
-            )
-
-            if valid_rest:
-                b_id = None if r_id == root_id else r_id
-                # Búsqueda directa con IS NOT DISTINCT FROM (maneja el NULL de la matriz impecablemente)
-                row = await conn.fetchrow(
-                    "SELECT * FROM restaurant_tables WHERE branch_id IS NOT DISTINCT FROM $1 AND number = $2 AND active = TRUE",
-                    b_id, t_num
-                )
-                if row:
-                    table = dict(row)
-                    await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-                    table["is_new_session"] = True
-                    return table
-        else:
-            # ── FORMATO LEGACY (Fallback): "Mesa 3" sin prefijo ──
-            num_mesa = int(extracted_val)
-            query = """
+        # Helper: fetch all active tables for this franchise
+        async def _all_franchise_tables():
+            return await conn.fetch(
+                """
                 SELECT t.* FROM restaurant_tables t
                 LEFT JOIN restaurants r ON t.branch_id = r.id
                 WHERE t.active = TRUE
                   AND (t.branch_id = $1 OR r.parent_restaurant_id = $1)
-            """
-            all_tables = await conn.fetch(query, root_id)
+                """,
+                root_id
+            )
+
+        if "-" in extracted_val:
+            # ── FORMATO NUMÉRICO "RestauranteID-Mesa" (ej: "1-5") ──
+            try:
+                r_id_str, t_num_str = extracted_val.split("-", 1)
+                r_id = int(r_id_str)
+                t_num = int(t_num_str)
+
+                valid_rest = await conn.fetchval(
+                    "SELECT id FROM restaurants WHERE id = $1 AND (id = $2 OR parent_restaurant_id = $2)",
+                    r_id, root_id
+                )
+                if valid_rest:
+                    b_id = None if r_id == root_id else r_id
+                    row = await conn.fetchrow(
+                        "SELECT * FROM restaurant_tables WHERE branch_id IS NOT DISTINCT FROM $1 AND number = $2 AND active = TRUE",
+                        b_id, t_num
+                    )
+                    if row:
+                        table = dict(row)
+                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                        table["is_new_session"] = True
+                        return table
+            except (ValueError, TypeError):
+                pass  # not a numeric pair — fall through to name lookup
+
+        else:
+            # ── FORMATO LEGACY: "Mesa 3" ──
+            try:
+                num_mesa = int(extracted_val)
+                all_tables = await _all_franchise_tables()
+                for row in all_tables:
+                    if row["number"] == num_mesa:
+                        table = dict(row)
+                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                        table["is_new_session"] = True
+                        return table
+            except (ValueError, TypeError):
+                pass
+
+        # ── FALLBACK: buscar por nombre de mesa (ej: "Estoy en Mesa 8-1") ──
+        # Cubre casos donde "8-1" es el nombre, no "restaurante 8, mesa 1"
+        name_match = re.search(r'estoy en\s+(.+?)(?:\n|$)', clean_lower)
+        if name_match:
+            candidate = name_match.group(1).strip()
+            all_tables = await _all_franchise_tables()
             for row in all_tables:
-                if row["number"] == num_mesa:
+                if row["name"].lower() == candidate:
                     table = dict(row)
                     await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                     table["is_new_session"] = True
