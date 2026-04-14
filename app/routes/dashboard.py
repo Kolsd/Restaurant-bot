@@ -13,9 +13,11 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pathlib import Path
+from pydantic import BaseModel, field_validator
 
 from app.services import database as db
 from app.repositories import restaurant_repo
+from app.services import state_store
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
@@ -199,8 +201,10 @@ async def get_public_menu(bot_number: str):
         "menu": menu_data,
         "availability": data["availability"],
         "bot_number": bot_number,
-        "locale": features.get("locale", "en-US"),
-        "currency": features.get("currency", "USD")
+        "locale": features.get("locale", "es-CO"),
+        "currency": features.get("currency", "COP"),
+        "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
+        "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
     }
 
 
@@ -215,3 +219,72 @@ async def geocode_endpoint(address: str):
         "display_name": display,
         "maps_url": f"https://www.google.com/maps?q={lat},{lon}"
     }
+
+
+# ── Catalog v2: analytics tracking (fire-and-forget, real DB insert) ──────────
+
+_VALID_TRACK_EVENTS = frozenset({"view", "modal_open", "add_to_cart", "ordered"})
+
+
+class MenuTrackBody(BaseModel):
+    dish_name:  str
+    event_type: str
+    bot_number: str
+    phone:      str | None = None
+
+    @field_validator("dish_name")
+    @classmethod
+    def _dish_name_len(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("dish_name required")
+        return v.strip()[:255]
+
+    @field_validator("event_type")
+    @classmethod
+    def _valid_event(cls, v: str) -> str:
+        if v not in _VALID_TRACK_EVENTS:
+            raise ValueError(f"event_type must be one of {sorted(_VALID_TRACK_EVENTS)}")
+        return v
+
+    @field_validator("bot_number")
+    @classmethod
+    def _bot_number_len(cls, v: str) -> str:
+        if len(v) > 20:
+            raise ValueError("bot_number max 20 chars")
+        return v
+
+
+@router.post("/api/public/menu/track")
+async def menu_track(body: MenuTrackBody):
+    """
+    Fire-and-forget analytics tracking for catalog v2 events.
+    Rate-limited to 120 req/min per bot_number.
+    Always returns 200 (sendBeacon callers cannot handle 4xx/5xx).
+    """
+    from app.repositories import menu_analytics_repo
+
+    rate_key = f"catalog_track:{body.bot_number}"
+    allowed = await state_store.rate_limit_check(rate_key, max_requests=120, window_seconds=60)
+    if not allowed:
+        log.warning("catalog.track.rate_limited", bot_number=body.bot_number)
+        return {"ok": True}
+
+    # Resolve restaurant_id from bot_number — fire-and-forget on miss
+    restaurant = await restaurant_repo.db_get_restaurant_by_bot_number(body.bot_number)
+    if not restaurant:
+        log.info(
+            "catalog.track.unknown_bot",
+            bot_number=body.bot_number,
+            dish_name=body.dish_name,
+            event_type=body.event_type,
+        )
+        return {"ok": True}
+
+    await menu_analytics_repo.record_event(
+        restaurant_id=restaurant["id"],
+        dish_name=body.dish_name,
+        event_type=body.event_type,
+        phone=body.phone,
+        bot_number=body.bot_number,
+    )
+    return {"ok": True}
