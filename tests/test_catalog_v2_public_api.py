@@ -59,8 +59,8 @@ class TestPublicMenuFeatureFlags:
         body = resp.json()
         assert body["catalog_v2_enabled"] is True   # default
         assert body["bot_visual_menu"] is False      # default
-        assert body["locale"] == "en-US"
-        assert body["currency"] == "USD"
+        assert body["locale"] == "es-CO"
+        assert body["currency"] == "COP"
         assert body["restaurant_name"] == "Test Restaurant"
         assert body["bot_number"] == "573001234567"
 

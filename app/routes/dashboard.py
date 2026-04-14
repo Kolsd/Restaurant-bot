@@ -202,8 +202,8 @@ async def get_public_menu(bot_number: str):
         "menu": menu_data,
         "availability": data["availability"],
         "bot_number": bot_number,
-        "locale": features.get("locale", "en-US"),
-        "currency": features.get("currency", "USD"),
+        "locale": features.get("locale", "es-CO"),
+        "currency": features.get("currency", "COP"),
         "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
         "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
     }

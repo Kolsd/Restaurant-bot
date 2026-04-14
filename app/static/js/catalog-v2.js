@@ -985,7 +985,7 @@ function initCatalog() {
           onOpen: (d, el) => openModal(d, cat, el),
           onAdd: (d, c) => {
             updateCart(d, c, 1, false);
-            mesioToast(_escHtml(d.name) + ' agregado', 'success', 2000);
+            mesioToast(d.name + ' agregado', 'success', 2000);
             trackEvent(d.name, 'add_to_cart', state.botNumber);
           },
           viewObservers,
@@ -1085,17 +1085,28 @@ function initCatalog() {
     });
   }
 
+  function findDishCategory(dish) {
+    // Fallback when caller doesn't know the category (e.g. HeroCarousel).
+    // Without this, dishId() would produce a cart key detached from state.menu,
+    // silently dropping the item from the WhatsApp message and total.
+    for (const [c, dishes] of Object.entries(state.menu || {})) {
+      if (dishes.some(d => d.name === dish.name)) return c;
+    }
+    return '';
+  }
+
   function openModal(dish, cat, triggerEl) {
     if (!modal) {
       modal = new DishModal(document.body, state,  {
         onAdd: (d, c, qty) => {
           updateCart(d, c, qty, true);
-          mesioToast(_escHtml(d.name) + ' agregado', 'success', 2000);
+          mesioToast(d.name + ' agregado', 'success', 2000);
           trackEvent(d.name, 'add_to_cart', state.botNumber);
         }
       });
     }
-    modal.open(dish, cat, triggerEl, state);
+    const effectiveCat = cat || findDishCategory(dish);
+    modal.open(dish, effectiveCat, triggerEl, state);
   }
 
   function showLoading() {
@@ -1130,8 +1141,9 @@ function initCatalog() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
-      // Feature flag escape hatch
-      if (data.features && data.features.catalog_v2_enabled === false) {
+      // Feature flag escape hatch. Backend exposes flags flat at the root
+      // (see dashboard.py get_public_menu, tables.py public_menu_context).
+      if (data.catalog_v2_enabled === false) {
         const qs = window.location.search;
         window.location.replace('/menu-legacy' + qs);
         return;
