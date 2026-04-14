@@ -523,7 +523,7 @@ function _createDishCard(catIndex, dishIndex, dish) {
   delBtn.addEventListener('click', (e) => { e.stopPropagation(); removeMenuEditorDish(catIndex, dishIndex); });
   card.appendChild(delBtn);
 
-  // ── Drag & Drop handlers ──
+  // ── Drag & Drop handlers (mouse/touch) ──
   card.addEventListener('dragstart', (e) => {
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', JSON.stringify({ catIndex, dishIndex }));
@@ -550,15 +550,22 @@ function _createDishCard(catIndex, dishIndex, dish) {
     const dstCat = parseInt(card.dataset.catIndex, 10);
     const dstDish = parseInt(card.dataset.dishIndex, 10);
     if (srcCat !== dstCat || srcDish === dstDish) return;
-    // Reorder within same category
-    const dishes = editorMenuState[srcCat].dishes;
-    const [moved] = dishes.splice(srcDish, 1);
-    dishes.splice(dstDish, 0, moved);
-    // Recalculate sort_order (steps of 10)
-    dishes.forEach((d, i) => { d.sort_order = i * 10; });
-    renderMenuEditor();
-    // Auto-save reorder
-    _autoSaveMenuReorder();
+    _reorderDish(srcCat, srcDish, dstDish);
+  });
+
+  // ── Keyboard reorder on drag handle (accessibility) ──
+  handle.setAttribute('tabindex', '0');
+  handle.setAttribute('role', 'button');
+  handle.setAttribute('aria-label', `Reordenar ${dish.name || 'plato'}. Usa Alt+Arriba / Alt+Abajo`);
+  handle.addEventListener('keydown', (e) => {
+    const dishes = editorMenuState[catIndex].dishes;
+    if (e.altKey && e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (dishIndex > 0) { _reorderDish(catIndex, dishIndex, dishIndex - 1); }
+    } else if (e.altKey && e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (dishIndex < dishes.length - 1) { _reorderDish(catIndex, dishIndex, dishIndex + 1); }
+    }
   });
 
   // Click card (not handle/buttons) → open editor
@@ -568,6 +575,26 @@ function _createDishCard(catIndex, dishIndex, dish) {
   });
 
   return card;
+}
+
+// ── Reorder helper (shared by drag-drop and keyboard) ───────────────
+function _reorderDish(catIndex, srcIndex, dstIndex) {
+  const dishes = editorMenuState[catIndex].dishes;
+  if (srcIndex === dstIndex) return;
+  const [moved] = dishes.splice(srcIndex, 1);
+  dishes.splice(dstIndex, 0, moved);
+  // Recalculate sort_order (steps of 10)
+  dishes.forEach((d, i) => { d.sort_order = i * 10; });
+  renderMenuEditor();
+  // Re-focus the handle in the new position for keyboard users
+  setTimeout(() => {
+    const container = document.getElementById('editor-dishes-' + catIndex);
+    if (container) {
+      const handles = container.querySelectorAll('.dish-drag-handle');
+      if (handles[dstIndex]) handles[dstIndex].focus();
+    }
+  }, 50);
+  _autoSaveMenuReorder();
 }
 
 // ── Auto-save reorder ────────────────────────────────────────────────
