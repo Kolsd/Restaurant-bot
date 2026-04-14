@@ -222,9 +222,28 @@ async def update_table_properties(table_id: str, body: TablePropertiesBody, rest
 
 @router.get("/menu/{table_id}", response_class=HTMLResponse)
 async def menu_page(table_id: str):
-    p = STATIC / "html" / "menu.html"
+    # Resolve catalog_v2_enabled to pick legacy vs current template.
+    catalog_v2 = True  # default: serve new catalog
+    try:
+        table = await db.db_get_table_by_id(table_id)
+        if table:
+            wa_number = await get_table_wa_number(table)
+            restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
+            feat = restaurant.get("features") or {}
+            if isinstance(feat, str):
+                import json as _json
+                try:
+                    feat = _json.loads(feat)
+                except Exception:
+                    feat = {}
+            catalog_v2 = bool(feat.get("catalog_v2_enabled", True))
+    except Exception:
+        pass  # on any error keep default (True) — non-critical path
+
+    html_file = "menu.html" if catalog_v2 else "menu-legacy.html"
+    p = STATIC / "html" / html_file
     if not p.exists():
-        raise HTTPException(status_code=404, detail="menu.html no encontrado en static/")
+        raise HTTPException(status_code=404, detail=f"{html_file} no encontrado en static/")
     return HTMLResponse(p.read_text(encoding="utf-8"))
 
 @router.get("/api/public/menu-context/{table_id}")
@@ -254,6 +273,9 @@ async def public_menu_context(table_id: str):
         "availability": availability,
         "locale": features.get("locale", "en-US"),
         "currency": features.get("currency", "USD"),
+        "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
+        "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
+        "bot_number": wa_number,
     }
 
 def build_qr_html(menu_url: str, table_name: str, width: int = 300) -> str:
