@@ -67,6 +67,9 @@ async def get_settings(request: Request):
         "locale": features.get("locale", "es-CO"),
         "latitude": restaurant.get("latitude"),
         "longitude": restaurant.get("longitude"),
+        # Catálogo visual v2 — Fase 1
+        "bot_visual_menu": features.get("bot_visual_menu", False),
+        "catalog_v2_enabled": features.get("catalog_v2_enabled", True),
     }
 
 
@@ -94,7 +97,9 @@ async def save_settings(request: Request):
         "upsell_active", "domicilio_active", "recoger_active",
         "delivery_fee", "min_order", "delivery_radius_km", "delivery_message",
         "pickup_message", "welcome_message",
-        "timezone", "currency", "locale"
+        "timezone", "currency", "locale",
+        # Catálogo visual v2 — Fase 1
+        "bot_visual_menu", "catalog_v2_enabled",
     ]
     for key in updatable:
         if key in body:
