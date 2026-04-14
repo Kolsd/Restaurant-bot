@@ -53,22 +53,42 @@ def normalize_dish_shape(dish: dict) -> dict:
         description (str, ""), image_url (str|None), image_public_id (str|None),
         tags (list[str], []), badges (list[str], []), allergens (list[str], []),
         featured (bool, False), sort_order (int, 999),
-        calories (int|None), prep_time_min (int|None), active (bool, True)
+        calories (int|None), prep_time_min (int|None), active (bool, True),
+        combo_suggestions (list[{dish_name, extra_price}], [])
     """
+    # combo_suggestions — strict per-entry validation (Fase 5d)
+    raw_combos = dish.get("combo_suggestions")
+    validated_combos: list[dict] = []
+    if isinstance(raw_combos, list):
+        for entry in raw_combos:
+            if not isinstance(entry, dict):
+                continue
+            dish_name = entry.get("dish_name")
+            extra_price = entry.get("extra_price")
+            if not isinstance(dish_name, str) or not dish_name.strip():
+                continue
+            if not isinstance(extra_price, (int, float)) or extra_price < 0:
+                continue
+            validated_combos.append({
+                "dish_name":   dish_name.strip(),
+                "extra_price": int(extra_price),  # store as int (no float arith)
+            })
+
     return {
-        "name":             dish.get("name", ""),
-        "description":      dish.get("description", ""),
-        "price":            dish.get("price", 0),
-        "image_url":        dish.get("image_url"),        # None = no image
-        "image_public_id":  dish.get("image_public_id"),  # None = no Cloudinary asset
-        "tags":             dish.get("tags") if isinstance(dish.get("tags"), list) else [],
-        "badges":           dish.get("badges") if isinstance(dish.get("badges"), list) else [],
-        "allergens":        dish.get("allergens") if isinstance(dish.get("allergens"), list) else [],
-        "featured":         bool(dish.get("featured", False)),
-        "sort_order":       int(dish.get("sort_order", 999)),
-        "calories":         dish.get("calories"),         # None = unknown
-        "prep_time_min":    dish.get("prep_time_min"),    # None = unknown
-        "active":           bool(dish.get("active", True)),
+        "name":               dish.get("name", ""),
+        "description":        dish.get("description", ""),
+        "price":              dish.get("price", 0),
+        "image_url":          dish.get("image_url"),        # None = no image
+        "image_public_id":    dish.get("image_public_id"),  # None = no Cloudinary asset
+        "tags":               dish.get("tags") if isinstance(dish.get("tags"), list) else [],
+        "badges":             dish.get("badges") if isinstance(dish.get("badges"), list) else [],
+        "allergens":          dish.get("allergens") if isinstance(dish.get("allergens"), list) else [],
+        "featured":           bool(dish.get("featured", False)),
+        "sort_order":         int(dish.get("sort_order", 999)),
+        "calories":           dish.get("calories"),         # None = unknown
+        "prep_time_min":      dish.get("prep_time_min"),    # None = unknown
+        "active":             bool(dish.get("active", True)),
+        "combo_suggestions":  validated_combos,
     }
 
 
@@ -103,6 +123,14 @@ def _normalize_menu_dishes(menu: dict) -> dict:
         else:
             result[category] = dishes
     return result
+
+
+# Public alias used by tests and future call-sites (Fase 5d).
+# Wraps _normalize_menu_dishes with None → {} coercion so frontends can trust the shape.
+def normalize_menu_shape(menu):
+    if menu is None:
+        return {}
+    return _normalize_menu_dishes(menu)
 
 
 # ── Superadmin global stats ───────────────────────────────────────────────────

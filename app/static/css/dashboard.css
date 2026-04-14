@@ -1177,3 +1177,19 @@ input:checked + .toggle-slider:before { transform: translateX(16px); }
   .dish-modal-body { padding: var(--s-4); gap: var(--s-4); }
   .dish-modal-footer { padding: var(--s-3) var(--s-4); }
 }
+/* ── Combo suggestions editor (Fase 5d) ── */
+.menu-combo-editor {
+  border-top: 1px dashed var(--border, #e0e0d8);
+  padding-top: var(--s-3, 12px);
+  margin-top: 4px;
+}
+.menu-combo-editor input[type="text"],
+.menu-combo-editor input[type="number"] {
+  transition: border-color var(--ease, 0.2s ease), box-shadow var(--ease, 0.2s ease);
+}
+.menu-combo-editor input[type="text"]:focus,
+.menu-combo-editor input[type="number"]:focus {
+  border-color: var(--brand, #1D9E75);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--brand-light, #E1F5EE);
+}

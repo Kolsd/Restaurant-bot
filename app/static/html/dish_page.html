@@ -23,102 +23,308 @@
 
   <link rel="canonical" href="{{OG_URL}}">
 
+  <!-- Preconnect to Cloudinary CDN for hero image -->
+  <link rel="preconnect" href="https://res.cloudinary.com" crossorigin>
+
   <style>
+    /* ── Reset & base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #f5f5f5;
-      color: #222;
-      min-height: 100vh;
+
+    /* Design tokens (inline — this is a standalone SEO page, no external CSS dep) */
+    :root {
+      --brand:        #1D9E75;
+      --brand-dark:   #0F6E56;
+      --brand-light:  #E1F5EE;
+      --bg:           #f5f5f0;
+      --surface:      #ffffff;
+      --border:       #e0e0d8;
+      --text:         #111827;
+      --text-2:       #4B5563;
+      --text-3:       #6B7280;
+      --radius:       12px;
+      --radius-lg:    16px;
+      --radius-pill:  9999px;
+      --shadow:       0 4px 12px rgba(0,0,0,0.06);
+      --shadow-lg:    0 12px 32px rgba(0,0,0,0.10);
+      --ease:         0.2s ease;
+      --wa-green:     #25D366;
+      --wa-green-dark:#1fac54;
     }
-    .card {
-      max-width: 480px;
-      margin: 0 auto;
-      background: #fff;
+
+    /* ── Accessibility: Focus ring ── */
+    :focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
+    }
+
+    /* ── Screen-reader only ── */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      padding: 0; margin: -1px; overflow: hidden;
+      clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+
+    /* ── Page ── */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+    }
+
+    /* ── Card (mobile-first, max 520px centered on desktop) ── */
+    .card {
+      width: 100%;
+      max-width: 520px;
+      margin: 0 auto;
+      background: var(--surface);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-lg);
+    }
+
+    /* ── Breadcrumb ── */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .breadcrumb a {
+      font-size: 0.825rem;
+      color: var(--brand);
+      text-decoration: none;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: color var(--ease);
+    }
+    .breadcrumb a:hover { color: var(--brand-dark); }
+    .breadcrumb__sep {
+      font-size: 0.75rem;
+      color: var(--text-3);
+    }
+    .breadcrumb__current {
+      font-size: 0.825rem;
+      color: var(--text-3);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 55%;
+    }
+
+    /* ── Hero image ── */
+    .hero-wrap {
+      position: relative;
+      width: 100%;
+      background: var(--brand-light);
+      overflow: hidden;
     }
     .dish-image {
       width: 100%;
       aspect-ratio: 4/3;
       object-fit: cover;
       display: block;
+      transition: transform 0.4s ease;
     }
+    .dish-image:hover { transform: scale(1.015); }
+
+    /* ── Placeholder (no image) ── */
     .placeholder-img {
       width: 100%;
       aspect-ratio: 4/3;
-      background: linear-gradient(135deg, #e8f5ef 0%, #d0ede0 100%);
+      background: linear-gradient(135deg, var(--brand-light) 0%, #c5e8d6 100%);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 4rem;
+      font-size: 5rem;
+      color: var(--brand);
     }
+
+    /* ── Content area ── */
     .content {
-      padding: 1.25rem 1rem;
+      padding: 20px 16px 24px;
       flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: 0;
     }
-    .restaurant-name {
-      font-size: 0.8rem;
-      color: #1D9E75;
-      font-weight: 600;
+
+    /* ── Restaurant label ── */
+    .restaurant-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--brand);
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
     }
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      line-height: 1.25;
+
+    /* ── Dish name ── */
+    .dish-name {
+      font-size: 1.65rem;
+      font-weight: 800;
+      line-height: 1.2;
+      color: var(--text);
+      margin-bottom: 10px;
+      letter-spacing: -0.01em;
     }
-    .price {
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: #1D9E75;
+
+    /* ── Price badge ── */
+    .price-wrap {
+      display: inline-flex;
+      align-items: center;
+      background: var(--brand-light);
+      color: var(--brand-dark);
+      border-radius: var(--radius-pill);
+      padding: 5px 14px;
+      font-size: 1.2rem;
+      font-weight: 800;
+      margin-bottom: 16px;
+      width: fit-content;
+      letter-spacing: -0.01em;
     }
+
+    /* ── Description ── */
     .description {
       font-size: 0.95rem;
-      color: #555;
-      line-height: 1.6;
+      color: var(--text-2);
+      line-height: 1.65;
+      margin-bottom: 24px;
+    }
+
+    /* ── Spacer pushes CTA to bottom ── */
+    .spacer { flex: 1; }
+
+    /* ── WhatsApp CTA ── */
+    .cta-wrap {
+      padding: 0 0 8px;
     }
     .cta {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
       width: 100%;
-      padding: 0.9rem 1rem;
-      background: #25D366;
+      padding: 16px 20px;
+      background: var(--wa-green);
       color: #fff;
       text-decoration: none;
-      border-radius: 12px;
-      font-size: 1rem;
-      font-weight: 600;
+      border-radius: var(--radius-lg);
+      font-size: 1.05rem;
+      font-weight: 700;
       text-align: center;
-      margin-top: auto;
+      box-shadow: 0 4px 16px rgba(37, 211, 102, 0.35);
+      transition: background var(--ease), box-shadow var(--ease), transform var(--ease);
+      min-height: 56px; /* WCAG touch target */
     }
-    .cta:hover { background: #20bd5a; }
-    .back-link {
-      display: inline-block;
-      margin-top: 0.75rem;
-      font-size: 0.85rem;
-      color: #1D9E75;
+    .cta:hover, .cta:focus-visible {
+      background: var(--wa-green-dark);
+      box-shadow: 0 6px 20px rgba(37, 211, 102, 0.45);
+      transform: translateY(-1px);
+    }
+    .cta:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 8px rgba(37, 211, 102, 0.25);
+    }
+    .cta__icon {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+
+    /* ── Footer ── */
+    .page-footer {
+      text-align: center;
+      padding: 16px 16px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .footer-brand {
+      font-size: 0.75rem;
+      color: var(--text-3);
+    }
+    .footer-brand a {
+      color: var(--brand);
       text-decoration: none;
+      font-weight: 600;
+    }
+    .footer-brand a:hover { color: var(--brand-dark); }
+
+    /* ── Desktop: center card with side breathing room ── */
+    @media (min-width: 600px) {
+      body { padding: 32px 16px; background: var(--bg); }
+      .card {
+        min-height: auto;
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+      }
+      .breadcrumb { position: static; }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    {{DISH_IMAGE_HTML}}
-    <div class="content">
-      <div class="restaurant-name">{{RESTAURANT_NAME}}</div>
-      <h1>{{DISH_NAME}}</h1>
-      <div class="price">{{PRICE_DISPLAY}}</div>
-      {{DESCRIPTION_HTML}}
-      <a class="cta" href="{{WA_LINK}}">
-        Pedir por WhatsApp
+  <main class="card" role="main">
+
+    <!-- Breadcrumb navigation -->
+    <nav class="breadcrumb" aria-label="Navegación de menú">
+      <a href="{{MENU_URL}}" aria-label="Volver al menú completo de {{RESTAURANT_NAME}}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+        Menú
       </a>
-      <a class="back-link" href="{{MENU_URL}}">← Ver menú completo</a>
+      <span class="breadcrumb__sep" aria-hidden="true">/</span>
+      <span class="breadcrumb__current">{{DISH_NAME}}</span>
+    </nav>
+
+    <!-- Hero image (injected by backend: <img loading="eager"> or .placeholder-img) -->
+    <div class="hero-wrap" role="img" aria-label="Imagen de {{DISH_NAME}}">
+      {{DISH_IMAGE_HTML}}
     </div>
-  </div>
+
+    <!-- Content -->
+    <div class="content">
+      <p class="restaurant-label">{{RESTAURANT_NAME}}</p>
+      <h1 class="dish-name">{{DISH_NAME}}</h1>
+      <div class="price-wrap" aria-label="Precio: {{PRICE_DISPLAY}}">{{PRICE_DISPLAY}}</div>
+
+      <!-- Description (rendered as <p class="description"> by backend, or empty string) -->
+      {{DESCRIPTION_HTML}}
+
+      <div class="spacer"></div>
+
+      <!-- Primary CTA -->
+      <div class="cta-wrap">
+        <a
+          class="cta"
+          href="{{WA_LINK}}"
+          aria-label="Pedir {{DISH_NAME}} por WhatsApp a {{RESTAURANT_NAME}}"
+          rel="noopener"
+        >
+          <!-- WhatsApp icon (inline SVG — no extra HTTP request) -->
+          <svg class="cta__icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+            <path d="M20.52 3.48A11.93 11.93 0 0 0 12 0C5.37 0 0 5.37 0 12a11.92 11.92 0 0 0 1.59 5.98L0 24l6.21-1.57A11.94 11.94 0 0 0 12 24c6.63 0 12-5.37 12-12a11.93 11.93 0 0 0-3.48-8.52ZM12 22a9.93 9.93 0 0 1-5.06-1.38l-.36-.22-3.69.93.97-3.6-.24-.37A9.94 9.94 0 0 1 2 12C2 6.48 6.48 2 12 2s10 4.48 10 10-4.48 10-10 10Zm5.47-7.33c-.3-.15-1.77-.87-2.04-.97-.28-.1-.48-.15-.68.15-.2.3-.77.97-.95 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.68-1.63-.93-2.23-.24-.58-.49-.5-.68-.51h-.58c-.2 0-.52.07-.79.37-.28.3-1.05 1.02-1.05 2.5s1.08 2.9 1.22 3.1c.15.2 2.1 3.22 5.1 4.51.71.31 1.27.5 1.7.63.72.23 1.37.2 1.89.12.58-.09 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.07-.12-.27-.2-.57-.35Z"/>
+          </svg>
+          Pedir por WhatsApp
+        </a>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="page-footer" role="contentinfo">
+      <p class="footer-brand">
+        Menú gestionado con <a href="https://mesioai.com" target="_blank" rel="noopener noreferrer">Mesio</a>
+      </p>
+    </footer>
+
+  </main>
 </body>
 </html>
