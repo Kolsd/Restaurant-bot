@@ -66,6 +66,7 @@
   <div class="nav-group-label">Restaurante</div>
   <button class="nav-item" id="nav-mesas" onclick="showSection('mesas',this)">🪑 Salón</button>
   <button class="nav-item" onclick="showSection('menu',this)">🍽️ Menú</button>
+  <button class="nav-item" id="nav-menu-engineering" onclick="showSection('menu-engineering',this)">📈 Menu Engineering</button>
 
   <div class="nav-group-label">Clientes</div>
   <button class="nav-item" id="nav-nps" onclick="showSection('nps',this)">⭐ NPS</button>
@@ -601,6 +602,11 @@
     <div id="weekly-report-component"><div class="empty-state">Cargando reporte semanal...</div></div>
   </div>
 
+  <!-- MENU ENGINEERING -->
+  <div id="menu-engineering" class="section">
+    <div id="menu-engineering-root"></div>
+  </div>
+
   <!-- FIDELIZACIÓN (Loyalty — requires loyalty module) -->
   <div id="loyalty" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
@@ -960,6 +966,7 @@
 <script src="/static/js/dashboard-floorplan.js?v=2"></script>
 <script src="/static/js/dashboard-wizard.js"></script>
 <script src="/static/js/dashboard-marketing.js?v=1"></script>
+<script src="/static/js/dashboard-analytics.js?v=1"></script>
 
 <!-- Offline indicator banner (hidden by default, shown by offline-sync.js) -->
 <div id="offline-indicator" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;font-weight:600;z-index:9999;gap:8px;align-items:center;">
