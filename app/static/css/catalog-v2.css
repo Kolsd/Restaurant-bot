@@ -408,7 +408,8 @@ body {
   opacity: 0.55;
   filter: grayscale(40%);
 }
-.dish-card.dish-unavailable .dish-add-btn { pointer-events: none; }
+.dish-card.dish-unavailable .dish-add-btn,
+.dish-card.dish-unavailable .dish-ctrl { pointer-events: none; }
 
 /* Image wrapper */
 .dish-img-wrap {
@@ -556,6 +557,61 @@ body {
   display: flex; align-items: center; justify-content: center;
   border: 2px solid var(--surface);
   pointer-events: none;
+}
+
+/* ── Dish cart control (+ button or −/count/+ stepper) ── */
+.dish-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+/* Single + button: delegate existing .dish-add-btn styles */
+
+/* Stepper state */
+.dish-ctrl--active {
+  background: var(--brand);
+  border-radius: 20px;
+  height: 36px;
+  padding: 0 4px;
+  gap: 2px;
+}
+
+.dish-ctrl-btn {
+  width: 28px; height: 28px;
+  border: none;
+  background: transparent;
+  color: #ffffff;
+  font-size: 18px; font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+  transition: background var(--ease), transform var(--ease);
+  flex-shrink: 0;
+}
+.dish-ctrl-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.2);
+}
+.dish-ctrl-btn:active:not(:disabled) {
+  transform: scale(0.88);
+}
+.dish-ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.dish-ctrl-btn.adding {
+  animation: add-to-cart-pop 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+
+.dish-ctrl-count {
+  min-width: 22px;
+  text-align: center;
+  font-size: 14px; font-weight: 700;
+  color: #ffffff;
+  flex-shrink: 0;
 }
 
 /* ── DishModal ── */

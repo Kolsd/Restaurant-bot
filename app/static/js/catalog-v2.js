@@ -234,6 +234,58 @@ function buildBadge(dish, available) {
   return frag;
 }
 
+function _renderDishCtrl(ctrl, dish, cat, qty, available, callbacks) {
+  ctrl.innerHTML = '';
+  if (qty > 0) {
+    // Stepper: [−] [count] [+]
+    ctrl.classList.add('dish-ctrl--active');
+    const minusBtn = document.createElement('button');
+    minusBtn.className = 'dish-ctrl-btn dish-ctrl-minus';
+    minusBtn.setAttribute('aria-label', 'Quitar ' + dish.name);
+    minusBtn.innerHTML = '−';
+    minusBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      callbacks.onRemove(dish, cat);
+    });
+    const countEl = document.createElement('span');
+    countEl.className = 'dish-ctrl-count';
+    countEl.setAttribute('aria-live', 'polite');
+    countEl.setAttribute('aria-atomic', 'true');
+    countEl.textContent = qty;
+    const plusBtn = document.createElement('button');
+    plusBtn.className = 'dish-ctrl-btn dish-ctrl-plus';
+    plusBtn.setAttribute('aria-label', 'Agregar ' + dish.name);
+    plusBtn.innerHTML = '+';
+    if (!available) { plusBtn.disabled = true; }
+    plusBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!available) return;
+      plusBtn.classList.add('adding');
+      setTimeout(() => plusBtn.classList.remove('adding'), 350);
+      callbacks.onAdd(dish, cat);
+    });
+    ctrl.appendChild(minusBtn);
+    ctrl.appendChild(countEl);
+    ctrl.appendChild(plusBtn);
+  } else {
+    // Single + button
+    ctrl.classList.remove('dish-ctrl--active');
+    const addBtn = document.createElement('button');
+    addBtn.className = 'dish-add-btn';
+    addBtn.setAttribute('aria-label', 'Agregar ' + dish.name);
+    if (!available) { addBtn.disabled = true; addBtn.setAttribute('aria-disabled', 'true'); }
+    addBtn.innerHTML = SVG_PLUS;
+    addBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!available) return;
+      addBtn.classList.add('adding');
+      setTimeout(() => addBtn.classList.remove('adding'), 350);
+      callbacks.onAdd(dish, cat);
+    });
+    ctrl.appendChild(addBtn);
+  }
+}
+
 function buildDishCard(dish, cat, state, callbacks) {
   const available = state.availability[dish.name] !== false;
   const id = dishId(dish, cat);
@@ -275,32 +327,16 @@ function buildDishCard(dish, cat, state, callbacks) {
   priceEl.textContent = fmtPrice(dish.price, state.locale, state.currency);
   footer.appendChild(priceEl);
 
-  // Add button
-  const addBtn = document.createElement('button');
-  addBtn.className = 'dish-add-btn';
-  addBtn.setAttribute('aria-label', 'Agregar ' + dish.name);
-  if (!available) { addBtn.disabled = true; addBtn.setAttribute('aria-disabled', 'true'); }
-  addBtn.innerHTML = SVG_PLUS;
-
-  // Qty badge
-  if (qty > 0) {
-    const qtyBadge = document.createElement('span');
-    qtyBadge.className = 'dish-qty-badge';
-    qtyBadge.setAttribute('aria-hidden', 'true');
-    qtyBadge.textContent = qty;
-    addBtn.appendChild(qtyBadge);
-  }
-
-  addBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!available) return;
-    addBtn.classList.add('adding');
-    setTimeout(() => addBtn.classList.remove('adding'), 350);
-    callbacks.onAdd(dish, cat);
-  });
-  footer.appendChild(addBtn);
+  // Cart control: single + when qty=0, stepper when qty>0
+  const ctrl = document.createElement('div');
+  ctrl.className = 'dish-ctrl';
+  _renderDishCtrl(ctrl, dish, cat, qty, available, callbacks);
+  footer.appendChild(ctrl);
   info.appendChild(footer);
   card.appendChild(info);
+
+  // Store meta for rerenderCards
+  _cardMeta.set(card, { dish, cat, available, callbacks });
 
   // Card click → open modal
   card.addEventListener('click', () => callbacks.onOpen(dish, card));
@@ -647,6 +683,9 @@ class HeroCarousel {
 }
 
 /* ── Main CatalogPage ── */
+// Maps card element → { dish, cat, available, callbacks } for rerenderCards
+const _cardMeta = new WeakMap();
+
 function initCatalog() {
   const root = document.getElementById('catalog-root');
   if (!root) return;
@@ -998,6 +1037,9 @@ function initCatalog() {
             mesioToast(d.name + ' agregado', 'success', 2000);
             trackEvent(d.name, 'add_to_cart', state.botNumber);
           },
+          onRemove: (d, c) => {
+            updateCart(d, c, -1, false);
+          },
           viewObservers,
         });
         grid.appendChild(card);
@@ -1017,24 +1059,13 @@ function initCatalog() {
   }
 
   function rerenderCards() {
-    // Just update qty badges on existing cards without full re-render
     document.querySelectorAll('.dish-card').forEach(card => {
-      const id = card.dataset.dishId;
-      const qty = state.cart[id] || 0;
-      const addBtn = card.querySelector('.dish-add-btn');
-      if (!addBtn) return;
-      let badge = addBtn.querySelector('.dish-qty-badge');
-      if (qty > 0) {
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = 'dish-qty-badge';
-          badge.setAttribute('aria-hidden', 'true');
-          addBtn.appendChild(badge);
-        }
-        badge.textContent = qty;
-      } else {
-        if (badge) badge.remove();
-      }
+      const meta = _cardMeta.get(card);
+      if (!meta) return;
+      const qty = state.cart[card.dataset.dishId] || 0;
+      const ctrl = card.querySelector('.dish-ctrl');
+      if (!ctrl) return;
+      _renderDishCtrl(ctrl, meta.dish, meta.cat, qty, meta.available, meta.callbacks);
     });
   }
 
