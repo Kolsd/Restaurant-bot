@@ -53,6 +53,7 @@ from app.routes.discounts import router as discounts_router
 from app.routes.reviews import router as reviews_router
 from app.routes.health import router as health_router
 from app.routes.analytics import router as analytics_router
+from app.routes.marketing import router as marketing_router
 from app.services import database as db  # ← FIX: import directo de db
 from app.services.logging import get_logger as _get_logger
 
@@ -183,3 +184,4 @@ app.include_router(discounts_router)
 app.include_router(reviews_router)
 app.include_router(health_router)
 app.include_router(analytics_router)
+app.include_router(marketing_router)

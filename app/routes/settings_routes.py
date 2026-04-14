@@ -3,14 +3,17 @@ Settings routes: restaurant settings (GET/POST) and all /api/dashboard/* data en
 Also includes the order-status update and table-session helpers that power the dashboard UI.
 """
 import json
+import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Request, HTTPException, Depends
 from anthropic import Anthropic
 
 from app.services import database as db
 from app.services.database import get_pool
-from app.routes.deps import require_auth, get_current_user
+from app.routes.deps import require_auth, get_current_user, get_current_restaurant
 from app.repositories import restaurant_repo, tables_repo as tr
+from app.repositories import weekly_reports_repo
 from app.services.logging import get_logger
 from pydantic import BaseModel
 
@@ -101,6 +104,132 @@ async def save_settings(request: Request):
     lon = float(body["longitude"]) if "longitude" in body and body["longitude"] not in [None, ""] else None
     await restaurant_repo.db_save_restaurant_settings(restaurant["id"], current_features, latitude=lat, longitude=lon)
     return {"success": True, "features": current_features}
+
+
+# ── WEEKLY REPORTS ────────────────────────────────────────────────────
+
+_PHONE_RE = re.compile(r"^\+?\d{10,15}$")
+
+
+class WeeklyReportSettings(BaseModel):
+    enabled: bool | None = None
+    owner_phone: str | None = None
+    timezone: str | None = None
+
+
+@router.get("/api/weekly-reports")
+async def get_weekly_reports(
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Return the last 12 weekly reports and current settings for the authenticated restaurant."""
+    restaurant_id = restaurant["id"]
+
+    reports_raw = await weekly_reports_repo.get_recent_reports(restaurant_id, limit=12)
+
+    reports = []
+    for r in reports_raw:
+        reports.append({
+            "id": r["id"],
+            "week_start": r["week_start"].isoformat() if hasattr(r.get("week_start"), "isoformat") else str(r.get("week_start", "")),
+            "generated_at": r["generated_at"].isoformat() + "Z" if r.get("generated_at") else None,
+            "sent_at": r["sent_at"].isoformat() + "Z" if r.get("sent_at") else None,
+            "delivery_status": r.get("delivery_status"),
+            "error_message": r.get("error_message"),
+            "payload": r.get("payload"),
+        })
+
+    raw_features = restaurant.get("features") or {}
+    if isinstance(raw_features, str):
+        try:
+            features = json.loads(raw_features)
+        except Exception:
+            features = {}
+    else:
+        features = dict(raw_features)
+
+    settings = {
+        "enabled": features.get("weekly_report_enabled", True),
+        "owner_phone": restaurant.get("owner_phone"),
+        "timezone": restaurant.get("timezone") or "America/Bogota",
+    }
+
+    return {"reports": reports, "settings": settings}
+
+
+@router.patch("/api/weekly-reports/settings")
+async def patch_weekly_report_settings(
+    body: WeeklyReportSettings,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """Update weekly report settings (enabled flag, owner_phone, timezone)."""
+    restaurant_id = restaurant["id"]
+
+    # ── Validate owner_phone ──────────────────────────────────────────
+    if body.owner_phone is not None:
+        phone = body.owner_phone.strip()
+        if phone == "":
+            # Empty string clears the phone
+            phone = None
+        else:
+            # Normalize: leading "00" → "+"
+            if phone.startswith("00"):
+                phone = "+" + phone[2:]
+            if not _PHONE_RE.match(phone):
+                raise HTTPException(
+                    status_code=422,
+                    detail="owner_phone debe seguir el formato E.164 (ej. +573001234567, 10–15 dígitos)",
+                )
+        await restaurant_repo.db_update_restaurant_owner_phone(restaurant_id, phone)
+        log.info("weekly_reports.settings.phone_updated", restaurant_id=restaurant_id)
+
+    # ── Validate timezone ─────────────────────────────────────────────
+    if body.timezone is not None:
+        tz_str = body.timezone.strip()
+        if tz_str == "":
+            raise HTTPException(
+                status_code=422,
+                detail="timezone no puede ser vacío. Usa un nombre IANA válido (ej. America/Bogota)",
+            )
+        try:
+            ZoneInfo(tz_str)
+        except ZoneInfoNotFoundError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"timezone inválido: '{tz_str}'. Usa un nombre IANA válido (ej. America/Bogota, America/New_York)",
+            )
+        await restaurant_repo.db_update_restaurant_timezone(restaurant_id, tz_str)
+        log.info("weekly_reports.settings.timezone_updated", restaurant_id=restaurant_id, timezone=tz_str)
+
+    # ── Update enabled flag in features JSONB ────────────────────────
+    if body.enabled is not None:
+        await restaurant_repo.db_merge_restaurant_features(
+            restaurant_id, {"weekly_report_enabled": body.enabled}
+        )
+        log.info(
+            "weekly_reports.settings.enabled_updated",
+            restaurant_id=restaurant_id,
+            enabled=body.enabled,
+        )
+
+    # ── Re-fetch to return authoritative state ────────────────────────
+    updated = await db.db_get_restaurant_by_id(restaurant_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    raw_features = updated.get("features") or {}
+    if isinstance(raw_features, str):
+        try:
+            features = json.loads(raw_features)
+        except Exception:
+            features = {}
+    else:
+        features = dict(raw_features)
+
+    return {
+        "enabled": features.get("weekly_report_enabled", True),
+        "owner_phone": updated.get("owner_phone"),
+        "timezone": updated.get("timezone") or "America/Bogota",
+    }
 
 
 # ── ONBOARDING STATUS ────────────────────────────────────────────────

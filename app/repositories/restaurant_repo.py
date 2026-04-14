@@ -272,6 +272,69 @@ async def db_save_restaurant_settings(
             pass
 
 
+async def db_update_restaurant_owner_phone(
+    restaurant_id: int,
+    phone: str | None,
+) -> None:
+    """Set or clear the owner_phone column for weekly reports delivery.
+
+    Pass None or empty string to clear the phone (set NULL).
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE restaurants SET owner_phone = $1 WHERE id = $2",
+            phone or None,
+            restaurant_id,
+        )
+
+
+async def db_update_restaurant_timezone(
+    restaurant_id: int,
+    timezone: str,
+) -> None:
+    """Set the IANA timezone for the restaurant (used by scheduler and weekly reports)."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE restaurants SET timezone = $1 WHERE id = $2",
+            timezone,
+            restaurant_id,
+        )
+
+
+async def db_merge_restaurant_features(
+    restaurant_id: int,
+    patch: dict,
+) -> dict:
+    """Shallow-merge *patch* into the restaurant's features JSONB and return the result.
+
+    Uses the Postgres || operator so only the provided keys are overwritten —
+    existing keys not in *patch* are preserved.  Returns the final features dict.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE restaurants
+               SET features = COALESCE(features, '{}'::jsonb) || $2::jsonb
+             WHERE id = $1
+            RETURNING features
+            """,
+            restaurant_id,
+            _json.dumps(patch),
+        )
+    if row is None:
+        return patch
+    raw = row["features"]
+    if isinstance(raw, str):
+        try:
+            return _json.loads(raw)
+        except Exception:
+            return patch
+    return dict(raw) if raw else patch
+
+
 # ── Dashboard data queries ────────────────────────────────────────────────────
 
 async def db_get_dashboard_orders(

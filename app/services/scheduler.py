@@ -1,12 +1,35 @@
 import asyncio
+import json
 import os
+from datetime import date, datetime, timedelta
+
 import httpx
+
 from app.services import database as db
 from app.services import state_store
 from app.repositories import reviews_repo as rr
+from app.repositories import weekly_reports_repo
 from app.services.logging import get_logger
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None  # type: ignore
+
 log = get_logger(__name__)
+
+
+def _local_now(tz_name: str) -> datetime:
+    """Return current datetime in the given IANA timezone. Falls back to America/Bogota."""
+    try:
+        if ZoneInfo is None:
+            raise RuntimeError("zoneinfo unavailable")
+        return datetime.now(ZoneInfo(tz_name or "America/Bogota"))
+    except Exception:
+        try:
+            return datetime.now(ZoneInfo("America/Bogota")) if ZoneInfo else datetime.utcnow()
+        except Exception:
+            return datetime.utcnow()
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -259,6 +282,177 @@ async def _run_reservation_reminders():
         log.exception("scheduler.reservation_reminder_failed")
 
 
+async def _run_weekly_owner_reports():
+    """
+    Send a weekly performance summary to each restaurant owner via WhatsApp.
+    Runs every scheduler tick (60s) but only sends when the restaurant's local
+    time is Monday 09:xx AND no report has been sent yet for the current week.
+    Dry-run mode: set WEEKLY_REPORT_DRY_RUN=1 to skip actual WhatsApp send.
+    """
+    dry_run = os.getenv("WEEKLY_REPORT_DRY_RUN", "0") == "1"
+    dashboard_url = os.getenv("APP_DOMAIN", "https://mesio.com").rstrip("/") + "/dashboard"
+
+    try:
+        restaurants = await db.db_get_all_restaurants()
+    except Exception:
+        log.exception("scheduler.weekly_reports.fetch_restaurants_failed")
+        return
+
+    for restaurant in restaurants:
+        rid = restaurant.get("id")
+        restaurant_name = restaurant.get("name", f"Restaurant {rid}")
+        try:
+            # ── 1. Resolve timezone and local time ────────────────────────────
+            tz_name = restaurant.get("timezone") or "America/Bogota"
+            local_now = _local_now(tz_name)
+
+            # ── 2. Only proceed on Monday 09:xx local time ────────────────────
+            if local_now.weekday() != 0 or local_now.hour != 9:
+                continue
+
+            # ── 3. Compute week window (previous week: Mon–Sun) ───────────────
+            # week_start = last Monday (7 days ago), week_end = this Monday (exclusive)
+            week_start: date = local_now.date() - timedelta(days=7)
+            week_end: date = week_start + timedelta(days=7)
+
+            # ── 4. Skip if already sent this week ─────────────────────────────
+            if await weekly_reports_repo.already_sent_for_week(rid, week_start):
+                log.info(
+                    "scheduler.weekly_reports.already_sent",
+                    restaurant_id=rid,
+                    week_start=week_start.isoformat(),
+                )
+                continue
+
+            # ── 5. Check feature flag (default True, skip if explicitly False) ─
+            features = restaurant.get("features") or {}
+            if isinstance(features, str):
+                try:
+                    features = json.loads(features)
+                except Exception:
+                    features = {}
+            if features.get("weekly_report_enabled") is False:
+                log.info(
+                    "scheduler.weekly_reports.feature_disabled",
+                    restaurant_id=rid,
+                )
+                continue
+
+            # ── 6. Compute stats ──────────────────────────────────────────────
+            stats = await weekly_reports_repo.compute_weekly_stats(rid, week_start, week_end)
+
+            # ── 7. Skip dormant / new restaurants with no signal ──────────────
+            if not stats["has_signal"]:
+                log.info(
+                    "scheduler.weekly_reports.no_signal_skip",
+                    restaurant_id=rid,
+                    week_start=week_start.isoformat(),
+                )
+                continue
+
+            # ── 8. Format message ─────────────────────────────────────────────
+            msg = weekly_reports_repo.format_report_message(
+                stats, restaurant_name, week_start, week_end, dashboard_url
+            )
+            if not msg:
+                log.info(
+                    "scheduler.weekly_reports.empty_message_skip",
+                    restaurant_id=rid,
+                )
+                continue
+
+            # ── 9. Resolve owner phone ────────────────────────────────────────
+            owner_phone = restaurant.get("owner_phone")
+
+            # ── 10. Build payload and persist the report row ──────────────────
+            payload = weekly_reports_repo.build_payload(stats, week_start, week_end)
+
+            if dry_run:
+                initial_status = "dry_run"
+            elif owner_phone:
+                initial_status = "pending"
+            else:
+                initial_status = "skipped"
+
+            report_row = await weekly_reports_repo.save_report(
+                restaurant_id=rid,
+                week_start=week_start,
+                payload=payload,
+                message_text=msg,
+                owner_phone=owner_phone,
+                delivery_status=initial_status,
+                error_message=None if owner_phone else "missing_owner_phone",
+            )
+
+            # ON CONFLICT DO NOTHING → already exists; skip to avoid double-send
+            if report_row is None:
+                log.info(
+                    "scheduler.weekly_reports.conflict_skip",
+                    restaurant_id=rid,
+                    week_start=week_start.isoformat(),
+                )
+                continue
+
+            report_id = report_row["id"]
+
+            # ── 11. Send (or dry-run) ─────────────────────────────────────────
+            if dry_run:
+                log.info(
+                    "scheduler.weekly_reports.dry_run",
+                    restaurant_id=rid,
+                    owner_phone=owner_phone,
+                    week_start=week_start.isoformat(),
+                )
+                continue
+
+            if not owner_phone:
+                log.info(
+                    "scheduler.weekly_reports.no_owner_phone",
+                    restaurant_id=rid,
+                    week_start=week_start.isoformat(),
+                )
+                continue
+
+            bot_number = restaurant.get("whatsapp_number", "")
+            phone_id = restaurant.get("wa_phone_id")
+
+            try:
+                ok = await _send_whatsapp(owner_phone, msg, bot_number, phone_id)
+                if ok:
+                    await weekly_reports_repo.mark_sent(report_id)
+                    log.info(
+                        "scheduler.weekly_reports.sent",
+                        restaurant_id=rid,
+                        owner_phone=owner_phone,
+                        week_start=week_start.isoformat(),
+                    )
+                else:
+                    error_msg = "whatsapp_send_returned_false"
+                    await weekly_reports_repo.mark_failed(report_id, error_msg)
+                    log.warning(
+                        "scheduler.weekly_reports.send_failed",
+                        restaurant_id=rid,
+                        owner_phone=owner_phone,
+                        week_start=week_start.isoformat(),
+                        reason=error_msg,
+                    )
+            except Exception as exc:
+                error_str = str(exc)[:500]
+                await weekly_reports_repo.mark_failed(report_id, error_str)
+                log.exception(
+                    "scheduler.weekly_reports.send_exception",
+                    restaurant_id=rid,
+                    owner_phone=owner_phone,
+                    week_start=week_start.isoformat(),
+                )
+
+        except Exception:
+            log.exception(
+                "scheduler.weekly_reports.restaurant_loop_failed",
+                restaurant_id=rid,
+            )
+
+
 async def _scheduler_loop():
     log.info("scheduler.started")
     _reminder_counter = 0
@@ -286,6 +480,8 @@ async def _scheduler_loop():
         # Capture occupancy snapshots every 15 minutes
         if _reminder_counter % 15 == 0:
             await _run_occupancy_snapshot()
+        # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)
+        await _run_weekly_owner_reports()
 
 
 async def start_scheduler():

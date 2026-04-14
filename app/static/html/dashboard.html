@@ -70,6 +70,8 @@
   <div class="nav-group-label">Clientes</div>
   <button class="nav-item" id="nav-nps" onclick="showSection('nps',this)">⭐ NPS</button>
   <button class="nav-item" id="nav-loyalty" onclick="showSection('loyalty',this)">🎁 Fidelización</button>
+  <button class="nav-item" id="nav-reporte-semanal" onclick="showSection('reporte-semanal',this)">📊 Reporte Semanal</button>
+  <button class="nav-item" id="nav-clientes" onclick="showSection('clientes',this)">📣 Clientes en Riesgo</button>
 
   <div class="nav-group-label">Equipo</div>
   <button class="nav-item" id="nav-staff" onclick="showSection('staff',this)">👤 Equipo</button>
@@ -594,6 +596,11 @@
     <div id="payroll-component"><div class="empty-state">Cargando nómina...</div></div>
   </div>
   
+  <!-- REPORTE SEMANAL -->
+  <div id="reporte-semanal" class="section">
+    <div id="weekly-report-component"><div class="empty-state">Cargando reporte semanal...</div></div>
+  </div>
+
   <!-- FIDELIZACIÓN (Loyalty — requires loyalty module) -->
   <div id="loyalty" class="section">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
@@ -619,6 +626,80 @@
       <div id="loyalty-stats-body">
         <div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;">Cargando...</div>
       </div>
+    </div>
+  </div>
+
+  <!-- CLIENTES EN RIESGO -->
+  <div id="clientes" class="section">
+
+    <!-- Marketing status card -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div style="font-size:18px;font-weight:600;">Clientes en Riesgo</div>
+        <div style="font-size:12px;color:#888;margin-top:2px;">Clientes frecuentes que no han vuelto en 21+ dias. Envia un saludo para reactivarlos.</div>
+      </div>
+    </div>
+
+    <!-- Marketing status card -->
+    <div id="marketing-status-card" style="background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:1.25rem;margin-bottom:1.25rem;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+        <div>
+          <span id="mkt-plan-badge" style="display:inline-block;background:#e8f5f0;color:#1D9E75;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px;">basic</span>
+          <span style="font-size:13px;color:#555;margin-left:8px;">Mensajes marketing este mes</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span id="mkt-cost-estimate" style="font-size:12px;color:#888;"></span>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:#555;">
+            <input type="checkbox" id="mkt-enabled-toggle" onchange="marketingToggleEnabled(this.checked)"
+              style="width:16px;height:16px;accent-color:#1D9E75;cursor:pointer;">
+            Activo
+          </label>
+        </div>
+      </div>
+      <!-- Progress bar -->
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="flex:1;background:#f0f0e8;border-radius:20px;height:8px;overflow:hidden;">
+          <div id="mkt-progress-bar" style="height:100%;background:#1D9E75;border-radius:20px;width:0%;transition:width 0.4s ease;"></div>
+        </div>
+        <span id="mkt-progress-label" style="font-size:12px;color:#888;white-space:nowrap;">0 / 30</span>
+      </div>
+      <div id="mkt-cap-warning" style="display:none;margin-top:8px;font-size:12px;color:#C0392B;font-weight:500;"></div>
+    </div>
+
+    <!-- At-risk customers table -->
+    <div style="background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:1.25rem;margin-bottom:1.25rem;">
+      <div style="font-size:14px;font-weight:600;margin-bottom:14px;">Clientes sin visitar</div>
+      <div id="at-risk-table-body">
+        <div style="text-align:center;padding:2rem;color:#aaa;font-size:13px;">Cargando...</div>
+      </div>
+    </div>
+
+    <!-- Recent history (collapsible) -->
+    <details style="background:#fff;border:0.5px solid #e0e0d8;border-radius:14px;padding:1.25rem;">
+      <summary style="font-size:14px;font-weight:600;cursor:pointer;user-select:none;">Historial de envios</summary>
+      <div id="marketing-history-body" style="margin-top:14px;">
+        <div style="text-align:center;padding:1rem;color:#aaa;font-size:13px;">Cargando...</div>
+      </div>
+    </details>
+
+  </div><!-- /clientes -->
+
+  <!-- Modal: Enviar saludo -->
+  <div id="reengagement-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:none;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:16px;padding:1.75rem;width:100%;max-width:460px;margin:1rem;box-shadow:0 20px 60px rgba(0,0,0,0.15);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+        <div style="font-size:16px;font-weight:600;">Enviar saludo</div>
+        <button onclick="closeReengagementModal()" style="background:none;border:none;font-size:20px;color:#aaa;cursor:pointer;line-height:1;">x</button>
+      </div>
+      <div style="font-size:12px;color:#888;margin-bottom:10px;">Para: <span id="reengagement-modal-phone" style="font-weight:600;color:#333;"></span></div>
+      <textarea id="reengagement-modal-message" rows="5"
+        style="width:100%;padding:10px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;line-height:1.5;resize:vertical;outline:none;box-sizing:border-box;font-family:inherit;"
+        maxlength="1024"></textarea>
+      <div style="font-size:11px;color:#aaa;text-align:right;margin-top:4px;" id="reengagement-char-count">0 / 1024</div>
+      <button id="reengagement-send-btn" onclick="sendReengagement()"
+        style="margin-top:14px;width:100%;background:#1D9E75;color:#fff;border:none;padding:11px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;">
+        Enviar mensaje
+      </button>
     </div>
   </div>
 
@@ -870,6 +951,7 @@
 </div>
 
 <script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/dashboard-weekly-report.js?v=1"></script>
 <script src="/static/js/offline-sync.js?v=1"></script>
 <script src="/static/js/dashboard-components.js?v=4"></script>
 <script src="/static/js/dashboard-core.js?v=3"></script>
@@ -877,6 +959,7 @@
 <script src="/static/js/dashboard-nps-inventory.js?v=3"></script>
 <script src="/static/js/dashboard-floorplan.js?v=2"></script>
 <script src="/static/js/dashboard-wizard.js"></script>
+<script src="/static/js/dashboard-marketing.js?v=1"></script>
 
 <!-- Offline indicator banner (hidden by default, shown by offline-sync.js) -->
 <div id="offline-indicator" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:8px 18px;border-radius:20px;font-size:13px;font-weight:600;z-index:9999;gap:8px;align-items:center;">
@@ -916,6 +999,36 @@
     </div>
   </div>
 </div>
+
+<!-- Modal: Weekly Report Preview -->
+<div id="wr-preview-modal" onclick="if(event.target===this)wrClosePreviewModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:#fff;border-radius:16px;width:520px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.18);">
+    <div style="padding:1.25rem 1.5rem;border-bottom:0.5px solid #e0e0d8;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:15px;font-weight:600;" id="wr-preview-title">Vista previa del reporte</div>
+        <div style="font-size:12px;color:#888;margin-top:2px;">Resumen de la semana</div>
+      </div>
+      <button onclick="wrClosePreviewModal()" style="font-size:20px;background:none;border:none;cursor:pointer;color:#aaa;line-height:1;">✕</button>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:1.25rem 1.5rem;">
+      <pre id="wr-preview-body" style="font-family:inherit;font-size:14px;line-height:1.7;color:#222;white-space:pre-wrap;margin:0;"></pre>
+    </div>
+    <div style="padding:1rem 1.5rem;border-top:0.5px solid #e0e0d8;display:flex;justify-content:flex-end;">
+      <button onclick="wrClosePreviewModal()" style="padding:8px 20px;background:none;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;cursor:pointer;color:#555;">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+/* Weekly report toggle switch */
+.wr-toggle { position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0; }
+.wr-toggle input { position:absolute;opacity:0;width:0;height:0; }
+.wr-track { display:inline-block;width:44px;height:24px;background:#e0e0d8;border-radius:12px;transition:background 0.2s;position:relative; }
+.wr-thumb { position:absolute;top:3px;left:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform 0.2s;box-shadow:0 1px 4px rgba(0,0,0,.2); }
+.wr-toggle input:checked ~ .wr-track { background:#1D9E75; }
+.wr-toggle input:checked ~ .wr-track .wr-thumb { transform:translateX(20px); }
+.wr-toggle input:focus-visible ~ .wr-track { outline:2px solid #1D9E75;outline-offset:2px; }
+</style>
 
 </body>
 </html>

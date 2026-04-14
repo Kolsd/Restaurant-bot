@@ -129,7 +129,7 @@ function logout() {
 let currentPeriod = 'today';
 window.customStart = '';
 window.customEnd = '';
-const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', mesas:'Salón', equipo:'Mi Equipo', nps:'NPS', staff:'Equipo', payroll:'Nómina y Propinas', loyalty:'Fidelización' };
+const titles = { resumen:'Resumen', pedidos:'Pedidos', reservaciones:'Reservaciones', conversaciones:'WhatsApp', menu:'Menú', mesas:'Salón', equipo:'Mi Equipo', nps:'NPS', staff:'Equipo', payroll:'Nómina y Propinas', loyalty:'Fidelización', 'reporte-semanal':'Reporte Semanal', clientes:'Clientes en Riesgo' };
 
 function setPeriod(p, btn) {
   currentPeriod = p;
@@ -179,7 +179,7 @@ function showSection(id, btn) {
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[id] || '';
 
-  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'mesas', 'nps', 'staff', 'loyalty', 'payroll'];
+  const hidePeriod = ['conversaciones', 'menu', 'equipo', 'mesas', 'nps', 'staff', 'loyalty', 'payroll', 'reporte-semanal', 'clientes'];
   const periodBar = document.getElementById('period-bar');
   
   if (periodBar) {
@@ -204,7 +204,9 @@ function showSection(id, btn) {
   if (id === 'staff'         && typeof loadStaffSection        === 'function') loadStaffSection();
   if (id === 'payroll'       && typeof loadPayrollSection      === 'function') loadPayrollSection();
   if (id === 'loyalty'       && typeof loadLoyaltySection      === 'function') loadLoyaltySection();
-  if (id === 'reservaciones' && typeof loadReservationsSection === 'function') loadReservationsSection();
+  if (id === 'reservaciones'    && typeof loadReservationsSection   === 'function') loadReservationsSection();
+  if (id === 'reporte-semanal'  && typeof loadWeeklyReportSection  === 'function') loadWeeklyReportSection();
+  if (id === 'clientes'         && typeof loadClientesSection       === 'function') loadClientesSection();
   if (window.innerWidth <= 768) closeSidebar();
 }
 
