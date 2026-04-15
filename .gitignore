@@ -1,6 +1,7 @@
 # Secrets — never commit these
 .env
 .env.*
+!.env.example
 app/.env
 
 # Claude Code local settings (may contain API keys in allowed commands)
@@ -13,6 +14,7 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest_cache/
 
 # Alembic
 alembic/versions/*.pyc
