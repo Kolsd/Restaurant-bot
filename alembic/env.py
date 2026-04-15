@@ -12,9 +12,16 @@ if config.config_file_name is not None:
 # ── Database URL ──────────────────────────────────────────────────────────────
 # Railway provides DATABASE_URL as postgres://... which psycopg2 understands
 # after replacing the scheme.  asyncpg handles this at runtime separately.
-_database_url = os.environ.get("DATABASE_URL", "")
+#
+# Migrations need SUPERUSER privileges (CREATE ROLE, ALTER SYSTEM, etc.) — prefer
+# DATABASE_URL_ADMIN if set.  Runtime (app) connects as non-superuser via
+# DATABASE_URL so Row-Level Security actually enforces.  If DATABASE_URL_ADMIN
+# is not set we fall back to DATABASE_URL for backward compatibility.
+_database_url = os.environ.get("DATABASE_URL_ADMIN") or os.environ.get("DATABASE_URL", "")
 if not _database_url:
-    raise RuntimeError("DATABASE_URL environment variable is not set.")
+    raise RuntimeError(
+        "Neither DATABASE_URL_ADMIN nor DATABASE_URL environment variable is set."
+    )
 # Normalize to postgresql:// (required by SQLAlchemy / psycopg2)
 if _database_url.startswith("postgres://"):
     _database_url = _database_url.replace("postgres://", "postgresql://", 1)
