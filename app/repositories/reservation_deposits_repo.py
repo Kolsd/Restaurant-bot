@@ -60,21 +60,6 @@ async def db_create_deposit(
         return None
 
 
-async def db_get_deposit_by_reservation(reservation_id: int) -> dict | None:
-    """Return the most recent deposit for a reservation (pending or paid)."""
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT * FROM reservation_deposits
-            WHERE reservation_id = $1
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            reservation_id,
-        )
-        return _serialize(dict(row)) if row else None
-
-
 async def db_confirm_deposit(reservation_id: int, transaction_id: str) -> dict | None:
     """
     Transition deposit status pending -> paid.
@@ -120,23 +105,3 @@ async def db_get_pending_deposits(older_than_hours: int = 2) -> list[dict]:
             older_than_hours,
         )
         return [_serialize(dict(r)) for r in rows]
-
-
-async def db_mark_deposit_refunded(deposit_id: int, reason: str = "") -> dict | None:
-    """Mark a deposit as refunded with an optional reason string."""
-    async with _tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE reservation_deposits
-            SET refunded = TRUE,
-                refund_reason = $1
-            WHERE id = $2
-            RETURNING *
-            """,
-            reason,
-            deposit_id,
-        )
-        if row:
-            log.info("deposit.refunded", deposit_id=deposit_id, reason=reason)
-            return _serialize(dict(row))
-        return None

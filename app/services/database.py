@@ -82,8 +82,6 @@ async def init_db():
     await init_pool()
 
 
-# db_init_nps_inventory re-exported below alongside the rest of the inventory module (Fase 6)
-
 # === Reservations: moved to app.repositories.reservations_repo (Apparta integration) ===
 from app.repositories.reservations_repo import (
     db_add_reservation,
@@ -154,7 +152,6 @@ from app.repositories.restaurant_repo import (
     db_sync_batch,
     db_get_nps_stats,
     db_get_nps_responses,
-    db_get_restaurant_settings,
     db_increment_token_usage,
     db_increment_invoice_usage,
     db_check_usage_limits,
@@ -188,7 +185,6 @@ from app.repositories.tables_repo import (
     db_get_table_by_id,
     db_save_table_order,
     db_get_base_order_status,
-    db_merge_table_order_items,
     db_get_table_orders,
     db_update_table_order_status,
     db_get_base_order_id,
@@ -228,20 +224,17 @@ from app.repositories.conversations_repo import (
     db_save_nps_response,
     db_save_nps_pending,
     db_update_nps_comment,
-    db_get_pending_nps_score,
 )
 
 # === Conversations (NPS waiting state): moved to app.repositories.conversations_repo (Fase 6) ===
 from app.repositories.conversations_repo import (
     db_save_nps_waiting,
-    db_get_nps_waiting,
     db_clear_nps_waiting,
 )
 
 
 # === Inventory: moved to app.repositories.inventory_repo (Fase 6) ===
 from app.repositories.inventory_repo import (
-    db_init_nps_inventory,
     db_get_inventory,
     db_create_inventory_item,
     db_update_inventory_item,
@@ -250,7 +243,6 @@ from app.repositories.inventory_repo import (
     db_get_inventory_history,
     db_get_inventory_alerts,
     db_deduct_inventory_for_order,
-    db_init_dish_recipes,
     db_upsert_dish_recipe,
     db_get_dish_recipe,
     db_get_all_recipes,
@@ -267,7 +259,6 @@ from app.repositories.inventory_repo import (
 
 # === Fiscal/DIAN: moved to app.repositories.fiscal_repo (Fase 6) ===
 from app.repositories.fiscal_repo import (
-    db_init_fiscal_tables,
     db_get_fiscal_resolution,
     db_upsert_fiscal_resolution,
     db_claim_next_invoice_number,

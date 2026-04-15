@@ -1369,29 +1369,3 @@ async def db_get_restaurant_by_slug(slug: str) -> dict | None:
     if not row:
         return None
     return dict(row)
-
-
-async def db_slug_exists(slug: str) -> bool:
-    """Return True if a restaurant with this slug already exists."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        val = await conn.fetchval(
-            "SELECT 1 FROM restaurants WHERE slug = $1", slug
-        )
-    return val is not None
-
-
-async def db_generate_unique_slug(name: str) -> str:
-    """
-    Generate a unique slug for a new restaurant.
-    Tries base slug first; appends -2, -3, … until unique.
-    Uses ON CONFLICT strategy: check-then-insert is acceptable here
-    because slug assignment is infrequent (restaurant creation).
-    """
-    base = _slugify(name)
-    candidate = base
-    suffix = 2
-    while await db_slug_exists(candidate):
-        candidate = f"{base}-{suffix}"
-        suffix += 1
-    return candidate
