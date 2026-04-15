@@ -49,9 +49,9 @@ MIN_DORMANT_ORDERS: int = 3
 
 # ── Lazy pool / serialize accessors ──────────────────────────────────────────
 
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 
 def _serialize(d: dict) -> dict:
@@ -114,8 +114,7 @@ def _cost_for_country(country_code: str) -> Decimal:
 async def count_marketing_this_month(restaurant_id: int, tz_name: str) -> int:
     """Count marketing_messages_log rows with status='sent' in the current local month."""
     month_start, month_end = _month_bounds_utc(tz_name)
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         count = await conn.fetchval(
             """
             SELECT COUNT(*)
@@ -142,8 +141,7 @@ async def get_marketing_status(restaurant_id: int) -> dict:
         }
     remaining is None when cap is None (enterprise = unlimited).
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             SELECT plan,
@@ -197,8 +195,7 @@ async def can_send_marketing(restaurant_id: int) -> tuple[bool, str]:
         (False, "cap_reached")         — monthly cap exhausted
         (False, "restaurant_not_found")— restaurant does not exist
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             SELECT plan,
@@ -247,8 +244,7 @@ async def log_marketing_message(
     If cost_estimate_usd is None, uses the country default for the restaurant.
     cost_estimate_usd must be Decimal — never float.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # Resolve cost if not provided
         if cost_estimate_usd is None:
             country_code = await _get_restaurant_country(restaurant_id, conn)
@@ -286,8 +282,7 @@ async def get_at_risk_customers(restaurant_id: int, limit: int = 50) -> list[dic
 
     Returns list of dicts ordered by days_since DESC (longest dormant first).
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT
@@ -325,8 +320,7 @@ async def get_at_risk_customers(restaurant_id: int, limit: int = 50) -> list[dic
 
 async def get_recent_marketing_messages(restaurant_id: int, limit: int = 50) -> list[dict]:
     """Return recent marketing log rows for the restaurant (newest first)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT id, customer_phone, message_type, template_name,
@@ -360,8 +354,7 @@ async def get_recent_marketing_messages(restaurant_id: int, limit: int = 50) -> 
 
 async def toggle_marketing_enabled(restaurant_id: int, enabled: bool) -> bool:
     """Set marketing_enabled for a restaurant. Returns True if row was updated."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         result = await conn.execute(
             """
             UPDATE restaurants

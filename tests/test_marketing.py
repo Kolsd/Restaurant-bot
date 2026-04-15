@@ -25,10 +25,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import make_pool, make_row, patch_auth
+from app.services.tenant_context import tenant_scope as _tenant_scope
 
 
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _run_scoped(restaurant_id: int, coro):
+    """Run coro inside a tenant_scope for the given restaurant_id."""
+    async def _wrapper():
+        with _tenant_scope(restaurant_id):
+            return await coro
+    return asyncio.get_event_loop().run_until_complete(_wrapper())
 
 
 # ── Mock helpers ───────────────────────────────────────────────────────────────
@@ -39,6 +48,10 @@ def _make_conn(fetchrow=None, fetch=None, fetchval=None, execute=None):
     conn.fetch     = AsyncMock(return_value=fetch or [])
     conn.fetchval  = AsyncMock(return_value=fetchval)
     conn.execute   = AsyncMock(return_value=execute or "UPDATE 1")
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__  = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
     return conn
 
 
@@ -79,9 +92,8 @@ class TestMarketingCaps:
         conn = _make_conn(fetchrow=row)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        allowed, reason = _run(marketing_repo.can_send_marketing(1))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            allowed, reason = _run_scoped(1, marketing_repo.can_send_marketing(1))
         assert allowed is False
         assert reason == "disabled"
 
@@ -93,14 +105,14 @@ class TestMarketingCaps:
         conn = _make_conn(fetchrow=row)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
         # Mock count_marketing_this_month to return 30 (at cap)
         monkeypatch.setattr(
             marketing_repo, "count_marketing_this_month",
             AsyncMock(return_value=30),
         )
 
-        allowed, reason = _run(marketing_repo.can_send_marketing(1))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            allowed, reason = _run_scoped(1, marketing_repo.can_send_marketing(1))
         assert allowed is False
         assert reason == "cap_reached"
 
@@ -112,14 +124,14 @@ class TestMarketingCaps:
         conn = _make_conn(fetchrow=row)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
         # Should NOT call count_marketing_this_month for enterprise
         monkeypatch.setattr(
             marketing_repo, "count_marketing_this_month",
             AsyncMock(return_value=1000),
         )
 
-        allowed, reason = _run(marketing_repo.can_send_marketing(1))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            allowed, reason = _run_scoped(1, marketing_repo.can_send_marketing(1))
         assert allowed is True
         assert reason == "ok"
 
@@ -130,9 +142,8 @@ class TestMarketingCaps:
         conn = _make_conn(fetchrow=None)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        allowed, reason = _run(marketing_repo.can_send_marketing(999))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            allowed, reason = _run_scoped(999, marketing_repo.can_send_marketing(999))
         assert allowed is False
         assert reason == "restaurant_not_found"
 
@@ -150,9 +161,8 @@ class TestCountMarketingThisMonth:
         conn = _make_conn(fetchval=5)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        result = _run(marketing_repo.count_marketing_this_month(1, "America/Bogota"))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            result = _run_scoped(1, marketing_repo.count_marketing_this_month(1, "America/Bogota"))
         assert result == 5
         assert isinstance(result, int)
 
@@ -164,9 +174,8 @@ class TestCountMarketingThisMonth:
         conn = _make_conn(fetchval=0)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        result = _run(marketing_repo.count_marketing_this_month(1, "America/Bogota"))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            result = _run_scoped(1, marketing_repo.count_marketing_this_month(1, "America/Bogota"))
         # Verify the query used tz-aware month boundaries
         call_args = conn.fetchval.call_args
         assert call_args is not None
@@ -199,22 +208,24 @@ class TestLogMarketingMessage:
         }))
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        row_id = _run(marketing_repo.log_marketing_message(
-            restaurant_id=1,
-            customer_phone="+573001234567",
-            message_type="reengagement",
-            status="sent",
-            message_body="Hola 👋",
-            cost_estimate_usd=Decimal("0.0625"),
-            meta_message_id="wam_abc123",
-        ))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            row_id = _run_scoped(1, marketing_repo.log_marketing_message(
+                restaurant_id=1,
+                customer_phone="+573001234567",
+                message_type="reengagement",
+                status="sent",
+                message_body="Hola 👋",
+                cost_estimate_usd=Decimal("0.0625"),
+                meta_message_id="wam_abc123",
+            ))
 
         assert row_id == 42
-        # Verify fetchval was called (the INSERT RETURNING id)
-        conn.fetchval.assert_called_once()
-        sql, *params = conn.fetchval.call_args[0]
+        # tenant_connection() calls fetchval for set_config; log_marketing_message
+        # calls it for INSERT RETURNING id. Filter for the INSERT call.
+        insert_calls = [c for c in conn.fetchval.call_args_list
+                        if "INSERT INTO marketing_messages_log" in str(c)]
+        assert len(insert_calls) == 1, f"Expected 1 INSERT fetchval, got {insert_calls}"
+        sql, *params = insert_calls[0][0]
         assert "INSERT INTO marketing_messages_log" in sql
         assert "+573001234567" in params
         assert "reengagement" in params
@@ -231,19 +242,21 @@ class TestLogMarketingMessage:
         }))
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        row_id = _run(marketing_repo.log_marketing_message(
-            restaurant_id=1,
-            customer_phone="+573001234567",
-            message_type="reengagement",
-            status="blocked_cap",
-            cost_estimate_usd=None,  # should default
-        ))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            row_id = _run_scoped(1, marketing_repo.log_marketing_message(
+                restaurant_id=1,
+                customer_phone="+573001234567",
+                message_type="reengagement",
+                status="blocked_cap",
+                cost_estimate_usd=None,  # should default
+            ))
 
         assert row_id == 7
-        # Inspect that cost passed to fetchval is Decimal("0.0625")
-        _, *params = conn.fetchval.call_args[0]
+        # tenant_connection() also calls fetchval for set_config — filter for INSERT call
+        insert_calls = [c for c in conn.fetchval.call_args_list
+                        if "INSERT INTO marketing_messages_log" in str(c)]
+        assert len(insert_calls) == 1, f"Expected 1 INSERT fetchval, got {insert_calls}"
+        _, *params = insert_calls[0][0]
         # cost_estimate_usd is the 6th positional param ($6)
         # params order: restaurant_id, phone, type, template, body, cost, status, error, meta_id
         cost_param = params[5]
@@ -280,9 +293,8 @@ class TestGetAtRiskCustomers:
         conn = _make_conn(fetch=rows)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        result = _run(marketing_repo.get_at_risk_customers(1, limit=50))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            result = _run_scoped(1, marketing_repo.get_at_risk_customers(1, limit=50))
         assert len(result) == 2
         assert result[0]["customer_phone"] == "+57300111"
         assert result[0]["days_since"] == 25
@@ -306,9 +318,8 @@ class TestGetAtRiskCustomers:
         conn = _make_conn(fetch=rows)
         pool = make_pool(conn)
 
-        monkeypatch.setattr(marketing_repo, "_get_pool", AsyncMock(return_value=pool))
-
-        result = _run(marketing_repo.get_at_risk_customers(1))
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            result = _run_scoped(1, marketing_repo.get_at_risk_customers(1))
         assert result[0]["days_since"] >= result[1]["days_since"]
 
 

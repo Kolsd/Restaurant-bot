@@ -299,22 +299,32 @@ async def test_db_clock_in_unique_violation_raises_value_error():
     """
     asyncpg.UniqueViolationError from the partial unique index
     uq_staff_shifts_one_open must be converted to ValueError by db_clock_in.
+
+    Adapted for tenant_connection(): requires tenant_scope(1) active.
     """
     import asyncpg
     from app.services import database as db
+    from app.services.tenant_context import tenant_scope
     from tests.conftest import make_pool
 
     mock_conn = AsyncMock()
     mock_conn.fetchrow = AsyncMock(
         side_effect=asyncpg.UniqueViolationError("duplicate key")
     )
+    mock_conn.fetchval = AsyncMock(return_value=None)  # set_config call in tenant_connection
+
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.transaction = MagicMock(return_value=txn)
 
     with patch.object(db, "get_pool", AsyncMock(return_value=make_pool(mock_conn))):
-        with pytest.raises(ValueError, match="turno abierto"):
-            await db.db_clock_in(
-                staff_id="aaaaaaaa-0000-4000-8000-000000000001",
-                restaurant_id=1,
-            )
+        with tenant_scope(1):
+            with pytest.raises(ValueError, match="turno abierto"):
+                await db.db_clock_in(
+                    staff_id="aaaaaaaa-0000-4000-8000-000000000001",
+                    restaurant_id=1,
+                )
 
 
 @pytest.mark.asyncio
@@ -322,17 +332,27 @@ async def test_db_clock_out_returns_none_when_no_open_shift():
     """
     When no open shift exists for the employee, fetchrow returns None.
     db_clock_out must propagate None (not raise).
+
+    Adapted for tenant_connection(): requires tenant_scope(1) active.
     """
     from app.services import database as db
+    from app.services.tenant_context import tenant_scope
     from tests.conftest import make_pool
 
     mock_conn = AsyncMock()
     mock_conn.fetchrow = AsyncMock(return_value=None)
+    mock_conn.fetchval = AsyncMock(return_value=None)  # set_config call in tenant_connection
+
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.transaction = MagicMock(return_value=txn)
 
     with patch.object(db, "get_pool", AsyncMock(return_value=make_pool(mock_conn))):
-        result = await db.db_clock_out(
-            staff_id="aaaaaaaa-0000-4000-8000-000000000001",
-            restaurant_id=1,
-        )
+        with tenant_scope(1):
+            result = await db.db_clock_out(
+                staff_id="aaaaaaaa-0000-4000-8000-000000000001",
+                restaurant_id=1,
+            )
 
     assert result is None

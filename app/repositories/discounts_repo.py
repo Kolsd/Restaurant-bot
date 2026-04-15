@@ -15,6 +15,7 @@ import re
 from zoneinfo import available_timezones
 
 from app.services.logging import get_logger
+from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
 
@@ -27,12 +28,6 @@ def _validate_tz(tz: str) -> str:
     if tz not in _VALID_TIMEZONES or not _TZ_SAFE_RE.match(tz):
         raise ValueError(f"Invalid timezone: {tz}")
     return tz
-
-
-# Lazy accessors — break circular import with app.services.database.
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
 
 
 def _serialize(d: dict) -> dict:
@@ -63,9 +58,10 @@ async def db_get_active_discount(
     Return the best active discount for *this restaurant right now*, or None.
 
     branch_id is always set (NOT NULL after migration 0018).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         dow = _dow_expr(tz)
         now_t = _now_time_expr(tz)
         # branch_id defaults to restaurant_id if not provided
@@ -90,9 +86,11 @@ async def db_get_active_discount(
 
 
 async def db_get_all_discounts(restaurant_id: int) -> list[dict]:
-    """Return all discounts for a restaurant ordered for display."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return all discounts for a restaurant ordered for display.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT *
@@ -117,9 +115,10 @@ async def db_create_discount(
     """
     Insert a new discount or update on conflict (same restaurant/branch/day/start_time).
     Returns the full row.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO time_slot_discounts
@@ -160,6 +159,8 @@ async def db_update_discount(discount_id: int, **kwargs) -> dict | None:
     """
     Dynamically update allowed fields on a discount row.
     Returns the updated row or None if not found.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     updates = {k: v for k, v in kwargs.items() if k in _ALLOWED_UPDATE_FIELDS}
     if not updates:
@@ -169,8 +170,7 @@ async def db_update_discount(discount_id: int, **kwargs) -> dict | None:
     set_clauses = [f"{col} = ${i + 2}" for i, col in enumerate(updates)]
     values = list(updates.values())
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             f"UPDATE time_slot_discounts SET {', '.join(set_clauses)} WHERE id = $1 RETURNING *",
             discount_id,
@@ -180,9 +180,11 @@ async def db_update_discount(discount_id: int, **kwargs) -> dict | None:
 
 
 async def db_delete_discount(discount_id: int) -> bool:
-    """Delete a discount by id. Returns True if a row was deleted."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Delete a discount by id. Returns True if a row was deleted.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         result = await conn.execute(
             "DELETE FROM time_slot_discounts WHERE id = $1",
             discount_id,

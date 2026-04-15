@@ -402,7 +402,9 @@ class TestWaiterFlows:
         session_row = make_row({"table_id": "table-1"})
         order_row = make_row({"table_id": "table-1", "status": "recibido"})
         conn = AsyncMock()
-        conn.fetch = AsyncMock(side_effect=[[session_row], [order_row]])
+        # Call order: db_get_pending_orders_by_branch (orders) first, then
+        # db_get_active_session_table_ids (sessions) — matches route execution order.
+        conn.fetch = AsyncMock(side_effect=[[order_row], [session_row]])
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
 
         resp = client.get(
@@ -1101,7 +1103,7 @@ class TestBotWhatsAppFlows:
         monkeypatch.setattr("app.routes.chat._process_message", fake_process)
         monkeypatch.setattr(
             "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok-abc"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-abc"}),
         )
 
         payload = {
@@ -1204,7 +1206,7 @@ class TestBotWhatsAppFlows:
         monkeypatch.setattr("app.routes.chat._process_message", fake_process)
         monkeypatch.setattr(
             db, "db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok"}),
         )
 
         stop = asyncio.Event()
@@ -1258,7 +1260,8 @@ class TestEndToEndTableFlow:
         }))
 
         conn = AsyncMock()
-        conn.fetch = AsyncMock(side_effect=[[session_row], [order_row_empty]])
+        # Call order: db_get_pending_orders_by_branch first, db_get_active_session_table_ids second.
+        conn.fetch = AsyncMock(side_effect=[[order_row_empty], [session_row]])
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
 
         resp = client.get(

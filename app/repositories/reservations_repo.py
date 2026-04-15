@@ -24,9 +24,9 @@ log = get_logger(__name__)
 # database.py re-exports this module at module level, so a top-level import
 # of database here would create a cycle. We resolve both helpers at call time.
 
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 
 def _serialize(d: dict) -> dict:
@@ -50,8 +50,7 @@ async def db_add_reservation(
     If a matching row exists, UPDATE name/guests/notes and return it.
     Otherwise INSERT a new row.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         existing = await conn.fetchrow(
             """SELECT * FROM reservations
                WHERE phone=$1 AND bot_number=$2 AND "date"=$3 AND "time"=$4""",
@@ -85,8 +84,7 @@ async def db_get_reservations_range(
 
     Optionally filter by bot_number. Results ordered by date, time.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         if bot_number is not None:
             rows = await conn.fetch(
                 """SELECT * FROM reservations
@@ -109,8 +107,7 @@ async def db_get_all_reservations(bot_number: str | None = None) -> list[dict]:
 
     Results ordered by created_at DESC.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         if bot_number is not None:
             rows = await conn.fetch(
                 "SELECT * FROM reservations WHERE bot_number=$1 ORDER BY created_at DESC",
@@ -125,8 +122,7 @@ async def db_get_all_reservations(bot_number: str | None = None) -> list[dict]:
 
 async def db_get_reservation_by_id(reservation_id: int) -> dict | None:
     """Return a single reservation by primary key, or None if not found."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM reservations WHERE id=$1",
             reservation_id,
@@ -156,8 +152,7 @@ async def db_update_reservation_status(
     vals.append(reservation_id)
     sql = f'UPDATE reservations SET {", ".join(sets)} WHERE id=${idx} RETURNING *'
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(sql, *vals)
         return _serialize(dict(row)) if row else None
 
@@ -174,8 +169,7 @@ async def db_get_available_tables(
 
     Resolves the restaurant via bot_number unless branch_id is provided.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # Resolve restaurant_id from bot_number or branch_id
         if branch_id is not None:
             restaurant_row = await conn.fetchrow(
@@ -218,8 +212,7 @@ async def db_assign_table_to_reservation(
     table_id: str,
 ) -> dict | None:
     """Assign a table to a reservation. Returns updated row or None."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "UPDATE reservations SET table_id=$1 WHERE id=$2 RETURNING *",
             table_id, reservation_id,
@@ -229,8 +222,7 @@ async def db_assign_table_to_reservation(
 
 async def db_mark_no_show(reservation_id: int) -> dict | None:
     """Mark a reservation as no-show. Returns updated row or None."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "UPDATE reservations SET no_show=TRUE, status='no_show' WHERE id=$1 RETURNING *",
             reservation_id,
@@ -246,8 +238,7 @@ async def db_cancel_reservation(
 
     Returns updated row or None.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE reservations
                SET status='cancelled', cancelled_at=NOW(), cancellation_reason=$1
@@ -296,8 +287,7 @@ async def db_get_reservations_by_status(
     where_clause = " AND ".join(conditions)
     sql = f'SELECT * FROM reservations WHERE {where_clause} ORDER BY "date", "time"'
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(sql, *vals)
         return [_serialize(dict(r)) for r in rows]
 
@@ -336,8 +326,7 @@ async def db_get_reservation_stats(
     FROM reservations
     WHERE {where_clause}"""
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(sql, *vals)
         if not row:
             return {
@@ -366,8 +355,7 @@ async def db_confirm_reservation(reservation_id: int) -> dict | None:
 
     Returns updated row or None.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE reservations
                SET status='confirmed', confirmed_at=NOW()
@@ -382,8 +370,7 @@ async def db_get_upcoming_unconfirmed(hours_ahead: int = 24) -> list[dict]:
     """Return confirmed reservations that have not yet received a reminder,
     whose appointment time falls within the next hours_ahead hours.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT * FROM reservations
                WHERE status = 'confirmed'
@@ -399,8 +386,7 @@ async def db_get_upcoming_unconfirmed(hours_ahead: int = 24) -> list[dict]:
 
 async def db_mark_confirmation_sent(reservation_id: int) -> None:
     """Mark confirmation_sent=TRUE so the reminder is not sent again."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "UPDATE reservations SET confirmation_sent=TRUE WHERE id=$1",
             reservation_id,

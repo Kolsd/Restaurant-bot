@@ -10,6 +10,7 @@ from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
 from app.services.money import to_decimal
+from app.services.tenant_context import bypass_tenant_scope as _bypass_tenant
 from app.repositories.orders_repo import (
     InsufficientStockError,
     OrderCommitError,
@@ -149,19 +150,22 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
         table_id = tid_match.group(1).strip()
         table = await db.db_get_table_by_id(table_id)
         if table:
-            session = await db.db_get_active_session(phone, bot_number)
-            if session and session.get("table_id") != table["id"]:
-                await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
-            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+            with _bypass_tenant("agent.detect_table_context: cross-tenant session lookup"):
+                session = await db.db_get_active_session(phone, bot_number)
+                if session and session.get("table_id") != table["id"]:
+                    await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
+                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
             table["is_new_session"] = True
             return table
 
     # 2. Sesión activa existente: Si ya sabemos dónde está, respetamos la sesión
-    session = await db.db_get_active_session(phone, bot_number)
+    with _bypass_tenant("agent.detect_table_context: cross-tenant active session lookup"):
+        session = await db.db_get_active_session(phone, bot_number)
     if session and session.get("table_id"):
         table = await db.db_get_table_by_id(session["table_id"])
         if table:
-            await db.db_touch_session(phone, bot_number)
+            with _bypass_tenant("agent.detect_table_context: cross-tenant touch session"):
+                await db.db_touch_session(phone, bot_number)
             table["is_new_session"] = False
             return table
 
@@ -246,7 +250,8 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                     )
                     if row:
                         table = dict(row)
-                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                        with _bypass_tenant("agent.detect_table_context: create session numeric"):
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                         table["is_new_session"] = True
                         return table
             except (ValueError, TypeError):
@@ -260,7 +265,8 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 for row in all_tables:
                     if row["number"] == num_mesa:
                         table = dict(row)
-                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                        with _bypass_tenant("agent.detect_table_context: create session legacy"):
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                         table["is_new_session"] = True
                         return table
             except (ValueError, TypeError):
@@ -275,14 +281,16 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             for row in all_tables:
                 if row["name"].lower() == candidate:
                     table = dict(row)
-                    await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                    with _bypass_tenant("agent.detect_table_context: create session by name"):
+                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                     table["is_new_session"] = True
                     return table
 
     return None
 
 async def get_session_state(phone: str, bot_number: str) -> dict:
-    session = await db.db_get_active_session(phone, bot_number)
+    with _bypass_tenant("agent.get_session_state: cross-tenant session lookup"):
+        session = await db.db_get_active_session(phone, bot_number)
     if not session:
         return {"has_order": False, "order_delivered": False, "active": False}
     return {
@@ -1244,7 +1252,8 @@ async def _handle_nps_guard(user_phone: str, bot_number: str,
     """
     if not await state_store.nps_is_done(user_phone, bot_number):
         return False
-    _active_sess = await db.db_get_active_session(user_phone, bot_number)
+    with _bypass_tenant("agent._handle_nps_guard: cross-tenant session lookup"):
+        _active_sess = await db.db_get_active_session(user_phone, bot_number)
     if _active_sess:
         return False
     if len(user_message_clean.strip()) > 30:

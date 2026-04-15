@@ -21,6 +21,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.conftest import make_pool, make_row
+from unittest.mock import patch as _patch
+from app.services.tenant_context import tenant_scope
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -32,8 +34,14 @@ def _run(coro):
 def _make_conn_for_history(fetchval_result: int, fetch_result: list):
     """Mock DB connection with fetchval (order count) + fetch (aggregated rows)."""
     conn = MagicMock()
-    conn.fetchval = AsyncMock(return_value=fetchval_result)
+    # tenant_connection() calls conn.fetchval("SELECT set_config(...)") first,
+    # then the repo calls conn.fetchval for the order count, then conn.fetch.
+    conn.fetchval = AsyncMock(side_effect=[None, fetchval_result])
     conn.fetch = AsyncMock(return_value=fetch_result)
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
     return conn
 
 
@@ -53,12 +61,10 @@ class TestDbGetCustomerOrderHistory:
 
     def test_returns_empty_for_customer_with_no_orders(self, monkeypatch):
         conn = _make_conn_for_history(fetchval_result=0, fetch_result=[])
-        monkeypatch.setattr(
-            "app.repositories.conversations_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         from app.repositories.conversations_repo import db_get_customer_order_history
-        result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1))
+        with _patch("app.services.database.get_pool", AsyncMock(return_value=make_pool(conn))):
+            with tenant_scope(1):
+                result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1))
         assert result == []
         # fetch() must NOT have been called (early return after fetchval < 2)
         conn.fetch.assert_not_awaited()
@@ -67,12 +73,10 @@ class TestDbGetCustomerOrderHistory:
 
     def test_returns_empty_for_single_order_customer(self, monkeypatch):
         conn = _make_conn_for_history(fetchval_result=1, fetch_result=[])
-        monkeypatch.setattr(
-            "app.repositories.conversations_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         from app.repositories.conversations_repo import db_get_customer_order_history
-        result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1))
+        with _patch("app.services.database.get_pool", AsyncMock(return_value=make_pool(conn))):
+            with tenant_scope(1):
+                result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1))
         assert result == []
         conn.fetch.assert_not_awaited()
 
@@ -85,12 +89,10 @@ class TestDbGetCustomerOrderHistory:
             _make_history_row("Limonada de Coco", count=2, days_ago=6),
         ]
         conn = _make_conn_for_history(fetchval_result=3, fetch_result=db_rows)
-        monkeypatch.setattr(
-            "app.repositories.conversations_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         from app.repositories.conversations_repo import db_get_customer_order_history
-        result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1))
+        with _patch("app.services.database.get_pool", AsyncMock(return_value=make_pool(conn))):
+            with tenant_scope(1):
+                result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1))
 
         assert len(result) == 2
         # First item: most frequent
@@ -112,13 +114,11 @@ class TestDbGetCustomerOrderHistory:
             _make_history_row("Dish C", count=3, days_ago=3),
         ]
         conn = _make_conn_for_history(fetchval_result=10, fetch_result=db_rows)
-        monkeypatch.setattr(
-            "app.repositories.conversations_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         from app.repositories.conversations_repo import db_get_customer_order_history
-        # Even if caller passes limit=10, the query caps at 3
-        result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1, limit=10))
+        with _patch("app.services.database.get_pool", AsyncMock(return_value=make_pool(conn))):
+            with tenant_scope(1):
+                # Even if caller passes limit=10, the query caps at 3
+                result = _run(db_get_customer_order_history(phone="+57300", restaurant_id=1, limit=10))
         # The mock returns exactly 3 rows — function must not add or remove any
         assert len(result) == 3
         # Verify that the fetch was called with limit=3 (min(10, 3))

@@ -3,10 +3,16 @@ Tests para FASE 5: Split Checks y Pagos Mixtos.
 Cubre: db_create_checks, db_finalize_check_payment,
        db_get_order_ticket_data, endpoints REST de checks.
 No requiere base de datos ni credenciales reales.
+
+Updated for tenant_connection() migration: direct repo calls now require
+an active tenant_scope() or bypass_tenant_scope().  Tests that call repo
+functions directly wrap them in bypass_tenant_scope (since the test has
+no meaningful restaurant_id context).
 """
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+from app.services.tenant_context import bypass_tenant_scope as _bypass
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -71,7 +77,8 @@ async def test_create_checks_inserta_dos_checks():
     ]
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        result = await db.db_create_checks("BASE-001", checks_input)
+        with _bypass("test: db_create_checks direct call"):
+            result = await db.db_create_checks("BASE-001", checks_input)
 
     # DELETE de checks open fue llamado
     delete_calls = [c for c in mock_conn.execute.call_args_list if "DELETE" in str(c)]
@@ -117,9 +124,10 @@ async def test_create_checks_id_incluye_chk_numero():
     ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        await db.db_create_checks("ORD-XYZ", [
-            {"check_number": 1, "items": [], "subtotal": 23529, "tax_amount": 4471, "total": 28000}
-        ])
+        with _bypass("test: db_create_checks id format check"):
+            await db.db_create_checks("ORD-XYZ", [
+                {"check_number": 1, "items": [], "subtotal": 23529, "tax_amount": 4471, "total": 28000}
+            ])
 
     assert any("ORD-XYZ-CHK-1" in str(i) for i in inserted_ids)
 
@@ -142,16 +150,17 @@ async def test_finalize_check_marca_invoiced():
     ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        await db.db_finalize_check_payment(
-            check_id="BASE-001-CHK-1",
-            base_order_id="BASE-001",
-            payments=[{"method": "efectivo", "amount": 100000}],
-            change_amount=10000,
-            fiscal_invoice_id=42,
-            customer_name="Juan",
-            customer_nit="123456",
-            customer_email="j@test.co",
-        )
+        with _bypass("test: db_finalize_check_payment invoiced"):
+            await db.db_finalize_check_payment(
+                check_id="BASE-001-CHK-1",
+                base_order_id="BASE-001",
+                payments=[{"method": "efectivo", "amount": 100000}],
+                change_amount=10000,
+                fiscal_invoice_id=42,
+                customer_name="Juan",
+                customer_nit="123456",
+                customer_email="j@test.co",
+            )
 
     # UPDATE table_checks llamado (main UPDATE with SET payments=)
     update_check_calls = [c for c in mock_conn.execute.call_args_list
@@ -178,13 +187,14 @@ async def test_finalize_check_cierra_mesa_si_todos_pagados():
     ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        await db.db_finalize_check_payment(
-            check_id="BASE-001-CHK-2",
-            base_order_id="BASE-001",
-            payments=[{"method": "tarjeta", "amount": 15000}],
-            change_amount=0,
-            fiscal_invoice_id=43,
-        )
+        with _bypass("test: db_finalize_check_payment closes mesa"):
+            await db.db_finalize_check_payment(
+                check_id="BASE-001-CHK-2",
+                base_order_id="BASE-001",
+                payments=[{"method": "tarjeta", "amount": 15000}],
+                change_amount=0,
+                fiscal_invoice_id=43,
+            )
 
     # UPDATE table_orders debe haber sido llamado (cierre de mesa)
     close_calls = [c for c in mock_conn.execute.call_args_list
@@ -207,13 +217,14 @@ async def test_finalize_check_no_cierra_mesa_si_hay_pendientes():
     ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        await db.db_finalize_check_payment(
-            check_id="BASE-001-CHK-1",
-            base_order_id="BASE-001",
-            payments=[{"method": "efectivo", "amount": 90000}],
-            change_amount=0,
-            fiscal_invoice_id=41,
-        )
+        with _bypass("test: db_finalize_check_payment pending checks"):
+            await db.db_finalize_check_payment(
+                check_id="BASE-001-CHK-1",
+                base_order_id="BASE-001",
+                payments=[{"method": "efectivo", "amount": 90000}],
+                change_amount=0,
+                fiscal_invoice_id=41,
+            )
 
     close_calls = [c for c in mock_conn.execute.call_args_list
                    if "UPDATE table_orders" in str(c)]
@@ -241,9 +252,14 @@ async def test_get_order_ticket_data_agrega_items():
 
     mock_conn = AsyncMock()
     mock_conn.fetch = AsyncMock(return_value=rows)
+    mock_conn.transaction = MagicMock(return_value=AsyncMock(
+        __aenter__=AsyncMock(return_value=None),
+        __aexit__=AsyncMock(return_value=False),
+    ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        result = await db.db_get_order_ticket_data("BASE-001", branch_id=None)
+        with _bypass("test: db_get_order_ticket_data aggregate"):
+            result = await db.db_get_order_ticket_data("BASE-001", branch_id=None)
 
     assert result is not None
     assert result["total"] == 105000
@@ -258,9 +274,14 @@ async def test_get_order_ticket_data_retorna_none_si_no_existe():
 
     mock_conn = AsyncMock()
     mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.transaction = MagicMock(return_value=AsyncMock(
+        __aenter__=AsyncMock(return_value=None),
+        __aexit__=AsyncMock(return_value=False),
+    ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        result = await db.db_get_order_ticket_data("INEXISTENTE", branch_id=None)
+        with _bypass("test: db_get_order_ticket_data none case"):
+            result = await db.db_get_order_ticket_data("INEXISTENTE", branch_id=None)
 
     assert result is None
 

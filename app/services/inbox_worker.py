@@ -282,6 +282,8 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
         AudioTooLongError,
     )
 
+    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+
     bot_number = payload["bot_number"]
     user_phone = payload["user_phone"]
     phone_id   = payload["phone_id"]
@@ -293,6 +295,10 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
         access_token = restaurant["wa_access_token"]
     else:
         access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+
+    # Resolve tenant_id for downstream tenant-scoped repo calls.
+    # If restaurant cannot be resolved, proceed without scope (legacy path).
+    _tenant_id = restaurant["id"] if restaurant else None
 
     # ── Voice note: transcribe before calling _process_message ────────────────
     if payload.get("needs_transcription"):
@@ -353,13 +359,27 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
     else:
         user_text = payload.get("user_text", "")
 
-    await _process_message(
-        user_phone   = user_phone,
-        user_text    = user_text,
-        bot_number   = bot_number,
-        phone_id     = phone_id,
-        access_token = access_token,
-    )
+    # Wrap _process_message in tenant_scope so that any tenant-scoped repo calls
+    # downstream (agent.py → orders.py → customer_profiles_repo, etc.) have an
+    # active tenant context.  If restaurant could not be resolved, skip the scope
+    # and let the existing error handling in _process_message deal with it.
+    if _tenant_id is not None:
+        with tenant_scope(_tenant_id):
+            await _process_message(
+                user_phone   = user_phone,
+                user_text    = user_text,
+                bot_number   = bot_number,
+                phone_id     = phone_id,
+                access_token = access_token,
+            )
+    else:
+        await _process_message(
+            user_phone   = user_phone,
+            user_text    = user_text,
+            bot_number   = bot_number,
+            phone_id     = phone_id,
+            access_token = access_token,
+        )
 
 
 # Register at import time so the worker is ready before any message arrives.

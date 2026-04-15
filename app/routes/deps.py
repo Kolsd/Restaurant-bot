@@ -82,24 +82,24 @@ async def get_current_user(request: Request) -> dict:
 async def get_current_restaurant(request: Request) -> dict:
     """Returns the restaurant for the authenticated user or raises 403."""
     user = await get_current_user(request)
-    
+
     # 1. Si es Gerente de una sucursal específica
     if user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
         if r:
             return r
-            
+
     # 2. Si es Staff operativo (resuelve su restaurante principal exacto)
     if user.get("restaurant_id"):
         r = await db.db_get_restaurant_by_id(user["restaurant_id"])
         if r:
             return r
-            
+
     # 3. Fallback para el Owner/Admin
     all_r = await db.db_get_all_restaurants()
     if all_r:
         main_rest = all_r[0]
-        
+
         # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sucursal
         branch_header = request.headers.get("X-Branch-ID")
         if branch_header and branch_header.isdigit():
@@ -108,11 +108,54 @@ async def get_current_restaurant(request: Request) -> dict:
             # Verifica rigurosamente que sea realmente una sucursal de esta matriz
             if target_rest and target_rest.get("parent_restaurant_id") == main_rest["id"]:
                 return target_rest
-                
+
         return main_rest
-        
+
     raise HTTPException(status_code=403, detail="Restaurant not found")
-    
+
+
+# NOTE: Decision — get_current_restaurant is called as a regular async function
+# from many route files (inventory, stats, tables, nps, etc.), not only via
+# Depends().  Mutating it to a yield-based generator would break all those
+# call sites.  Instead we provide this sibling that wraps the resolved
+# restaurant in tenant_scope() and is used ONLY by loyalty routes (the RLS
+# pilot).  Other routes continue to use the original get_current_restaurant.
+async def get_current_restaurant_scoped(request: Request):
+    """Yield-based variant of get_current_restaurant that activates tenant_scope.
+
+    Used by loyalty routes as the RLS pilot.  Entering tenant_scope() pins
+    app.restaurant_id for every DB call made within the request lifetime.
+    The scope is guaranteed to exit via the finally clause in the `with` block.
+
+    DO NOT use this dep in routes that also call get_current_restaurant() as a
+    plain function — the scope would be active only for the Depends() path.
+    """
+    from app.services.tenant_context import tenant_scope
+
+    restaurant = await get_current_restaurant(request)
+    with tenant_scope(restaurant["id"]):
+        yield restaurant
+
+
+async def get_current_user_scoped(request: Request):
+    """Yield-based variant of get_current_user that activates tenant_scope.
+
+    For routes that only need the user dict (staff login, profile, etc.) and
+    whose downstream repo calls are tenant-scoped via the user's restaurant_id.
+    """
+    from app.services.tenant_context import tenant_scope
+
+    user = await get_current_user(request)
+    rid = user.get("restaurant_id") or user.get("branch_id")
+    if rid:
+        with tenant_scope(int(rid)):
+            yield user
+    else:
+        # User without a restaurant (unusual — probably superadmin bootstrap).
+        # Yield without scope; downstream tenant-scoped repo calls will raise
+        # TenantNotSetError if reached, which is the correct fail-loud behaviour.
+        yield user
+
 
 def require_module(module_name: str) -> Callable:
     """

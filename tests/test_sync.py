@@ -17,6 +17,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from tests.conftest import make_pool, patch_auth
+from app.services.tenant_context import tenant_scope as _tenant_scope
 
 
 _HEADERS = {"Authorization": "Bearer tok"}
@@ -185,15 +186,16 @@ async def test_db_sync_batch_dispatches_registered_handler():
         mock_pool = make_pool(mock_conn)
 
         with patch.object(db, "get_pool", AsyncMock(return_value=mock_pool)):
-            results = await db.db_sync_batch(
-                restaurant_id=1,
-                operations=[{
-                    "id":     "ffffffff-0000-4000-8000-000000000001",
-                    "type":   "test_entity",
-                    "action": "upsert",
-                    "data":   {"key": "value"},
-                }],
-            )
+            with _tenant_scope(1):
+                results = await db.db_sync_batch(
+                    restaurant_id=1,
+                    operations=[{
+                        "id":     "ffffffff-0000-4000-8000-000000000001",
+                        "type":   "test_entity",
+                        "action": "upsert",
+                        "data":   {"key": "value"},
+                    }],
+                )
     finally:
         # Restore original handler registry
         db._SYNC_HANDLERS.clear()
@@ -215,18 +217,23 @@ async def test_db_sync_batch_unknown_type_returns_error_not_exception():
     from app.services import database as db
 
     mock_conn = AsyncMock()
+    mock_conn.transaction = MagicMock(return_value=AsyncMock(
+        __aenter__=AsyncMock(return_value=None),
+        __aexit__=AsyncMock(return_value=False),
+    ))
     mock_pool = make_pool(mock_conn)
 
     with patch.object(db, "get_pool", AsyncMock(return_value=mock_pool)):
-        results = await db.db_sync_batch(
-            restaurant_id=1,
-            operations=[{
-                "id":     "eeeeeeee-0000-4000-8000-000000000001",
-                "type":   "absolutely_unknown_type_xyz",
-                "action": "upsert",
-                "data":   {},
-            }],
-        )
+        with _tenant_scope(1):
+            results = await db.db_sync_batch(
+                restaurant_id=1,
+                operations=[{
+                    "id":     "eeeeeeee-0000-4000-8000-000000000001",
+                    "type":   "absolutely_unknown_type_xyz",
+                    "action": "upsert",
+                    "data":   {},
+                }],
+            )
 
     assert len(results) == 1
     # db_sync_batch uses status "unsupported_type" for unregistered handlers

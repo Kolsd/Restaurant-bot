@@ -20,9 +20,9 @@ log = get_logger(__name__)
 
 
 # Lazy accessors — break circular import with app.services.database.
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 
 def _serialize(d: dict) -> dict:
@@ -32,8 +32,7 @@ def _serialize(d: dict) -> dict:
 
 async def db_verify_review_ownership(nps_id: int, bot_number: str) -> bool:
     """Return True if the NPS response exists and belongs to this bot_number."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT id FROM nps_responses WHERE id = $1 AND bot_number = $2",
             nps_id, bot_number,
@@ -43,8 +42,7 @@ async def db_verify_review_ownership(nps_id: int, bot_number: str) -> bool:
 
 async def db_get_public_reviews(bot_number: str, limit: int = 50) -> list[dict]:
     """Return public reviews for a restaurant ordered by most recent."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT id, phone, score, comment, feedback, is_public,
@@ -66,8 +64,7 @@ async def db_set_review_public(
     customer_name: str = "",
 ) -> dict | None:
     """Toggle public visibility and optionally set a display name for the review."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             UPDATE nps_responses
@@ -84,8 +81,7 @@ async def db_set_review_public(
 
 async def db_add_owner_reply(nps_id: int, reply_text: str) -> dict | None:
     """Save owner reply to a review with timestamp."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             UPDATE nps_responses
@@ -104,8 +100,7 @@ async def db_get_review_summary(bot_number: str) -> dict:
     Aggregate stats for all public reviews of a restaurant:
     total_reviews, avg_score, score_distribution (count per score 1-5).
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         summary_row = await conn.fetchrow(
             """
             SELECT
@@ -147,8 +142,7 @@ async def db_save_occupancy_snapshot(
     seated_guests: int,
 ) -> None:
     """Persist a point-in-time occupancy snapshot."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             """
             INSERT INTO occupancy_snapshots
@@ -176,8 +170,7 @@ async def db_get_occupancy_stats(
     Returns avg_occupancy_rate (occupied/total), avg_utilization (seated/capacity),
     and snapshot_count.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         if branch_id is not None:
             row = await conn.fetchrow(
                 """
@@ -249,8 +242,7 @@ async def db_get_turn_time_stats(
     Calculate table turn time statistics from closed table sessions.
     Returns avg_minutes, min_minutes, max_minutes, and session_count.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         if branch_id is not None:
             row = await conn.fetchrow(
                 """

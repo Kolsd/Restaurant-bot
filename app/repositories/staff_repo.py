@@ -1,5 +1,6 @@
 """
 Staff repository — Fase 6 extraction from app.services.database.
+Migrated to tenant_connection() — RLS rollout Step 3.
 
 Covers the staff/HR aggregate:
   - staff CRUD (roster, PIN login helpers)
@@ -17,6 +18,14 @@ Covers the staff/HR aggregate:
 
 Call sites that import via `app.services.database` continue to work through the
 re-export shim added to that module.
+
+Tenant isolation notes
+----------------------
+• Functions with a `restaurant_id` parameter use ``tenant_connection()``.
+• Functions that look up data by staff/credential/shift UUID only (no tenant
+  parameter) use ``bypass_tenant_scope("staff_cross_tenant_<reason>")``.
+• ``_generate_username`` is an internal helper that must scan across tenants;
+  it also uses bypass.
 """
 
 from __future__ import annotations
@@ -28,6 +37,8 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.services.money import to_decimal, money_mul, money_sum, quantize_money, ZERO
+from app.services.tenant_db import tenant_connection
+from app.services.tenant_context import bypass_tenant_scope
 
 
 def _ensure_datetime(val) -> datetime:
@@ -43,14 +54,6 @@ def _ensure_datetime(val) -> datetime:
             return datetime.strptime(val, "%Y-%m-%d")
     return val
 
-
-# Lazy accessors — break circular import with app.services.database.
-# database.py re-exports this module at module level, so a top-level import
-# of database here would create a cycle. We resolve both helpers at call time.
-
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
 
 def _serialize(d: dict) -> dict:
     from app.services.database import _serialize as _db_serialize  # noqa: PLC0415
@@ -121,19 +124,25 @@ def _normalize_for_username(text: str) -> str:
 
 async def _generate_username(name: str, exclude_id: str | None = None) -> str:
     """Generate unique username as firstname.lastname from full name.
-    If a duplicate exists, appends an incrementing number: juan.perez1, juan.perez2..."""
+    If a duplicate exists, appends an incrementing number: juan.perez1, juan.perez2...
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    # NOTE: scans across all tenants to avoid collisions — always called via
+    # bypass_tenant_scope("staff_username_generation") from db_create_staff /
+    # db_update_staff which already hold a tenant_connection() outer scope.
+    """
     parts = name.strip().split()
     fname = _normalize_for_username(parts[0]) if parts else 'user'
     lname = _normalize_for_username(parts[1]) if len(parts) > 1 else ''
 
     base = f"{fname}.{lname}" if lname else fname
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT username FROM staff WHERE username LIKE $1 || '%'",
-            base,
-        )
+    with bypass_tenant_scope("staff_username_generation"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                "SELECT username FROM staff WHERE username LIKE $1 || '%'",
+                base,
+            )
     existing = {r['username'] for r in rows}
 
     candidate = base
@@ -148,9 +157,11 @@ async def _generate_username(name: str, exclude_id: str | None = None) -> str:
 # ── Staff roster ─────────────────────────────────────────────────────────────
 
 async def db_get_staff(restaurant_id: int) -> list:
-    """Return all active (and inactive) staff members for a restaurant."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return all active (and inactive) staff members for a restaurant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
             "document_number, created_at, updated_at FROM staff "
@@ -161,9 +172,11 @@ async def db_get_staff(restaurant_id: int) -> list:
 
 
 async def db_get_team_staff_by_branch(restaurant_id: int) -> list:
-    """Return staff formatted for the Mi Equipo unified team view."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return staff formatted for the Mi Equipo unified team view.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             "SELECT id::text, name, role, roles, phone, active "
             "FROM staff WHERE restaurant_id=$1 ORDER BY name ASC",
@@ -183,9 +196,11 @@ async def db_get_team_staff_by_branch(restaurant_id: int) -> list:
 
 
 async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | None:
-    """Return a staff member's record including pin hash for PIN authentication."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return a staff member's record including pin hash for PIN authentication.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
             "document_number, hourly_rate, photo_url "
@@ -205,16 +220,19 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
 
 async def db_get_staff_candidates_by_name(name: str) -> list:
     """Retorna todos los staff activos con ese nombre (multi-restaurante).
-    El caller verifica el PIN contra cada candidato para resolver colisiones."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
-            "document_number, hourly_rate "
-            "FROM staff WHERE (LOWER(name)=LOWER($1) OR LOWER(username)=LOWER($1)) AND active=true "
-            "ORDER BY restaurant_id",
-            name,
-        )
+    El caller verifica el PIN contra cada candidato para resolver colisiones.
+
+    # Cross-tenant lookup — always uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_pin_login_cross_tenant"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
+                "document_number, hourly_rate "
+                "FROM staff WHERE (LOWER(name)=LOWER($1) OR LOWER(username)=LOWER($1)) AND active=true "
+                "ORDER BY restaurant_id",
+                name,
+            )
     result = []
     for row in rows:
         d = dict(row)
@@ -237,13 +255,15 @@ async def db_create_staff(
     username: str = "",
 ) -> dict:
     """Insert a new staff member. Returns the created row.
-    username is auto-generated from name if not provided."""
+    username is auto-generated from name if not provided.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     if roles is None:
         roles = [role] if role else []
     if not username:
         username = await _generate_username(name)
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO staff (restaurant_id, name, username, role, pin, phone, roles, document_number)
                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
@@ -260,6 +280,8 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
     Ignores unknown keys. Returns updated row or None if not found.
     Only updates columns that are explicitly passed in fields.
     All values are passed as parameters — no f-string SQL.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     allowed = {"name", "username", "role", "roles", "pin", "phone", "active", "document_number"}
     updates = {k: v for k, v in fields.items() if k in allowed}
@@ -274,8 +296,7 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
     if "roles" in updates and isinstance(updates["roles"], list):
         updates["roles"] = json.dumps(updates["roles"])
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         # Build SET clause with positional params starting at $3
         set_parts = []
         values = []
@@ -295,9 +316,11 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
 
 
 async def db_delete_staff(staff_id: str, restaurant_id: int) -> bool:
-    """Elimina permanentemente un miembro de staff. Retorna True si se eliminó."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Elimina permanentemente un miembro de staff. Retorna True si se eliminó.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         result = await conn.execute(
             "DELETE FROM staff WHERE id=$1::uuid AND restaurant_id=$2",
             staff_id, restaurant_id,
@@ -314,11 +337,12 @@ async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
     After inserting, checks staff_schedules for today's day and records
     a tardiness attendance_deduction if clock_in is > 5 min late.
     Returns the new shift dict.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     import asyncpg as _asyncpg
     from datetime import datetime, timedelta
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         try:
             row = await conn.fetchrow(
                 """INSERT INTO staff_shifts (staff_id, restaurant_id)
@@ -371,10 +395,11 @@ async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
     After updating, checks staff_schedules for today's day and records
     an early_departure attendance_deduction if clock_out is > 5 min early.
     Returns the updated shift, or None if no open shift was found.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     from datetime import datetime, timedelta
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE staff_shifts
                SET clock_out = NOW()
@@ -423,9 +448,11 @@ async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
 
 
 async def db_get_open_shifts(restaurant_id: int) -> list:
-    """Return all currently open shifts for a restaurant, joined with staff info."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return all currently open shifts for a restaurant, joined with staff info.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT ss.id::text, ss.staff_id::text, ss.clock_in,
                       s.name AS staff_name, s.role AS staff_role
@@ -443,7 +470,10 @@ async def db_get_shifts(
     date_from: str,
     date_to: str,
 ) -> list:
-    """Return closed and open shifts in [date_from, date_to] with staff name/role."""
+    """Return closed and open shifts in [date_from, date_to] with staff name/role.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     from datetime import datetime, timezone
     def _parse_dt(s: str):
         s = s.replace("Z", "+00:00")
@@ -455,8 +485,7 @@ async def db_get_shifts(
     dt_from = _parse_dt(date_from)
     dt_to   = _parse_dt(date_to)
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT ss.id::text, ss.staff_id::text, ss.clock_in, ss.clock_out,
                       ss.notes,
@@ -501,9 +530,10 @@ async def db_calculate_tip_pool(
         "total_allocated":   float,
         "total_unallocated": float
       }
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         # 1. Read tip_distribution config — single parametrized query
         pct_val = await conn.fetchval(
             "SELECT features->'tip_distribution' FROM restaurants WHERE id=$1",
@@ -598,9 +628,10 @@ async def db_calculate_tips_by_attendance(
     """
     Distribute tips from table_checks to staff based on who was clocked-in
     when each ticket was paid. Uses features.tip_distribution % config.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         # Get tip distribution config
         rest = await conn.fetchrow(
             "SELECT features FROM restaurants WHERE id=$1", restaurant_id
@@ -724,9 +755,11 @@ async def db_save_tip_distribution(
     pct_config: dict,
     created_by: str,
 ) -> dict:
-    """Persist a tip distribution cut. Returns the saved row."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Persist a tip distribution cut. Returns the saved row.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO tip_distributions
                (restaurant_id, period_start, period_end,
@@ -747,9 +780,11 @@ async def db_save_tip_distribution(
 
 
 async def db_get_tip_distributions(restaurant_id: int, limit: int = 20) -> list:
-    """Return recent tip distribution cuts for a restaurant."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return recent tip distribution cuts for a restaurant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT id::text, restaurant_id, period_start, period_end,
                       total_tips, distribution, pct_config, created_by, created_at
@@ -772,9 +807,12 @@ async def db_save_webauthn_credential(
     transports: list,
     device_name: str = "",
 ) -> dict:
-    """Store a WebAuthn credential for a staff member."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Store a WebAuthn credential for a staff member.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    # webauthn_credentials is tenant-scoped via JOIN staff → restaurant_id.
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO webauthn_credentials
                    (staff_id, credential_id, public_key, sign_count, transports, device_name)
@@ -788,24 +826,29 @@ async def db_save_webauthn_credential(
 
 
 async def db_get_webauthn_credentials_by_staff(staff_id: str) -> list:
-    """Return all WebAuthn credentials registered for a staff member."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """SELECT id::text, staff_id::text, credential_id,
-                      sign_count, transports, device_name, created_at
-               FROM webauthn_credentials
-               WHERE staff_id = $1::uuid
-               ORDER BY created_at DESC""",
-            staff_id,
-        )
+    """Return all WebAuthn credentials registered for a staff member.
+
+    # Cross-tenant lookup by staff UUID — always uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("webauthn_credentials_by_staff"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                """SELECT id::text, staff_id::text, credential_id,
+                          sign_count, transports, device_name, created_at
+                   FROM webauthn_credentials
+                   WHERE staff_id = $1::uuid
+                   ORDER BY created_at DESC""",
+                staff_id,
+            )
     return [_serialize(dict(r)) for r in rows]
 
 
 async def db_get_webauthn_credentials_by_restaurant(restaurant_id: int) -> list:
-    """Get all WebAuthn credentials for a restaurant (for authentication ceremony)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Get all WebAuthn credentials for a restaurant (for authentication ceremony).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT wc.id::text, wc.staff_id::text, wc.credential_id, wc.public_key,
                       wc.sign_count, wc.transports, wc.device_name, s.name AS staff_name
@@ -819,37 +862,46 @@ async def db_get_webauthn_credentials_by_restaurant(restaurant_id: int) -> list:
 
 
 async def db_get_webauthn_credential(credential_id: str) -> dict | None:
-    """Get a single credential by its credential_id (base64url string)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """SELECT wc.id::text, wc.staff_id::text, wc.credential_id, wc.public_key,
-                      wc.sign_count, wc.transports, s.restaurant_id, s.name AS staff_name
-               FROM webauthn_credentials wc
-               JOIN staff s ON wc.staff_id = s.id
-               WHERE wc.credential_id = $1""",
-            credential_id,
-        )
+    """Get a single credential by its credential_id (base64url string).
+
+    # Cross-tenant lookup by credential ID — always uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("webauthn_credential_lookup"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchrow(
+                """SELECT wc.id::text, wc.staff_id::text, wc.credential_id, wc.public_key,
+                          wc.sign_count, wc.transports, s.restaurant_id, s.name AS staff_name
+                   FROM webauthn_credentials wc
+                   JOIN staff s ON wc.staff_id = s.id
+                   WHERE wc.credential_id = $1""",
+                credential_id,
+            )
     return _serialize(dict(row)) if row else None
 
 
 async def db_update_webauthn_sign_count(credential_id: str, new_count: int) -> None:
-    """Update the sign counter after a successful assertion."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE webauthn_credentials SET sign_count = $1 WHERE credential_id = $2",
-            new_count, credential_id,
-        )
+    """Update the sign counter after a successful assertion.
+
+    # Cross-tenant update by credential ID — always uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("webauthn_sign_count_update"):
+        async with tenant_connection() as conn:
+            await conn.execute(
+                "UPDATE webauthn_credentials SET sign_count = $1 WHERE credential_id = $2",
+                new_count, credential_id,
+            )
 
 
 async def db_delete_webauthn_credential(credential_id: str) -> bool:
-    """Delete a credential. Returns True if a row was deleted."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM webauthn_credentials WHERE credential_id = $1", credential_id
-        )
+    """Delete a credential. Returns True if a row was deleted.
+
+    # Cross-tenant delete by credential ID — always uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("webauthn_credential_delete"):
+        async with tenant_connection() as conn:
+            result = await conn.execute(
+                "DELETE FROM webauthn_credentials WHERE credential_id = $1", credential_id
+            )
     return result == "DELETE 1"
 
 
@@ -859,9 +911,12 @@ async def db_save_webauthn_challenge(
     challenge_type: str,
     restaurant_id: int,
 ) -> None:
-    """Persist a WebAuthn challenge (registration or authentication)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Persist a WebAuthn challenge (registration or authentication).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    # webauthn_challenges has a restaurant_id column (migration 0005).
+    """
+    async with tenant_connection() as conn:
         await conn.execute(
             """INSERT INTO webauthn_challenges (challenge, staff_id, type, restaurant_id)
                VALUES ($1, $2, $3, $4)""",
@@ -870,87 +925,105 @@ async def db_save_webauthn_challenge(
 
 
 async def db_consume_webauthn_challenge(challenge: str) -> dict | None:
-    """Atomically get and delete a challenge. Returns None if expired (>5 min) or not found."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """DELETE FROM webauthn_challenges
-               WHERE challenge = $1
-                 AND created_at > NOW() - INTERVAL '5 minutes'
-               RETURNING id::text, challenge, staff_id::text, type, restaurant_id""",
-            challenge,
-        )
+    """Atomically get and delete a challenge. Returns None if expired (>5 min) or not found.
+
+    # Cross-tenant: looked up by challenge string only — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("webauthn_challenge_consume"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchrow(
+                """DELETE FROM webauthn_challenges
+                   WHERE challenge = $1
+                     AND created_at > NOW() - INTERVAL '5 minutes'
+                   RETURNING id::text, challenge, staff_id::text, type, restaurant_id""",
+                challenge,
+            )
     return _serialize(dict(row)) if row else None
 
 
 async def db_cleanup_expired_challenges() -> None:
-    """Remove all WebAuthn challenges older than 5 minutes."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM webauthn_challenges WHERE created_at < NOW() - INTERVAL '5 minutes'"
-        )
+    """Remove all WebAuthn challenges older than 5 minutes.
+
+    # Global maintenance op — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("webauthn_challenge_cleanup"):
+        async with tenant_connection() as conn:
+            await conn.execute(
+                "DELETE FROM webauthn_challenges WHERE created_at < NOW() - INTERVAL '5 minutes'"
+            )
 
 
 # ── Breaks ────────────────────────────────────────────────────────────────────
 
 async def db_start_break(staff_id: str, shift_id: str) -> dict:
-    """Start a break for an employee. Raises ValueError if a break is already open."""
+    """Start a break for an employee. Raises ValueError if a break is already open.
+
+    # Cross-tenant: keyed by staff/shift UUID only — uses bypass_tenant_scope internally.
+    """
     import asyncpg as _asyncpg
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        try:
-            row = await conn.fetchrow(
-                """INSERT INTO staff_breaks (staff_id, shift_id)
-                   VALUES ($1::uuid, $2::uuid)
-                   RETURNING id::text, staff_id::text, shift_id::text,
-                             break_start, break_end, notes, created_at""",
-                staff_id, shift_id,
-            )
-            return _serialize(dict(row))
-        except _asyncpg.UniqueViolationError:
-            raise ValueError("El empleado ya tiene un break abierto.")
+    with bypass_tenant_scope("staff_break_start"):
+        async with tenant_connection() as conn:
+            try:
+                row = await conn.fetchrow(
+                    """INSERT INTO staff_breaks (staff_id, shift_id)
+                       VALUES ($1::uuid, $2::uuid)
+                       RETURNING id::text, staff_id::text, shift_id::text,
+                                 break_start, break_end, notes, created_at""",
+                    staff_id, shift_id,
+                )
+                return _serialize(dict(row))
+            except _asyncpg.UniqueViolationError:
+                raise ValueError("El empleado ya tiene un break abierto.")
 
 
 async def db_end_break(staff_id: str) -> dict | None:
-    """End the current open break. Returns None if no open break exists."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """UPDATE staff_breaks SET break_end = NOW()
-               WHERE staff_id = $1::uuid AND break_end IS NULL
-               RETURNING id::text, staff_id::text, shift_id::text,
-                         break_start, break_end, notes""",
-            staff_id,
-        )
+    """End the current open break. Returns None if no open break exists.
+
+    # Cross-tenant: keyed by staff UUID only — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_break_end"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchrow(
+                """UPDATE staff_breaks SET break_end = NOW()
+                   WHERE staff_id = $1::uuid AND break_end IS NULL
+                   RETURNING id::text, staff_id::text, shift_id::text,
+                             break_start, break_end, notes""",
+                staff_id,
+            )
     return _serialize(dict(row)) if row else None
 
 
 async def db_get_breaks_for_shift(shift_id: str) -> list:
-    """Return all breaks for a given shift ordered chronologically."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """SELECT id::text, staff_id::text, shift_id::text,
-                      break_start, break_end, notes
-               FROM staff_breaks
-               WHERE shift_id = $1::uuid
-               ORDER BY break_start""",
-            shift_id,
-        )
+    """Return all breaks for a given shift ordered chronologically.
+
+    # Cross-tenant: keyed by shift UUID only — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_breaks_by_shift"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                """SELECT id::text, staff_id::text, shift_id::text,
+                          break_start, break_end, notes
+                   FROM staff_breaks
+                   WHERE shift_id = $1::uuid
+                   ORDER BY break_start""",
+                shift_id,
+            )
     return [_serialize(dict(r)) for r in rows]
 
 
 async def db_get_open_break(staff_id: str) -> dict | None:
-    """Return the currently open break for a staff member, or None."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """SELECT id::text, staff_id::text, shift_id::text, break_start, notes
-               FROM staff_breaks
-               WHERE staff_id = $1::uuid AND break_end IS NULL""",
-            staff_id,
-        )
+    """Return the currently open break for a staff member, or None.
+
+    # Cross-tenant: keyed by staff UUID only — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_open_break"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchrow(
+                """SELECT id::text, staff_id::text, shift_id::text, break_start, notes
+                   FROM staff_breaks
+                   WHERE staff_id = $1::uuid AND break_end IS NULL""",
+                staff_id,
+            )
     return _serialize(dict(row)) if row else None
 
 
@@ -963,56 +1036,60 @@ async def db_upsert_schedule(
     start_time: str,
     end_time: str,
 ) -> dict:
-    """Create or replace the schedule for a staff member on a specific day."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
-                staff_id, day_of_week,
-            )
-            row = await conn.fetchrow(
-                """INSERT INTO staff_schedules
-                       (staff_id, restaurant_id, day_of_week, start_time, end_time)
-                   VALUES ($1::uuid, $2, $3, $4, $5)
-                   RETURNING id::text, staff_id::text, restaurant_id,
-                             day_of_week, start_time::text, end_time::text, active""",
-                staff_id, restaurant_id, day_of_week, start_time, end_time,
-            )
-        return _serialize(dict(row))
+    """Create or replace the schedule for a staff member on a specific day.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        await conn.execute(
+            "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
+            staff_id, day_of_week,
+        )
+        row = await conn.fetchrow(
+            """INSERT INTO staff_schedules
+                   (staff_id, restaurant_id, day_of_week, start_time, end_time)
+               VALUES ($1::uuid, $2, $3, $4, $5)
+               RETURNING id::text, staff_id::text, restaurant_id,
+                         day_of_week, start_time::text, end_time::text, active""",
+            staff_id, restaurant_id, day_of_week, start_time, end_time,
+        )
+    return _serialize(dict(row))
 
 
 async def db_bulk_upsert_schedules(
     entries: list[dict],
     restaurant_id: int,
 ) -> list[dict]:
-    """Bulk create/update schedules. Each entry: {staff_id, day_of_week, start_time, end_time}."""
-    pool = await _get_pool()
+    """Bulk create/update schedules. Each entry: {staff_id, day_of_week, start_time, end_time}.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     results = []
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            for entry in entries:
-                await conn.execute(
-                    "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
-                    entry["staff_id"], entry["day_of_week"],
-                )
-                row = await conn.fetchrow(
-                    """INSERT INTO staff_schedules (staff_id, restaurant_id, day_of_week, start_time, end_time)
-                       VALUES ($1::uuid, $2, $3, $4, $5)
-                       RETURNING id::text, staff_id::text, restaurant_id, day_of_week,
-                                 start_time::text, end_time::text""",
-                    entry["staff_id"], restaurant_id, entry["day_of_week"],
-                    entry["start_time"], entry["end_time"],
-                )
-                if row:
-                    results.append(_serialize(dict(row)))
+    async with tenant_connection() as conn:
+        for entry in entries:
+            await conn.execute(
+                "DELETE FROM staff_schedules WHERE staff_id = $1::uuid AND day_of_week = $2",
+                entry["staff_id"], entry["day_of_week"],
+            )
+            row = await conn.fetchrow(
+                """INSERT INTO staff_schedules (staff_id, restaurant_id, day_of_week, start_time, end_time)
+                   VALUES ($1::uuid, $2, $3, $4, $5)
+                   RETURNING id::text, staff_id::text, restaurant_id, day_of_week,
+                             start_time::text, end_time::text""",
+                entry["staff_id"], restaurant_id, entry["day_of_week"],
+                entry["start_time"], entry["end_time"],
+            )
+            if row:
+                results.append(_serialize(dict(row)))
     return results
 
 
 async def db_get_schedules(restaurant_id: int) -> list:
-    """Return all active schedules for a restaurant with staff info."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return all active schedules for a restaurant with staff info.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT ss.id::text, ss.staff_id::text, s.name AS staff_name,
                       s.role AS staff_role, ss.day_of_week,
@@ -1027,12 +1104,15 @@ async def db_get_schedules(restaurant_id: int) -> list:
 
 
 async def db_delete_schedule(schedule_id: str) -> bool:
-    """Delete a schedule entry. Returns True if a row was deleted."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        result = await conn.execute(
-            "DELETE FROM staff_schedules WHERE id = $1::uuid", schedule_id
-        )
+    """Delete a schedule entry. Returns True if a row was deleted.
+
+    # Cross-tenant: keyed by schedule UUID only — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_schedule_delete"):
+        async with tenant_connection() as conn:
+            result = await conn.execute(
+                "DELETE FROM staff_schedules WHERE id = $1::uuid", schedule_id
+            )
     return result == "DELETE 1"
 
 
@@ -1045,8 +1125,10 @@ async def db_edit_shift(
     clock_out=None,
     notes=None,
 ) -> dict | None:
-    """Admin edit of shift times/notes. Only updates provided fields."""
-    pool = await _get_pool()
+    """Admin edit of shift times/notes. Only updates provided fields.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     parts: list[str] = []
     params: list = []
     idx = 1
@@ -1071,7 +1153,7 @@ async def db_edit_shift(
         f"WHERE id = ${idx}::uuid AND restaurant_id = ${idx + 1} "
         "RETURNING id::text, staff_id::text, restaurant_id, clock_in, clock_out, notes"
     )
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(query, *params)
     return _serialize(dict(row)) if row else None
 
@@ -1083,9 +1165,11 @@ async def db_get_timecard(
     week_start: str,
     week_end: str,
 ) -> list:
-    """Weekly timecard: per employee per day — gross hours minus break time."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Weekly timecard: per employee per day — gross hours minus break time.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT
                  ss.staff_id::text,
@@ -1165,9 +1249,11 @@ async def db_get_attendance_report(
     date_from: str,
     date_to: str,
 ) -> list:
-    """Compare actual clock-in times with scheduled times to identify lateness."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Compare actual clock-in times with scheduled times to identify lateness.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT
                  ss.staff_id::text,
@@ -1222,9 +1308,11 @@ async def db_get_attendance_report(
 # ── Deduction items (manual) ─────────────────────────────────────────────────
 
 async def db_list_deduction_items(staff_id: str, restaurant_id: int) -> list:
-    """List all deduction items for a staff member."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """List all deduction items for a staff member.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT id::text, staff_id::text, restaurant_id, category, label,
                       type, amount, active, created_at
@@ -1244,9 +1332,11 @@ async def db_create_deduction_item(
     item_type: str,
     amount: float,
 ) -> dict:
-    """Create a manual deduction item."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Create a manual deduction item.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO staff_deduction_items
                (staff_id, restaurant_id, category, label, type, amount)
@@ -1263,12 +1353,14 @@ async def db_update_deduction_item(
     restaurant_id: int,
     patch: dict,
 ) -> dict | None:
-    """Update a deduction item. patch keys: label, category, type, amount, active."""
+    """Update a deduction item. patch keys: label, category, type, amount, active.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     allowed = {"label", "category", "type", "amount", "active"}
     updates = {k: v for k, v in patch.items() if k in allowed}
     if not updates:
         return None
-    pool = await _get_pool()
     set_parts = []
     values: list = [item_id, restaurant_id]
     idx = 3
@@ -1282,15 +1374,17 @@ async def db_update_deduction_item(
         f"RETURNING id::text, staff_id::text, restaurant_id, category, label, "
         f"type, amount, active, created_at"
     )
-    async with (await _get_pool()).acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(sql, *values)
     return _serialize(dict(row)) if row else None
 
 
 async def db_delete_deduction_item(item_id: str, restaurant_id: int) -> bool:
-    """Delete a deduction item. Returns True if deleted."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Delete a deduction item. Returns True if deleted.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         result = await conn.execute(
             "DELETE FROM staff_deduction_items WHERE id=$1::uuid AND restaurant_id=$2",
             item_id, restaurant_id,
@@ -1319,6 +1413,8 @@ async def db_calculate_payroll(
                correct restaurant_id for the branch can omit this — it is
                only needed when restaurant_id is the matrix and you want to
                restrict tip aggregation to a single branch.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     if config is None:
         config = {}
@@ -1326,8 +1422,7 @@ async def db_calculate_payroll(
     weekly_threshold = config.get("overtime_weekly_threshold", 40.0)
     ot_multiplier    = config.get("overtime_multiplier", 1.5)
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         staff_rows = await conn.fetch(
             """SELECT id::text, name, role, hourly_rate, deductions
                FROM staff WHERE restaurant_id = $1 AND active = TRUE""",
@@ -1404,11 +1499,13 @@ async def db_save_payroll_run(
     config: dict,
     created_by: str = "",
 ) -> dict:
-    """Persist a payroll run snapshot. Returns the saved row."""
+    """Persist a payroll run snapshot. Returns the saved row.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     total_gross = money_sum(e.get("gross_pay", 0) for e in snapshot)
     total_net   = money_sum(e.get("net_pay",   0) for e in snapshot)
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO payroll_runs
                    (restaurant_id, period_start, period_end,
@@ -1424,9 +1521,11 @@ async def db_save_payroll_run(
 
 
 async def db_get_payroll_runs(restaurant_id: int, limit: int = 20) -> list:
-    """Return recent payroll runs for a restaurant."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return recent payroll runs for a restaurant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT id::text, restaurant_id, period_start, period_end,
                       status, total_gross, total_net, created_by, created_at, approved_at
@@ -1440,9 +1539,11 @@ async def db_get_payroll_runs(restaurant_id: int, limit: int = 20) -> list:
 
 
 async def db_get_payroll_run(run_id: str, restaurant_id: int) -> dict | None:
-    """Return a single payroll run including its snapshot."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return a single payroll run including its snapshot.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """SELECT id::text, restaurant_id, period_start, period_end,
                       status, snapshot, config, total_gross, total_net,
@@ -1455,9 +1556,11 @@ async def db_get_payroll_run(run_id: str, restaurant_id: int) -> dict | None:
 
 
 async def db_approve_payroll_run(run_id: str, restaurant_id: int) -> dict | None:
-    """Approve a draft payroll run. Returns None if not found or already approved."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Approve a draft payroll run. Returns None if not found or already approved.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE payroll_runs
                SET status = 'approved', approved_at = NOW()
@@ -1471,9 +1574,11 @@ async def db_approve_payroll_run(run_id: str, restaurant_id: int) -> dict | None
 # ── Contract templates ────────────────────────────────────────────────────────
 
 async def db_list_contract_templates(restaurant_id: int) -> list:
-    """Return all contract templates for a restaurant."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return all contract templates for a restaurant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT id::text, restaurant_id, name, weekly_hours, monthly_salary,
                       pay_period, transport_subsidy, arl_pct, health_pct, pension_pct,
@@ -1488,9 +1593,11 @@ async def db_list_contract_templates(restaurant_id: int) -> list:
 
 
 async def db_create_contract_template(restaurant_id: int, data: dict) -> dict:
-    """Create a new contract template."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Create a new contract template.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO contract_templates
                (restaurant_id, name, weekly_hours, monthly_salary, pay_period,
@@ -1519,7 +1626,10 @@ async def db_create_contract_template(restaurant_id: int, data: dict) -> dict:
 
 
 async def db_update_contract_template(template_id: str, restaurant_id: int, data: dict) -> dict | None:
-    """Update allowed fields of a contract template."""
+    """Update allowed fields of a contract template.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     allowed = {
         "name", "weekly_hours", "monthly_salary", "pay_period",
         "transport_subsidy", "arl_pct", "health_pct", "pension_pct",
@@ -1528,7 +1638,6 @@ async def db_update_contract_template(template_id: str, restaurant_id: int, data
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
         return None
-    pool = await _get_pool()
     set_parts = []
     values: list = [template_id, restaurant_id]
     idx = 3
@@ -1543,15 +1652,17 @@ async def db_update_contract_template(template_id: str, restaurant_id: int, data
         f"transport_subsidy, arl_pct, health_pct, pension_pct, other_benefits, "
         f"breaks_billable, lunch_billable, lunch_minutes, active, created_at"
     )
-    async with (await _get_pool()).acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(sql, *values)
     return _serialize(dict(row)) if row else None
 
 
 async def db_delete_contract_template(template_id: str, restaurant_id: int) -> bool:
-    """Delete a contract template (only if no staff assigned)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Delete a contract template (only if no staff assigned).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         in_use = await conn.fetchval(
             "SELECT COUNT(*) FROM staff WHERE contract_template_id=$1::uuid",
             template_id,
@@ -1572,9 +1683,11 @@ async def db_assign_staff_contract(
     overrides: dict | None = None,
     contract_start: str | None = None,
 ) -> dict | None:
-    """Assign (or clear) a contract template for a staff member."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Assign (or clear) a contract template for a staff member.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE staff
                SET contract_template_id = $1::uuid,
@@ -1599,8 +1712,10 @@ async def db_list_overtime_requests(
     week_start: str | None = None,
     status: str | None = None,
 ) -> list:
-    """Return overtime requests, optionally filtered by week and status."""
-    pool = await _get_pool()
+    """Return overtime requests, optionally filtered by week and status.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     clauses = ["o.restaurant_id = $1"]
     values: list = [restaurant_id]
     idx = 2
@@ -1613,7 +1728,7 @@ async def db_list_overtime_requests(
         values.append(status)
         idx += 1
     where = " AND ".join(clauses)
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             f"""SELECT o.id::text, o.staff_id::text, s.name AS staff_name, s.role,
                        o.restaurant_id, o.week_start, o.regular_minutes,
@@ -1636,9 +1751,11 @@ async def db_upsert_overtime_request(
     overtime_minutes: int,
     overtime_rate: float = 1.25,
 ) -> dict:
-    """Insert or update an overtime request for a staff member's week."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Insert or update an overtime request for a staff member's week.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO overtime_requests
                (staff_id, restaurant_id, week_start, regular_minutes, overtime_minutes, overtime_rate)
@@ -1663,9 +1780,11 @@ async def db_review_overtime_request(
     approved_by: str | None,
     notes: str = "",
 ) -> dict | None:
-    """Approve or reject an overtime request."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Approve or reject an overtime request.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE overtime_requests
                SET status=$3, approved_by=$4::uuid, approved_at=NOW(), notes=$5
@@ -1682,24 +1801,30 @@ async def db_review_overtime_request(
 # ── Self-service helpers (Staff HQ) ──────────────────────────────────────────
 
 async def db_get_staff_restaurant_id(staff_id: str) -> int | None:
-    """Return the restaurant_id for a staff member by UUID. Used for self clock-in/out."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id
-        )
+    """Return the restaurant_id for a staff member by UUID. Used for self clock-in/out.
+
+    # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_self_service_restaurant_id"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id
+            )
     return row["restaurant_id"] if row else None
 
 
 async def db_get_staff_profile(staff_id: str) -> dict | None:
-    """Return full staff profile row for the Staff HQ self-service view."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
-            "document_number, hourly_rate, photo_url FROM staff WHERE id=$1::uuid",
-            staff_id,
-        )
+    """Return full staff profile row for the Staff HQ self-service view.
+
+    # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_self_service_profile"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
+                "document_number, hourly_rate, photo_url FROM staff WHERE id=$1::uuid",
+                staff_id,
+            )
     if not row:
         return None
     d = dict(row)
@@ -1712,19 +1837,22 @@ async def db_get_staff_profile(staff_id: str) -> dict | None:
 
 
 async def db_get_staff_open_shift_and_break(staff_id: str) -> tuple:
-    """Return (open_shift_dict, open_break_dict) for the self-profile endpoint."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        shift_row = await conn.fetchrow(
-            "SELECT id::text, clock_in FROM staff_shifts "
-            "WHERE staff_id=$1::uuid AND clock_out IS NULL LIMIT 1",
-            staff_id,
-        )
-        break_row = await conn.fetchrow(
-            "SELECT id::text, break_start FROM staff_breaks "
-            "WHERE staff_id=$1::uuid AND break_end IS NULL LIMIT 1",
-            staff_id,
-        )
+    """Return (open_shift_dict, open_break_dict) for the self-profile endpoint.
+
+    # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_self_service_shift_break"):
+        async with tenant_connection() as conn:
+            shift_row = await conn.fetchrow(
+                "SELECT id::text, clock_in FROM staff_shifts "
+                "WHERE staff_id=$1::uuid AND clock_out IS NULL LIMIT 1",
+                staff_id,
+            )
+            break_row = await conn.fetchrow(
+                "SELECT id::text, break_start FROM staff_breaks "
+                "WHERE staff_id=$1::uuid AND break_end IS NULL LIMIT 1",
+                staff_id,
+            )
     return (dict(shift_row) if shift_row else None, dict(break_row) if break_row else None)
 
 
@@ -1732,43 +1860,45 @@ async def db_get_staff_timecard_rows(staff_id: str, ws_date, we_date) -> tuple:
     """
     Return (shift_rows, schedule_rows, deduction_rows) for a staff timecard week.
     All date params must be date objects (asyncpg requirement).
+
+    # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        shift_rows = await conn.fetch(
-            """
-            SELECT
-                s.id::text      AS shift_id,
-                s.clock_in,
-                s.clock_out,
-                s.clock_in::date AS work_date,
-                COALESCE(
-                    EXTRACT(EPOCH FROM (COALESCE(s.clock_out, NOW()) - s.clock_in)) / 3600,
-                    0
-                )::numeric(8,2) AS gross_hours,
-                COALESCE((
-                    SELECT SUM(EXTRACT(EPOCH FROM (COALESCE(b.break_end, NOW()) - b.break_start)) / 3600)
-                    FROM staff_breaks b
-                    WHERE b.shift_id = s.id
-                ), 0)::numeric(8,2) AS break_hours
-            FROM staff_shifts s
-            WHERE s.staff_id = $1::uuid
-              AND s.clock_in::date BETWEEN $2 AND $3
-            ORDER BY s.clock_in ASC
-            """,
-            staff_id, ws_date, we_date,
-        )
-        sched_rows = await conn.fetch(
-            "SELECT day_of_week, start_time, end_time FROM staff_schedules "
-            "WHERE staff_id=$1::uuid AND active=true",
-            staff_id,
-        )
-        ded_rows = await conn.fetch(
-            "SELECT shift_id::text, type, minutes_diff, deduction_amount "
-            "FROM attendance_deductions "
-            "WHERE staff_id=$1::uuid AND created_at::date BETWEEN $2 AND $3",
-            staff_id, ws_date, we_date,
-        )
+    with bypass_tenant_scope("staff_self_service_timecard"):
+        async with tenant_connection() as conn:
+            shift_rows = await conn.fetch(
+                """
+                SELECT
+                    s.id::text      AS shift_id,
+                    s.clock_in,
+                    s.clock_out,
+                    s.clock_in::date AS work_date,
+                    COALESCE(
+                        EXTRACT(EPOCH FROM (COALESCE(s.clock_out, NOW()) - s.clock_in)) / 3600,
+                        0
+                    )::numeric(8,2) AS gross_hours,
+                    COALESCE((
+                        SELECT SUM(EXTRACT(EPOCH FROM (COALESCE(b.break_end, NOW()) - b.break_start)) / 3600)
+                        FROM staff_breaks b
+                        WHERE b.shift_id = s.id
+                    ), 0)::numeric(8,2) AS break_hours
+                FROM staff_shifts s
+                WHERE s.staff_id = $1::uuid
+                  AND s.clock_in::date BETWEEN $2 AND $3
+                ORDER BY s.clock_in ASC
+                """,
+                staff_id, ws_date, we_date,
+            )
+            sched_rows = await conn.fetch(
+                "SELECT day_of_week, start_time, end_time FROM staff_schedules "
+                "WHERE staff_id=$1::uuid AND active=true",
+                staff_id,
+            )
+            ded_rows = await conn.fetch(
+                "SELECT shift_id::text, type, minutes_diff, deduction_amount "
+                "FROM attendance_deductions "
+                "WHERE staff_id=$1::uuid AND created_at::date BETWEEN $2 AND $3",
+                staff_id, ws_date, we_date,
+            )
     return (
         [dict(r) for r in shift_rows],
         [dict(r) for r in sched_rows],
@@ -1777,23 +1907,28 @@ async def db_get_staff_timecard_rows(staff_id: str, ws_date, we_date) -> tuple:
 
 
 async def db_get_staff_schedule(staff_id: str) -> list:
-    """Return active weekly schedule entries for a staff member."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id::text, day_of_week, start_time, end_time, active "
-            "FROM staff_schedules WHERE staff_id=$1::uuid AND active=true "
-            "ORDER BY day_of_week ASC",
-            staff_id,
-        )
+    """Return active weekly schedule entries for a staff member.
+
+    # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_self_service_schedule"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                "SELECT id::text, day_of_week, start_time, end_time, active "
+                "FROM staff_schedules WHERE staff_id=$1::uuid AND active=true "
+                "ORDER BY day_of_week ASC",
+                staff_id,
+            )
     return [dict(r) for r in rows]
 
 
 async def db_update_tip_distribution(restaurant_id: int, config: dict) -> None:
-    """Persist tip distribution % config into restaurants.features JSONB."""
+    """Persist tip distribution % config into restaurants.features JSONB.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     import json as _json
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         await conn.execute(
             """UPDATE restaurants
                SET features = jsonb_set(COALESCE(features, '{}'), '{tip_distribution}', $1::jsonb)
@@ -1803,20 +1938,25 @@ async def db_update_tip_distribution(restaurant_id: int, config: dict) -> None:
 
 
 async def db_get_active_staff_basic(staff_id: str) -> dict | None:
-    """Return id, name, restaurant_id for an active staff member. Used by WebAuthn registration."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id::text, name, restaurant_id FROM staff WHERE id = $1::uuid AND active = TRUE",
-            staff_id,
-        )
+    """Return id, name, restaurant_id for an active staff member. Used by WebAuthn registration.
+
+    # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
+    """
+    with bypass_tenant_scope("staff_self_service_basic"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT id::text, name, restaurant_id FROM staff WHERE id = $1::uuid AND active = TRUE",
+                staff_id,
+            )
     return dict(row) if row else None
 
 
 async def db_has_staff(restaurant_id: int) -> bool:
-    """Return True if the restaurant has at least one staff record. Uses EXISTS for efficiency."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return True if the restaurant has at least one staff record. Uses EXISTS for efficiency.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         exists = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM staff WHERE restaurant_id = $1 LIMIT 1)",
             restaurant_id,

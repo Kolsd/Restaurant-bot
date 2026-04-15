@@ -38,6 +38,13 @@ def test_table_orders_sin_filtro_devuelve_todos(client, mock_auth, monkeypatch):
         class FakeConn:
             async def fetch(self, *a, **k):
                 return [MagicMock(**{**o, "__iter__": lambda s: iter(o.items()), "keys": lambda s: o.keys(), "__getitem__": lambda s, k: o[k]}) for o in SAMPLE_ORDERS]
+            async def fetchval(self, *a, **k): return None
+            async def execute(self, *a, **k): pass
+            def transaction(self):
+                class _T:
+                    async def __aenter__(self): return self
+                    async def __aexit__(self, *a): pass
+                return _T()
         return FakeConn()
 
     class FakePool:
@@ -45,6 +52,13 @@ def test_table_orders_sin_filtro_devuelve_todos(client, mock_auth, monkeypatch):
         async def __aenter__(self):
             class FakeConn:
                 async def fetch(self, *a, **k): return []
+                async def fetchval(self, *a, **k): return None
+                async def execute(self, *a, **k): pass
+                def transaction(self):
+                    class _T:
+                        async def __aenter__(self): return self
+                        async def __aexit__(self, *a): pass
+                    return _T()
             return FakeConn()
         async def __aexit__(self, *a): pass
 
@@ -67,6 +81,14 @@ def _make_pool_with_orders(orders: list):
     class FakeConn:
         async def fetch(self, *a, **k):
             return [FakeRow(o) for o in orders]
+        async def fetchval(self, *a, **k): return None  # set_config calls
+        async def execute(self, *a, **k): pass
+
+        def transaction(self):
+            class _FakeTxn:
+                async def __aenter__(self): return self
+                async def __aexit__(self, *a): pass
+            return _FakeTxn()
 
     class FakePool:
         def acquire(self): return self

@@ -15,6 +15,7 @@ from app.routes.deps import require_auth, get_current_user, get_current_restaura
 from app.repositories import restaurant_repo, tables_repo as tr
 from app.repositories import weekly_reports_repo
 from app.repositories.staff_repo import db_has_staff
+from app.services.tenant_context import bypass_tenant_scope
 from app.repositories.restaurant_repo import db_has_orders_by_bot_number
 from app.services.logging import get_logger
 from app.services import state_store
@@ -307,7 +308,8 @@ async def get_onboarding_status(request: Request):
     # ── 2. has_staff ──────────────────────────────────────────────────
     has_staff = False
     try:
-        has_staff = await db_has_staff(restaurant_id)
+        with bypass_tenant_scope("onboarding_has_staff"):
+            has_staff = await db_has_staff(restaurant_id)
     except Exception as exc:
         log.warning("onboarding.staff_check_failed", error=str(exc))
 

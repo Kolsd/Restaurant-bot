@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.routes.deps import require_auth, get_current_restaurant, require_module
+from app.routes.deps import require_auth, get_current_restaurant_scoped, require_module
 from app.repositories import discounts_repo as dr
 from app.services.logging import get_logger
 
@@ -51,7 +51,7 @@ class DiscountUpdate(BaseModel):
 
 @router.get("/active")
 async def get_active_discount(
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Return the currently active discount for this restaurant (right now), or null."""
     discount = await dr.db_get_active_discount(restaurant["id"])
@@ -60,7 +60,7 @@ async def get_active_discount(
 
 @router.get("")
 async def list_discounts(
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """List all time-slot discounts for this restaurant."""
     discounts = await dr.db_get_all_discounts(restaurant["id"])
@@ -70,7 +70,7 @@ async def list_discounts(
 @router.post("")
 async def create_discount(
     body: DiscountCreate,
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Create (or upsert on conflict) a time-slot discount."""
     try:
@@ -102,7 +102,7 @@ async def _verify_discount_ownership(discount_id: int, restaurant: dict) -> dict
 async def update_discount(
     discount_id: int,
     body: DiscountUpdate,
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Update allowed fields on a discount."""
     await _verify_discount_ownership(discount_id, restaurant)
@@ -119,7 +119,7 @@ async def update_discount(
 @router.delete("/{discount_id}")
 async def delete_discount(
     discount_id: int,
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Delete a discount by id."""
     await _verify_discount_ownership(discount_id, restaurant)

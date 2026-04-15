@@ -277,7 +277,7 @@ class TestAudioVoiceNotes:
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok-test"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-test"}),
         )
 
         payload = _worker_audio_payload()
@@ -307,7 +307,7 @@ class TestAudioVoiceNotes:
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok-test"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-test"}),
         )
 
         payload = _worker_audio_payload()
@@ -338,7 +338,7 @@ class TestAudioVoiceNotes:
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok-test"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-test"}),
         )
 
         payload = _worker_audio_payload()
@@ -367,7 +367,7 @@ class TestAudioVoiceNotes:
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok-test"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-test"}),
         )
 
         payload = _worker_audio_payload()
@@ -393,7 +393,7 @@ class TestAudioVoiceNotes:
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok-test"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-test"}),
         )
 
         payload = _worker_audio_payload()
@@ -423,7 +423,7 @@ class TestAudioVoiceNotes:
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"wa_access_token": "tok-test"}),
+            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-test"}),
         )
 
         payload = _worker_audio_payload()

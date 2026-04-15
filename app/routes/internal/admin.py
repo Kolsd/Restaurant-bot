@@ -34,10 +34,22 @@ from app.services import database as db
 from app.routes.deps import verify_superadmin
 from app.repositories import sessions_repo, restaurant_repo
 from app.services.logging import get_logger
+from app.services.tenant_context import bypass_tenant_scope
 
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/internal/admin", tags=["internal-admin"])
+
+
+async def _bypass_internal_admin():
+    """FastAPI dependency: enter bypass_tenant_scope for all internal admin routes.
+
+    Internal admin routes are cross-tenant by design — they enumerate all
+    restaurants and users.  This bypass allows migrated repos to execute
+    without a pinned tenant_scope.
+    """
+    with bypass_tenant_scope("internal_admin_route"):
+        yield
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
@@ -73,17 +85,27 @@ async def admin_logout_session(req: Request):
 
 
 @router.get("/stats")
-async def admin_get_stats(_: None = Depends(verify_superadmin)):
+async def admin_get_stats(
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     return await restaurant_repo.db_get_admin_stats()
 
 
 @router.get("/restaurants")
-async def admin_get_restaurants(_: None = Depends(verify_superadmin)):
+async def admin_get_restaurants(
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     return {"restaurants": await db.db_get_all_restaurants()}
 
 
 @router.post("/create-user")
-async def admin_create_user(request: CreateUserRequest, _: None = Depends(verify_superadmin)):
+async def admin_create_user(
+    request: CreateUserRequest,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     rest = await db.db_get_restaurant_by_id(request.restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
@@ -102,18 +124,29 @@ async def admin_create_user(request: CreateUserRequest, _: None = Depends(verify
 
 
 @router.post("/delete-user")
-async def admin_delete_user(username: str, _: None = Depends(verify_superadmin)):
+async def admin_delete_user(
+    username: str,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     await restaurant_repo.db_delete_user(username)
     return {"success": True}
 
 
 @router.get("/users")
-async def admin_list_users(_: None = Depends(verify_superadmin)):
+async def admin_list_users(
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     return {"users": await get_users()}
 
 
 @router.post("/create-restaurant")
-async def admin_create_restaurant(request: CreateRestaurantRequest, _: None = Depends(verify_superadmin)):
+async def admin_create_restaurant(
+    request: CreateRestaurantRequest,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     from app.routes.dashboard import geocode_address
     try:
         menu_dict = json.loads(request.menu)
@@ -132,13 +165,21 @@ async def admin_create_restaurant(request: CreateRestaurantRequest, _: None = De
 
 
 @router.post("/set-subscription")
-async def admin_set_subscription(request: SetSubscriptionRequest, _: None = Depends(verify_superadmin)):
+async def admin_set_subscription(
+    request: SetSubscriptionRequest,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     await db.db_update_subscription(request.restaurant_id, request.status)
     return {"success": True}
 
 
 @router.get("/restaurant/{restaurant_id}")
-async def admin_get_restaurant_detail(restaurant_id: int, _: None = Depends(verify_superadmin)):
+async def admin_get_restaurant_detail(
+    restaurant_id: int,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     rest = await db.db_get_restaurant_by_id(restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
@@ -148,7 +189,11 @@ async def admin_get_restaurant_detail(restaurant_id: int, _: None = Depends(veri
 
 
 @router.post("/update-restaurant")
-async def admin_update_restaurant(request: UpdateRestaurantRequest, _: None = Depends(verify_superadmin)):
+async def admin_update_restaurant(
+    request: UpdateRestaurantRequest,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     from app.routes.dashboard import geocode_address
     rest = await db.db_get_restaurant_by_id(request.restaurant_id)
     if not rest:
@@ -193,19 +238,30 @@ async def admin_update_restaurant(request: UpdateRestaurantRequest, _: None = De
 
 
 @router.get("/billing-stats")
-async def admin_billing_stats(_: None = Depends(verify_superadmin)):
+async def admin_billing_stats(
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     stats = await restaurant_repo.db_get_billing_stats()
     return {"stats": stats}
 
 
 @router.post("/fix-branch-ids")
-async def fix_branch_ids(request: Request, _: None = Depends(verify_superadmin)):
+async def fix_branch_ids(
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     fixed = await restaurant_repo.db_fix_branch_ids()
     return {"success": True, "fixed": fixed}
 
 
 @router.post("/fix-conversations")
-async def fix_conversations_bot_number(request: Request, _: None = Depends(verify_superadmin)):
+async def fix_conversations_bot_number(
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
     body = await request.json()
     await restaurant_repo.db_fix_conversations_bot_number(body.get("bot_number", ""))
     return {"success": True}

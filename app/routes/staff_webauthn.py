@@ -42,6 +42,7 @@ from app.routes.deps import get_current_restaurant, require_auth, require_module
 from app.services import database as db
 from app.repositories import staff_repo
 from app.services.auth import verify_token
+from app.services.tenant_context import bypass_tenant_scope
 
 router = APIRouter(prefix="/api/staff/webauthn", tags=["staff-webauthn"])
 
@@ -129,12 +130,13 @@ async def register_options(request: Request):
 
     challenge_b64 = bytes_to_base64url(options.challenge)
 
-    await db.db_save_webauthn_challenge(
-        challenge=challenge_b64,
-        staff_id=staff_id,
-        challenge_type="registration",
-        restaurant_id=staff["restaurant_id"],
-    )
+    with bypass_tenant_scope("webauthn_register_options"):
+        await db.db_save_webauthn_challenge(
+            challenge=challenge_b64,
+            staff_id=staff_id,
+            challenge_type="registration",
+            restaurant_id=staff["restaurant_id"],
+        )
 
     return json.loads(options_to_json(options))
 
@@ -182,14 +184,15 @@ async def register_complete(request: Request, body: RegisterCompleteBody):
                   for t in (verification.credential_device_type and [] or [])]
 
     try:
-        credential = await db.db_save_webauthn_credential(
-            staff_id=staff_id,
-            credential_id=credential_id_b64,
-            public_key=public_key_b64,
-            sign_count=verification.sign_count,
-            transports=transports,
-            device_name=body.device_name,
-        )
+        with bypass_tenant_scope("webauthn_register_complete"):
+            credential = await db.db_save_webauthn_credential(
+                staff_id=staff_id,
+                credential_id=credential_id_b64,
+                public_key=public_key_b64,
+                sign_count=verification.sign_count,
+                transports=transports,
+                device_name=body.device_name,
+            )
     except Exception as exc:
         # Likely a unique-constraint violation (credential already registered)
         raise HTTPException(status_code=409, detail=f"No se pudo guardar la credencial: {exc}")
@@ -208,7 +211,8 @@ async def auth_options(request: Request, body: AuthOptionsBody):
     # Housekeeping: remove stale challenges before generating a new one
     await db.db_cleanup_expired_challenges()
 
-    credentials_raw = await db.db_get_webauthn_credentials_by_restaurant(body.restaurant_id)
+    with bypass_tenant_scope("webauthn_auth_options"):
+        credentials_raw = await db.db_get_webauthn_credentials_by_restaurant(body.restaurant_id)
     if not credentials_raw:
         raise HTTPException(
             status_code=404,
@@ -248,12 +252,13 @@ async def auth_options(request: Request, body: AuthOptionsBody):
 
     challenge_b64 = bytes_to_base64url(options.challenge)
 
-    await db.db_save_webauthn_challenge(
-        challenge=challenge_b64,
-        staff_id=None,
-        challenge_type=body.action,
-        restaurant_id=body.restaurant_id,
-    )
+    with bypass_tenant_scope("webauthn_auth_options_challenge"):
+        await db.db_save_webauthn_challenge(
+            challenge=challenge_b64,
+            staff_id=None,
+            challenge_type=body.action,
+            restaurant_id=body.restaurant_id,
+        )
 
     return json.loads(options_to_json(options))
 
@@ -324,9 +329,11 @@ async def auth_complete(request: Request, body: AuthCompleteBody):
     staff_id = cred_record["staff_id"]
     restaurant_id = cred_record["restaurant_id"]
 
+    from app.services.tenant_context import tenant_scope  # local import avoids top-level cycle risk
     if body.action == "break":
         # Find the open shift to get shift_id, then toggle break start/end
-        open_shifts = await db.db_get_open_shifts(restaurant_id)
+        with tenant_scope(restaurant_id):
+            open_shifts = await db.db_get_open_shifts(restaurant_id)
         open_shift = next((s for s in open_shifts if str(s["staff_id"]) == str(staff_id)), None)
         if not open_shift:
             raise HTTPException(status_code=400, detail="No tienes un turno abierto para registrar break")
@@ -346,10 +353,11 @@ async def auth_complete(request: Request, body: AuthCompleteBody):
         }
 
     try:
-        if body.action == "clock_in":
-            shift = await db.db_clock_in(staff_id, restaurant_id)
-        else:
-            shift = await db.db_clock_out(staff_id, restaurant_id)
+        with tenant_scope(restaurant_id):
+            if body.action == "clock_in":
+                shift = await db.db_clock_in(staff_id, restaurant_id)
+            else:
+                shift = await db.db_clock_out(staff_id, restaurant_id)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

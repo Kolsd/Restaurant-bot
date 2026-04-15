@@ -3,17 +3,14 @@ app/repositories/fiscal_repo.py
 
 Repository for fiscal/DIAN functions.
 Extracted from database.py — Fase 6 Repository Pattern.
+Migrated to tenant_connection() — RLS Wave 2.
 """
 import json
 from datetime import datetime
 from app.services.logging import get_logger
+from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
-
-
-def _get_pool():
-    from app.services.database import get_pool
-    return get_pool()
 
 
 def _serialize(d: dict) -> dict:
@@ -27,9 +24,11 @@ async def db_init_fiscal_tables():
 
 
 async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
-    """Devuelve la resolución DIAN activa del restaurante, o None si no existe."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Devuelve la resolución DIAN activa del restaurante, o None si no existe.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM fiscal_resolution WHERE restaurant_id=$1",
             restaurant_id
@@ -38,9 +37,11 @@ async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
 
 
 async def db_upsert_fiscal_resolution(restaurant_id: int, data: dict) -> None:
-    """Inserta o actualiza la resolución DIAN de un restaurante."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Inserta o actualiza la resolución DIAN de un restaurante.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute(
             """INSERT INTO fiscal_resolution
                (restaurant_id, resolution_number, resolution_date, prefix,
@@ -75,9 +76,10 @@ async def db_claim_next_invoice_number(restaurant_id: int) -> int:
     Incrementa atómicamente el consecutivo de factura y lo devuelve.
     Lanza RuntimeError si la resolución no existe o el rango está agotado.
     La operación es atómica (UPDATE ... RETURNING) — segura con múltiples workers.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE fiscal_resolution
                SET current_number = current_number + 1,
@@ -103,7 +105,10 @@ async def db_claim_next_invoice_number(restaurant_id: int) -> int:
 
 
 async def db_save_fiscal_invoice(data: dict) -> int:
-    """Persiste la factura electrónica. Devuelve el ID generado."""
+    """Persiste la factura electrónica. Devuelve el ID generado.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
 
     # asyncpg espera date/time nativos, no strings
     raw_date = data.get("issue_date")
@@ -118,8 +123,7 @@ async def db_save_fiscal_invoice(data: dict) -> int:
         if isinstance(raw_time, str) else raw_time
     )
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO fiscal_invoices
                (billing_log_id, restaurant_id, order_id,
@@ -153,9 +157,11 @@ async def db_save_fiscal_invoice(data: dict) -> int:
 
 
 async def db_get_fiscal_invoices(restaurant_id: int, limit: int = 50) -> list:
-    """Lista las facturas electrónicas emitidas por el restaurante."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Lista las facturas electrónicas emitidas por el restaurante.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT id, order_id, prefix, invoice_number, issue_date,
                       subtotal_cents, tax_regime, tax_pct, tax_cents, total_cents,
@@ -179,9 +185,10 @@ async def db_get_next_invoice_number(
     Devuelve start_at si no existen facturas previas con ese prefijo.
     NOTA: SELECT no-atómico — apropiado para sandbox. En producción multi-worker
     usar db_claim_next_invoice_number (UPDATE … RETURNING atómico).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         val = await conn.fetchval(
             """SELECT COALESCE(MAX(invoice_number), $3 - 1) + 1
                FROM fiscal_invoices
@@ -201,9 +208,10 @@ async def db_update_invoice_dian_data(
     """
     Almacena los 3 campos DIAN retornados por MATIAS API tras la emisión exitosa:
     CUFE, URL/base64 del PDF y cadena QR. Actualiza dian_status a 'accepted'.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         await conn.execute(
             """UPDATE fiscal_invoices
                SET cufe          = $2,

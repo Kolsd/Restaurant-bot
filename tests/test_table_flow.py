@@ -7,14 +7,21 @@ import app.routes.tables as tables_routes
 def mock_db_pool(monkeypatch):
     class MockConnection:
         async def fetchrow(self, query, *args):
-            if "table_orders" in query: 
+            if "table_orders" in query:
                 return {"phone": "573000000000", "table_name": "Mesa 1", "base_order_id": "MESA-TEST"}
             if "table_sessions" in query:
                 return {"bot_number": "15556293573", "meta_phone_id": "123"}
             if "restaurants" in query:
                 return {"id": 1, "name": "Restaurante Test", "whatsapp_number": "15556293573"}
             return None
+        async def fetchval(self, query, *args): return None  # set_config calls
         async def execute(self, query, *args): pass
+
+        def transaction(self):
+            class _FakeTxn:
+                async def __aenter__(self): return self
+                async def __aexit__(self, *a): pass
+            return _FakeTxn()
 
     class MockPool:
         def acquire(self): return self

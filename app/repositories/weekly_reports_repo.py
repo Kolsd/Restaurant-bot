@@ -44,9 +44,9 @@ REVENUE_STATUSES_TABLE_EXCLUDE: tuple[str, ...] = ("cancelado", "cancelled")
 
 # ── Lazy pool / serialize accessors ──────────────────────────────────────────
 
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 
 def _serialize(d: dict) -> dict:
@@ -81,14 +81,12 @@ async def compute_weekly_stats(
         dormant_frequent_count int
         has_signal             bool
     """
-    pool = await _get_pool()
-
     # Previous week window (same length as current).
     from datetime import timedelta
     prev_start = week_start - timedelta(days=7)
     prev_end = week_start  # exclusive
 
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # ── 1. Delivery/pickup revenue (orders table via bot_number join) ──────
         # orders.status must be in REVENUE_STATUSES_DELIVERY.
         # join: restaurants r ON r.whatsapp_number = o.bot_number WHERE r.id = $restaurant_id
@@ -370,8 +368,7 @@ async def save_report(
     Returns the inserted row as a dict, or None if the row already existed
     (meaning the report was already generated for this week — idempotent).
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO weekly_reports
@@ -401,8 +398,7 @@ async def save_report(
 
 async def mark_sent(report_id: int) -> None:
     """Mark a report as successfully sent."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             """
             UPDATE weekly_reports
@@ -416,8 +412,7 @@ async def mark_sent(report_id: int) -> None:
 
 async def mark_failed(report_id: int, error: str) -> None:
     """Mark a report as failed and store the error message."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             """
             UPDATE weekly_reports
@@ -432,8 +427,7 @@ async def mark_failed(report_id: int, error: str) -> None:
 
 async def already_sent_for_week(restaurant_id: int, week_start: date) -> bool:
     """Return True if a sent report already exists for this restaurant + week."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchval(
             """
             SELECT 1 FROM weekly_reports
@@ -450,8 +444,7 @@ async def already_sent_for_week(restaurant_id: int, week_start: date) -> bool:
 
 async def get_recent_reports(restaurant_id: int, limit: int = 12) -> list[dict]:
     """Return the most-recent report rows for a restaurant (descending by week)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT id, restaurant_id, week_start, generated_at, sent_at,

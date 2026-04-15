@@ -21,6 +21,8 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
+from app.services.tenant_context import tenant_scope, bypass_tenant_scope
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -204,6 +206,7 @@ async def test_deduct_recipe_path_triggers_ingredient_sync():
     ])
     # UPDATE returns new_stock = 0.0
     mock_conn.fetchrow = AsyncMock(return_value=MagicMock(__getitem__=lambda s, k: 0.0))
+    mock_conn.fetchval = AsyncMock(return_value=None)
     mock_conn.transaction = _tx_cm()
 
     sync_calls = []
@@ -216,10 +219,11 @@ async def test_deduct_recipe_path_triggers_ingredient_sync():
         patch.object(db, "db_get_restaurant_by_phone", AsyncMock(return_value=restaurant)),
         patch.object(inv, "_sync_ingredient_dishes_conn", fake_sync_ingredient),
     ):
-        await db.db_deduct_inventory_for_order(
-            bot_number="+57300",
-            items=[{"name": "Bandeja Paisa", "quantity": 1}],
-        )
+        with tenant_scope(1):
+            await db.db_deduct_inventory_for_order(
+                bot_number="+57300",
+                items=[{"name": "Bandeja Paisa", "quantity": 1}],
+            )
 
     assert len(sync_calls) == 1
     assert sync_calls[0]["ingredient_id"] == 10
@@ -290,8 +294,8 @@ async def test_upsert_recipe_with_depleted_ingredient_marks_unavailable():
 
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
-    # fetchval: depleted=1 (one ingredient already depleted)
-    mock_conn.fetchval = AsyncMock(return_value=1)
+    # fetchval calls: set_config #1 (tenant), depleted count, set_config #2 (db_get_dish_recipe)
+    mock_conn.fetchval = AsyncMock(side_effect=[None, 1, None])
     # fetch for db_get_dish_recipe (called at end)
     mock_conn.fetch = AsyncMock(return_value=[])
     mock_conn.transaction = _tx_cm()
@@ -306,11 +310,12 @@ async def test_upsert_recipe_with_depleted_ingredient_marks_unavailable():
         patch.object(db, "get_pool", AsyncMock(return_value=_pool(mock_conn))),
         patch.object(inv, "_sync_dish_availability_conn", fake_sync_conn),
     ):
-        await db.db_upsert_dish_recipe(
-            restaurant_id=1,
-            dish_name="Hamburguesa Especial",
-            lines=[{"ingredient_id": 3, "quantity": 0.2}],
-        )
+        with tenant_scope(1):
+            await db.db_upsert_dish_recipe(
+                restaurant_id=1,
+                dish_name="Hamburguesa Especial",
+                lines=[{"ingredient_id": 3, "quantity": 0.2}],
+            )
 
     # Should have been called with available=False because depleted=1
     assert any(call[0] == ["Hamburguesa Especial"] and call[1] is False for call in sync_calls)
@@ -324,8 +329,8 @@ async def test_upsert_recipe_all_stock_ok_marks_available():
 
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
-    # depleted=0
-    mock_conn.fetchval = AsyncMock(return_value=0)
+    # fetchval calls: set_config #1 (tenant), depleted count=0, set_config #2 (db_get_dish_recipe)
+    mock_conn.fetchval = AsyncMock(side_effect=[None, 0, None])
     mock_conn.fetch = AsyncMock(return_value=[])
     mock_conn.transaction = _tx_cm()
 
@@ -338,11 +343,12 @@ async def test_upsert_recipe_all_stock_ok_marks_available():
         patch.object(db, "get_pool", AsyncMock(return_value=_pool(mock_conn))),
         patch.object(inv, "_sync_dish_availability_conn", fake_sync_conn),
     ):
-        await db.db_upsert_dish_recipe(
-            restaurant_id=1,
-            dish_name="Pizza Margarita",
-            lines=[{"ingredient_id": 5, "quantity": 0.1}],
-        )
+        with tenant_scope(1):
+            await db.db_upsert_dish_recipe(
+                restaurant_id=1,
+                dish_name="Pizza Margarita",
+                lines=[{"ingredient_id": 5, "quantity": 0.1}],
+            )
 
     assert any(call[0] == ["Pizza Margarita"] and call[1] is True for call in sync_calls)
 
@@ -363,6 +369,7 @@ async def test_upsert_recipe_empty_lines_marks_dish_available():
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
     mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.fetchval = AsyncMock(return_value=None)
     mock_conn.transaction = _tx_cm()
 
     sync_calls = []
@@ -374,11 +381,15 @@ async def test_upsert_recipe_empty_lines_marks_dish_available():
         patch.object(db, "get_pool", AsyncMock(return_value=_pool(mock_conn))),
         patch.object(inv, "_sync_dish_availability_conn", fake_sync_conn),
     ):
-        await db.db_upsert_dish_recipe(
-            restaurant_id=1,
-            dish_name="Plato sin receta",
-            lines=[],
-        )
+        # Use bypass_tenant_scope so conn.fetchval is not called by the tenant
+        # infrastructure, preserving the assertion that business logic avoids fetchval
+        # when lines=[] (no depleted check needed).
+        with bypass_tenant_scope("test: empty lines upsert"):
+            await db.db_upsert_dish_recipe(
+                restaurant_id=1,
+                dish_name="Plato sin receta",
+                lines=[],
+            )
 
     assert any(call[0] == ["Plato sin receta"] and call[1] is True for call in sync_calls)
     # fetchval should NOT have been called (no depleted check needed)

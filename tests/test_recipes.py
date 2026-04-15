@@ -8,6 +8,8 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
+from app.services.tenant_context import tenant_scope
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,6 +50,8 @@ async def test_upsert_dish_recipe_llama_delete_e_insert():
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
     mock_conn.fetch   = AsyncMock(return_value=result_rows)
+    # fetchval calls: set_config #1 (tenant), depleted count, set_config #2 (db_get_dish_recipe)
+    mock_conn.fetchval = AsyncMock(side_effect=[None, 0, None])
     # transaction context manager
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
@@ -55,11 +59,12 @@ async def test_upsert_dish_recipe_llama_delete_e_insert():
     ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        result = await db.db_upsert_dish_recipe(
-            restaurant_id=1,
-            dish_name="Pizza",
-            lines=[{"ingredient_id": 10, "quantity": 0.5}]
-        )
+        with tenant_scope(1):
+            result = await db.db_upsert_dish_recipe(
+                restaurant_id=1,
+                dish_name="Pizza",
+                lines=[{"ingredient_id": 10, "quantity": 0.5}]
+            )
 
     # DELETE fue llamado
     delete_calls = [c for c in mock_conn.execute.call_args_list
@@ -84,13 +89,17 @@ async def test_upsert_dish_recipe_vacio_elimina_escandallo():
     mock_conn = AsyncMock()
     mock_conn.execute = AsyncMock()
     mock_conn.fetch   = AsyncMock(return_value=[])
+    # fetchval calls: set_config #1 (tenant), set_config #2 (db_get_dish_recipe)
+    # No depleted check when lines=[]
+    mock_conn.fetchval = AsyncMock(side_effect=[None, None])
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
     ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        result = await db.db_upsert_dish_recipe(1, "Pizza", [])
+        with tenant_scope(1):
+            result = await db.db_upsert_dish_recipe(1, "Pizza", [])
 
     # Fase 5c: _sync_dish_availability_conn inserts into menu_availability when
     # lines=[] — only dish_recipes INSERTs must be absent (the recipe was deleted).
@@ -119,9 +128,15 @@ async def test_get_food_costs_retorna_lista_con_breakdown():
 
     mock_conn = AsyncMock()
     mock_conn.fetch = AsyncMock(return_value=[row])
+    mock_conn.fetchval = AsyncMock(return_value=None)
+    mock_conn.transaction = MagicMock(return_value=AsyncMock(
+        __aenter__=AsyncMock(return_value=None),
+        __aexit__=AsyncMock(return_value=False),
+    ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        result = await db.db_get_food_costs(restaurant_id=1)
+        with tenant_scope(1):
+            result = await db.db_get_food_costs(restaurant_id=1)
 
     assert len(result) == 1
     assert result[0]["dish_name"] == "Pizza Margarita"
@@ -135,9 +150,15 @@ async def test_get_food_costs_sin_escandallos_retorna_lista_vacia():
 
     mock_conn = AsyncMock()
     mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.fetchval = AsyncMock(return_value=None)
+    mock_conn.transaction = MagicMock(return_value=AsyncMock(
+        __aenter__=AsyncMock(return_value=None),
+        __aexit__=AsyncMock(return_value=False),
+    ))
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
-        result = await db.db_get_food_costs(restaurant_id=99)
+        with tenant_scope(99):
+            result = await db.db_get_food_costs(restaurant_id=99)
 
     assert result == []
 
@@ -173,6 +194,7 @@ async def test_deduct_usa_receta_cuando_existe():
     ])
     # fetchrow returns the updated stock after UPDATE ... RETURNING current_stock
     mock_conn.fetchrow = AsyncMock(return_value=MagicMock(__getitem__=lambda s, k: 4.4))
+    mock_conn.fetchval = AsyncMock(return_value=None)
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -189,9 +211,10 @@ async def test_deduct_usa_receta_cuando_existe():
                      AsyncMock(return_value=restaurant)),
         patch.object(inv_repo, "_sync_ingredient_dishes_conn", _noop_sync),
     ):
-        await db.db_deduct_inventory_for_order(
-            bot_number="+57300", items=[{"name": "Pizza", "quantity": 2}]
-        )
+        with tenant_scope(1):
+            await db.db_deduct_inventory_for_order(
+                bot_number="+57300", items=[{"name": "Pizza", "quantity": 2}]
+            )
 
     # Debe haber un UPDATE de inventario via fetchrow (uses RETURNING)
     update_calls = [c for c in mock_conn.fetchrow.call_args_list
@@ -232,6 +255,7 @@ async def test_deduct_usa_linked_dishes_fallback_sin_receta():
     ])
     # fetchrow returns updated stock after UPDATE ... RETURNING current_stock
     mock_conn.fetchrow = AsyncMock(return_value=MagicMock(__getitem__=lambda s, k: 7.0))
+    mock_conn.fetchval = AsyncMock(return_value=None)
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -243,10 +267,11 @@ async def test_deduct_usa_linked_dishes_fallback_sin_receta():
         patch.object(db, "db_get_restaurant_by_phone",
                      AsyncMock(return_value=restaurant)),
     ):
-        await db.db_deduct_inventory_for_order(
-            bot_number="+57300",
-            items=[{"name": "Hamburguesa", "quantity": 3}]
-        )
+        with tenant_scope(1):
+            await db.db_deduct_inventory_for_order(
+                bot_number="+57300",
+                items=[{"name": "Hamburguesa", "quantity": 3}]
+            )
 
     # UPDATE uses fetchrow (RETURNING current_stock)
     update_calls = [c for c in mock_conn.fetchrow.call_args_list
@@ -281,6 +306,7 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
     ])
     # fetchrow returns new_stock = 0.0 (0.5 - 0.5) so new_stock <= min_stock triggers sync
     mock_conn.fetchrow = AsyncMock(return_value=MagicMock(__getitem__=lambda s, k: 0.0))
+    mock_conn.fetchval = AsyncMock(return_value=None)
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
         __aexit__=AsyncMock(return_value=False),
@@ -305,10 +331,11 @@ async def test_deduct_desactiva_plato_al_agotar_stock():
         patch.object(inv_repo, "_sync_dish_availability_conn", fake_sync_conn),
         patch.object(inv_repo, "_sync_ingredient_dishes_conn", _noop_ingredient_sync),
     ):
-        await db.db_deduct_inventory_for_order(
-            bot_number="+57300",
-            items=[{"name": "Sopa del día", "quantity": 1}]
-        )
+        with tenant_scope(1):
+            await db.db_deduct_inventory_for_order(
+                bot_number="+57300",
+                items=[{"name": "Sopa del día", "quantity": 1}]
+            )
 
     # Debe haber llamado a _sync_dish_availability_conn con available=False
     assert len(sync_calls) == 1

@@ -27,9 +27,9 @@ from typing import Any
 # database.py re-exports this module at module level, so a top-level import
 # of database here would create a cycle. We resolve both helpers at call time.
 
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 
 def _serialize(d: dict) -> dict:
@@ -45,8 +45,7 @@ def _to_date(s: str):
 # ── CONVERSACIONES ────────────────────────────────────────────────────
 
 async def db_get_history(phone: str, bot_number: str = "") -> list:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow("SELECT history FROM conversations WHERE phone=$1 AND bot_number=$2", phone, bot_number)
         if row:
             h = row["history"]
@@ -54,8 +53,7 @@ async def db_get_history(phone: str, bot_number: str = "") -> list:
         return []
 
 async def db_save_history(phone: str, bot_number: str, history: list, branch_id: int = None):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # 🛡️ Agregamos branch_id al INSERT y al UPDATE
         await conn.execute("""
             INSERT INTO conversations (phone, bot_number, history, branch_id, updated_at)
@@ -65,8 +63,7 @@ async def db_save_history(phone: str, bot_number: str, history: list, branch_id:
         """, phone, bot_number, json.dumps(history[-20:]), branch_id)
 
 async def db_get_all_conversations(bot_number: str = None, branch_id: int | str = None, date_from: str = None, date_to: str = None):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         conditions = []
         params = []
         idx = 1
@@ -123,13 +120,11 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int | str 
         return result
 
 async def db_delete_conversation(phone: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute("DELETE FROM conversations WHERE phone=$1", phone)
 
 async def db_get_conversation_details(phone: str, bot_number: str = ""):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT history, bot_paused, bot_number FROM conversations WHERE phone=$1 AND bot_number=$2",
             phone, bot_number,
@@ -146,8 +141,7 @@ async def db_get_conversation_details(phone: str, bot_number: str = ""):
     return {"history": [], "bot_paused": False, "bot_number": bot_number}
 
 async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute("""
             INSERT INTO conversations (phone, bot_number, bot_paused, updated_at)
             VALUES ($1,$2,$3,NOW())
@@ -155,8 +149,7 @@ async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
         """, phone, bot_number, pause)
 
 async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         if bot_number:
             await conn.execute("DELETE FROM conversations WHERE updated_at < NOW() - ($1 || ' days')::INTERVAL AND bot_number=$2", str(days), bot_number)
         else:
@@ -167,8 +160,7 @@ async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
 # (Restaurant-wide analytics db_get_nps_stats/db_get_nps_responses stay in database.py)
 
 async def db_save_nps_response(phone: str, bot_number: str, score: int, comment: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # 1. Inferimos el branch_id buscando la mesa donde acaba de comer el cliente
         branch_id = await conn.fetchval("""
             SELECT rt.branch_id FROM table_sessions ts
@@ -186,8 +178,7 @@ async def db_save_nps_response(phone: str, bot_number: str, score: int, comment:
 async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
     """Save a preliminary NPS record when score is received but comment is still pending.
     Returns the inserted row id so it can be updated later."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO nps_responses (phone, bot_number, score, comment)
                VALUES ($1, $2, $3, '__pending__') RETURNING id""",
@@ -198,8 +189,7 @@ async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
 
 async def db_update_nps_comment(phone: str, bot_number: str, comment: str) -> bool:
     """Update the pending NPS record with the actual comment."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         result = await conn.execute(
             """UPDATE nps_responses SET comment=$3
                WHERE phone=$1 AND bot_number=$2 AND comment='__pending__'
@@ -211,8 +201,7 @@ async def db_update_nps_comment(phone: str, bot_number: str, comment: str) -> bo
 
 async def db_get_pending_nps_score(phone: str, bot_number: str) -> int | None:
     """Check if there is a pending NPS comment request in the DB (score saved, comment missing)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """SELECT score FROM nps_responses
                WHERE phone=$1 AND bot_number=$2 AND comment='__pending__'
@@ -228,8 +217,7 @@ async def db_get_pending_nps_score(phone: str, bot_number: str) -> int | None:
 async def db_save_nps_waiting(phone: str, bot_number: str):
     """Persists that we are waiting for an NPS score from this customer.
     Called when trigger_nps is invoked so state survives server restarts."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute("""
             INSERT INTO nps_waiting (phone, bot_number, created_at)
             VALUES ($1, $2, NOW())
@@ -239,8 +227,7 @@ async def db_save_nps_waiting(phone: str, bot_number: str):
 
 async def db_get_nps_waiting(phone: str, bot_number: str) -> bool:
     """Returns True if there is a pending NPS score request for this customer (within 48 hours)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT 1 FROM nps_waiting WHERE phone=$1 AND bot_number=$2 AND created_at > NOW() - INTERVAL '48 hours'",
             phone, bot_number
@@ -250,8 +237,7 @@ async def db_get_nps_waiting(phone: str, bot_number: str) -> bool:
 
 async def db_clear_nps_waiting(phone: str, bot_number: str):
     """Removes the pending NPS state — called after score is received or survey is skipped."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "DELETE FROM nps_waiting WHERE phone=$1 AND bot_number=$2",
             phone, bot_number
@@ -265,16 +251,14 @@ async def db_clear_nps_waiting(phone: str, bot_number: str):
 # ── CARRITOS ─────────────────────────────────────────────────────────
 
 async def db_get_cart(phone: str, bot_number: str) -> dict:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
         if row:
             return json.loads(row["cart_data"]) if isinstance(row["cart_data"], str) else row["cart_data"]
         return {"items": [], "order_type": None, "address": None, "notes": ""}
 
 async def db_save_cart(phone: str, bot_number: str, cart_data: dict):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute("""
             INSERT INTO carts (phone, bot_number, cart_data, updated_at)
             VALUES ($1, $2, $3::jsonb, NOW())
@@ -282,25 +266,23 @@ async def db_save_cart(phone: str, bot_number: str, cart_data: dict):
         """, phone, bot_number, json.dumps(cart_data))
 
 async def db_clear_cart(phone: str, bot_number: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, bot_number)
 
 # 🛡️ NUEVO: Migrar el carrito atómicamente a otra sucursal
 async def db_migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
     if from_bot_number == to_bot_number:
         return
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
-            if row:
-                await conn.execute("""
-                    INSERT INTO carts (phone, bot_number, cart_data, updated_at)
-                    VALUES ($1, $2, $3::jsonb, NOW())
-                    ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
-                """, phone, to_bot_number, row["cart_data"])
-                await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
+    async with _tenant_connection() as conn:
+        # tenant_connection() already wraps in a transaction — no nested tx needed
+        row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
+        if row:
+            await conn.execute("""
+                INSERT INTO carts (phone, bot_number, cart_data, updated_at)
+                VALUES ($1, $2, $3::jsonb, NOW())
+                ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
+            """, phone, to_bot_number, row["cart_data"])
+            await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
 
 
 # ── RATE LIMITING ─────────────────────────────────────────────────────
@@ -311,8 +293,7 @@ async def db_check_rate_limit(phone: str, window_seconds: int, max_messages: int
     Returns True if the phone is rate-limited (should be blocked), False if allowed.
     Deletes stale rows, counts recent messages, and inserts a new row atomically.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "DELETE FROM meta_rate_limits WHERE phone = $1 AND created_at < NOW() - make_interval(secs => $2)",
             phone, window_seconds,
@@ -331,8 +312,7 @@ async def db_check_rate_limit(phone: str, window_seconds: int, max_messages: int
 
 async def db_update_restaurant_phone_id(restaurant_id: int, wa_phone_id: str) -> None:
     """Persist a discovered wa_phone_id back to the restaurant row. Non-critical."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2",
             wa_phone_id, restaurant_id,
@@ -342,8 +322,7 @@ async def db_update_restaurant_phone_id(restaurant_id: int, wa_phone_id: str) ->
 async def db_update_restaurant_features(restaurant_id: int, features: dict) -> None:
     """Overwrite the features JSONB column for a restaurant row."""
     import json as _json
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
             _json.dumps(features), restaurant_id,
@@ -367,8 +346,7 @@ async def db_is_duplicate_wam(wam_id: str) -> bool:
     """
     if not wam_id:
         return False
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "DELETE FROM processed_wam_ids WHERE received_at < NOW() - INTERVAL '2 minutes'"
         )
@@ -404,8 +382,7 @@ async def db_get_customer_order_history(
     - Returns at most 3 items (the top 3 by count, tie-broken by most recent).
     - Never raises — caller must handle exceptions.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # Step 1: count distinct orders (JSONB arrays) for this customer in the window
         _raw_count = await conn.fetchval(
             """

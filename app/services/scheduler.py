@@ -216,6 +216,8 @@ async def _run_occupancy_snapshot():
     Capture a point-in-time occupancy snapshot for every restaurant.
     Runs every 15 minutes via the scheduler loop.
     """
+    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+
     try:
         restaurants = await db.db_get_all_restaurants()
         pool = await db.get_pool()
@@ -242,14 +244,15 @@ async def _run_occupancy_snapshot():
                     rid,
                 )
             if tables_row:
-                await rr.db_save_occupancy_snapshot(
-                    restaurant_id=rid,
-                    branch_id=rid,
-                    total_tables=tables_row["total_tables"],
-                    occupied_tables=tables_row["occupied_tables"],
-                    total_capacity=tables_row["total_capacity"],
-                    seated_guests=tables_row["seated_guests"],
-                )
+                with tenant_scope(rid):
+                    await rr.db_save_occupancy_snapshot(
+                        restaurant_id=rid,
+                        branch_id=rid,
+                        total_tables=tables_row["total_tables"],
+                        occupied_tables=tables_row["occupied_tables"],
+                        total_capacity=tables_row["total_capacity"],
+                        seated_guests=tables_row["seated_guests"],
+                    )
     except Exception:
         log.exception("scheduler.occupancy_snapshot_failed")
 
@@ -289,6 +292,8 @@ async def _run_weekly_owner_reports():
     time is Monday 09:xx AND no report has been sent yet for the current week.
     Dry-run mode: set WEEKLY_REPORT_DRY_RUN=1 to skip actual WhatsApp send.
     """
+    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+
     dry_run = os.getenv("WEEKLY_REPORT_DRY_RUN", "0") == "1"
     dashboard_url = os.getenv("APP_DOMAIN", "https://mesio.com").rstrip("/") + "/dashboard"
 
@@ -454,6 +459,8 @@ async def _run_weekly_owner_reports():
 
 
 async def _scheduler_loop():
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
     log.info("scheduler.started")
     _reminder_counter = 0
     while True:
@@ -465,23 +472,28 @@ async def _scheduler_loop():
         if not await state_store.scheduler_leader_acquire(ttl_seconds=90):
             continue
 
-        await _run_inactivity_check()
+        # The scheduler tick enumerates all restaurants (cross-tenant) and then
+        # performs per-restaurant operations.  The bypass allows cross-tenant DB
+        # queries; individual per-restaurant helpers apply tenant_scope() internally
+        # when they need to call tenant-scoped repos.
+        with bypass_tenant_scope("scheduler_leader_tick"):
+            await _run_inactivity_check()
 
-        from app.services.alerts import check_alerts  # late import — avoids circular
-        await check_alerts()
+            from app.services.alerts import check_alerts  # late import — avoids circular
+            await check_alerts()
 
-        _reminder_counter += 1
-        # Run reservation reminders every 5 minutes
-        if _reminder_counter % 5 == 0:
-            await _run_reservation_reminders()
-        # Run deposit expiry every 10 minutes
-        if _reminder_counter % 10 == 0:
-            await _run_deposit_expiry()
-        # Capture occupancy snapshots every 15 minutes
-        if _reminder_counter % 15 == 0:
-            await _run_occupancy_snapshot()
-        # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)
-        await _run_weekly_owner_reports()
+            _reminder_counter += 1
+            # Run reservation reminders every 5 minutes
+            if _reminder_counter % 5 == 0:
+                await _run_reservation_reminders()
+            # Run deposit expiry every 10 minutes
+            if _reminder_counter % 10 == 0:
+                await _run_deposit_expiry()
+            # Capture occupancy snapshots every 15 minutes
+            if _reminder_counter % 15 == 0:
+                await _run_occupancy_snapshot()
+            # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)
+            await _run_weekly_owner_reports()
 
 
 async def start_scheduler():

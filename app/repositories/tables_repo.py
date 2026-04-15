@@ -1,5 +1,6 @@
 """
 Tables / POS repository — Fase 6 extraction from app.services.database.
+Migrated to tenant_connection() — RLS pilot Step 3.
 
 Covers the Tables / POS aggregate:
   - restaurant_tables (CRUD: init DDL, get, create, auto-create, delete, get by id)
@@ -14,6 +15,14 @@ Covers the Tables / POS aggregate:
 
 Call sites that import via `app.services.database` continue to work through the
 re-export shim added to that module.
+
+Bypass rationale:
+  - Scheduler functions (db_get_stale_sessions, db_get_closeable_sessions,
+    db_get_active_session_table_ids) iterate across ALL tenants by design.
+  - Kitchen/delivery views (db_get_delivery_orders_for_caja,
+    db_get_delivery_status_hash, db_get_waiter_alerts global) are cross-tenant
+    kitchen displays.
+  - db_verify_branch_is_child queries `restaurants` across tenant boundary.
 """
 
 from __future__ import annotations
@@ -22,17 +31,11 @@ import json
 
 from app.services.money import to_decimal, ZERO
 from app.services.logging import get_logger
+from app.services.tenant_db import tenant_connection
+from app.services.tenant_context import bypass_tenant_scope
 
 log = get_logger(__name__)
 
-
-# Lazy accessors — break circular import with app.services.database.
-# database.py re-exports this module at module level, so a top-level import
-# of database here would create a cycle. We resolve both helpers at call time.
-
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
 
 def _serialize(d: dict) -> dict:
     from app.services.database import _serialize as _db_serialize  # noqa: PLC0415
@@ -57,9 +60,10 @@ async def db_get_tables(branch_id: int = None, is_main: bool = False):
     Si branch_id tiene un número, trae las de esa sucursal/matriz.
     Si branch_id es None, trae TODAS las mesas (admin global).
     (is_main ya no se usa — branch_id siempre es NOT NULL tras migración 0018)
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         if branch_id is not None:
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id=$1 ORDER BY number", branch_id)
         else:
@@ -71,8 +75,8 @@ async def db_get_tables(branch_id: int = None, is_main: bool = False):
 
 async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None,
                           capacity: int = 4, table_type: str = "interior", zone: str = ""):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("""
             INSERT INTO restaurant_tables (id, number, name, branch_id, active, capacity, table_type, zone)
             VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7)
@@ -87,12 +91,13 @@ async def db_auto_create_table(restaurant_id: int, is_main_restaurant: bool) -> 
     Crea una mesa automáticamente buscando el primer número disponible.
     El nombre será {restaurant_id}-{numero}. (Ej. "1-1", "2-1").
     Reutiliza automáticamente los números de las mesas que hayan sido borradas.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     # branch_id is always the restaurant_id (parent or branch)
     branch_id = restaurant_id
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         # 1. Obtener todos los números actualmente en uso (ignorando los borrados)
         rows = await conn.fetch("SELECT number FROM restaurant_tables WHERE branch_id=$1 AND active=TRUE", branch_id)
 
@@ -123,14 +128,14 @@ async def db_auto_create_table(restaurant_id: int, is_main_restaurant: bool) -> 
 
 
 async def db_delete_table(table_id: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("UPDATE restaurant_tables SET active=FALSE WHERE id=$1", table_id)
 
 
 async def db_get_table_by_id(table_id: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("SELECT * FROM restaurant_tables WHERE id=$1", table_id)
         return _serialize(dict(row)) if row else None
 
@@ -138,8 +143,8 @@ async def db_get_table_by_id(table_id: str):
 # ── table_orders ─────────────────────────────────────────────────────────────
 
 async def db_save_table_order(order: dict):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("""
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
@@ -160,13 +165,15 @@ async def db_save_table_order(order: dict):
             order.get('base_order_id'),
             order.get('sub_number', 1),
             order.get('station', 'all'),
-            order.get('branch_id')) # 🛡️ Parámetro $12: Grabado con éxito
+            order.get('branch_id'))  # 🛡️ Parámetro $12: Grabado con éxito
 
 
 async def db_get_base_order_status(base_order_id: str) -> str | None:
-    """Returns the status of the base order record itself (not sub-orders)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Returns the status of the base order record itself (not sub-orders).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT status FROM table_orders WHERE id=$1", base_order_id
         )
@@ -175,9 +182,11 @@ async def db_get_base_order_status(base_order_id: str) -> str | None:
 
 async def db_merge_table_order_items(base_order_id: str, new_items: list, additional_total: float) -> bool:
     """Merges new items into the base order when it's still in 'recibido' status.
-    Combines quantities for duplicate item names. Returns False if order is no longer recibido."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    Combines quantities for duplicate item names. Returns False if order is no longer recibido.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT items, total FROM table_orders WHERE id=$1 AND status='recibido'",
             base_order_id
@@ -209,8 +218,8 @@ async def db_merge_table_order_items(base_order_id: str, new_items: list, additi
 
 
 async def db_get_table_orders(status: str = None):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         if status:
             rows = await conn.fetch("SELECT * FROM table_orders WHERE status=$1 ORDER BY created_at ASC", status)
         else:
@@ -224,14 +233,14 @@ async def db_get_table_orders(status: str = None):
 
 
 async def db_update_table_order_status(order_id: str, status: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("UPDATE table_orders SET status=$2, updated_at=NOW() WHERE id=$1", order_id, status)
 
 
 async def db_get_base_order_id(table_id: str) -> str | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         # FIX: Only return a base_order_id when there's an active session for this table.
         # Without this check, a new customer at a table with leftover orders from a
         # previous session would get labeled "Adicional #N" instead of starting fresh.
@@ -251,15 +260,15 @@ async def db_get_base_order_id(table_id: str) -> str | None:
 
 
 async def db_get_next_sub_number(base_order_id: str) -> int:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("SELECT MAX(sub_number) as max_sub FROM table_orders WHERE base_order_id=$1 OR id=$1", base_order_id)
         return (row['max_sub'] or 0) + 1
 
 
 async def db_get_table_bill(base_order_id: str) -> dict:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         rows = await conn.fetch("SELECT * FROM table_orders WHERE base_order_id=$1 OR id=$1 ORDER BY created_at ASC", base_order_id)
         if not rows: return {}
         sub_orders = []
@@ -277,15 +286,15 @@ async def db_get_table_bill(base_order_id: str) -> dict:
 
 
 async def db_close_table_bill(base_order_id: str) -> bool:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         result = await conn.execute("UPDATE table_orders SET status='factura_entregada', updated_at=NOW() WHERE (base_order_id=$1 OR id=$1) AND status NOT IN ('cancelado')", base_order_id)
         return result != "UPDATE 0"
 
 
 async def db_mark_factura_generada(base_order_id: str) -> None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute(
             "UPDATE table_orders SET status='factura_generada', updated_at=NOW() "
             "WHERE (id=$1 OR base_order_id=$1) AND status NOT IN ('cancelado','factura_entregada')",
@@ -294,8 +303,8 @@ async def db_mark_factura_generada(base_order_id: str) -> None:
 
 
 async def db_get_first_table_order(base_order_id: str) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT phone, table_id, status FROM table_orders "
             "WHERE (id=$1 OR base_order_id=$1) ORDER BY created_at ASC LIMIT 1",
@@ -305,15 +314,15 @@ async def db_get_first_table_order(base_order_id: str) -> dict | None:
 
 
 async def db_cleanup_after_checkout(phone: str) -> None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("DELETE FROM conversations WHERE phone=$1", phone)
         await conn.execute("DELETE FROM carts WHERE phone=$1", phone)
 
 
 async def db_get_open_session_by_phone(phone: str) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM table_sessions WHERE phone=$1 AND closed_at IS NULL ORDER BY started_at DESC LIMIT 1",
             phone
@@ -322,15 +331,15 @@ async def db_get_open_session_by_phone(phone: str) -> dict | None:
 
 
 async def db_has_pending_invoice(phone: str) -> bool:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("SELECT id FROM table_orders WHERE phone=$1 AND status='entregado' LIMIT 1", phone)
         return row is not None
 
 
 async def db_get_active_table_order(phone: str, table_id: str) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("""
             SELECT * FROM table_orders
             WHERE phone=$1 AND table_id=$2
@@ -351,9 +360,10 @@ async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) ->
     """
     Retorna los ítems y total agregados de todas las sub-órdenes de un ticket.
     Usado por create_checks para validar cantidades antes de crear la división.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         if branch_id is not None:
             rows = await conn.fetch(
                 """SELECT * FROM table_orders
@@ -406,9 +416,10 @@ async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, m
     append the new message to the existing alert instead of creating a duplicate.
     This prevents the waiter from receiving multiple pings when the customer
     mentions the same request across two consecutive turns.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         # Dedup window: 60 seconds for waiter (non-bill) alerts only
         if alert_type == "waiter" and table_id:
             existing = await conn.fetchrow(
@@ -440,15 +451,15 @@ async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, m
 
 
 async def db_get_waiter_alerts(bot_number: str) -> list:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         rows = await conn.fetch("SELECT * FROM waiter_alerts WHERE bot_number=$1 AND dismissed=FALSE AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC", bot_number)
         return [_serialize(dict(r)) for r in rows]
 
 
 async def db_dismiss_waiter_alert(alert_id: int) -> bool:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         result = await conn.execute("UPDATE waiter_alerts SET dismissed=TRUE WHERE id=$1", alert_id)
         return result == "UPDATE 1"
 
@@ -461,46 +472,46 @@ async def db_init_table_sessions():
 
 
 async def db_get_active_session(phone: str, bot_number: str) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("SELECT * FROM table_sessions WHERE phone=$1 AND bot_number=$2 AND status='active' ORDER BY started_at DESC LIMIT 1", phone, bot_number)
         return _serialize(dict(row)) if row else None
 
 
 async def db_create_table_session(phone: str, bot_number: str, table_id: str, table_name: str) -> dict:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("INSERT INTO table_sessions (phone, bot_number, table_id, table_name, status, last_activity) VALUES ($1, $2, $3, $4, 'active', NOW()) RETURNING *", phone, bot_number, table_id, table_name)
         return _serialize(dict(row))
 
 
 async def db_touch_session(phone: str, bot_number: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("UPDATE table_sessions SET last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
 
 
 async def db_touch_session_with_phone_id(phone: str, bot_number: str, meta_phone_id: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("UPDATE table_sessions SET last_activity=NOW(), meta_phone_id=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number, meta_phone_id)
 
 
 async def db_session_mark_order(phone: str, bot_number: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("UPDATE table_sessions SET has_order=TRUE, last_activity=NOW() WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number)
 
 
 async def db_session_mark_delivered(phone: str, bot_number: str, total: int = 0):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute("UPDATE table_sessions SET order_delivered=TRUE, last_activity=NOW(), total_spent=$3 WHERE phone=$1 AND bot_number=$2 AND status='active'", phone, bot_number, total)
 
 
 async def db_mark_session_nps_pending(phone: str, bot_number: str) -> None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         await conn.execute(
             "UPDATE table_sessions SET status='nps_pending', closed_by='factura_entregada', last_activity=NOW() "
             "WHERE phone=$1 AND bot_number=$2 AND status='active'",
@@ -509,8 +520,8 @@ async def db_mark_session_nps_pending(phone: str, bot_number: str) -> None:
 
 
 async def db_close_session(phone: str, bot_number: str, reason: str = "manual", closed_by_username: str = "") -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("""
             UPDATE table_sessions
             SET status='closed', closed_at=NOW(), closed_by=$3, closed_by_username=$4,
@@ -521,8 +532,8 @@ async def db_close_session(phone: str, bot_number: str, reason: str = "manual", 
 
 
 async def db_mark_session_warned(session_id: int) -> bool:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         # El AND inactivity_warned=FALSE asegura que solo 1 worker pueda hacer el UPDATE
         result = await conn.execute(
             "UPDATE table_sessions SET inactivity_warned=TRUE WHERE id=$1 AND inactivity_warned=FALSE",
@@ -532,31 +543,41 @@ async def db_mark_session_warned(session_id: int) -> bool:
 
 
 async def db_get_stale_sessions() -> list:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM table_sessions WHERE status='active' AND inactivity_warned=FALSE
-            AND ((has_order=FALSE AND last_activity < NOW() - INTERVAL '10 minutes')
-              OR (order_delivered=TRUE AND last_activity < NOW() - INTERVAL '60 minutes'))
-        """)
-        return [_serialize(dict(r)) for r in rows]
+    """
+    Cross-tenant scheduler function — iterates ALL active sessions.
+
+    # Uses bypass_tenant_scope internally (scheduler admin operation).
+    """
+    with bypass_tenant_scope("scheduler: stale session sweep across all tenants"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM table_sessions WHERE status='active' AND inactivity_warned=FALSE
+                AND ((has_order=FALSE AND last_activity < NOW() - INTERVAL '10 minutes')
+                  OR (order_delivered=TRUE AND last_activity < NOW() - INTERVAL '60 minutes'))
+            """)
+            return [_serialize(dict(r)) for r in rows]
 
 
 async def db_get_closeable_sessions() -> list:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT * FROM table_sessions WHERE
-            (status='active' AND inactivity_warned=TRUE AND last_activity < NOW() - INTERVAL '5 minutes')
-            OR (status='nps_pending' AND last_activity < NOW() - INTERVAL '5 minutes')
-        """)
-        return [_serialize(dict(r)) for r in rows]
+    """
+    Cross-tenant scheduler function — iterates ALL sessions needing closure.
+
+    # Uses bypass_tenant_scope internally (scheduler admin operation).
+    """
+    with bypass_tenant_scope("scheduler: closeable session sweep across all tenants"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM table_sessions WHERE
+                (status='active' AND inactivity_warned=TRUE AND last_activity < NOW() - INTERVAL '5 minutes')
+                OR (status='nps_pending' AND last_activity < NOW() - INTERVAL '5 minutes')
+            """)
+            return [_serialize(dict(r)) for r in rows]
 
 
 async def db_get_closed_sessions(bot_number: str, hours: int = 24) -> list:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
     hours = max(1, min(hours, 720))
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             "SELECT * FROM table_sessions WHERE bot_number=$1 AND status='closed'"
             " AND closed_at > NOW() - make_interval(hours => $2) ORDER BY closed_at DESC",
@@ -566,15 +587,15 @@ async def db_get_closed_sessions(bot_number: str, hours: int = 24) -> list:
 
 
 async def db_get_session_by_id(session_id: int) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("SELECT * FROM table_sessions WHERE id=$1", session_id)
         return _serialize(dict(row)) if row else None
 
 
 async def db_reopen_session(session_id: int) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with tenant_connection() as conn:
         target = await conn.fetchrow("SELECT * FROM table_sessions WHERE id=$1 AND status='closed'", session_id)
         if not target: return None
         phone = target["phone"]
@@ -596,9 +617,11 @@ async def db_create_checks(base_order_id: str, checks: list) -> list:
     Reemplaza los checks 'open' del ticket y crea los nuevos.
     checks = [{"check_number": 1, "items": [...], "subtotal": N, "tax_amount": N, "total": N}, ...]
     Cada item en items: {"name": str, "qty": int, "unit_price": float, "subtotal": float}
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
+        # tenant_connection() opens a transaction; conn.transaction() creates a SAVEPOINT.
         async with conn.transaction():
             # Eliminar únicamente los checks todavía abiertos (no los ya cobrados)
             await conn.execute(
@@ -629,9 +652,11 @@ async def db_create_checks(base_order_id: str, checks: list) -> list:
 
 
 async def db_get_checks(base_order_id: str) -> list:
-    """Devuelve todos los checks de un ticket, con datos fiscales si existen."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Devuelve todos los checks de un ticket, con datos fiscales si existen.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch("""
             SELECT tc.*,
                    fi.cufe, fi.qr_data, fi.invoice_number, fi.dian_status,
@@ -645,9 +670,11 @@ async def db_get_checks(base_order_id: str) -> list:
 
 
 async def db_get_check(check_id: str) -> dict | None:
-    """Devuelve un check individual."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Devuelve un check individual.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM table_checks WHERE id=$1", check_id
         )
@@ -670,9 +697,11 @@ async def db_finalize_check_payment(
     1. Actualiza el check a status='invoiced' con pagos y cambio.
     2. Si TODOS los checks del base_order_id están en {invoiced, cancelled},
        actualiza table_orders a status='factura_entregada'.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
+        # tenant_connection() opens a transaction; conn.transaction() creates a SAVEPOINT.
         async with conn.transaction():
             await conn.execute(
                 """UPDATE table_checks
@@ -711,9 +740,11 @@ async def db_finalize_check_payment(
 
 
 async def db_delete_open_check(check_id: str) -> bool:
-    """Elimina un check solo si está en estado 'open'. Retorna True si se eliminó."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Elimina un check solo si está en estado 'open'. Retorna True si se eliminó.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         result = await conn.execute(
             "DELETE FROM table_checks WHERE id=$1 AND status='open'", check_id
         )
@@ -728,9 +759,11 @@ async def db_attach_proposal(
     proposal_status: str,
     customer_phone: str,
 ) -> None:
-    """Adjunta metadatos de propuesta de pago a un check existente."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Adjunta metadatos de propuesta de pago a un check existente.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute(
             """UPDATE table_checks
                SET proposed_payments     = $2::jsonb,
@@ -750,9 +783,11 @@ async def db_attach_proposal(
 
 
 async def db_set_check_tip(check_id: str, tip_amount: float) -> None:
-    """Actualiza tip_amount en un check abierto (durante el flujo de checkout del bot)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Actualiza tip_amount en un check abierto (durante el flujo de checkout del bot).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute(
             "UPDATE table_checks SET tip_amount = $1 WHERE id = $2",
             to_decimal(tip_amount),
@@ -764,9 +799,10 @@ async def db_attach_proof(base_order_id: str, customer_phone: str, media_url: st
     """
     Adjunta URL de comprobante a los checks con propuesta awaiting_proof del cliente.
     Retorna True si se actualizó al menos un check.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         result = await conn.execute(
             """UPDATE table_checks
                SET proof_media_url  = $3,
@@ -788,9 +824,10 @@ async def db_get_open_proposal_for_phone(
     Busca si el cliente tiene algún check con propuesta pendiente/esperando comprobante.
     Útil en chat.py para interceptar imágenes y adjuntarlas sin pasar por el LLM.
     Retorna el check (con base_order_id) o None.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """SELECT tc.id, tc.base_order_id, tc.proposal_status, tc.proposed_payments
                FROM table_checks tc
@@ -812,10 +849,11 @@ async def db_list_checkout_proposals(
     """
     Lista mesas que tienen checks con propuestas bot activas (pending/awaiting_proof/proof_received).
     Agrupado por base_order_id para la vista de Caja.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
     ids = branch_ids if branch_ids else [restaurant_id]
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT DISTINCT ON (tor.table_name, COALESCE(tor.branch_id, 0))
                  tor.base_order_id,
@@ -837,9 +875,11 @@ async def db_list_checkout_proposals(
 
 
 async def db_cancel_checkout_proposal(base_order_id: str) -> None:
-    """Cancels all pending bot checkout proposals on a base order's open checks."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Cancels all pending bot checkout proposals on a base order's open checks.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute(
             """UPDATE table_checks
                SET proposal_status = NULL,
@@ -856,9 +896,11 @@ async def db_cancel_checkout_proposal(base_order_id: str) -> None:
 
 
 async def db_get_check_ticket(check_id: str) -> dict | None:
-    """Devuelve datos del check + info fiscal para impresión de factura."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Devuelve datos del check + info fiscal para impresión de factura.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("""
             SELECT tc.id, tc.base_order_id, tc.check_number,
                    tc.items, tc.subtotal, tc.tax_amount, tc.total,
@@ -886,13 +928,15 @@ async def db_get_check_ticket(check_id: str) -> dict | None:
 # ── Floor plan & table properties (Apparta integration) ─────────────────────
 
 async def db_update_table_properties(table_id: str, **kwargs):
-    """Update table properties (capacity, table_type, zone). Only updates provided fields."""
+    """Update table properties (capacity, table_type, zone). Only updates provided fields.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     allowed = {"capacity", "table_type", "zone"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not updates:
         return None
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         sets = []
         vals = []
         for i, (col, val) in enumerate(updates.items(), 1):
@@ -905,9 +949,11 @@ async def db_update_table_properties(table_id: str, **kwargs):
 
 
 async def db_update_table_position(table_id: str, position_x: float, position_y: float):
-    """Update table position for floor plan."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Update table position for floor plan.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "UPDATE restaurant_tables SET position_x=$1, position_y=$2 WHERE id=$3 RETURNING *",
             position_x, position_y, table_id
@@ -916,9 +962,11 @@ async def db_update_table_position(table_id: str, position_x: float, position_y:
 
 
 async def db_get_floor_plan(branch_id: int = None, is_main: bool = False):
-    """Get all tables with positions and current occupancy for floor plan view."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Get all tables with positions and current occupancy for floor plan view.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         sql = """
             SELECT t.*,
                    s.id AS session_id,
@@ -942,9 +990,10 @@ async def db_get_session_phones_by_branch(branch_id: int, bot_number: str) -> se
     """
     Return the set of phone numbers that have table sessions in a given branch.
     Used by stats.py to filter conversations to those belonging to branch tables.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT DISTINCT ts.phone
@@ -958,19 +1007,25 @@ async def db_get_session_phones_by_branch(branch_id: int, bot_number: str) -> se
 
 
 async def db_get_active_session_table_ids() -> set:
-    """Return set of table_ids that have active or nps_pending sessions."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')"
-        )
+    """Return set of table_ids that have active or nps_pending sessions.
+
+    Cross-tenant scheduler function — iterates ALL tenants.
+    # Uses bypass_tenant_scope internally (scheduler admin operation).
+    """
+    with bypass_tenant_scope("scheduler: active session table_ids sweep across all tenants"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                "SELECT table_id FROM table_sessions WHERE status IN ('active','nps_pending')"
+            )
     return {r["table_id"] for r in rows}
 
 
 async def db_get_pending_orders_by_branch(branch_id: int) -> list:
-    """Return table_id + status for non-closed orders in a branch (for POS tables-status)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return table_id + status for non-closed orders in a branch (for POS tables-status).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             "SELECT table_id, status FROM table_orders "
             "WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
@@ -980,17 +1035,22 @@ async def db_get_pending_orders_by_branch(branch_id: int) -> list:
 
 
 async def db_get_waiter_alerts() -> list:
-    """Return the 30 most recent waiter alerts."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
+    """Return the 30 most recent waiter alerts (global cross-tenant kitchen view).
+
+    # Uses bypass_tenant_scope internally (global kitchen display).
+    """
+    with bypass_tenant_scope("kitchen: global waiter alerts display"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
     return [dict(r) for r in rows]
 
 
 async def db_dismiss_waiter_alert(alert_id: int) -> None:
-    """Delete a waiter alert by id."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Delete a waiter alert by id.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute("DELETE FROM waiter_alerts WHERE id = $1", alert_id)
 
 
@@ -1002,9 +1062,10 @@ async def db_get_table_orders_for_branch(
     """
     Return table orders filtered by branch and optional status.
     If branch_id is None and is_admin=True, returns all orders.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         if branch_id is not None:
             if status:
                 rows = await conn.fetch(
@@ -1037,9 +1098,10 @@ async def db_get_table_orders_by_base_id(
 ) -> list:
     """
     Return all orders belonging to a base_order_id group (for ticket aggregation).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         if branch_id is not None:
             rows = await conn.fetch(
                 """SELECT * FROM table_orders
@@ -1065,10 +1127,11 @@ async def db_adjust_table_bill(
     """
     Update base order with adjusted items/total and zero out sub-orders.
     Returns False if the base order does not exist.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     import json as _json
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         base_row = await conn.fetchrow(
             "SELECT id FROM table_orders WHERE id=$1", base_order_id
         )
@@ -1086,9 +1149,11 @@ async def db_adjust_table_bill(
 
 
 async def db_get_table_order_record(order_id: str) -> dict | None:
-    """Return phone, table_name, base_order_id, table_id for a table order."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return phone, table_name, base_order_id, table_id for a table order.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT phone, table_name, base_order_id, table_id FROM table_orders WHERE id=$1",
             order_id,
@@ -1097,9 +1162,11 @@ async def db_get_table_order_record(order_id: str) -> dict | None:
 
 
 async def db_get_open_table_session_by_phone(phone: str) -> dict | None:
-    """Return the active table session for a phone, or None."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return the active table session for a phone, or None.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM table_sessions WHERE phone=$1 AND closed_at IS NULL",
             phone,
@@ -1108,18 +1175,25 @@ async def db_get_open_table_session_by_phone(phone: str) -> dict | None:
 
 
 async def db_verify_table_in_restaurant(table_id: str, rest_id: int) -> dict | None:
-    """Return branch_id for a table, or None if not found."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return branch_id for a table, or None if not found.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         return await conn.fetchrow(
             "SELECT branch_id FROM restaurant_tables WHERE id = $1", table_id
         )
 
 
 async def db_verify_branch_is_child(branch_id: int, parent_id: int) -> bool:
-    """Return True if branch_id is a direct child of parent_id."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return True if branch_id is a direct child of parent_id.
+
+    Queries `restaurants` (no RLS on this table) — safe to run within any
+    tenant_scope or bypass_tenant_scope. set_config does not affect this query.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
             branch_id, parent_id,
@@ -1131,34 +1205,43 @@ async def db_get_delivery_orders_for_caja() -> list:
     """
     Return pending delivery/pickup orders for the kitchen/caja view (last 24h,
     excluding terminal statuses).
+
+    Cross-tenant kitchen display.
+    # Uses bypass_tenant_scope internally (global kitchen view).
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """SELECT * FROM orders
-               WHERE order_type IN ('domicilio','recoger')
-               AND created_at >= NOW() - INTERVAL '24 hours'
-               AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
-               ORDER BY created_at DESC"""
-        )
+    with bypass_tenant_scope("kitchen: delivery orders for caja cross-tenant view"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                """SELECT * FROM orders
+                   WHERE order_type IN ('domicilio','recoger')
+                   AND created_at >= NOW() - INTERVAL '24 hours'
+                   AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
+                   ORDER BY created_at DESC"""
+            )
     return [dict(r) for r in rows]
 
 
 async def db_get_delivery_status_hash() -> list:
-    """Return id+status pairs for active delivery orders (for hash-based polling)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, status FROM orders WHERE order_type IN ('domicilio','recoger')"
-            " AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
-        )
+    """Return id+status pairs for active delivery orders (for hash-based polling).
+
+    Cross-tenant kitchen display.
+    # Uses bypass_tenant_scope internally (global kitchen view).
+    """
+    with bypass_tenant_scope("kitchen: delivery status hash cross-tenant polling"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                "SELECT id, status FROM orders WHERE order_type IN ('domicilio','recoger')"
+                " AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
+            )
     return [dict(r) for r in rows]
 
 
 async def db_get_delivery_status_hash_for_restaurant(restaurant_id: int) -> list:
-    """Return id+status pairs for active delivery orders scoped to a restaurant."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return id+status pairs for active delivery orders scoped to a restaurant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT o.id, o.status
@@ -1175,16 +1258,20 @@ async def db_get_delivery_status_hash_for_restaurant(restaurant_id: int) -> list
 
 
 async def db_update_delivery_order_status(order_id: str, new_status: str) -> None:
-    """Update delivery order status."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Update delivery order status.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
 
 
 async def db_get_delivery_order_contact(order_id: str) -> dict | None:
-    """Return phone, address, total for a delivery order (for WA notification)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return phone, address, total for a delivery order (for WA notification).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT phone, address, total FROM orders WHERE id=$1", order_id
         )
@@ -1192,9 +1279,11 @@ async def db_get_delivery_order_contact(order_id: str) -> dict | None:
 
 
 async def db_get_meta_phone_id_for_session(phone: str) -> str | None:
-    """Return the most recent meta_phone_id from a table session for a phone."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return the most recent meta_phone_id from a table session for a phone.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT meta_phone_id FROM table_sessions WHERE phone=$1 ORDER BY started_at DESC LIMIT 1",
             phone,
@@ -1203,9 +1292,11 @@ async def db_get_meta_phone_id_for_session(phone: str) -> str | None:
 
 
 async def db_get_delivery_order_full(order_id: str) -> dict | None:
-    """Return full order row for billing/DIAN processing."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return full order row for billing/DIAN processing.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
     return dict(row) if row else None
 
@@ -1214,9 +1305,10 @@ async def db_force_delete_conversation_data(phone: str, username: str) -> None:
     """
     Force-delete conversation, cart, and close active table session for a phone.
     Called from the manual chat cleanup endpoint.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         await conn.execute("DELETE FROM conversations WHERE phone = $1", phone)
         await conn.execute("DELETE FROM carts WHERE phone = $1", phone)
         await conn.execute(
@@ -1230,9 +1322,11 @@ async def db_force_delete_conversation_data(phone: str, username: str) -> None:
 async def db_insert_session_waiter_alert(
     table_id: str, table_name: str, message: str
 ) -> None:
-    """Insert a waiter alert triggered from a dashboard session alert."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Insert a waiter alert triggered from a dashboard session alert.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute(
             "INSERT INTO waiter_alerts (table_id, table_name, message, status) "
             "VALUES ($1, $2, $3, 'active')",
@@ -1241,9 +1335,11 @@ async def db_insert_session_waiter_alert(
 
 
 async def db_get_closed_sessions(hours: int, bot_number: str | None) -> list[dict]:
-    """Return closed table sessions within the given hours window."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return closed table sessions within the given hours window.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         if bot_number:
             rows = await conn.fetch(
                 "SELECT * FROM table_sessions WHERE closed_at IS NOT NULL"
@@ -1262,10 +1358,12 @@ async def db_get_closed_sessions(hours: int, bot_number: str | None) -> list[dic
 
 
 async def db_get_session_with_history(session_id: int) -> tuple[dict | None, list]:
-    """Return (session_dict, conversation_history) for a table session."""
-    pool = await _get_pool()
+    """Return (session_dict, conversation_history) for a table session.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     import json as _json
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
         if not session:
             return None, []
@@ -1282,9 +1380,11 @@ async def db_get_session_with_history(session_id: int) -> tuple[dict | None, lis
 
 
 async def db_reopen_session(session_id: int) -> None:
-    """Clear closed_at / closed_by fields to re-open a table session."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Clear closed_at / closed_by fields to re-open a table session.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         await conn.execute(
             "UPDATE table_sessions SET closed_at = NULL, closed_by = NULL, closed_by_username = NULL WHERE id = $1",
             session_id,
@@ -1295,9 +1395,10 @@ async def db_session_alert_waiter(session_id: int, message: str) -> bool:
     """
     Look up the table session and insert a waiter alert for its table.
     Returns True if the session was found, False otherwise.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
         if session:
             await conn.execute(

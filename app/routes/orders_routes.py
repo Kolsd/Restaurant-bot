@@ -12,6 +12,7 @@ from app.services.agent import trigger_nps
 from app.services import loyalty as loyalty_svc
 from app.services.logging import get_logger
 from app.repositories import tables_repo as tr
+from app.services.tenant_context import tenant_scope
 
 log = get_logger(__name__)
 
@@ -65,6 +66,8 @@ async def view_cart(request: Request, phone: str, bot_number: str):
 
 @router.post("/payment/wompi-webhook")
 async def wompi_webhook(request: Request):
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
     # 🚨 FIX DE SEGURIDAD CON INDENTACIÓN CORRECTA
     if not WOMPI_EVENTS_SECRET:
         log.error("orders.wompi_secret_not_configured")
@@ -73,7 +76,7 @@ async def wompi_webhook(request: Request):
     body_bytes = await request.body()
     body = _json.loads(body_bytes)
     signature_header = request.headers.get("x-event-checksum", "")
-    
+
     expected_sig = hashlib.sha256(
         (body_bytes.decode() + WOMPI_EVENTS_SECRET).encode()
     ).hexdigest()
@@ -84,30 +87,33 @@ async def wompi_webhook(request: Request):
     event = body.get("event", "")
     data = body.get("data", {})
 
-    if event == "transaction.updated":
-        transaction = data.get("transaction", {})
-        if transaction.get("status") == "APPROVED":
-            reference = transaction.get("reference", "")
-            transaction_id = transaction.get("id")
-            if reference:
-                # Reservation deposit references are prefixed with "dep_"
-                if reference.startswith("dep_"):
-                    from app.services.reservation_payments import confirm_deposit_payment
-                    await confirm_deposit_payment(reference, transaction_id)
-                    return {"status": "ok"}
+    # Wompi webhooks are cross-tenant — no restaurant JWT present.
+    # bypass_tenant_scope allows migrated repos to execute without a pinned tenant.
+    with bypass_tenant_scope("wompi_webhook_cross_tenant"):
+        if event == "transaction.updated":
+            transaction = data.get("transaction", {})
+            if transaction.get("status") == "APPROVED":
+                reference = transaction.get("reference", "")
+                transaction_id = transaction.get("id")
+                if reference:
+                    # Reservation deposit references are prefixed with "dep_"
+                    if reference.startswith("dep_"):
+                        from app.services.reservation_payments import confirm_deposit_payment
+                        await confirm_deposit_payment(reference, transaction_id)
+                        return {"status": "ok"}
 
-                result = await db.db_confirm_payment(reference, transaction_id)
-                if result:
-                    log.info("orders.payment_confirmed", reference=reference, total=str(result['total']))
-                    # Acumulación de puntos loyalty en background (silenciosa)
-                    asyncio.create_task(loyalty_svc.accrue_on_order(
-                        bot_number=result.get("bot_number", ""),
-                        phone=result.get("phone", ""),
-                        order_id=reference,
-                        total_cop=float(result.get("total", 0)),
-                    ))
+                    result = await db.db_confirm_payment(reference, transaction_id)
+                    if result:
+                        log.info("orders.payment_confirmed", reference=reference, total=str(result['total']))
+                        # Acumulación de puntos loyalty en background (silenciosa)
+                        asyncio.create_task(loyalty_svc.accrue_on_order(
+                            bot_number=result.get("bot_number", ""),
+                            phone=result.get("phone", ""),
+                            order_id=reference,
+                            total_cop=float(result.get("total", 0)),
+                        ))
 
-    return {"status": "ok"}
+        return {"status": "ok"}
 
 @router.get("/payment/confirm")
 async def payment_confirm(request: Request):
@@ -262,7 +268,8 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
 @router.get("/delivery/check-updates")
 async def check_delivery_updates(request: Request):
     restaurant = await get_current_restaurant(request)
-    rows = await tr.db_get_delivery_status_hash_for_restaurant(restaurant["id"])
+    with tenant_scope(restaurant["id"]):
+        rows = await tr.db_get_delivery_status_hash_for_restaurant(restaurant["id"])
     current_state_hash = "".join([f"{r['id']}{r['status']}" for r in rows])
     return {"hash": current_state_hash}
 

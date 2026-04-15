@@ -23,9 +23,9 @@ from app.repositories.orders_repo import InsufficientStockError
 # database.py re-exports this module at module level, so a top-level import
 # of database here would create a cycle. We resolve both helpers at call time.
 
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 def _serialize(d: dict) -> dict:
     from app.services.database import _serialize as _db_serialize  # noqa: PLC0415
@@ -50,8 +50,7 @@ async def _sync_dish_availability(dish_names: list, available: bool, restaurant_
     """Activa o desactiva platos en menu_availability según el stock."""
     if not dish_names:
         return
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await _sync_dish_availability_conn(conn, dish_names, available, restaurant_id)
 
 
@@ -156,8 +155,7 @@ async def db_init_dish_recipes():
 # ── Inventory CRUD ────────────────────────────────────────────────────────────
 
 async def db_get_inventory(restaurant_id: int) -> list:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             "SELECT * FROM inventory WHERE restaurant_id = $1 ORDER BY name ASC",
             restaurant_id
@@ -168,8 +166,7 @@ async def db_get_inventory(restaurant_id: int) -> list:
 async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
                                     current_stock: float, min_stock: float,
                                     linked_dishes: list, cost_per_unit: float = 0) -> dict:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO inventory
                (restaurant_id, name, unit, current_stock, min_stock, linked_dishes, cost_per_unit)
@@ -186,8 +183,7 @@ async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
 
 
 async def db_update_inventory_item(item_id: int, fields: dict) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         existing = await conn.fetchrow("SELECT * FROM inventory WHERE id = $1", item_id)
         if not existing:
             return None
@@ -229,15 +225,13 @@ async def db_update_inventory_item(item_id: int, fields: dict) -> dict | None:
 
 
 async def db_delete_inventory_item(item_id: int):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute("DELETE FROM inventory WHERE id = $1", item_id)
 
 
 async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
                                      reason: str, restaurant_id: int) -> dict | None:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE inventory
                SET current_stock = GREATEST(0, current_stock + $1),
@@ -266,8 +260,7 @@ async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
 
 
 async def db_get_inventory_history(item_id: int) -> list:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT * FROM inventory_history
                WHERE inventory_id = $1
@@ -279,8 +272,7 @@ async def db_get_inventory_history(item_id: int) -> list:
 
 
 async def db_get_inventory_alerts(restaurant_id: int) -> list:
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT * FROM inventory
                WHERE restaurant_id = $1
@@ -311,15 +303,14 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
     # db_get_restaurant_by_phone from database — use lazy import to break cycle.
     from app.services.database import db_get_restaurant_by_phone
 
-    pool = await _get_pool()
     restaurant = await db_get_restaurant_by_phone(bot_number)
     if not restaurant:
         return
 
     restaurant_id = restaurant["id"]
 
-    async with pool.acquire() as conn:
-        async with conn.transaction():
+    # tenant_connection() already wraps in a transaction — no nested tx needed
+    async with _tenant_connection() as conn:
             for item in items:
                 dish_name = item.get("name", "")
                 qty       = float(item.get("quantity", item.get("qty", 1)))
@@ -443,8 +434,7 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
     from app.services.logging import get_logger
     log = get_logger(__name__)
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         async with conn.transaction():
             await conn.execute(
                 "DELETE FROM dish_recipes WHERE restaurant_id=$1 AND dish_name=$2",
@@ -488,8 +478,7 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
 
 async def db_get_dish_recipe(restaurant_id: int, dish_name: str) -> list:
     """Devuelve las líneas de ingredientes de un plato, con costo por línea."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch("""
             SELECT r.id, r.ingredient_id, r.quantity,
                    i.name AS ingredient_name, i.unit, i.cost_per_unit,
@@ -504,8 +493,7 @@ async def db_get_dish_recipe(restaurant_id: int, dish_name: str) -> list:
 
 async def db_get_all_recipes(restaurant_id: int) -> list:
     """Lista todos los escandallos con food cost total por plato."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch("""
             SELECT r.dish_name,
                    COUNT(*) AS ingredient_count,
@@ -521,8 +509,7 @@ async def db_get_all_recipes(restaurant_id: int) -> list:
 
 async def db_delete_dish_recipe(restaurant_id: int, dish_name: str):
     """Elimina todos los ingredientes del escandallo de un plato."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "DELETE FROM dish_recipes WHERE restaurant_id=$1 AND dish_name=$2",
             restaurant_id, dish_name
@@ -534,8 +521,7 @@ async def db_get_food_costs(restaurant_id: int) -> list:
     Devuelve el Food Cost de cada plato que tiene escandallo definido.
     Incluye desglose por ingrediente para que el dueño vea de dónde viene el costo.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch("""
             SELECT
                 r.dish_name,

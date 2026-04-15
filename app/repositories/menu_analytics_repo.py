@@ -16,9 +16,9 @@ from app.services.logging import get_logger
 log = get_logger(__name__)
 
 
-async def _get_pool():
-    from app.services.database import get_pool
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 
 # ── Write ─────────────────────────────────────────────────────────────────────
@@ -35,8 +35,7 @@ async def record_event(
     Fire-and-forget: exceptions are logged but never re-raised to the caller.
     """
     try:
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
+        async with _tenant_connection() as conn:
             await conn.execute(
                 """
                 INSERT INTO menu_events (restaurant_id, dish_name, event_type, phone, bot_number)
@@ -73,8 +72,7 @@ async def get_dish_analytics(
     cart_conversion_rate  = add_to_carts / views      (or 0 if views == 0)
     order_conversion_rate = orders / add_to_carts     (or 0 if add_to_carts == 0)
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT

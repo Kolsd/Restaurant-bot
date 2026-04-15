@@ -15,7 +15,7 @@ Diseño orientado a mínimos tokens:
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from app.services import database as db
-from app.routes.deps import get_current_restaurant, require_module
+from app.routes.deps import get_current_restaurant_scoped, require_module
 
 router = APIRouter(prefix="/api/loyalty", tags=["loyalty"])
 
@@ -42,7 +42,7 @@ class AdjustBody(BaseModel):
 @router.get("/balance", dependencies=[_module_dep])
 async def get_loyalty_balance(
     phone:      str  = Query(..., min_length=7, max_length=15),
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
     Herramienta ultra-ligera para el bot y el POS.
@@ -66,7 +66,7 @@ async def get_loyalty_balance(
 async def get_loyalty_ledger(
     phone:      str  = Query(..., min_length=7, max_length=15),
     limit:      int  = Query(default=50, ge=1, le=200),
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Historial de movimientos de un cliente (para dashboard / POS)."""
     clean = "".join(c for c in phone if c.isdigit())
@@ -80,7 +80,7 @@ async def get_loyalty_ledger(
 @router.get("/stats", dependencies=[_module_dep])
 async def get_loyalty_stats(
     limit:      int  = Query(default=100, ge=1, le=500),
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Top clientes por saldo de puntos (para dashboard de fidelización)."""
     rows = await db.db_get_loyalty_stats(restaurant["id"], limit)
@@ -90,7 +90,7 @@ async def get_loyalty_stats(
 @router.post("/redeem", dependencies=[_module_dep])
 async def redeem_loyalty_points(
     body:       RedeemBody,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
     Canjea puntos en el POS al momento del pago.
@@ -111,7 +111,7 @@ async def redeem_loyalty_points(
 @router.post("/adjust", dependencies=[_module_dep])
 async def adjust_loyalty_points(
     body:       AdjustBody,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
     Ajuste manual de puntos (admin/soporte).

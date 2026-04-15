@@ -580,76 +580,96 @@ def test_get_waiter_alerts_no_auth(client, monkeypatch):
 
 # ══════════════════════════════════════════════════════════════════════════════
 # G. BUG DUPLICACIÓN — db_get_base_order_id
+# Updated for tenant_connection() migration: patch app.services.database.get_pool
+# and wrap calls in tenant_scope() (following test_customer_memory.py pattern).
 # ══════════════════════════════════════════════════════════════════════════════
 
+from unittest.mock import patch as _patch
+from app.services.tenant_context import tenant_scope as _tenant_scope
+
+
+def _make_tenant_conn(fetchrow_side_effect):
+    """Build a connection mock with transaction() support for tenant_connection()."""
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(side_effect=fetchrow_side_effect)
+    conn.fetchval = AsyncMock(return_value=None)  # set_config returns None
+    conn.execute = AsyncMock(return_value=None)
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
+    return conn
+
+
 @pytest.mark.asyncio
-async def test_base_order_id_sin_sesion_activa_retorna_none(monkeypatch):
+async def test_base_order_id_sin_sesion_activa_retorna_none():
     """
     FIX DUPLICACIÓN: Sin sesión activa para la mesa → None.
     Evita que nueva sesión añada "Adicional #N" a una sesión anterior.
+    Updated: patches app.services.database.get_pool (tenant_connection pattern).
     """
     from app.repositories.tables_repo import db_get_base_order_id
 
-    conn = MagicMock()
-    conn.fetchrow = AsyncMock(side_effect=[
+    conn = _make_tenant_conn([
         None,  # no hay sesión activa
         make_row({"base_id": "MESA-OLD"}),  # no debe llegar aquí
     ])
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.tables_repo._get_pool", AsyncMock(return_value=pool))
+    with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _tenant_scope(1):
+            result = await db_get_base_order_id("TBL-001")
 
-    result = await db_get_base_order_id("TBL-001")
     assert result is None
+    # fetchrow call count: 1 set_config (fetchval) + 1 session query = fetchrow=1
     assert conn.fetchrow.call_count == 1  # solo 1 query: la de sesión
 
 
 @pytest.mark.asyncio
-async def test_base_order_id_con_sesion_activa_retorna_id(monkeypatch):
+async def test_base_order_id_con_sesion_activa_retorna_id():
     """Con sesión activa → retorna el base_order_id de la orden existente."""
     from app.repositories.tables_repo import db_get_base_order_id
 
-    conn = MagicMock()
-    conn.fetchrow = AsyncMock(side_effect=[
+    conn = _make_tenant_conn([
         make_row({"id": "sess-001"}),
         make_row({"base_id": "MESA-AA3E4A"}),
     ])
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.tables_repo._get_pool", AsyncMock(return_value=pool))
+    with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _tenant_scope(1):
+            result = await db_get_base_order_id("TBL-001")
 
-    result = await db_get_base_order_id("TBL-001")
     assert result == "MESA-AA3E4A"
 
 
 @pytest.mark.asyncio
-async def test_base_order_id_sesion_activa_sin_ordenes_retorna_none(monkeypatch):
+async def test_base_order_id_sesion_activa_sin_ordenes_retorna_none():
     """Sesión activa pero sin órdenes previas → None (primera orden del cliente)."""
     from app.repositories.tables_repo import db_get_base_order_id
 
-    conn = MagicMock()
-    conn.fetchrow = AsyncMock(side_effect=[
+    conn = _make_tenant_conn([
         make_row({"id": "sess-001"}),
         None,
     ])
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.tables_repo._get_pool", AsyncMock(return_value=pool))
+    with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _tenant_scope(1):
+            result = await db_get_base_order_id("TBL-001")
 
-    result = await db_get_base_order_id("TBL-001")
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_base_order_id_sesion_cerrada_no_reutiliza(monkeypatch):
+async def test_base_order_id_sesion_cerrada_no_reutiliza():
     """Mesa con sesión cerrada (status != active) → None, no reutiliza órdenes."""
     from app.repositories.tables_repo import db_get_base_order_id
 
-    conn = MagicMock()
-    # Ninguna sesión activa (query filtra status='active')
-    conn.fetchrow = AsyncMock(side_effect=[
-        None,
+    conn = _make_tenant_conn([
+        None,  # Ninguna sesión activa (query filtra status='active')
         make_row({"base_id": "MESA-OLD"}),
     ])
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.tables_repo._get_pool", AsyncMock(return_value=pool))
+    with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _tenant_scope(1):
+            result = await db_get_base_order_id("TBL-001")
 
-    result = await db_get_base_order_id("TBL-001")
     assert result is None

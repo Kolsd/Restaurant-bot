@@ -49,7 +49,20 @@ def make_row(d: dict):
 
 
 def make_pool(conn):
-    """Wrap a mock connection in a minimal pool context manager."""
+    """Wrap a mock connection in a minimal pool context manager.
+
+    Also ensures conn.transaction() is a sync callable returning an async ctx-mgr,
+    as required by tenant_connection() which calls `async with conn.transaction():`.
+    If conn already has transaction set to a MagicMock, it is left unchanged.
+    """
+    # Ensure transaction() is a sync MagicMock returning an async ctx-mgr.
+    # AsyncMock's auto-generated attributes return coroutines when called, which
+    # breaks `async with conn.transaction():`. Only patch if not already correct.
+    if not isinstance(getattr(conn, "transaction", None), MagicMock):
+        _txn = MagicMock()
+        _txn.__aenter__ = AsyncMock(return_value=_txn)
+        _txn.__aexit__ = AsyncMock(return_value=False)
+        conn.transaction = MagicMock(return_value=_txn)
     pool = AsyncMock()
     pool.acquire = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=conn),

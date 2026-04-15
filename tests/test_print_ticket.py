@@ -8,6 +8,17 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime
 
 import app.routes.tables as tables_routes
+from app.services.tenant_context import bypass_tenant_scope as _bypass
+
+
+def _make_tenant_mock_conn():
+    """Build a mock conn compatible with tenant_connection() (needs transaction() as sync ctx-mgr)."""
+    conn = AsyncMock()
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
+    return conn
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -53,7 +64,7 @@ async def test_ticket_agrega_subordenes():
     row1 = _make_row("BASE-001",   None,       "Mesa 5", items1, 90000, sub_number=1)
     row2 = _make_row("BASE-001-2", "BASE-001", "Mesa 5", items2, 15000, sub_number=2)
 
-    mock_conn = AsyncMock()
+    mock_conn = _make_tenant_mock_conn()
     mock_conn.fetch = AsyncMock(return_value=[row1, row2])
     mock_conn.fetchrow = AsyncMock(return_value=None)  # sin factura fiscal
 
@@ -69,6 +80,7 @@ async def test_ticket_agrega_subordenes():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
+        _bypass("test: get_order_ticket direct call"),
     ):
         result = await tables_routes.get_order_ticket(mock_request, "BASE-001")
 
@@ -86,7 +98,7 @@ async def test_ticket_orden_simple():
     items = json.dumps([{"name": "Bandeja Paisa", "price": 28000, "quantity": 1}])
     row   = _make_row("ORD-XYZ", None, "Mesa 2", items, 28000, notes="Sin picante")
 
-    mock_conn = AsyncMock()
+    mock_conn = _make_tenant_mock_conn()
     mock_conn.fetch    = AsyncMock(return_value=[row])
     mock_conn.fetchrow = AsyncMock(return_value=None)
 
@@ -102,6 +114,7 @@ async def test_ticket_orden_simple():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
+        _bypass("test: get_order_ticket direct call"),
     ):
         result = await tables_routes.get_order_ticket(mock_request, "ORD-XYZ")
 
@@ -115,7 +128,7 @@ async def test_ticket_orden_no_encontrada_retorna_404():
     """Si no hay órdenes con ese ID debe levantar HTTPException 404."""
     from fastapi import HTTPException
 
-    mock_conn = AsyncMock()
+    mock_conn = _make_tenant_mock_conn()
     mock_conn.fetch = AsyncMock(return_value=[])
 
     mock_pool = AsyncMock()
@@ -130,6 +143,7 @@ async def test_ticket_orden_no_encontrada_retorna_404():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
+        _bypass("test: get_order_ticket direct call"),
     ):
         with pytest.raises(HTTPException) as exc_info:
             await tables_routes.get_order_ticket(mock_request, "ID-INEXISTENTE")
@@ -163,7 +177,7 @@ async def test_ticket_incluye_fiscal_si_existe():
     fiscal_row.keys     = lambda: fiscal_mock.keys()
     fiscal_row.__getitem__ = lambda s, k: fiscal_mock[k]
 
-    mock_conn = AsyncMock()
+    mock_conn = _make_tenant_mock_conn()
     mock_conn.fetch    = AsyncMock(return_value=[row])
     mock_conn.fetchrow = AsyncMock(return_value=fiscal_row)
 
@@ -179,6 +193,7 @@ async def test_ticket_incluye_fiscal_si_existe():
         patch.object(tables_routes.db, "get_pool", AsyncMock(return_value=mock_pool)),
         patch("app.routes.deps.get_current_user", AsyncMock(return_value=MOCK_USER)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=MOCK_USER)),
+        _bypass("test: get_order_ticket direct call"),
     ):
         result = await tables_routes.get_order_ticket(mock_request, "ORDER-FISCAL")
 

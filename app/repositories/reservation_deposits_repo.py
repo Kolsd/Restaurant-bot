@@ -19,9 +19,9 @@ log = get_logger(__name__)
 
 
 # Lazy accessors — break circular import with app.services.database.
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
+def _tenant_connection():
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
 
 
 def _serialize(d: dict) -> dict:
@@ -36,8 +36,7 @@ async def db_create_deposit(
     payment_url: str = "",
 ) -> dict | None:
     """Insert a new deposit record and return the full row."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO reservation_deposits
@@ -63,8 +62,7 @@ async def db_create_deposit(
 
 async def db_get_deposit_by_reservation(reservation_id: int) -> dict | None:
     """Return the most recent deposit for a reservation (pending or paid)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             SELECT * FROM reservation_deposits
@@ -82,8 +80,7 @@ async def db_confirm_deposit(reservation_id: int, transaction_id: str) -> dict |
     Transition deposit status pending -> paid.
     Returns the updated row, or None if no pending deposit was found.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             UPDATE reservation_deposits
@@ -112,8 +109,7 @@ async def db_get_pending_deposits(older_than_hours: int = 2) -> list[dict]:
     Return pending deposits older than `older_than_hours` for auto-cancellation.
     Used by the scheduler to expire unpaid deposits.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT * FROM reservation_deposits
@@ -128,8 +124,7 @@ async def db_get_pending_deposits(older_than_hours: int = 2) -> list[dict]:
 
 async def db_mark_deposit_refunded(deposit_id: int, reason: str = "") -> dict | None:
     """Mark a deposit as refunded with an optional reason string."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             UPDATE reservation_deposits

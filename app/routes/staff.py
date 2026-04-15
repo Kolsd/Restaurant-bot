@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from app.services.money import to_decimal
 
-from app.routes.deps import get_current_restaurant, require_module
+from app.routes.deps import get_current_restaurant, get_current_restaurant_scoped, require_module
 from app.services import database as db
 from app.repositories import sessions_repo, staff_repo
 from app.services.logging import get_logger
@@ -105,7 +105,7 @@ class TipCutRequest(BaseModel):
 @router.get("", dependencies=_MODULE_DEPS)
 async def list_staff(
     request: Request,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Retorna el staff filtrado por la sucursal seleccionada en el selector global."""
     # 🛡️ FILTRO GLOBAL: Si el Owner seleccionó una sucursal, usamos ese ID
@@ -125,7 +125,7 @@ async def list_staff(
 async def create_staff(
     request: Request,
     body: StaffCreate,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Crea un empleado en la sucursal que el Owner tenga seleccionada."""
     branch_id = restaurant["id"]
@@ -211,7 +211,7 @@ async def staff_pin_login(body: StaffPinLoginRequest):
 async def update_staff(
     staff_id: str,
     body: StaffUpdate,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Update mutable staff fields. PIN is re-hashed if provided."""
     patch = body.model_dump(exclude_none=True)
@@ -236,7 +236,7 @@ async def update_staff(
 @router.delete("/{staff_id}", dependencies=_MODULE_DEPS, status_code=200)
 async def delete_staff(
     staff_id: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Elimina permanentemente un empleado del roster."""
     deleted = await db.db_delete_staff(staff_id, restaurant["id"])
@@ -288,7 +288,7 @@ async def self_clock_out(request: Request):
 @router.post("/clock-in", dependencies=_MODULE_DEPS)
 async def clock_in(
     body: ClockInRequest,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
     Open a new shift for the given staff_id.
@@ -305,7 +305,7 @@ async def clock_in(
 @router.post("/clock-out", dependencies=_MODULE_DEPS)
 async def clock_out(
     body: ClockOutRequest,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
     Close the open shift for the given staff_id.
@@ -319,7 +319,7 @@ async def clock_out(
 
 @router.get("/open-shifts", dependencies=_MODULE_DEPS)
 async def open_shifts(
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Return all currently open shifts for the restaurant."""
     shifts = await db.db_get_open_shifts(restaurant["id"])
@@ -330,7 +330,7 @@ async def open_shifts(
 async def get_shifts(
     date_from: str,
     date_to: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
     Return shift history for [date_from, date_to).
@@ -344,7 +344,7 @@ async def get_shifts(
 
 @router.get("/tip-distributions", dependencies=_MODULE_DEPS)
 async def tip_distributions(
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Return the 20 most recent tip distribution cuts."""
     cuts = await db.db_get_tip_distributions(restaurant["id"])
@@ -362,7 +362,7 @@ async def tips_auto(
     period_start: str,
     period_end: str,
     branch_id: int | None = None,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Return auto-calculated tip distribution based on attendance overlap."""
     result = await db.db_calculate_tips_by_attendance(
@@ -381,7 +381,7 @@ class TipDistributionConfig(BaseModel):
 @router.patch("/tip-distribution", dependencies=_MODULE_DEPS, status_code=200)
 async def update_tip_distribution(
     body: TipDistributionConfig,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Update the tip distribution % config for all roles."""
     total = sum(body.config.values())
@@ -573,7 +573,7 @@ async def edit_shift(
     request: Request,
     shift_id: str,
     body: ShiftEditBody,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Admin: correct shift times."""
     result = await db.db_edit_shift(
@@ -601,7 +601,7 @@ class ScheduleBulkBody(BaseModel):
 @router.post("/schedules/bulk", dependencies=_MODULE_DEPS, status_code=200)
 async def save_schedules_bulk(
     body: ScheduleBulkBody,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Bulk create/update schedules for multiple staff members."""
     from datetime import time
@@ -620,7 +620,7 @@ async def save_schedules_bulk(
 @router.post("/schedules", dependencies=_MODULE_DEPS, status_code=200)
 async def save_schedule(
     body: ScheduleBody,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Create or update schedule for staff member on a specific day."""
     from datetime import time
@@ -634,7 +634,7 @@ async def save_schedule(
 
 @router.get("/schedules", dependencies=_MODULE_DEPS)
 async def list_schedules(
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Get all schedules for the restaurant."""
     schedules = await db.db_get_schedules(restaurant["id"])
@@ -644,7 +644,7 @@ async def list_schedules(
 @router.delete("/schedules/{schedule_id}", dependencies=_MODULE_DEPS, status_code=200)
 async def delete_schedule(
     schedule_id: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Delete a schedule entry by ID."""
     deleted = await db.db_delete_schedule(schedule_id)
@@ -659,7 +659,7 @@ async def delete_schedule(
 async def get_timecard(
     week_start: str,
     week_end: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Weekly timecard: hours per employee per day."""
     data = await db.db_get_timecard(restaurant["id"], week_start, week_end)
@@ -672,7 +672,7 @@ async def get_timecard(
 async def get_overtime(
     date_from: str,
     date_to: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
     daily_threshold: float = 8.0,
     weekly_threshold: float = 40.0,
 ):
@@ -689,7 +689,7 @@ async def get_overtime(
 async def get_attendance(
     date_from: str,
     date_to: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Compare actual clock-in with scheduled times."""
     data = await db.db_get_attendance_report(restaurant["id"], date_from, date_to)
@@ -716,7 +716,7 @@ class DeductionItemUpdate(BaseModel):
 @router.get("/{staff_id}/deductions", dependencies=_MODULE_DEPS)
 async def list_deduction_items(
     staff_id: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """List all deduction items for a staff member."""
     items = await db.db_list_deduction_items(staff_id, restaurant["id"])
@@ -727,7 +727,7 @@ async def list_deduction_items(
 async def create_deduction_item(
     staff_id: str,
     body: DeductionItemCreate,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Create a manual deduction item for a staff member."""
     item = await db.db_create_deduction_item(
@@ -745,7 +745,7 @@ async def create_deduction_item(
 async def update_deduction_item(
     item_id: str,
     body: DeductionItemUpdate,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Edit or deactivate a deduction item."""
     patch = body.model_dump(exclude_none=True)
@@ -760,7 +760,7 @@ async def update_deduction_item(
 @router.delete("/deductions/{item_id}", dependencies=_MODULE_DEPS, status_code=200)
 async def delete_deduction_item(
     item_id: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Delete a deduction item."""
     deleted = await db.db_delete_deduction_item(item_id, restaurant["id"])
@@ -776,7 +776,7 @@ async def payroll_calculate(
     request: Request,
     period_start: str,
     period_end: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Calculate payroll for all staff in the selected branch/period."""
     branch_id = restaurant["id"]
@@ -791,7 +791,7 @@ async def payroll_calculate(
 async def save_payroll_run(
     request: Request,
     body: dict,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Save payroll calculation as a draft run."""
     period_start = body.get("period_start")
@@ -817,7 +817,7 @@ async def save_payroll_run(
 @router.get("/payroll/runs", dependencies=_MODULE_DEPS)
 async def list_payroll_runs(
     request: Request,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """List recent payroll runs."""
     branch_id = restaurant["id"]
@@ -831,7 +831,7 @@ async def list_payroll_runs(
 @router.get("/payroll/runs/{run_id}/export", dependencies=_MODULE_DEPS)
 async def export_payroll_run(
     run_id: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Download a saved payroll run as a CSV file."""
     branch_id = restaurant["id"]
@@ -917,7 +917,7 @@ class StaffContractAssign(BaseModel):
 
 @router.get("/payroll/contracts", dependencies=_MODULE_DEPS)
 async def list_contract_templates(
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """List all contract templates for the restaurant."""
     templates = await db.db_list_contract_templates(restaurant["id"])
@@ -927,7 +927,7 @@ async def list_contract_templates(
 @router.post("/payroll/contracts", dependencies=_MODULE_DEPS, status_code=201)
 async def create_contract_template(
     body: ContractTemplateCreate,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Create a new contract template."""
     template = await db.db_create_contract_template(restaurant["id"], body.model_dump())
@@ -938,7 +938,7 @@ async def create_contract_template(
 async def update_contract_template(
     template_id: str,
     body: ContractTemplateUpdate,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Update a contract template."""
     data = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -951,7 +951,7 @@ async def update_contract_template(
 @router.delete("/payroll/contracts/{template_id}", dependencies=_MODULE_DEPS)
 async def delete_contract_template(
     template_id: str,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Delete a contract template (fails if staff are assigned to it)."""
     deleted = await db.db_delete_contract_template(template_id, restaurant["id"])
@@ -967,7 +967,7 @@ async def delete_contract_template(
 async def assign_staff_contract(
     staff_id: str,
     body: StaffContractAssign,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Assign or clear a contract template for a staff member."""
     result = await db.db_assign_staff_contract(
@@ -994,7 +994,7 @@ async def list_overtime_requests(
     request: Request,
     week_start: str | None = None,
     status: str | None = None,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """List overtime requests for review."""
     branch_id = restaurant["id"]
@@ -1009,7 +1009,7 @@ async def list_overtime_requests(
 async def review_overtime_request(
     request_id: str,
     body: OvertimeReview,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Approve or reject an overtime request."""
     result = await db.db_review_overtime_request(

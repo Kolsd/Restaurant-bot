@@ -4,15 +4,22 @@ tests/test_customer_memory.py
 
 All tests are fully mocked — no real DB is touched.
 Uses make_pool / make_row from tests/conftest.py.
+
+Updated for Wave 2 RLS migration: _get_pool removed from repo.
+DB calls are now gated by tenant_connection(); tests patch
+app.services.database.get_pool and wrap calls in tenant_scope().
 """
 import asyncio
 import json
 from decimal import Decimal
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from tests.conftest import make_pool, make_row
+from app.services.tenant_context import tenant_scope, bypass_tenant_scope
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -42,8 +49,18 @@ def _make_profile(overrides: dict | None = None) -> dict:
 def _make_conn(fetchrow_result=None, execute_result=None):
     conn = MagicMock()
     conn.fetchrow = AsyncMock(return_value=fetchrow_result)
+    conn.fetchval = AsyncMock(return_value=None)
     conn.execute = AsyncMock(return_value=execute_result)
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
     return conn
+
+
+def _patched_pool(conn):
+    """Return a pool mock wrapped in a patch context for get_pool."""
+    return patch("app.services.database.get_pool", AsyncMock(return_value=make_pool(conn)))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -54,27 +71,23 @@ class TestCustomerProfilesRepo:
 
     # ── 1. get_profile returns None when row is missing ──────────────────────
 
-    def test_get_profile_returns_none_when_missing(self, monkeypatch):
+    def test_get_profile_returns_none_when_missing(self):
         conn = _make_conn(fetchrow_result=None)
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         import app.repositories.customer_profiles_repo as repo
-        result = _run(repo.get_profile(1, "+57300"))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                result = _run(repo.get_profile(1, "+57300"))
         assert result is None
 
     # ── 2. get_profile returns dict when row is found ────────────────────────
 
-    def test_get_profile_returns_dict_when_found(self, monkeypatch):
+    def test_get_profile_returns_dict_when_found(self):
         profile_data = _make_profile()
         conn = _make_conn(fetchrow_result=make_row(profile_data))
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         import app.repositories.customer_profiles_repo as repo
-        result = _run(repo.get_profile(1, "+57300"))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                result = _run(repo.get_profile(1, "+57300"))
         assert result is not None
         assert isinstance(result, dict)
         assert result["phone"] == "+57300"
@@ -83,15 +96,13 @@ class TestCustomerProfilesRepo:
 
     # ── 3. upsert_profile passes display_name as SQL param ──────────────────
 
-    def test_upsert_profile_passes_display_name(self, monkeypatch):
+    def test_upsert_profile_passes_display_name(self):
         profile_data = _make_profile()
         conn = _make_conn(fetchrow_result=make_row(profile_data))
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         import app.repositories.customer_profiles_repo as repo
-        result = _run(repo.upsert_profile_from_message(1, "+57300", display_name="Miguel"))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                result = _run(repo.upsert_profile_from_message(1, "+57300", display_name="Miguel"))
 
         conn.fetchrow.assert_awaited_once()
         call_args = conn.fetchrow.call_args
@@ -101,15 +112,13 @@ class TestCustomerProfilesRepo:
 
     # ── 4. upsert_profile without name doesn't break ─────────────────────────
 
-    def test_upsert_profile_without_name(self, monkeypatch):
+    def test_upsert_profile_without_name(self):
         profile_data = _make_profile({"display_name": None})
         conn = _make_conn(fetchrow_result=make_row(profile_data))
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
         import app.repositories.customer_profiles_repo as repo
-        result = _run(repo.upsert_profile_from_message(1, "+57300", display_name=None))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                result = _run(repo.upsert_profile_from_message(1, "+57300", display_name=None))
         assert result is not None
         # None was passed for display_name — SQL params should include None
         call_args = conn.fetchrow.call_args[0]
@@ -117,39 +126,35 @@ class TestCustomerProfilesRepo:
 
     # ── 5. update_preference rejects invalid key ─────────────────────────────
 
-    def test_update_preference_rejects_invalid_key(self, monkeypatch):
-        conn = _make_conn(fetchrow_result=make_row(_make_profile()))
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
+    def test_update_preference_rejects_invalid_key(self):
+        # ValueError is raised before DB access — no pool patch needed
         import app.repositories.customer_profiles_repo as repo
-        with pytest.raises(ValueError, match="hacker_mode"):
-            _run(repo.update_preference(1, "+57300", key="hacker_mode", value="evil"))
+        conn = _make_conn(fetchrow_result=make_row(_make_profile()))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                with pytest.raises(ValueError, match="hacker_mode"):
+                    _run(repo.update_preference(1, "+57300", key="hacker_mode", value="evil"))
 
     # ── 6. update_preference truncates long values to MAX_VALUE_CHARS ────────
 
-    def test_update_preference_truncates_long_value(self, monkeypatch):
+    def test_update_preference_truncates_long_value(self):
         captured_args: list = []
 
-        async def mock_get_pool_inner():
-            conn = MagicMock()
-            conn.fetchrow = AsyncMock(return_value=make_row(_make_profile()))
+        conn = _make_conn(fetchrow_result=make_row(_make_profile()))
 
-            async def capture_execute(sql, *args):
-                captured_args.extend(args)
+        original_execute = conn.execute
 
-            conn.execute = capture_execute
-            return make_pool(conn)
+        async def capture_execute(sql, *args):
+            captured_args.extend(args)
 
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            mock_get_pool_inner,
-        )
+        conn.execute = capture_execute
+
         import app.repositories.customer_profiles_repo as repo
 
-        long_value = "x" * 300
-        _run(repo.update_preference(1, "+57300", key="notes", value=long_value))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                long_value = "x" * 300
+                _run(repo.update_preference(1, "+57300", key="notes", value=long_value))
 
         # The value passed to SQL must be capped at MAX_VALUE_CHARS (200)
         executed_value = next(
@@ -173,47 +178,41 @@ class TestCustomerProfilesRepo:
             return _make_profile()
 
         execute_called: list[bool] = []
+        conn = _make_conn(fetchrow_result=make_row(_make_profile()))
 
-        async def mock_get_pool_inner():
-            conn = MagicMock()
+        async def capture_execute(sql, *args):
+            execute_called.append(True)
 
-            async def capture_execute(sql, *args):
-                execute_called.append(True)
-
-            conn.execute = capture_execute
-            return make_pool(conn)
+        conn.execute = capture_execute
 
         import app.repositories.customer_profiles_repo as repo
         monkeypatch.setattr(repo, "get_profile", mock_get_profile)
         monkeypatch.setattr(repo, "upsert_profile_from_message", mock_upsert)
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            mock_get_pool_inner,
-        )
 
-        _run(repo.update_preference(1, "+57300", key="dietary", value="vegan"))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                _run(repo.update_preference(1, "+57300", key="dietary", value="vegan"))
 
         assert upsert_called, "upsert_profile_from_message was not called"
         assert execute_called, "SQL UPDATE was not called after upsert"
 
     # ── 8. increment_after_order rejects float ───────────────────────────────
 
-    def test_increment_after_order_rejects_float(self, monkeypatch):
-        conn = _make_conn(fetchrow_result=make_row(_make_profile()))
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            AsyncMock(return_value=make_pool(conn)),
-        )
+    def test_increment_after_order_rejects_float(self):
+        # TypeError is raised before DB access
         import app.repositories.customer_profiles_repo as repo
-        with pytest.raises(TypeError, match="Decimal"):
-            _run(
-                repo.increment_after_order(
-                    restaurant_id=1,
-                    phone="+57300",
-                    order_total=12.50,        # float — must be rejected
-                    order_summary="Pizza",
-                )
-            )
+        conn = _make_conn(fetchrow_result=make_row(_make_profile()))
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                with pytest.raises(TypeError, match="Decimal"):
+                    _run(
+                        repo.increment_after_order(
+                            restaurant_id=1,
+                            phone="+57300",
+                            order_total=12.50,        # float — must be rejected
+                            order_summary="Pizza",
+                        )
+                    )
 
     # ── 9. increment_after_order accepts Decimal and passes correct params ───
 
@@ -223,30 +222,26 @@ class TestCustomerProfilesRepo:
         async def mock_get_profile(rid, phone):
             return _make_profile()  # profile exists, no upsert needed
 
-        async def mock_get_pool_inner():
-            conn = MagicMock()
+        conn = _make_conn(fetchrow_result=make_row(_make_profile()))
 
-            async def capture_execute(sql, *args):
-                captured.extend(args)
+        async def capture_execute(sql, *args):
+            captured.extend(args)
 
-            conn.execute = capture_execute
-            return make_pool(conn)
+        conn.execute = capture_execute
 
         import app.repositories.customer_profiles_repo as repo
         monkeypatch.setattr(repo, "get_profile", mock_get_profile)
-        monkeypatch.setattr(
-            "app.repositories.customer_profiles_repo._get_pool",
-            mock_get_pool_inner,
-        )
 
-        _run(
-            repo.increment_after_order(
-                restaurant_id=1,
-                phone="+57300",
-                order_total=Decimal("12500.00"),
-                order_summary="2 pizzas + bebida",
-            )
-        )
+        with _patched_pool(conn):
+            with tenant_scope(1):
+                _run(
+                    repo.increment_after_order(
+                        restaurant_id=1,
+                        phone="+57300",
+                        order_total=Decimal("12500.00"),
+                        order_summary="2 pizzas + bebida",
+                    )
+                )
 
         assert 1 in captured, "restaurant_id not in SQL params"
         assert "+57300" in captured, "phone not in SQL params"

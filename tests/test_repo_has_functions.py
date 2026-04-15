@@ -11,14 +11,20 @@ suite runs in CI without a Postgres instance.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from app.services.tenant_context import tenant_scope as _tenant_scope
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_pool(fetchval_result):
-    """Build a minimal mock pool that returns fetchval_result from fetchval."""
+    """Build a minimal mock pool that returns fetchval_result from fetchval.
+    conn.transaction() must be a sync callable returning an async ctx-mgr."""
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value=fetchval_result)
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
     cm = AsyncMock()
     cm.__aenter__ = AsyncMock(return_value=conn)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -27,7 +33,7 @@ def _make_pool(fetchval_result):
     return pool
 
 
-_STAFF_POOL  = "app.repositories.staff_repo._get_pool"
+_SHARED_POOL = "app.services.database.get_pool"
 _REST_POOL   = "app.repositories.restaurant_repo._get_pool"
 
 
@@ -37,30 +43,34 @@ class TestDbHasStaff:
     @pytest.mark.asyncio
     async def test_returns_false_when_no_staff(self):
         from app.repositories.staff_repo import db_has_staff
-        with patch(_STAFF_POOL, AsyncMock(return_value=_make_pool(False))):
-            result = await db_has_staff(restaurant_id=42)
+        with patch(_SHARED_POOL, AsyncMock(return_value=_make_pool(False))):
+            with _tenant_scope(42):
+                result = await db_has_staff(restaurant_id=42)
         assert result is False
 
     @pytest.mark.asyncio
     async def test_returns_true_when_staff_exists(self):
         from app.repositories.staff_repo import db_has_staff
-        with patch(_STAFF_POOL, AsyncMock(return_value=_make_pool(True))):
-            result = await db_has_staff(restaurant_id=42)
+        with patch(_SHARED_POOL, AsyncMock(return_value=_make_pool(True))):
+            with _tenant_scope(42):
+                result = await db_has_staff(restaurant_id=42)
         assert result is True
 
     @pytest.mark.asyncio
     async def test_coerces_truthy_int_to_bool(self):
         """asyncpg may return 1 or True; both should coerce to True."""
         from app.repositories.staff_repo import db_has_staff
-        with patch(_STAFF_POOL, AsyncMock(return_value=_make_pool(1))):
-            result = await db_has_staff(restaurant_id=99)
+        with patch(_SHARED_POOL, AsyncMock(return_value=_make_pool(1))):
+            with _tenant_scope(99):
+                result = await db_has_staff(restaurant_id=99)
         assert result is True
 
     @pytest.mark.asyncio
     async def test_coerces_none_to_false(self):
         from app.repositories.staff_repo import db_has_staff
-        with patch(_STAFF_POOL, AsyncMock(return_value=_make_pool(None))):
-            result = await db_has_staff(restaurant_id=99)
+        with patch(_SHARED_POOL, AsyncMock(return_value=_make_pool(None))):
+            with _tenant_scope(99):
+                result = await db_has_staff(restaurant_id=99)
         assert result is False
 
 

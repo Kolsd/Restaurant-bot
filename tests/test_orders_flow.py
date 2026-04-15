@@ -28,6 +28,7 @@ import pytest
 
 from tests.conftest import make_pool, make_row, patch_auth
 import app.services.database as db_mod
+from app.services.tenant_context import bypass_tenant_scope as _bypass
 
 _HEADERS = {"Authorization": "Bearer tok"}
 
@@ -43,7 +44,12 @@ def _mock_pool(monkeypatch, rows=None, fetchrow_result=None):
     conn = MagicMock()
     conn.fetch = AsyncMock(return_value=rows or [])
     conn.fetchrow = AsyncMock(return_value=fetchrow_result)
+    conn.fetchval = AsyncMock(return_value=None)
     conn.execute = AsyncMock()
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__  = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
     pool = make_pool(conn)
     monkeypatch.setattr(db_mod, "get_pool", AsyncMock(return_value=pool))
     return conn
@@ -525,7 +531,7 @@ async def test_inbox_handler_passes_correct_fields(monkeypatch):
     # Handler now fetches wa_access_token from DB at dispatch time (Rule 6).
     monkeypatch.setattr(
         db_mod, "db_get_restaurant_by_phone",
-        AsyncMock(return_value={"wa_access_token": "META_TOKEN"}),
+        AsyncMock(return_value={"id": 1, "wa_access_token": "META_TOKEN"}),
     )
     process_mock = AsyncMock()
     with patch("app.routes.chat._process_message", process_mock):
@@ -559,19 +565,29 @@ async def test_inbox_handler_registered_at_import():
 # G. DEDUPLICACIÓN WAM
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _make_wam_conn(fetchval_result):
+    """Build mock conn compatible with tenant_connection() for wam_dedup tests."""
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    conn.fetchval = AsyncMock(return_value=fetchval_result)
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__  = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
+    return conn
+
+
 @pytest.mark.asyncio
 async def test_wam_dedup_new_message_false(monkeypatch):
     """Mensaje nuevo → retorna False (no es duplicado)."""
     from app.repositories.conversations_repo import db_is_duplicate_wam
 
-    conn = MagicMock()
-    conn.execute = AsyncMock()
-    conn.fetchval = AsyncMock(return_value="wam-001")  # insertado → no duplicado
+    conn = _make_wam_conn(fetchval_result="wam-001")  # insertado → no duplicado
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.conversations_repo._get_pool",
-                        AsyncMock(return_value=pool))
 
-    result = await db_is_duplicate_wam("wam-001")
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _bypass("test: db_is_duplicate_wam"):
+            result = await db_is_duplicate_wam("wam-001")
     assert result is False
 
 
@@ -580,14 +596,12 @@ async def test_wam_dedup_duplicate_true(monkeypatch):
     """WAM ya procesado → True."""
     from app.repositories.conversations_repo import db_is_duplicate_wam
 
-    conn = MagicMock()
-    conn.execute = AsyncMock()
-    conn.fetchval = AsyncMock(return_value=None)  # ON CONFLICT → None
+    conn = _make_wam_conn(fetchval_result=None)  # ON CONFLICT → None
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.conversations_repo._get_pool",
-                        AsyncMock(return_value=pool))
 
-    result = await db_is_duplicate_wam("wam-dup")
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _bypass("test: db_is_duplicate_wam"):
+            result = await db_is_duplicate_wam("wam-dup")
     assert result is True
 
 
@@ -597,16 +611,15 @@ async def test_wam_dedup_cleans_old_records(monkeypatch):
     from app.repositories.conversations_repo import db_is_duplicate_wam
 
     executed_queries = []
-    conn = MagicMock()
+    conn = _make_wam_conn(fetchval_result="wam-clean")
     async def capture_execute(q, *a):
         executed_queries.append(q)
     conn.execute = capture_execute
-    conn.fetchval = AsyncMock(return_value="wam-clean")
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.conversations_repo._get_pool",
-                        AsyncMock(return_value=pool))
 
-    await db_is_duplicate_wam("wam-clean")
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _bypass("test: db_is_duplicate_wam"):
+            await db_is_duplicate_wam("wam-clean")
     assert any("DELETE" in q and "2 minutes" in q for q in executed_queries)
 
 
@@ -615,15 +628,14 @@ async def test_wam_dedup_different_ids_both_new(monkeypatch):
     """Dos WAM IDs distintos → ambos retornan False (ninguno duplicado)."""
     from app.repositories.conversations_repo import db_is_duplicate_wam
 
-    conn = MagicMock()
-    conn.execute = AsyncMock()
-    conn.fetchval = AsyncMock(return_value="any_id")
+    conn = _make_wam_conn(fetchval_result="any_id")
     pool = make_pool(conn)
-    monkeypatch.setattr("app.repositories.conversations_repo._get_pool",
-                        AsyncMock(return_value=pool))
 
-    r1 = await db_is_duplicate_wam("wam-A")
-    r2 = await db_is_duplicate_wam("wam-B")
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with _bypass("test: db_is_duplicate_wam"):
+            r1 = await db_is_duplicate_wam("wam-A")
+        with _bypass("test: db_is_duplicate_wam"):
+            r2 = await db_is_duplicate_wam("wam-B")
     assert r1 is False
     assert r2 is False
 

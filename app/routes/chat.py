@@ -230,6 +230,7 @@ async def _send_wa_text(user_phone: str, text: str, phone_id: str, access_token:
 @router.post("/webhook/meta")
 async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
     import json as _json
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
 
     if not await rate_limit_check("webhook_global", max_requests=200, window_seconds=1):
         log.warning("webhook.global_rate_limit")
@@ -250,165 +251,206 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(content={"status": "ok"})
 
     any_enqueue_failed = False
-    try:
-        entries = data.get("entry", [])
-        if not entries:
-            return JSONResponse(content={"status": "ok"})
+    # The webhook enqueue path is cross-tenant: the inbox worker resolves the
+    # tenant at dispatch time.  bypass_tenant_scope allows migrated repos (e.g.
+    # conversations_repo.db_is_duplicate_wam) to execute without a pinned tenant.
+    with bypass_tenant_scope("webhook_enqueue_cross_tenant"):
+        try:
+            entries = data.get("entry", [])
+            if not entries:
+                return JSONResponse(content={"status": "ok"})
 
-        for entry in entries:
-            changes_list = entry.get("changes", [])
-            if not changes_list:
-                continue
-            changes = changes_list[0]
-            value   = changes.get("value", {})
+            for entry in entries:
+                changes_list = entry.get("changes", [])
+                if not changes_list:
+                    continue
+                changes = changes_list[0]
+                value   = changes.get("value", {})
 
-            if "messages" not in value:
-                continue
+                if "messages" not in value:
+                    continue
 
-            messages_list = value.get("messages", [])
-            if not messages_list:
-                continue
-            message = messages_list[0]
-            if not message:
-                continue
+                messages_list = value.get("messages", [])
+                if not messages_list:
+                    continue
+                message = messages_list[0]
+                if not message:
+                    continue
 
-            # 3. Deduplicación por WAM_ID — descarta reintentos de Meta
-            wam_id = message.get("id", "")
-            if wam_id and await db.db_is_duplicate_wam(wam_id):
-                log.info("chat.wam_duplicate_ignored", wam_id=wam_id)
-                continue
+                # 3. Deduplicación por WAM_ID — descarta reintentos de Meta
+                wam_id = message.get("id", "")
+                if wam_id and await db.db_is_duplicate_wam(wam_id):
+                    log.info("chat.wam_duplicate_ignored", wam_id=wam_id)
+                    continue
 
-            user_phone    = message.get("from", "")
-            msg_type      = message.get("type", "text")
-            raw_bot_number = value.get("metadata", {}).get("display_phone_number", "")
-            bot_number    = _normalize_number(raw_bot_number)
-            phone_id      = value.get("metadata", {}).get("phone_number_id", "")
+                user_phone    = message.get("from", "")
+                msg_type      = message.get("type", "text")
+                raw_bot_number = value.get("metadata", {}).get("display_phone_number", "")
+                bot_number    = _normalize_number(raw_bot_number)
+                phone_id      = value.get("metadata", {}).get("phone_number_id", "")
 
-            # 4. Credenciales dinámicas desde PostgreSQL
-            restaurant = await db.db_get_restaurant_by_phone(bot_number)
-            if restaurant and restaurant.get("wa_access_token"):
-                access_token = restaurant["wa_access_token"]
-                phone_id = restaurant.get("wa_phone_id") or phone_id
-            else:
-                access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+                # 4. Credenciales dinámicas desde PostgreSQL
+                restaurant = await db.db_get_restaurant_by_phone(bot_number)
+                if restaurant and restaurant.get("wa_access_token"):
+                    access_token = restaurant["wa_access_token"]
+                    phone_id = restaurant.get("wa_phone_id") or phone_id
+                else:
+                    access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
 
-            # Auto-persist phone_id so delivery notifications can use it later.
-            # wa_phone_id comes from Meta webhook metadata — always authoritative.
-            if restaurant and phone_id and not restaurant.get("wa_phone_id"):
-                try:
-                    await conversations_repo.db_update_restaurant_phone_id(restaurant["id"], phone_id)
-                except Exception:
-                    pass  # non-critical, next message will retry
+                # Auto-persist phone_id so delivery notifications can use it later.
+                # wa_phone_id comes from Meta webhook metadata — always authoritative.
+                if restaurant and phone_id and not restaurant.get("wa_phone_id"):
+                    try:
+                        await conversations_repo.db_update_restaurant_phone_id(restaurant["id"], phone_id)
+                    except Exception:
+                        pass  # non-critical, next message will retry
 
-            # 5. Ruta CRM — procesamiento inline (no requiere IA)
-            crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
-            if crm_phone_id and phone_id == crm_phone_id:
-                from app.routes.internal.crm import register_inbound_from_prospect
+                # 5. Ruta CRM — procesamiento inline (no requiere IA)
+                crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
+                if crm_phone_id and phone_id == crm_phone_id:
+                    from app.routes.internal.crm import register_inbound_from_prospect
+                    if msg_type == "location":
+                        loc = message.get("location", {})
+                        user_text = f"📍 Ubicación compartida: lat:{loc.get('latitude')} lon:{loc.get('longitude')}"
+                    else:
+                        user_text = message.get("text", {}).get("body", "")
+                    if user_text and user_phone:
+                        log.info("chat.crm_inbound", phone=user_phone, phone_id=phone_id)
+                        await register_inbound_from_prospect(user_phone, user_text, wam_id)
+                        log.info("chat.crm_message_saved", phone=user_phone)
+                    continue
+
+                # 6. Rate limiting
+                is_limited = await _is_rate_limited(user_phone)
+                if user_phone and is_limited:
+                    log.warning("chat.rate_limited", phone=user_phone, bot_number=bot_number)
+                    try:
+                        await _send_wa_text(user_phone, "Un momento por favor, estoy procesando tu mensaje anterior.", phone_id, access_token)
+                    except Exception:
+                        pass  # best-effort
+                    continue
+
+                # 7. Extraer texto del mensaje
                 if msg_type == "location":
                     loc = message.get("location", {})
-                    user_text = f"📍 Ubicación compartida: lat:{loc.get('latitude')} lon:{loc.get('longitude')}"
+                    lat, lon = loc.get("latitude"), loc.get("longitude")
+
+                    if lat is not None and lon is not None:
+                        try:
+                            cart = await db.db_get_cart(user_phone, bot_number)
+                            cart["latitude"] = lat
+                            cart["longitude"] = lon
+                            await db.db_save_cart(user_phone, bot_number, cart)
+                        except Exception as e:
+                            log.error("chat.gps_cart_save_failed", phone=user_phone, error=str(e))
+
+                        maps_url = f"https://maps.google.com/?q={lat},{lon}"
+                        user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
+                    else:
+                        log.warning("chat.gps_missing_coordinates", phone=user_phone)
+                        user_text = ""
+                elif msg_type == "interactive":
+                    button_reply = message.get("interactive", {}).get("button_reply", {})
+                    user_text = button_reply.get("id", "") or button_reply.get("title", "")
+                elif msg_type == "image":
+                    image_id = message.get("image", {}).get("id", "")
+                    media_url = f"/api/media/{image_id}?bot={bot_number}"
+
+                    # Atajo no-LLM: si hay una propuesta awaiting_proof para este teléfono,
+                    # adjuntar el comprobante directamente sin pasar por el modelo.
+                    try:
+                        restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number)
+                        if restaurant_data:
+                            proposal = await db.db_get_open_proposal_for_phone(
+                                restaurant_data["id"], user_phone
+                            )
+                            if proposal and proposal.get("proposal_status") == "awaiting_proof":
+                                # Moderación de contenido: rechazar imágenes inapropiadas
+                                is_safe = await _is_image_safe(image_id, access_token)
+                                if not is_safe:
+                                    rejection_msg = (
+                                        "⚠️ Tu imagen no pudo ser procesada. "
+                                        "Por favor envía una captura clara de tu comprobante de pago."
+                                    )
+                                    await _send_wa_text(user_phone, rejection_msg, phone_id, access_token)
+                                    continue
+                                await db.db_attach_proof(
+                                    proposal["base_order_id"], user_phone, media_url
+                                )
+                                # Limpiar checkout state
+                                from app.services import state_store as _ss
+                                await _ss.checkout_delete(user_phone, bot_number)
+                                # Enviar confirmación vía background task
+                                confirm_msg = "✅ Comprobante recibido, caja lo está validando. ¡Gracias! 🙏"
+                                background_tasks.add_task(
+                                    _send_wa_text, user_phone, confirm_msg, phone_id, access_token
+                                )
+                                continue
+                    except Exception as e:
+                        log.error("chat.proof_shortcut_failed", phone=user_phone, error=str(e))
+
+                    user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: {media_url}"
+                elif msg_type == "audio":
+                    # ── Audio / voice note handling ──────────────────────────────
+                    # Transcription is intentionally deferred to the inbox worker
+                    # so the webhook returns fast to Meta (Rule 6).
+                    audio_id = (message.get("audio") or {}).get("id")
+                    if not audio_id:
+                        log.warning("audio.no_id", wam_id=wam_id, phone=user_phone)
+                        continue
+                    if not user_phone:
+                        continue
+                    log.info("chat.audio_inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, audio_id=audio_id)
+                    try:
+                        pool = await db.get_pool()
+                        external_id = wam_id or None
+                        if not external_id:
+                            dedup_content = f"{user_phone}:audio:{audio_id}:{bot_number}:{int(time.time() // 10)}"
+                            external_id = f"synth_{hashlib.sha256(dedup_content.encode()).hexdigest()[:16]}"
+                        enqueue_payload = {
+                            "user_phone":          user_phone,
+                            "user_text":           "",
+                            "audio_id":            audio_id,
+                            "needs_transcription": True,
+                            "bot_number":          bot_number,
+                            "phone_id":            phone_id,
+                        }
+                        inserted = await inbox_repo.enqueue(
+                            pool,
+                            provider="meta_whatsapp",
+                            external_id=external_id,
+                            payload=enqueue_payload,
+                        )
+                        if not inserted:
+                            log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
+                    except Exception:
+                        log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
+                        any_enqueue_failed = True
+                    continue  # audio path is fully handled above; skip text guard
                 else:
                     user_text = message.get("text", {}).get("body", "")
-                if user_text and user_phone:
-                    log.info("chat.crm_inbound", phone=user_phone, phone_id=phone_id)
-                    await register_inbound_from_prospect(user_phone, user_text, wam_id)
-                    log.info("chat.crm_message_saved", phone=user_phone)
-                continue
 
-            # 6. Rate limiting
-            is_limited = await _is_rate_limited(user_phone)
-            if user_phone and is_limited:
-                log.warning("chat.rate_limited", phone=user_phone, bot_number=bot_number)
-                try:
-                    await _send_wa_text(user_phone, "Un momento por favor, estoy procesando tu mensaje anterior.", phone_id, access_token)
-                except Exception:
-                    pass  # best-effort
-                continue
-
-            # 7. Extraer texto del mensaje
-            if msg_type == "location":
-                loc = message.get("location", {})
-                lat, lon = loc.get("latitude"), loc.get("longitude")
-
-                if lat is not None and lon is not None:
-                    try:
-                        cart = await db.db_get_cart(user_phone, bot_number)
-                        cart["latitude"] = lat
-                        cart["longitude"] = lon
-                        await db.db_save_cart(user_phone, bot_number, cart)
-                    except Exception as e:
-                        log.error("chat.gps_cart_save_failed", phone=user_phone, error=str(e))
-
-                    maps_url = f"https://maps.google.com/?q={lat},{lon}"
-                    user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
-                else:
-                    log.warning("chat.gps_missing_coordinates", phone=user_phone)
-                    user_text = ""
-            elif msg_type == "interactive":
-                button_reply = message.get("interactive", {}).get("button_reply", {})
-                user_text = button_reply.get("id", "") or button_reply.get("title", "")
-            elif msg_type == "image":
-                image_id = message.get("image", {}).get("id", "")
-                media_url = f"/api/media/{image_id}?bot={bot_number}"
-
-                # Atajo no-LLM: si hay una propuesta awaiting_proof para este teléfono,
-                # adjuntar el comprobante directamente sin pasar por el modelo.
-                try:
-                    restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number)
-                    if restaurant_data:
-                        proposal = await db.db_get_open_proposal_for_phone(
-                            restaurant_data["id"], user_phone
-                        )
-                        if proposal and proposal.get("proposal_status") == "awaiting_proof":
-                            # Moderación de contenido: rechazar imágenes inapropiadas
-                            is_safe = await _is_image_safe(image_id, access_token)
-                            if not is_safe:
-                                rejection_msg = (
-                                    "⚠️ Tu imagen no pudo ser procesada. "
-                                    "Por favor envía una captura clara de tu comprobante de pago."
-                                )
-                                await _send_wa_text(user_phone, rejection_msg, phone_id, access_token)
-                                continue
-                            await db.db_attach_proof(
-                                proposal["base_order_id"], user_phone, media_url
-                            )
-                            # Limpiar checkout state
-                            from app.services import state_store as _ss
-                            await _ss.checkout_delete(user_phone, bot_number)
-                            # Enviar confirmación vía background task
-                            confirm_msg = "✅ Comprobante recibido, caja lo está validando. ¡Gracias! 🙏"
-                            background_tasks.add_task(
-                                _send_wa_text, user_phone, confirm_msg, phone_id, access_token
-                            )
-                            continue
-                except Exception as e:
-                    log.error("chat.proof_shortcut_failed", phone=user_phone, error=str(e))
-
-                user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: {media_url}"
-            elif msg_type == "audio":
-                # ── Audio / voice note handling ──────────────────────────────
-                # Transcription is intentionally deferred to the inbox worker
-                # so the webhook returns fast to Meta (Rule 6).
-                audio_id = (message.get("audio") or {}).get("id")
-                if not audio_id:
-                    log.warning("audio.no_id", wam_id=wam_id, phone=user_phone)
+                if not user_text or not user_phone:
                     continue
-                if not user_phone:
-                    continue
-                log.info("chat.audio_inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, audio_id=audio_id)
+
+                log.info("chat.inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, text_preview=user_text[:200])
+
+                # 8. Persist to webhook_inbox — durable processing survives worker restarts.
+                #    The inbox worker (inbox_worker.py) will call _process_message asynchronously.
                 try:
                     pool = await db.get_pool()
+                    # Ensure dedup coverage even when Meta sends no WAM ID.
+                    # Synthetic ID hashes content in 10s windows so retries within
+                    # the same window hit the unique index and are skipped.
                     external_id = wam_id or None
                     if not external_id:
-                        dedup_content = f"{user_phone}:audio:{audio_id}:{bot_number}:{int(time.time() // 10)}"
+                        dedup_content = f"{user_phone}:{user_text}:{bot_number}:{int(time.time() // 10)}"
                         external_id = f"synth_{hashlib.sha256(dedup_content.encode()).hexdigest()[:16]}"
                     enqueue_payload = {
-                        "user_phone":          user_phone,
-                        "user_text":           "",
-                        "audio_id":            audio_id,
-                        "needs_transcription": True,
-                        "bot_number":          bot_number,
-                        "phone_id":            phone_id,
+                        "user_phone": user_phone,
+                        "user_text":  user_text,
+                        "bot_number": bot_number,
+                        "phone_id":   phone_id,
                     }
                     inserted = await inbox_repo.enqueue(
                         pool,
@@ -421,47 +463,10 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                 except Exception:
                     log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
                     any_enqueue_failed = True
-                continue  # audio path is fully handled above; skip text guard
-            else:
-                user_text = message.get("text", {}).get("body", "")
+                    continue
 
-            if not user_text or not user_phone:
-                continue
-
-            log.info("chat.inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, text_preview=user_text[:200])
-
-            # 8. Persist to webhook_inbox — durable processing survives worker restarts.
-            #    The inbox worker (inbox_worker.py) will call _process_message asynchronously.
-            try:
-                pool = await db.get_pool()
-                # Ensure dedup coverage even when Meta sends no WAM ID.
-                # Synthetic ID hashes content in 10s windows so retries within
-                # the same window hit the unique index and are skipped.
-                external_id = wam_id or None
-                if not external_id:
-                    dedup_content = f"{user_phone}:{user_text}:{bot_number}:{int(time.time() // 10)}"
-                    external_id = f"synth_{hashlib.sha256(dedup_content.encode()).hexdigest()[:16]}"
-                enqueue_payload = {
-                    "user_phone": user_phone,
-                    "user_text":  user_text,
-                    "bot_number": bot_number,
-                    "phone_id":   phone_id,
-                }
-                inserted = await inbox_repo.enqueue(
-                    pool,
-                    provider="meta_whatsapp",
-                    external_id=external_id,
-                    payload=enqueue_payload,
-                )
-                if not inserted:
-                    log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
-            except Exception:
-                log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
-                any_enqueue_failed = True
-                continue
-
-    except Exception:
-        log.exception("chat.webhook_critical_error")
+        except Exception:
+            log.exception("chat.webhook_critical_error")
 
     # 9. ACK inmediato a Meta (<200ms) — evita reintentos
     if any_enqueue_failed:

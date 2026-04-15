@@ -15,6 +15,18 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from tests.conftest import make_row, make_pool, patch_auth
+from app.services.tenant_context import bypass_tenant_scope as _bypass
+
+
+def _make_tenant_conn():
+    """Build a mock conn compatible with tenant_connection() outer transaction."""
+    conn = AsyncMock()
+    conn.execute = AsyncMock(return_value=None)
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=txn)
+    txn.__aexit__  = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
+    return conn
 
 
 client = TestClient(app)
@@ -49,20 +61,24 @@ def _pool_for(conn):
 async def test_record_event_inserts_row():
     from app.repositories import menu_analytics_repo
 
-    conn = AsyncMock()
-    conn.execute = AsyncMock(return_value=None)
+    conn = _make_tenant_conn()
 
-    with patch.object(menu_analytics_repo, "_get_pool", return_value=_pool_for(conn)):
-        await menu_analytics_repo.record_event(
-            restaurant_id=1,
-            dish_name="Bandeja Paisa",
-            event_type="view",
-            phone="573001234567",
-            bot_number="5731234",
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=_pool_for(conn))):
+        with _bypass("test: record_event direct call"):
+            await menu_analytics_repo.record_event(
+                restaurant_id=1,
+                dish_name="Bandeja Paisa",
+                event_type="view",
+                phone="573001234567",
+                bot_number="5731234",
+            )
 
-    conn.execute.assert_awaited_once()
-    call_args = conn.execute.call_args[0]
+    # tenant_connection() with bypass calls conn.execute once (SET LOCAL ROLE),
+    # then record_event calls conn.execute once for the INSERT → total 2 calls.
+    insert_calls = [c for c in conn.execute.call_args_list
+                    if "INSERT INTO menu_events" in str(c)]
+    assert len(insert_calls) == 1, f"Expected 1 INSERT call, got {insert_calls}"
+    call_args = insert_calls[0][0]  # positional args of the INSERT call
     assert "INSERT INTO menu_events" in call_args[0]
     assert call_args[1] == 1              # restaurant_id
     assert call_args[2] == "Bandeja Paisa"
@@ -79,17 +95,20 @@ async def test_record_event_inserts_row():
 async def test_record_event_null_phone_and_bot_number():
     from app.repositories import menu_analytics_repo
 
-    conn = AsyncMock()
-    conn.execute = AsyncMock(return_value=None)
+    conn = _make_tenant_conn()
 
-    with patch.object(menu_analytics_repo, "_get_pool", return_value=_pool_for(conn)):
-        await menu_analytics_repo.record_event(
-            restaurant_id=1,
-            dish_name="Ajiaco",
-            event_type="add_to_cart",
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=_pool_for(conn))):
+        with _bypass("test: record_event direct call"):
+            await menu_analytics_repo.record_event(
+                restaurant_id=1,
+                dish_name="Ajiaco",
+                event_type="add_to_cart",
+            )
 
-    call_args = conn.execute.call_args[0]
+    insert_calls = [c for c in conn.execute.call_args_list
+                    if "INSERT INTO menu_events" in str(c)]
+    assert len(insert_calls) == 1
+    call_args = insert_calls[0][0]
     assert call_args[4] is None   # phone
     assert call_args[5] is None   # bot_number
 
@@ -102,12 +121,13 @@ async def test_record_event_null_phone_and_bot_number():
 async def test_record_event_does_not_raise_on_db_error():
     from app.repositories import menu_analytics_repo
 
-    conn = AsyncMock()
+    conn = _make_tenant_conn()
     conn.execute = AsyncMock(side_effect=Exception("DB down"))
 
-    with patch.object(menu_analytics_repo, "_get_pool", return_value=_pool_for(conn)):
-        # Should not raise
-        await menu_analytics_repo.record_event(1, "Pizza", "view")
+    with patch("app.services.database.get_pool", AsyncMock(return_value=_pool_for(conn))):
+        with _bypass("test: record_event direct call"):
+            # Should not raise
+            await menu_analytics_repo.record_event(1, "Pizza", "view")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,11 +154,12 @@ async def test_get_dish_analytics_conversions():
             "orders":       0,
         }),
     ]
-    conn = AsyncMock()
+    conn = _make_tenant_conn()
     conn.fetch = AsyncMock(return_value=fake_rows)
 
-    with patch.object(menu_analytics_repo, "_get_pool", return_value=_pool_for(conn)):
-        result = await menu_analytics_repo.get_dish_analytics(1, 30)
+    with patch("app.services.database.get_pool", AsyncMock(return_value=_pool_for(conn))):
+        with _bypass("test: get_dish_analytics direct call"):
+            result = await menu_analytics_repo.get_dish_analytics(1, 30)
 
     pizza = next(r for r in result if r["dish_name"] == "Pizza")
     pasta = next(r for r in result if r["dish_name"] == "Pasta")

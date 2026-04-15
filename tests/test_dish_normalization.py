@@ -18,6 +18,7 @@ from app.repositories.restaurant_repo import (
     _normalize_menu_dishes,
 )
 from app.services.image_host import is_cloudinary_url
+from app.services.tenant_context import bypass_tenant_scope
 
 
 # ── normalize_dish_shape ──────────────────────────────────────────────────────
@@ -198,15 +199,22 @@ class TestDbUpdateMenuValidation:
             ]
         }
 
-        # Patch _get_pool so no DB is needed
+        # db_update_menu is now tenant-scoped — ValueError raised before DB call
+        # so we only need bypass + pool mock; the error happens in validation.
         mock_pool = MagicMock()
         mock_conn = AsyncMock()
+        txn = MagicMock()
+        txn.__aenter__ = AsyncMock(return_value=txn)
+        txn.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=txn)
+        mock_conn.fetchval = AsyncMock(return_value=None)
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("app.repositories.restaurant_repo._get_pool", AsyncMock(return_value=mock_pool)):
-            with pytest.raises(ValueError, match="mesio/r_99/dish_abc"):
-                await db_update_menu(restaurant_id=42, menu_data=menu_data)
+        with patch("app.services.database.get_pool", AsyncMock(return_value=mock_pool)):
+            with bypass_tenant_scope("test_cross_tenant_image"):
+                with pytest.raises(ValueError, match="mesio/r_99/dish_abc"):
+                    await db_update_menu(restaurant_id=42, menu_data=menu_data)
 
     @pytest.mark.asyncio
     async def test_valid_menu_calls_db(self):
@@ -226,14 +234,26 @@ class TestDbUpdateMenuValidation:
         mock_pool = MagicMock()
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+        txn = MagicMock()
+        txn.__aenter__ = AsyncMock(return_value=txn)
+        txn.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=txn)
+        mock_conn.fetchval = AsyncMock(return_value=None)
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("app.repositories.restaurant_repo._get_pool", AsyncMock(return_value=mock_pool)):
-            result = await db_update_menu(restaurant_id=42, menu_data=menu_data)
+        with patch("app.services.database.get_pool", AsyncMock(return_value=mock_pool)):
+            with bypass_tenant_scope("test_valid_menu"):
+                result = await db_update_menu(restaurant_id=42, menu_data=menu_data)
 
         assert result is True
-        mock_conn.execute.assert_called_once()
+        # execute is called at least once for the UPDATE (bypass mode also calls SET LOCAL ROLE)
+        assert mock_conn.execute.call_count >= 1
+        update_calls = [
+            c for c in mock_conn.execute.call_args_list
+            if c.args and "UPDATE restaurants SET menu" in str(c.args[0])
+        ]
+        assert len(update_calls) == 1
 
     @pytest.mark.asyncio
     async def test_legacy_menu_no_images_passes(self):
@@ -249,11 +269,17 @@ class TestDbUpdateMenuValidation:
         mock_pool = MagicMock()
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(return_value="UPDATE 1")
+        txn = MagicMock()
+        txn.__aenter__ = AsyncMock(return_value=txn)
+        txn.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=txn)
+        mock_conn.fetchval = AsyncMock(return_value=None)
         mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("app.repositories.restaurant_repo._get_pool", AsyncMock(return_value=mock_pool)):
-            result = await db_update_menu(restaurant_id=1, menu_data=menu_data)
+        with patch("app.services.database.get_pool", AsyncMock(return_value=mock_pool)):
+            with bypass_tenant_scope("test_legacy_menu"):
+                result = await db_update_menu(restaurant_id=1, menu_data=menu_data)
 
         assert result is True
         # The normalized dish was passed to execute

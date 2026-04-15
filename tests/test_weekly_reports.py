@@ -23,6 +23,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import make_pool, make_row
+from unittest.mock import patch as _patch
+from app.services.tenant_context import tenant_scope
 
 
 def _run(coro):
@@ -163,7 +165,8 @@ class TestComputeWeeklyStats:
     def _make_multi_fetchrow_conn(self, delivery_row_dict, table_row_dict, nps_row_dict, dormant_val):
         """
         compute_weekly_stats calls conn.fetchrow 3 times and conn.fetchval once.
-        We need a connection whose fetchrow returns different values on successive calls.
+        tenant_connection() calls conn.fetchval("SELECT set_config(...)") first (returns None),
+        then the repo calls conn.fetchval for the dormant count.
         """
         conn = MagicMock()
         conn.fetchrow = AsyncMock(side_effect=[
@@ -171,7 +174,11 @@ class TestComputeWeeklyStats:
             make_row(table_row_dict),
             make_row(nps_row_dict),
         ])
-        conn.fetchval = AsyncMock(return_value=dormant_val)
+        conn.fetchval = AsyncMock(side_effect=[None, dormant_val])
+        txn = MagicMock()
+        txn.__aenter__ = AsyncMock(return_value=txn)
+        txn.__aexit__ = AsyncMock(return_value=False)
+        conn.transaction = MagicMock(return_value=txn)
         return conn
 
     def test_B1_all_zeros_has_signal_false(self, monkeypatch):
@@ -190,9 +197,9 @@ class TestComputeWeeklyStats:
         pool = make_pool(conn)
 
         import app.repositories.weekly_reports_repo as wrr
-        monkeypatch.setattr(wrr, "_get_pool", AsyncMock(return_value=pool))
-
-        stats = _run(wrr.compute_weekly_stats(1, WEEK_START, WEEK_END))
+        with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with tenant_scope(1):
+                stats = _run(wrr.compute_weekly_stats(1, WEEK_START, WEEK_END))
 
         assert stats["has_signal"] is False
         assert stats["revenue_current"] == Decimal("0")
@@ -214,9 +221,9 @@ class TestComputeWeeklyStats:
         pool = make_pool(conn)
 
         import app.repositories.weekly_reports_repo as wrr
-        monkeypatch.setattr(wrr, "_get_pool", AsyncMock(return_value=pool))
-
-        stats = _run(wrr.compute_weekly_stats(1, WEEK_START, WEEK_END))
+        with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with tenant_scope(1):
+                stats = _run(wrr.compute_weekly_stats(1, WEEK_START, WEEK_END))
 
         assert stats["has_signal"] is True
         assert stats["revenue_current"] == Decimal("1700000")
@@ -241,9 +248,9 @@ class TestComputeWeeklyStats:
         pool = make_pool(conn)
 
         import app.repositories.weekly_reports_repo as wrr
-        monkeypatch.setattr(wrr, "_get_pool", AsyncMock(return_value=pool))
-
-        stats = _run(wrr.compute_weekly_stats(1, WEEK_START, WEEK_END))
+        with _patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with tenant_scope(1):
+                stats = _run(wrr.compute_weekly_stats(1, WEEK_START, WEEK_END))
 
         # The repo stores nps_avg exactly as round(float(raw_avg), 1)
         assert stats["nps_avg"] == 4.5

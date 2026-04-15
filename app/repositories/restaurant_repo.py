@@ -23,6 +23,12 @@ async def _get_pool():
     return await get_pool()
 
 
+def _tenant_connection():
+    """Return tenant_connection() async-ctx-manager (lazy import to break cycle)."""
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+    return tenant_connection()
+
+
 def _serialize(d: dict) -> dict:
     from app.services.database import _serialize as _db_serialize  # noqa: PLC0415
     return _db_serialize(d)
@@ -161,6 +167,11 @@ def normalize_menu_shape(menu):
     return _normalize_menu_dishes(menu)
 
 
+# ── GLOBAL functions (not tenant-scoped) — call sites must provide their own scope if needed ──
+# These functions enumerate ALL restaurants, handle auth/login paths that query users
+# cross-tenant, or are called from inbox_worker dispatch resolution BEFORE a tenant is pinned.
+# They MUST keep _get_pool() and must NOT use tenant_connection().
+
 # ── Superadmin global stats ───────────────────────────────────────────────────
 
 async def db_get_admin_stats() -> dict:
@@ -221,9 +232,10 @@ async def db_update_restaurant_fields(
     """
     Update any subset of restaurant fields atomically.
     Each non-None kwarg is applied as a separate UPDATE statement within one connection.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         if name is not None:
             await conn.execute("UPDATE restaurants SET name=$1 WHERE id=$2", name, restaurant_id)
         if address is not None and latitude is not None and longitude is not None:
@@ -377,9 +389,10 @@ async def db_save_restaurant_settings(
     """
     Persist restaurant features JSONB and optionally update lat/lon.
     Called from POST /api/settings.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
             _json.dumps(features), restaurant_id,
@@ -404,9 +417,10 @@ async def db_update_restaurant_owner_phone(
     """Set or clear the owner_phone column for weekly reports delivery.
 
     Pass None or empty string to clear the phone (set NULL).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             "UPDATE restaurants SET owner_phone = $1 WHERE id = $2",
             phone or None,
@@ -418,9 +432,11 @@ async def db_update_restaurant_timezone(
     restaurant_id: int,
     timezone: str,
 ) -> None:
-    """Set the IANA timezone for the restaurant (used by scheduler and weekly reports)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Set the IANA timezone for the restaurant (used by scheduler and weekly reports).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with _tenant_connection() as conn:
         await conn.execute(
             "UPDATE restaurants SET timezone = $1 WHERE id = $2",
             timezone,
@@ -436,9 +452,10 @@ async def db_merge_restaurant_features(
 
     Uses the Postgres || operator so only the provided keys are overwritten —
     existing keys not in *patch* are preserved.  Returns the final features dict.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             UPDATE restaurants
@@ -619,9 +636,11 @@ async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
 # ── Team / Branch management ──────────────────────────────────────────────────
 
 async def db_get_branches(parent_restaurant_id: int) -> list[dict]:
-    """Return all child branches for a given parent restaurant."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return all child branches for a given parent restaurant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with _tenant_connection() as conn:
         rows = await conn.fetch(
             "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY id ASC",
             parent_restaurant_id,
@@ -630,9 +649,11 @@ async def db_get_branches(parent_restaurant_id: int) -> list[dict]:
 
 
 async def db_get_matriz_details(restaurant_id: int) -> dict | None:
-    """Return whatsapp_number, menu, features, wa_phone_id, wa_access_token for a restaurant."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return whatsapp_number, menu, features, wa_phone_id, wa_access_token for a restaurant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT whatsapp_number, menu, features, wa_phone_id, wa_access_token "
             "FROM restaurants WHERE id = $1",
@@ -910,9 +931,10 @@ async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
     Sincroniza (sobrescribe) la columna 'menu' de todas las sucursales hijas
     con el JSON exacto de la Casa Matriz.
     Devuelve el número de sucursales actualizadas.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # 1. Obtener el menú de la matriz
         parent = await conn.fetchrow("SELECT menu FROM restaurants WHERE id = $1", parent_restaurant_id)
         if not parent or not parent["menu"]:
@@ -942,6 +964,8 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
     Catálogo v2: antes de guardar, cada plato pasa por normalize_dish_shape y se
     valida que image_public_id pertenezca a este restaurante.  Lanza ValueError si
     algún plato tiene una imagen de otro tenant.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     # ── Validate + normalize dishes ───────────────────────────────────────────
     if isinstance(menu_data, dict):
@@ -970,8 +994,7 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
                 normalized.append(normalize_dish_shape(dish))
             menu_data[category] = normalized
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         result = await conn.execute(
             "UPDATE restaurants SET menu = $1::jsonb WHERE id = $2",
             json.dumps(menu_data, default=lambda o: float(o) if isinstance(o, Decimal) else str(o)), restaurant_id  # JSON boundary
@@ -1044,10 +1067,11 @@ async def db_sync_batch(restaurant_id: int, operations: list) -> list:
     Each operation: {id, type, action, data, client_ts}.
     Returns [{id, status: 'ok'|'error'|'unsupported_type', error?}].
     All operations use fully parametrized upserts — no f-string SQL.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
     results = []
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         for op in operations:
             op_id   = op.get("id", "unknown")
             op_type = op.get("type", "")
@@ -1117,23 +1141,23 @@ async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
 
 
 async def db_update_subscription(restaurant_id: int, new_status: str):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with _tenant_connection() as conn:
         await conn.execute("UPDATE restaurants SET subscription_status=$2 WHERE id=$1", restaurant_id, new_status)
 
 
 # ── Menu availability ─────────────────────────────────────────────────────────
 
 async def db_get_menu_availability(restaurant_id: int):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with _tenant_connection() as conn:
         rows = await conn.fetch("SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1", restaurant_id)
         return {r['dish_name']: r['available'] for r in rows}
 
 
 async def db_set_dish_availability(restaurant_id: int, dish_name: str, available: bool):
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    async with _tenant_connection() as conn:
         await conn.execute("""
             INSERT INTO menu_availability (dish_name, restaurant_id, available, updated_at)
             VALUES ($1, $2, $3, NOW())
@@ -1224,12 +1248,14 @@ async def _ensure_usage_table() -> None:
 
 
 async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
-    """Suma `tokens` al contador diario del restaurante (upsert atómico)."""
+    """Suma `tokens` al contador diario del restaurante (upsert atómico).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     if tokens <= 0:
         return
     await _ensure_usage_table()
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             """INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens)
                VALUES ($1, CURRENT_DATE, $2)
@@ -1241,10 +1267,12 @@ async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
 
 
 async def db_increment_invoice_usage(restaurant_id: int) -> None:
-    """Incrementa en 1 el contador de facturas diarias del restaurante (upsert atómico)."""
+    """Incrementa en 1 el contador de facturas diarias del restaurante (upsert atómico).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     await _ensure_usage_table()
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         await conn.execute(
             """INSERT INTO subscription_usage (restaurant_id, usage_date, total_invoices)
                VALUES ($1, CURRENT_DATE, 1)
@@ -1261,11 +1289,12 @@ async def db_check_usage_limits(restaurant_id: int) -> None:
     Lee restaurants.features.plan_limits → { daily_tokens, daily_invoices }.
     Si plan_limits está ausente, no se aplica ningún límite.
     Lanza UsageLimitExceeded si se superó algún límite.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     from app.services.database import UsageLimitExceeded  # noqa: PLC0415
     await _ensure_usage_table()
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with _tenant_connection() as conn:
         # Leer límites del plan desde features
         row = await conn.fetchrow(
             "SELECT features FROM restaurants WHERE id = $1", restaurant_id

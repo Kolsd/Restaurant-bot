@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 from app.services import database as db
 from app.services import billing
 from app.services.agent import trigger_nps
-from app.routes.deps import require_auth, get_current_user, get_current_restaurant
+from app.routes.deps import require_auth, get_current_user, get_current_restaurant, get_current_restaurant_scoped
+from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 from app.services import loyalty as loyalty_svc
 from app.services.money import to_decimal, money_mul, quantize_money
 from app.services.logging import get_logger
@@ -69,7 +70,8 @@ async def get_table_wa_number(table: dict) -> str:
 async def _get_restaurant_for_table(table_id: str | None, session_data: dict | None) -> dict:
     """Resuelve el restaurante/sucursal a partir de la mesa o la sesión activa."""
     if table_id:
-        table = await db.db_get_table_by_id(table_id)
+        with bypass_tenant_scope("_get_restaurant_for_table: table lookup by ID"):
+            table = await db.db_get_table_by_id(table_id)
         if table:
             bid = table.get("branch_id")
             if bid:
@@ -95,9 +97,11 @@ async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict
     if final_bot_num:
         asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
         asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))
-        await db.db_mark_session_nps_pending(phone, final_bot_num)
-        
-    await db.db_cleanup_after_checkout(phone)
+        with bypass_tenant_scope("farewell_and_nps: mark session nps_pending by phone"):
+            await db.db_mark_session_nps_pending(phone, final_bot_num)
+
+    with bypass_tenant_scope("farewell_and_nps: cleanup checkout data by phone"):
+        await db.db_cleanup_after_checkout(phone)
 
 # ── MESAS ────────────────────────────────────────────────────────────
 
@@ -117,9 +121,10 @@ async def get_tables(request: Request):
             branch_id = int(branch_header)
         # else: branch_id stays None → db_get_tables returns all
 
-    tables = await db.db_get_tables(branch_id=branch_id)
+    with bypass_tenant_scope("get_tables: may be global admin view (branch_id=None)"):
+        tables = await db.db_get_tables(branch_id=branch_id)
     return {"tables": tables}
-    
+
 @router.post("/api/tables")
 async def create_table(request: Request):
     """Crea una mesa automáticamente sin pedir número ni nombre manual."""
@@ -138,8 +143,9 @@ async def create_table(request: Request):
         if branch_rest:
             restaurant_id = branch_id
 
-    new_table = await db.db_auto_create_table(restaurant_id, is_main_restaurant=False)
-    
+    with tenant_scope(restaurant_id):
+        new_table = await db.db_auto_create_table(restaurant_id, is_main_restaurant=False)
+
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
 
 async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
@@ -166,7 +172,7 @@ async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
 
 
 @router.delete("/api/tables/{table_id}")
-async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant)):
+async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant_scoped)):
     """Elimina una mesa por su ID."""
     await _verify_table_ownership(table_id, restaurant)
     await db.db_delete_table(table_id)
@@ -174,7 +180,7 @@ async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant)
 
 
 @router.get("/api/tables/floor-plan")
-async def get_floor_plan(request: Request, restaurant=Depends(get_current_restaurant)):
+async def get_floor_plan(request: Request, restaurant=Depends(get_current_restaurant_scoped)):
     """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta."""
     branch_id_str = request.headers.get("x-branch-id")
     branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else restaurant["id"]
@@ -196,7 +202,7 @@ class TablePropertiesBody(BaseModel):
 
 
 @router.put("/api/tables/{table_id}/position")
-async def update_table_position(table_id: str, body: TablePositionBody, restaurant=Depends(get_current_restaurant)):
+async def update_table_position(table_id: str, body: TablePositionBody, restaurant=Depends(get_current_restaurant_scoped)):
     """Actualiza la posición (x, y) de una mesa en el mapa de planta."""
     await _verify_table_ownership(table_id, restaurant)
     result = await db.db_update_table_position(
@@ -208,7 +214,7 @@ async def update_table_position(table_id: str, body: TablePositionBody, restaura
 
 
 @router.put("/api/tables/{table_id}/properties")
-async def update_table_properties(table_id: str, body: TablePropertiesBody, restaurant=Depends(get_current_restaurant)):
+async def update_table_properties(table_id: str, body: TablePropertiesBody, restaurant=Depends(get_current_restaurant_scoped)):
     """Actualiza propiedades de una mesa (capacity, table_type, zone)."""
     await _verify_table_ownership(table_id, restaurant)
     updates = body.model_dump(exclude_none=True)
@@ -339,21 +345,23 @@ class AdminCallRequest(BaseModel):
 async def admin_call_waiter(request: Request, body: AdminCallRequest):
     """El administrador convoca a un mesero/empleado a caja o dashboard."""
     await require_auth(request)
-    alert = await db.db_create_waiter_alert(
-        phone=body.phone or "admin",
-        bot_number=body.bot_number,
-        alert_type="admin_call",
-        message="El Administrador requiere verte en caja/dashboard",
-        table_id=body.table_id,
-        table_name=body.table_name,
-    )
+    with bypass_tenant_scope("admin_call_waiter: cross-tenant waiter alert from dashboard"):
+        alert = await db.db_create_waiter_alert(
+            phone=body.phone or "admin",
+            bot_number=body.bot_number,
+            alert_type="admin_call",
+            message="El Administrador requiere verte en caja/dashboard",
+            table_id=body.table_id,
+            table_name=body.table_name,
+        )
     return {"success": True, "alert": alert}
 
 @router.post("/api/waiter-alerts/{alert_id}/dismiss")
 async def dismiss_waiter_alert(request: Request, alert_id: int):
     await require_auth(request)
     try:
-        await tr.db_dismiss_waiter_alert(alert_id)
+        with bypass_tenant_scope("dismiss_waiter_alert: global kitchen alert dismiss"):
+            await tr.db_dismiss_waiter_alert(alert_id)
     except Exception:
         pass
     return {"success": True}
@@ -364,7 +372,8 @@ async def force_delete_conversation(request: Request, phone: str):
     """Permite al mesero limpiar un chat manualmente (ej. pruebas atascadas)"""
     username = await require_auth(request)
     try:
-        await tr.db_force_delete_conversation_data(phone, username)
+        with bypass_tenant_scope("force_delete_conversation: manual cleanup by staff"):
+            await tr.db_force_delete_conversation_data(phone, username)
     except Exception as e:
         log.error("tables.chat_cleanup_failed", error=str(e))
     return {"success": True}
@@ -415,10 +424,12 @@ async def update_delivery_order_status(request: Request, order_id: str):
     if new_status not in valid:
         raise HTTPException(status_code=400, detail="Estado inválido")
         
-    await tr.db_update_delivery_order_status(order_id, new_status)
+    with bypass_tenant_scope("update_delivery_order_status: delivery order by ID"):
+        await tr.db_update_delivery_order_status(order_id, new_status)
 
     if new_status in ("confirmado", "en_camino", "entregado"):
-        row = await tr.db_get_delivery_order_contact(order_id)
+        with bypass_tenant_scope("update_delivery_order_status: contact lookup by order ID"):
+            row = await tr.db_get_delivery_order_contact(order_id)
         if row:
             phone = row["phone"]
             if new_status == "confirmado":
@@ -428,13 +439,15 @@ async def update_delivery_order_status(request: Request, order_id: str):
             else:
                 msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
             try:
-                db_phone_id = await tr.db_get_meta_phone_id_for_session(phone)
+                with bypass_tenant_scope("update_delivery_order_status: meta phone ID lookup"):
+                    db_phone_id = await tr.db_get_meta_phone_id_for_session(phone)
             except Exception:
                 db_phone_id = None
             await send_wa_msg(phone, msg, db_phone_id)
 
     if new_status == "confirmado":
-        order_row = await tr.db_get_delivery_order_full(order_id)
+        with bypass_tenant_scope("update_delivery_order_status: full order for billing"):
+            order_row = await tr.db_get_delivery_order_full(order_id)
         if order_row:
             restaurant = await get_current_restaurant(request)
             config = await billing.get_billing_config(restaurant["id"])
@@ -499,9 +512,10 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
 
     # Resolve effective branch_id: from header, user, or staff context
     effective_bid = branch_id or user.get("restaurant_id")
-    rows = await tr.db_get_table_orders_for_branch(
-        branch_id=effective_bid, status=status, is_admin=is_admin
-    )
+    with bypass_tenant_scope("get_table_orders: may span branches or be admin view"):
+        rows = await tr.db_get_table_orders_for_branch(
+            branch_id=effective_bid, status=status, is_admin=is_admin
+        )
 
     import json as _json
     result = []
@@ -530,7 +544,8 @@ async def get_order_ticket(request: Request, order_id: str):
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
 
-    rows = await tr.db_get_table_orders_by_base_id(order_id, branch_id)
+    with bypass_tenant_scope("get_order_ticket: ticket lookup by order_id across branches"):
+        rows = await tr.db_get_table_orders_by_base_id(order_id, branch_id)
 
     if not rows:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
@@ -654,7 +669,8 @@ async def update_order_status(request: Request, order_id: str):
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail="Estado inválido")
     
-    order_record = await tr.db_get_table_order_record(order_id)
+    with bypass_tenant_scope("update_order_status: order lookup by ID across branches"):
+        order_record = await tr.db_get_table_order_record(order_id)
     if not order_record:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
@@ -666,7 +682,8 @@ async def update_order_status(request: Request, order_id: str):
     session_data = None
     if phone and phone != "manual":
         try:
-            session = await tr.db_get_open_table_session_by_phone(phone)
+            with bypass_tenant_scope("update_order_status: session lookup by phone"):
+                session = await tr.db_get_open_table_session_by_phone(phone)
             if session:
                 session_data = session
                 db_phone_id = session_data.get("meta_phone_id")
@@ -675,7 +692,8 @@ async def update_order_status(request: Request, order_id: str):
 
     if status == "generar_factura":
         base_id = order.get("base_order_id") or order_id
-        await db.db_mark_factura_generada(base_id)
+        with bypass_tenant_scope("update_order_status: mark factura generada by order ID"):
+            await db.db_mark_factura_generada(base_id)
         if phone and phone != "manual":
             await send_wa_msg(
                 phone,
@@ -686,14 +704,16 @@ async def update_order_status(request: Request, order_id: str):
 
     if status in ("cerrar_mesa", "factura_entregada"):
         base_id = order.get("base_order_id") or order_id
-        await db.db_close_table_bill(base_id)
+        with bypass_tenant_scope("update_order_status: close table bill by order ID"):
+            await db.db_close_table_bill(base_id)
         if phone and phone != "manual":
             await _farewell_and_nps(phone, order.get("table_id"), session_data, db_phone_id, username)
         return {"success": True, "order_id": order_id, "status": "factura_entregada"}
-        
+
     # ── C. ESTADOS NORMALES (Prep, Listo, Entregado) ──
     else:
-        await db.db_update_table_order_status(order_id, status)
+        with bypass_tenant_scope("update_order_status: normal status update by order ID"):
+            await db.db_update_table_order_status(order_id, status)
         if status == "entregado" and phone and _can_send_entregado_notif(phone):
             msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
             await send_wa_msg(phone, msg, db_phone_id)
@@ -751,10 +771,12 @@ async def get_tables_status(request: Request):
     restaurant = await get_current_restaurant(request)
     branch_id = restaurant["id"]
 
-    tables = await db.db_get_tables(branch_id=branch_id)
+    with tenant_scope(branch_id):
+        tables = await db.db_get_tables(branch_id=branch_id)
+        pending_orders = await tr.db_get_pending_orders_by_branch(branch_id)
 
+    # db_get_active_session_table_ids uses bypass internally (cross-tenant)
     session_map = await tr.db_get_active_session_table_ids()
-    pending_orders = await tr.db_get_pending_orders_by_branch(branch_id)
 
     order_map = {}
     for o in pending_orders:
@@ -782,7 +804,8 @@ async def adjust_table_bill(request: Request, base_order_id: str):
     if new_total < 0:
         raise HTTPException(status_code=400, detail="El total no puede ser negativo")
 
-    found = await tr.db_adjust_table_bill(base_order_id, adjusted_items, new_total)
+    with bypass_tenant_scope("adjust_table_bill: lookup by order ID, branch resolved upstream"):
+        found = await tr.db_adjust_table_bill(base_order_id, adjusted_items, new_total)
     if not found:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
@@ -801,31 +824,33 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     
     order_id = f"pos-{str(uuid.uuid4())[:8]}"
     phone = "manual"
-    base_id = await db.db_get_base_order_id(body.table_id)
-    
-    if base_id:
-        final_base_id = base_id
-        sub_num = await db.db_get_next_sub_number(base_id)
-    else:
-        final_base_id = order_id
-        sub_num = 1
 
-    order = {
-        "id":            order_id,
-        "table_id":      body.table_id,
-        "table_name":    body.table_name,
-        "phone":         phone,
-        "items":         body.items,
-        "status":        "recibido",
-        "notes":         body.notes,
-        "total":         body.total,
-        "base_order_id": final_base_id,
-        "sub_number":    sub_num,
-        "station":       body.station,
-        "branch_id":     branch_id
-    }
+    with bypass_tenant_scope("pos_manual_order: branch scoped via body.branch_id"):
+        base_id = await db.db_get_base_order_id(body.table_id)
 
-    await db.db_save_table_order(order)
+        if base_id:
+            final_base_id = base_id
+            sub_num = await db.db_get_next_sub_number(base_id)
+        else:
+            final_base_id = order_id
+            sub_num = 1
+
+        order = {
+            "id":            order_id,
+            "table_id":      body.table_id,
+            "table_name":    body.table_name,
+            "phone":         phone,
+            "items":         body.items,
+            "status":        "recibido",
+            "notes":         body.notes,
+            "total":         body.total,
+            "base_order_id": final_base_id,
+            "sub_number":    sub_num,
+            "station":       body.station,
+            "branch_id":     branch_id
+        }
+
+        await db.db_save_table_order(order)
 
     dest = {"kitchen": "cocina", "bar": "bar", "all": "cocina y bar"}.get(body.station, "cocina")
     return {"success": True, "order_id": order_id, "message": f"Comanda enviada a {dest}"}
@@ -870,7 +895,8 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
     user = await get_current_user(request)
 
     # Obtener el ticket completo para validar cantidades
-    ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+    with bypass_tenant_scope("create_checks: ticket lookup by order ID across branches"):
+        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
 
@@ -926,7 +952,8 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
             "total": float(total),
         })
 
-    result = await db.db_create_checks(base_order_id, validated)
+    with bypass_tenant_scope("create_checks: write split checks by order ID"):
+        result = await db.db_create_checks(base_order_id, validated)
     return {"success": True, "checks": result}
 
 
@@ -934,7 +961,8 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
 async def get_checks(request: Request, base_order_id: str):
     """Lista todos los checks de una mesa con sus datos fiscales."""
     await get_current_user(request)
-    checks = await db.db_get_checks(base_order_id)
+    with bypass_tenant_scope("get_checks: checks lookup by order ID across branches"):
+        checks = await db.db_get_checks(base_order_id)
     return {"checks": checks}
 
 @router.post("/api/table-orders/{base_order_id}/checks/{check_id}/pay")
@@ -946,8 +974,9 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         if not await state_store.rate_limit_check(rl_key, max_requests=3, window_seconds=10):
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes de pago. Intenta de nuevo en unos segundos.")
         restaurant = await get_current_restaurant(request)
-        check = await db.db_get_check(check_id)
-        
+        with tenant_scope(restaurant["id"]):
+            check = await db.db_get_check(check_id)
+
         if not check:
             raise HTTPException(status_code=404, detail="Check no encontrado")
         if check["base_order_id"] != base_order_id:
@@ -1038,17 +1067,18 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
 
         payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
 
-        await db.db_finalize_check_payment(
-            check_id=check_id,
-            base_order_id=base_order_id,
-            payments=payments_list,
-            change_amount=change,
-            fiscal_invoice_id=fiscal_invoice_id,
-            customer_name=body.customer_name,
-            customer_nit=body.customer_nit,
-            customer_email=body.customer_email,
-            tip_amount=body.tip_amount,
-        )
+        with tenant_scope(restaurant["id"]):
+            await db.db_finalize_check_payment(
+                check_id=check_id,
+                base_order_id=base_order_id,
+                payments=payments_list,
+                change_amount=change,
+                fiscal_invoice_id=fiscal_invoice_id,
+                customer_name=body.customer_name,
+                customer_nit=body.customer_nit,
+                customer_email=body.customer_email,
+                tip_amount=body.tip_amount,
+            )
 
         if hasattr(loyalty_svc, "accrue_on_check"):
             asyncio.create_task(loyalty_svc.accrue_on_check(
@@ -1061,11 +1091,13 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         else:
             log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
 
-        order_row = await db.db_get_first_table_order(base_order_id)
+        with tenant_scope(restaurant["id"]):
+            order_row = await db.db_get_first_table_order(base_order_id)
         if order_row and order_row["status"] == "factura_entregada":
             customer_phone = order_row.get("phone")
             if customer_phone and customer_phone != "manual":
-                sess = await db.db_get_open_session_by_phone(customer_phone)
+                with tenant_scope(restaurant["id"]):
+                    sess = await db.db_get_open_session_by_phone(customer_phone)
                 session_phone_id = sess.get("meta_phone_id") if sess else None
                 await _farewell_and_nps(customer_phone, order_row.get("table_id"), sess, session_phone_id, "caja")
 
@@ -1095,7 +1127,8 @@ async def attach_checkout_proof(
 ):
     """Adjunta comprobante de pago a los checks con propuesta awaiting_proof."""
     await get_current_user(request)
-    updated = await db.db_attach_proof(base_order_id, body.customer_phone, body.media_url)
+    with bypass_tenant_scope("attach_proof: proof attachment by order ID across branches"):
+        updated = await db.db_attach_proof(base_order_id, body.customer_phone, body.media_url)
     if not updated:
         raise HTTPException(status_code=404, detail="No hay propuesta awaiting_proof para este teléfono")
     return {"success": True}
@@ -1117,14 +1150,16 @@ async def list_checkout_proposals(request: Request):
         except ValueError:
             pass
 
-    proposals = await db.db_list_checkout_proposals(restaurant["id"], branch_ids)
+    with tenant_scope(restaurant["id"]):
+        proposals = await db.db_list_checkout_proposals(restaurant["id"], branch_ids)
     return {"proposals": proposals}
 
 
 @router.delete("/api/checkout-proposals/{base_order_id}")
 async def cancel_checkout_proposal(base_order_id: str, request: Request):
-    await get_current_restaurant(request)  # auth check
-    await db.db_cancel_checkout_proposal(base_order_id)
+    restaurant = await get_current_restaurant(request)  # auth check
+    with tenant_scope(restaurant["id"]):
+        await db.db_cancel_checkout_proposal(base_order_id)
     return {"success": True}
 
 
@@ -1132,7 +1167,8 @@ async def cancel_checkout_proposal(base_order_id: str, request: Request):
 async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
     """Devuelve los datos del check para impresión de factura térmica."""
     await get_current_user(request)
-    ticket = await db.db_get_check_ticket(check_id)
+    with bypass_tenant_scope("get_check_ticket: ticket lookup by check ID across branches"):
+        ticket = await db.db_get_check_ticket(check_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Check no encontrado")
     return ticket
@@ -1142,7 +1178,8 @@ async def get_check_ticket(request: Request, base_order_id: str, check_id: str):
 async def delete_check(request: Request, base_order_id: str, check_id: str):
     """Elimina un check en estado 'open'. No afecta checks ya cobrados."""
     await get_current_user(request)
-    deleted = await db.db_delete_open_check(check_id)
+    with bypass_tenant_scope("delete_check: check deletion by ID across branches"):
+        deleted = await db.db_delete_open_check(check_id)
     if not deleted:
         raise HTTPException(
             status_code=400,
@@ -1212,17 +1249,18 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
         "station": "all",
         "branch_id": branch_id,
     }
-    await db.db_save_table_order(order)
+    with tenant_scope(restaurant["id"]):
+        await db.db_save_table_order(order)
 
-    # Crear un check único para esta venta
-    check_payload = [{
-        "check_number": 1,
-        "items": items_payload,
-        "subtotal": float(to_decimal(subtotal)),
-        "tax_amount": 0.0,
-        "total": float(to_decimal(subtotal)),
-    }]
-    created = await db.db_create_checks(base_order_id, check_payload)
+        # Crear un check único para esta venta
+        check_payload = [{
+            "check_number": 1,
+            "items": items_payload,
+            "subtotal": float(to_decimal(subtotal)),
+            "tax_amount": 0.0,
+            "total": float(to_decimal(subtotal)),
+        }]
+        created = await db.db_create_checks(base_order_id, check_payload)
     if not created:
         raise HTTPException(status_code=500, detail="No se pudo crear el check")
     check_id = created[0]["id"]
@@ -1272,17 +1310,18 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
 
     payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
 
-    await db.db_finalize_check_payment(
-        check_id=check_id,
-        base_order_id=base_order_id,
-        payments=payments_list,
-        change_amount=0.0,
-        fiscal_invoice_id=fiscal_invoice_id,
-        customer_name=body.customer_name,
-        customer_nit=body.customer_nit,
-        customer_email=body.customer_email,
-        tip_amount=float(tip_d),
-    )
+    with tenant_scope(restaurant["id"]):
+        await db.db_finalize_check_payment(
+            check_id=check_id,
+            base_order_id=base_order_id,
+            payments=payments_list,
+            change_amount=0.0,
+            fiscal_invoice_id=fiscal_invoice_id,
+            customer_name=body.customer_name,
+            customer_nit=body.customer_nit,
+            customer_email=body.customer_email,
+            tip_amount=float(tip_d),
+        )
 
     return {
         "success": True,

@@ -17,6 +17,7 @@ from typing import Optional
 
 from app.services.logging import get_logger
 from app.services.money import quantize_money
+from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
 
@@ -30,19 +31,14 @@ MAX_SUMMARY_CHARS: int = 300
 DEFAULT_PROMPT_MAX_CHARS: int = 400
 
 
-# ── Lazy pool accessor — breaks circular import with app.services.database ────
-
-async def _get_pool():
-    from app.services.database import get_pool  # noqa: PLC0415
-    return await get_pool()
-
-
 # ── Repository functions ──────────────────────────────────────────────────────
 
 async def get_profile(restaurant_id: int, phone: str) -> Optional[dict]:
-    """Return the profile row as a dict, or None if not found."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    """Return the profile row as a dict, or None if not found.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             SELECT id, restaurant_id, phone, display_name, preferences,
@@ -69,9 +65,10 @@ async def upsert_profile_from_message(
 
     Uses INSERT ... ON CONFLICT (restaurant_id, phone) DO UPDATE. Idempotent.
     When display_name is None the existing value is preserved via COALESCE.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO customer_profiles
@@ -104,6 +101,8 @@ async def update_preference(
     key must be one of VALID_PREFERENCE_KEYS; raises ValueError otherwise.
     value is truncated to MAX_VALUE_CHARS (no exception raised on long input).
     If the profile does not yet exist, it is created first.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     if key not in VALID_PREFERENCE_KEYS:
         raise ValueError(
@@ -124,8 +123,7 @@ async def update_preference(
         )
         await upsert_profile_from_message(restaurant_id, phone, display_name=None)
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         await conn.execute(
             """
             UPDATE customer_profiles
@@ -155,6 +153,8 @@ async def increment_after_order(
 
     order_total MUST be a Decimal — floats are rejected (CLAUDE.md Rule 5).
     order_summary is truncated to MAX_SUMMARY_CHARS.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
     """
     if not isinstance(order_total, Decimal):
         raise TypeError(
@@ -175,8 +175,7 @@ async def increment_after_order(
         )
         await upsert_profile_from_message(restaurant_id, phone, display_name=None)
 
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         await conn.execute(
             """
             UPDATE customer_profiles
