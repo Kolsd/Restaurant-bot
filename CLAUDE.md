@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v10.3 (Bot Hardening — 79 bugs fixed across 4 audit rounds)
+# Mesio Restaurant Bot — v11.0 (Multi-tenant RLS Blindaje — Fase 1 completa)
 
 ## Entorno y Comandos
 
@@ -11,7 +11,11 @@ Deploy:  Railway — railway.toml conditional start (web vs inbox worker)
 Worker:  WORKER_MODE=inbox → python scripts/run_inbox_worker.py (Railway separate service)
 
 Variables de entorno críticas:
-  DATABASE_URL, ANTHROPIC_API_KEY, META_APP_SECRET, ADMIN_KEY,
+  DATABASE_URL,                 # RUNTIME: conecta como mesio_app (non-superuser). RLS enforce automático.
+  DATABASE_URL_ADMIN,           # (Fase 1 RLS) URL superuser SOLO para migraciones Alembic.
+                                #   Si no se setea, alembic cae a DATABASE_URL (backward-compat).
+                                #   En prod: NUNCA apuntar la app aquí.
+  ANTHROPIC_API_KEY, META_APP_SECRET, ADMIN_KEY,
   META_ACCESS_TOKEN, WOMPI_PUBLIC_KEY, WOMPI_INTEGRITY_SECRET, APP_DOMAIN,
   REDIS_URL,                    # Estado compartido entre 4 workers (NPS, checkout, cooldowns)
   ALERT_WEBHOOK_URL,            # (opcional) Webhook para alertas operativas (Slack/Discord)
@@ -26,6 +30,12 @@ Variables de entorno críticas:
   CLOUDINARY_API_SECRET,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
 ```
 
+## Roles Postgres (Fase 1 RLS)
+
+- **`postgres`** (superuser) — usado SOLO por Alembic vía `DATABASE_URL_ADMIN`. Bypass implícito de RLS.
+- **`mesio_app`** (non-superuser, LOGIN) — conexión de la app en runtime. RLS se aplica normalmente. Tiene DML + sequences + execute + `mesio_superadmin` granted.
+- **`mesio_superadmin`** (BYPASSRLS, NOINHERIT, no LOGIN) — activado via `SET LOCAL ROLE mesio_superadmin` dentro de `bypass_tenant_scope()`. Para rutas internas, scheduler leader tick, inbox worker pre-resolución, y analytics cross-tenant.
+
 ## Estructura del Proyecto
 
 ```
@@ -33,7 +43,7 @@ Restaurant-bot/
 ├── app/
 │   ├── main.py                      # FastAPI entry point. @asynccontextmanager lifespan: scheduler, inbox_worker, Redis
 │   ├── routes/                      # Capa HTTP — solo validación y respuesta (zero SQL directo)
-│   │   ├── deps.py                  # Dependencias: auth, get_current_restaurant, require_module
+│   │   ├── deps.py                  # Dependencias: auth, get_current_restaurant, get_current_restaurant_scoped, get_current_user_scoped, require_module
 │   │   ├── chat.py                  # Webhook Meta → ENCOLA en webhook_inbox (no más create_task)
 │   │   ├── dashboard.py             # Páginas HTML, APIs públicas, geocode (~240 LOC)
 │   │   ├── auth_routes.py           # /api/auth/login, /api/auth/logout, /api/auth/verify-role
@@ -61,6 +71,8 @@ Restaurant-bot/
 │   │       └── ops.py               # /internal/monitoring, /api/internal/ops/metrics — Observabilidad
 │   ├── services/
 │   │   ├── database.py              # Infraestructura pura (get_pool, _serialize, UsageLimitExceeded) + re-exports. ~383 LOC
+│   │   ├── tenant_context.py        # RLS — ContextVar tenant_scope(rid) + bypass_tenant_scope(reason) + TenantNotSetError
+│   │   ├── tenant_db.py             # RLS — tenant_connection() async ctx manager: acquire → SET LOCAL app.restaurant_id (o SET LOCAL ROLE)
 │   │   ├── agent.py                 # Claude tool_use API. chat() orquestador + _validate_tool_call + 10 helpers
 │   │   ├── auth.py                  # JWT y passwords. Sesiones via sessions_repo (token hasheado)
 │   │   ├── orders.py                # Carrito y pagos. Decimal end-to-end. Cart lock UUID ownership via Redis
@@ -68,9 +80,9 @@ Restaurant-bot/
 │   │   ├── logging.py               # structlog wrapper con fallback stdlib. get_logger(name, **ctx)
 │   │   ├── redis_client.py          # Singleton lazy redis.asyncio. Circuit breaker 30s
 │   │   ├── state_store.py           # API alto nivel: nps_*, checkout_*, table_cooldown_*, cart_lock_*, rate_limit_check, scheduler_leader_acquire
-│   │   ├── inbox_worker.py          # Claim-then-ack worker: fetch→claim→release conn→dispatch→ack (3 fases)
+│   │   ├── inbox_worker.py          # Claim-then-ack worker: fetch→claim→release conn→dispatch→ack (3 fases). Wrap _process_message en tenant_scope(rid) post-resolución.
 │   │   ├── alerts.py               # Health checks automáticos: dead letters, pool, latency, queue, errors → webhook
-│   │   ├── scheduler.py            # Background loop: inactivity, reminders, deposits, occupancy, alerts. Leader election via Redis
+│   │   ├── scheduler.py            # Background loop: inactivity, reminders, deposits, occupancy, alerts. Leader election via Redis. Tick wrapped en bypass_tenant_scope + per-iter tenant_scope(rid).
 │   │   ├── agent_tools.py           # 8 tool definitions para Claude tool_use API (TOOLS_SALON, TOOLS_EXTERNAL)
 │   │   └── reservation_payments.py  # Generación de links Wompi para depósitos de reserva
 │   ├── repositories/                # Patrón Repository — extracción completa de SQL desde routes
@@ -121,8 +133,113 @@ Restaurant-bot/
 │   ├── 0017_reviews_analytics.py    # Apparta: reseñas públicas en NPS + occupancy_snapshots
 │   ├── 0018_...
 │   ├── 0019_staff_username.py       # staff.username TEXT UNIQUE + backfill PL/pgSQL
-│   └── 0020_missing_runtime_tables.py # subscription_usage, loyalty_*, CRM tables (antes eran runtime DDL)
+│   ├── 0020_missing_runtime_tables.py # subscription_usage, loyalty_*, CRM tables (antes eran runtime DDL)
+│   ├── 0021–0026                    # drift repair, customer_profiles, weekly_reports, marketing_messages_log, menu_events, nps_responses.restaurant_id nullable
+│   ├── 0027_backfill_tenant_ids.py  # RLS F1 — batched backfill NULL restaurant_id en orders/table_orders/conversations/nps_responses + SET NOT NULL + índices
+│   ├── 0028_linked_tables_restaurant_id.py  # RLS F1 — ADD COLUMN restaurant_id en carts/table_sessions/waiter_alerts/nps_waiting + backfill via bot_number + FK CASCADE
+│   ├── 0027_0028_preflight.sql      # RLS F1 — SQL read-only para revisar orphans/duplicados antes de 0027/0028 (psql -f)
+│   ├── 0029_enable_row_level_security.py   # RLS F1 — CREATE ROLE mesio_superadmin BYPASSRLS + ENABLE RLS + policy tenant_isolation en 33 tablas
+│   └── 0030_force_rls.py            # RLS F1 — FORCE ROW LEVEL SECURITY en las 33 tablas (aplica incluso a table OWNER)
 ```
+
+## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
+
+**Objetivo:** imposible filtrar datos cross-tenant aunque un dev olvide `WHERE restaurant_id = $1`. El enforcement real vive en Postgres RLS; el Python es la plomería que alimenta el GUC.
+
+### Estado actual: 100% aplicado
+
+| Capa | Mecanismo | Archivo/migración |
+|---|---|---|
+| App fail-fast | `TenantNotSetError` si llamás `tenant_connection()` sin scope | `app/services/tenant_context.py` |
+| App→DB | `SET LOCAL app.restaurant_id = $1` en cada `tenant_connection` | `app/services/tenant_db.py` |
+| DB lectura | `USING (restaurant_id = NULLIF(current_setting('app.restaurant_id', true), '')::int)` | Alembic 0029 |
+| DB escritura | `WITH CHECK (...)` — bloquea spoofing de restaurant_id en INSERT/UPDATE | Alembic 0029 |
+| Owner lockdown | `ALTER TABLE ... FORCE ROW LEVEL SECURITY` | Alembic 0030 |
+| Runtime non-superuser | App conecta como `mesio_app` (DML-only), RLS se aplica | `.env` + `alembic/env.py` |
+| Admin escape hatch | `bypass_tenant_scope("reason")` → `SET LOCAL ROLE mesio_superadmin` (BYPASSRLS) | `app/services/tenant_context.py` |
+
+**Prueba empírica (en la DB actual, probada en sesión 2026-04-15):**
+```
+mesio_app + scope=8  → orders=4   (solo ese tenant)
+mesio_app + scope=19 → orders=11
+mesio_app + no_scope → orders=0   (fail-closed)
+INSERT sin scope     → InsufficientPrivilegeError (WITH CHECK dispara)
+INSERT cross-tenant  → InsufficientPrivilegeError (scope=8 intentando restaurant_id=19)
+bypass_tenant_scope  → orders=15 (todo)
+```
+
+### Patrón de uso
+
+**En rutas FastAPI (admin/staff autenticado):**
+```python
+# Restaurante admin (owner/gerente) — scope desde el dict del restaurante
+@router.get("/api/loyalty/balance")
+async def get_balance(
+    phone: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),  # ← yield-based, entra en tenant_scope
+):
+    return await db.db_get_loyalty_balance(restaurant["id"], phone)
+
+# Staff autenticado con JWT "staff:<uuid>" — scope desde user["restaurant_id"]
+@router.get("/api/staff/self/timecard")
+async def my_timecard(user: dict = Depends(get_current_user_scoped)):
+    return await db.db_get_staff_timecard_rows(user["restaurant_id"])
+```
+
+**En bot runtime (webhook Meta):**
+```python
+# inbox_worker._handle_meta_whatsapp — después de resolver restaurant desde bot_number
+if _tenant_id is not None:
+    with tenant_scope(_tenant_id):
+        await _process_message(...)
+```
+
+**En rutas/servicios cross-tenant (internal, scheduler, analytics):**
+```python
+# app/routes/internal/admin.py — superadmin Mesio
+with bypass_tenant_scope("internal_admin_restaurants_list"):
+    return await db.db_get_all_restaurants()
+
+# scheduler leader tick — enumera restaurantes, luego scope por cada uno
+with bypass_tenant_scope("scheduler_leader_tick"):
+    restaurants = await db_get_all_restaurants()
+    for r in restaurants:
+        with tenant_scope(r["id"]):
+            await _per_restaurant_task(r)
+
+# chat.py webhook Meta — enqueue es pre-tenant
+with bypass_tenant_scope("webhook_enqueue_cross_tenant"):
+    await inbox_repo.enqueue(...)
+```
+
+### Clasificación de repos
+
+| Repo | Tipo | Notas |
+|---|---|---|
+| `loyalty_repo`, `fiscal_repo`, `discounts_repo`, `customer_profiles_repo` | Tenant-scoped 100% | `_get_pool` eliminado |
+| `orders_repo`, `conversations_repo`, `inventory_repo`, `reviews_repo`, `reservations_repo`, `reservation_deposits_repo`, `weekly_reports_repo`, `menu_analytics_repo` | Tenant-scoped 100% | `_get_pool` eliminado |
+| `staff_repo`, `tables_repo` | Tenant-scoped con `bypass_tenant_scope` interno en ~20 funciones | 🚧 deuda: auditar cada bypass interno (kiosco público vs. cuestionables) |
+| `marketing_repo` | MIXED: `marketing_messages_log` tenant; `prospects`/CRM GLOBAL | Mantiene `_get_pool` para GLOBAL |
+| `restaurant_repo` | MIXED: 14 tenant (config por restaurant_id), 38 GLOBAL (users, enumeración, pre-resolución bot) | Mantiene `_get_pool` para GLOBAL |
+| `sessions_repo` | GLOBAL | `sessions` no tiene `restaurant_id` (auth cross-tenant). NO MIGRAR. |
+| `inbox_repo` | GLOBAL | `webhook_inbox` es pre-resolución por diseño. NO MIGRAR. |
+| `crm_repo` (`app/repositories/internal/`) | GLOBAL | Herramientas internas Mesio. NO MIGRAR. |
+
+### Reglas que cualquier cambio futuro DEBE respetar
+
+1. **Nunca uses `get_pool()` / `pool.acquire()` directo en código nuevo de repos.** Usá `tenant_connection()` + `tenant_scope(rid)` en el call site.
+2. **Nunca catches `TenantNotSetError`.** Es la señal de diseño — si salta, hay un call site sin scope.
+3. **Toda tabla nueva con `restaurant_id NOT NULL` DEBE agregarse a `_RLS_TABLES` en una nueva migración** que habilite RLS + FORCE. Si la olvidás, la tabla queda sin protección.
+4. **Los parámetros de `set_config` son posicionales, nunca f-string.** `SET LOCAL` vía `SELECT set_config('app.restaurant_id', $1, true)`.
+5. **Migraciones Alembic corren con `DATABASE_URL_ADMIN` (superuser).** La app runtime JAMÁS debe apuntarse a una URL superuser.
+6. **Tests nuevos mockean `app.services.database.get_pool`** + wrappean en `tenant_scope(N)`. El patrón viejo (`monkeypatch.setattr(repo, "_get_pool", ...)`) rompe porque `_get_pool` se eliminó de los repos migrados. Referencia: `tests/test_loyalty_repo_tenant.py`.
+7. **`bypass_tenant_scope` SIEMPRE con reason ≥ 8 chars.** Se loguea para auditoría. Reservado para: rutas `/api/internal/*`, scheduler leader tick, inbox worker pre-resolución, agent.py lookups cross-tenant pre-scope, endpoints de kiosco público (WebAuthn).
+
+### Deuda pendiente (no bloqueante)
+
+- Auditar los ~20 `bypass_tenant_scope` internos en `staff_repo.py` — varios son cuestionables (breaks, self-profile) y se pueden apretar a `tenant_connection()` si el call site siempre entra con scope.
+- 48 integration tests usan el patrón viejo `_get_pool` monkeypatch. Saltan en CI unit normal pero rompen con DB real. Adaptar al patrón nuevo.
+- Ver `PHASE_2_3_PLAN.md` en raíz del repo para el roadmap detallado de Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA + middlewares).
 
 ## Refactor Blindaje (Fases 1–8) — Estado Actual
 
@@ -208,8 +325,10 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 
 1. Tras ~2 semanas de logs `session.legacy_lookup` en cero → crear migración que dropea `sessions.token` y eliminar el fallback en `sessions_repo.get_session`/`delete_session`.
 2. Setear `REDIS_URL` en Railway antes del deploy (sin él, el bot funciona pero pierde la garantía multi-worker — fallback in-process).
-3. Correr `alembic upgrade head` para aplicar hasta 0020.
+3. Correr `alembic upgrade head` para aplicar hasta 0030 (RLS + FORCE).
 4. Migración `0012_b2b_sales_system.py` crea tablas huérfanas (`sales_inbox`, `sales_knowledge_base`, etc.) — `sales_agent.py` fue eliminado. Crear migración de cleanup cuando convenga.
+5. **Railway: setear `DATABASE_URL_ADMIN`** con la URL superuser, y `DATABASE_URL` apuntando al role `mesio_app` (non-superuser). Sin esto, RLS no enforce en prod.
+6. **Fase 2 + Fase 3 del roadmap de security** — ver `PHASE_2_3_PLAN.md` en raíz del repo. Top prioridad si hay tráfico real: 3.1 (precios por IA → Python) y 3.3 (webhook resilience bajo DB down).
 
 ### Limitaciones conocidas (no críticas)
 
@@ -221,7 +340,18 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 ### Tablas principales
 `restaurants`, `users`, `orders`, `table_orders`, `table_sessions`, `table_checks`,
 `conversations`, `carts`, `staff`, `fiscal_invoices`, `inventory`, `dish_recipes`,
-`webhook_inbox` (NUEVO), `sessions` (con `token_hash`)
+`webhook_inbox`, `sessions` (con `token_hash`)
+
+### RLS (Row-Level Security) activo en 33 tablas (Fase 1 v11.0)
+`attendance_deductions`, `billing_log`, `carts`, `contract_templates`, `conversations`,
+`customer_profiles`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
+`loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
+`menu_events`, `nps_responses`, `nps_waiting`, `occupancy_snapshots`, `orders`,
+`overtime_requests`, `payroll_runs`, `staff`, `staff_deduction_items`, `staff_schedules`,
+`staff_shifts`, `subscription_usage`, `table_orders`, `table_sessions`, `time_slot_discounts`,
+`tip_distributions`, `waiter_alerts`, `webauthn_challenges`, `weekly_reports`
+
+Todas con policy `tenant_isolation` + `ENABLE + FORCE ROW LEVEL SECURITY`. Tablas explícitamente GLOBAL (sin RLS por diseño): `users`, `sessions`, `webhook_inbox`, `processed_wam_ids`, `prospects*`, `crm_templates`, `sales_*`.
 
 ### Tablas del módulo Staff & Nómina
 | Tabla | Propósito |
@@ -601,6 +731,8 @@ Feature flags relacionados:
 - **Logging**: PROHIBIDO `except Exception: pass`. Usar `from app.services.logging import get_logger; log = get_logger(__name__)`. Catch tipado + `log.exception("contexto.evento", **ctx)`. Si afecta consistencia de datos/dinero → re-raise tras loguear.
 - **Money**: PROHIBIDO `float` en aritmética financiera. Usar `Decimal` + helpers de `services/money.py`. `float(...)` solo en el borde JSON con comentario `# JSON boundary`.
 - **Prompt injection**: Cualquier nuevo punto donde se inyecte texto del usuario al LLM debe pasar por `_wrap_user_message(...)`.
+- **Multi-tenant RLS (Fase 1)**: PROHIBIDO `pool.acquire()` / `get_pool()` directo en repos nuevos — usá `async with tenant_connection() as conn:`. El call site debe entrar en `tenant_scope(rid)` (rutas admin/staff via deps `_scoped`) o en `bypass_tenant_scope("reason")` (internal/scheduler/inbox pre-resolve). PROHIBIDO capturar `TenantNotSetError` (es señal de call site sin scope). Nueva tabla con `restaurant_id NOT NULL` DEBE agregarse a `_RLS_TABLES` en una migración que habilite + force RLS.
+- **DB URLs**: app runtime conecta como `mesio_app` (non-superuser) via `DATABASE_URL`. Alembic corre con `DATABASE_URL_ADMIN` (postgres superuser). PROHIBIDO apuntar la app runtime a una URL superuser — invalida el enforcement de RLS.
 
 ## Reglas del Bot — NO ROMPER (aprendidas de 79 bugs en 4 auditorías)
 
@@ -690,6 +822,14 @@ Estas reglas protegen los flujos críticos del bot de WhatsApp. Toda modificaci�
 - `OrderCommitError` → mensaje al cliente sobre error de pedido.
 - Ambos DEBEN capturarse ANTES del `except Exception` genérico en `execute_action`.
 - `commit_order_transaction` DEBE recibir el cart real con items, NUNCA `cart={}`.
+
+### 14. Tenant scope en bot runtime (Fase 1 RLS)
+- `inbox_worker._handle_meta_whatsapp` DEBE envolver `_process_message(...)` en `with tenant_scope(_tenant_id):` una vez resuelto el restaurante desde `bot_number`. Si no lo hacés, CUALQUIER repo migrado explota con `TenantNotSetError` dentro del flujo del bot.
+- `scheduler._scheduler_loop` DEBE entrar en `bypass_tenant_scope("scheduler_leader_tick")` antes del leader tick, Y envolver cada iteración per-restaurant en `tenant_scope(rid)`.
+- `chat.py meta_webhook` DEBE entrar en `bypass_tenant_scope("webhook_enqueue_cross_tenant")` durante el enqueue (pre-resolución).
+- `agent.py detect_table_context / get_session_state / _handle_nps_guard` están envueltos en `_bypass_tenant` porque hacen lookups cross-tenant por `bot_number` antes de conocer el tenant. Si movés esa lógica, preservá el bypass.
+- `orders.py process_order_callback` (Wompi) DEBE entrar en `tenant_scope(order["restaurant_id"])` tras cargar la orden.
+- NO volver a "silent fail" en el bot runtime. Si un `TenantNotSetError` aparece en producción, es un gap de wiring, NO un caso a suprimir.
 
 ## Frontend — Patrones y Convenciones
 
@@ -816,14 +956,16 @@ Wrapper Cloudinary. Funciones clave:
 - **No Vaguedad**: Ante una duda técnica, pregunta antes de proponer cambios masivos que consuman tokens.
 - **Aislamiento Multi-Worker**: Al modificar estados (`NPS`, `checkout`), asume siempre que hay 4 workers y usa `state_store` (Redis).
 - **Patrón Repositorio**: Prohibido SQL en `app/routes/` y `app/services/` (excepto `billing.py` fiscal). Todo SQL nuevo va en `app/repositories/`.
+- **Multi-tenant RLS (v11.0)**: Todo repo nuevo que toque una tabla con `restaurant_id` DEBE usar `async with tenant_connection() as conn:` y ser llamado desde un call site con `tenant_scope(rid)` activo (o `bypass_tenant_scope("reason")` si es genuinamente cross-tenant). LEE la sección "Blindaje Multi-tenant RLS" antes de tocar repos, deps, bot runtime, o alembic. El estado ha sido verificado empíricamente — no lo rompas con "silent fails" o catches genéricos.
 - **Precisión Financiera**: Prohibido usar `float` para dinero. Usa `Decimal` y los helpers en `app/services/money.py`.
 - **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
-- **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle.
+- **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
-- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/test_full_flow.py`. 60/60 DEBEN pasar.
+- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`. 766/766 DEBEN pasar.
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.
+- **Roadmap Fase 2+3**: Antes de empezar trabajo de hardening adicional, LEER `PHASE_2_3_PLAN.md` en raíz del repo. Ahí está el plan priorizado, con deuda residual, tareas concretas, y sugerencias de delegación.
 
 ## Separación Internal vs App
 
