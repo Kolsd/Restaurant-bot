@@ -1,128 +1,90 @@
-# 🍽️ Restaurant AI Bot
+# Mesio Restaurant Bot — v11.0
 
-Agente de WhatsApp con IA para restaurantes. Responde preguntas del menú, toma reservaciones, da recomendaciones y escala a humano cuando es necesario.
-
-## ✨ Funciones
-
-- 🍕 **Menú completo** - Precios, ingredientes, opciones vegetarianas
-- 📅 **Reservaciones** - Toma datos y confirma automáticamente
-- ⏰ **Horarios y ubicación**
-- 🔥 **Recomendaciones** - Basadas en platos más pedidos
-- 👤 **Escalar a humano** - Cuando no puede resolver algo
-- 💬 **Memoria de conversación** - Recuerda el contexto del chat
+SaaS multi-tenant de WhatsApp con IA para restaurantes. Cada restaurante opera en un tenant aislado con Row-Level Security en Postgres. Gestiona pedidos, reservas, mesas (POS), staff, nomina y facturacion electronica. El bot corre sobre Claude (tool_use API) y recibe mensajes via Meta WhatsApp Business API.
 
 ---
 
-## 🚀 Instalación
-
-### 1. Clonar e instalar dependencias
+## Quickstart
 
 ```bash
-cd restaurant-bot
+git clone <repo>
+cd Restaurant-bot
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### 2. Configurar variables de entorno
-
-```bash
-cp .env.example .env
-# Editar .env con tu ANTHROPIC_API_KEY
-```
-
-### 3. Personalizar el restaurante
-
-Editar `app/data/restaurant.py` con:
-- Nombre, dirección, teléfono del restaurante
-- Horarios reales
-- Menú completo con precios
-
-### 4. Ejecutar el servidor
-
-```bash
+cp .env.example .env   # editar con tus valores
+alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
-El bot estará en: `http://localhost:8000`
-Documentación interactiva: `http://localhost:8000/docs`
+### Variables de entorno criticas
+
+| Variable | Descripcion |
+|---|---|
+| `DATABASE_URL` | Conexion runtime como `mesio_app` (non-superuser). RLS se aplica automaticamente. |
+| `DATABASE_URL_ADMIN` | Conexion superuser SOLO para migraciones Alembic. La app NUNCA debe usar esta URL en runtime. Si no se setea, Alembic cae a `DATABASE_URL`. |
+| `ANTHROPIC_API_KEY` | API key de Anthropic para el LLM (Claude). |
+| `META_APP_SECRET` | Secret para verificar firmas de webhooks de Meta. |
+| `ADMIN_KEY` | Key para endpoints internos de Mesio (analytics, monitoring, superadmin). |
+| `REDIS_URL` | Estado compartido entre workers (NPS, checkout, cooldowns, cart locks). Sin esto el bot degrada a in-process. |
+| `META_ACCESS_TOKEN` | Token de acceso de la app Meta para enviar mensajes salientes. |
+| `APP_DOMAIN` | Dominio publico (usado en WebAuthn RP_ID y links de pago). |
+
+Variables opcionales: `OPENAI_API_KEY` (transcripcion de audios via Whisper), `CLOUDINARY_*` (catalogo visual), `ALERT_WEBHOOK_URL`, `WOMPI_*`, `BOT_MAX_TOKENS`, `BOT_MODEL_FAST`, `BOT_MODEL_PRECISE`, `DISABLE_EMBEDDED_WORKER`, `WORKER_MODE`.
 
 ---
 
-## 🧪 Probar el bot localmente
+## Arquitectura
+
+- **Capas**: HTTP routes (sin SQL) -> repositories (todo el SQL) -> `tenant_connection()` -> Postgres con RLS activo. Zero SQL directo en routes o services.
+- **Multi-worker**: Estado compartido (NPS, checkout, cooldowns, cart locks) en Redis via `app/services/state_store.py`. Cuatro uvicorn workers compiten por inbox via `FOR UPDATE SKIP LOCKED`.
+- **Bot AI**: Claude tool_use API. El orquestador vive en `app/services/agent.py`. Las definiciones de tools en `app/services/agent_tools.py`. Todo texto del usuario pasa por `_wrap_user_message()` antes de llegar al LLM.
+- **Webhook durable**: `POST /webhook` encola en `webhook_inbox` (Postgres). El `inbox_worker` procesa con patron claim-then-ack en 3 fases: claim (transaccion corta, ms) -> dispatch (hasta 120s, sin conexion DB) -> ack (conexion nueva, ms). Nunca meter dispatch dentro de una transaccion larga.
+- **Scheduler**: Loop de background con leader election via Redis (`scheduler_leader_acquire`). Solo un worker ejecuta el tick. Maneja inactividad, recordatorios, depositos, ocupacion y alertas operativas.
+
+---
+
+## Seguridad multi-tenant (RLS)
+
+RLS activo en 33 tablas. En runtime, la app conecta como `mesio_app` (non-superuser, LOGIN), lo que hace que Postgres aplique las politicas automaticamente. El GUC `app.restaurant_id` se setea por conexion via `SET LOCAL` en `tenant_connection()`.
+
+Para rutas cross-tenant legitimas (internas Mesio, scheduler, inbox pre-resolucion), se usa `bypass_tenant_scope("reason")` que activa `SET LOCAL ROLE mesio_superadmin` (BYPASSRLS, NOINHERIT, sin LOGIN).
+
+Regla de oro: nunca usar `get_pool()` o `pool.acquire()` directo en repos nuevos. Siempre `async with tenant_connection() as conn:` con `tenant_scope(rid)` activo en el call site.
+
+Ver seccion "Blindaje Multi-tenant RLS" en [CLAUDE.md](CLAUDE.md) para el detalle completo, incluyendo prueba empirica y clasificacion de repos.
+
+---
+
+## Tests
 
 ```bash
-# Enviar un mensaje de prueba
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"phone": "+5215512345678", "message": "Hola, ¿qué platos recomiendan?"}'
+# Suite completa (766 tests, excluye simulacion E2E)
+pytest tests/ --ignore=tests/ai_sim
+
+# Simulacion E2E real (requiere Postgres + Anthropic API activos)
+python run_ai_sim.py   # 20 escenarios multi-turno
 ```
 
 ---
 
-## 📱 Conectar WhatsApp Real
+## Deploy (Railway)
 
-### Opción A: Twilio (más fácil para empezar)
-
-1. Crear cuenta en [twilio.com](https://twilio.com)
-2. Activar WhatsApp Sandbox
-3. Configurar webhook: `https://tu-dominio.com/api/webhook/twilio`
-4. Agregar credenciales en `.env`
-
-### Opción B: Meta Cloud API (producción)
-
-1. Crear app en [developers.facebook.com](https://developers.facebook.com)
-2. Agregar producto "WhatsApp"
-3. Configurar webhook: `https://tu-dominio.com/api/webhook/meta`
-4. Token de verificación: `MI_TOKEN_SECRETO` (cambiar en `.env`)
-
----
-
-## ☁️ Deploy en producción
-
-### Railway (recomendado, ~$5/mes)
+El `railway.toml` arranca condicionalmente segun `WORKER_MODE`:
 
 ```bash
-npm install -g @railway/cli
-railway login
-railway init
-railway up
+# Web service (default): 4 uvicorn workers + scheduler + inbox worker embebido
+uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop
+
+# Worker service separado: WORKER_MODE=inbox
+python scripts/run_inbox_worker.py
 ```
 
-### Variables de entorno en Railway:
-- `ANTHROPIC_API_KEY` = tu API key
+Ambos servicios comparten la misma DB y Redis. Antes del primer deploy, setear `DATABASE_URL` apuntando al role `mesio_app` y `DATABASE_URL_ADMIN` apuntando al superuser `postgres`. Sin esta separacion, RLS no se aplica correctamente en produccion.
 
 ---
 
-## 📊 Endpoints disponibles
+## Documentacion
 
-| Método | URL | Descripción |
-|--------|-----|-------------|
-| POST | `/api/chat` | Chat directo (testing) |
-| POST | `/api/webhook/twilio` | Webhook de Twilio |
-| POST | `/api/webhook/meta` | Webhook de Meta |
-| GET  | `/api/webhook/meta` | Verificación de Meta |
-| GET  | `/api/reservations` | Ver reservaciones |
-| POST | `/api/reset` | Reiniciar conversación |
-
----
-
-## 💰 Costos estimados
-
-| Servicio | Costo |
-|----------|-------|
-| Anthropic API | ~$5-15/mes por restaurante |
-| Railway (servidor) | $5/mes |
-| Twilio WhatsApp | $0.005 por mensaje |
-| **Total** | **~$15-25/mes** |
-
-Cobrando $99-149/mes por restaurante = **$74-124 de ganancia por cliente** 🚀
-
----
-
-## 🗺️ Roadmap
-
-- [ ] Dashboard web para ver conversaciones y reservaciones
-- [ ] Integración con Google Calendar para reservaciones
-- [ ] Notificaciones por email al dueño
-- [ ] Base de datos PostgreSQL (reemplazar memoria)
-- [ ] Panel de configuración del restaurante sin código
-- [ ] Soporte multi-idioma
+- [CLAUDE.md](CLAUDE.md) — Spec de arquitectura completa, reglas de codigo, convenciones de repos, reglas del bot (NO ROMPER), y estado actual de todas las fases de hardening.
+- [PHASE_2_3_PLAN.md](PHASE_2_3_PLAN.md) — Roadmap de hardening Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA y middlewares). Leer antes de empezar trabajo de seguridad adicional.
+- [ARCHITECTURE_AND_SECURITY.md](ARCHITECTURE_AND_SECURITY.md) — Notas de seguridad y reglas de arquitectura (puede estar desactualizado respecto a v11.0; CLAUDE.md es la fuente autoritativa).
