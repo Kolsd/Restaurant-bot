@@ -35,15 +35,29 @@ async def _cart_lock(phone: str, bot_number: str, ttl_seconds: int = 30):
         await state_store.cart_lock_release(phone, bot_number, token=token)
 
 async def find_dish(dish_name: str, bot_number: str) -> dict | None:
+    if not dish_name or not dish_name.strip():
+        log.info("find_dish.empty_query", bot_number=bot_number)
+        return None
+
     menu = await db.db_get_menu(bot_number)
     if not menu:
+        log.info("find_dish.no_menu", bot_number=bot_number)
         return None
+
     name_lower = dish_name.lower().strip()
 
     # Pass 1: exact match (case-insensitive)
     for category, dishes in menu.items():
+        if not isinstance(dishes, list):
+            continue
         for dish in dishes:
-            if dish["name"].lower().strip() == name_lower:
+            if not isinstance(dish, dict):
+                continue
+            dish_name_stored = dish.get("name", "")
+            if not isinstance(dish_name_stored, str):
+                continue
+            if dish_name_stored.lower().strip() == name_lower:
+                log.info("find_dish.matched", query=dish_name, matched=dish_name_stored, method="exact")
                 return {**dish, "category": category}
 
     # Pass 2: substring matches — collect all and pick the one whose length is
@@ -52,23 +66,34 @@ async def find_dish(dish_name: str, bot_number: str) -> dict | None:
     # to avoid matching a 2-char query against a 30-char name.
     candidates = []
     for category, dishes in menu.items():
+        if not isinstance(dishes, list):
+            continue
         for dish in dishes:
-            dish_lower = dish["name"].lower()
+            if not isinstance(dish, dict):
+                continue
+            dish_name_stored = dish.get("name", "")
+            if not isinstance(dish_name_stored, str):
+                continue
+            dish_lower = dish_name_stored.lower()
             item_len = len(dish_lower)
             query_len = len(name_lower)
             if item_len == 0:
                 continue
-            if name_lower in dish_lower and query_len / item_len >= 0.4:
+            ratio = query_len / item_len
+            if name_lower in dish_lower and ratio >= 0.4:
                 candidates.append({**dish, "category": category})
-            elif (dish_lower in name_lower) and (query_len / item_len >= 0.4 if item_len > 0 else False):
+            elif dish_lower in name_lower and ratio >= 0.4:
                 candidates.append({**dish, "category": category})
 
     if not candidates:
+        log.info("find_dish.no_match", query=dish_name, method="none")
         return None
 
     # Prefer the dish whose name length is closest to the query length
-    candidates.sort(key=lambda d: abs(len(d["name"]) - len(dish_name)))
-    return candidates[0]
+    candidates.sort(key=lambda d: abs(len(d.get("name", "")) - len(dish_name)))
+    matched = candidates[0]
+    log.info("find_dish.matched", query=dish_name, matched=matched.get("name"), method="substring")
+    return matched
 
 async def add_to_cart(phone: str, dish_name: str, quantity: int, bot_number: str) -> dict:
     if quantity <= 0:

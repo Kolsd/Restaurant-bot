@@ -1,0 +1,293 @@
+"""
+tests/ai_sim/scenarios/mesa.py — Dine-in (salon) scenarios.
+
+6 scenarios covering: full flow with sub-order, split check, no-duplicate
+sub-order, waiter assistance, reservation with relative date, and delivery
+request rejected from inside the restaurant.
+"""
+from tests.ai_sim.types import ExpectedState, Scenario, Turn
+
+MESA_SCENARIOS: list[Scenario] = [
+    # ------------------------------------------------------------------
+    # mesa_01 — Flagship: full dine-in flow with sub-order and bill
+    # ------------------------------------------------------------------
+    Scenario(
+        id="mesa_01_flujo_completo",
+        suite="mesa",
+        description=(
+            "Full dine-in flow: greeting → order drink → add food → "
+            "sub-order (extra item, must NOT duplicate) → request bill with cash. "
+            "Exercises place_order, sub-order append, request_bill."
+        ),
+        mode="table",
+        user_phone="+573000000001",
+        bot_number="+57TESTBOT1",
+        table_hint="1",
+        turns=[
+            Turn(
+                user="hola buenas",
+                expect_bot_contains=["bienvenid", "mesa"],
+            ),
+            Turn(
+                user="una limonada natural porfavor",
+                expect_bot_contains=["limonada", "confirm"],
+                expect_bot_not_contains=["dirección", "domicilio"],
+            ),
+            Turn(
+                user="sip",
+                expect_bot_contains=["pedido", "listo", "orden"],
+            ),
+            Turn(
+                user="también quiero una bandeja paisa",
+                expect_bot_contains=["bandeja", "confirm"],
+            ),
+            Turn(
+                user="si claro",
+                expect_bot_contains=["bandeja", "listo", "orden"],
+            ),
+            Turn(
+                user="y nos ponen una cerveza club colombia mas",
+                expect_bot_contains=["cerveza", "confirm"],
+            ),
+            Turn(
+                user="dale",
+                expect_bot_contains=["cerveza"],
+            ),
+            Turn(
+                user="la cuenta por favor, vamos a pagar en efectivo",
+                expect_bot_contains=["cuenta", "mesero", "efectivo"],
+                expect_bot_not_contains=["nequi", "daviplata"],
+            ),
+        ],
+        expected_state=ExpectedState(
+            table_orders_count=None,  # at least one order committed
+            items_in_orders=["Limonada natural", "Bandeja Paisa", "Cerveza Club Colombia"],
+            waiter_alerts_types=["bill"],
+            carts_empty_after=True,
+            tokens_used_gt_zero=True,
+        ),
+        judge_criteria=[
+            "Bot greeted mentioning the restaurant name or welcoming to the table",
+            "Bot used place_order tool (not create_delivery_order or create_pickup_order)",
+            "Bot did NOT ask for a delivery address or payment method during the meal",
+            "Bot used request_bill action when the customer asked for the check",
+            "Sub-order (Cerveza) did NOT duplicate Limonada or Bandeja Paisa in the items[] array — each tool call contained ONLY the newly added item(s)",
+            "Bot confirmed each item before placing the order",
+        ],
+    ),
+
+    # ------------------------------------------------------------------
+    # mesa_02 — Split check: 3 friends want separate bills
+    # ------------------------------------------------------------------
+    Scenario(
+        id="mesa_02_split_check",
+        suite="mesa",
+        description=(
+            "Table of 3 friends, multiple items ordered, then they request "
+            "separate bills. Bot must use request_bill and mention the waiter "
+            "will handle the split."
+        ),
+        mode="table",
+        user_phone="+573000000002",
+        bot_number="+57TESTBOT1",
+        table_hint="2",
+        turns=[
+            Turn(
+                user="hola somos 3, queremos pedir",
+                expect_bot_contains=["bienvenid", "mesa", "hola"],
+            ),
+            Turn(
+                user="queremos 3 ajaicos santafereños y 3 aguas",
+                expect_bot_contains=["ajiaco", "agua", "confirm"],
+            ),
+            Turn(
+                user="sii todo está bien",
+                expect_bot_contains=["pedido", "orden", "listo"],
+            ),
+            Turn(
+                user="queremos pagar por separado, somos 3 personas",
+                expect_bot_contains=["separad", "mesero", "cuenta"],
+            ),
+        ],
+        expected_state=ExpectedState(
+            waiter_alerts_types=["bill"],
+            carts_empty_after=True,
+            tokens_used_gt_zero=True,
+        ),
+        judge_criteria=[
+            "Bot acknowledged the split bill request explicitly",
+            "Bot used request_bill action (not place_order or delivery)",
+            "Bot mentioned the waiter will assist with the split payment",
+            "Bot did NOT attempt to process payments directly or ask for payment method",
+        ],
+    ),
+
+    # ------------------------------------------------------------------
+    # mesa_03 — Sub-order must NOT duplicate items already ordered
+    # ------------------------------------------------------------------
+    Scenario(
+        id="mesa_03_sub_orden_sin_duplicar",
+        suite="mesa",
+        description=(
+            "Critical no-duplicate rule: customer orders Bandeja Paisa, confirms, "
+            "then adds a Cerveza. The second place_order tool call items[] must "
+            "contain ONLY Cerveza — never the already-confirmed Bandeja Paisa."
+        ),
+        mode="table",
+        user_phone="+573000000003",
+        bot_number="+57TESTBOT1",
+        table_hint="3",
+        turns=[
+            Turn(
+                user="buenas, una bandeja paisa",
+                expect_bot_contains=["bandeja", "confirm"],
+            ),
+            Turn(
+                user="sí perfecto",
+                expect_bot_contains=["pedido", "listo", "orden"],
+            ),
+            Turn(
+                user="oiga y también una cerveza club colombia",
+                expect_bot_contains=["cerveza", "confirm"],
+            ),
+            Turn(
+                user="sí",
+                expect_bot_contains=["cerveza"],
+            ),
+        ],
+        expected_state=ExpectedState(
+            items_in_orders=["Bandeja Paisa", "Cerveza Club Colombia"],
+            carts_empty_after=True,
+            tokens_used_gt_zero=True,
+        ),
+        judge_criteria=[
+            "When adding Cerveza Club Colombia as a sub-order, the bot's place_order "
+            "tool call 'items' array contained ONLY Cerveza Club Colombia — it NEVER "
+            "repeated Bandeja Paisa (which was already confirmed). Repeating items "
+            "would double-charge the customer.",
+        ],
+    ),
+
+    # ------------------------------------------------------------------
+    # mesa_04 — Waiter assistance (no food order, just call_waiter)
+    # ------------------------------------------------------------------
+    Scenario(
+        id="mesa_04_mesero_servilletas",
+        suite="mesa",
+        description=(
+            "Customer needs waiter assistance: requests more napkins and reports "
+            "spilled water. Bot must use call_waiter (assistance type), "
+            "NOT request_bill, and must NOT create a food order."
+        ),
+        mode="table",
+        user_phone="+573000000004",
+        bot_number="+57TESTBOT1",
+        table_hint="4",
+        turns=[
+            Turn(
+                user="por favor traigan más servilletas",
+                expect_bot_contains=["mesero", "aviso", "servilleta"],
+                expect_bot_not_contains=["cuenta", "pago"],
+            ),
+            Turn(
+                user="también se derramó un poco de agua aquí en la mesa",
+                expect_bot_contains=["mesero", "enseguida", "aviso"],
+            ),
+        ],
+        expected_state=ExpectedState(
+            table_orders_count=0,
+            waiter_alerts_count=None,  # at least 1
+            waiter_alerts_types=["waiter"],  # real codebase uses 'waiter' alert_type for assistance (tables_repo.py:826)
+            carts_empty_after=True,
+            tokens_used_gt_zero=True,
+        ),
+        judge_criteria=[
+            "Bot used call_waiter with type 'assistance', NOT request_bill",
+            "No food order was created (no place_order tool was called)",
+            "Bot confirmed the waiter was notified about the napkins and spilled water",
+            "Bot did NOT ask what the customer wants to eat",
+        ],
+    ),
+
+    # ------------------------------------------------------------------
+    # mesa_05 — Reservation with relative date: bot must ask for concrete date
+    # ------------------------------------------------------------------
+    Scenario(
+        id="mesa_05_reserva_fecha_relativa",
+        suite="mesa",
+        description=(
+            "Customer says 'mañana' (tomorrow) — bot must NOT call make_reservation "
+            "with a literal 'mañana' string. Must ask for a specific calendar date. "
+            "Then customer says 'para el 20 de diciembre' and confirms."
+        ),
+        mode="table",
+        user_phone="+573000000005",
+        bot_number="+57TESTBOT1",
+        table_hint="1",
+        turns=[
+            Turn(
+                user="quiero reservar para mañana a las 7pm, somos 4, soy Carlos",
+                expect_bot_contains=["fecha", "específic", "cuál", "día"],
+                expect_bot_not_contains=["reserva confirmada", "reserva creada"],
+            ),
+            Turn(
+                user="para el 20 de diciembre",
+                expect_bot_contains=["diciembre", "confirm", "4 person"],
+            ),
+            Turn(
+                user="sí confirmo",
+                expect_bot_contains=["reserva", "confirmada", "Carlos"],
+            ),
+        ],
+        expected_state=ExpectedState(
+            reservations_count=1,
+            reservations_status="pending",
+            carts_empty_after=True,
+            tokens_used_gt_zero=True,
+        ),
+        judge_criteria=[
+            "Bot did NOT use make_reservation on the first turn when the customer said 'mañana' — a relative date is ambiguous and cannot be stored as a concrete date",
+            "Bot explicitly asked for a specific calendar date (not just re-asked about guests or name)",
+            "Bot created the reservation ONLY after the customer provided '20 de diciembre' AND confirmed",
+            "Bot did NOT show a raw YYYY-MM-DD timestamp to the customer in the replies",
+            "Bot acknowledged the customer's name (Carlos) and party size (4) in the confirmation",
+        ],
+    ),
+
+    # ------------------------------------------------------------------
+    # mesa_06 — Delivery request from inside the restaurant → must reject
+    # ------------------------------------------------------------------
+    Scenario(
+        id="mesa_06_pide_domicilio_en_mesa",
+        suite="mesa",
+        description=(
+            "Customer at table 3 asks whether deliveries are available and wants "
+            "to send food to a relative. Bot must reject the delivery request with "
+            "the mesa-only policy and NOT start the external funnel."
+        ),
+        mode="table",
+        user_phone="+573000000006",
+        bot_number="+57TESTBOT1",
+        table_hint="3",
+        turns=[
+            Turn(
+                user="oye hacen domicilios? quiero mandarle algo a mi mamá en la casa",
+                expect_bot_contains=["mesa", "canal", "solo"],
+                expect_bot_not_contains=["dirección", "enviar", "catálogo", "menu"],
+            ),
+        ],
+        expected_state=ExpectedState(
+            table_orders_count=0,
+            orders_count=0,
+            carts_empty_after=True,
+            tokens_used_gt_zero=True,
+        ),
+        judge_criteria=[
+            "Bot refused to process a delivery request from inside the restaurant (table context)",
+            "Bot replied with the mesa-only channel policy (something like 'este canal es para pedidos en mesa')",
+            "Bot did NOT send a catalog link or start the delivery funnel",
+            "Bot did NOT use create_delivery_order",
+            "Bot was polite about the refusal and offered to take a dine-in order instead",
+        ],
+    ),
+]

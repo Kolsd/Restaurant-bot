@@ -400,9 +400,42 @@ async def db_init_waiter_alerts():
 
 
 async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, message: str, table_id: str = "", table_name: str = "") -> dict:
+    """
+    Create a waiter alert. For non-billing alerts (alert_type='waiter'), if an
+    open alert already exists for the same table within the last 60 seconds,
+    append the new message to the existing alert instead of creating a duplicate.
+    This prevents the waiter from receiving multiple pings when the customer
+    mentions the same request across two consecutive turns.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *", table_id, table_name, phone, bot_number, alert_type, message)
+        # Dedup window: 60 seconds for waiter (non-bill) alerts only
+        if alert_type == "waiter" and table_id:
+            existing = await conn.fetchrow(
+                """
+                SELECT id, message FROM waiter_alerts
+                WHERE table_id = $1
+                  AND bot_number = $2
+                  AND alert_type = 'waiter'
+                  AND dismissed = FALSE
+                  AND created_at > NOW() - INTERVAL '60 seconds'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                table_id, bot_number,
+            )
+            if existing:
+                combined = f"{existing['message']} | {message}"
+                row = await conn.fetchrow(
+                    "UPDATE waiter_alerts SET message = $1 WHERE id = $2 RETURNING *",
+                    combined, existing["id"],
+                )
+                return _serialize(dict(row))
+
+        row = await conn.fetchrow(
+            "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+            table_id, table_name, phone, bot_number, alert_type, message,
+        )
         return _serialize(dict(row))
 
 

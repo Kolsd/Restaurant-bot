@@ -111,9 +111,36 @@ def _normalize_menu_dishes(menu: dict) -> dict:
     """
     Walk a {category: [dish, ...]} menu and run normalize_dish_shape on every dish.
     Returns a new dict; does not mutate the input.
+
+    Also handles the legacy nested format {categories: [{name, items}]} produced by
+    setup_demo.py and some older imports.  Detected when the only key is "categories"
+    and its value is a list of objects that each have "name" and "items" keys.
+    Those are converted on-the-fly to the flat {category_name: [dishes]} format so
+    find_dish, _build_compact_menu, and the dashboard all see consistent data.
     """
     if not isinstance(menu, dict):
         return menu
+
+    # Auto-convert {categories: [{name, items}]} → {category_name: [dishes]}
+    raw_cats = menu.get("categories")
+    if (
+        len(menu) == 1
+        and isinstance(raw_cats, list)
+        and raw_cats
+        and isinstance(raw_cats[0], dict)
+        and "items" in raw_cats[0]
+    ):
+        flat: dict = {}
+        for cat_obj in raw_cats:
+            cat_name = cat_obj.get("name", "Sin categoría")
+            items = cat_obj.get("items", [])
+            if isinstance(items, list):
+                flat[cat_name] = [
+                    normalize_dish_shape(d) if isinstance(d, dict) else d
+                    for d in items
+                ]
+        return flat
+
     result: dict = {}
     for category, dishes in menu.items():
         if isinstance(dishes, list):

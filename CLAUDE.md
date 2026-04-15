@@ -6,6 +6,7 @@
 Server:  uvicorn app.main:app --reload --port 8000
 Migrate: alembic upgrade head          # SIEMPRE antes de arrancar en producción
 Tests:   pytest | pytest tests/test_file.py -v
+Sim:     python run_ai_sim.py          # Real E2E: Postgres + Anthropic reales, 20 escenarios multi-turno
 Deploy:  Railway — railway.toml conditional start (web vs inbox worker)
 Worker:  WORKER_MODE=inbox → python scripts/run_inbox_worker.py (Railway separate service)
 

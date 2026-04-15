@@ -70,6 +70,24 @@ _INJECTION_PATTERNS = [
 ]
 _INJECTION_RE = re.compile('|'.join(_INJECTION_PATTERNS), re.IGNORECASE)
 
+# ── Action-announcement detector (CATEGORY A safety net) ──────────────────────
+# Detects when the bot announces an action ("voy a procesar tu reserva") without
+# actually calling the corresponding tool.  Used in _call_llm_and_execute to
+# intercept these false-confirmation replies before they reach the customer.
+_ACTION_ANNOUNCEMENT_RE = re.compile(
+    r'(voy\s+a\s+(procesar|crear|generar|registrar|hacer|enviar)\b'
+    r'|procesando\s+(tu|la|el)\b'
+    r'|creando\s+(tu|la|el)\b'
+    r'|en\s+un\s+momento\s+(creo|proceso|registro)\b'
+    r'|ahora\s+(mismo\s+)?(proceso|creo|registro|genero)\b)',
+    re.IGNORECASE,
+)
+
+# Actions that MUST have a corresponding tool call when announced
+_ANNOUNCED_ACTION_TOOLS = frozenset({
+    "place_order", "create_delivery_order", "create_pickup_order", "make_reservation",
+})
+
 # ── Prompt-injection defense block (injected near the top of the system prompt) ──
 _INJECTION_DEFENSE_BLOCK = """\
 =========================================
@@ -147,23 +165,53 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             table["is_new_session"] = False
             return table
 
+    # 3. Text-based table detection is DISABLED by default (security bug: customers
+    #    could fake dine-in status by texting "estoy en la mesa 5" without a real QR scan).
+    #    Only activate when `allow_manual_table_number` feature flag is explicitly True.
+    #    Real QR scans always inject the [table_id:X] / [t:X] tag (path 1 above).
+    #
+    #    To enable for a restaurant: set features.allow_manual_table_number = true.
     clean_message = re.sub(r'\[.*?\]', '', re.sub(r'https?://\S+', '', message)).strip()
     clean_lower = clean_message.lower()
 
-    # 3. Detectar formato mágico (Ej: "estoy en la 1-1", "Mesa 1-1", "Mesa 5")
     m = re.search(r'(?:mesa|table|estoy en(?: la)?)\s*#?\s*(\d+(?:-\d+)?)', clean_lower, re.IGNORECASE)
     if not m:
         return None
 
+    # Text pattern matched — check feature flag before creating any session
     extracted_val = m.group(1)
 
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         bot_rest = await conn.fetchrow(
-            "SELECT id, parent_restaurant_id FROM restaurants WHERE whatsapp_number = $1", bot_number
+            "SELECT id, parent_restaurant_id, features FROM restaurants WHERE whatsapp_number = $1", bot_number
         )
         if not bot_rest:
             return None
+
+        features_raw = bot_rest["features"] or {}
+        features_dict = features_raw if isinstance(features_raw, dict) else {}
+        allow_manual = features_dict.get("allow_manual_table_number", False)
+
+        if not allow_manual:
+            # Security: do NOT auto-create a session from free-text table mentions.
+            # Customer must scan the physical QR code to establish a real table session.
+            log.warning(
+                "detect_table_context.manual_text_blocked",
+                phone=phone,
+                bot_number=bot_number,
+                extracted=extracted_val,
+                reason="allow_manual_table_number=False (default); QR scan required",
+            )
+            return None
+
+        # Feature flag is explicitly True — proceed with text-based lookup (opt-in only)
+        log.info(
+            "detect_table_context.manual_text_allowed",
+            phone=phone,
+            bot_number=bot_number,
+            extracted=extracted_val,
+        )
 
         root_id = bot_rest["parent_restaurant_id"] if bot_rest["parent_restaurant_id"] else bot_rest["id"]
 
@@ -731,6 +779,38 @@ def _make_order_fingerprint(items: list) -> str:
     return hashlib.md5("|".join(normalized).encode()).hexdigest()[:12]
 
 
+_CONFIRM_WORDS = frozenset([
+    "sí", "si", "sip", "sipo", "dale", "dale!", "ok", "okay", "va", "perfecto",
+    "confirmo", "confirma", "confirmar", "confirmado", "listo", "procede",
+    "manda", "mándalo", "mándalos", "siga", "adelante", "hágale", "hagale",
+    "yes", "yep", "sure", "please", "go ahead", "proceed",
+])
+
+
+def _last_messages_have_confirmation(full_history: list) -> bool:
+    """
+    Return True if any of the last 2 user turns in full_history contains a
+    confirmation word that would authorize a first-time place_order.
+    """
+    user_turns = [m for m in full_history if m.get("role") == "user"]
+    window = user_turns[-2:] if len(user_turns) >= 2 else user_turns
+    for turn in window:
+        content = turn.get("content", "")
+        if isinstance(content, list):
+            # content blocks
+            text = " ".join(
+                b.get("text", "") for b in content if isinstance(b, dict)
+            )
+        else:
+            text = str(content)
+        lowered = text.lower().strip()
+        # Exact single-word match OR the word appears surrounded by word boundaries
+        words = set(re.split(r"\W+", lowered))
+        if words & _CONFIRM_WORDS:
+            return True
+    return False
+
+
 async def _validate_tool_call(
     tool_name: str | None,
     tool_input: dict,
@@ -739,6 +819,8 @@ async def _validate_tool_call(
     bot_number: str,
     phone: str,
     features: dict | None = None,
+    session_state: dict | None = None,
+    full_history: list | None = None,
 ) -> tuple[str | None, str | None, dict]:
     """
     Validate a tool call before execution. Returns (tool_name, reply, tool_input).
@@ -750,7 +832,16 @@ async def _validate_tool_call(
     # 1. Context mismatch — salon tool in external mode (or vice versa)
     if tool_name in _SALON_ONLY_TOOLS and not table_context:
         log.warning("guard.salon_tool_without_table", tool=tool_name, phone=phone)
-        return None, reply, {}
+        # CRITICAL: discard the LLM reply — it may have hallucinated a table session.
+        # Replace with a context-appropriate message that guides the real flow.
+        base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
+        menu_url = f"{base_url}/menu?bot={bot_number}" if base_url else f"/menu?bot={bot_number}"
+        safe_reply = (
+            "Para hacer tu pedido en mesa necesitas escanear el código QR de tu mesa. "
+            "Si prefieres hacer un pedido a domicilio o para recoger, "
+            f"puedes ver nuestro menú aquí: {menu_url}"
+        )
+        return None, safe_reply, {}
 
     if tool_name in _EXTERNAL_ONLY_TOOLS and table_context:
         log.warning("guard.external_tool_at_table", tool=tool_name, phone=phone)
@@ -761,10 +852,10 @@ async def _validate_tool_call(
         items = tool_input.get("items", [])
         if not isinstance(items, list):
             log.warning("guard.order_tool_items_not_list", tool=tool_name, phone=phone, items_type=type(items).__name__)
-            return None, reply, {}
+            return None, reply or "¿Qué te gustaría ordenar? Cuéntame los platos que deseas.", {}
         if not items:
             log.warning("guard.order_tool_empty_items", tool=tool_name, phone=phone)
-            return None, reply, {}
+            return None, reply or "¿Qué te gustaría ordenar? Cuéntame los platos que deseas.", {}
 
     # 3. Duplicate order detection — same items within 60 seconds
     if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
@@ -776,6 +867,28 @@ async def _validate_tool_call(
         if not is_ok:
             log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=phone, fingerprint=item_key)
             return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
+
+    # 3b. Confirmation guard for place_order on first order at table.
+    # On the very first order (no committed order yet in this session), the bot
+    # MUST have received an explicit confirmation word in the last 2 user turns
+    # before charging the customer. Sub-orders (has_order=True) are already past
+    # the confirmation step and may proceed directly.
+    if tool_name == "place_order" and table_context:
+        _ss = session_state or {}
+        _has_prior_order = _ss.get("has_order", False)
+        if not _has_prior_order:
+            _hist = full_history or []
+            if not _last_messages_have_confirmation(_hist):
+                items = tool_input.get("items", [])
+                items_label = ", ".join(
+                    f"{i.get('qty', i.get('quantity', 1))}x {i.get('name', '?')}"
+                    for i in items
+                ) if items else "tu pedido"
+                log.info(
+                    "guard.place_order_awaiting_confirmation",
+                    phone=phone, items=items_label
+                )
+                return None, f"¿Confirmas tu pedido de {items_label}? 😊", {}
 
     # 4. Delivery without address
     if tool_name == "create_delivery_order":
@@ -789,21 +902,23 @@ async def _validate_tool_call(
         pm = tool_input.get("payment_method", "").strip()
         if not pm:
             log.warning("guard.order_no_payment", tool=tool_name, phone=phone)
-            return None, reply, {}
+            return None, reply or "¿Con qué método de pago prefieres? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)", {}
 
     # 6. Reservation with missing required fields
     if tool_name == "make_reservation":
         missing = [f for f in ("name", "date", "time") if not str(tool_input.get(f, "")).strip()]
         if missing:
+            missing_labels = {"name": "nombre", "date": "fecha", "time": "hora"}
+            missing_str = " y ".join(missing_labels.get(f, f) for f in missing)
             log.warning("guard.reservation_incomplete", missing=missing, phone=phone)
-            return None, reply, {}
+            return None, reply or f"Para completar tu reserva necesito el {missing_str}.", {}
         try:
             _guests = int(tool_input.get("guests", 1))
             if _guests <= 0:
                 raise ValueError("guests must be positive")
         except (ValueError, TypeError):
             log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=phone)
-            return None, reply, {}
+            return None, reply or "¿Cuántas personas serán para la reserva?", {}
 
     # 7. send_dish_card — validate feature flag, dish existence, and image availability
     if tool_name == "send_dish_card":
@@ -1470,7 +1585,29 @@ async def _call_llm_and_execute(
     tool_name, reply, tool_input = await _validate_tool_call(
         tool_name, tool_input, reply, table_context, bot_number, user_phone,
         features=feats,
+        session_state=session_state,
+        full_history=full_history,
     )
+
+    # ── CATEGORY A safety net: action-announcement without tool execution ──
+    # If the bot text announces an action ("voy a procesar tu reserva", "voy a crear
+    # tu pedido") but no corresponding action tool was returned (or the tool was
+    # nullified by _validate_tool_call), intercept the reply before the customer sees
+    # a false confirmation.  Replace with a neutral re-engagement prompt so the LLM
+    # gets another chance to actually fire the tool on the next turn.
+    if (
+        tool_name not in _ANNOUNCED_ACTION_TOOLS
+        and reply
+        and _ACTION_ANNOUNCEMENT_RE.search(reply)
+    ):
+        log.warning(
+            "action_announcement_without_tool",
+            phone=user_phone,
+            bot_number=bot_number,
+            tool_name=tool_name,
+            reply_snippet=reply[:120],
+        )
+        reply = "Un momento, déjame verificar los detalles. ¿Confirmas que quieres proceder?"
 
     parsed = _tool_use_to_parsed(reply, tool_name, tool_input)
 
@@ -1484,7 +1621,7 @@ async def _call_llm_and_execute(
 
     if not assistant_message.strip():
         log.warning("call_claude.empty_reply", bot_number=bot_number, phone=user_phone)
-        assistant_message = "¿En qué te puedo ayudar?"
+        assistant_message = "Disculpa, no te entendí bien. ¿Puedes repetirme lo que necesitas?"
 
     return assistant_message, routing_context
 
@@ -1578,7 +1715,11 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
         return nps_result if nps_result else None  # {} sentinel → return None
 
     # 4. Detect table/session context (needed by checkout flow for branch_id in history)
-    table_context = await detect_table_context(user_message_clean, user_phone, bot_number)
+    # Pass the RAW message (not user_message_clean) because _clean_incoming_message
+    # strips the [table_id:X] tag injected by QR scans. Without the raw message,
+    # the QR-based detection path at detect_table_context line 129 never fires
+    # — production has been silently relying on the text-regex fallback.
+    table_context = await detect_table_context(user_message, user_phone, bot_number)
     session_state = await get_session_state(user_phone, bot_number)
 
     # 5. Active checkout flow — handle and return early when consumed

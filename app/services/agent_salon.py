@@ -35,6 +35,63 @@ def _resolve_tip(mode: str, value, subtotal) -> Decimal:
     return quantize_money(value_d)
 
 
+# Payment-method keywords used both in handle_checkout_flow and in the bill pre-parse
+_PAYMENT_METHODS_MAP: dict[str, str] = {
+    "efectivo": "efectivo", "cash": "efectivo",
+    "nequi": "nequi",
+    "daviplata": "daviplata",
+    "tarjeta": "tarjeta", "card": "tarjeta", "débito": "tarjeta",
+    "debito": "tarjeta", "credito": "tarjeta", "crédito": "tarjeta",
+    "transferencia": "transferencia", "transfencia": "transferencia",
+}
+
+
+def _detect_payment_method(msg_lower: str) -> str | None:
+    """Return the normalized payment method keyword if found in msg, else None."""
+    for kw, method in _PAYMENT_METHODS_MAP.items():
+        if kw in msg_lower:
+            return method
+    return None
+
+
+def _detect_single_split(msg_lower: str) -> bool:
+    """Return True if the message clearly implies paying as one single check."""
+    single_words = ("junto", "juntos", "todo junto", "una sola", "sola", "todo", "completa", "solo", "únicamente")
+    return any(w in msg_lower for w in single_words)
+
+
+_SPLIT_TRIGGERS = (
+    "por separado", "separad", "dividir", "dividido", "dividimos",
+    "split", "cuentas separadas", "cuenta separada",
+)
+
+# Matches "somos 3", "para 3 personas", "entre 3", "x3", "3 personas", etc.
+_SPLIT_COUNT_RE = re.compile(
+    r"(?:somos|para|entre|x)\s*(\d+)|(\d+)\s*personas?",
+    re.IGNORECASE,
+)
+
+
+def _detect_split_count(msg_lower: str) -> int | None:
+    """
+    Return N (>= 2) if the message expresses a desire to split the bill
+    among N people, else return None.
+
+    Detects both split intent keywords AND a numeric person count in the same
+    message.  If only split intent is present (no number), returns 2 as a
+    safe minimum so the checkout flow still advances past asking_split.
+    """
+    has_split_intent = any(kw in msg_lower for kw in _SPLIT_TRIGGERS)
+    if not has_split_intent:
+        return None
+    match = _SPLIT_COUNT_RE.search(msg_lower)
+    if match:
+        n = int(match.group(1) or match.group(2))
+        return n if n >= 2 else None
+    # Split intent detected but no explicit count — default to 2 so we advance
+    return 2
+
+
 # ─── Salon system prompt ─────────────────────────────────────────────────────
 
 _SYSTEM_SALON = """\
@@ -59,8 +116,11 @@ DINE-IN MODE (TABLE)
 You are in TABLE MODE. The customer is physically inside the restaurant at [MESA: X].
 
 - Use the place_order tool to send items to the kitchen. Include all ordered items in the tool's items parameter.
-- When the customer asks for the bill or wants to pay (any method including card): use the request_bill tool. NEVER mention or calculate a total amount in the reply — taxes and service charges may apply and the official bill comes from the waiter.
+- CRITICAL (BILL REQUEST): ANY phrase that includes "la cuenta", "pagar", "cobrar", "cobra", "pago", "efectivo", "tarjeta", "dividir la cuenta", "dividir", "split" or ANY mention of payment intent MUST immediately trigger the request_bill tool call. Do NOT ask clarifying questions about payment method, split, or anything else — call request_bill FIRST. The waiter handles all payment details. NEVER say "¿cómo van a pagar?", "¿lo dividimos?", or any clarifying question before calling request_bill.
 - NEVER use the call_waiter tool for payment requests. The call_waiter tool is ONLY for non-billing assistance (spill, extra napkins, help needed, etc.).
+- CRITICAL (CALL_WAITER ROLE): When you use the call_waiter tool, you are NOTIFYING a HUMAN WAITER to attend the table. You are NOT the waiter. You NEVER physically bring anything. Your reply MUST use phrases like "Aviso al mesero ahora mismo", "Notifico al mesero", or "El mesero te asistirá enseguida". NEVER say "te traigo", "voy a llevarte", "ya mismo te lo entrego", "enseguida te llevo", "te lo traigo yo", or any phrase that implies you are physically delivering something. You are a digital assistant — the human staff delivers.
+- CRITICAL (CALL_WAITER + NO UPSELL): When you call the call_waiter tool because the customer needs assistance (napkins, water, spill, help), do NOT ask "¿qué te gustaría ordenar?", "¿algo más?", or any upsell question in that same reply. The customer requested assistance — acknowledge it and end the response.
+- CRITICAL (ANNOUNCE = EXECUTE): NEVER say "voy a procesar", "voy a crear", "procesando tu reserva", "creando tu pedido", "procesando tu pedido", or ANY phrase announcing an action WITHOUT including the corresponding tool call in the SAME response. If you announce an action, you MUST execute it in the same turn. If you are not ready to execute, do NOT announce it — instead ask for the missing information.
 - DELIVERY REQUESTS: You are EXCLUSIVELY a table ordering assistant. You MUST NOT process, explain, or offer delivery flows. If a customer asks about delivery (for themselves or someone else), reply EXACTLY: "Este canal es solo para pedidos en mesa. Para domicilios, por favor contacta al restaurante directamente. ¿Te ayudo con algo de tu pedido aquí?" Respond with text only (no tool call). Do NOT provide the catalog link. Do NOT ask what they want to deliver. Do NOT mention payment or address.
 - RESERVATIONS: Respond conversationally while collecting reservation details (name, date, time, guests). If the customer mentions a relative date (e.g. "tomorrow", "mañana", "next Friday"), ask for the specific date using natural language (e.g. "¿Para qué fecha sería? Por ejemplo, 25 de diciembre."). NEVER show "YYYY-MM-DD" format to the customer. Only use the make_reservation tool AFTER the customer has explicitly confirmed ALL details with a "yes / confirm / correct" type response. If the customer later changes any detail, use the make_reservation tool again with the corrected data — the system will update the existing reservation instead of creating a duplicate.
 
@@ -395,18 +455,7 @@ async def handle_checkout_flow(
     # ── Estado: pidiendo método de pago por check ────────────────────────
     if state["step"].startswith("asking_payment_"):
         idx = state.get("current_check_idx", 0)
-        methods_map = {
-            "efectivo": "efectivo", "cash": "efectivo",
-            "nequi": "nequi",
-            "daviplata": "daviplata",
-            "tarjeta": "tarjeta", "card": "tarjeta", "débito": "tarjeta", "credito": "tarjeta",
-            "transferencia": "transferencia", "transfencia": "transferencia",
-        }
-        method = None
-        for kw, mval in methods_map.items():
-            if kw in msg:
-                method = mval
-                break
+        method = _detect_payment_method(msg)
 
         if method is None:
             return "No reconocí el método de pago. Por favor elige: Efectivo, Nequi, Daviplata, Tarjeta, o Transferencia."
@@ -659,6 +708,62 @@ async def execute_salon_action(
                     if _all_covered:
                         _is_duplicate_order = True
                         log.info("closing_phrase_duplicate_ignored", base_order_id=base_order_id)
+
+                # ── Capa 3 (Bug #1 fix): filtrar ítems que el LLM repitió de órdenes previas ──
+                # El LLM a veces incluye ítems ya pedidos en la sub-orden. Esto causaría
+                # un doble cobro. Comparamos por nombre (case-insensitive) contra TODOS los
+                # ítems ya confirmados en esta sesión de mesa.
+                if not _is_duplicate_order and _all_prev and cart_items:
+                    _prev_names: set[str] = set()
+                    for _row in _all_prev:
+                        _ri3 = _row["items"] if isinstance(_row["items"], list) else json.loads(_row["items"])
+                        for _itm in _ri3:
+                            _n = _itm.get("name", "")
+                            if _n:
+                                _prev_names.add(_n.strip().lower())
+
+                    if _prev_names:
+                        _filtered_items = [
+                            _itm for _itm in cart_items
+                            if _itm.get("name", "").strip().lower() not in _prev_names
+                        ]
+                        _removed_count = len(cart_items) - len(_filtered_items)
+                        if _removed_count > 0:
+                            log.warning(
+                                "sub_order_llm_duplicate_items_removed",
+                                base_order_id=base_order_id,
+                                removed=_removed_count,
+                                original_count=len(cart_items),
+                                filtered_count=len(_filtered_items),
+                                phone=phone,
+                            )
+                            if not _filtered_items:
+                                # All items were already ordered — nothing new to commit
+                                await orders.clear_cart(phone, bot_number)
+                                return "Esos ítems ya están en tu pedido. ¿Quieres pedir algo distinto o más cantidad?"
+                            # Rebuild cart with only the genuinely new items
+                            await orders.clear_cart(phone, bot_number)
+                            for _new_itm in _filtered_items:
+                                _n2 = _new_itm.get("name", "")
+                                try:
+                                    _q2 = int(_new_itm.get("quantity", 1) or 1)
+                                except (ValueError, TypeError):
+                                    _q2 = 1
+                                if _n2:
+                                    await orders.add_to_cart(phone, _n2, _q2, bot_number)
+                            # Refresh cart_items, cart, and totals from the updated cart
+                            cart = await db.db_get_cart(phone, bot_number)
+                            cart_items = cart["items"] if cart and cart.get("items") else []
+                            cart_total = await orders.get_cart_total(phone, bot_number)
+                            items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
+                            if bar_enabled and bar_categories:
+                                kitchen_items = [i for i in cart_items if i.get("category", "") not in bar_categories]
+                                bar_items     = [i for i in cart_items if i.get("category", "") in bar_categories]
+                            else:
+                                kitchen_items = cart_items
+                                bar_items     = []
+                            has_split = bool(kitchen_items) and bool(bar_items)
+                            kitchen_station = "kitchen" if has_split else "all"
             except Exception:
                 log.exception("duplicate_order_check_failed", base_order_id=base_order_id)
 
@@ -789,7 +894,13 @@ async def execute_salon_action(
                         all_items.extend(lst)
                     _orig_msg = message.lower() if message else ""
                     _wants_fac = any(w in _orig_msg for w in ("factura", "boleta", "recibo fiscal", "nit", "a nombre de"))
-                    await state_store.checkout_set(phone, bot_number, {
+                    _predetected_method = _detect_payment_method(_orig_msg)
+                    _predetected_single = _detect_single_split(_orig_msg)
+                    _predetected_split_n = _detect_split_count(_orig_msg)
+
+                    # Start state at asking_split; then advance below if customer
+                    # already provided split intent and/or payment method in same message.
+                    _checkout_state: dict = {
                         "step": "asking_split",
                         "base_order_id": base_order_id,
                         "subtotal": total,
@@ -801,8 +912,62 @@ async def execute_salon_action(
                         "wants_factura": _wants_fac,
                         "factura_name": "",
                         "factura_nit": "",
-                    })
-                    log.info("checkout_started", table=table_name, base_order_id=base_order_id, total=total, factura=_wants_fac)
+                    }
+
+                    # Pre-advance: if customer stated split intent (e.g. "por separado, somos 3"),
+                    # skip asking_split entirely and advance to asking_tip with the given N.
+                    if _predetected_split_n:
+                        _checkout_state["split_count"] = _predetected_split_n
+                        _checkout_state["check_amounts"] = None
+                        _checkout_state["payments"] = [[] for _ in range(_predetected_split_n)]
+                        _checkout_state["step"] = "asking_tip"
+                        _checkout_state["current_check_idx"] = 0
+
+                    # Pre-advance: if customer already said "todos juntos" / single, resolve split=1
+                    elif _predetected_single or _predetected_method:
+                        # Resolve split as 1 (customer implied no splitting)
+                        _checkout_state["split_count"] = 1
+                        _checkout_state["check_amounts"] = None
+                        _checkout_state["payments"] = [[]]
+
+                        # Pre-advance: if payment method was also given, skip asking_split
+                        # AND skip asking_tip (go straight to asking_tip to preserve tip UX),
+                        # then jump to asking_payment_0 right away.
+                        # We advance to asking_tip and let handle_checkout_flow finish normally.
+                        _checkout_state["step"] = "asking_tip"
+                        _checkout_state["current_check_idx"] = 0
+
+                    await state_store.checkout_set(phone, bot_number, _checkout_state)
+                    log.info(
+                        "checkout_started",
+                        table=table_name,
+                        base_order_id=base_order_id,
+                        total=total,
+                        factura=_wants_fac,
+                        predetected_method=_predetected_method,
+                        predetected_single=_predetected_single,
+                        predetected_split_n=_predetected_split_n,
+                        step=_checkout_state["step"],
+                    )
+
+                    if _checkout_state["step"] == "asking_tip":
+                        # Customer already answered the split question — show tip menu
+                        subtotal_d = to_decimal(total)
+                        tip_10 = _resolve_tip("percent", 10, subtotal_d)
+                        tip_15 = _resolve_tip("percent", 15, subtotal_d)
+                        tip_20 = _resolve_tip("percent", 20, subtotal_d)
+                        lines = [
+                            "¡Claro! Vamos a procesar tu cuenta.",
+                            f"Subtotal: {_fmt_cop(total)}",
+                            "¿Deseas agregar una propina?",
+                            f"  1) 10% → {_fmt_cop(tip_10)}",
+                            f"  2) 15% → {_fmt_cop(tip_15)}  ⭐ sugerida",
+                            f"  3) 20% → {_fmt_cop(tip_20)}",
+                            "  4) Otro valor",
+                            "  5) Ninguna",
+                        ]
+                        return "\n".join(lines)
+
                     return "¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
         except Exception:
             log.exception("checkout_start_failed_fallback_waiter", phone=phone, bot_number=bot_number)
