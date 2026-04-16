@@ -20,8 +20,8 @@ Bypass rationale:
   - Scheduler functions (db_get_stale_sessions, db_get_closeable_sessions,
     db_get_active_session_table_ids) iterate across ALL tenants by design.
   - Kitchen/delivery views (db_get_delivery_orders_for_caja,
-    db_get_delivery_status_hash, db_get_waiter_alerts global) are cross-tenant
-    kitchen displays.
+    db_get_delivery_status_hash) are cross-tenant kitchen displays.
+  - db_get_waiter_alerts(bot_number) is tenant-scoped; call site must pass bot_number.
   - db_verify_branch_is_child queries `restaurants` across tenant boundary.
 """
 
@@ -1031,17 +1031,6 @@ async def db_get_pending_orders_by_branch(branch_id: int) -> list:
             "WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
             branch_id,
         )
-    return [dict(r) for r in rows]
-
-
-async def db_get_waiter_alerts() -> list:
-    """Return the 30 most recent waiter alerts (global cross-tenant kitchen view).
-
-    # Uses bypass_tenant_scope internally (global kitchen display).
-    """
-    with bypass_tenant_scope("kitchen: global waiter alerts display"):
-        async with tenant_connection() as conn:
-            rows = await conn.fetch("SELECT * FROM waiter_alerts ORDER BY created_at DESC LIMIT 30")
     return [dict(r) for r in rows]
 
 

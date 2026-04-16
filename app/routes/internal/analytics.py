@@ -10,28 +10,18 @@ Endpoints (all require Authorization: Bearer <ADMIN_KEY>):
   GET /api/analytics/trends    → daily order & conversation counts (last 30 days)
 """
 
-import os
 from datetime import date
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.services.database import get_pool
 from app.services.logging import get_logger
+from app.routes.deps import verify_superadmin
 
 log = get_logger(__name__)
 
 router = APIRouter(tags=["analytics"])
-
-# ── Auth helper ───────────────────────────────────────────────────────────────
-
-def _check_admin_key(request: Request) -> bool:
-    admin_key = os.environ.get("ADMIN_KEY", "")
-    if not admin_key:
-        return False
-    auth_header = request.headers.get("Authorization", "")
-    provided = auth_header.removeprefix("Bearer ").strip()
-    return provided == admin_key
 
 
 # ── Page ──────────────────────────────────────────────────────────────────────
@@ -44,9 +34,7 @@ async def analytics_page():
 # ── Overview ──────────────────────────────────────────────────────────────────
 
 @router.get("/api/internal/analytics/overview")
-async def analytics_overview(request: Request):
-    if not _check_admin_key(request):
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+async def analytics_overview(_: None = Depends(verify_superadmin)):
 
     pool = await get_pool()
     result: dict = {}
@@ -233,9 +221,7 @@ async def analytics_overview(request: Request):
 # ── Per-restaurant breakdown ──────────────────────────────────────────────────
 
 @router.get("/api/internal/analytics/restaurants")
-async def analytics_restaurants(request: Request):
-    if not _check_admin_key(request):
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+async def analytics_restaurants(_: None = Depends(verify_superadmin)):
 
     pool = await get_pool()
 
@@ -341,9 +327,7 @@ async def analytics_restaurants(request: Request):
 # ── Trends ────────────────────────────────────────────────────────────────────
 
 @router.get("/api/internal/analytics/trends")
-async def analytics_trends(request: Request):
-    if not _check_admin_key(request):
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+async def analytics_trends(_: None = Depends(verify_superadmin)):
 
     pool = await get_pool()
     result: dict = {}

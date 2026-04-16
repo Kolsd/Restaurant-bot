@@ -29,7 +29,16 @@ async def generate_deposit_link(
     """
     Generate a Wompi checkout link for a reservation deposit and persist the
     deposit record.  Returns the full payment URL string.
+
+    Raises RuntimeError if WOMPI_INTEGRITY_SECRET is not configured — a link
+    generated without it would have an invalid signature and Wompi would reject
+    all payment attempts, creating silent data loss.
     """
+    # Bug 9 fix: fail-fast if secret is missing rather than generating a broken link
+    if not WOMPI_INTEGRITY_SECRET:
+        log.error("reservation_payments.integrity_secret_missing")
+        raise RuntimeError("WOMPI_INTEGRITY_SECRET not configured")
+
     quantized = quantize_money(amount, currency)
 
     # Wompi expects amount-in-cents; for zero-decimal currencies the
@@ -75,8 +84,18 @@ async def generate_deposit_link(
 async def confirm_deposit_payment(reference: str, transaction_id: str) -> bool:
     """
     Handle a Wompi `transaction.updated` APPROVED event for a deposit reference.
-    Confirms the deposit row and transitions the reservation to confirmed status.
-    Returns True if the deposit was successfully confirmed.
+
+    Uses db_confirm_deposit_and_reservation() to atomically confirm the deposit
+    row AND transition the reservation to confirmed status in a single DB
+    transaction, eliminating the TOCTOU window in the previous two-step
+    approach.
+
+    Special-cases a reservation that is already 'cancelled': marks the deposit
+    as paid (the client did pay) but does NOT confirm the reservation.  Logs a
+    CRITICAL warning that requires manual reimbursement.
+
+    Returns True if the deposit was found and processed (even if the reservation
+    was already cancelled).  Returns False if no matching pending deposit exists.
     """
     if not reference.startswith("dep_"):
         return False
@@ -87,13 +106,43 @@ async def confirm_deposit_payment(reference: str, transaction_id: str) -> bool:
         log.warning("deposit.bad_reference", reference=reference)
         return False
 
+    # Bug 11 fix: check reservation status before confirming.
+    # We fetch the reservation here (read-only, no repo boundary violation)
+    # because reservations_repo is not in the permitted file list.
     from app.services import database as db  # noqa: PLC0415 — lazy, avoids cycle
 
-    result = await deposits_repo.db_confirm_deposit(reservation_id, transaction_id)
+    reservation = await db.db_get_reservation_by_id(reservation_id)
+
+    if reservation and reservation.get("status") == "cancelled":
+        # Bug 11: client paid for a cancelled reservation.
+        # Mark only the deposit as paid; do NOT confirm the reservation.
+        # Requires manual reimbursement — log CRITICAL.
+        deposit_result = await deposits_repo.db_confirm_deposit(reservation_id, transaction_id)
+        if deposit_result:
+            log.error(
+                "wompi.deposit.reservation_already_cancelled",
+                reservation_id=reservation_id,
+                transaction_id=transaction_id,
+                action="deposit_marked_paid_manual_refund_required",
+            )
+        else:
+            log.warning(
+                "wompi.deposit.orphaned",
+                reference=reference,
+                transaction_id=transaction_id,
+                reason="no_pending_deposit_and_reservation_cancelled",
+            )
+        # Return True: we handled the event; Wompi should not retry.
+        return True
+
+    # Atomic: confirm deposit + reservation in one transaction (Bug 4 fix)
+    result = await deposits_repo.db_confirm_deposit_and_reservation(
+        reservation_id, transaction_id
+    )
+
     if result:
-        await db.db_confirm_reservation(reservation_id)
         log.info(
-            "deposit.confirmed_and_reservation_activated",
+            "deposit.confirmed",
             reservation_id=reservation_id,
             transaction_id=transaction_id,
         )

@@ -25,6 +25,24 @@ def client():
     return TestClient(app)
 
 
+# ── Superadmin session mock (used by analytics, health metrics, ops tests) ────
+
+@pytest.fixture
+def mock_superadmin_session():
+    """Patch sessions_repo.get_session so any non-empty token returns 'superadmin'.
+
+    Use this fixture in tests for endpoints guarded by verify_superadmin.
+    The fixture patches the canonical location where verify_superadmin resolves it.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    async def _get_session(token):
+        return "superadmin" if token else None
+
+    with patch("app.repositories.sessions_repo.get_session", AsyncMock(side_effect=_get_session)):
+        yield
+
+
 # ── Clear rate limit state between tests ─────────────────────────────────────
 
 @pytest.fixture(autouse=True)

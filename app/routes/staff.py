@@ -25,8 +25,10 @@ from app.services.money import to_decimal
 
 from app.routes.deps import get_current_restaurant, get_current_restaurant_scoped, require_module
 from app.services import database as db
+from app.services import state_store
 from app.repositories import sessions_repo, staff_repo
 from app.services.logging import get_logger
+from app.services.tenant_context import tenant_scope
 
 log = get_logger(__name__)
 
@@ -111,11 +113,20 @@ async def list_staff(
     # 🛡️ FILTRO GLOBAL: Si el Owner seleccionó una sucursal, usamos ese ID
     branch_id = restaurant["id"]
     branch_header = request.headers.get("X-Branch-ID")
-    
+
     if branch_header and branch_header.isdigit():
-        # Como get_current_restaurant ya validó el acceso, 
-        # podemos confiar en el ID del header si el usuario es Owner/Admin
-        branch_id = int(branch_header)
+        target_id = int(branch_header)
+        # Validate ownership: the target branch must be the same restaurant or
+        # a direct child of the authenticated restaurant (which must be a matrix).
+        if target_id != restaurant["id"]:
+            if restaurant.get("parent_restaurant_id") is not None:
+                # Authenticated restaurant is itself a branch — cannot impersonate others.
+                raise HTTPException(status_code=403, detail="No autorizado para ver datos de otra sucursal")
+            # Authenticated restaurant is a matrix — verify target is its direct child.
+            target_rest = await db.db_get_restaurant_by_id(target_id)
+            if not target_rest or target_rest.get("parent_restaurant_id") != restaurant["id"]:
+                raise HTTPException(status_code=403, detail="No autorizado para ver datos de esta sucursal")
+        branch_id = target_id
 
     staff = await db.db_get_staff(branch_id)
     return {"staff": staff}
@@ -148,30 +159,24 @@ async def create_staff(
     )
     return {"staff": member}
     
-# Rate limiting for PIN login — max 10 attempts per restaurant+name per 15 min
-_pin_attempts: dict[str, list] = {}  # key -> list of timestamps
 _PIN_MAX_ATTEMPTS = 10
 _PIN_WINDOW = 900  # 15 minutes
 
 
-def _pin_rate_limited(restaurant_id: int, name: str) -> bool:
-    import time
-    key = f"{restaurant_id}:{name.lower().strip()}"
-    now = time.time()
-    attempts = _pin_attempts.get(key, [])
-    attempts = [t for t in attempts if now - t < _PIN_WINDOW]
-    if len(attempts) >= _PIN_MAX_ATTEMPTS:
-        _pin_attempts[key] = attempts
-        return True
-    attempts.append(now)
-    _pin_attempts[key] = attempts
-    return False
+async def _check_pin_rate_limit(request: Request, restaurant_id: int, name: str) -> None:
+    """Rate-limit PIN login via Redis (cross-worker safe)."""
+    ip = request.client.host if request.client else "unknown"
+    key = f"pin_login:{restaurant_id}:{name.lower().strip()}:{ip}"
+    allowed = await state_store.rate_limit_check(
+        key=key, max_requests=_PIN_MAX_ATTEMPTS, window_seconds=_PIN_WINDOW
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Demasiados intentos. Intenta en 15 minutos.")
 
 
 @router.post("/pin-login", status_code=200)
-async def staff_pin_login(body: StaffPinLoginRequest):
-    if _pin_rate_limited(body.restaurant_id, body.name):
-        raise HTTPException(status_code=429, detail="Demasiados intentos. Intenta en 15 minutos.")
+async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
+    await _check_pin_rate_limit(request, body.restaurant_id, body.name)
     member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)
     if not member:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
@@ -260,7 +265,8 @@ async def self_clock_in(request: Request):
     if not restaurant_id:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
     try:
-        shift = await db.db_clock_in(staff_id, restaurant_id)
+        with tenant_scope(restaurant_id):
+            shift = await db.db_clock_in(staff_id, restaurant_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"shift": shift}
@@ -277,7 +283,8 @@ async def self_clock_out(request: Request):
     restaurant_id = await staff_repo.db_get_staff_restaurant_id(staff_id)
     if not restaurant_id:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
-    shift = await db.db_clock_out(staff_id, restaurant_id)
+    with tenant_scope(restaurant_id):
+        shift = await db.db_clock_out(staff_id, restaurant_id)
     if not shift:
         raise HTTPException(status_code=404, detail="No hay turno abierto para este empleado.")
     return {"shift": shift}
@@ -410,7 +417,8 @@ async def self_break_start(request: Request):
     restaurant_id = await staff_repo.db_get_staff_restaurant_id(staff_id)
     if not restaurant_id:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
-    shifts = await db.db_get_open_shifts(restaurant_id)
+    with tenant_scope(restaurant_id):
+        shifts = await db.db_get_open_shifts(restaurant_id)
     open_shift = next((s for s in shifts if str(s["staff_id"]) == staff_id), None)
     if not open_shift:
         raise HTTPException(status_code=404, detail="No tienes un turno abierto.")
@@ -447,6 +455,8 @@ async def _resolve_staff_from_token(request: Request) -> dict:
     member = await staff_repo.db_get_staff_profile(staff_id)
     if not member:
         raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+    if not member.get("active"):
+        raise HTTPException(status_code=403, detail="Staff inactivo")
     return member
 
 

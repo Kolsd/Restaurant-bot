@@ -63,6 +63,11 @@ async def db_create_deposit(
 async def db_confirm_deposit(reservation_id: int, transaction_id: str) -> dict | None:
     """
     Transition deposit status pending -> paid.
+
+    Uses a subquery to deterministically pick the OLDEST pending deposit
+    when duplicate pending rows exist (shouldn't happen once the partial
+    UNIQUE INDEX from migration 0032 is in place, but this is defensive).
+
     Returns the updated row, or None if no pending deposit was found.
     """
     async with _tenant_connection() as conn:
@@ -72,8 +77,13 @@ async def db_confirm_deposit(reservation_id: int, transaction_id: str) -> dict |
             SET status = 'paid',
                 paid_at = NOW(),
                 transaction_id = $1
-            WHERE reservation_id = $2
-              AND status = 'pending'
+            WHERE id = (
+                SELECT id FROM reservation_deposits
+                 WHERE reservation_id = $2
+                   AND status = 'pending'
+                 ORDER BY created_at ASC
+                 LIMIT 1
+            )
             RETURNING *
             """,
             transaction_id,
@@ -87,6 +97,63 @@ async def db_confirm_deposit(reservation_id: int, transaction_id: str) -> dict |
             )
             return _serialize(dict(row))
         return None
+
+
+async def db_confirm_deposit_and_reservation(
+    reservation_id: int, transaction_id: str
+) -> dict | None:
+    """
+    Atomically confirm the deposit AND transition the reservation to 'confirmed'
+    in a single transaction.
+
+    Picks the oldest pending deposit for the reservation (deterministic when
+    duplicate pending rows exist).  If no pending deposit is found, returns None
+    without touching the reservation row.
+
+    Returns a dict with keys 'deposit' and 'reservation', or None on no-op.
+    """
+    async with _tenant_connection() as conn:
+        async with conn.transaction():
+            deposit_row = await conn.fetchrow(
+                """
+                UPDATE reservation_deposits
+                SET status = 'paid',
+                    paid_at = NOW(),
+                    transaction_id = $1
+                WHERE id = (
+                    SELECT id FROM reservation_deposits
+                     WHERE reservation_id = $2
+                       AND status = 'pending'
+                     ORDER BY created_at ASC
+                     LIMIT 1
+                )
+                RETURNING *
+                """,
+                transaction_id,
+                reservation_id,
+            )
+            if deposit_row is None:
+                return None
+
+            reservation_row = await conn.fetchrow(
+                """
+                UPDATE reservations
+                   SET status = 'confirmed', confirmed_at = NOW()
+                 WHERE id = $1
+                RETURNING *
+                """,
+                reservation_id,
+            )
+
+    log.info(
+        "deposit.confirmed_and_reservation_activated",
+        reservation_id=reservation_id,
+        transaction_id=transaction_id,
+    )
+    return {
+        "deposit": _serialize(dict(deposit_row)),
+        "reservation": _serialize(dict(reservation_row)) if reservation_row else None,
+    }
 
 
 async def db_get_pending_deposits(older_than_hours: int = 2) -> list[dict]:

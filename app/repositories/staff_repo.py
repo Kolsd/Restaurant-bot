@@ -137,7 +137,7 @@ async def _generate_username(name: str, exclude_id: str | None = None) -> str:
 
     base = f"{fname}.{lname}" if lname else fname
 
-    with bypass_tenant_scope("staff_username_generation"):
+    with bypass_tenant_scope("staff_username_generation: must scan all tenants to guarantee global username uniqueness; called from db_create_staff/db_update_staff"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 "SELECT username FROM staff WHERE username LIKE $1 || '%'",
@@ -224,7 +224,7 @@ async def db_get_staff_candidates_by_name(name: str) -> list:
 
     # Cross-tenant lookup — always uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_pin_login_cross_tenant"):
+    with bypass_tenant_scope("staff_pin_login_cross_tenant: name/username may exist in multiple tenants; caller in auth.py resolves tenant after PIN verification"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
@@ -830,7 +830,7 @@ async def db_get_webauthn_credentials_by_staff(staff_id: str) -> list:
 
     # Cross-tenant lookup by staff UUID — always uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("webauthn_credentials_by_staff"):
+    with bypass_tenant_scope("webauthn_credentials_by_staff: keyed by staff UUID only; caller in staff_webauthn.py validates staff token ownership before calling"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 """SELECT id::text, staff_id::text, credential_id,
@@ -866,7 +866,7 @@ async def db_get_webauthn_credential(credential_id: str) -> dict | None:
 
     # Cross-tenant lookup by credential ID — always uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("webauthn_credential_lookup"):
+    with bypass_tenant_scope("webauthn_credential_lookup: keyed by opaque credential_id from authenticator; caller validates restaurant ownership after lookup"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 """SELECT wc.id::text, wc.staff_id::text, wc.credential_id, wc.public_key,
@@ -884,7 +884,7 @@ async def db_update_webauthn_sign_count(credential_id: str, new_count: int) -> N
 
     # Cross-tenant update by credential ID — always uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("webauthn_sign_count_update"):
+    with bypass_tenant_scope("webauthn_sign_count_update: keyed by credential_id verified by verify_authentication_response in auth_complete before this call"):
         async with tenant_connection() as conn:
             await conn.execute(
                 "UPDATE webauthn_credentials SET sign_count = $1 WHERE credential_id = $2",
@@ -897,7 +897,7 @@ async def db_delete_webauthn_credential(credential_id: str) -> bool:
 
     # Cross-tenant delete by credential ID — always uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("webauthn_credential_delete"):
+    with bypass_tenant_scope("webauthn_credential_delete: ownership validated in staff_webauthn.py delete_credential before this call"):
         async with tenant_connection() as conn:
             result = await conn.execute(
                 "DELETE FROM webauthn_credentials WHERE credential_id = $1", credential_id
@@ -929,7 +929,7 @@ async def db_consume_webauthn_challenge(challenge: str) -> dict | None:
 
     # Cross-tenant: looked up by challenge string only — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("webauthn_challenge_consume"):
+    with bypass_tenant_scope("webauthn_challenge_consume: challenges are keyed by opaque random string only; single-use atomicity enforced by UPDATE RETURNING"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 """DELETE FROM webauthn_challenges
@@ -946,7 +946,7 @@ async def db_cleanup_expired_challenges() -> None:
 
     # Global maintenance op — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("webauthn_challenge_cleanup"):
+    with bypass_tenant_scope("webauthn_challenge_cleanup: global maintenance DELETE of expired rows across all tenants; run on every auth-options request"):
         async with tenant_connection() as conn:
             await conn.execute(
                 "DELETE FROM webauthn_challenges WHERE created_at < NOW() - INTERVAL '5 minutes'"
@@ -961,7 +961,7 @@ async def db_start_break(staff_id: str, shift_id: str) -> dict:
     # Cross-tenant: keyed by staff/shift UUID only — uses bypass_tenant_scope internally.
     """
     import asyncpg as _asyncpg
-    with bypass_tenant_scope("staff_break_start"):
+    with bypass_tenant_scope("staff_break_start: keyed by staff/shift UUID; caller validates open shift belongs to the authenticated staff member"):
         async with tenant_connection() as conn:
             try:
                 row = await conn.fetchrow(
@@ -981,7 +981,7 @@ async def db_end_break(staff_id: str) -> dict | None:
 
     # Cross-tenant: keyed by staff UUID only — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_break_end"):
+    with bypass_tenant_scope("staff_break_end: keyed by staff UUID only; UPDATE WHERE break_end IS NULL is self-scoping to the authenticated employee"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 """UPDATE staff_breaks SET break_end = NOW()
@@ -998,7 +998,7 @@ async def db_get_breaks_for_shift(shift_id: str) -> list:
 
     # Cross-tenant: keyed by shift UUID only — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_breaks_by_shift"):
+    with bypass_tenant_scope("staff_breaks_by_shift: keyed by shift UUID; shift ownership validated by caller before passing shift_id"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 """SELECT id::text, staff_id::text, shift_id::text,
@@ -1016,7 +1016,7 @@ async def db_get_open_break(staff_id: str) -> dict | None:
 
     # Cross-tenant: keyed by staff UUID only — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_open_break"):
+    with bypass_tenant_scope("staff_open_break: keyed by staff UUID only; used to display current break state for the authenticated employee"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 """SELECT id::text, staff_id::text, shift_id::text, break_start, notes
@@ -1108,7 +1108,7 @@ async def db_delete_schedule(schedule_id: str) -> bool:
 
     # Cross-tenant: keyed by schedule UUID only — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_schedule_delete"):
+    with bypass_tenant_scope("staff_schedule_delete: keyed by schedule UUID; admin caller in staff.py validates restaurant ownership before passing schedule_id"):
         async with tenant_connection() as conn:
             result = await conn.execute(
                 "DELETE FROM staff_schedules WHERE id = $1::uuid", schedule_id
@@ -1805,7 +1805,7 @@ async def db_get_staff_restaurant_id(staff_id: str) -> int | None:
 
     # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_self_service_restaurant_id"):
+    with bypass_tenant_scope("staff_self_service_restaurant_id: UUID from verified staff JWT; needed to resolve tenant before entering tenant_scope in caller"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 "SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id
@@ -1818,7 +1818,7 @@ async def db_get_staff_profile(staff_id: str) -> dict | None:
 
     # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_self_service_profile"):
+    with bypass_tenant_scope("staff_self_service_profile: UUID from verified staff JWT in sessions_repo; staff can only read their own row"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
@@ -1841,7 +1841,7 @@ async def db_get_staff_open_shift_and_break(staff_id: str) -> tuple:
 
     # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_self_service_shift_break"):
+    with bypass_tenant_scope("staff_self_service_shift_break: UUID from verified staff JWT; queries filtered by staff_id UUID so only own records returned"):
         async with tenant_connection() as conn:
             shift_row = await conn.fetchrow(
                 "SELECT id::text, clock_in FROM staff_shifts "
@@ -1863,7 +1863,7 @@ async def db_get_staff_timecard_rows(staff_id: str, ws_date, we_date) -> tuple:
 
     # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_self_service_timecard"):
+    with bypass_tenant_scope("staff_self_service_timecard: UUID from verified staff JWT; all queries filtered by staff_id UUID so only own shifts/schedules returned"):
         async with tenant_connection() as conn:
             shift_rows = await conn.fetch(
                 """
@@ -1911,7 +1911,7 @@ async def db_get_staff_schedule(staff_id: str) -> list:
 
     # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_self_service_schedule"):
+    with bypass_tenant_scope("staff_self_service_schedule: UUID from verified staff JWT; query filtered by staff_id UUID so only own schedule returned"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 "SELECT id::text, day_of_week, start_time, end_time, active "
@@ -1942,7 +1942,7 @@ async def db_get_active_staff_basic(staff_id: str) -> dict | None:
 
     # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
     """
-    with bypass_tenant_scope("staff_self_service_basic"):
+    with bypass_tenant_scope("staff_self_service_basic: UUID from verified staff JWT; used by WebAuthn register-options before restaurant scope is known"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 "SELECT id::text, name, restaurant_id FROM staff WHERE id = $1::uuid AND active = TRUE",

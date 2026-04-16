@@ -2,19 +2,31 @@
 from passlib.context import CryptContext
 from app.services import database as db
 from app.repositories import sessions_repo
+from app.services.logging import get_logger
+
+_log = get_logger(__name__)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str, hashed_password: str, _username: str = "") -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception:
-        # Fallback para usuarios viejos con sha256
+        # Fallback para usuarios viejos con sha256 (legacy hash — not bcrypt).
+        # Log as warning so we can measure how many legacy users remain before
+        # dropping the fallback.  Username is obfuscated to 3 chars for privacy.
         import hashlib
-        return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
+        result = hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
+        if result:
+            obfuscated = (_username[:3] + "***") if _username else "***"
+            _log.warning(
+                "auth.password.sha256_fallback_used",
+                username_prefix=obfuscated,
+            )
+        return result
 
 async def login(username: str, password: str) -> dict:
     # ── Intento 1: tabla users (admin / gerente / owner) ──────────────────────
@@ -22,7 +34,7 @@ async def login(username: str, password: str) -> dict:
     if not user:
         # ── Intento 2: tabla staff (operativos con contraseña) ────────────────
         candidates = await db.db_get_staff_candidates_by_name(username)
-        member = next((c for c in candidates if verify_password(password, c["pin"])), None)
+        member = next((c for c in candidates if verify_password(password, c["pin"], c.get("name", ""))), None)
         if not member:
             return {"success": False, "error": "Usuario o contraseña incorrectos"}
 
@@ -64,7 +76,7 @@ async def login(username: str, password: str) -> dict:
             },
         }
 
-    if not verify_password(password, user["password_hash"]):
+    if not verify_password(password, user["password_hash"], username):
         return {"success": False, "error": "Contraseña incorrecta"}
 
     token = await sessions_repo.create_session(username.lower().strip())

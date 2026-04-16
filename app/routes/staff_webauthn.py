@@ -40,9 +40,13 @@ from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
 
 from app.routes.deps import get_current_restaurant, require_auth, require_module
 from app.services import database as db
+from app.services import state_store
 from app.repositories import staff_repo
 from app.services.auth import verify_token
+from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
+
+log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/staff/webauthn", tags=["staff-webauthn"])
 
@@ -208,6 +212,18 @@ async def auth_options(request: Request, body: AuthOptionsBody):
     Generate a WebAuthn authentication challenge for a clock terminal.
     This endpoint is intentionally public — no auth token required.
     """
+    ip = request.client.host if request.client else "unknown"
+    rl_key = f"webauthn_auth_opts:{body.restaurant_id}:{ip}"
+    if not await state_store.rate_limit_check(key=rl_key, max_requests=10, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta en un momento.")
+
+    # Validate restaurant exists and has at least one registered credential before
+    # generating a challenge — avoids leaking whether a restaurant_id exists.
+    with bypass_tenant_scope("webauthn_auth_options_validate_restaurant"):
+        restaurant_check = await db.db_get_restaurant_by_id(body.restaurant_id)
+    if not restaurant_check:
+        raise HTTPException(status_code=404, detail="No encontrado")
+
     # Housekeeping: remove stale challenges before generating a new one
     await db.db_cleanup_expired_challenges()
 
@@ -216,7 +232,7 @@ async def auth_options(request: Request, body: AuthOptionsBody):
     if not credentials_raw:
         raise HTTPException(
             status_code=404,
-            detail="No hay credenciales biométricas registradas para este restaurante",
+            detail="No encontrado",
         )
 
     allow_credentials = []
@@ -272,6 +288,14 @@ async def auth_complete(request: Request, body: AuthCompleteBody):
     Returns staff name, action performed, and the resulting shift record.
     This endpoint is intentionally public for kiosk terminals.
     """
+    # Rate-limit auth completions to prevent brute-force of biometric challenges.
+    # The restaurant_id is derived after challenge lookup, so we key on credential_id + ip.
+    ip = request.client.host if request.client else "unknown"
+    # We do a pre-check keyed on credential_id so an attacker cannot enumerate IDs.
+    rl_key = f"webauthn_auth_complete:{body.credential_id[:16]}:{ip}"
+    if not await state_store.rate_limit_check(key=rl_key, max_requests=5, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta en un momento.")
+
     # Derive the challenge from the clientDataJSON
     try:
         client_data_bytes = base64url_to_bytes(body.client_data_json)
@@ -288,6 +312,12 @@ async def auth_complete(request: Request, body: AuthCompleteBody):
             status_code=400,
             detail=f"El challenge fue generado para '{stored.get('type')}', no '{body.action}'",
         )
+
+    # Secondary per-restaurant rate limit (tighter, keyed by restaurant + ip).
+    rid_for_rl = stored.get("restaurant_id", "unknown")
+    rl_key_rest = f"webauthn_auth_complete:{rid_for_rl}:{ip}"
+    if not await state_store.rate_limit_check(key=rl_key_rest, max_requests=5, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta en un momento.")
 
     cred_record = await db.db_get_webauthn_credential(body.credential_id)
     if not cred_record:
@@ -402,10 +432,12 @@ async def delete_credential(
     if not cred:
         raise HTTPException(status_code=404, detail="Credencial no encontrada")
 
-    # Ensure the credential belongs to this restaurant (or a branch of it)
+    # Ensure the credential belongs to this restaurant or to a branch that this
+    # restaurant owns.  A matrix (parent_restaurant_id=None) may delete creds of
+    # its children; a branch may only delete its own creds.
     if cred.get("restaurant_id") != restaurant["id"]:
-        # Allow parent restaurant (matrix) to delete credentials of its branches
-        if restaurant.get("parent_restaurant_id") is not None:
+        cred_rest = await db.db_get_restaurant_by_id(cred.get("restaurant_id"))
+        if not cred_rest or cred_rest.get("parent_restaurant_id") != restaurant["id"]:
             raise HTTPException(status_code=403, detail="No tiene permiso para eliminar esta credencial")
 
     deleted = await db.db_delete_webauthn_credential(credential_id)

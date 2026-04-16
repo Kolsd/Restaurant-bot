@@ -144,6 +144,33 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # HSTS — only set over HTTPS to avoid breaking local dev over plain HTTP
+    if request.url.scheme == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains; preload",
+        )
+    # CSP — permissive baseline; inline scripts still required by current frontend.
+    # TODO: remove 'unsafe-inline' once inline <script> blocks are migrated to
+    #       external .js files (tracked as a separate hardening wave).
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        (
+            "default-src 'self'; "
+            "img-src 'self' https: data:; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline'; "
+            "font-src 'self' data:; "
+            "connect-src 'self' "
+            "https://api.anthropic.com "
+            "https://graph.facebook.com "
+            "https://checkout.wompi.co "
+            "https://nominatim.openstreetmap.org "
+            "https://res.cloudinary.com "
+            "https://api.cloudinary.com; "
+            "frame-ancestors 'none'"
+        ),
+    )
     return response
 
 # ── CORS ──────────────────────────────────────────────────────────────

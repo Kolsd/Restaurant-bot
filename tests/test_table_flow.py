@@ -30,8 +30,18 @@ def mock_db_pool(monkeypatch):
 
     # Inyectamos el pool falso
     monkeypatch.setattr(tables_routes.db, "get_pool", AsyncMock(return_value=MockPool()))
-    # Burlamos la seguridad
-    monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value=True))
+    # Burlamos la seguridad — require_auth devuelve username
+    monkeypatch.setattr(tables_routes, "require_auth", AsyncMock(return_value="caja_user"))
+    # get_current_user debe devolver un usuario con rol 'caja' para pasar _STATUS_ROLE_MAP
+    monkeypatch.setattr(
+        tables_routes, "get_current_user",
+        AsyncMock(return_value={
+            "username": "caja_user",
+            "restaurant_name": "Test",
+            "branch_id": 1,
+            "role": "caja",
+        }),
+    )
 
 # ── PRUEBA 1: Botón "Generar Factura" ──
 @pytest.mark.asyncio

@@ -157,9 +157,22 @@ def test_ruta_bar_devuelve_html(client):
     assert "Mesio" in body
 
 
-def test_ruta_cocina_sigue_funcionando(client):
-    """/cocina debe seguir devolviendo 200 tras los cambios."""
-    response = client.get("/cocina")
+def test_ruta_cocina_sigue_funcionando(client, monkeypatch):
+    """/cocina debe seguir devolviendo 200 tras los cambios (requires valid kitchen role)."""
+    from unittest.mock import AsyncMock
+    # /cocina now validates the user role — mock auth so a kitchen user passes
+    monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="cocina_user"))
+    monkeypatch.setattr(
+        "app.routes.deps.db.db_get_user",
+        AsyncMock(return_value={
+            "username": "cocina_user",
+            "restaurant_name": "Test",
+            "branch_id": 1,
+            "role": "cocina",
+        }),
+    )
+    # Provide a cookie-based token (kitchen page checks cookies)
+    response = client.get("/cocina", headers={"Authorization": "Bearer cocina-token"})
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "station=kitchen" in response.text

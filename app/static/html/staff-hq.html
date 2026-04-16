@@ -635,6 +635,15 @@
       }
     }
 
+    function escHtml(s) {
+      if (s == null) return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     function _fmtTime(iso) {
       if (!iso) return '--:--';
       const d = new Date(iso);
@@ -755,13 +764,15 @@
 
       for (const e of data.entries) {
         const d  = new Date(e.work_date + 'T12:00:00');
-        const dayLabel = DAYS_ES[d.getDay()] + ' ' + d.getDate();
+        const dayLabel = escHtml(DAYS_ES[d.getDay()] + ' ' + d.getDate());
 
-        const sched   = e.schedule ? e.schedule.start.slice(0,5) + ' – ' + e.schedule.end.slice(0,5) : '—';
-        const cin     = e.clock_in  ? _fmtTime(e.clock_in)  : '—';
-        const cout    = e.clock_out ? _fmtTime(e.clock_out) : 'Abierto';
-        const brk     = e.break_hours > 0 ? e.break_hours.toFixed(2) + 'h' : '—';
-        const net     = e.net_hours.toFixed(2) + 'h';
+        const schedStart = e.schedule ? escHtml(e.schedule.start.slice(0,5)) : '';
+        const schedEnd   = e.schedule ? escHtml(e.schedule.end.slice(0,5))   : '';
+        const sched      = e.schedule ? schedStart + ' – ' + schedEnd : '—';
+        const cin        = e.clock_in  ? escHtml(_fmtTime(e.clock_in))  : '—';
+        const cout       = e.clock_out ? escHtml(_fmtTime(e.clock_out)) : 'Abierto';
+        const brk        = e.break_hours > 0 ? escHtml(e.break_hours.toFixed(2)) + 'h' : '—';
+        const net        = escHtml(e.net_hours.toFixed(2)) + 'h';
         totalNet += e.net_hours;
 
         let rowCls = '';
@@ -780,7 +791,7 @@
           badge = '<span class="tc-badge tc-overtime">Overtime</span>';
         }
 
-        html += '<tr class="' + rowCls + '">' +
+        html += '<tr class="' + escHtml(rowCls) + '">' +
           '<td><strong>' + dayLabel + '</strong></td>' +
           '<td style="color:var(--text-muted)">' + sched + '</td>' +
           '<td>' + cin  + '</td>' +

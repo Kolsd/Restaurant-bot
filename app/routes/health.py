@@ -26,8 +26,11 @@ async def health_check():
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-    except Exception as exc:
-        checks["db"] = f"error: {type(exc).__name__}"
+    except Exception:
+        # Log the full exception server-side for diagnostics; never expose the
+        # exception type or message to callers (prevents technology fingerprinting).
+        log.exception("health.db_check_failed")
+        checks["db"] = "error"
         checks["status"] = "degraded"
         return JSONResponse(status_code=503, content=checks)
     return checks

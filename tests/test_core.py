@@ -99,21 +99,29 @@ def test_login_rate_limit(client, monkeypatch):
     """
     After _LOGIN_MAX failed attempts from the same IP, subsequent calls
     to POST /api/auth/login must return 429.
+
+    Rate limiting now uses state_store.rate_limit_check (Redis / in-process fallback).
+    We mock rate_limit_check to count calls and return False on the (MAX+1)th attempt.
     """
     import app.routes.auth_routes as auth_mod
+    from app.services import state_store
 
-    # Reset the in-process counter so this test is independent of run order
-    auth_mod._login_attempts.clear()
+    max_attempts = auth_mod._LOGIN_MAX  # 10
+
+    # Counter to simulate exhausting the rate limit
+    call_count = {"n": 0}
+
+    async def mock_rate_limit_check(key, max_requests, window_seconds):
+        call_count["n"] += 1
+        return call_count["n"] <= max_requests  # True (allowed) until limit reached
+
+    monkeypatch.setattr(state_store, "rate_limit_check", mock_rate_limit_check)
 
     # Mock auth.login to always fail quickly (no DB needed).
-    # auth_routes.py does `from app.services.auth import login` so `login` is a
-    # direct name in auth_routes's namespace — patch it there.
     async def mock_login(username, password):
         return {"success": False, "error": "bad credentials"}
 
     monkeypatch.setattr(auth_mod, "login", mock_login)
-
-    max_attempts = auth_mod._LOGIN_MAX  # 10
 
     # Exhaust all allowed attempts
     for i in range(max_attempts):
@@ -122,7 +130,7 @@ def test_login_rate_limit(client, monkeypatch):
             json={"username": "test", "password": "bad"},
             headers={"X-Forwarded-For": "10.0.0.99"},
         )
-        # Each attempt before the limit returns 200 (failed auth, but not rate-limited)
+        # Each attempt before the limit returns 401 (failed auth, but not rate-limited)
         assert r.status_code in (200, 401), f"Unexpected status on attempt {i+1}: {r.status_code}"
 
     # The (max_attempts+1)-th attempt must be rate-limited

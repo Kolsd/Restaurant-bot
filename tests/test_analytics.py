@@ -23,9 +23,17 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 _PATCH_TARGET = "app.routes.internal.analytics.get_pool"
+_SESSION_PATCH = "app.repositories.sessions_repo.get_session"
 
 ADMIN_KEY = "test-analytics-key"
 AUTH_HEADER = {"Authorization": f"Bearer {ADMIN_KEY}"}
+
+
+def _mock_session(valid_token: str = ADMIN_KEY):
+    """Return an async mock for sessions_repo.get_session that accepts valid_token as superadmin."""
+    async def _get_session(token):
+        return "superadmin" if token == valid_token else None
+    return AsyncMock(side_effect=_get_session)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,27 +91,33 @@ def _make_row(d: dict):
 # ── 1. test_overview_requires_auth ───────────────────────────────────────────
 
 class TestOverviewAuth:
-    def test_no_auth_returns_401(self, client, monkeypatch):
+    def test_no_auth_returns_401(self, client, mock_superadmin_session, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         resp = client.get("/api/internal/analytics/overview")
         assert resp.status_code == 401
 
     def test_wrong_key_returns_401(self, client, monkeypatch):
+        """Wrong/unknown token → sessions_repo returns None → 403."""
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
-        resp = client.get("/api/internal/analytics/overview",
-                          headers={"Authorization": "Bearer wrong-key"})
-        assert resp.status_code == 401
+        with patch(_SESSION_PATCH, AsyncMock(return_value=None)):
+            resp = client.get("/api/internal/analytics/overview",
+                              headers={"Authorization": "Bearer wrong-key"})
+        assert resp.status_code == 403
 
-    def test_missing_env_key_returns_401(self, client, monkeypatch):
+    def test_missing_env_key_returns_401(self, client, mock_superadmin_session, monkeypatch):
+        """No Authorization header → 401 regardless of ADMIN_KEY env."""
         monkeypatch.delenv("ADMIN_KEY", raising=False)
-        resp = client.get("/api/internal/analytics/overview",
-                          headers={"Authorization": "Bearer anything"})
+        resp = client.get("/api/internal/analytics/overview")
         assert resp.status_code == 401
 
 
 # ── 2. test_overview_returns_data ────────────────────────────────────────────
 
 class TestOverviewData:
+    @pytest.fixture(autouse=True)
+    def _session_mock(self, mock_superadmin_session):
+        """All data tests require a valid superadmin session."""
+
     def _build_pool_mock(self):
         """
         overview calls get_pool() ONCE and then calls pool.acquire() 15 times.
@@ -235,6 +249,10 @@ class TestOverviewData:
 # ── 3. test_restaurants_list ─────────────────────────────────────────────────
 
 class TestRestaurantsList:
+    @pytest.fixture(autouse=True)
+    def _session_mock(self, mock_superadmin_session):
+        """All data tests require a valid superadmin session."""
+
     def test_restaurants_requires_auth(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         resp = client.get("/api/internal/analytics/restaurants")
@@ -340,6 +358,10 @@ class TestRestaurantsList:
 # ── 4. test_trends_returns_daily_data ────────────────────────────────────────
 
 class TestTrends:
+    @pytest.fixture(autouse=True)
+    def _session_mock(self, mock_superadmin_session):
+        """All data tests require a valid superadmin session."""
+
     def test_trends_requires_auth(self, client, monkeypatch):
         monkeypatch.setenv("ADMIN_KEY", ADMIN_KEY)
         resp = client.get("/api/internal/analytics/trends")
@@ -420,7 +442,8 @@ class TestTrends:
         acquire_cm.__aexit__ = AsyncMock(return_value=False)
         pool = AsyncMock()
         pool.acquire = MagicMock(return_value=acquire_cm)
-        with patch(_PATCH_TARGET, AsyncMock(return_value=pool)):
+        with patch(_SESSION_PATCH, _mock_session()), \
+             patch(_PATCH_TARGET, AsyncMock(return_value=pool)):
             resp = client.get("/api/internal/analytics/trends", headers=AUTH_HEADER)
         assert resp.status_code == 200
         body = resp.json()

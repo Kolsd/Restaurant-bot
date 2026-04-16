@@ -109,6 +109,14 @@ const token = localStorage.getItem('rb_token');
 if (!token) window.location.href = '/login';
 const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function clock() {
   const el = document.getElementById('header-clock');
   if (el) el.textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
@@ -158,40 +166,43 @@ function renderCard(o) {
       : `<div class="sub-tag first">🆕 Pedido inicial</div>`;
 
   const itemsHtml = items.length
-    ? items.map(i => `<div class="order-item"><span class="order-item-qty">${i.quantity || i.qty || 1}×</span><span>${i.name || ''}</span></div>`).join('')
+    ? items.map(i => `<div class="order-item"><span class="order-item-qty">${escHtml(String(i.quantity || i.qty || 1))}×</span><span>${escHtml(i.name || '')}</span></div>`).join('')
     : '<div class="order-item" style="color:#555;">Sin items</div>';
 
-  const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
+  const notesHtml = o.notes ? `<div class="order-notes">📝 ${escHtml(o.notes)}</div>` : '';
+
+  // IDs are server-generated UUIDs — safe for attribute interpolation but still escaped defensively
+  const safeId  = escHtml(o.id);
+  const safeOid = escHtml(o.original_id || o.id);
 
   let actionHtml = '';
   if (isDel) {
-    const oid = o.original_id || o.id;
     if (o.status === 'recibido') {
-      actionHtml = `<button class="btn btn-prep" onclick="setDeliveryStatus('${oid}','en_preparacion')">👨‍🍳 En preparación</button>`;
+      actionHtml = `<button class="btn btn-prep" onclick="setDeliveryStatus('${safeOid}','en_preparacion')">👨‍🍳 En preparación</button>`;
     } else if (o.status === 'en_preparacion') {
-      actionHtml = `<button class="btn btn-listo" onclick="setDeliveryStatus('${oid}','listo')">✅ Listo para domiciliario</button>`;
+      actionHtml = `<button class="btn btn-listo" onclick="setDeliveryStatus('${safeOid}','listo')">✅ Listo para domiciliario</button>`;
     } else {
       actionHtml = `<div class="listo-badge">📦 Esperando domiciliario</div>`;
     }
   } else {
     if (o.status === 'recibido') {
-      actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">👨‍🍳 En preparación</button>`;
+      actionHtml = `<button class="btn btn-prep" onclick="setStatus('${safeId}','en_preparacion')">👨‍🍳 En preparación</button>`;
     } else if (o.status === 'en_preparacion') {
-      actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">✅ Listo para servir</button>`;
+      actionHtml = `<button class="btn btn-listo" onclick="setStatus('${safeId}','listo')">✅ Listo para servir</button>`;
     } else {
       actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
     }
   }
 
-  return `<div class="order-card ${o.status.replace('_','-')}" data-id="${o.id}">
+  return `<div class="order-card ${escHtml(o.status.replace('_','-'))}" data-id="${safeId}">
     ${subTag}
     <div class="order-header">
-      <div><div class="order-table">${o.table_name}</div><div class="order-id">${o.id}</div></div>
+      <div><div class="order-table">${escHtml(o.table_name)}</div><div class="order-id">${safeId}</div></div>
       ${elapsed(o.created_at)}
     </div>
     <div class="order-items">${itemsHtml}</div>
     ${notesHtml}
-    <button class="btn btn-print" onclick="printComanda('${o.id}')">🖨️ Imprimir Comanda</button>
+    <button class="btn btn-print" onclick="printComanda('${safeId}')">🖨️ Imprimir Comanda</button>
     ${actionHtml}
   </div>`;
 }
@@ -232,14 +243,14 @@ function printComanda(orderId) {
   const subNum = o.sub_number || 1;
   const subLabel = (o.base_order_id && subNum > 1) ? `ADICIONAL #${subNum}` : 'PEDIDO INICIAL';
   const itemsHtml = items.map(i =>
-    `<div class="item"><span class="qty">${i.quantity||i.qty||1}x</span> ${i.name||''}</div>`
+    `<div class="item"><span class="qty">${escHtml(String(i.quantity||i.qty||1))}x</span> ${escHtml(i.name||'')}</div>`
   ).join('');
   const notesHtml = o.notes
-    ? `<div class="sep"></div><div class="notes">NOTAS: ${o.notes}</div>`
+    ? `<div class="sep"></div><div class="notes">NOTAS: ${escHtml(o.notes)}</div>`
     : '';
   const win = window.open('', '_blank', 'width=340,height=560,toolbar=0,menubar=0');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>Comanda ${o.table_name}</title>
+<title>Comanda ${escHtml(o.table_name)}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
@@ -258,7 +269,7 @@ body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-siz
 <div class="sub">${subLabel}</div>
 <div class="sep"></div>
 <div class="label">MESA</div>
-<div class="mesa">${o.table_name}</div>
+<div class="mesa">${escHtml(o.table_name)}</div>
 <div class="label">Hora: ${timeStr} &nbsp;|&nbsp; ${dateStr}</div>
 <div class="sep"></div>
 <div class="label" style="font-weight:bold;margin-bottom:3px">ITEMS</div>

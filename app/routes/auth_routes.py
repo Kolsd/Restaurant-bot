@@ -4,12 +4,11 @@ Auth routes: login/logout and role verification for restaurant users.
 The superadmin CRUD endpoints (/api/admin/*) have been moved to
 app/routes/internal/admin.py under /api/internal/admin/*.
 """
-import time
-from collections import defaultdict
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 
 from app.services.auth import login, logout
+from app.services import state_store
 from app.routes.deps import get_current_user
 from app.services.logging import get_logger
 
@@ -17,19 +16,18 @@ log = get_logger(__name__)
 
 router = APIRouter()
 
-# ── LOGIN RATE LIMITER (in-process, resets on restart) ────────────────
-_login_attempts: dict = defaultdict(list)
-_LOGIN_MAX    = 10   # max attempts
+_LOGIN_MAX    = 10   # max attempts per IP per window
 _LOGIN_WINDOW = 900  # 15 minutes in seconds
 
 
-def _check_login_rate_limit(ip: str) -> None:
-    now = time.time()
-    attempts = _login_attempts[ip]
-    _login_attempts[ip] = [t for t in attempts if now - t < _LOGIN_WINDOW]
-    if len(_login_attempts[ip]) >= _LOGIN_MAX:
+async def _check_login_rate_limit(ip: str) -> None:
+    """Rate-limit login attempts via Redis (cross-worker safe)."""
+    key = f"login_attempts:{ip}"
+    allowed = await state_store.rate_limit_check(
+        key=key, max_requests=_LOGIN_MAX, window_seconds=_LOGIN_WINDOW
+    )
+    if not allowed:
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again in 15 minutes.")
-    _login_attempts[ip].append(now)
 
 
 # ── Pydantic models ──────────────────────────────────────────────────
@@ -51,7 +49,7 @@ _ROLE_REDIRECT = {
 @router.post("/api/auth/login")
 async def auth_login(request: Request, body: LoginRequest):
     ip = request.client.host if request.client else "unknown"
-    _check_login_rate_limit(ip)
+    await _check_login_rate_limit(ip)
     result = await login(body.username, body.password)
     if not result["success"]:
         raise HTTPException(status_code=401, detail=result["error"])

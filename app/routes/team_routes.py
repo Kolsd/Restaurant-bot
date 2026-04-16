@@ -44,7 +44,8 @@ class CreateBranchRequest(BaseModel):
 @router.get("/api/team/branches")
 async def list_team_branches(request: Request):
     user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"):
+    roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
+    if "owner" not in roles_list:
         raise HTTPException(status_code=403, detail="Acceso restringido a dueños")
 
     my_restaurant_id = user.get("branch_id")
@@ -59,7 +60,8 @@ async def list_team_branches(request: Request):
 async def create_branch(request: Request, body: CreateBranchRequest):
     from app.routes.dashboard import geocode_address
     user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"):
+    roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
+    if "owner" not in roles_list:
         raise HTTPException(status_code=403, detail="Solo el dueño puede crear sucursales")
 
     my_restaurant_id = user.get("branch_id")
@@ -127,16 +129,26 @@ async def create_branch(request: Request, body: CreateBranchRequest):
 @router.delete("/api/team/branches/{branch_id}")
 async def delete_branch(branch_id: int, request: Request):
     user = await get_current_user(request)
-    if "owner" not in user.get("role", "owner"):
+    roles_list = [r.strip() for r in (user.get("role") or "").split(",")]
+    if "owner" not in roles_list:
         raise HTTPException(status_code=403, detail="Solo el dueño puede eliminar sucursales")
 
     my_main_id = user.get("branch_id")
     if not my_main_id:
-        all_r = await db.db_get_all_restaurants()
-        my_main_id = all_r[0]["id"] if all_r else None
+        raise HTTPException(status_code=403, detail="Tu usuario no tiene una Casa Matriz asignada")
 
     if branch_id == my_main_id:
         raise HTTPException(status_code=400, detail="No puedes eliminar la Casa Matriz desde aquí.")
+
+    # Verify that the target branch belongs to this owner's tenant before deleting
+    branch_row = await db.db_get_restaurant_by_id(branch_id)
+    if not branch_row or branch_row.get("parent_restaurant_id") != my_main_id:
+        log.warning(
+            "team.delete_branch_idor_attempt",
+            requested_branch_id=branch_id,
+            user_restaurant_id=my_main_id,
+        )
+        raise HTTPException(status_code=404, detail="La sucursal no existe o no pertenece a tu cuenta.")
 
     deleted = await restaurant_repo.db_delete_branch(branch_id, my_main_id)
     if not deleted:
@@ -156,6 +168,19 @@ async def list_team_users(request: Request, branch_id: int = None):
     elif not branch_id:
         branch_id = user.get("branch_id")
 
+    my_restaurant_id = user.get("branch_id") or user.get("restaurant_id")
+
+    # Validate that the requested branch_id belongs to the authenticated user's tenant
+    if branch_id and branch_id != my_restaurant_id:
+        branch_row = await db.db_get_restaurant_by_id(branch_id)
+        if not branch_row or branch_row.get("parent_restaurant_id") != my_restaurant_id:
+            log.warning(
+                "team.users_idor_attempt",
+                requested_branch_id=branch_id,
+                user_restaurant_id=my_restaurant_id,
+            )
+            raise HTTPException(status_code=403, detail="No autorizado para ver usuarios de esta sucursal")
+
     users = await restaurant_repo.db_get_team_users(branch_id)
     return {"users": users}
 
@@ -166,17 +191,31 @@ async def team_invite(request: Request, body: TeamInviteRequest):
     _pin_ctx = _CC(schemes=["bcrypt"], deprecated="auto")
 
     creator = await get_current_user(request)
-    role = creator.get("role", "owner")
-    if "owner" not in role and "admin" not in role:
+    roles_list = [r.strip() for r in (creator.get("role") or "").split(",")]
+    is_owner = "owner" in roles_list
+    is_admin = "admin" in roles_list
+    if not is_owner and not is_admin:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    branch_id = body.branch_id if "owner" in role else creator.get("branch_id")
+    branch_id = body.branch_id if is_owner else creator.get("branch_id")
 
-    if not branch_id and "owner" in role:
+    if not branch_id and is_owner:
         branch_id = creator.get("branch_id")
 
     if not branch_id:
         raise HTTPException(status_code=400, detail="Sucursal requerida")
+
+    # Verify the branch belongs to this owner's tenant (prevents cross-tenant invite)
+    my_restaurant_id = creator.get("branch_id") or creator.get("restaurant_id")
+    if branch_id != my_restaurant_id:
+        branch_check = await db.db_get_restaurant_by_id(branch_id)
+        if not branch_check or branch_check.get("parent_restaurant_id") != my_restaurant_id:
+            log.warning(
+                "team.invite_idor_attempt",
+                requested_branch_id=branch_id,
+                user_restaurant_id=my_restaurant_id,
+            )
+            raise HTTPException(status_code=403, detail="No autorizado para esta sucursal")
 
     branch = await db.db_get_restaurant_by_id(branch_id)
 

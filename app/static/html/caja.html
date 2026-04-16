@@ -651,7 +651,7 @@ function _buildReceiptHtml(bill, paymentContext) {
     const price = Number(i.price || i.unit_price || 0);
     const lineTotal = price * qty;
     return `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">
-      <span>${qty}x ${i.name}</span><span style="white-space:nowrap;">${fmt(lineTotal)}</span>
+      <span>${qty}x ${_escHtml(i.name)}</span><span style="white-space:nowrap;">${fmt(lineTotal)}</span>
     </div>`;
   }).join('');
 
@@ -1778,13 +1778,13 @@ function renderDeliveryCard(o, hasVoucher) {
     ✅ Confirmar
   </button>`;
 
-  const phone = document.createTextNode(o.phone || '').nodeValue;
+  const safePhone = _escHtml(o.phone || '');
 
   return `
     <div style="background:white;border-radius:10px;padding:16px;min-width:260px;max-width:300px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <span style="background:${typeBg};color:white;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:700;">${typeLabel}</span>
-        <span style="font-size:12px;color:#999;">${phone}</span>
+        <span style="font-size:12px;color:#999;">${safePhone}</span>
       </div>
       ${voucherBadge}
       <div style="margin:8px 0;border-top:1px solid #eee;padding-top:8px;">

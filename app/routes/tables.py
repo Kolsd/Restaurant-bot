@@ -1,7 +1,6 @@
 import asyncio
 import html as _html
 import os
-import time
 import httpx
 import urllib.parse
 import uuid
@@ -12,11 +11,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from app.services import database as db
 from app.services import billing
+from app.services import state_store
 from app.services.agent import trigger_nps
 from app.routes.deps import require_auth, get_current_user, get_current_restaurant, get_current_restaurant_scoped
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 from app.services import loyalty as loyalty_svc
-from app.services.money import to_decimal, money_mul, quantize_money
+from app.services.money import to_decimal, money_mul, quantize_money, money_sum
 from app.services.logging import get_logger
 from app.repositories import tables_repo as tr
 
@@ -27,29 +27,20 @@ STATIC = Path(__file__).parent.parent / "static"
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 _APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
-# Rate-limit WA "entregado" notifications: max 1 per phone per 5 minutes
-_entregado_notif_sent: dict = {}  # phone -> last sent timestamp (epoch seconds)
-_ENTREGADO_COOLDOWN = 300  # seconds
+# Role-based status transition map: which roles may set each status
+_STATUS_ROLE_MAP: dict[str, set[str]] = {
+    'recibido':         {'cocina', 'caja', 'mesero', 'admin', 'owner', 'gerente'},
+    'en_preparacion':   {'cocina', 'admin', 'owner', 'gerente'},
+    'listo':            {'cocina', 'admin', 'owner', 'gerente'},
+    'entregado':        {'mesero', 'caja', 'admin', 'owner', 'gerente'},
+    'generar_factura':  {'caja', 'admin', 'owner', 'gerente'},
+    'cerrar_mesa':      {'caja', 'admin', 'owner', 'gerente'},
+    'factura_entregada':{'caja', 'admin', 'owner', 'gerente'},
+    'cancelado':        {'caja', 'mesero', 'admin', 'owner', 'gerente'},
+}
 
-
-def _can_send_entregado_notif(phone: str) -> bool:
-    last = _entregado_notif_sent.get(phone, 0)
-    if time.time() - last >= _ENTREGADO_COOLDOWN:
-        _entregado_notif_sent[phone] = time.time()
-        return True
-    return False
-
-# Rate-limit WA "listo" notifications: max 1 per phone per 5 minutes
-_listo_notif_sent: dict = {}  # phone -> last sent timestamp (epoch seconds)
-_LISTO_COOLDOWN = 300  # seconds
-
-
-def _can_send_listo_notif(phone: str) -> bool:
-    last = _listo_notif_sent.get(phone, 0)
-    if time.time() - last >= _LISTO_COOLDOWN:
-        _listo_notif_sent[phone] = time.time()
-        return True
-    return False
+# WA notification rate-limiting moved to Redis via state_store (multi-worker safe).
+# Keys: notif_wa:{bot_number}:{phone}:{kind}  max 1 per 5 min per worker pool.
 
 async def get_table_wa_number(table: dict) -> str:
     wa_number = ""
@@ -110,18 +101,25 @@ async def get_tables(request: Request):
     """Devuelve las mesas de la sucursal actual para pintarlas en el dashboard."""
     await require_auth(request)
     user = await get_current_user(request)
-    
+
     # Por defecto, asumimos el branch_id del usuario (útil para meseros/gerentes)
     branch_id = user.get("branch_id")
 
-    # 🛡️ Si el dueño usa el selector del Topbar:
+    # Si el dueño/admin usa el selector del Topbar:
     branch_header = request.headers.get("X-Branch-ID")
-    if "owner" in user.get("role", "") or "admin" in user.get("role", ""):
+    is_owner_or_admin = "owner" in user.get("role", "") or "admin" in user.get("role", "")
+    if is_owner_or_admin:
         if branch_header and branch_header.isdigit():
             branch_id = int(branch_header)
-        # else: branch_id stays None → db_get_tables returns all
+        # branch_id=None → admin global view (all branches)
+    else:
+        # Non-admin: must always have a branch_id; fall back to restaurant_id if missing
+        if branch_id is None:
+            branch_id = user.get("restaurant_id")
+        if branch_id is None:
+            raise HTTPException(status_code=400, detail="No se pudo determinar la sucursal del usuario")
 
-    with bypass_tenant_scope("get_tables: may be global admin view (branch_id=None)"):
+    with bypass_tenant_scope("get_tables: admin global view or branch-scoped via user.branch_id"):
         tables = await db.db_get_tables(branch_id=branch_id)
     return {"tables": tables}
 
@@ -328,10 +326,13 @@ async def get_qr_sheet(request: Request, table_id: str):
 @router.get("/api/waiter-alerts")
 async def get_waiter_alerts(request: Request):
     await require_auth(request)
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant.get("whatsapp_number", "")
     try:
-        alerts = await tr.db_get_waiter_alerts()
+        with tenant_scope(restaurant["id"]):
+            alerts = await tr.db_get_waiter_alerts(bot_number)
     except Exception as e:
-        log.error("tables.alerts_read_failed", error=str(e))
+        log.exception("tables.alerts_read_failed", restaurant_id=restaurant.get("id"), error=str(e))
         alerts = []
     return {"alerts": alerts}
 
@@ -662,12 +663,19 @@ async def send_wa_interactive_nps(phone: str, nps_label: str, db_phone_id: str =
 @router.post("/api/table-orders/{order_id}/status")
 async def update_order_status(request: Request, order_id: str):
     username = await require_auth(request)
+    user = await get_current_user(request)
     body = await request.json()
     status = body.get("status")
-    
-    valid_statuses = ['recibido', 'en_preparacion', 'listo', 'entregado', 'generar_factura', 'cerrar_mesa', 'factura_entregada', 'cancelado']
+
+    valid_statuses = list(_STATUS_ROLE_MAP.keys())
     if status not in valid_statuses:
         raise HTTPException(status_code=400, detail="Estado inválido")
+
+    # Role-based transition guard
+    user_roles = {r.strip() for r in user.get("role", "").split(",") if r.strip()}
+    allowed_roles = _STATUS_ROLE_MAP.get(status, set())
+    if not user_roles.intersection(allowed_roles):
+        raise HTTPException(status_code=403, detail=f"Tu rol no puede cambiar el estado a '{status}'")
     
     with bypass_tenant_scope("update_order_status: order lookup by ID across branches"):
         order_record = await tr.db_get_table_order_record(order_id)
@@ -714,17 +722,33 @@ async def update_order_status(request: Request, order_id: str):
     else:
         with bypass_tenant_scope("update_order_status: normal status update by order ID"):
             await db.db_update_table_order_status(order_id, status)
-        if status == "entregado" and phone and _can_send_entregado_notif(phone):
-            msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
-            await send_wa_msg(phone, msg, db_phone_id)
-        if status == "listo" and phone and phone != "manual" and _can_send_listo_notif(phone):
-            msg = f"🍽️ ¡Tu pedido en {table_name} está listo!\n\nUn mesero te lo llevará en un momento. ¡Buen provecho! 😋"
-            await send_wa_msg(phone, msg, db_phone_id)
+        # bot_number needed for per-tenant rate-limit key (Redis, cross-worker safe)
+        _bot_number = (session_data.get("bot_number") if session_data else None) or order.get("bot_number", "")
+        if status == "entregado" and phone and phone != "manual":
+            _rl_key = f"notif_wa:{_bot_number}:{phone}:entregado"
+            if await state_store.rate_limit_check(_rl_key, max_requests=1, window_seconds=300):
+                msg = f"¡Tu pedido ha llegado a {table_name}! 🍽️\n\n¡Que lo disfrutes! Cuando estés listo, puedes pedir la cuenta aquí mismo."
+                await send_wa_msg(phone, msg, db_phone_id)
+        if status == "listo" and phone and phone != "manual":
+            _rl_key = f"notif_wa:{_bot_number}:{phone}:listo"
+            if await state_store.rate_limit_check(_rl_key, max_requests=1, window_seconds=300):
+                msg = f"🍽️ ¡Tu pedido en {table_name} está listo!\n\nUn mesero te lo llevará en un momento. ¡Buen provecho! 😋"
+                await send_wa_msg(phone, msg, db_phone_id)
 
     return {"success": True, "order_id": order_id, "status": status}
 
+_KITCHEN_ROLES = {"cocina", "owner", "admin", "gerente"}
+
 @router.get("/cocina", response_class=HTMLResponse)
-async def kitchen_display():
+async def kitchen_display(request: Request):
+    from fastapi.responses import RedirectResponse
+    try:
+        user = await get_current_user(request)
+        user_roles = {r.strip() for r in user.get("role", "").split(",")}
+        if not user_roles.intersection(_KITCHEN_ROLES):
+            return RedirectResponse("/login", status_code=302)
+    except HTTPException:
+        return RedirectResponse("/login", status_code=302)
     return HTMLResponse((STATIC / "html" / "kitchen.html").read_text(encoding="utf-8"))
 
 @router.get("/bar", response_class=HTMLResponse)
@@ -740,7 +764,7 @@ class ManualOrderRequest(BaseModel):
     table_id:   str
     table_name: str
     items:      list
-    total:      int
+    total:      Decimal
     notes:      str = ""
     station:    str = "all"
     branch_id:  int = None  # 🛡️ Agregamos branch_id al modelo
@@ -824,6 +848,7 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     
     order_id = f"pos-{str(uuid.uuid4())[:8]}"
     phone = "manual"
+    total_d = quantize_money(to_decimal(body.total))
 
     with bypass_tenant_scope("pos_manual_order: branch scoped via body.branch_id"):
         base_id = await db.db_get_base_order_id(body.table_id)
@@ -843,7 +868,7 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
             "items":         body.items,
             "status":        "recibido",
             "notes":         body.notes,
-            "total":         body.total,
+            "total":         float(total_d),  # JSON boundary
             "base_order_id": final_base_id,
             "sub_number":    sub_num,
             "station":       body.station,
@@ -906,6 +931,15 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
         key = item["name"].strip().lower()
         available[key] = available.get(key, 0) + int(item.get("quantity", item.get("qty", 1)))
 
+    # Ownership check: ticket must belong to this user's restaurant
+    ticket_restaurant_id = ticket.get("restaurant_id")
+    user_restaurant_id = user.get("restaurant_id") or user.get("branch_id")
+    if ticket_restaurant_id and user_restaurant_id and ticket_restaurant_id != user_restaurant_id:
+        # Allow parent restaurant to access its branches
+        is_parent = not bool(user.get("parent_restaurant_id"))
+        if not is_parent:
+            raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu restaurante")
+
     # Validar que los checks no excedan las cantidades disponibles
     check_totals: dict[str, int] = {}
     for chk in body.checks:
@@ -918,6 +952,15 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
             raise HTTPException(
                 status_code=400,
                 detail=f"'{name}': cantidad en checks ({qty}) supera la pedida ({avail})"
+            )
+
+    # Validar que el desglose cubre TODOS los ítems del ticket (no solo que no exceda)
+    for name, avail_qty in available.items():
+        assigned = check_totals.get(name, 0)
+        if assigned < avail_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El desglose no cubre todos los ítems. Faltan: {name} x{avail_qty - assigned}"
             )
 
     # Construir checks con totales calculados servidor-side
@@ -1191,7 +1234,7 @@ async def delete_check(request: Request, base_order_id: str, check_id: str):
 class QuickInvoiceItem(BaseModel):
     name: str
     qty: int = 1
-    unit_price: float
+    unit_price: Decimal
 
 class QuickInvoiceBody(BaseModel):
     items: list[QuickInvoiceItem]
@@ -1219,19 +1262,20 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
     if not body.items:
         raise HTTPException(status_code=400, detail="Se requiere al menos un ítem")
 
-    subtotal = sum(it.unit_price * it.qty for it in body.items)
+    subtotal = quantize_money(money_sum(money_mul(to_decimal(it.unit_price), it.qty) for it in body.items))
     tip_d = to_decimal(body.tip_amount)
-    total_d = to_decimal(subtotal) + tip_d
+    total_d = quantize_money(subtotal + tip_d)
 
-    if tip_d > 0 and tip_d > money_mul(to_decimal(subtotal), Decimal("0.5")):
+    if tip_d > 0 and tip_d > money_mul(subtotal, Decimal("0.5")):
         raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del subtotal")
 
     order_id = f"qi-{str(uuid.uuid4())[:8]}"
     base_order_id = order_id
 
     items_payload = [
-        {"name": it.name, "quantity": it.qty, "price": it.unit_price,
-         "subtotal": it.unit_price * it.qty}
+        {"name": it.name, "quantity": it.qty,
+         "price": float(quantize_money(to_decimal(it.unit_price))),         # JSON boundary
+         "subtotal": float(money_mul(to_decimal(it.unit_price), it.qty))}   # JSON boundary
         for it in body.items
     ]
 

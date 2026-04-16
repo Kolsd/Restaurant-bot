@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_restaurant
+from app.routes.deps import require_auth, get_current_restaurant, get_current_restaurant_scoped
+from app.services.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter()
 
@@ -55,9 +58,17 @@ async def create_inventory_item(request: Request, body: InventoryItemCreate):
 
 
 @router.put("/api/inventory/{item_id}")
-async def update_inventory_item(request: Request, item_id: int, body: InventoryItemUpdate):
+async def update_inventory_item(
+    request: Request,
+    item_id: int,
+    body: InventoryItemUpdate,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Actualiza un producto del inventario"""
-    await require_auth(request)
+    existing = await db.db_get_inventory_item(item_id)
+    if not existing or existing.get("restaurant_id") != restaurant["id"]:
+        log.warning("inventory.update_idor_attempt", item_id=item_id, restaurant_id=restaurant["id"])
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
     item = await db.db_update_inventory_item(item_id, body.dict(exclude_none=True))
     if not item:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
@@ -65,9 +76,16 @@ async def update_inventory_item(request: Request, item_id: int, body: InventoryI
 
 
 @router.delete("/api/inventory/{item_id}")
-async def delete_inventory_item(request: Request, item_id: int):
+async def delete_inventory_item(
+    request: Request,
+    item_id: int,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Elimina un producto del inventario"""
-    await require_auth(request)
+    existing = await db.db_get_inventory_item(item_id)
+    if not existing or existing.get("restaurant_id") != restaurant["id"]:
+        log.warning("inventory.delete_idor_attempt", item_id=item_id, restaurant_id=restaurant["id"])
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
     await db.db_delete_inventory_item(item_id)
     return {"success": True}
 
@@ -88,9 +106,16 @@ async def adjust_stock(request: Request, item_id: int, body: StockAdjustment):
 
 
 @router.get("/api/inventory/{item_id}/history")
-async def get_stock_history(request: Request, item_id: int):
+async def get_stock_history(
+    request: Request,
+    item_id: int,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Historial de movimientos de stock"""
-    await require_auth(request)
+    existing = await db.db_get_inventory_item(item_id)
+    if not existing or existing.get("restaurant_id") != restaurant["id"]:
+        log.warning("inventory.history_idor_attempt", item_id=item_id, restaurant_id=restaurant["id"])
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
     history = await db.db_get_inventory_history(item_id)
     return {"history": history}
 

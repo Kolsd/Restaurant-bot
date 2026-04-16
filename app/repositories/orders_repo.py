@@ -384,10 +384,25 @@ async def db_save_order(order: dict):
         order.get("base_order_id"), order.get("sub_number", 1))
 
 async def db_confirm_payment(order_id: str, transaction_id: str):
+    """
+    Idempotent payment confirmation.
+
+    Adds guards so that:
+      - already-paid orders are not re-confirmed (idempotent Wompi retries)
+      - cancelled / delivered orders cannot be flipped back to 'confirmado'
+
+    Returns the updated row dict, or None if no eligible row was found
+    (already paid, cancelled, or delivered).  The caller should treat None
+    as a no-op success (return 200 to Wompi, log wompi.webhook.noop).
+    """
     async with _tenant_connection() as conn:
         row = await conn.fetchrow("""
-            UPDATE orders SET paid=TRUE, status='confirmado', transaction_id=$2, paid_at=NOW()
-            WHERE id=$1 RETURNING *
+            UPDATE orders
+               SET paid=TRUE, status='confirmado', transaction_id=$2, paid_at=NOW()
+             WHERE id=$1
+               AND paid = FALSE
+               AND status NOT IN ('cancelado', 'entregado')
+            RETURNING *
         """, order_id, transaction_id)
         return _serialize(dict(row)) if row else None
 
@@ -453,12 +468,25 @@ async def db_update_pending_order_payment_method(phone: str, bot_number: str, pa
             phone, bot_number, payment_method
         )
 
-async def db_update_order_status(order_id: str, new_status: str):
-    """Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id."""
+async def db_update_order_status(order_id: str, new_status: str) -> dict | None:
+    """
+    Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id.
+
+    Returns the updated main-order row dict, or None if the status was already
+    the same value (or the order does not exist) — so the caller can detect
+    race conditions and return 409 Conflict instead of silently accepting a
+    no-op update.
+    """
     async with _tenant_connection() as conn:
-        await conn.execute("UPDATE orders SET status=$2 WHERE id=$1", order_id, new_status)
+        row = await conn.fetchrow(
+            "UPDATE orders SET status=$2 WHERE id=$1 AND status != $2 RETURNING *",
+            order_id, new_status,
+        )
+        if row is None:
+            return None
         # Cascade to sub-orders (base order id matches both base_order_id column and the passed id)
         await conn.execute(
             "UPDATE orders SET status=$2 WHERE base_order_id=$1 AND id != $1",
-            order_id, new_status
+            order_id, new_status,
         )
+        return _serialize(dict(row))

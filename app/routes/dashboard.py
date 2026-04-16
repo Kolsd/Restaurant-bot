@@ -168,7 +168,13 @@ async def public_restaurant_info(id: int):
 
 
 @router.get("/api/public/menu/{bot_number}")
-async def get_public_menu(bot_number: str):
+async def get_public_menu(request: Request, bot_number: str):
+    # ── Rate limit: 30 req/min por IP — previene harvesting masivo ─────────────
+    client_ip = request.client.host if request.client else "unknown"
+    allowed = await state_store.rate_limit_check(f"public_menu:{client_ip}", max_requests=30, window_seconds=60)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
     normalized = bot_number.replace("+", "").replace(" ", "").strip()
     data = await restaurant_repo.db_get_public_menu_data(normalized)
     if not data:
@@ -213,7 +219,20 @@ async def get_public_menu(bot_number: str):
 
 
 @router.get("/api/geocode")
-async def geocode_endpoint(address: str):
+async def geocode_endpoint(request: Request, address: str):
+    """
+    Proxy geocode a Nominatim. Requiere autenticación (Bearer token de admin/staff).
+    Rate limit: 10 req/min por IP.
+    """
+    from app.routes.deps import require_auth
+    await require_auth(request)
+
+    # ── Rate limit: 10 req/min por IP ────────────────────────────────────────────
+    client_ip = request.client.host if request.client else "unknown"
+    allowed = await state_store.rate_limit_check(f"geocode:{client_ip}", max_requests=10, window_seconds=60)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes de geocodificación. Intenta más tarde.")
+
     lat, lon, display = await geocode_address(address)
     if lat is None:
         raise HTTPException(status_code=404, detail="No se encontró la dirección.")
@@ -223,6 +242,42 @@ async def geocode_endpoint(address: str):
         "display_name": display,
         "maps_url": f"https://www.google.com/maps?q={lat},{lon}"
     }
+
+
+@router.get("/api/geocode/reverse")
+async def geocode_reverse_endpoint(request: Request, lat: float, lon: float):
+    """
+    Proxy reverse geocode a Nominatim. Requiere autenticación (Bearer token de admin/staff).
+    Rate limit: 10 req/min por IP (compartido con /api/geocode).
+    El frontend debe usar este endpoint en lugar de llamar a Nominatim directamente.
+    TODO (wave siguiente): migrar dashboard-features.js para usar este endpoint.
+    """
+    from app.routes.deps import require_auth
+    await require_auth(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    allowed = await state_store.rate_limit_check(f"geocode:{client_ip}", max_requests=10, window_seconds=60)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes de geocodificación. Intenta más tarde.")
+
+    headers = {"User-Agent": "Mesio-Bot/1.0 (contacto@mesioai.com)"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lon, "format": "json"},
+                headers=headers,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                return {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "display_name": data.get("display_name", ""),
+                }
+    except Exception:
+        pass
+    raise HTTPException(status_code=404, detail="No se encontró información para estas coordenadas.")
 
 
 # ── Catalog v2: analytics tracking (fire-and-forget, real DB insert — Fase 5b) ─
@@ -526,6 +581,15 @@ async def restaurant_sitemap(restaurant_id: int):
         except Exception:
             menu_raw = {}
 
+    # Load availability to exclude out-of-stock dishes from the sitemap
+    availability: dict = {}
+    try:
+        bot_number_for_avail = data.get("whatsapp_number", "")
+        if bot_number_for_avail:
+            availability = await db.db_get_menu_availability(bot_number_for_avail) or {}
+    except Exception:
+        pass  # availability is optional — fail open
+
     base     = f"https://{_APP_DOMAIN}"
     menu_url = f"{base}/r/{slug}/menu"
 
@@ -538,7 +602,11 @@ async def restaurant_sitemap(restaurant_id: int):
                 continue
             if dish.get("active") is False:
                 continue
-            d_slug = _slugify_dish(dish["name"])
+            # Exclude dishes that are explicitly marked unavailable in menu_availability
+            dish_name = dish["name"]
+            if availability.get(dish_name) is False:
+                continue
+            d_slug = _slugify_dish(dish_name)
             urls.append({
                 "loc":        f"{base}/r/{slug}/menu/{d_slug}",
                 "changefreq": "daily",

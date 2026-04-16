@@ -259,6 +259,17 @@ async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
         return item
 
 
+async def db_get_inventory_item(item_id: int) -> dict | None:
+    """Obtiene un item de inventario por ID. Tenant-scoped via RLS."""
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, restaurant_id, name, unit, current_stock, min_stock, "
+            "linked_dishes, cost_per_unit FROM inventory WHERE id = $1",
+            item_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
 async def db_get_inventory_history(item_id: int) -> list:
     async with _tenant_connection() as conn:
         rows = await conn.fetch(

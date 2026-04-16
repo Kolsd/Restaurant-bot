@@ -11,6 +11,7 @@ from app.services.logging import get_logger
 from app.services import state_store
 from app.services.money import to_decimal
 from app.services.tenant_context import bypass_tenant_scope as _bypass_tenant
+from app.services.tenant_db import tenant_connection as _tenant_conn
 from app.repositories.orders_repo import (
     InsufficientStockError,
     OrderCommitError,
@@ -30,6 +31,13 @@ from app.services.agent_tools import TOOLS_SALON, TOOLS_EXTERNAL
 log = get_logger(__name__)
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "mesioai.com")
+
+
+def _ofuscar_phone(p: str) -> str:
+    """Return obfuscated phone for log contexts: '***XXXX' (last 4 digits only)."""
+    if not p:
+        return "***"
+    return "***" + p[-4:] if len(p) >= 4 else "***"
 
 # h11 ≥0.16.0 enforces strict RFC 9110 header validation — strip accidental
 # leading whitespace/newlines/equals that some env var editors inject.
@@ -185,106 +193,105 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     # Text pattern matched — check feature flag before creating any session
     extracted_val = m.group(1)
 
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
-        bot_rest = await conn.fetchrow(
-            "SELECT id, parent_restaurant_id, features FROM restaurants WHERE whatsapp_number = $1", bot_number
-        )
-        if not bot_rest:
-            return None
+    # Pre-tenant lookup: resolve restaurant and tables by bot_number before we know tenant.
+    # All inner db_create_table_session calls use bypass because this is pre-resolution.
+    with _bypass_tenant("agent.detect_table_context: pre-tenant text-based table lookup by bot_number"):
+        async with _tenant_conn() as conn:
+            bot_rest = await conn.fetchrow(
+                "SELECT id, parent_restaurant_id, features FROM restaurants WHERE whatsapp_number = $1", bot_number
+            )
+            if not bot_rest:
+                return None
 
-        features_raw = bot_rest["features"] or {}
-        features_dict = features_raw if isinstance(features_raw, dict) else {}
-        allow_manual = features_dict.get("allow_manual_table_number", False)
+            features_raw = bot_rest["features"] or {}
+            features_dict = features_raw if isinstance(features_raw, dict) else {}
+            allow_manual = features_dict.get("allow_manual_table_number", False)
 
-        if not allow_manual:
-            # Security: do NOT auto-create a session from free-text table mentions.
-            # Customer must scan the physical QR code to establish a real table session.
-            log.warning(
-                "detect_table_context.manual_text_blocked",
-                phone=phone,
+            if not allow_manual:
+                # Security: do NOT auto-create a session from free-text table mentions.
+                # Customer must scan the physical QR code to establish a real table session.
+                log.warning(
+                    "detect_table_context.manual_text_blocked",
+                    phone=_ofuscar_phone(phone),
+                    bot_number=bot_number,
+                    extracted=extracted_val,
+                    reason="allow_manual_table_number=False (default); QR scan required",
+                )
+                return None
+
+            # Feature flag is explicitly True — proceed with text-based lookup (opt-in only)
+            log.info(
+                "detect_table_context.manual_text_allowed",
+                phone=_ofuscar_phone(phone),
                 bot_number=bot_number,
                 extracted=extracted_val,
-                reason="allow_manual_table_number=False (default); QR scan required",
-            )
-            return None
-
-        # Feature flag is explicitly True — proceed with text-based lookup (opt-in only)
-        log.info(
-            "detect_table_context.manual_text_allowed",
-            phone=phone,
-            bot_number=bot_number,
-            extracted=extracted_val,
-        )
-
-        root_id = bot_rest["parent_restaurant_id"] if bot_rest["parent_restaurant_id"] else bot_rest["id"]
-
-        # Helper: fetch all active tables for this franchise
-        async def _all_franchise_tables():
-            return await conn.fetch(
-                """
-                SELECT t.* FROM restaurant_tables t
-                LEFT JOIN restaurants r ON t.branch_id = r.id
-                WHERE t.active = TRUE
-                  AND (t.branch_id = $1 OR r.parent_restaurant_id = $1)
-                """,
-                root_id
             )
 
-        if "-" in extracted_val:
-            # ── FORMATO NUMÉRICO "RestauranteID-Mesa" (ej: "1-5") ──
-            try:
-                r_id_str, t_num_str = extracted_val.split("-", 1)
-                r_id = int(r_id_str)
-                t_num = int(t_num_str)
+            root_id = bot_rest["parent_restaurant_id"] if bot_rest["parent_restaurant_id"] else bot_rest["id"]
 
-                valid_rest = await conn.fetchval(
-                    "SELECT id FROM restaurants WHERE id = $1 AND (id = $2 OR parent_restaurant_id = $2)",
-                    r_id, root_id
+            # Helper: fetch all active tables for this franchise
+            async def _all_franchise_tables():
+                return await conn.fetch(
+                    """
+                    SELECT t.* FROM restaurant_tables t
+                    LEFT JOIN restaurants r ON t.branch_id = r.id
+                    WHERE t.active = TRUE
+                      AND (t.branch_id = $1 OR r.parent_restaurant_id = $1)
+                    """,
+                    root_id
                 )
-                if valid_rest:
-                    b_id = None if r_id == root_id else r_id
-                    row = await conn.fetchrow(
-                        "SELECT * FROM restaurant_tables WHERE branch_id IS NOT DISTINCT FROM $1 AND number = $2 AND active = TRUE",
-                        b_id, t_num
-                    )
-                    if row:
-                        table = dict(row)
-                        with _bypass_tenant("agent.detect_table_context: create session numeric"):
-                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-                        table["is_new_session"] = True
-                        return table
-            except (ValueError, TypeError):
-                pass  # not a numeric pair — fall through to name lookup
 
-        else:
-            # ── FORMATO LEGACY: "Mesa 3" ──
-            try:
-                num_mesa = int(extracted_val)
+            if "-" in extracted_val:
+                # ── FORMATO NUMÉRICO "RestauranteID-Mesa" (ej: "1-5") ──
+                try:
+                    r_id_str, t_num_str = extracted_val.split("-", 1)
+                    r_id = int(r_id_str)
+                    t_num = int(t_num_str)
+
+                    valid_rest = await conn.fetchval(
+                        "SELECT id FROM restaurants WHERE id = $1 AND (id = $2 OR parent_restaurant_id = $2)",
+                        r_id, root_id
+                    )
+                    if valid_rest:
+                        b_id = None if r_id == root_id else r_id
+                        row = await conn.fetchrow(
+                            "SELECT * FROM restaurant_tables WHERE branch_id IS NOT DISTINCT FROM $1 AND number = $2 AND active = TRUE",
+                            b_id, t_num
+                        )
+                        if row:
+                            table = dict(row)
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                            table["is_new_session"] = True
+                            return table
+                except (ValueError, TypeError):
+                    pass  # not a numeric pair — fall through to name lookup
+
+            else:
+                # ── FORMATO LEGACY: "Mesa 3" ──
+                try:
+                    num_mesa = int(extracted_val)
+                    all_tables = await _all_franchise_tables()
+                    for row in all_tables:
+                        if row["number"] == num_mesa:
+                            table = dict(row)
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                            table["is_new_session"] = True
+                            return table
+                except (ValueError, TypeError):
+                    pass
+
+            # ── FALLBACK: buscar por nombre de mesa (ej: "Estoy en Mesa 8-1") ──
+            # Cubre casos donde "8-1" es el nombre, no "restaurante 8, mesa 1"
+            name_match = re.search(r'estoy en\s+(.+?)(?:\n|$)', clean_lower)
+            if name_match:
+                candidate = name_match.group(1).strip()
                 all_tables = await _all_franchise_tables()
                 for row in all_tables:
-                    if row["number"] == num_mesa:
+                    if row["name"].lower() == candidate:
                         table = dict(row)
-                        with _bypass_tenant("agent.detect_table_context: create session legacy"):
-                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
                         table["is_new_session"] = True
                         return table
-            except (ValueError, TypeError):
-                pass
-
-        # ── FALLBACK: buscar por nombre de mesa (ej: "Estoy en Mesa 8-1") ──
-        # Cubre casos donde "8-1" es el nombre, no "restaurante 8, mesa 1"
-        name_match = re.search(r'estoy en\s+(.+?)(?:\n|$)', clean_lower)
-        if name_match:
-            candidate = name_match.group(1).strip()
-            all_tables = await _all_franchise_tables()
-            for row in all_tables:
-                if row["name"].lower() == candidate:
-                    table = dict(row)
-                    with _bypass_tenant("agent.detect_table_context: create session by name"):
-                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
-                    table["is_new_session"] = True
-                    return table
 
     return None
 
@@ -347,16 +354,15 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
-            log.exception("nps_clear_waiting_failed", phone=phone, bot_number=bot_number)
+            log.exception("nps_clear_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
         try:
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
+            async with _tenant_conn() as conn:
                 await conn.execute(
                     "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
                     phone, bot_number
                 )
         except Exception:
-            log.exception("nps_delete_conversation_failed", phone=phone, bot_number=bot_number)
+            log.exception("nps_delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
         return "¡Entendido! No hay problema. ¡Gracias por visitarnos y esperamos verte pronto! 😊"
 
     if state["state"] == "waiting_score":
@@ -370,13 +376,23 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             return "Por favor responde con un número del 1 al 5 ⭐"
 
         score = int(nums[0])
-        await state_store.nps_set(phone, bot_number, {"state": "waiting_comment", "score": score})
+
+        # Acquire transition lock to prevent race condition where two workers both
+        # process the score simultaneously (Regla 9 — NPS multi-worker race condition).
+        _nps_lock_token = await state_store.nps_transition_lock_acquire(phone, bot_number)
+        if _nps_lock_token is None:
+            # Another worker is processing this transition — stay silent
+            return ""
+        try:
+            await state_store.nps_set(phone, bot_number, {"state": "waiting_comment", "score": score})
+        finally:
+            await state_store.nps_transition_lock_release(phone, bot_number, _nps_lock_token)
 
         if score <= 3:
             try:
                 await db.db_save_nps_pending(phone, bot_number, score)
             except Exception:
-                log.exception("nps_save_pending_failed", phone=phone, bot_number=bot_number)
+                log.exception("nps_save_pending_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
             return (
                 f"Gracias por tu honestidad 🙏 Tu opinión es muy valiosa para nosotros.\n\n"
                 f"¿Nos podrías contar qué podríamos mejorar? Tu comentario llega directo al equipo."
@@ -385,27 +401,26 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
             try:
                 await db.db_save_nps_response(phone, bot_number, score, "")
             except Exception:
-                log.exception("nps_save_response_failed", phone=phone, bot_number=bot_number, score=score)
+                log.exception("nps_save_response_failed", phone=_ofuscar_phone(phone), bot_number=bot_number, score=score)
             await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
             await state_store.nps_mark_done(phone, bot_number)
             try:
                 await db.db_clear_nps_waiting(phone, bot_number)
             except Exception:
-                log.exception("nps_clear_waiting_failed", phone=phone, bot_number=bot_number)
+                log.exception("nps_clear_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
             maps_msg = ""
             if google_maps_url:
                 maps_msg = f"\n\n¿Te animas a dejarnos una reseña en Google? Nos ayuda muchísimo 🌟\n{google_maps_url}"
 
             try:
-                pool = await db.get_pool()
-                async with pool.acquire() as conn:
+                async with _tenant_conn() as conn:
                     await conn.execute(
                         "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
                         phone, bot_number
                     )
             except Exception:
-                log.exception("nps_delete_conversation_failed", phone=phone, bot_number=bot_number)
+                log.exception("nps_delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
             return (
                 f"¡Muchas gracias! Nos alegra mucho que hayas tenido una gran experiencia 😊"
@@ -419,28 +434,27 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
         try:
             updated = await db.db_update_nps_comment(phone, bot_number, comment)
         except Exception:
-            log.exception("nps_update_comment_failed", phone=phone, bot_number=bot_number)
+            log.exception("nps_update_comment_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
         if not updated:
             try:
                 await db.db_save_nps_response(phone, bot_number, score, comment)
             except Exception:
-                log.exception("nps_save_response_failed", phone=phone, bot_number=bot_number)
+                log.exception("nps_save_response_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
         await state_store.nps_set(phone, bot_number, {"state": "cooldown"}, ttl_seconds=_NPS_COOLDOWN_TTL)
         await state_store.nps_mark_done(phone, bot_number)
         try:
             await db.db_clear_nps_waiting(phone, bot_number)
         except Exception:
-            log.exception("nps_clear_waiting_failed", phone=phone, bot_number=bot_number)
+            log.exception("nps_clear_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
         try:
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
+            async with _tenant_conn() as conn:
                 await conn.execute(
                     "DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
                     phone, bot_number
                 )
         except Exception:
-            log.exception("nps_delete_conversation_failed", phone=phone, bot_number=bot_number)
+            log.exception("nps_delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
         return (
             "¡Gracias por tu comentario! Lo tomaremos muy en cuenta para mejorar. "
@@ -453,17 +467,17 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
 async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
     # Idempotency guards: skip if NPS is already active, in cooldown, or done within 12h
     if await state_store.nps_is_done(phone, bot_number):
-        log.info("nps_trigger_skipped_done", phone=phone, bot_number=bot_number)
+        log.info("nps_trigger_skipped_done", phone=_ofuscar_phone(phone), bot_number=bot_number)
         return
     if await state_store.nps_get(phone, bot_number) is not None:
-        log.info("nps_trigger_skipped_active", phone=phone, bot_number=bot_number)
+        log.info("nps_trigger_skipped_active", phone=_ofuscar_phone(phone), bot_number=bot_number)
         return
     await state_store.nps_set(phone, bot_number, {"state": "waiting_score", "score": 0})
     try:
         await db.db_save_nps_waiting(phone, bot_number)
     except Exception:
-        log.exception("nps_save_waiting_failed", phone=phone, bot_number=bot_number)
-    log.info("nps.triggered", phone=phone, bot_number=bot_number)
+        log.exception("nps_save_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+    log.info("nps.triggered", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
 
 # ── Module restriction rules ──────────────────────────────────────────────────
@@ -839,7 +853,7 @@ async def _validate_tool_call(
 
     # 1. Context mismatch — salon tool in external mode (or vice versa)
     if tool_name in _SALON_ONLY_TOOLS and not table_context:
-        log.warning("guard.salon_tool_without_table", tool=tool_name, phone=phone)
+        log.warning("guard.salon_tool_without_table", tool=tool_name, phone=_ofuscar_phone(phone))
         # CRITICAL: discard the LLM reply — it may have hallucinated a table session.
         # Replace with a context-appropriate message that guides the real flow.
         base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
@@ -852,17 +866,17 @@ async def _validate_tool_call(
         return None, safe_reply, {}
 
     if tool_name in _EXTERNAL_ONLY_TOOLS and table_context:
-        log.warning("guard.external_tool_at_table", tool=tool_name, phone=phone)
+        log.warning("guard.external_tool_at_table", tool=tool_name, phone=_ofuscar_phone(phone))
         return None, reply, {}
 
     # 2. Empty items on order tools
     if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
         items = tool_input.get("items", [])
         if not isinstance(items, list):
-            log.warning("guard.order_tool_items_not_list", tool=tool_name, phone=phone, items_type=type(items).__name__)
+            log.warning("guard.order_tool_items_not_list", tool=tool_name, phone=_ofuscar_phone(phone), items_type=type(items).__name__)
             return None, reply or "¿Qué te gustaría ordenar? Cuéntame los platos que deseas.", {}
         if not items:
-            log.warning("guard.order_tool_empty_items", tool=tool_name, phone=phone)
+            log.warning("guard.order_tool_empty_items", tool=tool_name, phone=_ofuscar_phone(phone))
             return None, reply or "¿Qué te gustaría ordenar? Cuéntame los platos que deseas.", {}
 
     # 3. Duplicate order detection — same items within 60 seconds
@@ -873,7 +887,7 @@ async def _validate_tool_call(
             f"order_dedup:{phone}:{bot_number}:{item_key}", max_requests=1, window_seconds=60
         )
         if not is_ok:
-            log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=phone, fingerprint=item_key)
+            log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=_ofuscar_phone(phone), fingerprint=item_key)
             return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
 
     # 3b. Confirmation guard for place_order on first order at table.
@@ -894,7 +908,7 @@ async def _validate_tool_call(
                 ) if items else "tu pedido"
                 log.info(
                     "guard.place_order_awaiting_confirmation",
-                    phone=phone, items=items_label
+                    phone=_ofuscar_phone(phone), items=items_label
                 )
                 return None, f"¿Confirmas tu pedido de {items_label}? 😊", {}
 
@@ -902,14 +916,14 @@ async def _validate_tool_call(
     if tool_name == "create_delivery_order":
         address = tool_input.get("address", "").strip()
         if not address:
-            log.warning("guard.delivery_no_address", phone=phone)
+            log.warning("guard.delivery_no_address", phone=_ofuscar_phone(phone))
             return None, reply + "\n\nNecesito tu dirección de entrega para procesar el pedido.", {}
 
     # 5. Pickup/Delivery without payment method
     if tool_name in ("create_delivery_order", "create_pickup_order"):
         pm = tool_input.get("payment_method", "").strip()
         if not pm:
-            log.warning("guard.order_no_payment", tool=tool_name, phone=phone)
+            log.warning("guard.order_no_payment", tool=tool_name, phone=_ofuscar_phone(phone))
             return None, reply or "¿Con qué método de pago prefieres? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)", {}
 
     # 6. Reservation with missing required fields
@@ -918,37 +932,37 @@ async def _validate_tool_call(
         if missing:
             missing_labels = {"name": "nombre", "date": "fecha", "time": "hora"}
             missing_str = " y ".join(missing_labels.get(f, f) for f in missing)
-            log.warning("guard.reservation_incomplete", missing=missing, phone=phone)
+            log.warning("guard.reservation_incomplete", missing=missing, phone=_ofuscar_phone(phone))
             return None, reply or f"Para completar tu reserva necesito el {missing_str}.", {}
         try:
             _guests = int(tool_input.get("guests", 1))
             if _guests <= 0:
                 raise ValueError("guests must be positive")
         except (ValueError, TypeError):
-            log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=phone)
+            log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=_ofuscar_phone(phone))
             return None, reply or "¿Cuántas personas serán para la reserva?", {}
 
     # 7. send_dish_card — validate feature flag, dish existence, and image availability
     if tool_name == "send_dish_card":
         feats = features or {}
         if not isinstance(tool_input, dict):
-            log.warning("guard.send_dish_card_input_not_dict", phone=phone)
+            log.warning("guard.send_dish_card_input_not_dict", phone=_ofuscar_phone(phone))
             return None, reply, {}
         if not feats.get("bot_visual_menu"):
-            log.info("guard.send_dish_card_flag_off", phone=phone, bot_number=bot_number)
+            log.info("guard.send_dish_card_flag_off", phone=_ofuscar_phone(phone), bot_number=bot_number)
             return None, reply + "\n\n(Las fotos de platos no están disponibles en este restaurante.)", {}
         dish_name = tool_input.get("dish_name", "")
         if not isinstance(dish_name, str) or not dish_name.strip() or len(dish_name) > 200:
-            log.warning("guard.send_dish_card_invalid_name", dish_name=dish_name, phone=phone)
+            log.warning("guard.send_dish_card_invalid_name", dish_name=dish_name, phone=_ofuscar_phone(phone))
             return None, reply, {}
         # Use find_dish (Regla 12 — same matching logic, no shortcuts)
         from app.services.orders import find_dish  # noqa: PLC0415
         matched_dish = await find_dish(dish_name.strip(), bot_number)
         if matched_dish is None:
-            log.warning("guard.send_dish_card_dish_not_found", dish_name=dish_name, phone=phone)
+            log.warning("guard.send_dish_card_dish_not_found", dish_name=dish_name, phone=_ofuscar_phone(phone))
             return None, reply, {}
         if not matched_dish.get("image_url"):
-            log.info("guard.send_dish_card_no_image", dish_name=dish_name, phone=phone)
+            log.info("guard.send_dish_card_no_image", dish_name=dish_name, phone=_ofuscar_phone(phone))
             return None, reply, {}
         # Inject resolved dish into tool_input so execute_action skips a second DB lookup
         tool_input = {**tool_input, "_resolved_dish": matched_dish}
@@ -960,17 +974,17 @@ async def _validate_tool_call(
         value = str(tool_input.get("value", "")).strip()
         reason = str(tool_input.get("reason", "")).strip()
         if key not in VALID_PREFERENCE_KEYS:
-            log.warning("guard.remember_invalid_key", key=key, phone=phone)
+            log.warning("guard.remember_invalid_key", key=key, phone=_ofuscar_phone(phone))
             return None, reply, {}
         if not value or not reason:
-            log.warning("guard.remember_empty_value_or_reason", phone=phone)
+            log.warning("guard.remember_empty_value_or_reason", phone=_ofuscar_phone(phone))
             return None, reply, {}
         # Rate limit: max 3 remember calls per phone per conversation window (10 min)
         ok = await state_store.rate_limit_check(
             f"remember:{phone}:{bot_number}", max_requests=3, window_seconds=600
         )
         if not ok:
-            log.warning("guard.remember_rate_limited", phone=phone)
+            log.warning("guard.remember_rate_limited", phone=_ofuscar_phone(phone))
             return None, reply, {}
 
     return tool_name, reply, tool_input
@@ -1000,9 +1014,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     key=pref["key"],
                     value=pref["value"],
                 )
-                log.info("customer.preference_saved", phone=phone, restaurant_id=restaurant_id, key=pref["key"])
+                log.info("customer.preference_saved", phone=_ofuscar_phone(phone), restaurant_id=restaurant_id, key=pref["key"])
         except Exception:
-            log.exception("customer.preference_save_failed", phone=phone)
+            log.exception("customer.preference_save_failed", phone=_ofuscar_phone(phone))
         return reply   # Reply flows through unchanged
 
     # ── Early: send_dish_card (sends image directly; fallback to text on failure) ──
@@ -1018,7 +1032,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             f"mesio:dish_img:{phone}:{bot_number}", max_requests=3, window_seconds=60
         )
         if not ok:
-            log.warning("send_dish_card.rate_limited", phone=phone, bot_number=bot_number)
+            log.warning("send_dish_card.rate_limited", phone=_ofuscar_phone(phone), bot_number=bot_number)
             # Fallback: return the text reply Claude already prepared
             return reply or f"Te recomiendo {dish_name}" + (f" - {_fmt_cop(price)}" if price else "")
 
@@ -1039,12 +1053,12 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     phone_id=phone_id,
                 )
                 if sent:
-                    log.info("send_dish_card.image_sent", dish=dish_name, phone=phone)
+                    log.info("send_dish_card.image_sent", dish=dish_name, phone=_ofuscar_phone(phone))
                     # Return empty string — the image IS the response; Claude's text reply
                     # is optional but we return it so the conversation stays natural.
                     return reply or ""
             except Exception:
-                log.exception("send_dish_card.image_send_error", dish=dish_name, phone=phone)
+                log.exception("send_dish_card.image_send_error", dish=dish_name, phone=_ofuscar_phone(phone))
 
         # Fallback: text description (Regla 8 — never silence the client)
         price_str = _fmt_cop(price) if price else ""
@@ -1054,7 +1068,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             fallback += f" - {price_str}"
         if desc:
             fallback += f"\n{desc}"
-        log.warning("send_dish_card.fallback_text", dish=dish_name, phone=phone, bot_number=bot_number)
+        log.warning("send_dish_card.fallback_text", dish=dish_name, phone=_ofuscar_phone(phone), bot_number=bot_number)
         return reply or fallback
 
     try:
@@ -1071,10 +1085,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     continue
                 res = await orders.add_to_cart(phone, name, qty, bot_number)
                 if res["success"]:
-                    log.info("cart.item_added", dish=res['dish']['name'], qty=qty, phone=phone)
+                    log.info("cart.item_added", dish=res['dish']['name'], qty=qty, phone=_ofuscar_phone(phone))
                 else:
                     cart_errors.append(name)
-                    log.warning("cart.item_not_found", name=name, phone=phone)
+                    log.warning("cart.item_not_found", name=name, phone=_ofuscar_phone(phone))
 
             if cart_errors and len(cart_errors) == len([i for i in items if i.get("name")]):
                 names = ", ".join(cart_errors)
@@ -1087,7 +1101,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         # ── Salon actions (order, bill, waiter) ───────────────────────────
         elif action == "order":
             if not table_context:
-                log.warning("agent.order_without_table_context", phone=phone)
+                log.warning("agent.order_without_table_context", phone=_ofuscar_phone(phone))
                 base_url = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
                 menu_url = f"{base_url}/menu?bot={bot_number}" if base_url else f"/menu?bot={bot_number}"
                 return f"Para tomar tu pedido, necesito saber en qué mesa estás. ¿En qué número de mesa te encuentras?\n\nSi prefieres Domicilio o Recoger, usa nuestro menú digital: {menu_url}"
@@ -1123,7 +1137,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     phone=phone, bot_number=bot_number, alert_type=action,
                     message=alert_message, table_id=table_id, table_name=table_name,
                 )
-                log.info("waiter_alert_no_table", alert_type=action, phone=phone)
+                log.info("waiter_alert_no_table", alert_type=action, phone=_ofuscar_phone(phone))
 
         # ── External actions (delivery, pickup, change_payment) ───────────
         elif action in ("delivery", "pickup", "change_payment"):
@@ -1204,26 +1218,28 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         # ── End session (shared, both flows) ──────────────────────────────
         elif action == "end_session":
             if session_state.get("has_order") and not session_state.get("order_delivered"):
-                log.warning("agent.end_session_blocked_order_pending", phone=phone)
+                log.warning("agent.end_session_blocked_order_pending", phone=_ofuscar_phone(phone))
                 return "Tu pedido aún está en preparación. Seguimos aquí por si necesitas algo más."
             if session_state.get("order_delivered"):
                 if await db.db_has_pending_invoice(phone):
-                    log.warning("agent.end_session_blocked_invoice_pending", phone=phone)
+                    log.warning("agent.end_session_blocked_invoice_pending", phone=_ofuscar_phone(phone))
                     return "Tu cuenta aún está pendiente de pago. El mesero llegará en un momento."
             await db.db_close_session(phone=phone, bot_number=bot_number,
                                       reason="client_goodbye", closed_by_username="")
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
-                await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
-                                   phone, bot_number)
-            log.info("agent.session_closed", phone=phone)
+            try:
+                async with _tenant_conn() as conn:
+                    await conn.execute("DELETE FROM conversations WHERE phone=$1 AND bot_number=$2",
+                                       phone, bot_number)
+            except Exception:
+                log.exception("end_session.delete_conversation_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            log.info("agent.session_closed", phone=_ofuscar_phone(phone))
             await trigger_nps(phone, bot_number, (restaurant_obj or {}).get("name", ""))
 
     except InsufficientStockError as e:
-        log.warning("execute_action.insufficient_stock", sku=str(e), phone=phone, bot_number=bot_number)
+        log.warning("execute_action.insufficient_stock", sku=str(e), phone=_ofuscar_phone(phone), bot_number=bot_number)
         return f"Lo siento, '{e}' ya no está disponible en el inventario. ¿Te gustaría elegir otra opción?"
     except Exception:
-        log.exception("execute_action_failed", action=action, phone=phone, bot_number=bot_number)
+        log.exception("execute_action_failed", action=action, phone=_ofuscar_phone(phone), bot_number=bot_number)
 
     return reply
 
@@ -1258,7 +1274,7 @@ async def _handle_nps_guard(user_phone: str, bot_number: str,
         return False
     if len(user_message_clean.strip()) > 30:
         await state_store.nps_delete(user_phone, bot_number)
-        log.info("nps_done_cleared_new_order", phone=user_phone, bot_number=bot_number)
+        log.info("nps_done_cleared_new_order", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
         return False   # cleared — let the normal flow proceed
     return True        # short message while NPS done and no session → stay silent
 
@@ -1303,7 +1319,7 @@ async def _try_nps_active_flow(user_phone: str, bot_number: str,
         try:
             await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
         except Exception:
-            log.exception("nps_close_session_failed", phone=user_phone, bot_number=bot_number)
+            log.exception("nps_close_session_failed", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
 
     return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
 
@@ -1420,8 +1436,7 @@ async def _build_enriched_user_message(
     in_transit_note = ""
     if not table_context:
         try:
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
+            async with _tenant_conn() as conn:
                 transit_row = await conn.fetchrow(
                     """SELECT id, status FROM orders
                        WHERE phone=$1 AND bot_number=$2
@@ -1436,7 +1451,7 @@ async def _build_enriched_user_message(
                     f"Si el cliente quiere pedir más, debe hacer un PEDIDO NUEVO completo.]"
                 )
         except Exception:
-            log.exception("transit_check_failed", phone=user_phone, bot_number=bot_number)
+            log.exception("transit_check_failed", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
 
     if table_context:
         table_note = f"\n[MESA: {table_context['name']}]"
@@ -1544,7 +1559,7 @@ async def _call_llm_and_execute(
             profile = await get_profile(restaurant_id, user_phone)
             customer_ctx = serialize_for_prompt(profile)
     except Exception:
-        log.exception("customer.profile_load_failed", phone=user_phone)
+        log.exception("customer.profile_load_failed", phone=_ofuscar_phone(user_phone))
         customer_ctx = ""  # Graceful fallback — chat proceeds without memory
 
     # Load order history for personalized recommendations (Fase 5a)
@@ -1560,7 +1575,7 @@ async def _call_llm_and_execute(
                 restaurant_id=_rid,
             )
     except Exception:
-        log.exception("customer.order_history_load_failed", phone=user_phone)
+        log.exception("customer.order_history_load_failed", phone=_ofuscar_phone(user_phone))
         order_history = []  # Graceful fallback — chat proceeds without history block
 
     sys_prompt = await build_system_prompt(
@@ -1578,7 +1593,7 @@ async def _call_llm_and_execute(
             tools=tools,
         )
     except Exception:
-        log.exception("call_llm_and_execute.claude_error", phone=user_phone, bot_number=bot_number)
+        log.exception("call_llm_and_execute.claude_error", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
         return "Lo siento, tengo un problema técnico. Por favor intenta de nuevo en un momento.", {}
 
     reply = result["reply"]
@@ -1629,7 +1644,7 @@ async def _call_llm_and_execute(
     assistant_message = (assistant_message or "").replace("[LINK_MENU]", menu_url)
 
     if not assistant_message.strip():
-        log.warning("call_claude.empty_reply", bot_number=bot_number, phone=user_phone)
+        log.warning("call_claude.empty_reply", bot_number=bot_number, phone=_ofuscar_phone(user_phone))
         assistant_message = "Disculpa, no te entendí bien. ¿Puedes repetirme lo que necesitas?"
 
     return assistant_message, routing_context
@@ -1685,23 +1700,25 @@ async def _resolve_branch_id(
 
     if not branch_id:
         try:
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
-                active_order = await conn.fetchrow(
-                    "SELECT bot_number FROM orders "
-                    "WHERE phone=$1 AND status NOT IN ('entregado', 'cancelado') "
-                    "ORDER BY created_at DESC LIMIT 1",
-                    user_phone,
-                )
-                if active_order and active_order["bot_number"] != bot_number:
-                    b_id = await conn.fetchval(
-                        "SELECT id FROM restaurants WHERE whatsapp_number=$1",
-                        active_order["bot_number"],
+            # Cross-tenant: lookup active order by phone across all restaurants to
+            # detect branch routing. Ownership validated downstream via bot_number match.
+            with _bypass_tenant("agent._resolve_branch_id: cross-tenant order lookup by phone to detect branch routing"):
+                async with _tenant_conn() as conn:
+                    active_order = await conn.fetchrow(
+                        "SELECT bot_number FROM orders "
+                        "WHERE phone=$1 AND status NOT IN ('entregado', 'cancelado') "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        user_phone,
                     )
-                    if b_id:
-                        branch_id = b_id
+                    if active_order and active_order["bot_number"] != bot_number:
+                        b_id = await conn.fetchval(
+                            "SELECT id FROM restaurants WHERE whatsapp_number=$1",
+                            active_order["bot_number"],
+                        )
+                        if b_id:
+                            branch_id = b_id
         except Exception:
-            log.exception("branch_detection_failed", phone=user_phone, bot_number=bot_number)
+            log.exception("branch_detection_failed", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
 
     return branch_id
 

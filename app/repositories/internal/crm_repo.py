@@ -350,8 +350,11 @@ async def db_record_inbound_interaction(
                 pid, new_stage,
             )
             log.info("crm.inbound_message_saved", prospect_id=pid, new_stage=new_stage)
-    except Exception as e:
-        log.error("crm.inbound_hook_failed", error=str(e))
+    except Exception:
+        # Do NOT re-raise: the WhatsApp webhook must not fail due to CRM errors.
+        # log.exception captures the full stacktrace for debugging lost prospects.
+        log.exception("crm.inbound_hook_failed", phone_suffix=phone[-4:] if phone else "?", wa_message_id=wa_message_id)
+        log.error("crm.inbound_lost", phone_suffix=phone[-4:] if phone else "?", message_preview=message[:100] if message else "")
 
 
 # ── TEMPLATES ─────────────────────────────────────────────────────────────────

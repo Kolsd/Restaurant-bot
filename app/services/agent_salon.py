@@ -14,11 +14,19 @@ from app.services.logging import get_logger
 from app.services import state_store
 from app.services.money import to_decimal, quantize_money, money_mul, money_sum, ZERO
 from app.repositories.orders_repo import InsufficientStockError
+from app.services.tenant_db import tenant_connection as _tenant_conn
 
 log = get_logger(__name__)
 
 
 # ─── Utility (self-contained to avoid circular import) ────────────────────────
+
+def _ofuscar_phone(p: str) -> str:
+    """Return obfuscated phone for log contexts: '***XXXX' (last 4 digits only)."""
+    if not p:
+        return "***"
+    return "***" + p[-4:] if len(p) >= 4 else "***"
+
 
 def _fmt_cop(n: float) -> str:
     """Formatea número como $84.000 sin decimales."""
@@ -333,7 +341,7 @@ async def handle_checkout_flow(
         if n is None or n < 1 or n > 20:
             return "¿Cuántas personas van a dividir la cuenta? Dime el número (ej: 2, 3...)."
 
-        state["tip_amount"] = 0.0
+        state["tip_amount"] = "0"  # JSON boundary: stored as str, read via to_decimal()
 
         session_items = state.get("items", [])
         item_amounts = _parse_item_assignments(msg, session_items, state["subtotal"]) if session_items else None
@@ -350,7 +358,7 @@ async def handle_checkout_flow(
             state["check_amounts"] = None
             state["payments"] = [[] for _ in range(n)]
 
-        subtotal = state["subtotal"]
+        subtotal = to_decimal(state["subtotal"])
         tip_10 = _resolve_tip("percent", 10, subtotal)
         tip_15 = _resolve_tip("percent", 15, subtotal)
         tip_20 = _resolve_tip("percent", 20, subtotal)
@@ -360,11 +368,11 @@ async def handle_checkout_flow(
 
         lines = [
             f"El equipo de cocina y tu mesero estuvieron felices de atenderte hoy 👨‍🍳",
-            f"Subtotal: {_fmt_cop(subtotal)}",
+            f"Subtotal: {_fmt_cop(float(subtotal))}",  # JSON boundary: display only
             f"¿Deseas agregar una propina?",
-            f"  1) 10% → {_fmt_cop(tip_10)}",
-            f"  2) 15% → {_fmt_cop(tip_15)}  ⭐ sugerida",
-            f"  3) 20% → {_fmt_cop(tip_20)}",
+            f"  1) 10% → {_fmt_cop(float(tip_10))}",
+            f"  2) 15% → {_fmt_cop(float(tip_15))}  ⭐ sugerida",
+            f"  3) 20% → {_fmt_cop(float(tip_20))}",
             f"  4) Otro valor",
             f"  5) Ninguna",
         ]
@@ -404,7 +412,7 @@ async def handle_checkout_flow(
         if tip is None:
             return "Elige una opción del 1 al 5, o escribe el valor de propina que deseas dejar."
 
-        state["tip_amount"] = float(quantize_money(tip))  # JSON boundary
+        state["tip_amount"] = str(quantize_money(tip))  # JSON boundary: Decimal→str, read via to_decimal()
         if state.get("wants_factura") and not state.get("factura_name"):
             state["step"] = "asking_factura_nit"
             await state_store.checkout_set(phone, bot_number, state)
@@ -425,7 +433,7 @@ async def handle_checkout_flow(
         half_subtotal = quantize_money(money_mul(subtotal_d, to_decimal("0.5")))
         if val_d > half_subtotal:
             return f"La propina no puede superar el 50% del subtotal ({_fmt_cop(float(half_subtotal))}). ¿Cuánto deseas dejar?"  # JSON boundary
-        state["tip_amount"] = float(quantize_money(val_d))  # JSON boundary
+        state["tip_amount"] = str(quantize_money(val_d))  # JSON boundary: Decimal→str, read via to_decimal()
         if state.get("wants_factura") and not state.get("factura_name"):
             state["step"] = "asking_factura_nit"
             await state_store.checkout_set(phone, bot_number, state)
@@ -490,8 +498,8 @@ async def handle_checkout_flow(
                 m = pmts[0]["method"].capitalize()
                 a = _fmt_cop(pmts[0]["amount"])
                 lines.append(f"  Parte {i+1}: {a} · {m}")
-        if state["tip_amount"] > 0:
-            lines.append(f"  Propina: {_fmt_cop(state['tip_amount'])}")
+        if to_decimal(state["tip_amount"]) > ZERO:
+            lines.append(f"  Propina: {_fmt_cop(float(to_decimal(state['tip_amount'])))}")  # JSON boundary: display only
         lines.append(f"  Total: {_fmt_cop(total_with_tip)}")
         lines.append("")
         if needs_proof:
@@ -502,7 +510,7 @@ async def handle_checkout_flow(
         try:
             created_check_ids = await _save_checkout_proposal(phone, bot_number, state, table_context)
         except Exception:
-            log.exception("checkout_proposal_save_failed", phone=phone, bot_number=bot_number)
+            log.exception("checkout_proposal_save_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
             await state_store.checkout_delete(phone, bot_number)
             return "Hubo un problema al procesar tu pago. Por favor pide ayuda al mesero."
 
@@ -562,7 +570,7 @@ async def execute_salon_action(
     if action == "order":
         cart = await db.db_get_cart(phone, bot_number)
         if not cart or not cart.get("items"):
-            log.warning("order_empty_cart", phone=phone, items=parsed.get("items"), action=action)
+            log.warning("order_empty_cart", phone=_ofuscar_phone(phone), items=parsed.get("items"), action=action)
             return reply
 
         cart_total    = await orders.get_cart_total(phone, bot_number)
@@ -583,7 +591,7 @@ async def execute_salon_action(
                 bar_enabled    = bool(features.get("bar_enabled", False))
                 bar_categories = list(features.get("bar_categories", []))
         except Exception:
-            log.exception("bar_routing_features_failed", phone=phone, bot_number=bot_number)
+            log.exception("bar_routing_features_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
         if bar_enabled and bar_categories:
             kitchen_items = [i for i in cart_items if i.get("category", "") not in bar_categories]
@@ -643,8 +651,7 @@ async def execute_salon_action(
                 except Exception:
                     log.exception("bar_order_save_failed", order_id=bar_oid, base_order_id=base_order_id)
                     try:
-                        pool = await db.get_pool()
-                        async with pool.acquire() as _conn_cancel:
+                        async with _tenant_conn() as _conn_cancel:
                             await _conn_cancel.execute(
                                 "UPDATE table_orders SET status='cancelled' WHERE id=$1 OR base_order_id=$1",
                                 order_id,
@@ -660,8 +667,7 @@ async def execute_salon_action(
             from datetime import timezone as _tz
             _dup_items_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in cart_items)
             try:
-                _pool_dup = await db.get_pool()
-                async with _pool_dup.acquire() as _conn_dup:
+                async with _tenant_conn() as _conn_dup:
                     _recent = await _conn_dup.fetchrow(
                         "SELECT items, created_at FROM table_orders "
                         "WHERE base_order_id=$1 ORDER BY created_at DESC LIMIT 1",
@@ -787,8 +793,7 @@ async def execute_salon_action(
                     except Exception:
                         log.exception("bar_order_save_failed", order_id=bar_oid, base_order_id=base_order_id)
                         try:
-                            pool = await db.get_pool()
-                            async with pool.acquire() as _conn_cancel:
+                            async with _tenant_conn() as _conn_cancel:
                                 await _conn_cancel.execute(
                                     "UPDATE table_orders SET status='cancelled' WHERE id=$1",
                                     order_id,
@@ -808,14 +813,13 @@ async def execute_salon_action(
                 log.warning(
                     "inventory_insufficient_table_order",
                     sku=e.sku, requested=e.requested, available=e.available,
-                    phone=phone, bot_number=bot_number,
+                    phone=_ofuscar_phone(phone), bot_number=bot_number,
                 )
                 # Cancel the order(s) that were already saved so they do NOT reach the kitchen
                 _saved_order_id = locals().get("order_id")
                 if _saved_order_id:
                     try:
-                        pool = await db.get_pool()
-                        async with pool.acquire() as _conn_cancel:
+                        async with _tenant_conn() as _conn_cancel:
                             await _conn_cancel.execute(
                                 "UPDATE table_orders SET status='cancelled' WHERE id=$1 OR base_order_id=$1",
                                 _saved_order_id,
@@ -826,15 +830,15 @@ async def execute_salon_action(
                 try:
                     await orders.clear_cart(phone, bot_number)
                 except Exception:
-                    log.exception("cart_clear_failed_table_order", phone=phone, bot_number=bot_number)
+                    log.exception("cart_clear_failed_table_order", phone=_ofuscar_phone(phone), bot_number=bot_number)
                 return f"Lo siento, '{e.sku}' no está disponible en este momento. ¿Te gustaría ordenar algo diferente?"
             except Exception:
-                log.exception("inventory_deduction_failed_table_order", phone=phone, bot_number=bot_number)
+                log.exception("inventory_deduction_failed_table_order", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
         try:
             await orders.clear_cart(phone, bot_number)
         except Exception:
-            log.exception("cart_clear_failed_table_order", phone=phone, bot_number=bot_number)
+            log.exception("cart_clear_failed_table_order", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
         await db.db_session_mark_order(phone, bot_number)
         if not _skip_inventory:
@@ -879,8 +883,7 @@ async def execute_salon_action(
         try:
             base_order_id = await db.db_get_base_order_id(table_id)
             if base_order_id:
-                pool = await db.get_pool()
-                async with pool.acquire() as conn:
+                async with _tenant_conn() as conn:
                     all_rows = await conn.fetch(
                         "SELECT total, items FROM table_orders WHERE base_order_id=$1",
                         base_order_id,
@@ -903,11 +906,11 @@ async def execute_salon_action(
                     _checkout_state: dict = {
                         "step": "asking_split",
                         "base_order_id": base_order_id,
-                        "subtotal": total,
+                        "subtotal": str(quantize_money(to_decimal(total))),  # JSON boundary: Decimal→str
                         "items": all_items,
                         "split_count": 1,
                         "payments": [],
-                        "tip_amount": 0.0,
+                        "tip_amount": "0",  # JSON boundary: stored as str, read via to_decimal()
                         "requires_proof": False,
                         "wants_factura": _wants_fac,
                         "factura_name": "",
@@ -970,7 +973,7 @@ async def execute_salon_action(
 
                     return "¡Claro! ¿Cómo van a pagar hoy? ¿Todo junto o lo dividimos en varias partes?"
         except Exception:
-            log.exception("checkout_start_failed_fallback_waiter", phone=phone, bot_number=bot_number)
+            log.exception("checkout_start_failed_fallback_waiter", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
         # Fallback: waiter_alert
         payment_info = parsed.get("payment_method", "") or parsed.get("notes", "")

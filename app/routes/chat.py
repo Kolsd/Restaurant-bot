@@ -6,7 +6,7 @@ import hashlib
 import httpx
 import traceback
 from collections import defaultdict
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from anthropic import AsyncAnthropic
@@ -15,6 +15,7 @@ from app.services import database as db
 from app.repositories import inbox_repo, conversations_repo
 from app.services.logging import get_logger
 from app.services.state_store import rate_limit_check
+from app.routes.deps import get_current_user
 
 log = get_logger(__name__)
 
@@ -76,12 +77,47 @@ async def reset_chat(request: ResetRequest):
     return {"success": True, "message": f"Conversacion de {request.phone} reiniciada"}
 
 @router.get("/media/{media_id}")
-async def get_whatsapp_media(media_id: str, bot: str = ""):
-    """Descarga la imagen encriptada desde Meta y la muestra en el navegador del Cajero"""
-    rest = await db.db_get_restaurant_by_phone(bot)
-    token = rest.get("wa_access_token") if rest else os.getenv("META_ACCESS_TOKEN")
+async def get_whatsapp_media(
+    media_id: str,
+    bot: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """
+    Descarga la imagen encriptada desde Meta y la muestra en el navegador del Cajero.
+
+    Requiere autenticación (Bearer token de admin/staff del tenant).
+    El parámetro `bot` es obligatorio y debe corresponder al tenant del usuario autenticado.
+    Rate limit: 60 req/min por usuario.
+    """
+    # ── Ownership: el bot_number debe pertenecer al tenant del usuario autenticado ──
+    if not bot:
+        raise HTTPException(status_code=400, detail="Parámetro bot requerido")
+
+    tenant_restaurant_id = user.get("restaurant_id") or user.get("branch_id")
+    if not tenant_restaurant_id:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    # Verificar que el bot_number pertenece al tenant (o a una sucursal suya)
+    from app.services.tenant_context import bypass_tenant_scope
+    with bypass_tenant_scope("media_proxy_ownership_check"):
+        tenant_rest = await db.db_get_restaurant_by_phone(bot)
+    if not tenant_rest:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    rest_id = tenant_rest["id"]
+    parent_id = tenant_rest.get("parent_restaurant_id")
+    if rest_id != tenant_restaurant_id and parent_id != tenant_restaurant_id:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    # ── Rate limit: 60 req/min por usuario ──────────────────────────────────────
+    user_key = user.get("username") or str(tenant_restaurant_id)
+    allowed = await rate_limit_check(f"media:{user_key}", max_requests=60, window_seconds=60)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    # ── Descargar desde Meta ─────────────────────────────────────────────────────
+    token = tenant_rest.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
     if not token:
-        token = os.getenv("WHATSAPP_TOKEN", "")
+        raise HTTPException(status_code=503, detail="Token de acceso no configurado")
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         headers = {"Authorization": f"Bearer {token}"}
@@ -303,7 +339,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     try:
                         await conversations_repo.db_update_restaurant_phone_id(restaurant["id"], phone_id)
                     except Exception:
-                        pass  # non-critical, next message will retry
+                        log.exception("chat.update_phone_id_failed", restaurant_id=restaurant["id"], phone_id=phone_id)
 
                 # 5. Ruta CRM — procesamiento inline (no requiere IA)
                 crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID")
@@ -327,7 +363,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     try:
                         await _send_wa_text(user_phone, "Un momento por favor, estoy procesando tu mensaje anterior.", phone_id, access_token)
                     except Exception:
-                        pass  # best-effort
+                        log.exception("chat.send_ratelimit_msg_failed", phone=user_phone)
                     continue
 
                 # 7. Extraer texto del mensaje

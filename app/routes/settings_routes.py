@@ -625,13 +625,23 @@ def _get_ai_client() -> Anthropic:
 
 
 @router.post("/api/ai/proxy")
-async def ai_proxy(payload: _AIProxyRequest, _user: str = Depends(require_auth)):
+async def ai_proxy(payload: _AIProxyRequest, request: Request, _user: str = Depends(require_auth)):
     """
     Proxy autenticado para llamadas al modelo de IA desde el dashboard.
     El ANTHROPIC_API_KEY vive solo en el servidor — nunca se expone al cliente.
     Requiere Bearer token de admin válido.
+    Rate limit: 20 req/min por usuario autenticado.
     """
-    max_tok = min(max(1, payload.max_tokens), 2000)  # clamp 1–2000
+    # ── Rate limit: 20 req/min por usuario ───────────────────────────────────────
+    rl_key = f"ai_proxy:{_user}"
+    allowed = await state_store.rate_limit_check(rl_key, max_requests=20, window_seconds=60)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Demasiadas solicitudes al proxy de IA. Espera un momento e intenta de nuevo.",
+        )
+
+    max_tok = min(max(1, payload.max_tokens), 1000)  # clamp 1–1000 (conservador)
     try:
         client = _get_ai_client()
         resp = client.messages.create(

@@ -279,43 +279,58 @@
 <script src="/static/js/mesio-utils.js"></script>
 <script>
   // ── Auth ────────────────────────────────────────────────────────────────────
-  let _adminKey = sessionStorage.getItem('mesio_admin_key') || '';
+  // _token is an opaque session token obtained via POST /api/internal/admin/login.
+  // The raw ADMIN_KEY is NEVER stored in sessionStorage — only the opaque token.
+  const SESSION_KEY = 'hq_session';
+  let _token = sessionStorage.getItem(SESSION_KEY) || sessionStorage.getItem('mesio_admin_key') || '';
 
-  function applyKey(key) {
-    _adminKey = key;
-    sessionStorage.setItem('mesio_admin_key', key);
+  function applyToken(token) {
+    _token = token;
+    sessionStorage.setItem(SESSION_KEY, token);
+    sessionStorage.setItem('mesio_admin_key', token); // compat alias for crm.js
     document.getElementById('auth-overlay').style.display = 'none';
     document.getElementById('app').style.display = '';
     loadAll();
   }
 
-  document.getElementById('auth-btn').addEventListener('click', () => {
+  document.getElementById('auth-btn').addEventListener('click', async () => {
     const val = document.getElementById('key-input').value.trim();
+    const errEl = document.getElementById('auth-error');
     if (!val) return;
-    // Try a quick ping to validate the key
-    fetch('/api/internal/analytics/overview', { headers: { 'Authorization': `Bearer ${val}` } })
-      .then(r => {
-        if (r.status === 401) {
-          document.getElementById('auth-error').style.display = 'block';
-        } else {
-          document.getElementById('auth-error').style.display = 'none';
-          applyKey(val);
-        }
-      })
-      .catch(() => { document.getElementById('auth-error').style.display = 'block'; });
+    try {
+      // Exchange raw ADMIN_KEY for opaque session token — raw key is never persisted.
+      const r = await fetch('/api/internal/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: val }),
+      });
+      if (!r.ok) {
+        errEl.style.display = 'block';
+        return;
+      }
+      const { token } = await r.json();
+      errEl.style.display = 'none';
+      applyToken(token);
+    } catch (_) {
+      errEl.style.display = 'block';
+    }
   });
 
   document.getElementById('key-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('auth-btn').click();
   });
 
-  if (_adminKey) applyKey(_adminKey);
+  if (_token) applyToken(_token);
 
   // ── Data helpers ────────────────────────────────────────────────────────────
   function apiGet(path) {
-    return fetch(path, { headers: { 'Authorization': `Bearer ${_adminKey}` } })
+    return fetch(path, { headers: { 'Authorization': `Bearer ${_token}` } })
       .then(r => {
-        if (r.status === 401) { sessionStorage.removeItem('mesio_admin_key'); location.reload(); }
+        if (r.status === 401) {
+          sessionStorage.removeItem(SESSION_KEY);
+          sessionStorage.removeItem('mesio_admin_key');
+          location.reload();
+        }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       });
@@ -526,7 +541,7 @@
 
   // Auto-refresh every 60 seconds
   setInterval(() => {
-    if (_adminKey) loadAll();
+    if (_token) loadAll();
   }, 60_000);
 </script>
 </body>

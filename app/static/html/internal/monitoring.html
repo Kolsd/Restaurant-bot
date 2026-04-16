@@ -505,10 +505,11 @@
   /* ── Constants ── */
   const POLL_INTERVAL_MS = 10_000;
   const HISTORY_MAX      = 20;
-  const STORAGE_KEY      = 'mesio_admin_key';
+  // Token is an opaque session token — raw ADMIN_KEY is never stored.
+  const SESSION_KEY      = 'hq_session';
 
   /* ── State ── */
-  let adminKey    = sessionStorage.getItem(STORAGE_KEY) || '';
+  let adminKey    = sessionStorage.getItem(SESSION_KEY) || sessionStorage.getItem('mesio_admin_key') || '';
   let pollTimer   = null;
   let history     = [];   // array of {ts, metrics}
 
@@ -542,18 +543,22 @@
     authError.textContent = '';
 
     try {
-      const resp = await fetch('/api/internal/ops/metrics', {
-        headers: { 'Authorization': `Bearer ${key}` }
+      // Exchange raw ADMIN_KEY for opaque session token — raw key is never persisted.
+      const loginResp = await fetch('/api/internal/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
       });
-      if (resp.status === 401) {
+      if (!loginResp.ok) {
         authError.textContent = 'Invalid key.';
         authBtn.disabled = false;
         authBtn.textContent = 'Connect';
         return;
       }
-      // Any non-401 (even 500) is treated as a valid key
-      adminKey = key;
-      sessionStorage.setItem(STORAGE_KEY, adminKey);
+      const { token } = await loginResp.json();
+      adminKey = token;
+      sessionStorage.setItem(SESSION_KEY, adminKey);
+      sessionStorage.setItem('mesio_admin_key', adminKey); // compat alias
       authOverlay.style.display = 'none';
       startPolling();
     } catch {
@@ -576,10 +581,11 @@
       });
 
       if (resp.status === 401) {
-        // Key expired/invalid — show auth overlay again
+        // Session expired — show auth overlay again
         clearInterval(pollTimer);
         adminKey = '';
-        sessionStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(SESSION_KEY);
+        sessionStorage.removeItem('mesio_admin_key');
         authOverlay.style.display = 'flex';
         authError.textContent = 'Session expired. Re-enter key.';
         setStatus('error', 'Auth required');

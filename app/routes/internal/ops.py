@@ -9,12 +9,11 @@ Endpoints:
   GET /api/internal/ops/metrics  → detailed operational metrics (requires ADMIN_KEY)
 """
 
-import os
-
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from app.services.database import get_pool
 from app.services.logging import get_logger
+from app.routes.deps import verify_superadmin
 
 log = get_logger(__name__)
 
@@ -28,14 +27,7 @@ async def monitoring_page():
 
 
 @router.get("/api/internal/ops/metrics")
-async def health_metrics(request: Request):
-    admin_key = os.environ.get("ADMIN_KEY", "")
-    auth_header = request.headers.get("Authorization", "")
-    provided_key = auth_header.removeprefix("Bearer ").strip()
-
-    if not admin_key or provided_key != admin_key:
-        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-
+async def health_metrics(_: None = Depends(verify_superadmin)):
     metrics: dict = {}
 
     # Pool stats — may work even if queries fail

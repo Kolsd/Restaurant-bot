@@ -35,6 +35,8 @@ from app.routes.deps import verify_superadmin
 from app.repositories import sessions_repo, restaurant_repo
 from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
+from app.services.security import compare_secret
+from app.services.state_store import rate_limit_check
 
 log = get_logger(__name__)
 
@@ -48,7 +50,7 @@ async def _bypass_internal_admin():
     restaurants and users.  This bypass allows migrated repos to execute
     without a pinned tenant_scope.
     """
-    with bypass_tenant_scope("internal_admin_route"):
+    with bypass_tenant_scope("internal_admin_cross_tenant: superadmin operations spanning all tenants; auth verified via session token"):
         yield
 
 
@@ -67,9 +69,13 @@ class UpdateRestaurantRequest(BaseModel):
 # ── SUPER ADMIN SESSION ──────────────────────────────────────────────────────
 
 @router.post("/login")
-async def admin_login(payload: AdminLoginRequest):
+async def admin_login(payload: AdminLoginRequest, request: Request):
     """Exchange ADMIN_KEY for a session token. The raw key is never stored client-side."""
-    if not payload.key or payload.key != os.getenv("ADMIN_KEY"):
+    ip = request.client.host if request.client else "unknown"
+    ok = await rate_limit_check(f"admin_login:{ip}", max_requests=5, window_seconds=900)
+    if not ok:
+        raise HTTPException(status_code=429, detail="Demasiados intentos, intenta más tarde")
+    if not compare_secret(payload.key, os.getenv("ADMIN_KEY", "")):
         raise HTTPException(status_code=403, detail="Clave incorrecta")
     token = await sessions_repo.create_session("superadmin")
     return {"token": token}

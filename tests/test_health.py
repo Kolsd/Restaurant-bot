@@ -64,7 +64,8 @@ class TestHealthUnit:
         assert resp.status_code == 503
         body = resp.json()
         assert body["status"] == "degraded"
-        assert "ConnectionRefusedError" in body["db"]
+        # health.py intentionally hides exception type (prevents fingerprinting)
+        assert body["db"] == "error"
 
     def test_get_pool_error_returns_503(self, client):
         """If get_pool itself raises (e.g. pool not initialised), still 503."""
@@ -73,7 +74,8 @@ class TestHealthUnit:
         assert resp.status_code == 503
         body = resp.json()
         assert body["status"] == "degraded"
-        assert "RuntimeError" in body["db"]
+        # health.py intentionally hides exception type (prevents fingerprinting)
+        assert body["db"] == "error"
 
     def test_response_always_has_db_key(self, client):
         pool = _make_pool_mock()
@@ -143,16 +145,23 @@ class TestHealthIntegration:
 class TestHealthMetrics:
     """Tests for GET /api/internal/ops/metrics (moved from /health/metrics)."""
 
+    @pytest.fixture(autouse=True)
+    def _session_mock(self, mock_superadmin_session):
+        """All metrics tests use the superadmin session mock."""
+
     def test_metrics_requires_auth(self, client):
         """No auth header → 401."""
         resp = client.get("/api/internal/ops/metrics")
         assert resp.status_code == 401
 
     def test_metrics_wrong_key(self, client, monkeypatch):
-        """Wrong ADMIN_KEY → 401."""
+        """Unknown session token (not superadmin) → 403."""
+        from unittest.mock import patch, AsyncMock
         monkeypatch.setenv("ADMIN_KEY", "correct-key")
-        resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer wrong-key"})
-        assert resp.status_code == 401
+        # Override the autouse mock: unknown token returns None → 403
+        with patch("app.repositories.sessions_repo.get_session", AsyncMock(return_value=None)):
+            resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer wrong-key"})
+        assert resp.status_code == 403
 
     def test_metrics_returns_data(self, client, monkeypatch):
         """Valid auth → 200 with expected keys (infrastructure metrics)."""
@@ -241,9 +250,11 @@ class TestHealthMetrics:
         assert body["db_pool_used"] == 3
 
     def test_metrics_no_admin_key_env(self, client, monkeypatch):
-        """If ADMIN_KEY env is not set at all, any request returns 401."""
+        """Without a valid session token, request returns 403 (ADMIN_KEY env is irrelevant now).
+        Without any token, returns 401."""
         monkeypatch.delenv("ADMIN_KEY", raising=False)
-        resp = client.get("/api/internal/ops/metrics", headers={"Authorization": "Bearer anything"})
+        # No auth header at all → 401
+        resp = client.get("/api/internal/ops/metrics")
         assert resp.status_code == 401
 
     def test_metrics_business_counters(self, client, monkeypatch):

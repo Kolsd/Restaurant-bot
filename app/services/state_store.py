@@ -344,19 +344,55 @@ async def cart_lock_release(phone: str, bot_number: str, token: str | None = Non
         _fb_cart_lock_tokens.pop(key, None)
 
 
-# ── Rate limiting (sliding window) ───────────────────────────────────────────
+# ── NPS transition distributed lock ──────────────────────────────────────────
+
+
+async def nps_transition_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 10) -> str | None:
+    """Acquire atomic lock for NPS state transition. Returns token or None."""
+    key = f"mesio:nps_lock:{phone}:{bot_number}"
+    token = str(uuid.uuid4())
+    r = await _rc.get_redis()
+    if r is not None:
+        try:
+            result = await r.set(key, token, nx=True, ex=ttl_seconds)
+            return token if result is not None else None
+        except Exception:
+            _maybe_warn("nps_lock")
+            return token  # degraded: single-worker safe, return token
+    # Fallback: no distributed lock available (single-worker safe anyway)
+    return token
+
+
+async def nps_transition_lock_release(phone: str, bot_number: str, token: str) -> bool:
+    """Release a previously acquired NPS transition lock. Ownership-safe via Lua."""
+    key = f"mesio:nps_lock:{phone}:{bot_number}"
+    r = await _rc.get_redis()
+    if r is not None:
+        try:
+            # Lua script: only DEL if our token matches — prevents releasing another worker's lock
+            script = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end"
+            result = await r.eval(script, 1, key, token)
+            return int(result) == 1
+        except Exception:
+            _maybe_warn("nps_lock_release")
+            return False
+    # Fallback: nothing to release
+    return True
+
+
+# ── Rate limiting (fixed window) ─────────────────────────────────────────────
 
 _fb_rate_limits: dict[str, list[float]] = {}  # key → list of timestamps
 
 
 async def rate_limit_check(key: str, max_requests: int, window_seconds: int) -> bool:
     """
-    Check if a request should be rate-limited using a sliding window counter.
+    Fixed window rate limiter in Redis (INCR+EXPIRE). In-process fallback uses sliding window.
 
     Returns True if the request is ALLOWED, False if it should be BLOCKED.
 
-    Redis path: Uses INCR + EXPIRE for atomic counter with TTL.
-    Fallback: In-process timestamp list with expiry cleanup.
+    Redis path: Uses INCR + EXPIRE for atomic counter with TTL (fixed window).
+    Fallback: In-process timestamp list with expiry cleanup (sliding window).
     """
     redis_key = f"mesio:ratelimit:{key}"
     r = await _rc.get_redis()

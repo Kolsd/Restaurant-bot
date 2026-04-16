@@ -239,6 +239,7 @@ class TestFeature3DiningPolish:
         from app.services import database as db
         from app.services import orders as orders_svc
         from app.services.agent_salon import execute_salon_action
+        from app.services.tenant_context import bypass_tenant_scope
 
         cart_items = [
             {"name": "Hamburguesa", "quantity": 1, "price": 15000, "subtotal": 15000, "category": "food"},
@@ -264,16 +265,18 @@ class TestFeature3DiningPolish:
         table_context = {"id": "T2", "name": "Mesa 2", "branch_id": None}
         restaurant_obj = self._make_restaurant_obj(eta=20)
 
-        reply = _run(execute_salon_action(
-            parsed=parsed,
-            phone="+57300",
-            bot_number="+57999",
-            table_context=table_context,
-            session_state={"has_order": True, "active": True},
-            full_history=[],
-            restaurant_obj=restaurant_obj,
-            message="quiero pedir",
-        ))
+        # execute_salon_action uses tenant_connection() for duplicate checks; provide scope.
+        with bypass_tenant_scope("test_C2_duplicate_order_no_receipt"):
+            reply = _run(execute_salon_action(
+                parsed=parsed,
+                phone="+57300",
+                bot_number="+57999",
+                table_context=table_context,
+                session_state={"has_order": True, "active": True},
+                full_history=[],
+                restaurant_obj=restaurant_obj,
+                message="quiero pedir",
+            ))
 
         # Duplicate path: original reply returned, no receipt appended
         assert "🧾 Pedido #" not in (reply or "")
@@ -340,11 +343,13 @@ class TestFeature3DiningPolish:
 
     @pytest.fixture(autouse=True)
     def _reset_listo_throttle(self, monkeypatch):
-        """Reset the module-level _listo_notif_sent dict before each test."""
-        import app.routes.tables as tables_mod
-        monkeypatch.setattr(tables_mod, "_listo_notif_sent", {})
-        # Also reset entregado dict to avoid cross-contamination
-        monkeypatch.setattr(tables_mod, "_entregado_notif_sent", {})
+        """Reset the Redis-backed rate limit state for listo/entregado notifications.
+
+        The module-level dicts (_listo_notif_sent, _entregado_notif_sent) were removed
+        in favour of state_store.rate_limit_check (Redis/in-process).
+        The conftest autouse fixture already clears _fb_rate_limits between tests.
+        No additional action needed here; keep the fixture for future-proofing.
+        """
 
     def _patch_tables_route(self, monkeypatch, *, phone="+57300", table_name="Mesa 5"):
         """Patch auth + DB helpers required by update_order_status."""
@@ -354,6 +359,17 @@ class TestFeature3DiningPolish:
 
         # Auth — patch the name as imported in the tables module
         monkeypatch.setattr("app.routes.tables.require_auth", AsyncMock(return_value="staff_user"))
+        # get_current_user is also called for role check (_STATUS_ROLE_MAP).
+        # Use 'admin' so all status transitions are permitted (widest role).
+        monkeypatch.setattr(
+            "app.routes.tables.get_current_user",
+            AsyncMock(return_value={
+                "username": "staff_user",
+                "restaurant_name": "Test",
+                "branch_id": 1,
+                "role": "admin",
+            }),
+        )
 
         fake_order = {
             "id": "ORD-001",
@@ -370,8 +386,9 @@ class TestFeature3DiningPolish:
         }))
         monkeypatch.setattr(db, "db_update_table_order_status", AsyncMock())
 
-        # "entregado" helpers — keep quiet
-        monkeypatch.setattr(tables_mod, "_can_send_entregado_notif", lambda phone: False)
+        # "entregado" helpers — rate limiting now uses state_store.rate_limit_check inline;
+        # no module-level function to patch. The rate-limit fallback dict is cleared by
+        # conftest so entregado notifications won't fire for these tests (status=listo).
 
         # send_wa_msg
         send_mock = AsyncMock()
@@ -453,6 +470,16 @@ class TestFeature3DiningPolish:
 
         # Patch auth — use the name as imported in the tables module
         monkeypatch.setattr("app.routes.tables.require_auth", AsyncMock(return_value="staff_user"))
+        # get_current_user needed for role check; cocina can set listo
+        monkeypatch.setattr(
+            "app.routes.tables.get_current_user",
+            AsyncMock(return_value={
+                "username": "staff_user",
+                "restaurant_name": "Test",
+                "branch_id": 1,
+                "role": "cocina",
+            }),
+        )
 
         from app.services import database as db
         fake_order = {
@@ -467,7 +494,7 @@ class TestFeature3DiningPolish:
         monkeypatch.setattr(db, "db_update_table_order_status", AsyncMock())
         send_mock = AsyncMock()
         monkeypatch.setattr(tables_mod, "send_wa_msg", send_mock)
-        monkeypatch.setattr(tables_mod, "_can_send_entregado_notif", lambda p: False)
+        # _can_send_entregado_notif removed; rate limiting uses state_store inline
 
         resp = client.post(
             "/api/table-orders/ORD-001/status",

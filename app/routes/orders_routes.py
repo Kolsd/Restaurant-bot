@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json as _json
 import os
 import httpx
@@ -9,9 +10,10 @@ from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
 from app.routes.deps import require_auth, get_current_restaurant
 from app.services.agent import trigger_nps
-from app.services import loyalty as loyalty_svc
 from app.services.logging import get_logger
+from app.services.money import to_decimal
 from app.repositories import tables_repo as tr
+from app.repositories.loyalty_repo import db_accrue_loyalty_points
 from app.services.tenant_context import tenant_scope
 
 log = get_logger(__name__)
@@ -68,7 +70,6 @@ async def view_cart(request: Request, phone: str, bot_number: str):
 async def wompi_webhook(request: Request):
     from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
 
-    # 🚨 FIX DE SEGURIDAD CON INDENTACIÓN CORRECTA
     if not WOMPI_EVENTS_SECRET:
         log.error("orders.wompi_secret_not_configured")
         raise HTTPException(status_code=500, detail="Configuración de pasarela de pagos incompleta")
@@ -81,7 +82,10 @@ async def wompi_webhook(request: Request):
         (body_bytes.decode() + WOMPI_EVENTS_SECRET).encode()
     ).hexdigest()
 
-    if not signature_header or signature_header != expected_sig:
+    # Bug 3 fix: timing-safe comparison to prevent timing-oracle attacks
+    if not signature_header or not hmac.compare_digest(
+        signature_header.encode(), expected_sig.encode()
+    ):
         raise HTTPException(status_code=401, detail="Firma inválida")
 
     event = body.get("event", "")
@@ -92,26 +96,115 @@ async def wompi_webhook(request: Request):
     with bypass_tenant_scope("wompi_webhook_cross_tenant"):
         if event == "transaction.updated":
             transaction = data.get("transaction", {})
-            if transaction.get("status") == "APPROVED":
-                reference = transaction.get("reference", "")
-                transaction_id = transaction.get("id")
-                if reference:
-                    # Reservation deposit references are prefixed with "dep_"
-                    if reference.startswith("dep_"):
-                        from app.services.reservation_payments import confirm_deposit_payment
-                        await confirm_deposit_payment(reference, transaction_id)
-                        return {"status": "ok"}
+            tx_status = transaction.get("status", "")
+            reference = transaction.get("reference", "")
+            transaction_id = transaction.get("id")
 
-                    result = await db.db_confirm_payment(reference, transaction_id)
-                    if result:
-                        log.info("orders.payment_confirmed", reference=reference, total=str(result['total']))
-                        # Acumulación de puntos loyalty en background (silenciosa)
-                        asyncio.create_task(loyalty_svc.accrue_on_order(
-                            bot_number=result.get("bot_number", ""),
-                            phone=result.get("phone", ""),
-                            order_id=reference,
-                            total_cop=float(result.get("total", 0)),
-                        ))
+            # Bug 8 fix: handle non-APPROVED terminal statuses explicitly.
+            # Do not silently ignore DECLINED / VOIDED / ERROR.
+            if tx_status in ("DECLINED", "ERROR", "VOIDED"):
+                log.warning(
+                    "wompi.transaction.non_approved",
+                    tx_status=tx_status,
+                    reference=reference,
+                    transaction_id=transaction_id,
+                )
+                # Bug 8: special-case VOIDED after an already-paid order
+                if tx_status == "VOIDED" and reference and not reference.startswith("dep_"):
+                    existing = await db.db_get_order(reference)
+                    if existing and existing.get("paid"):
+                        log.error(
+                            "wompi.transaction.voided_after_paid",
+                            reference=reference,
+                            transaction_id=transaction_id,
+                            action="manual_intervention_required",
+                        )
+                return {"status": "ok"}
+
+            if tx_status == "PENDING":
+                log.info(
+                    "wompi.transaction.pending",
+                    reference=reference,
+                    transaction_id=transaction_id,
+                )
+                return {"status": "ok"}
+
+            if tx_status == "APPROVED" and reference:
+                # Reservation deposit references are prefixed with "dep_"
+                if reference.startswith("dep_"):
+                    from app.services.reservation_payments import confirm_deposit_payment  # noqa: PLC0415
+                    confirmed = await confirm_deposit_payment(reference, transaction_id)
+                    if not confirmed:
+                        # Bug 5 fix: orphaned deposit — log warning, still return 200
+                        # (Wompi must not retry; this requires manual audit)
+                        log.warning(
+                            "wompi.deposit.orphaned",
+                            reference=reference,
+                            transaction_id=transaction_id,
+                        )
+                    return {"status": "ok"}
+
+                result = await db.db_confirm_payment(reference, transaction_id)
+
+                # Bug 2 fix: handle idempotent no-op (already paid / cancelled order)
+                if result is None:
+                    log.info(
+                        "wompi.webhook.noop",
+                        reference=reference,
+                        transaction_id=transaction_id,
+                        reason="already_paid_or_cancelled",
+                    )
+                    return {"status": "ok"}
+
+                # Bug 12 fix: do not log full result — it may contain PII fields.
+                # Only log safe, non-PII identifiers.
+                log.info(
+                    "orders.payment_confirmed",
+                    reference=reference,
+                    total=str(result.get("total", "")),
+                )
+
+                # Bug 1 fix: call loyalty_repo directly instead of dead loyalty_svc.accrue_on_order.
+                # Bug 10 fix: pass total as Decimal, not float.
+                # Bug 14 (RLS): loyalty_repo is tenant-scoped — enter tenant_scope after resolving
+                # restaurant_id from the confirmed order.
+                restaurant_id = result.get("restaurant_id")
+                if not restaurant_id:
+                    # Fallback: resolve via bot_number
+                    bot_number = result.get("bot_number", "")
+                    if bot_number:
+                        rest = await db.db_get_restaurant_by_bot_number(bot_number)
+                        restaurant_id = rest["id"] if rest else None
+
+                if restaurant_id:
+                    async def _accrue_loyalty(rid: int, res: dict) -> None:
+                        try:
+                            with tenant_scope(rid):
+                                pts = await db_accrue_loyalty_points(
+                                    restaurant_id=rid,
+                                    phone=res.get("phone", ""),
+                                    order_id=reference,
+                                    total_cop=to_decimal(res.get("total", 0)),  # Bug 10: Decimal, not float
+                                )
+                                if pts:
+                                    log.info(
+                                        "orders.loyalty_accrued",
+                                        reference=reference,
+                                        points=pts,
+                                    )
+                        except Exception:
+                            log.exception(
+                                "orders.loyalty_accrue_failed",
+                                reference=reference,
+                                restaurant_id=rid,
+                            )
+
+                    asyncio.create_task(_accrue_loyalty(restaurant_id, result))
+                else:
+                    log.warning(
+                        "orders.loyalty_skipped_no_restaurant",
+                        reference=reference,
+                    )
 
         return {"status": "ok"}
 
@@ -291,9 +384,16 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
     if not order:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
         
-    # 2. Actualizamos el estado
-    await db.db_update_order_status(order_id, req.status)
-    
+    # 2. Actualizamos el estado — db_update_order_status returns None on no-op
+    # (status already set or order modified concurrently).  Return 409 so the
+    # frontend can inform the operator instead of silently ignoring the race.
+    updated = await db.db_update_order_status(order_id, req.status)
+    if updated is None:
+        raise HTTPException(
+            status_code=409,
+            detail="La orden ya tiene ese estado o fue modificada por otro usuario",
+        )
+
     # 3. Disparamos el mensaje de WhatsApp en SEGUNDO PLANO
     order_type = order.get("order_type", "domicilio")
     notify_statuses = ['listo', 'en_camino', 'en_puerta', 'entregado']

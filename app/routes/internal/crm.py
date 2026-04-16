@@ -5,37 +5,26 @@ import csv
 import io
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Request, HTTPException, File, UploadFile
+from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
 from pydantic import BaseModel
 from app.services import database as db
 from app.repositories.internal import crm_repo
 from app.services.logging import get_logger
+from app.routes.deps import verify_superadmin
 
 log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/internal/crm", tags=["internal-crm"])
 
 # ── CONFIG ────────────────────────────────────────────────────────────
-ADMIN_KEY = os.getenv("ADMIN_KEY")
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 CRM_TEMPLATE_LANGUAGE = os.getenv("CRM_TEMPLATE_LANGUAGE", "en")
 
-async def _require_auth(request: Request) -> dict:
-    from app.repositories import sessions_repo
-    key = (
-        request.headers.get("X-Admin-Key", "")
-        or request.headers.get("Authorization", "").replace("Bearer ", "")
-    ).strip()
-    if not key:
-        raise HTTPException(status_code=401, detail="Acceso exclusivo para el equipo Mesio")
-    # Preferred: session token issued by /api/admin/login
-    identity = await sessions_repo.get_session(key)
-    if identity == "superadmin":
-        return {"username": "mesio_admin", "role": "superadmin"}
-    # Legacy fallback: raw ADMIN_KEY comparison (for backward compat during transition)
-    if ADMIN_KEY and key == ADMIN_KEY:
-        return {"username": "mesio_admin", "role": "superadmin"}
-    raise HTTPException(status_code=401, detail="Acceso exclusivo para el equipo Mesio")
+# NOTE: _require_auth (X-Admin-Key + raw ADMIN_KEY fallback) has been replaced
+# by verify_superadmin (Depends) everywhere. All CRM callers must obtain a
+# session token via POST /api/internal/admin/login first.
+# Breaking change: clients that were passing X-Admin-Key or raw ADMIN_KEY
+# directly must now do the login exchange first.
 
 # ── MODELOS ───────────────────────────────────────────────────────────
 class ProspectCreate(BaseModel):
@@ -104,14 +93,13 @@ async def _ensure_crm_tables():
 # ── PROSPECTS CRUD ────────────────────────────────────────────────────
 @router.get("/prospects")
 async def get_prospects(
-    request: Request,
     stage: str = None,
     priority: str = None,
     search: str = None,
     archived: bool = False,
     limit: int = 500,
+    _: None = Depends(verify_superadmin),
 ):
-    await _require_auth(request)
     await _ensure_crm_tables()
     limit = max(1, min(limit, 500))  # hard cap
     prospects = await crm_repo.db_get_prospects(
@@ -120,8 +108,7 @@ async def get_prospects(
     return {"prospects": prospects}
 
 @router.post("/prospects")
-async def create_prospect(request: Request, body: ProspectCreate):
-    await _require_auth(request)
+async def create_prospect(body: ProspectCreate, _: None = Depends(verify_superadmin)):
     await _ensure_crm_tables()
     prospect = await crm_repo.db_create_prospect(
         restaurant_name=body.restaurant_name, owner_name=body.owner_name,
@@ -133,15 +120,13 @@ async def create_prospect(request: Request, body: ProspectCreate):
     return {"success": True, "prospect": prospect}
 
 @router.get("/check-updates")
-async def check_updates(request: Request):
+async def check_updates(_: None = Depends(verify_superadmin)):
     """Devuelve únicamente la fecha del último cambio en toda la tabla."""
-    await _require_auth(request)
     latest = await crm_repo.db_get_prospects_last_updated()
     return {"latest": latest}
 
 @router.patch("/prospects/{pid}")
-async def update_prospect(request: Request, pid: int, body: ProspectUpdate):
-    await _require_auth(request)
+async def update_prospect(pid: int, body: ProspectUpdate, _: None = Depends(verify_superadmin)):
     updates = body.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="Nada que actualizar")
@@ -152,15 +137,13 @@ async def update_prospect(request: Request, pid: int, body: ProspectUpdate):
 
 
 @router.delete("/prospects/{pid}")
-async def delete_prospect(request: Request, pid: int):
-    await _require_auth(request)
+async def delete_prospect(pid: int, _: None = Depends(verify_superadmin)):
     await crm_repo.db_delete_prospect(pid)
     return {"success": True}
 
 
 @router.patch("/prospects/{pid}/stage")
-async def move_stage(request: Request, pid: int):
-    await _require_auth(request)
+async def move_stage(request: Request, pid: int, _: None = Depends(verify_superadmin)):
     body = await request.json()
     new_stage = body.get("stage")
     if not new_stage:
@@ -171,41 +154,36 @@ async def move_stage(request: Request, pid: int):
 
 # ── NOTES ─────────────────────────────────────────────────────────────
 @router.get("/prospects/{pid}/notes")
-async def get_notes(request: Request, pid: int):
-    await _require_auth(request)
+async def get_notes(pid: int, _: None = Depends(verify_superadmin)):
     notes = await crm_repo.db_get_prospect_notes(pid)
     return {"notes": notes}
 
 
 @router.post("/prospects/{pid}/notes")
-async def add_note(request: Request, pid: int, body: NoteCreate):
-    user = await _require_auth(request)
+async def add_note(pid: int, body: NoteCreate, _: None = Depends(verify_superadmin)):
     note = await crm_repo.db_create_prospect_note(
-        pid, author=user.get("username", "admin"),
+        pid, author="mesio_admin",
         content=body.content, note_type=body.note_type,
     )
     return {"success": True, "note": note}
 
 
 @router.delete("/prospects/{pid}/notes/{nid}")
-async def delete_note(request: Request, pid: int, nid: int):
-    await _require_auth(request)
+async def delete_note(pid: int, nid: int, _: None = Depends(verify_superadmin)):
     await crm_repo.db_delete_prospect_note(nid, pid)
     return {"success": True}
 
 
 # ── INTERACTIONS (historial completo) ─────────────────────────────────
 @router.get("/prospects/{pid}/interactions")
-async def get_interactions(request: Request, pid: int):
-    await _require_auth(request)
+async def get_interactions(pid: int, _: None = Depends(verify_superadmin)):
     interactions = await crm_repo.db_get_prospect_interactions(pid)
     return {"interactions": interactions}
 
 
 # ── SEND WHATSAPP MESSAGE (manual 1:1) ───────────────────────────────
 @router.post("/send-message")
-async def send_manual_message(request: Request, body: SendMessagePayload):
-    await _require_auth(request)
+async def send_manual_message(body: SendMessagePayload, _: None = Depends(verify_superadmin)):
     prospect = await crm_repo.db_get_prospect_by_id(body.prospect_id)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecto no encontrado")
@@ -258,8 +236,7 @@ async def send_manual_message(request: Request, body: SendMessagePayload):
 
 # ── SEND TEMPLATE (masivo) ────────────────────────────────────────────
 @router.post("/send-template")
-async def send_template(request: Request, body: SendTemplatePayload):
-    await _require_auth(request)
+async def send_template(body: SendTemplatePayload, _: None = Depends(verify_superadmin)):
     tpl = await crm_repo.db_get_crm_template_by_id(body.template_id)
     if not tpl:
         raise HTTPException(status_code=404, detail="Template no encontrado")
@@ -382,16 +359,14 @@ async def send_template(request: Request, body: SendTemplatePayload):
 
 # ── TEMPLATES CRUD ────────────────────────────────────────────────────
 @router.get("/templates")
-async def get_templates(request: Request):
-    await _require_auth(request)
+async def get_templates(_: None = Depends(verify_superadmin)):
     await _ensure_crm_tables()
     templates = await crm_repo.db_get_crm_templates()
     return {"templates": templates}
 
 
 @router.post("/templates")
-async def create_template(request: Request, body: TemplateCreate):
-    await _require_auth(request)
+async def create_template(body: TemplateCreate, _: None = Depends(verify_superadmin)):
     try:
         template = await crm_repo.db_create_crm_template(
             name=body.name, wa_name=body.wa_name, language=body.language,
@@ -402,15 +377,13 @@ async def create_template(request: Request, body: TemplateCreate):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/templates/{tid}")
-async def delete_template(request: Request, tid: int):
-    await _require_auth(request)
+async def delete_template(tid: int, _: None = Depends(verify_superadmin)):
     await crm_repo.db_delete_crm_template(tid)
     return {"success": True}
 
 # ── IMPORTACIÓN CSV ───────────────────────────────────────────────────
 @router.post("/upload-csv")
-async def upload_csv(request: Request, file: UploadFile = File(...)):
-    await _require_auth(request)
+async def upload_csv(file: UploadFile = File(...), _: None = Depends(verify_superadmin)):
     
     await _ensure_crm_tables()
     content = await file.read()
@@ -463,8 +436,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
 
 # ── STATS / KANBAN COUNTS ─────────────────────────────────────────────
 @router.get("/stats")
-async def crm_stats(request: Request):
-    await _require_auth(request)
+async def crm_stats(_: None = Depends(verify_superadmin)):
     await _ensure_crm_tables()
     return await crm_repo.db_get_crm_stats()
 

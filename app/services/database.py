@@ -236,6 +236,7 @@ from app.repositories.conversations_repo import (
 # === Inventory: moved to app.repositories.inventory_repo (Fase 6) ===
 from app.repositories.inventory_repo import (
     db_get_inventory,
+    db_get_inventory_item,
     db_create_inventory_item,
     db_update_inventory_item,
     db_delete_inventory_item,
