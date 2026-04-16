@@ -23,6 +23,7 @@ from app.services import database as db
 from app.repositories import restaurant_repo
 from app.services import state_store
 from app.services.logging import get_logger
+from app.services.tenant_context import bypass_tenant_scope
 
 log = get_logger(__name__)
 
@@ -581,14 +582,15 @@ async def restaurant_sitemap(restaurant_id: int):
         except Exception:
             menu_raw = {}
 
-    # Load availability to exclude out-of-stock dishes from the sitemap
+    # Load availability to exclude out-of-stock dishes from the sitemap.
+    # Public sitemap — cross-tenant by design (resolved from URL path param).
     availability: dict = {}
     try:
-        bot_number_for_avail = data.get("whatsapp_number", "")
-        if bot_number_for_avail:
-            availability = await db.db_get_menu_availability(bot_number_for_avail) or {}
+        with bypass_tenant_scope("restaurant_sitemap: public sitemap menu availability lookup"):
+            availability = await db.db_get_menu_availability(restaurant_id) or {}
     except Exception:
-        pass  # availability is optional — fail open
+        log.exception("sitemap.availability_load_failed", restaurant_id=restaurant_id)
+        # availability is optional — fail open (sitemap still renders all dishes)
 
     base     = f"https://{_APP_DOMAIN}"
     menu_url = f"{base}/r/{slug}/menu"

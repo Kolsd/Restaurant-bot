@@ -8,13 +8,13 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
 from app.services.orders import cart_summary, clear_cart
-from app.routes.deps import require_auth, get_current_restaurant
+from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 from app.services.agent import trigger_nps
 from app.services.logging import get_logger
 from app.services.money import to_decimal
 from app.repositories import tables_repo as tr
 from app.repositories.loyalty_repo import db_accrue_loyalty_points
-from app.services.tenant_context import tenant_scope
+from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 
 log = get_logger(__name__)
 
@@ -49,10 +49,16 @@ async def list_orders(request: Request):
 
 @router.get("/orders/{order_id}")
 async def get_single_order(request: Request, order_id: str):
-    await require_auth(request)
-    order = await db.db_get_order(order_id)
+    user = await get_current_user(request)
+    # Pre-resolve order's tenant, then scope-check against the authenticated user.
+    with bypass_tenant_scope("get_single_order: pre-resolve order tenant"):
+        order = await db.db_get_order(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    order_rid = order.get("restaurant_id")
+    user_rid = user.get("branch_id") or user.get("restaurant_id")
+    if order_rid and user_rid and int(order_rid) != int(user_rid):
+        raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
     return order
 
 @router.post("/cart/clear")
@@ -68,8 +74,6 @@ async def view_cart(request: Request, phone: str, bot_number: str):
 
 @router.post("/payment/wompi-webhook")
 async def wompi_webhook(request: Request):
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
-
     if not WOMPI_EVENTS_SECRET:
         log.error("orders.wompi_secret_not_configured")
         raise HTTPException(status_code=500, detail="Configuración de pasarela de pagos incompleta")
@@ -213,7 +217,11 @@ async def payment_confirm(request: Request):
     params = dict(request.query_params)
     order_id = params.get("id", "")
     status = params.get("status", "")
-    order = await db.db_get_order(order_id) if order_id else None
+    if order_id:
+        with bypass_tenant_scope("payment_confirm_return_url: pre-resolve order tenant (public Wompi return URL)"):
+            order = await db.db_get_order(order_id)
+    else:
+        order = None
 
     if status == "APPROVED" and order:
         return {
@@ -378,17 +386,30 @@ async def get_delivery_orders(request: Request):
 
 @router.patch("/delivery/orders/{order_id}/status")
 async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
-    await require_auth(request)
+    user = await get_current_user(request)
 
-    # 1. Buscamos el pedido original en la base de datos para obtener el número del cliente
-    order = await db.db_get_order(order_id)
+    # 1. Buscamos el pedido original en la base de datos para obtener el número del cliente.
+    #    Bypass to resolve order → restaurant_id first; then re-enter tenant_scope for the update.
+    with bypass_tenant_scope("update_delivery_status: pre-resolve order tenant before scope"):
+        order = await db.db_get_order(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
-        
-    # 2. Actualizamos el estado — db_update_order_status returns None on no-op
-    # (status already set or order modified concurrently).  Return 409 so the
-    # frontend can inform the operator instead of silently ignoring the race.
-    updated = await db.db_update_order_status(order_id, req.status)
+
+    # Ownership check: staff user can only touch orders of their own restaurant (or branch children).
+    order_rid = order.get("restaurant_id")
+    user_rid = user.get("branch_id") or user.get("restaurant_id")
+    if order_rid and user_rid and int(order_rid) != int(user_rid):
+        raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
+
+    scope_rid = int(order_rid) if order_rid else int(user_rid) if user_rid else None
+    if not scope_rid:
+        raise HTTPException(status_code=500, detail="No se pudo resolver tenant de la orden")
+
+    # 2. Actualizamos el estado dentro del scope del tenant — db_update_order_status
+    #    returns None on no-op (status already set or order modified concurrently). Return 409
+    #    so the frontend can inform the operator instead of silently ignoring the race.
+    with tenant_scope(scope_rid):
+        updated = await db.db_update_order_status(order_id, req.status)
     if updated is None:
         raise HTTPException(
             status_code=409,

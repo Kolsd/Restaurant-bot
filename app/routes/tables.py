@@ -240,7 +240,8 @@ async def menu_page(table_id: str):
     # Resolve catalog_v2_enabled to pick legacy vs current template.
     catalog_v2 = True  # default: serve new catalog
     try:
-        table = await db.db_get_table_by_id(table_id)
+        with bypass_tenant_scope("menu_page: pre-resolve table tenant for template selection"):
+            table = await db.db_get_table_by_id(table_id)
         if table:
             wa_number = await get_table_wa_number(table)
             restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
@@ -253,7 +254,8 @@ async def menu_page(table_id: str):
                     feat = {}
             catalog_v2 = bool(feat.get("catalog_v2_enabled", True))
     except Exception:
-        pass  # on any error keep default (True) — non-critical path
+        log.exception("menu_page.template_resolution_failed", table_id=table_id)
+        # on any error keep default (True) — non-critical path (template fallback)
 
     html_file = "menu.html" if catalog_v2 else "menu-legacy.html"
     p = STATIC / "html" / html_file
@@ -263,7 +265,8 @@ async def menu_page(table_id: str):
 
 @router.get("/api/public/menu-context/{table_id}")
 async def public_menu_context(table_id: str):
-    table = await db.db_get_table_by_id(table_id)
+    with bypass_tenant_scope("public_menu_context: pre-resolve table tenant for public menu"):
+        table = await db.db_get_table_by_id(table_id)
     if not table:
         raise HTTPException(status_code=404, detail="Mesa no encontrada")
 
@@ -272,10 +275,14 @@ async def public_menu_context(table_id: str):
         raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
     wa_msg = f"Hola! Estoy en {table['name']}"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
-    
+
     menu = await db.db_get_menu(wa_number) or {}
     restaurant = await db.db_get_restaurant_by_bot_number(wa_number) or {}
-    availability = await db.db_get_menu_availability(restaurant.get("id")) if restaurant.get("id") else {}
+    if restaurant.get("id"):
+        with tenant_scope(restaurant["id"]):
+            availability = await db.db_get_menu_availability(restaurant["id"])
+    else:
+        availability = {}
     features = restaurant.get("features") or {}
     if isinstance(features, str):
         import json as _json
@@ -306,14 +313,16 @@ def _public_base_url(request: Request) -> str:
 
 @router.get("/api/tables/{table_id}/qr", response_class=HTMLResponse)
 async def get_table_qr(request: Request, table_id: str):
-    table = await db.db_get_table_by_id(table_id)
+    with bypass_tenant_scope("qr_public_lookup: pre-resolve table tenant for QR"):
+        table = await db.db_get_table_by_id(table_id)
     if not table: raise HTTPException(status_code=404, detail="Mesa no encontrada")
     menu_url = f"{_public_base_url(request)}/menu/{table_id}"
     return build_qr_html(menu_url, table["name"], width=300)
 
 @router.get("/api/tables/{table_id}/qr-sheet")
 async def get_qr_sheet(request: Request, table_id: str):
-    table = await db.db_get_table_by_id(table_id)
+    with bypass_tenant_scope("qr_sheet_public_lookup: pre-resolve table tenant for QR sheet"):
+        table = await db.db_get_table_by_id(table_id)
     if not table: raise HTTPException(status_code=404, detail="Mesa no encontrada")
     menu_url = f"{_public_base_url(request)}/menu/{table_id}"
     encoded = urllib.parse.quote(menu_url)

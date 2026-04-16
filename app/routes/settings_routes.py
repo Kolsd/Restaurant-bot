@@ -493,12 +493,29 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
 
 @router.post("/api/orders/{order_id}/status")
 async def update_order_status(order_id: str, request: Request):
-    await require_auth(request)
+    user = await get_current_user(request)
     body = await request.json()
     new_status = body.get("status", "")
     if not new_status:
         raise HTTPException(status_code=400, detail="status requerido")
-    await db.db_update_order_status(order_id, new_status)
+
+    # Pre-resolve the order's tenant before entering scope for the update.
+    with bypass_tenant_scope("settings_update_order_status: pre-resolve order tenant"):
+        order = await db.db_get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+    order_rid = order.get("restaurant_id")
+    user_rid = user.get("branch_id") or user.get("restaurant_id")
+    if order_rid and user_rid and int(order_rid) != int(user_rid):
+        raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
+
+    scope_rid = int(order_rid) if order_rid else int(user_rid) if user_rid else None
+    if not scope_rid:
+        raise HTTPException(status_code=500, detail="No se pudo resolver tenant de la orden")
+
+    with tenant_scope(scope_rid):
+        await db.db_update_order_status(order_id, new_status)
     return {"success": True}
 
 
