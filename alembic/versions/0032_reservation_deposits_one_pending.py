@@ -9,13 +9,13 @@ Uses CREATE UNIQUE INDEX CONCURRENTLY so the operation does not lock the table
 in production.  CONCURRENTLY requires autocommit mode (no surrounding transaction).
 IF NOT EXISTS makes it safe to rerun after partial failure.
 
-Revision ID: 0032_reservation_deposits_one_pending
+Revision ID: 0032_deposits_one_pending
 Revises: 0031_drop_orphan_sales_tables
 Create Date: 2026-04-16
 """
 from alembic import op
 
-revision      = "0032_reservation_deposits_one_pending"
+revision      = "0032_deposits_one_pending"
 down_revision = "0031_drop_orphan_sales_tables"
 branch_labels = None
 depends_on    = None
