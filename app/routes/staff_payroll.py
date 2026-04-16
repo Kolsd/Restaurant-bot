@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.routes.deps import get_current_restaurant, require_auth, require_module
+from app.routes.deps import get_current_restaurant_scoped, require_auth, require_module
 from app.services import database as db
 
 router = APIRouter(
@@ -44,15 +44,14 @@ def _build_config(
 
 @router.get("/api/staff/payroll/calculate")
 async def calculate_payroll(
-    request: Request,
     period_start:        str,
     period_end:          str,
     overtime_daily:      float = 8.0,
     overtime_weekly:     float = 40.0,
     overtime_multiplier: float = 1.5,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Preview payroll for a date range without persisting."""
-    restaurant = await get_current_restaurant(request)
     config = _build_config(overtime_daily, overtime_weekly, overtime_multiplier)
 
     entries = await db.db_calculate_payroll(
@@ -70,9 +69,11 @@ async def calculate_payroll(
 
 
 @router.post("/api/staff/payroll/runs")
-async def create_payroll_run(request: Request, body: PayrollRunCreate):
+async def create_payroll_run(
+    body: PayrollRunCreate,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Save a payroll run as draft."""
-    restaurant = await get_current_restaurant(request)
     config = _build_config(
         body.overtime_daily, body.overtime_weekly, body.overtime_multiplier
     )
@@ -93,17 +94,21 @@ async def create_payroll_run(request: Request, body: PayrollRunCreate):
 
 
 @router.get("/api/staff/payroll/runs")
-async def list_payroll_runs(request: Request, limit: int = 20):
+async def list_payroll_runs(
+    limit: int = 20,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """List payroll runs for the restaurant."""
-    restaurant = await get_current_restaurant(request)
     runs = await db.db_list_payroll_runs(restaurant["id"], limit=limit)
     return {"runs": runs}
 
 
 @router.get("/api/staff/payroll/runs/{run_id}")
-async def get_payroll_run(request: Request, run_id: str):
+async def get_payroll_run(
+    run_id: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Get a single payroll run including its full snapshot."""
-    restaurant = await get_current_restaurant(request)
     run = await db.db_get_payroll_run(run_id, restaurant["id"])
     if not run:
         raise HTTPException(404, "Nómina no encontrada.")
@@ -111,9 +116,11 @@ async def get_payroll_run(request: Request, run_id: str):
 
 
 @router.put("/api/staff/payroll/runs/{run_id}/approve")
-async def approve_payroll_run(request: Request, run_id: str):
+async def approve_payroll_run(
+    run_id: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Approve a draft payroll run (draft → approved)."""
-    restaurant = await get_current_restaurant(request)
     run = await db.db_approve_payroll_run(run_id, restaurant["id"])
     if not run:
         raise HTTPException(404, "Nómina no encontrada o ya no está en borrador.")
@@ -121,9 +128,11 @@ async def approve_payroll_run(request: Request, run_id: str):
 
 
 @router.get("/api/staff/payroll/export/{run_id}")
-async def export_payroll(request: Request, run_id: str):
+async def export_payroll(
+    run_id: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Export a payroll run as a CSV download."""
-    restaurant = await get_current_restaurant(request)
     run = await db.db_get_payroll_run(run_id, restaurant["id"])
     if not run:
         raise HTTPException(404, "Nómina no encontrada.")

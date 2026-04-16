@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.repositories import marketing_repo
-from app.routes.deps import get_current_restaurant
+from app.routes.deps import get_current_restaurant_scoped
 from app.services import state_store
 from app.services.logging import get_logger
 
@@ -109,7 +109,7 @@ async def _send_whatsapp_marketing(
 
 @router.get("/api/marketing/status")
 async def get_marketing_status(
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Return plan, cap, sent_this_month, remaining, enabled, cost_estimate_month_usd."""
     restaurant_id = restaurant["id"]
@@ -122,7 +122,7 @@ async def get_marketing_status(
 @router.get("/api/customers/at-risk")
 async def get_at_risk_customers(
     limit: int = Query(default=50, ge=1, le=200),
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Return list of dormant frequent customers ordered by days_since DESC."""
     restaurant_id = restaurant["id"]
@@ -133,7 +133,7 @@ async def get_at_risk_customers(
 @router.get("/api/marketing/history")
 async def get_marketing_history(
     limit: int = Query(default=50, ge=1, le=200),
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Return recent marketing message log (newest first)."""
     restaurant_id = restaurant["id"]
@@ -144,7 +144,7 @@ async def get_marketing_history(
 @router.patch("/api/marketing/settings")
 async def patch_marketing_settings(
     body: MarketingSettingsBody,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Enable or disable marketing for the restaurant."""
     restaurant_id = restaurant["id"]
@@ -163,7 +163,7 @@ async def patch_marketing_settings(
 async def send_reengagement(
     body: ReengagementBody,
     request: Request,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Send a re-engagement WhatsApp message to a single at-risk customer.
 

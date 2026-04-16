@@ -10,6 +10,7 @@ from app.services.auth import hash_password
 from app.services import database as db
 from app.repositories import restaurant_repo
 from app.routes.deps import get_current_user
+from app.services.tenant_context import tenant_scope
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
@@ -52,7 +53,8 @@ async def list_team_branches(request: Request):
     if not my_restaurant_id:
         return {"branches": []}
 
-    branches = await restaurant_repo.db_get_branches(my_restaurant_id)
+    with tenant_scope(my_restaurant_id):
+        branches = await restaurant_repo.db_get_branches(my_restaurant_id)
     return {"branches": branches}
 
 
@@ -70,7 +72,8 @@ async def create_branch(request: Request, body: CreateBranchRequest):
 
     wa_number = body.whatsapp_number.strip()
 
-    matriz_row = await restaurant_repo.db_get_matriz_details(my_restaurant_id)
+    with tenant_scope(my_restaurant_id):
+        matriz_row = await restaurant_repo.db_get_matriz_details(my_restaurant_id)
     if not matriz_row:
         raise HTTPException(status_code=404, detail="No se encontró la Casa Matriz.")
 

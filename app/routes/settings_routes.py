@@ -15,7 +15,7 @@ from app.routes.deps import require_auth, get_current_user, get_current_restaura
 from app.repositories import restaurant_repo, tables_repo as tr
 from app.repositories import weekly_reports_repo
 from app.repositories.staff_repo import db_has_staff
-from app.services.tenant_context import bypass_tenant_scope
+from app.services.tenant_context import bypass_tenant_scope, tenant_scope
 from app.repositories.restaurant_repo import db_has_orders_by_bot_number
 from app.services.logging import get_logger
 from app.services import state_store
@@ -111,7 +111,8 @@ async def save_settings(request: Request):
 
     lat = float(body["latitude"]) if "latitude" in body and body["latitude"] not in [None, ""] else None
     lon = float(body["longitude"]) if "longitude" in body and body["longitude"] not in [None, ""] else None
-    await restaurant_repo.db_save_restaurant_settings(restaurant["id"], current_features, latitude=lat, longitude=lon)
+    with tenant_scope(restaurant["id"]):
+        await restaurant_repo.db_save_restaurant_settings(restaurant["id"], current_features, latitude=lat, longitude=lon)
     return {"success": True, "features": current_features}
 
 
@@ -133,7 +134,8 @@ async def get_weekly_reports(
     """Return the last 12 weekly reports and current settings for the authenticated restaurant."""
     restaurant_id = restaurant["id"]
 
-    reports_raw = await weekly_reports_repo.get_recent_reports(restaurant_id, limit=12)
+    with tenant_scope(restaurant_id):
+        reports_raw = await weekly_reports_repo.get_recent_reports(restaurant_id, limit=12)
 
     reports = []
     for r in reports_raw:
@@ -173,52 +175,53 @@ async def patch_weekly_report_settings(
     """Update weekly report settings (enabled flag, owner_phone, timezone)."""
     restaurant_id = restaurant["id"]
 
-    # ── Validate owner_phone ──────────────────────────────────────────
-    if body.owner_phone is not None:
-        phone = body.owner_phone.strip()
-        if phone == "":
-            # Empty string clears the phone
-            phone = None
-        else:
-            # Normalize: leading "00" → "+"
-            if phone.startswith("00"):
-                phone = "+" + phone[2:]
-            if not _PHONE_RE.match(phone):
+    with tenant_scope(restaurant_id):
+        # ── Validate owner_phone ──────────────────────────────────────────
+        if body.owner_phone is not None:
+            phone = body.owner_phone.strip()
+            if phone == "":
+                # Empty string clears the phone
+                phone = None
+            else:
+                # Normalize: leading "00" → "+"
+                if phone.startswith("00"):
+                    phone = "+" + phone[2:]
+                if not _PHONE_RE.match(phone):
+                    raise HTTPException(
+                        status_code=422,
+                        detail="owner_phone debe seguir el formato E.164 (ej. +573001234567, 10–15 dígitos)",
+                    )
+            await restaurant_repo.db_update_restaurant_owner_phone(restaurant_id, phone)
+            log.info("weekly_reports.settings.phone_updated", restaurant_id=restaurant_id)
+
+        # ── Validate timezone ─────────────────────────────────────────────
+        if body.timezone is not None:
+            tz_str = body.timezone.strip()
+            if tz_str == "":
                 raise HTTPException(
                     status_code=422,
-                    detail="owner_phone debe seguir el formato E.164 (ej. +573001234567, 10–15 dígitos)",
+                    detail="timezone no puede ser vacío. Usa un nombre IANA válido (ej. America/Bogota)",
                 )
-        await restaurant_repo.db_update_restaurant_owner_phone(restaurant_id, phone)
-        log.info("weekly_reports.settings.phone_updated", restaurant_id=restaurant_id)
+            try:
+                ZoneInfo(tz_str)
+            except ZoneInfoNotFoundError:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"timezone inválido: '{tz_str}'. Usa un nombre IANA válido (ej. America/Bogota, America/New_York)",
+                )
+            await restaurant_repo.db_update_restaurant_timezone(restaurant_id, tz_str)
+            log.info("weekly_reports.settings.timezone_updated", restaurant_id=restaurant_id, timezone=tz_str)
 
-    # ── Validate timezone ─────────────────────────────────────────────
-    if body.timezone is not None:
-        tz_str = body.timezone.strip()
-        if tz_str == "":
-            raise HTTPException(
-                status_code=422,
-                detail="timezone no puede ser vacío. Usa un nombre IANA válido (ej. America/Bogota)",
+        # ── Update enabled flag in features JSONB ────────────────────────
+        if body.enabled is not None:
+            await restaurant_repo.db_merge_restaurant_features(
+                restaurant_id, {"weekly_report_enabled": body.enabled}
             )
-        try:
-            ZoneInfo(tz_str)
-        except ZoneInfoNotFoundError:
-            raise HTTPException(
-                status_code=422,
-                detail=f"timezone inválido: '{tz_str}'. Usa un nombre IANA válido (ej. America/Bogota, America/New_York)",
+            log.info(
+                "weekly_reports.settings.enabled_updated",
+                restaurant_id=restaurant_id,
+                enabled=body.enabled,
             )
-        await restaurant_repo.db_update_restaurant_timezone(restaurant_id, tz_str)
-        log.info("weekly_reports.settings.timezone_updated", restaurant_id=restaurant_id, timezone=tz_str)
-
-    # ── Update enabled flag in features JSONB ────────────────────────
-    if body.enabled is not None:
-        await restaurant_repo.db_merge_restaurant_features(
-            restaurant_id, {"weekly_report_enabled": body.enabled}
-        )
-        log.info(
-            "weekly_reports.settings.enabled_updated",
-            restaurant_id=restaurant_id,
-            enabled=body.enabled,
-        )
 
     # ── Re-fetch to return authoritative state ────────────────────────
     updated = await db.db_get_restaurant_by_id(restaurant_id)
@@ -502,10 +505,18 @@ async def update_order_status(order_id: str, request: Request):
 @router.get("/api/table-sessions/closed")
 async def get_closed_sessions(request: Request, hours: int = 24):
     hours = max(1, min(hours, 720))  # clamp: 1h – 30 days
-    _, bot_number, _, _ = await get_dashboard_filters(request, "today")
+    branch_id, bot_number, _, _ = await get_dashboard_filters(request, "today")
 
     try:
-        rows = await tr.db_get_closed_sessions(hours, bot_number)
+        # db_get_closed_sessions uses tenant_connection() — must be wrapped in tenant_scope.
+        # branch_id may be an int, "all", or None; fall back to bypass when cross-tenant.
+        if isinstance(branch_id, int):
+            with tenant_scope(branch_id):
+                rows = await tr.db_get_closed_sessions(hours, bot_number)
+        else:
+            from app.services.tenant_context import bypass_tenant_scope as _bypass
+            with _bypass("get_closed_sessions: cross-tenant dashboard view"):
+                rows = await tr.db_get_closed_sessions(hours, bot_number)
     except Exception as e:
         log.warning("dashboard.table_sessions_query_failed", error=str(e))
         rows = []
@@ -584,7 +595,8 @@ async def get_dashboard_menu(request: Request):
 @router.get("/api/table-sessions/{session_id}/history")
 async def get_session_history(request: Request, session_id: int):
     await require_auth(request)
-    session, history = await tr.db_get_session_with_history(session_id)
+    with bypass_tenant_scope("get_session_history: session lookup by ID, tenant unknown"):
+        session, history = await tr.db_get_session_with_history(session_id)
     if not session:
         raise HTTPException(404, "Sesión no encontrada")
     if session.get("started_at"): session["started_at"] = session["started_at"].isoformat()
@@ -595,14 +607,16 @@ async def get_session_history(request: Request, session_id: int):
 @router.post("/api/table-sessions/{session_id}/reopen")
 async def reopen_session(request: Request, session_id: int):
     await require_auth(request)
-    await tr.db_reopen_session(session_id)
+    with bypass_tenant_scope("reopen_session: session update by ID, tenant unknown"):
+        await tr.db_reopen_session(session_id)
     return {"success": True}
 
 
 @router.post("/api/table-sessions/{session_id}/alert-waiter")
 async def session_alert_waiter(request: Request, session_id: int):
     body = await request.json()
-    await tr.db_session_alert_waiter(session_id, body.get("message", "Alerta de dashboard"))
+    with bypass_tenant_scope("session_alert_waiter: alert insert by session ID, tenant unknown"):
+        await tr.db_session_alert_waiter(session_id, body.get("message", "Alerta de dashboard"))
     return {"success": True}
 
 
@@ -786,7 +800,8 @@ async def menu_analytics(
     days = max(1, min(days, 365))
     restaurant_id = restaurant["id"]
 
-    per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
-    matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
+    with tenant_scope(restaurant_id):
+        per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
+        matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
 
     return {"per_dish": per_dish, "matrix": matrix}

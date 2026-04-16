@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.services import database as db
 from app.repositories import conversations_repo
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
+from app.services.tenant_context import tenant_scope
 
 _NPS_INTERNAL_KEY = os.getenv("NPS_INTERNAL_KEY", "")
 
@@ -65,5 +66,6 @@ async def set_google_maps_url(request: Request):
     if isinstance(features, str):
         import json; features = json.loads(features)
     features["google_maps_url"] = url
-    await conversations_repo.db_update_restaurant_features(restaurant["id"], features)
+    with tenant_scope(restaurant["id"]):
+        await conversations_repo.db_update_restaurant_features(restaurant["id"], features)
     return {"success": True, "url": url}

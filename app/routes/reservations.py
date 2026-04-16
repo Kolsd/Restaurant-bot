@@ -5,7 +5,7 @@ Provides CRUD + status management + availability + stats for restaurant reservat
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.routes.deps import require_auth, get_current_restaurant, require_module
+from app.routes.deps import require_auth, get_current_restaurant_scoped, require_module
 from app.services import database as db
 from app.services.logging import get_logger
 
@@ -26,7 +26,7 @@ router = APIRouter(
 @router.get("/availability")
 async def check_availability(
     request: Request,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Check which tables are available for a given date/time/party size."""
     date = request.query_params.get("date")
@@ -65,7 +65,7 @@ async def check_availability(
 @router.get("/stats")
 async def reservation_stats(
     request: Request,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Return aggregated reservation statistics for a given period."""
     period_start = request.query_params.get("period_start")
@@ -104,7 +104,7 @@ async def reservation_stats(
 @router.get("")
 async def list_reservations(
     request: Request,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """List reservations filtered by date range and optionally by status."""
     date_from = request.query_params.get("date_from")
@@ -157,7 +157,7 @@ async def _verify_reservation_ownership(reservation_id: int, restaurant: dict) -
 @router.get("/{reservation_id}")
 async def get_reservation(
     reservation_id: int,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Fetch a single reservation by ID."""
     reservation = await _verify_reservation_ownership(reservation_id, restaurant)
@@ -168,7 +168,7 @@ async def get_reservation(
 async def update_reservation_status(
     request: Request,
     reservation_id: int,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Update reservation status. Routes to the appropriate DB helper per status value."""
     await _verify_reservation_ownership(reservation_id, restaurant)
@@ -215,7 +215,7 @@ async def update_reservation_status(
 async def assign_table(
     request: Request,
     reservation_id: int,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Assign a table to an existing reservation."""
     await _verify_reservation_ownership(reservation_id, restaurant)

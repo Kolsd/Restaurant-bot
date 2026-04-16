@@ -374,15 +374,14 @@ async def test_deduct_restaurante_inexistente_no_hace_nada():
 def test_recipe_routes_upsert_y_delete(client, monkeypatch):
     """POST y DELETE de /api/inventory/recipes retornan 200 con datos correctos."""
     from app.services import database as db_mod
+    from app.routes.deps import get_current_restaurant_scoped
+    from app.main import app
 
     async def mock_verify_token(token: str):
         return "admin_test"
 
     async def mock_get_user(username: str):
         return {"username": "admin_test", "restaurant_name": "Rest", "branch_id": 1, "role": "owner"}
-
-    async def mock_get_restaurant(request):
-        return {"id": 1, "whatsapp_number": "+57300", "name": "Rest"}
 
     async def mock_upsert(restaurant_id, dish_name, lines):
         return [{"ingredient_id": 10, "quantity": 0.5, "ingredient_name": "Queso",
@@ -391,11 +390,14 @@ def test_recipe_routes_upsert_y_delete(client, monkeypatch):
     async def mock_delete(restaurant_id, dish_name):
         pass
 
+    async def mock_scoped_override():
+        yield {"id": 1, "whatsapp_number": "+57300", "name": "Rest"}
+
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
-    monkeypatch.setattr("app.routes.inventory.get_current_restaurant", mock_get_restaurant)
     monkeypatch.setattr(db_mod, "db_upsert_dish_recipe", mock_upsert)
     monkeypatch.setattr(db_mod, "db_delete_dish_recipe", mock_delete)
+    app.dependency_overrides[get_current_restaurant_scoped] = mock_scoped_override
 
     # POST
     resp = client.post(
@@ -417,10 +419,15 @@ def test_recipe_routes_upsert_y_delete(client, monkeypatch):
     assert resp2.status_code == 200
     assert resp2.json()["success"] is True
 
+    # Cleanup
+    app.dependency_overrides.pop(get_current_restaurant_scoped, None)
+
 
 def test_recipe_routes_food_costs(client, monkeypatch):
     """GET /api/inventory/food-costs retorna lista con food_cost por plato."""
     from app.services import database as db_mod
+    from app.routes.deps import get_current_restaurant_scoped
+    from app.main import app
 
     async def mock_verify_token(token: str):
         return "admin_test"
@@ -428,17 +435,17 @@ def test_recipe_routes_food_costs(client, monkeypatch):
     async def mock_get_user(username: str):
         return {"username": "admin_test", "restaurant_name": "Rest", "branch_id": 1, "role": "owner"}
 
-    async def mock_get_restaurant(request):
-        return {"id": 1, "whatsapp_number": "+57300", "name": "Rest"}
-
     async def mock_food_costs(restaurant_id):
         return [{"dish_name": "Pizza", "food_cost": 12000,
                  "breakdown": [{"ingredient": "Queso", "line_cost": 12000}]}]
 
+    async def mock_scoped_override():
+        yield {"id": 1, "whatsapp_number": "+57300", "name": "Rest"}
+
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
-    monkeypatch.setattr("app.routes.inventory.get_current_restaurant", mock_get_restaurant)
     monkeypatch.setattr(db_mod, "db_get_food_costs", mock_food_costs)
+    app.dependency_overrides[get_current_restaurant_scoped] = mock_scoped_override
 
     resp = client.get("/api/inventory/food-costs", headers={"Authorization": "Bearer fake-token"})
     assert resp.status_code == 200
@@ -446,3 +453,6 @@ def test_recipe_routes_food_costs(client, monkeypatch):
     assert len(fc) == 1
     assert fc[0]["dish_name"] == "Pizza"
     assert fc[0]["food_cost"] == 12000
+
+    # Cleanup
+    app.dependency_overrides.pop(get_current_restaurant_scoped, None)

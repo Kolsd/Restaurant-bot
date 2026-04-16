@@ -369,10 +369,11 @@ async def check_delivery_updates(request: Request):
 @router.get("/delivery/orders")
 async def get_delivery_orders(request: Request):
     restaurant = await get_current_restaurant(request)
-    raw = await db.db_get_delivery_orders(
-        ['pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta', 'entregado'],
-        restaurant_id=restaurant["id"]
-    )
+    with tenant_scope(restaurant["id"]):
+        raw = await db.db_get_delivery_orders(
+            ['pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta', 'entregado'],
+            restaurant_id=restaurant["id"]
+        )
     return {"orders": raw}
 
 @router.patch("/delivery/orders/{order_id}/status")

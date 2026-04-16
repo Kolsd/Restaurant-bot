@@ -11,7 +11,7 @@ Endpoints:
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.routes.deps import require_auth, get_current_restaurant
+from app.routes.deps import require_auth, get_current_restaurant_scoped
 from app.repositories import reviews_repo as rr
 from app.services.logging import get_logger
 
@@ -36,7 +36,7 @@ class ReplyBody(BaseModel):
 @router.get("")
 async def list_reviews(
     limit: int = 50,
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Return public reviews for the authenticated restaurant."""
     bot_number = restaurant["whatsapp_number"]
@@ -45,7 +45,7 @@ async def list_reviews(
 
 
 @router.get("/summary")
-async def get_review_summary(restaurant=Depends(get_current_restaurant)):
+async def get_review_summary(restaurant=Depends(get_current_restaurant_scoped)):
     """Return aggregate review stats: total, avg score, distribution by score."""
     bot_number = restaurant["whatsapp_number"]
     summary = await rr.db_get_review_summary(bot_number)
@@ -63,7 +63,7 @@ async def _verify_review_ownership(nps_id: int, bot_number: str) -> None:
 async def publish_review(
     nps_id: int,
     body: PublishBody,
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Toggle public visibility for an NPS response and set display name."""
     bot_number = restaurant["whatsapp_number"]
@@ -82,7 +82,7 @@ async def publish_review(
 async def reply_to_review(
     nps_id: int,
     body: ReplyBody,
-    restaurant=Depends(get_current_restaurant),
+    restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Save owner reply to a review."""
     bot_number = restaurant["whatsapp_number"]

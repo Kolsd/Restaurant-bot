@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from app.services import database as db
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 from app.repositories import reviews_repo as rr, conversations_repo
+from app.services.tenant_context import tenant_scope
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -268,8 +269,10 @@ async def get_menu_availability(request: Request):
     restaurant_id = user.get("branch_id") or restaurant["id"]
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         restaurant_id = int(branch_header)
-        
-    return {"availability": await db.db_get_menu_availability(restaurant_id)}
+
+    with tenant_scope(restaurant_id):
+        availability = await db.db_get_menu_availability(restaurant_id)
+    return {"availability": availability}
 
 @router.post("/api/menu/availability")
 async def set_dish_availability(request: Request):
@@ -284,12 +287,13 @@ async def set_dish_availability(request: Request):
     restaurant_id = user.get("branch_id") or restaurant["id"]
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         restaurant_id = int(branch_header)
-        
-    await db.db_set_dish_availability(
-        restaurant_id=restaurant_id,
-        dish_name=body["dish_name"], 
-        available=body.get("available", True)
-    )
+
+    with tenant_scope(restaurant_id):
+        await db.db_set_dish_availability(
+            restaurant_id=restaurant_id,
+            dish_name=body["dish_name"],
+            available=body.get("available", True)
+        )
     return {"success": True, "dish_name": body["dish_name"], "available": body.get("available", True)}
 
 @router.post("/api/menu/sync-branches")
@@ -426,7 +430,8 @@ async def get_turn_time_stats(
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     bid = int(branch_id) if branch_id and branch_id.isdigit() else None
-    stats = await rr.db_get_turn_time_stats(bot_number, period_start, period_end, branch_id=bid)
+    with tenant_scope(restaurant["id"]):
+        stats = await rr.db_get_turn_time_stats(bot_number, period_start, period_end, branch_id=bid)
     return stats
 
 
@@ -440,9 +445,10 @@ async def get_occupancy_stats(
     """Aggregated occupancy and utilization rates from 15-min snapshots."""
     restaurant = await get_current_restaurant(request)
     bid = int(branch_id) if branch_id and branch_id.isdigit() else None
-    stats = await rr.db_get_occupancy_stats(
-        restaurant["id"], period_start, period_end, branch_id=bid
-    )
+    with tenant_scope(restaurant["id"]):
+        stats = await rr.db_get_occupancy_stats(
+            restaurant["id"], period_start, period_end, branch_id=bid
+        )
     return stats
 
 

@@ -11,7 +11,7 @@ Protected by standard Bearer token auth via get_current_restaurant.
 from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from app.routes.deps import get_current_restaurant
+from app.routes.deps import get_current_restaurant_scoped
 from app.services import database as db
 
 router = APIRouter()
@@ -32,7 +32,7 @@ class SyncBatch(BaseModel):
 @router.post("/sync")
 async def sync_batch(
     batch: SyncBatch,
-    restaurant: dict = Depends(get_current_restaurant),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
     Process a batch of offline operations.

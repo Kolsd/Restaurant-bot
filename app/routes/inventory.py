@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_restaurant, get_current_restaurant_scoped
+from app.routes.deps import require_auth, get_current_restaurant_scoped
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
@@ -34,17 +34,20 @@ class StockAdjustment(BaseModel):
 
 
 @router.get("/api/inventory")
-async def get_inventory(request: Request):
+async def get_inventory(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Lista todos los productos del inventario"""
-    restaurant = await get_current_restaurant(request)
     items = await db.db_get_inventory(restaurant["id"])
     return {"items": items}
 
 
 @router.post("/api/inventory")
-async def create_inventory_item(request: Request, body: InventoryItemCreate):
+async def create_inventory_item(
+    body: InventoryItemCreate,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Crea un nuevo producto en el inventario"""
-    restaurant = await get_current_restaurant(request)
     item = await db.db_create_inventory_item(
         restaurant_id=restaurant["id"],
         name=body.name,
@@ -91,9 +94,12 @@ async def delete_inventory_item(
 
 
 @router.post("/api/inventory/{item_id}/adjust")
-async def adjust_stock(request: Request, item_id: int, body: StockAdjustment):
+async def adjust_stock(
+    item_id: int,
+    body: StockAdjustment,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Ajusta el stock manualmente (reposición, merma, etc.)"""
-    restaurant = await get_current_restaurant(request)
     result = await db.db_adjust_inventory_stock(
         item_id=item_id,
         quantity_delta=body.quantity,
@@ -121,17 +127,19 @@ async def get_stock_history(
 
 
 @router.get("/api/inventory/alerts")
-async def get_inventory_alerts(request: Request):
+async def get_inventory_alerts(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Productos con stock bajo o agotado"""
-    restaurant = await get_current_restaurant(request)
     alerts = await db.db_get_inventory_alerts(restaurant["id"])
     return {"alerts": alerts}
 
 
 @router.get("/api/inventory/menu-items")
-async def get_menu_items_for_linking(request: Request):
+async def get_menu_items_for_linking(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Devuelve todos los platos del menú para el selector de vinculación"""
-    restaurant = await get_current_restaurant(request)
     menu = await db.db_get_menu(restaurant["whatsapp_number"]) or {}
     dishes = []
     for category, items in menu.items():
@@ -153,25 +161,30 @@ class RecipeUpsert(BaseModel):
 
 
 @router.get("/api/inventory/recipes")
-async def get_all_recipes(request: Request):
+async def get_all_recipes(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Lista todos los escandallos con food cost por plato."""
-    restaurant = await get_current_restaurant(request)
     recipes = await db.db_get_all_recipes(restaurant["id"])
     return {"recipes": recipes}
 
 
 @router.get("/api/inventory/recipes/{dish_name}")
-async def get_recipe(request: Request, dish_name: str):
+async def get_recipe(
+    dish_name: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Devuelve las líneas de ingredientes de un plato."""
-    restaurant = await get_current_restaurant(request)
     lines = await db.db_get_dish_recipe(restaurant["id"], dish_name)
     return {"dish_name": dish_name, "lines": lines}
 
 
 @router.post("/api/inventory/recipes")
-async def upsert_recipe(request: Request, body: RecipeUpsert):
+async def upsert_recipe(
+    body: RecipeUpsert,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Crea o reemplaza el escandallo completo de un plato."""
-    restaurant = await get_current_restaurant(request)
     if not body.dish_name.strip():
         raise HTTPException(status_code=400, detail="dish_name no puede estar vacío")
     lines = [{"ingredient_id": l.ingredient_id, "quantity": l.quantity} for l in body.lines]
@@ -180,16 +193,19 @@ async def upsert_recipe(request: Request, body: RecipeUpsert):
 
 
 @router.delete("/api/inventory/recipes/{dish_name}")
-async def delete_recipe(request: Request, dish_name: str):
+async def delete_recipe(
+    dish_name: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Elimina todos los ingredientes del escandallo de un plato."""
-    restaurant = await get_current_restaurant(request)
     await db.db_delete_dish_recipe(restaurant["id"], dish_name)
     return {"success": True}
 
 
 @router.get("/api/inventory/food-costs")
-async def get_food_costs(request: Request):
+async def get_food_costs(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
     """Food cost de cada plato con desglose por ingrediente."""
-    restaurant = await get_current_restaurant(request)
     costs = await db.db_get_food_costs(restaurant["id"])
     return {"food_costs": costs}
