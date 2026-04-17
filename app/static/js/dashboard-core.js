@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Then fetch fresh features from API and re-apply (keeps localStorage in sync)
   fetch('/api/settings', { headers }).then(r => r.ok ? r.json() : null).then(data => {
     if (!data) return;
-    
+
     // --- INICIO CÓDIGO CORREGIDO ---
     let freshFeats = data.features || {};
     if (typeof freshFeats === 'string') {
@@ -104,6 +104,19 @@ document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem('rb_restaurant', JSON.stringify(stored));
     window._dashRestaurant = stored;
     _applyFeatureToggles(freshFeats);
+
+    // Issue 4 — role stale in localStorage:
+    // /api/settings does NOT return a `role` field (backend gap — it returns restaurant config,
+    // not the authenticated user's role). When the backend adds `role` to this response,
+    // uncomment the lines below to keep rawRole in sync without re-login:
+    //
+    // if (data.role) {
+    //   rawRole = data.role.toLowerCase();
+    //   localStorage.setItem('rb_role', rawRole);
+    //   // Re-run role-gated visibility (equipoNav, etc.)
+    //   const equipoNav = document.getElementById('nav-equipo');
+    //   if (equipoNav) equipoNav.style.display = rawRole.includes('owner') ? '' : 'none';
+    // }
   }).catch(() => {});
 
   loadMenu();
@@ -334,6 +347,7 @@ async function refreshAll() {
 
     const rOrders = await fetch(`/api/dashboard/orders?${urlParams}`, { headers });
     if (rOrders.status === 401) { logout(); return; }
+    if (!rOrders.ok) { mesioToast('No pude cargar pedidos. Intenta de nuevo.', 'error'); return; }
     const orders = (await rOrders.json()).orders || [];
     
     const rRes = await fetch(`/api/dashboard/reservations?${urlParams}`, { headers });
@@ -546,9 +560,11 @@ function renderConversations(conversations) {
 async function cleanupConversations() {
   if (!confirm('¿Eliminar conversaciones de más de 7 días? Esto limpiará la memoria de la IA para esos números.')) return;
   try {
-    await fetch('/api/conversations/cleanup', { method: 'DELETE', headers });
+    const r = await fetch('/api/conversations/cleanup', { method: 'DELETE', headers });
+    if (!r.ok) { mesioToast('No pude limpiar las conversaciones', 'error'); return; }
+    mesioToast('Conversaciones limpiadas', 'success');
     refreshAll();
-  } catch(e) {}
+  } catch(e) { mesioToast('No pude limpiar las conversaciones', 'error'); }
 }
 
 // ── CHAT MODAL ──
@@ -606,7 +622,7 @@ async function forceCloseChat() {
     });
     closeChatModal();
     refreshAll();
-  } catch(e) { console.error('forceCloseChat:', e); }
+  } catch(e) { console.error('forceCloseChat:', e); mesioToast('Error de conexión. Reintenta.', 'error'); }
 }
 
 async function toggleBotPause() {
@@ -618,7 +634,7 @@ async function toggleBotPause() {
       body: JSON.stringify({ paused: botPaused })
     });
     loadChatHistory(currentChatPhone);
-  } catch(e) {}
+  } catch(e) { mesioToast('Error de conexión. Reintenta.', 'error'); }
 }
 
 async function sendManualReply() {
@@ -632,7 +648,7 @@ async function sendManualReply() {
       body: JSON.stringify({ message: msg })
     });
     await loadChatHistory(currentChatPhone);
-  } catch(e) {}
+  } catch(e) { mesioToast('Error de conexión. Reintenta.', 'error'); }
 }
 
 function switchOrderTab(tab, btn) {
