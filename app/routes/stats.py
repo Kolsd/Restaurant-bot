@@ -67,14 +67,14 @@ async def dashboard_sync(request: Request, period: str = Query("today")):
     branch_id = _resolve_branch_id(request, user, restaurant)
     effective_bot = await _get_effective_bot_number(restaurant)
 
-    orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
-    reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
-
-    all_convs = await db.db_get_all_conversations(
-        bot_number=effective_bot,
-        date_from=date_from,
-        date_to=date_to
-    )
+    with tenant_scope(restaurant["id"]):
+        orders        = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
+        reservations  = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
+        all_convs     = await db.db_get_all_conversations(
+            bot_number=effective_bot,
+            date_from=date_from,
+            date_to=date_to
+        )
     conversations = await filter_conversations_for_branch(all_convs, branch_id, effective_bot)
 
     paid    = [o for o in orders if o["paid"]]
@@ -147,16 +147,16 @@ async def dashboard_stats(request: Request, period: str = Query("today")):
     date_from, date_to = get_date_range(period, get_tz(restaurant))
     effective_bot = await _get_effective_bot_number(restaurant)
 
-    orders       = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
+    with tenant_scope(restaurant["id"]):
+        orders       = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
+        reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
+        all_convs    = await db.db_get_all_conversations(
+            bot_number=effective_bot,
+            date_from=date_from,
+            date_to=date_to
+        )
     paid         = [o for o in orders if o["paid"]]
     pending      = [o for o in orders if not o["paid"]]
-    reservations = await db.db_get_reservations_range(date_from, date_to, bot_number=bot_number)
-
-    all_convs = await db.db_get_all_conversations(
-        bot_number=effective_bot,
-        date_from=date_from,
-        date_to=date_to
-    )
     conversations = await filter_conversations_for_branch(all_convs, _resolve_branch_id(request, user, restaurant), effective_bot)
 
     return {
@@ -178,7 +178,8 @@ async def dashboard_orders(request: Request, period: str = Query("today")):
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     date_from, date_to = get_date_range(period, get_tz(restaurant))
-    orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
+    with tenant_scope(restaurant["id"]):
+        orders = await db.db_get_orders_range(date_from, date_to, bot_number=bot_number)
     result = []
     for o in orders:
         try:
@@ -213,15 +214,16 @@ async def get_conversations(request: Request):
     if branch_header and branch_header.isdigit() and any(r in user.get("role", "") for r in ["owner", "admin"]):
         branch_id = int(branch_header)
 
-    conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
-    
+    with tenant_scope(restaurant["id"]):
+        conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
     return {"conversations": conversations}
 
 @router.get("/api/dashboard/chart")
 async def dashboard_chart(request: Request, period: str = Query("week")):
     restaurant = await get_current_restaurant(request)
     date_from, date_to = get_date_range(period, get_tz(restaurant))
-    orders = await db.db_get_orders_range(date_from, date_to, bot_number=restaurant["whatsapp_number"])
+    with tenant_scope(restaurant["id"]):
+        orders = await db.db_get_orders_range(date_from, date_to, bot_number=restaurant["whatsapp_number"])
     by_date = {}
     current = datetime.strptime(date_from, "%Y-%m-%d").date()
     end     = datetime.strptime(date_to, "%Y-%m-%d").date()
@@ -317,9 +319,8 @@ async def sync_menu_to_branches(request: Request):
     if branch_header and branch_header != "matriz" and branch_header != "all":
         raise HTTPException(status_code=400, detail="Debes estar en la vista de la Casa Matriz para sincronizar.")
 
-    # Ejecutar sincronización
-    branches_updated = await db.db_sync_menu_to_branches(restaurant["id"])
-    
+    with tenant_scope(restaurant["id"]):
+        branches_updated = await db.db_sync_menu_to_branches(restaurant["id"])
     return {"success": True, "branches_updated": branches_updated}
 
 @router.put("/api/menu/update")
@@ -354,31 +355,32 @@ async def update_menu_structure(request: Request):
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"El precio del plato '{item.get('name')}' debe ser un número (sin signos $ ni letras).")
 
-    success = await db.db_update_menu(restaurant["id"], new_menu)
+    with tenant_scope(restaurant["id"]):
+        success = await db.db_update_menu(restaurant["id"], new_menu)
     if not success:
         raise HTTPException(status_code=500, detail="No se pudo actualizar el menú en la base de datos.")
-        
     return {"success": True}
 
 @router.delete("/api/conversations/cleanup")
 async def cleanup_conversations(request: Request):
     restaurant = await get_current_restaurant(request)
-    return {
-        "success": True,
-        "result": str(await db.db_cleanup_old_conversations(days=7, bot_number=restaurant["whatsapp_number"]))
-    }
+    with tenant_scope(restaurant["id"]):
+        result = await db.db_cleanup_old_conversations(days=7, bot_number=restaurant["whatsapp_number"])
+    return {"success": True, "result": str(result)}
 
 @router.get("/api/conversations/{phone}")
 async def get_conversation(phone: str, request: Request):
     restaurant = await get_current_restaurant(request)
-    details = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
+    with tenant_scope(restaurant["id"]):
+        details = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
     return {"phone": phone, "history": details.get("history", []), "bot_paused": details.get("bot_paused", False)}
 
 @router.post("/api/conversations/{phone}/pause")
 async def pause_bot_for_conversation(phone: str, request: Request):
     restaurant = await get_current_restaurant(request)
     body = await request.json()
-    await db.db_toggle_bot(phone, restaurant["whatsapp_number"], body.get("paused", True))
+    with tenant_scope(restaurant["id"]):
+        await db.db_toggle_bot(phone, restaurant["whatsapp_number"], body.get("paused", True))
     return {"success": True, "paused": body.get("paused", True)}
 
 @router.post("/api/conversations/{phone}/reply")
@@ -388,12 +390,13 @@ async def manual_reply(phone: str, request: Request):
     message     = (await request.json()).get("message", "").strip()
     if not message: raise HTTPException(status_code=400, detail="Mensaje vacio")
 
-    # Usar bot_number real de la conversación (puede diferir en setup multi-sucursal)
-    details    = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
-    actual_bot = details.get("bot_number") or restaurant["whatsapp_number"]
-    history    = details.get("history", [])
-    history.append({"role": "assistant", "content": f"[Humano] {message}"})
-    await db.db_save_history(phone, actual_bot, history)
+    with tenant_scope(restaurant["id"]):
+        # Usar bot_number real de la conversación (puede diferir en setup multi-sucursal)
+        details    = await db.db_get_conversation_details(phone, restaurant["whatsapp_number"])
+        actual_bot = details.get("bot_number") or restaurant["whatsapp_number"]
+        history    = details.get("history", [])
+        history.append({"role": "assistant", "content": f"[Humano] {message}"})
+        await db.db_save_history(phone, actual_bot, history)
 
     # wa_phone_id y wa_access_token viven en la tabla restaurants, no en env vars
     meta_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
@@ -463,12 +466,13 @@ async def get_no_show_rate(
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant["whatsapp_number"]
     bid = int(branch_id) if branch_id and branch_id.isdigit() else None
-    stats = await db.db_get_reservation_stats(
-        bot_number,
-        date_from=period_start,
-        date_to=period_end,
-        branch_id=bid,
-    )
+    with tenant_scope(restaurant["id"]):
+        stats = await db.db_get_reservation_stats(
+            bot_number,
+            date_from=period_start,
+            date_to=period_end,
+            branch_id=bid,
+        )
     total = stats.get("total", 0) or 0
     no_shows = stats.get("no_show", 0) or 0
     rate = round(no_shows / total * 100, 1) if total > 0 else 0.0
