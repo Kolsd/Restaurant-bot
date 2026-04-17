@@ -1,65 +1,129 @@
 /* ══ Mesio Design Tokens ═════════════════════════════════════════════
    Single source of truth. Every page imports this file.
+   Mesio operates in TWO visual modes:
+   1. LIGHT/OPERATIONAL — dashboard, back-of-house, forms. Warm off-white bg.
+   2. DARK/MARKETING    — landing page, hero. Near-black with green glow.
    ═══════════════════════════════════════════════════════════════════ */
 :root {
   /* ── Brand ── */
-  --brand: #1D9E75;
-  --brand-dark: #0F6E56;
-  --brand-light: #E1F5EE;
-  --brand-bg: #f0faf5;
+  --brand:          #1D9E75;
+  --brand-dark:     #0F6E56;
+  --brand-light:    #E1F5EE;
+  --brand-bg:       #f0faf5;
+  --brand-glow:     rgba(16,185,129,.35);
+  --accent-violet:  #A78BFA;
 
-  /* ── Surfaces ── */
-  --bg: #f5f5f0;
-  --surface: #ffffff;
-  --surface-hover: #fafaf8;
-  --border: #e0e0d8;
-  --border-strong: #c8c8c0;
+  /* ── Operational surfaces (dashboard / light) ── */
+  --bg:             #f5f5f0;
+  --surface:        #ffffff;
+  --surface-hover:  #fafaf8;
+  --border:         #e0e0d8;
+  --border-strong:  #c8c8c0;
 
-  /* ── Text ── */
-  --text: #111827;
-  --text-2: #4B5563;   /* was #555, improved contrast */
-  --text-3: #6B7280;   /* was #888, improved contrast */
-  --text-4: #9CA3AF;   /* was #bbb, improved contrast */
+  /* ── Marketing surfaces (landing / dark) ── */
+  --bg-dark:        #0A0B0F;
+  --surface-dark:   #12141A;
+  --surface-dark-2: #171A22;
+  --border-dark:    #1F2230;
+  --border-dark-strong: #2A2F40;
 
-  /* ── Semantic ── */
-  --success: #059669;
-  --success-light: #ECFDF5;
-  --warning: #F59E0B;
-  --warning-light: #FAEEDA;
-  --danger: #EF4444;
-  --danger-light: #FEE2E2;
-  --info: #3B82F6;
-  --info-light: #E6F1FB;
+  /* ── Text (light mode) ── */
+  --text:    #111827;
+  --text-2:  #4B5563;
+  --text-3:  #6B7280;
+  --text-4:  #9CA3AF;
 
-  /* ── Spacing (8pt grid) ── */
-  --s-1: 4px;
-  --s-2: 8px;
-  --s-3: 12px;
-  --s-4: 16px;
-  --s-5: 24px;
-  --s-6: 32px;
-  --s-7: 48px;
-  --s-8: 64px;
+  /* ── Text (dark mode) ── */
+  --text-on-dark:      #F5F6F8;
+  --text-on-dark-dim:  #9CA3AF;
+  --text-on-dark-mute: #6B7280;
 
-  /* ── Radii ── */
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-pill: 9999px;
-
-  /* ── Shadows ── */
-  --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
-  --shadow: 0 4px 12px rgba(0,0,0,0.06);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,0.1);
-
-  /* ── Transitions ── */
-  --ease: 0.2s ease;
-
-  /* ── Dark surfaces (for operational pages: kitchen, bar, topbar) ── */
+  /* ── Operational role surfaces (topbar, KDS) ── */
+  --op-dark:    #111827;
+  --op-dark-2:  #1F2937;
+  --op-dark-3:  #374151;
+  /* legacy aliases */
   --dark: #111827;
   --dark-2: #1F2937;
   --dark-3: #374151;
+
+  /* ── Semantic ── */
+  --success:        #059669;
+  --success-light:  #ECFDF5;
+  --warning:        #F59E0B;
+  --warning-light:  #FAEEDA;
+  --warning-text:   #854F0B;
+  --danger:         #EF4444;
+  --danger-light:   #FEE2E2;
+  --danger-text:    #991B1B;
+  --info:           #3B82F6;
+  --info-light:     #E6F1FB;
+  --info-text:      #185FA5;
+  --purple:         #7B5EA7;
+  --purple-light:   #EEEDFE;
+  --purple-text:    #534AB7;
+
+  /* ── Floor plan status ── */
+  --fp-libre:     #86EFAC;  --fp-libre-bg:     #F0FDF4;  --fp-libre-text:     #166534;
+  --fp-sentados:  #FCD34D;  --fp-sentados-bg:  #FEF3C7;  --fp-sentados-text:  #92400E;
+  --fp-ocupada:   #FCA5A5;  --fp-ocupada-bg:   #FEE2E2;  --fp-ocupada-text:   #991B1B;
+  --fp-factura:   #C4B5FD;  --fp-factura-bg:   #EDE9FE;  --fp-factura-text:   #5B21B6;
+  --fp-reservada: #93C5FD;  --fp-reservada-bg: #DBEAFE;  --fp-reservada-text: #1E40AF;
+
+  /* ── Spacing (8pt grid) ── */
+  --s-1: 4px;   --s-2: 8px;   --s-3: 12px;  --s-4: 16px;
+  --s-5: 24px;  --s-6: 32px;  --s-7: 48px;  --s-8: 64px;  --s-9: 96px;
+
+  /* ── Radii ── */
+  --radius-sm:   8px;
+  --radius:     12px;
+  --radius-lg:  16px;
+  --radius-xl:  20px;
+  --radius-pill: 9999px;
+
+  /* ── Shadows (light mode) ── */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+  --shadow:    0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.10);
+  --shadow-xl: 0 24px 64px rgba(0,0,0,0.18);
+
+  /* ── Shadows (dark / marketing) ── */
+  --shadow-hero: 0 32px 80px rgba(0,0,0,.5), 0 0 0 1px var(--border-dark);
+
+  /* ── Transitions ── */
+  --ease:      0.2s ease;
+  --ease-fast: 0.15s ease;
+  --ease-slow: 0.25s ease;
+
+  /* ── Type — Families ── */
+  /* Fraunces: display serif for hero H1/H2, stat numerals, big prices */
+  /* Inter: body + UI throughout */
+  /* System stack: dashboard chrome (sidebar, topbar, tables) */
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body:    'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-ui:      -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  --font-mono:    ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ── Type — Marketing sizes (fluid) ── */
+  --h1-size:      clamp(2rem, 5vw + 0.5rem, 4rem);
+  --h2-size:      clamp(1.6rem, 3vw + 0.5rem, 2.6rem);
+  --h3-size:      1.15rem;
+  --eyebrow-size: 0.8rem;
+
+  /* ── Type — UI / Dashboard sizes (fixed px) ── */
+  --page-title:         20px;  --page-title-weight: 600;
+  --card-title:         13px;  --card-title-weight: 500; --card-title-color: var(--text-3);
+  --metric-value:       26px;  --metric-value-weight: 600;
+  --metric-label:       12px;  --metric-label-color: var(--text-3);
+  --body:               14px;
+  --body-sm:            13px;
+  --caption:            12px;
+  --micro:              11px;
+
+  /* ── Line heights ── */
+  --lh-tight:   1.15;
+  --lh-snug:    1.3;
+  --lh-normal:  1.6;
 }
 
 /* ── Accessibility: Focus ring ── */
@@ -169,3 +233,61 @@
   border-radius: var(--radius-sm);
 }
 @keyframes m-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ══ Semantic type classes ════════════════════════════════════════════
+   Use directly on elements. Prefer CSS vars above when composing.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.t-h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--h1-size);
+  line-height: var(--lh-tight);
+}
+.t-h1 em { font-style: italic; color: var(--brand); }
+
+.t-h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--h2-size);
+  line-height: var(--lh-tight);
+}
+
+.t-h3 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--h3-size);
+  line-height: var(--lh-snug);
+}
+
+.t-eyebrow {
+  font-family: var(--font-body);
+  font-size: var(--eyebrow-size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--brand);
+}
+
+.t-body    { font-family: var(--font-body); font-size: var(--body);    line-height: var(--lh-normal); color: var(--text-2); }
+.t-body-sm { font-family: var(--font-body); font-size: var(--body-sm); line-height: var(--lh-normal); color: var(--text-2); }
+.t-caption { font-family: var(--font-body); font-size: var(--caption); color: var(--text-3); }
+.t-micro   { font-family: var(--font-body); font-size: var(--micro);   color: var(--text-3); }
+
+/* Fraunces display numerals */
+.t-stat {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(2rem, 4vw, 3rem);
+  color: var(--brand);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.t-price {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.6rem;
+}
+
+/* Tabular numerals for clocks + currency in tables */
+.t-nums { font-variant-numeric: tabular-nums; }
