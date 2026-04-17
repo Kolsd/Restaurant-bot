@@ -280,6 +280,7 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
         TranscriptionError,
         TranscriptionUnavailable,
         AudioTooLongError,
+        EmptyTranscriptionError,
     )
 
     from app.services.tenant_context import tenant_scope  # noqa: PLC0415
@@ -330,6 +331,15 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
                 access_token,
             )
             return  # ack — retrying won't shrink the file
+        except EmptyTranscriptionError:
+            log.warning("audio.empty_transcription", audio_id=audio_id)
+            await _send_wa_text(
+                user_phone,
+                "No logré escuchar tu nota de voz. ¿Puedes intentar de nuevo o escribirlo?",
+                phone_id,
+                access_token,
+            )
+            return  # ack — retrying won't help with an inaudible audio
         except TranscriptionError:
             # Transient failure — re-raise so the inbox worker marks this row
             # as failed and retries with exponential backoff (Rule 13).
@@ -345,15 +355,6 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
                 access_token,
             )
             return
-
-        if not transcribed.strip():
-            await _send_wa_text(
-                user_phone,
-                "No escuché nada en tu audio. ¿Intentas de nuevo o me escribes?",
-                phone_id,
-                access_token,
-            )
-            return  # ack — nothing to process
 
         user_text = transcribed
     else:

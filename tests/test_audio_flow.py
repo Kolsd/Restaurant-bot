@@ -379,11 +379,17 @@ class TestAudioVoiceNotes:
         process_mock.assert_not_awaited()
 
     def test_worker_empty_transcription_sends_fallback(self, monkeypatch):
-        """Empty transcript string → fallback WA text; _process_message NOT called."""
+        """EmptyTranscriptionError → fallback WA text; _process_message NOT called.
+
+        transcribe_audio now raises EmptyTranscriptionError instead of returning ""
+        so that the inbox_worker handles it via the typed exception branch.
+        """
         from app.services import inbox_worker
+        from app.services.transcription import EmptyTranscriptionError
 
         download_mock = AsyncMock(return_value=(b"bytes", "audio/ogg"))
-        transcribe_mock = AsyncMock(return_value="")   # Whisper heard nothing
+        # transcribe_audio raises EmptyTranscriptionError when Whisper hears nothing
+        transcribe_mock = AsyncMock(side_effect=EmptyTranscriptionError("inaudible"))
         send_mock = AsyncMock()
         process_mock = AsyncMock()
 
