@@ -654,10 +654,7 @@ function _openStaffModal(self, existing = null) {
             });
           }
         } else {
-          await _staffFetch('', {
-            method: 'POST',
-            body: JSON.stringify({ name, role: rolesArr[0], roles: rolesArr, password: pin, phone, document_number }),
-          });
+          await _staffFetch('', 'POST', { name, role: rolesArr[0], roles: rolesArr, password: pin, phone, document_number });
         }
         overlay.remove();
         await _reloadRoster(self);
@@ -677,7 +674,7 @@ function _openStaffModal(self, existing = null) {
   overlay.appendChild(box);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
-  setTimeout(() => nameIn.focus(), 50);
+  setTimeout(() => nombreIn.focus(), 50);
 }
 
 // ── Roster tab ────────────────────────────────────────────────────────────────

@@ -148,19 +148,22 @@ async def _generate_username(name: str, exclude_id: str | None = None) -> str:
     """Generate unique username as firstname.lastname from full name.
     If a duplicate exists, appends an incrementing number: juan.perez1, juan.perez2...
 
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    # NOTE: scans across all tenants to avoid collisions — always called via
-    # bypass_tenant_scope("staff_username_generation") from db_create_staff /
-    # db_update_staff which already hold a tenant_connection() outer scope.
+    Uses get_pool() + SET LOCAL ROLE mesio_superadmin directly to bypass RLS and
+    scan globally — avoids TenantContextConflict when called from within an active
+    tenant_scope (e.g. create_staff via get_current_restaurant_scoped dependency).
     """
+    from app.services.database import get_pool
+
     parts = name.strip().split()
     fname = _normalize_for_username(parts[0]) if parts else 'user'
     lname = _normalize_for_username(parts[1]) if len(parts) > 1 else ''
 
     base = f"{fname}.{lname}" if lname else fname
 
-    with bypass_tenant_scope("staff_username_generation: must scan all tenants to guarantee global username uniqueness; called from db_create_staff/db_update_staff"):
-        async with tenant_connection() as conn:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SET LOCAL ROLE mesio_superadmin")
             rows = await conn.fetch(
                 "SELECT username FROM staff WHERE username LIKE $1 || '%'",
                 base,
