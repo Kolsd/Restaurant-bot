@@ -214,15 +214,11 @@ function getDynamicRoleLabel(roleKey) {
 }
 
 function _apiHeaders() {
+  // Delegate to the shared _dashHeaders so X-Branch-ID and Authorization stay in sync
+  if (window._dashHeaders) return Object.assign({}, window._dashHeaders);
+  // Fallback during early init before _dashHeaders is populated
   const token = localStorage.getItem('rb_token') || '';
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  
-  // 🛡️ FIX: Usar el ID correcto del selector global
-  const branchSelect = document.getElementById('global-branch-select'); 
-  if (branchSelect && branchSelect.value && branchSelect.value !== 'matriz') {
-      headers['X-Branch-ID'] = branchSelect.value;
-  }
-  return headers;
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
@@ -603,7 +599,7 @@ function _openStaffModal(self, existing = null) {
       (data.templates || []).forEach(t => {
         const o = document.createElement('option');
         o.value = t.id;
-        o.textContent = `${t.name} · ${t.weekly_hours}h/sem · $${Number(t.monthly_salary).toLocaleString('es-CO')}`;
+        o.textContent = `${t.name} · ${t.weekly_hours}h/sem · ${mesioFmt(t.monthly_salary)}`;
         if (existing.contract_template_id === t.id) o.selected = true;
         contractTemplateSelect.appendChild(o);
       });
@@ -2114,7 +2110,7 @@ async function _renderContractsPanel(container, self) {
       const detailEl = document.createElement('div');
       detailEl.style.cssText = 'font-size:12px;color:#666;margin-top:4px;';
       const periodLabel = { monthly:'Mensual', biweekly:'Quincenal', weekly:'Semanal' }[t.pay_period] || t.pay_period;
-      detailEl.textContent = `${t.weekly_hours}h/sem · Salario: $${Number(t.monthly_salary).toLocaleString('es-CO')} · ${periodLabel} · Break: ${t.breaks_billable?'billable':'no billable'} · Almuerzo: ${t.lunch_billable?'billable':t.lunch_minutes+'min no billable'}`;
+      detailEl.textContent = `${t.weekly_hours}h/sem · Salario: ${mesioFmt(t.monthly_salary)} · ${periodLabel} · Break: ${t.breaks_billable?'billable':'no billable'} · Almuerzo: ${t.lunch_billable?'billable':t.lunch_minutes+'min no billable'}`;
       info.appendChild(nameEl);
       info.appendChild(detailEl);
       const editBtn = document.createElement('button');

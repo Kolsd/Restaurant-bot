@@ -7,13 +7,10 @@
 
 let _mktStatus       = null;   // last fetched status dict
 let _reengagePhone   = null;   // phone in open modal
-let _mktLoaded       = false;  // guard: load once per section visit
 
 // ── Load entry point (called from showSection) ────────────────────────────────
 
 async function loadClientesSection() {
-  if (_mktLoaded) return;   // already loaded this session
-  _mktLoaded = true;
   await Promise.all([
     _loadMarketingStatus(),
     _loadAtRiskCustomers(),

@@ -28,8 +28,10 @@ async function loadNPS() {
     ]);
 
     if (!rStats.ok || !rResponses.ok) {
-      document.getElementById('nps-container').innerHTML =
-        '<div class="empty-state">Error cargando datos NPS.</div>';
+      const is403 = rStats.status === 403 || rResponses.status === 403;
+      document.getElementById('nps-container').innerHTML = is403
+        ? '<div class="empty-state">El módulo NPS no está activo en tu plan. Actívalo desde Configuración.</div>'
+        : '<div class="empty-state">Error cargando datos NPS.</div>';
       return;
     }
 
@@ -671,7 +673,7 @@ function renderFoodCostTable(costs) {
     const dishEsc = (row.dish_name || '').replace(/'/g, "\\'");
     html += `<tr>
       <td style="font-weight:500;">${_escHtml(row.dish_name)}</td>
-      <td style="font-weight:700;color:#7B5EA7;">$${parseFloat(row.food_cost).toLocaleString('es-CO')}</td>
+      <td style="font-weight:700;color:#7B5EA7;">${mesioFmt(parseFloat(row.food_cost))}</td>
       <td style="max-width:240px;line-height:1.8;">${ingredientTags}</td>
       <td>
         <div style="display:flex;gap:6px;">
@@ -801,7 +803,7 @@ function _recalcFoodCost() {
   });
   if (lines.children.length && valid && total > 0) {
     preview.style.display = 'block';
-    preview.textContent = `Food Cost estimado: $${total.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    preview.textContent = `Food Cost estimado: ${mesioFmt(total)}`;
   } else {
     preview.style.display = 'none';
   }
@@ -896,17 +898,29 @@ async function loadReviews() {
       fetch('/api/reviews/summary', { headers: h }),
       fetch('/api/nps/responses?period=year&limit=200', { headers: h }),
     ]);
+
     if (rSummary.ok) {
       const s = await rSummary.json();
       renderReviewsSummary(s);
+    } else {
+      const metricsEl = document.getElementById('reviews-metrics-panel');
+      if (metricsEl) metricsEl.innerHTML = '<div class="empty-state" style="padding:1rem;">No pudimos cargar las métricas de reseñas.</div>';
+      mesioToast('No se pudieron cargar las métricas de reseñas.', 'error');
     }
+
     if (rAll.ok) {
       const { responses } = await rAll.json();
       _reviewsAllCache = responses || [];
       renderAllReviewsForManagement(_reviewsAllCache);
+    } else {
+      document.getElementById('reviews-all-list').innerHTML =
+        '<div class="empty-state">No se pudieron cargar las reseñas.</div>';
+      mesioToast('No se pudieron cargar las reseñas.', 'error');
     }
   } catch(e) {
     console.error('loadReviews:', e);
+    document.getElementById('reviews-all-list').innerHTML =
+      '<div class="empty-state">Error inesperado al cargar reseñas.</div>';
   }
 }
 

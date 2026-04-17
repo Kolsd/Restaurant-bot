@@ -28,9 +28,9 @@ const _WR_TIMEZONES = [
 const _PHONE_RE = /^\+?\d{10,15}$/;
 
 // ── Entry point (called by showSection in dashboard-core.js) ──────────────────
-window.loadWeeklyReportSection = async function () {
-  if (_wr.loading) return;
-  _wr.loading = true;
+window.loadWeeklyReportSection = async function (forceRefresh = false) {
+  if (_wr.loaded && !forceRefresh) return;
+  _wr.loaded = false;
   _wrRenderSkeleton();
   try {
     const resp = await fetch('/api/weekly-reports', { headers: mesioHeaders() });
@@ -43,8 +43,6 @@ window.loadWeeklyReportSection = async function () {
     _wrRender();
   } catch (e) {
     _wrRenderError();
-  } finally {
-    _wr.loading = false;
   }
 };
 
