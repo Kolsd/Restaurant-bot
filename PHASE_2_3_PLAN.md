@@ -6,6 +6,42 @@
 
 ---
 
+## ✅ Estado: COMPLETADO (sesión 2026-04-17)
+
+Todas las tareas priorizadas del plan están hechas. Test suite en 836 passed / 49 skipped. DB head = `0033_processed_wompi_events`. Mergeado a `main`.
+
+| Task | Estado | Commit | Archivos tocados |
+|---|---|---|---|
+| **D1** — Audit bypass staff_repo | ✅ | `5f8c719` | `staff_repo.py` (1 función tensada, 14 flag "caller gap") |
+| **D2** — Legacy integration tests | ✅ | `5d56f33` | `test_tips.py`, `test_payroll.py`, `test_integration_flows.py` |
+| **2.1** — Inventory race conditions | ✅ | `a207fd4` | `inventory_repo.py` (+`FOR UPDATE`), `test_inventory_concurrency.py` |
+| **2.2** — Wompi idempotency | ✅ | `ea966bc` | Alembic 0033, `orders_repo.record_wompi_event`, `orders_routes.wompi_webhook`, tests |
+| **2.3** — Scheduler leader renewal | ✅ | `ceaddf9` | `state_store.scheduler_leader_renew`, `scheduler._renew_or_abort`, tests |
+| **2.4** — Tx boundaries audit | ✅ | (incluido en `a207fd4`) | Audit table documentada; todas las ops multi-paso ya en tx única |
+| **3.1** — Server-side price resolution | ✅ | `d22dc95` | `agent._resolve_items_server_side` + guard en `_validate_tool_call`, tests |
+| **3.2** — POS lag bajo LLM | ✅ (arquitectural) | (pre-existente) | `railway.toml` ya tiene split web vs worker; `DISABLE_EMBEDDED_WORKER=1` en prod |
+| **3.3** — Middleware resiliency DB/Redis down | ✅ | `35bbffb` | `tenant_db.PoolAcquireTimeout`, `/health` split, webhook 200-on-DB-down, tests |
+| **3.4** — DB circuit breaker | ✅ | `695836f` | `database.DBCircuitOpen` + state machine + `get_circuit_state()`, tests |
+
+### Deuda residual (post-ejecución)
+
+- **14 bypasses cuestionables** en `staff_repo.py` siguen activos porque los call sites (rutas `self_*`, `staff_webauthn`) no entran en `tenant_scope`. Para apretarlos hay que migrar esas rutas a `get_current_user_scoped` / `get_current_restaurant_scoped`. Es deuda nueva, no regresión.
+- **`_sync_dish_availability`** abre nueva `tenant_connection()` — runs en tx separada de la UPDATE de stock. Eventual consistency aceptable; flaggeado en commit `a207fd4`.
+- **Wompi `processed_wompi_events`**: sin TTL cleanup job. Flaggear como tick del scheduler cuando la tabla crezca.
+- **49 tests skipped** siguen gateados por `DATABASE_URL` — migrar a `@pytest.mark.integration` es cleanup separado.
+
+### Fase 2 + Fase 3 — VERIFICACIÓN EMPÍRICA
+
+- `python -m pytest tests/ --ignore=tests/ai_sim -q` → **836 passed, 49 skipped**
+- DB circuit breaker probado con 6 tests (5 transitions + thundering herd)
+- Webhook resiliency probado con 19 tests (timeouts, partial batch, health split)
+- Inventory race probado con 5 tests (last-unit, multi-SKU, TOCTOU admin edit)
+- Wompi idempotency probado con 5 tests (dedup, handler replay, edge cases)
+- Scheduler renewal probado con 15 tests (token semantics, lease loss, abort-mid-tick)
+- Price injection probado con 6 tests (total tampering, phantom items, two-layer defense)
+
+---
+
 ## Deuda de Fase 1 — no bloqueante pero a limpiar
 
 Antes de arrancar Fase 2, vale gastar 30–60 min en estas dos:
