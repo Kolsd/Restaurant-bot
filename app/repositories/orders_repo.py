@@ -490,3 +490,52 @@ async def db_update_order_status(order_id: str, new_status: str) -> dict | None:
             order_id, new_status,
         )
         return _serialize(dict(row))
+
+
+# ── Wompi webhook idempotency (GLOBAL table) ──────────────────────────────────
+#
+# processed_wompi_events has no restaurant_id column and is explicitly GLOBAL
+# — the event_id is resolved before we know which tenant owns the order.
+# Pattern mirrors sessions_repo / inbox_repo: uses get_pool() directly, NOT
+# tenant_connection().  Do NOT add tenant_scope here.
+
+async def record_wompi_event(
+    event_id: str,
+    *,
+    transaction_id: str | None,
+    order_id: int | None,
+    status: str,
+) -> bool:
+    """Record a processed Wompi event and signal whether it is new.
+
+    Inserts a row for *event_id* using INSERT … ON CONFLICT (event_id) DO NOTHING.
+    Returns True if this is the first time we have seen this event_id (the
+    caller should continue processing), or False if the row already existed
+    (a replay — the caller should return 200 immediately without side effects).
+
+    Calling this function 100 times with the same event_id is safe: after the
+    first insert every subsequent call is a no-op that returns False.
+
+    GLOBAL table — does NOT require tenant_scope.
+    """
+    def _get_pool():
+        from app.services.database import get_pool  # noqa: PLC0415
+        return get_pool()
+
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            INSERT INTO processed_wompi_events
+                (event_id, transaction_id, order_id, status)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (event_id) DO NOTHING
+            """,
+            event_id,
+            transaction_id,
+            order_id,
+            status,
+        )
+    # asyncpg returns "INSERT 0 N" — N=1 means row was inserted (first time).
+    affected = int(result.split()[-1]) if result else 0
+    return affected == 1

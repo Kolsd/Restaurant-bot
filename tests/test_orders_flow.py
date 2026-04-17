@@ -273,6 +273,12 @@ def test_wompi_valid_approved_transaction(client, monkeypatch):
     """Transacción APPROVED con firma válida → 200, orden confirmada."""
     secret = "test_wompi_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
+    # record_wompi_event uses the GLOBAL processed_wompi_events table; mock so
+    # the test doesn't need a real DB. True = first time (proceed with processing).
+    monkeypatch.setattr(
+        "app.routes.orders_routes.record_wompi_event",
+        AsyncMock(return_value=True),
+    )
     payload = {
         "event": "transaction.updated",
         "data": {"transaction": {"id": "txn-001", "status": "APPROVED", "reference": "ord-001"}},
@@ -308,6 +314,10 @@ def test_wompi_declined_transaction(client, monkeypatch):
     """Transacción DECLINED → 200 pero no llama db_confirm_payment."""
     secret = "test_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
+    monkeypatch.setattr(
+        "app.routes.orders_routes.record_wompi_event",
+        AsyncMock(return_value=True),
+    )
     payload = {
         "event": "transaction.updated",
         "data": {"transaction": {"id": "txn-002", "status": "DECLINED", "reference": "ord-001"}},
@@ -338,6 +348,10 @@ def test_wompi_no_reference(client, monkeypatch):
     """Transacción APPROVED sin reference → 200, no crashea."""
     secret = "test_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
+    monkeypatch.setattr(
+        "app.routes.orders_routes.record_wompi_event",
+        AsyncMock(return_value=True),
+    )
     payload = {
         "event": "transaction.updated",
         "data": {"transaction": {"id": "txn-003", "status": "APPROVED"}},  # sin reference

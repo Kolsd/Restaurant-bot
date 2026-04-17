@@ -14,6 +14,7 @@ from app.services.logging import get_logger
 from app.services.money import to_decimal
 from app.repositories import tables_repo as tr
 from app.repositories.loyalty_repo import db_accrue_loyalty_points
+from app.repositories.orders_repo import record_wompi_event
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
 
 log = get_logger(__name__)
@@ -99,6 +100,34 @@ async def wompi_webhook(request: Request):
     # bypass_tenant_scope allows migrated repos to execute without a pinned tenant.
     with bypass_tenant_scope("wompi_webhook_cross_tenant"):
         if event == "transaction.updated":
+            # ── Idempotency guard (Phase 2.2) ──────────────────────────────────
+            # Extract the canonical Wompi event_id early, before touching any
+            # order state.  Wompi retries on timeout → same event_id arrives
+            # again; record_wompi_event returns False on replay.
+            transaction_data_raw = data.get("transaction", {})
+            event_id = transaction_data_raw.get("id")
+            if not event_id:
+                log.error(
+                    "wompi.webhook.missing_event_id",
+                    wompi_event_type=event,
+                    hint="payload did not contain data.transaction.id",
+                )
+                raise HTTPException(status_code=400, detail="Payload inválido: falta data.transaction.id")
+
+            is_first = await record_wompi_event(
+                event_id,
+                transaction_id=event_id,  # Wompi uses the same UUID as the transaction id
+                order_id=None,            # order_id not yet resolved at this point
+                status=transaction_data_raw.get("status", ""),
+            )
+            if not is_first:
+                log.info(
+                    "wompi.duplicate_event_ignored",
+                    event_id=event_id,
+                )
+                return {"status": "already_processed"}
+            # ── End idempotency guard ───────────────────────────────────────────
+
             transaction = data.get("transaction", {})
             tx_status = transaction.get("status", "")
             reference = transaction.get("reference", "")
