@@ -130,6 +130,34 @@
       border-color: #1D9E75;
     }
 
+    /* ── Panel principal tile (top of role selector) ── */
+    .panel-primary-tile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 1rem 1.25rem;
+      border-radius: 14px;
+      background: #1D9E75;
+      color: #fff;
+      text-decoration: none;
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      transition: opacity 0.15s, transform 0.1s;
+      box-shadow: 0 4px 14px rgba(29,158,117,.30);
+    }
+    .panel-primary-tile:hover { opacity: 0.92; transform: translateY(-2px); }
+    .panel-primary-tile .tile-icon { font-size: 22px; flex-shrink: 0; }
+    .panel-primary-tile .tile-text { display: flex; flex-direction: column; }
+    .panel-primary-tile .tile-text strong { font-size: 15px; }
+    .panel-primary-tile .tile-text small { font-size: 11px; opacity: 0.82; margin-top: 1px; }
+
+    .role-divider {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: #9CA3AF;
+      text-align: center; margin-bottom: 10px;
+    }
+
     /* ── Role grid ── */
     .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .role-tile {
@@ -216,6 +244,14 @@
       <h1 id="welcome-name">&#161;Hola!</h1>
       <p class="sub">&iquest;A qu&eacute; &aacute;rea vas a entrar hoy?</p>
     </div>
+    <a href="/staff-hq" class="panel-primary-tile">
+      <span class="tile-icon" aria-hidden="true">🏠</span>
+      <span class="tile-text">
+        <strong>Panel principal</strong>
+        <small>Marcar entrada / salida de turno</small>
+      </span>
+    </a>
+    <div class="role-divider">O entra directo a tu área</div>
     <div class="role-grid" id="role-grid" role="list" aria-label="Selecciona tu rol"></div>
     <button type="button" class="btn-ghost" id="back-from-role">Cambiar usuario</button>
   </div>
