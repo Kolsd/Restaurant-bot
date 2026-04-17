@@ -54,10 +54,9 @@ async def db_get_history(phone: str, bot_number: str = "") -> list:
 
 async def db_save_history(phone: str, bot_number: str, history: list, branch_id: int = None):
     async with _tenant_connection() as conn:
-        # 🛡️ Agregamos branch_id al INSERT y al UPDATE
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, history, branch_id, updated_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO conversations (phone, bot_number, history, branch_id, restaurant_id, updated_at)
+            VALUES ($1, $2, $3, $4, NULLIF(current_setting('app.restaurant_id', true), '')::int, NOW())
             ON CONFLICT (phone, bot_number)
             DO UPDATE SET history=EXCLUDED.history, branch_id=EXCLUDED.branch_id, updated_at=NOW()
         """, phone, bot_number, json.dumps(history[-20:]), branch_id)
@@ -143,8 +142,8 @@ async def db_get_conversation_details(phone: str, bot_number: str = ""):
 async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
     async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, bot_paused, updated_at)
-            VALUES ($1,$2,$3,NOW())
+            INSERT INTO conversations (phone, bot_number, bot_paused, restaurant_id, updated_at)
+            VALUES ($1,$2,$3,NULLIF(current_setting('app.restaurant_id', true), '')::int,NOW())
             ON CONFLICT (phone, bot_number) DO UPDATE SET bot_paused=EXCLUDED.bot_paused, updated_at=NOW()
         """, phone, bot_number, pause)
 
