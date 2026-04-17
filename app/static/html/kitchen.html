@@ -175,12 +175,16 @@ function renderCard(o) {
   const safeId  = escHtml(o.id);
   const safeOid = escHtml(o.original_id || o.id);
 
+  const isPickup = o.order_type === 'recoger';
+
   let actionHtml = '';
   if (isDel) {
     if (o.status === 'recibido') {
       actionHtml = `<button class="btn btn-prep" onclick="setDeliveryStatus('${safeOid}','en_preparacion')">👨‍🍳 En preparación</button>`;
     } else if (o.status === 'en_preparacion') {
-      actionHtml = `<button class="btn btn-listo" onclick="setDeliveryStatus('${safeOid}','listo')">✅ Listo para domiciliario</button>`;
+      actionHtml = isPickup
+        ? `<button class="btn btn-listo" onclick="setDeliveryStatus('${safeOid}','listo')">🛍️ Listo para recoger</button>`
+        : `<button class="btn btn-listo" onclick="setDeliveryStatus('${safeOid}','listo')">✅ Listo para domiciliario</button>`;
     } else {
       actionHtml = `<div class="listo-badge">📦 Esperando domiciliario</div>`;
     }
@@ -297,11 +301,13 @@ async function loadOrders() {
 
     const normalizedDelivery = deliveryOrders
       .filter(o => !['en_camino', 'en_puerta', 'entregado', 'cancelado'].includes(o.status))
+      .filter(o => !(o.order_type === 'recoger' && o.status === 'listo')) // listo pickups → caja
       .map(o => ({
         id: o.id,
+        order_type: o.order_type,
         table_name: o.order_type === 'domicilio'
           ? `🛵 Domicilio — ${(o.phone || '').slice(-4)}`
-          : `🏠 Recoger — ${(o.phone || '').slice(-4)}`,
+          : `🛍️ Recoger — ${(o.phone || '').slice(-4)}`,
         items: Array.isArray(o.items) ? o.items : [],
         notes: (o.notes || '') + (o.payment_method ? ` | Pago: ${o.payment_method}` : '') + (o.address ? ` | 📍 ${o.address}` : ''),
         status: mapDeliveryStatus(o.status),

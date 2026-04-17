@@ -437,23 +437,30 @@ async def update_delivery_order_status(request: Request, order_id: str):
     with bypass_tenant_scope("update_delivery_order_status: delivery order by ID"):
         await tr.db_update_delivery_order_status(order_id, new_status)
 
-    if new_status in ("confirmado", "en_camino", "entregado"):
+    if new_status in ("confirmado", "en_camino", "entregado", "listo"):
         with bypass_tenant_scope("update_delivery_order_status: contact lookup by order ID"):
             row = await tr.db_get_delivery_order_contact(order_id)
+            full = await tr.db_get_delivery_order_full(order_id) if new_status == "listo" else None
         if row:
             phone = row["phone"]
+            order_type = (full or {}).get("order_type", "domicilio")
             if new_status == "confirmado":
                 msg = f"✅ ¡Tu pedido fue confirmado! Ya está en preparación y pronto estará listo. 🍽️"
+            elif new_status == "listo" and order_type == "recoger":
+                msg = "🛍️ ¡Tu pedido está listo para recoger! Puedes pasar a buscarlo cuando quieras. ¡Te esperamos!"
             elif new_status == "en_camino":
                 msg = f"🛵 ¡Tu pedido ya va en camino a {row['address']}! Pronto estaremos contigo."
-            else:
+            elif new_status == "entregado":
                 msg = f"✅ ¡Tu pedido fue entregado! Total: ${int(row['total']):,} COP. ¡Gracias por tu compra!"
-            try:
-                with bypass_tenant_scope("update_delivery_order_status: meta phone ID lookup"):
-                    db_phone_id = await tr.db_get_meta_phone_id_for_session(phone)
-            except Exception:
-                db_phone_id = None
-            await send_wa_msg(phone, msg, db_phone_id)
+            else:
+                msg = None
+            if msg:
+                try:
+                    with bypass_tenant_scope("update_delivery_order_status: meta phone ID lookup"):
+                        db_phone_id = await tr.db_get_meta_phone_id_for_session(phone)
+                except Exception:
+                    db_phone_id = None
+                await send_wa_msg(phone, msg, db_phone_id)
 
     if new_status == "confirmado":
         with bypass_tenant_scope("update_delivery_order_status: full order for billing"):

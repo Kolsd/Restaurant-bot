@@ -1779,7 +1779,7 @@ async function loadPickupOrders() {
     const allOrders = domRes.ok  ? ((await domRes.json()).orders        || []) : [];
     const allConvs  = convRes.ok ? ((await convRes.json()).conversations || []) : [];
 
-    const pickups = allOrders.filter(o => ['pendiente','confirmado'].includes(o.status) && o.order_type === 'recoger');
+    const pickups = allOrders.filter(o => ['pendiente','confirmado','listo'].includes(o.status) && o.order_type === 'recoger');
     const voucherPhones = new Set(allConvs.filter(c => c.has_voucher).map(c => c.phone));
 
     const badge = document.getElementById('pickup-badge');
@@ -1818,6 +1818,18 @@ async function avisarListoPickup(id) {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+async function marcarEntregadoPickup(id) {
+  if (!confirm('¿Confirmar que el cliente ya recogió su pedido?')) return;
+  try {
+    const r = await fetch(`/api/delivery/orders/${id}/status`, {
+      method: 'PATCH', headers: reqHeaders, body: JSON.stringify({ status: 'entregado' })
+    });
+    if (!r.ok) { const d = await r.json(); alert('Error: ' + (d.detail || r.status)); return; }
+    loadPickupOrders();
+    _refreshPickupBadge();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 function renderPickupCard(o, hasVoucher) {
   let itemsHtml = '';
   try {
@@ -1834,25 +1846,31 @@ function renderPickupCard(o, hasVoucher) {
 
   const isPendiente  = o.status === 'pendiente';
   const isConfirmado = o.status === 'confirmado';
-  const statusBadge  = isConfirmado
+  const isListo      = o.status === 'listo';
+
+  const statusBadge = isConfirmado
     ? '<span style="background:#f59e0b;color:white;border-radius:4px;padding:1px 7px;font-size:11px;margin-left:6px;">🍳 En preparación</span>'
-    : '';
+    : isListo
+      ? '<span style="background:#16a34a;color:white;border-radius:4px;padding:1px 7px;font-size:11px;margin-left:6px;animation:pulse 1.5s infinite;">✅ LISTO PARA ENTREGAR</span>'
+      : '';
+
+  const borderColor = isListo ? '#16a34a' : '#8b5cf6';
+  const shadowColor = isListo ? 'rgba(22,163,74,0.15)' : 'rgba(139,92,246,0.12)';
 
   const actionBtns = isPendiente
     ? `<button onclick="confirmarPickup('${o.id}')"
          style="flex:1;background:#6366f1;color:white;border:none;border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13px;font-weight:600;">
          🍳 Enviar a cocina
        </button>`
-    : '';
-
-  const readyBtn = `<button onclick="avisarListoPickup('${o.id}')"
-      style="flex:1;background:#8b5cf6;color:white;border:none;border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13px;font-weight:600;"
-      title="Marca como listo y envía WhatsApp al cliente">
-      📲 Listo — Avisar cliente
-    </button>`;
+    : isListo
+      ? `<button onclick="marcarEntregadoPickup('${o.id}')"
+           style="flex:1;background:#16a34a;color:white;border:none;border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13px;font-weight:600;">
+           ✅ Entregar al cliente
+         </button>`
+      : '';
 
   return `
-    <div style="background:white;border-radius:12px;padding:18px;min-width:260px;max-width:300px;box-shadow:0 2px 10px rgba(139,92,246,0.12);border-top:4px solid #8b5cf6;">
+    <div style="background:white;border-radius:12px;padding:18px;min-width:260px;max-width:300px;box-shadow:0 2px 10px ${shadowColor};border-top:4px solid ${borderColor};">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <span style="background:#8b5cf6;color:white;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:700;">🛍️ Para Recoger</span>
         <span style="font-size:12px;color:#999;">${_escHtml(o.phone||'')}</span>
@@ -1865,7 +1883,6 @@ function renderPickupCard(o, hasVoucher) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         ${actionBtns}
-        ${readyBtn}
         <button onclick="openChatModal('${_escHtml(o.phone||'')}')"
           style="background:#f3f0ff;color:#8b5cf6;border:none;border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13px;">
           💬
@@ -2218,7 +2235,7 @@ async function _refreshPickupBadge() {
     const r = await fetch('/api/delivery/orders', { headers: reqHeaders });
     if (!r.ok) return;
     const orders = (await r.json()).orders || [];
-    const count = orders.filter(o => ['pendiente','confirmado'].includes(o.status) && o.order_type === 'recoger').length;
+    const count = orders.filter(o => ['pendiente','confirmado','listo'].includes(o.status) && o.order_type === 'recoger').length;
     const badge = document.getElementById('pickup-badge');
     if (badge) { badge.textContent = count; badge.style.display = count > 0 ? 'inline' : 'none'; }
   } catch(e) {}
