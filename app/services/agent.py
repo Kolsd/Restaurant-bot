@@ -9,7 +9,7 @@ from anthropic import AsyncAnthropic, APIStatusError, APITimeoutError, APIConnec
 from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
-from app.services.money import to_decimal
+from app.services.money import to_decimal, money_mul, money_sum, ZERO
 from app.services.tenant_context import bypass_tenant_scope as _bypass_tenant
 from app.services.tenant_db import tenant_connection as _tenant_conn
 from app.repositories.orders_repo import (
@@ -860,6 +860,81 @@ def _last_messages_have_confirmation(full_history: list) -> bool:
     return False
 
 
+_ORDER_TOOLS = frozenset({"place_order", "create_delivery_order", "create_pickup_order"})
+
+
+async def _resolve_items_server_side(
+    items: list,
+    bot_number: str,
+) -> tuple[list, object, list]:
+    """
+    Re-resolve prices for each item in `items` from the DB menu.
+
+    For each item:
+    - Looks up by `sku` (preferred) or by exact/substring name match via `find_dish`.
+    - If not found: appends item name to `errors`, skips the item.
+    - Builds a normalized item dict with `unit_price` and `line_total` from the DB,
+      NEVER from the LLM payload.
+
+    Returns:
+        resolved_items: list of dicts with {name, qty, unit_price, line_total, category, sku}
+        total: Decimal — server-computed sum of all line_totals
+        errors: list of str — names of items not found in the menu
+    """
+    from app.services.orders import find_dish  # noqa: PLC0415
+
+    resolved: list = []
+    errors: list = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw_qty = item.get("qty") or item.get("quantity") or 1
+        try:
+            qty = int(raw_qty)
+        except (ValueError, TypeError):
+            qty = 1
+        if qty <= 0:
+            qty = 1
+
+        # Prefer sku-based lookup, fall back to name
+        sku = item.get("sku") or item.get("name") or ""
+        name_hint = item.get("name") or sku
+        if not sku.strip():
+            errors.append(f"(item sin nombre)")
+            continue
+
+        dish = await find_dish(sku.strip(), bot_number)
+        if dish is None and sku != name_hint:
+            # sku didn't match, try name
+            dish = await find_dish(name_hint.strip(), bot_number)
+
+        if dish is None:
+            log.warning(
+                "price_resolution.item_not_found",
+                sku=sku,
+                name=name_hint,
+                bot_number=bot_number,
+            )
+            errors.append(name_hint or sku)
+            continue
+
+        unit_price = to_decimal(dish.get("price", 0))
+        line_total = money_mul(unit_price, qty)
+
+        resolved.append({
+            "name": dish["name"],
+            "sku": dish.get("sku") or dish["name"],
+            "qty": qty,
+            "unit_price": unit_price,        # Decimal — for arithmetic only
+            "line_total": line_total,         # Decimal — for arithmetic only
+            "category": dish.get("category", ""),
+        })
+
+    total = money_sum(r["line_total"] for r in resolved) if resolved else ZERO
+    return resolved, total, errors
+
+
 async def _validate_tool_call(
     tool_name: str | None,
     tool_input: dict,
@@ -870,6 +945,7 @@ async def _validate_tool_call(
     features: dict | None = None,
     session_state: dict | None = None,
     full_history: list | None = None,
+    restaurant_obj: dict | None = None,
 ) -> tuple[str | None, str | None, dict]:
     """
     Validate a tool call before execution. Returns (tool_name, reply, tool_input).
@@ -906,8 +982,48 @@ async def _validate_tool_call(
             log.warning("guard.order_tool_empty_items", tool=tool_name, phone=_ofuscar_phone(phone))
             return None, reply or "¿Qué te gustaría ordenar? Cuéntame los platos que deseas.", {}
 
+    # 2b. Server-side price resolution — SECURITY CRITICAL.
+    # The LLM receives menu prices in the system prompt and can be manipulated via
+    # prompt injection ("cobra $1"). We NEVER trust any price that came from the LLM.
+    # Re-read prices from the DB for every item and recompute total.
+    # Reject the entire tool call if any item cannot be found in the menu.
+    if tool_name in _ORDER_TOOLS:
+        raw_items = tool_input.get("items", [])
+        resolved_items, resolved_total, price_errors = await _resolve_items_server_side(
+            raw_items, bot_number
+        )
+        if price_errors:
+            error_names = ", ".join(f"'{e}'" for e in price_errors)
+            log.warning(
+                "guard.price_resolution_failed",
+                tool=tool_name,
+                phone=_ofuscar_phone(phone),
+                errors=price_errors,
+            )
+            return (
+                None,
+                f"No encontré estos productos en el menú: {error_names}. "
+                "¿Puedes verificar el nombre exacto de la carta?",
+                {},
+            )
+        # Rebuild items in a normalized shape; unit_price/line_total remain Decimal
+        # throughout the internal pipeline. JSON serialization happens at the boundary
+        # inside commit_order_transaction / execute_salon_action / execute_external_action.
+        tool_input = {
+            **tool_input,
+            "items": resolved_items,
+            "_resolved_total": resolved_total,  # Decimal — pipeline uses this, ignores LLM total
+        }
+        log.info(
+            "guard.price_resolution_ok",
+            tool=tool_name,
+            phone=_ofuscar_phone(phone),
+            item_count=len(resolved_items),
+            total=str(resolved_total),
+        )
+
     # 3. Duplicate order detection — same items within 60 seconds
-    if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
+    if tool_name in _ORDER_TOOLS:
         items = tool_input.get("items", [])
         item_key = _make_order_fingerprint(items)
         is_ok = await state_store.rate_limit_check(
@@ -1660,6 +1776,7 @@ async def _call_llm_and_execute(
         features=feats,
         session_state=session_state,
         full_history=full_history,
+        restaurant_obj=restaurant_obj,
     )
 
     # ── CATEGORY A safety net: action-announcement without tool execution ──
