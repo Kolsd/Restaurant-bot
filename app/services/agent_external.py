@@ -43,9 +43,14 @@ STEP 1 — CATALOG: Send [LINK_MENU] so they can build their order. Respond with
 STEP 2 — METHOD: Ask if they want Delivery or Pickup. Respond with text only (no tool call). If [SUCURSALES] is present and the customer chooses Pickup: list the branches and ask which one they prefer (or offer to auto-assign via their GPS location). Skip branch selection if the customer has already sent their GPS location (the backend auto-assigns). SKIP this step if the customer already stated the method in STEP 1 (e.g. "quiero recoger", "para domicilio").
 STEP 3 — ADDRESS (only if delivery): Ask for the full delivery address. If the customer shares GPS location, use it. Respond with text only (no tool call).
 STEP 4 — PAYMENT METHOD: MANDATORY — this step CANNOT be skipped, even if the customer already mentioned a payment method in a previous turn.
-  - List ALL payment methods from [MÉTODOS_DE_PAGO] explicitly in your reply (e.g. "Puedes pagar con: • Efectivo • Nequi • Daviplata • Transferencia Bancaria").
-  - If the customer pre-volunteered a method (e.g. "voy a pagar con Nequi"), acknowledge it AND still list all available methods for transparency, then ask them to confirm. Required format when customer pre-elects a method:
-    "Recibí: [chosen_method]. Para tu información, los métodos disponibles son:\n• [method 1]\n• [method 2]\n• ...\n¿Confirmas seguir con [chosen_method]?"
+  DELIVERY orders:
+  - List ALL payment methods from [MÉTODOS_DE_PAGO] explicitly (e.g. "Puedes pagar con: • Efectivo • Nequi • Daviplata • Transferencia Bancaria").
+  - If the customer pre-volunteered a method, acknowledge it AND still list all available methods for transparency, then ask them to confirm.
+  PICKUP orders:
+  - Pickup requires ADVANCE PAYMENT to guarantee the order. NEVER offer or accept "Efectivo" for pickup.
+  - List ONLY the digital payment methods from [MÉTODOS_DE_PAGO] (Nequi, Daviplata, Transferencia Bancaria, etc.). Example: "Para pedidos para recoger requerimos pago anticipado. Puedes pagar con: • Nequi • Daviplata • Transferencia Bancaria."
+  - If the customer asks to pay cash / "al llegar" / "cuando recoja": politely explain that pickup orders require advance payment to guarantee the reservation of their order. Example: "Para pedidos para recoger requerimos pago anticipado para garantizar tu pedido. Puedes pagar con: [métodos digitales]."
+  - If [MÉTODOS_DE_PAGO] contains NO digital methods at all (only efectivo), inform the customer that pickup is not available and suggest delivery instead.
   - Respond with text only (no tool call).
 STEP 5 — CONFIRM: Summarize the order, address, and payment method. Ask for explicit confirmation. Respond with text only (no tool call).
 STEP 6 — CREATE ORDER: Only after confirmation. YOU MUST use the create_delivery_order or create_pickup_order tool. Include address and payment_method as tool parameters. For pickup with [SUCURSALES] and no GPS: include branch_id (the ID from [SUCURSALES] of the selected branch) as a tool parameter. CRITICAL: DO NOT include payment instructions in your reply (e.g., do not invent bank account numbers). The system will append them automatically.
@@ -150,6 +155,10 @@ async def execute_external_action(
 
     if action == "delivery" and not address:
         return "Parece que me faltó tu dirección de entrega exacta. ¿Me la podrías escribir para poder procesar el envío?"
+
+    if action == "pickup" and payment_method.lower() in ("efectivo", "cash", "en efectivo"):
+        log.warning("pickup_cash_rejected", phone=phone)
+        return "Los pedidos para recoger requieren pago anticipado para garantizar tu pedido. ¿Con cuál método prefieres pagar? (Nequi, Daviplata, Transferencia Bancaria)"
 
     # ── Delivery branch routing (GPS or geocoded address) ─────────────
     effective_bot_number = bot_number
@@ -295,5 +304,20 @@ async def execute_external_action(
             log.info("additional_order_created", order_id=order["id"], total=order["total"])
         else:
             log.info("external_order_created", order_id=order["id"], action=action, payment=payment_method)
+
+        # If the LLM sent a tool-only response with no text, inject a confirmation so the
+        # customer doesn't receive a confusing "no te entendí" fallback.
+        if not reply or not reply.strip():
+            is_online = payment_method and payment_method.lower() in ["nequi", "daviplata", "transferencia"]
+            if action == "pickup":
+                if is_online:
+                    reply = "✅ ¡Pedido registrado! Una vez realices el pago, envíanos el comprobante (foto/captura) por aquí. 📸"
+                else:
+                    reply = "✅ ¡Pedido registrado! Pagas al llegar. Te esperamos cuando quieras. 🛍️"
+            else:
+                if is_online:
+                    reply = "✅ ¡Pedido registrado! Para completar, envíanos el comprobante de pago (foto/captura). 📸"
+                else:
+                    reply = "✅ ¡Pedido registrado! Nuestro equipo lo preparará en breve. 🛵"
 
     return reply
