@@ -1,14 +1,18 @@
 """
 tests/test_health.py
 
-Tests for GET /health.
+Tests for GET /health (process-only liveness probe) and GET /health/deep
+(full dependency check).
 
-Two modes:
-  1. Unit (no DB env var) — patches get_pool on the health module to simulate
-     healthy and degraded states, verifying response shape and status codes.
-     Uses the shared `client` fixture (no lifespan, no real DB needed).
-  2. Integration (DATABASE_URL set) — hits real PostgreSQL via TestClient
-     with the full app startup. Skipped when no DATABASE_URL is available.
+GET /health:
+  - NEVER checks DB or Redis.
+  - Always returns 200 {"status": "ok"} as long as the process is alive.
+  - Railway uses this as its healthcheck — must not trip during DB outages.
+
+GET /health/deep:
+  - Checks DB pool (SELECT 1) + Redis ping.
+  - Always returns HTTP 200 (so Railway does NOT restart the service).
+  - Body carries per-dependency status: ok | error | unavailable.
 """
 
 import os
@@ -21,6 +25,7 @@ from app.main import app
 # The name to patch: get_pool is imported at module level in health.py,
 # so we patch it in the health module's namespace.
 _PATCH_TARGET = "app.routes.health.get_pool"
+_REDIS_PATCH_TARGET = "app.routes.health.get_redis"
 _METRICS_PATCH_TARGET = "app.routes.internal.ops.get_pool"
 
 
@@ -43,52 +48,98 @@ def _make_pool_mock(*, raise_exc: Exception | None = None):
     return pool
 
 
-# ── Unit tests (no real DB needed) ───────────────────────────────────────────
+def _make_redis_mock(*, ping_raises: Exception | None = None, return_none: bool = False):
+    """Return a mock for get_redis() (the async function)."""
+    if return_none:
+        return AsyncMock(return_value=None)
+    redis_obj = AsyncMock()
+    if ping_raises is not None:
+        redis_obj.ping = AsyncMock(side_effect=ping_raises)
+    else:
+        redis_obj.ping = AsyncMock(return_value=True)
+    return AsyncMock(return_value=redis_obj)
+
+
+# ── Unit tests — GET /health (process-only liveness probe) ───────────────────
 # Use the shared `client` fixture from conftest — it is TestClient(app)
 # instantiated without a context manager, so lifespan events are NOT fired.
 
 class TestHealthUnit:
-    def test_healthy_returns_200(self, client):
+    def test_returns_200_always(self, client):
+        """Process-only /health always returns 200 regardless of DB state."""
+        resp = client.get("/health")
+        assert resp.status_code == 200
+
+    def test_status_ok(self, client):
+        """Body contains {"status": "ok"}."""
+        resp = client.get("/health")
+        assert resp.json()["status"] == "ok"
+
+    def test_no_db_key(self, client):
+        """Process-only probe must NOT have a 'db' key — that's /health/deep."""
+        resp = client.get("/health")
+        assert "db" not in resp.json()
+
+    def test_db_broken_still_200(self, client):
+        """Even if get_pool raises (broken DB), /health returns 200.
+
+        /health never calls get_pool — this test documents that DB state is
+        completely invisible to the liveness probe.
+        """
+        with patch(_PATCH_TARGET, AsyncMock(side_effect=RuntimeError("pool broken"))):
+            resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+    def test_method_not_allowed(self, client):
+        """Only GET is registered — POST should return 405."""
+        resp = client.post("/health")
+        assert resp.status_code == 405
+
+
+# ── Unit tests — GET /health/deep (full dependency check) ────────────────────
+
+class TestHealthDeepUnit:
+    def test_deep_healthy_returns_200(self, client):
         pool = _make_pool_mock()
         with patch(_PATCH_TARGET, AsyncMock(return_value=pool)):
-            resp = client.get("/health")
+            with patch(_REDIS_PATCH_TARGET, _make_redis_mock()):
+                resp = client.get("/health/deep")
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "ok"
         assert body["db"] == "ok"
 
-    def test_db_error_returns_503(self, client):
+    def test_deep_db_error_returns_200_with_degraded(self, client):
+        """DB failure must return HTTP 200 (not 503) — Railway must not restart."""
         pool = _make_pool_mock(raise_exc=ConnectionRefusedError("no db"))
         with patch(_PATCH_TARGET, AsyncMock(return_value=pool)):
-            resp = client.get("/health")
-        assert resp.status_code == 503
+            with patch(_REDIS_PATCH_TARGET, _make_redis_mock()):
+                resp = client.get("/health/deep")
+        assert resp.status_code == 200  # MUST be 200
         body = resp.json()
         assert body["status"] == "degraded"
-        # health.py intentionally hides exception type (prevents fingerprinting)
         assert body["db"] == "error"
 
-    def test_get_pool_error_returns_503(self, client):
-        """If get_pool itself raises (e.g. pool not initialised), still 503."""
+    def test_deep_get_pool_error_returns_200(self, client):
+        """If get_pool itself raises, /health/deep still returns 200."""
         with patch(_PATCH_TARGET, AsyncMock(side_effect=RuntimeError("pool not init"))):
-            resp = client.get("/health")
-        assert resp.status_code == 503
+            with patch(_REDIS_PATCH_TARGET, _make_redis_mock()):
+                resp = client.get("/health/deep")
+        assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "degraded"
-        # health.py intentionally hides exception type (prevents fingerprinting)
         assert body["db"] == "error"
 
-    def test_response_always_has_db_key(self, client):
+    def test_deep_response_always_has_all_keys(self, client):
         pool = _make_pool_mock()
         with patch(_PATCH_TARGET, AsyncMock(return_value=pool)):
-            resp = client.get("/health")
-        assert "db" in resp.json()
-
-    def test_method_not_allowed(self, client):
-        """Only GET is registered — POST should return 405."""
-        pool = _make_pool_mock()
-        with patch(_PATCH_TARGET, AsyncMock(return_value=pool)):
-            resp = client.post("/health")
-        assert resp.status_code == 405
+            with patch(_REDIS_PATCH_TARGET, _make_redis_mock()):
+                resp = client.get("/health/deep")
+        body = resp.json()
+        assert "status" in body
+        assert "db" in body
+        assert "redis" in body
 
 
 # ── Integration test (real DB) ───────────────────────────────────────────────
@@ -123,21 +174,34 @@ class TestHealthIntegration:
             yield
         _db._pool = None
 
-    def test_health_response_shape(self):
-        """Response must always have 'status' and 'db' keys."""
+    def test_health_always_200(self):
+        """Process-only /health always returns 200 (never depends on DB)."""
         with TestClient(app) as client:
             resp = client.get("/health")
-        assert resp.status_code in (200, 503)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ok"
+        # /health must NOT have a 'db' key — that's /health/deep
+        assert "db" not in body
+
+    def test_health_deep_response_shape(self):
+        """Response from /health/deep must have status, db, and redis keys."""
+        with TestClient(app) as client:
+            resp = client.get("/health/deep")
+        # Always 200 even when degraded — Railway must not restart on this
+        assert resp.status_code == 200
         body = resp.json()
         assert "status" in body
         assert "db" in body
+        assert "redis" in body
 
-    def test_health_db_ok_when_reachable(self):
+    def test_health_deep_db_ok_when_reachable(self):
         """When DATABASE_URL points to a live server, db should be 'ok'."""
         with TestClient(app) as client:
-            resp = client.get("/health")
-        if resp.status_code == 200:
-            assert resp.json()["db"] == "ok"
+            resp = client.get("/health/deep")
+        body = resp.json()
+        if body.get("db") == "ok":
+            assert body["status"] in ("ok", "degraded")  # redis might be absent
 
 
 # ── Metrics tests (mocked, no real DB) ───────────────────────────────────────

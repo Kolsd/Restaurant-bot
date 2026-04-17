@@ -12,6 +12,7 @@ tenant_context.py into the actual asyncpg connection lifecycle.
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -27,6 +28,45 @@ from app.services.tenant_context import (
 
 log = get_logger(__name__)
 
+# Maximum seconds to wait for a connection from the pool before giving up.
+# Keeping this short (3 s) means a saturated pool causes a fast, typed failure
+# rather than a long hang that blocks the webhook handler and delays the 200 ACK
+# to Meta.  Under normal load pool.acquire() completes in < 10 ms.
+POOL_ACQUIRE_TIMEOUT = 3.0
+
+
+class PoolAcquireTimeout(ConnectionError):
+    """Raised when pool.acquire() does not return within POOL_ACQUIRE_TIMEOUT seconds.
+
+    Subclasses ConnectionError so callers can catch it alongside other DB
+    connectivity errors with a single ``except ConnectionError`` branch, while
+    still allowing precise handling with ``except PoolAcquireTimeout``.
+    """
+
+
+async def _await_acquire_ctx(ctx: object) -> asyncpg.Connection:
+    """Coroutine wrapper around a PoolAcquireContext for asyncio.wait_for().
+
+    asyncpg's PoolAcquireContext supports both:
+      - ``async with pool.acquire() as conn``  → via __aenter__/__aexit__
+      - ``await pool.acquire()``               → via __await__
+
+    We use the __aenter__ form here because test mocks (conftest.make_pool,
+    FakePool in test_station_routing, etc.) only wire up __aenter__/__aexit__.
+
+    If the ctx is a plain coroutine (e.g. a test mock returning ``async def
+    _hanging_acquire()``), it has no __aenter__ and we fall back to awaiting it
+    directly — this covers the timeout simulation test case.
+
+    The CALLER is responsible for calling ``acquire_ctx.__aexit__`` in a finally
+    block to return the connection to the pool.
+    """
+    aenter = getattr(ctx, "__aenter__", None)
+    if aenter is not None:
+        return await aenter()
+    # Plain coroutine fallback (e.g. hanging mock for timeout tests).
+    return await ctx  # type: ignore[misc]
+
 
 @asynccontextmanager
 async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
@@ -37,6 +77,7 @@ async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
     - Tenant set     → executes `SELECT set_config('app.restaurant_id', $1, true)`
                        using a parameterised call — never an f-string.
     - Neither        → raises TenantNotSetError immediately (before touching DB).
+    - Pool exhausted → raises PoolAcquireTimeout after POOL_ACQUIRE_TIMEOUT seconds.
 
     The `conn.transaction()` context manager handles rollback on any exception,
     so callers do not need to catch asyncpg errors here.
@@ -53,7 +94,30 @@ async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
         )
 
     pool = await get_pool()
-    async with pool.acquire() as conn:
+
+    # Enforce a timeout on pool.acquire() to prevent the webhook handler from
+    # hanging indefinitely when the pool is exhausted.  asyncio.wait_for wraps
+    # a coroutine (_await_acquire_ctx), so it can cancel on timeout.
+    acquire_ctx = pool.acquire()  # PoolAcquireContext — awaitable + async ctxmgr
+    try:
+        conn = await asyncio.wait_for(
+            _await_acquire_ctx(acquire_ctx), timeout=POOL_ACQUIRE_TIMEOUT
+        )
+    except asyncio.TimeoutError as exc:
+        log.error(
+            "tenant_db.pool_timeout",
+            timeout_seconds=POOL_ACQUIRE_TIMEOUT,
+            bypass=bypass,
+            tenant_id=tenant_id,
+        )
+        raise PoolAcquireTimeout(
+            f"Could not acquire DB connection within {POOL_ACQUIRE_TIMEOUT}s "
+            "(pool exhausted or DB unreachable)"
+        ) from exc
+
+    # Connection acquired — always release it on exit via __aexit__ (symmetric
+    # with the __aenter__ call in _await_acquire_ctx).
+    try:
         async with conn.transaction():
             if bypass:
                 reason = _bypass_reason.get()
@@ -70,6 +134,12 @@ async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
                     str(tenant_id),
                 )
             yield conn
+    finally:
+        # Call __aexit__ on the acquire context to return the connection to the
+        # pool.  This is symmetric with __aenter__ called in _await_acquire_ctx.
+        aexit_fn = getattr(acquire_ctx, "__aexit__", None)
+        if aexit_fn is not None:
+            await aexit_fn(None, None, None)
 
 
 @asynccontextmanager

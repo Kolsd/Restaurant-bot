@@ -16,6 +16,7 @@ from app.repositories import inbox_repo, conversations_repo
 from app.services.logging import get_logger
 from app.services.state_store import rate_limit_check
 from app.routes.deps import get_current_user
+from app.services.tenant_db import PoolAcquireTimeout
 
 log = get_logger(__name__)
 
@@ -287,6 +288,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(content={"status": "ok"})
 
     any_enqueue_failed = False
+    all_failures_are_db_down = True  # flipped to False if any non-DB failure occurs
     # The webhook enqueue path is cross-tenant: the inbox worker resolves the
     # tenant at dispatch time.  bypass_tenant_scope allows migrated repos (e.g.
     # conversations_repo.db_is_duplicate_wam) to execute without a pinned tenant.
@@ -459,9 +461,19 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         )
                         if not inserted:
                             log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
+                    except (PoolAcquireTimeout, ConnectionError) as _db_exc:
+                        log.error(
+                            "chat.enqueue_failed_db_down",
+                            wam_id=wam_id,
+                            user_phone=user_phone,
+                            exc=str(_db_exc),
+                        )
+                        any_enqueue_failed = True
+                        # DB-connectivity failure — classified as db_down
                     except Exception:
                         log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
                         any_enqueue_failed = True
+                        all_failures_are_db_down = False  # non-DB failure
                     continue  # audio path is fully handled above; skip text guard
                 else:
                     user_text = message.get("text", {}).get("body", "")
@@ -496,17 +508,46 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     )
                     if not inserted:
                         log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
+                except (PoolAcquireTimeout, ConnectionError) as _db_exc:
+                    log.error(
+                        "chat.enqueue_failed_db_down",
+                        wam_id=wam_id,
+                        user_phone=user_phone,
+                        exc=str(_db_exc),
+                    )
+                    any_enqueue_failed = True
+                    # DB-connectivity failure — classified as db_down
+                    continue
                 except Exception:
                     log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
                     any_enqueue_failed = True
+                    all_failures_are_db_down = False  # non-DB failure
                     continue
 
         except Exception:
             log.exception("chat.webhook_critical_error")
 
-    # 9. ACK inmediato a Meta (<200ms) — evita reintentos
-    if any_enqueue_failed:
+    # 9. ACK inmediato a Meta (<200ms) — evita reintentos.
+    #
+    # DESIGN DECISION — why we return 200 even when enqueues fail due to DB down:
+    #
+    # Returning 503 tells Meta "delivery failed, please retry".  Meta will then
+    # re-send the SAME batch up to 5 times over 5 minutes.  During a DB outage
+    # that means each incoming message multiplies into 5 attempts, turning a
+    # short blip into a sustained flood that makes recovery even harder.
+    #
+    # Returning 200 tells Meta "received, do not retry".  We lose the batch for
+    # that window, but the inbox worker will naturally catch up any messages that
+    # survive the outage (e.g. those with durable WAM IDs that Meta re-delivers
+    # on the next conversation turn).  The trade-off is justified: a partial
+    # message loss during an outage is vastly preferable to a retry avalanche.
+    #
+    # We ONLY return 503 for non-DB failures (unexpected errors unrelated to
+    # connectivity) where a retry might actually succeed.
+    if any_enqueue_failed and not all_failures_are_db_down:
         return JSONResponse(content={"status": "partial_failure"}, status_code=503)
+    if any_enqueue_failed:
+        log.warning("meta_webhook.enqueue_all_failed_db_down")
     return JSONResponse(content={"status": "ok"}, status_code=200)
 
 @router.post("/webhook/twilio")
