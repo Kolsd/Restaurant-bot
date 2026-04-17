@@ -431,11 +431,24 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
         score   = state["score"]
         comment = message.strip() or "Sin comentario"
         updated = False
+        _update_raised = False
         try:
             updated = await db.db_update_nps_comment(phone, bot_number, comment)
         except Exception:
-            log.exception("nps_update_comment_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            _update_raised = True
+            log.exception(
+                "nps_update_comment_failed",
+                phone=_ofuscar_phone(phone),
+                bot_number=bot_number,
+            )
         if not updated:
+            # Log which path triggered the fallback so we can trace duplicates.
+            log.info(
+                "nps.comment_fallback_to_save",
+                reason="update_raised" if _update_raised else "update_returned_falsy",
+                phone=_ofuscar_phone(phone),
+                bot_number=bot_number,
+            )
             try:
                 await db.db_save_nps_response(phone, bot_number, score, comment)
             except Exception:
@@ -469,15 +482,29 @@ async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
     if await state_store.nps_is_done(phone, bot_number):
         log.info("nps_trigger_skipped_done", phone=_ofuscar_phone(phone), bot_number=bot_number)
         return
-    if await state_store.nps_get(phone, bot_number) is not None:
-        log.info("nps_trigger_skipped_active", phone=_ofuscar_phone(phone), bot_number=bot_number)
+
+    # Acquire distributed lock to prevent two workers from racing between the
+    # nps_get check and nps_set — Rule 10 (4-worker concurrency).
+    lock_token = await state_store.nps_transition_lock_acquire(phone, bot_number, ttl_seconds=10)
+    if lock_token is None:
+        # Another worker is already in the process of setting NPS state.
+        log.info("nps_trigger_skipped_lock_contention", phone=_ofuscar_phone(phone), bot_number=bot_number)
         return
-    await state_store.nps_set(phone, bot_number, {"state": "waiting_score", "score": 0})
+
     try:
-        await db.db_save_nps_waiting(phone, bot_number)
-    except Exception:
-        log.exception("nps_save_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
-    log.info("nps.triggered", phone=_ofuscar_phone(phone), bot_number=bot_number)
+        # Re-check under lock — another worker may have set state between our
+        # nps_is_done check above and lock acquisition.
+        if await state_store.nps_get(phone, bot_number) is not None:
+            log.info("nps_trigger_skipped_active", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            return
+        await state_store.nps_set(phone, bot_number, {"state": "waiting_score", "score": 0})
+        try:
+            await db.db_save_nps_waiting(phone, bot_number)
+        except Exception:
+            log.exception("nps_save_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
+        log.info("nps.triggered", phone=_ofuscar_phone(phone), bot_number=bot_number)
+    finally:
+        await state_store.nps_transition_lock_release(phone, bot_number, lock_token)
 
 
 # ── Module restriction rules ──────────────────────────────────────────────────
@@ -1074,13 +1101,23 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
     try:
         # ── Shared: cart population (order, delivery, pickup all need it) ──
         cart_errors = []
+        _qty_parse_failed = False
         if items and action in ("order", "delivery", "pickup"):
             for item in items:
                 name = item.get("name", "")
+                raw_qty = item.get("qty", 1)
                 try:
-                    qty = int(item.get("qty", 1) or 1)
+                    qty = int(raw_qty or 1)
                 except (ValueError, TypeError):
                     qty = 1
+                    if raw_qty is not None and raw_qty != "" and raw_qty != 1:
+                        _qty_parse_failed = True
+                        log.warning(
+                            "cart.qty_parse_failed",
+                            raw_qty=str(raw_qty),
+                            dish=name,
+                            phone=_ofuscar_phone(phone),
+                        )
                 if not name:
                     continue
                 res = await orders.add_to_cart(phone, name, qty, bot_number)
@@ -1240,6 +1277,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         return f"Lo siento, '{e}' ya no está disponible en el inventario. ¿Te gustaría elegir otra opción?"
     except Exception:
         log.exception("execute_action_failed", action=action, phone=_ofuscar_phone(phone), bot_number=bot_number)
+
+    # If any item had an unparseable qty, append a single friendly note (not one per item).
+    if _qty_parse_failed and reply:
+        reply += " (interpreté las cantidades según mi mejor entendimiento — si algo está mal, dímelo)"
 
     return reply
 
@@ -1420,7 +1461,15 @@ async def _build_enriched_user_message(
     Returns (enriched_message, menu_url).
     """
     full_history = await db.db_get_history(user_phone, bot_number)
-    cart_text    = await orders.cart_summary(user_phone, bot_number)
+    try:
+        cart_text = await orders.cart_summary(user_phone, bot_number)
+    except Exception:
+        log.exception(
+            "build_enriched_message.cart_summary_failed",
+            phone=_ofuscar_phone(user_phone),
+            bot_number=bot_number,
+        )
+        cart_text = ""
 
     availability = await db.db_get_menu_availability(restaurant_obj.get("id"))
     menu         = await db.db_get_menu(bot_number) or {}

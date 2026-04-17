@@ -42,6 +42,14 @@ class AudioTooLongError(Exception):
     """Audio exceeds MAX_AUDIO_BYTES. Do NOT retry — send fallback to user."""
 
 
+class EmptyTranscriptionError(TranscriptionError):
+    """Whisper returned an empty transcript (inaudible/too short audio).
+    Do NOT retry — send a friendly fallback and ACK the message.
+    Inherits from TranscriptionError so existing broad catches still work,
+    but the inbox worker handles it specifically before the generic branch.
+    """
+
+
 # ── Media download ─────────────────────────────────────────────────────────────
 
 async def download_whatsapp_media(media_id: str, access_token: str) -> tuple[bytes, str]:
@@ -169,6 +177,10 @@ async def transcribe_audio(
                         chars=len(text),
                         attempt=attempt,
                     )
+                    if not text:
+                        raise EmptyTranscriptionError(
+                            "Whisper returned an empty transcript — audio was inaudible or too short"
+                        )
                     return text
 
                 if res.status_code in _RETRYABLE_STATUSES:
