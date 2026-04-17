@@ -138,3 +138,35 @@ def bypass_tenant_scope(reason: str) -> Generator[None, None, None]:
         _bypass_flag.reset(flag_token)
         _bypass_reason.reset(reason_token)
         log.debug("tenant.bypass.exit", reason=reason)
+
+
+@contextmanager
+def bypass_tenant_scope_if_unset(reason: str) -> Generator[None, None, None]:
+    """Enter bypass only if no tenant is currently pinned; no-op otherwise.
+
+    Why this exists: functions like `agent.detect_table_context` were written
+    in the pre-RLS era when the bot runtime had no active tenant scope, so
+    they used `bypass_tenant_scope` to do pre-tenant lookups by `bot_number`.
+    After Phase 1, `inbox_worker._handle_meta_whatsapp` wraps the whole bot
+    flow in `tenant_scope(rid)` — now those same functions are called with an
+    active scope, and a nested `bypass_tenant_scope` would raise
+    TenantContextConflict.
+
+    This helper lets shared helpers work in both regimes:
+    - Active tenant scope (production via inbox_worker): no-op; the existing
+      scope is honored. Reads go through RLS for that tenant, which is
+      correct — the lookup by bot_number is within-tenant once the tenant is
+      known.
+    - No tenant scope (legacy `/chat` endpoint, Twilio webhook, tests): real
+      bypass is entered; legacy cross-tenant behavior is preserved.
+
+    Do NOT use this as a default — reserve for the handful of agent.py
+    helpers that predate Phase 1. For genuinely cross-tenant operations
+    (internal/admin, scheduler leader tick, inbox pre-resolution), keep using
+    `bypass_tenant_scope` which fails loudly if called inside a scope.
+    """
+    if _current_tenant.get() is not None:
+        yield
+        return
+    with bypass_tenant_scope(reason):
+        yield

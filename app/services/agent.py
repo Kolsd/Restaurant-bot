@@ -10,7 +10,7 @@ from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
 from app.services.money import to_decimal, money_mul, money_sum, ZERO
-from app.services.tenant_context import bypass_tenant_scope as _bypass_tenant
+from app.services.tenant_context import bypass_tenant_scope_if_unset as _bypass_tenant
 from app.services.tenant_db import tenant_connection as _tenant_conn
 from app.repositories.orders_repo import (
     InsufficientStockError,

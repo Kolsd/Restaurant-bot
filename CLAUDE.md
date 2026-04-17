@@ -827,7 +827,7 @@ Estas reglas protegen los flujos críticos del bot de WhatsApp. Toda modificaci�
 - `inbox_worker._handle_meta_whatsapp` DEBE envolver `_process_message(...)` en `with tenant_scope(_tenant_id):` una vez resuelto el restaurante desde `bot_number`. Si no lo hacés, CUALQUIER repo migrado explota con `TenantNotSetError` dentro del flujo del bot.
 - `scheduler._scheduler_loop` DEBE entrar en `bypass_tenant_scope("scheduler_leader_tick")` antes del leader tick, Y envolver cada iteración per-restaurant en `tenant_scope(rid)`.
 - `chat.py meta_webhook` DEBE entrar en `bypass_tenant_scope("webhook_enqueue_cross_tenant")` durante el enqueue (pre-resolución).
-- `agent.py detect_table_context / get_session_state / _handle_nps_guard` están envueltos en `_bypass_tenant` porque hacen lookups cross-tenant por `bot_number` antes de conocer el tenant. Si movés esa lógica, preservá el bypass.
+- `agent.py detect_table_context / get_session_state / _handle_nps_guard / _resolve_branch_id` usan `_bypass_tenant` (aliased a `bypass_tenant_scope_if_unset`, **soft-bypass**). En producción corren dentro de `tenant_scope(rid)` activado por `inbox_worker`, así que el helper es un **no-op** — la query corre bajo el scope real. En call sites legacy (`/chat` POST endpoint interno, Twilio webhook) sin scope previo, sí entra a un bypass real para preservar compat. Usar el strict `bypass_tenant_scope` (no el soft) sólo para casos genuinamente cross-tenant (internal admin, scheduler leader, inbox pre-resolución).
 - `orders.py process_order_callback` (Wompi) DEBE entrar en `tenant_scope(order["restaurant_id"])` tras cargar la orden.
 - NO volver a "silent fail" en el bot runtime. Si un `TenantNotSetError` aparece en producción, es un gap de wiring, NO un caso a suprimir.
 
