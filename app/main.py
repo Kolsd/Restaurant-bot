@@ -153,13 +153,22 @@ async def security_headers_middleware(request: Request, call_next):
     # CSP — permissive baseline; inline scripts still required by current frontend.
     # TODO: remove 'unsafe-inline' once inline <script> blocks are migrated to
     #       external .js files (tracked as a separate hardening wave).
+    # CDN allowlist rationale:
+    #   script-src   cdnjs + jsdelivr + unpkg  → Chart.js, qrcodejs, Leaflet
+    #   style-src    jsdelivr + unpkg          → Leaflet CSS (only external stylesheet today)
+    #   connect-src  unpkg                     → Leaflet fetches its .js.map in dev
     response.headers.setdefault(
         "Content-Security-Policy",
         (
             "default-src 'self'; "
             "img-src 'self' https: data:; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
-            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline' "
+            "https://cdn.jsdelivr.net "
+            "https://unpkg.com "
+            "https://cdnjs.cloudflare.com; "
+            "style-src 'self' 'unsafe-inline' "
+            "https://cdn.jsdelivr.net "
+            "https://unpkg.com; "
             "font-src 'self' data:; "
             "connect-src 'self' "
             "https://api.anthropic.com "
@@ -167,7 +176,8 @@ async def security_headers_middleware(request: Request, call_next):
             "https://checkout.wompi.co "
             "https://nominatim.openstreetmap.org "
             "https://res.cloudinary.com "
-            "https://api.cloudinary.com; "
+            "https://api.cloudinary.com "
+            "https://unpkg.com; "
             "frame-ancestors 'none'"
         ),
     )

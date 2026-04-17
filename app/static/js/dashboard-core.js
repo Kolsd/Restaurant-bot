@@ -261,6 +261,7 @@ let revenueChart = null, statusChart = null, tiposChart = null;
 function updateStatusChart(paid, pending) {
   const ctx = document.getElementById('chart-status');
   if (!ctx) return;
+  if (typeof Chart === 'undefined') return;  // Chart.js CDN not loaded yet (or blocked)
   if (statusChart) statusChart.destroy();
   statusChart = new Chart(ctx, {
     type: 'doughnut', data: { labels:['Pagados','Pendientes'], datasets:[{ data:[paid||0, pending||0], backgroundColor:['#1D9E75','#FAC775'], borderWidth:0 }] },
@@ -271,6 +272,7 @@ function updateStatusChart(paid, pending) {
 function updateTiposChart(domicilio, recoger) {
   const ctx = document.getElementById('chart-tipos');
   if (!ctx) return;
+  if (typeof Chart === 'undefined') return;  // Chart.js CDN not loaded yet (or blocked)
   if (tiposChart) tiposChart.destroy();
   tiposChart = new Chart(ctx, {
     type: 'doughnut', data: { labels:['Domicilio','Recoger'], datasets:[{ data:[domicilio||0, recoger||0], backgroundColor:['#1D9E75','#378ADD'], borderWidth:0 }] },
