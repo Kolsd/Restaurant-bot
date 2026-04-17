@@ -34,18 +34,20 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.repositories.staff_repo import db_calculate_tips_by_attendance
+from app.services.tenant_context import bypass_tenant_scope
 
 
 # ── Pool shim that routes pool.acquire() to the test connection ───────────────
 #
-# db_calculate_tips_by_attendance calls:
-#     pool = await _get_pool()
+# db_calculate_tips_by_attendance uses tenant_connection() which calls:
+#     pool = await get_pool()
 #     async with pool.acquire() as conn:
-#         ...
+#         async with conn.transaction(): ...
 #
-# We wrap the already-open test connection in a minimal async context manager
-# so the function never opens a second connection (and therefore stays inside
-# the same open transaction that conftest.db_conn wraps around every test).
+# We patch app.services.database.get_pool to return a shim that yields the
+# already-open test connection, keeping all SQL inside the rollback-able
+# test transaction.  calls are wrapped in bypass_tenant_scope so
+# tenant_connection() skips the RLS GUC (already enforced at DB level in prod).
 
 def _make_pool_for_conn(conn):
     """Return a fake pool whose .acquire() yields `conn` without touching it."""
@@ -216,10 +218,11 @@ async def test_basic_distribution(db_conn):
     await _insert_check(db_conn, base_order_id=base_id, tip_amount=100_000, paid_at=PAID_AT_14)
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_basic_distribution"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["total_tips"] == 100_000
     assert result["unallocated"] == 0
@@ -262,10 +265,11 @@ async def test_rounding_three_meseros(db_conn):
     await _insert_check(db_conn, base_order_id=base_id, tip_amount=10_000, paid_at=PAID_AT_14)
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_rounding_three_meseros"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["unallocated"] == 0
     total_allocated = sum(e["total_tips"] for e in result["entries"])
@@ -308,10 +312,11 @@ async def test_no_staff_on_shift_unallocated(db_conn):
     await _insert_check(db_conn, base_order_id=base_id, tip_amount=50_000, paid_at=PAID_AT_14)
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_no_staff_on_shift_unallocated"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["total_tips"] == 50_000
     assert result["unallocated"] == 50_000
@@ -351,10 +356,11 @@ async def test_role_not_in_config_ignored(db_conn):
     await _insert_check(db_conn, base_order_id=base_id, tip_amount=20_000, paid_at=PAID_AT_14)
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_role_not_in_config_ignored"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["total_tips"] == 20_000
     assert result["unallocated"] == 0
@@ -436,10 +442,11 @@ async def test_multiple_checks_accumulate(db_conn):
     )
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_multiple_checks_accumulate"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["total_tips"] == 100_000
     assert result["unallocated"] == 0
@@ -467,10 +474,11 @@ async def test_empty_tip_distribution_config(db_conn):
     rest_id = await _insert_restaurant(db_conn, tip_distribution={})
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_empty_tip_distribution_config"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["entries"] == []
     assert result["total_tips"] == 0
@@ -510,10 +518,11 @@ async def test_non_invoiced_check_ignored(db_conn):
     )
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_non_invoiced_check_ignored"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["entries"] == []
     assert result["total_tips"] == 0
@@ -549,10 +558,11 @@ async def test_check_outside_period_ignored(db_conn):
     )
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            rest_id, PERIOD_START, PERIOD_END
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_check_outside_period_ignored"):
+            result = await db_calculate_tips_by_attendance(
+                rest_id, PERIOD_START, PERIOD_END
+            )
 
     assert result["entries"] == []
     assert result["total_tips"] == 0
@@ -622,10 +632,11 @@ async def test_branch_id_filter(db_conn):
     await _insert_check(db_conn, base_order_id=base_b, tip_amount=70_000, paid_at=PAID_AT_14)
 
     pool = _make_pool_for_conn(db_conn)
-    with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-        result = await db_calculate_tips_by_attendance(
-            matrix_id, PERIOD_START, PERIOD_END, branch_id=branch_a_id
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with bypass_tenant_scope("test_branch_id_filter"):
+            result = await db_calculate_tips_by_attendance(
+                matrix_id, PERIOD_START, PERIOD_END, branch_id=branch_a_id
+            )
 
     assert result["total_tips"] == 30_000
     assert result["unallocated"] == 0

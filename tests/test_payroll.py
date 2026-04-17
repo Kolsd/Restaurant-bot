@@ -10,11 +10,13 @@ staging database.
 
 How connection injection works
 ──────────────────────────────
-db_calculate_payroll calls _get_pool() internally, which delegates to
-app.services.database.get_pool().  We monkeypatch get_pool at the module
-level in staff_repo so it returns a thin pool-shim that wraps the test
-connection already inside the open transaction.  That way every SQL statement
-the function executes joins the same transaction and is rolled back together.
+db_calculate_payroll uses tenant_connection() which calls
+app.services.database.get_pool().  Each test patches get_pool at the module
+level (app.services.database.get_pool) to return a _PoolShim that wraps the
+test connection already inside the open transaction.  Calls are wrapped in
+bypass_tenant_scope so tenant_connection() skips the RLS GUC call.
+That way every SQL statement the function executes joins the same transaction
+and is rolled back together.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
+from unittest.mock import AsyncMock, patch
 
 
 def _dt(iso: str) -> datetime:
@@ -38,6 +41,8 @@ def _dt_naive(iso: str) -> datetime:
     return dt
 import asyncpg
 import pytest
+
+from app.services.tenant_context import bypass_tenant_scope
 
 # ── Pool shim that routes all acquire() calls through a single connection ──────
 
@@ -84,19 +89,21 @@ async def db_conn():
 
 
 @pytest.fixture
-def patched_pool(db_conn, monkeypatch):
+def patched_pool(db_conn):
     """
-    Monkeypatches app.repositories.staff_repo._get_pool so that
-    db_calculate_payroll (and every internal function it calls) uses the
-    test transaction connection.
+    Returns the test connection with `_pool_shim` attached.
+
+    Each test must wrap the repo call with:
+        with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+            with bypass_tenant_scope("..."):
+                entries = await db_calculate_payroll(...)
+
+    This routes tenant_connection() → shim → test transaction connection,
+    keeping all SQL inside the same rollback-able transaction.
     """
     shim = _PoolShim(db_conn)
-
-    async def _fake_get_pool():
-        return shim
-
-    import app.repositories.staff_repo as repo
-    monkeypatch.setattr(repo, "_get_pool", _fake_get_pool)
+    # Store shim on the connection object so tests can patch get_pool with it
+    db_conn._pool_shim = shim
     return db_conn
 
 
@@ -273,11 +280,13 @@ async def test_happy_path_simple_payroll(patched_pool):
                             clock_in=clock_in, clock_out=clock_out)
 
     from app.repositories.staff_repo import db_calculate_payroll
-    entries = await db_calculate_payroll(
-        restaurant_id,
-        period_start="2024-01-01",
-        period_end="2024-01-08",
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_happy_path_simple_payroll"):
+            entries = await db_calculate_payroll(
+                restaurant_id,
+                period_start="2024-01-01",
+                period_end="2024-01-08",
+            )
 
     assert len(entries) == 1, "Expected exactly one staff entry"
     e = entries[0]
@@ -329,12 +338,14 @@ async def test_payroll_with_overtime(patched_pool):
         "overtime_weekly_threshold": 40.0,
         "overtime_multiplier":       1.5,
     }
-    entries = await db_calculate_payroll(
-        restaurant_id,
-        period_start="2024-01-01",
-        period_end="2024-01-08",
-        config=config,
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_with_overtime"):
+            entries = await db_calculate_payroll(
+                restaurant_id,
+                period_start="2024-01-01",
+                period_end="2024-01-08",
+                config=config,
+            )
 
     assert len(entries) == 1
     e = entries[0]
@@ -395,11 +406,13 @@ async def test_payroll_with_tips(patched_pool):
     )
 
     from app.repositories.staff_repo import db_calculate_payroll
-    entries = await db_calculate_payroll(
-        restaurant_id,
-        period_start="2024-01-01",
-        period_end="2024-01-08",
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_with_tips"):
+            entries = await db_calculate_payroll(
+                restaurant_id,
+                period_start="2024-01-01",
+                period_end="2024-01-08",
+            )
 
     assert len(entries) == 1
     e = entries[0]
@@ -455,11 +468,13 @@ async def test_payroll_with_deductions(patched_pool):
     )
 
     from app.repositories.staff_repo import db_calculate_payroll
-    entries = await db_calculate_payroll(
-        restaurant_id,
-        period_start="2024-01-01",
-        period_end="2024-01-08",
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_with_deductions"):
+            entries = await db_calculate_payroll(
+                restaurant_id,
+                period_start="2024-01-01",
+                period_end="2024-01-08",
+            )
 
     assert len(entries) == 1
     e = entries[0]
@@ -496,11 +511,13 @@ async def test_payroll_zero_hours(patched_pool):
     # Intentionally create NO shifts for this period.
 
     from app.repositories.staff_repo import db_calculate_payroll
-    entries = await db_calculate_payroll(
-        restaurant_id,
-        period_start="2024-01-01",
-        period_end="2024-01-08",
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_zero_hours"):
+            entries = await db_calculate_payroll(
+                restaurant_id,
+                period_start="2024-01-01",
+                period_end="2024-01-08",
+            )
 
     assert len(entries) == 1, "Active staff must appear even with 0 hours"
     e = entries[0]
@@ -569,11 +586,13 @@ async def test_payroll_malformed_deductions(patched_pool):
         )
 
     from app.repositories.staff_repo import db_calculate_payroll
-    entries = await db_calculate_payroll(
-        restaurant_id,
-        period_start="2024-01-01",
-        period_end="2024-01-08",
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_malformed_deductions"):
+            entries = await db_calculate_payroll(
+                restaurant_id,
+                period_start="2024-01-01",
+                period_end="2024-01-08",
+            )
 
     entry_map = {e["staff_id"]: e for e in entries}
 
@@ -642,12 +661,14 @@ async def test_payroll_branch_scope(patched_pool):
     from app.repositories.staff_repo import db_calculate_payroll
 
     # ── Scoped call: only branch tips ─────────────────────────────────────────
-    entries_branch = await db_calculate_payroll(
-        branch_id,
-        period_start="2024-01-01",
-        period_end="2024-01-06",
-        branch_id=branch_id,
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_branch_scope_branch"):
+            entries_branch = await db_calculate_payroll(
+                branch_id,
+                period_start="2024-01-01",
+                period_end="2024-01-06",
+                branch_id=branch_id,
+            )
 
     assert len(entries_branch) == 1
     e = entries_branch[0]
@@ -667,12 +688,14 @@ async def test_payroll_branch_scope(patched_pool):
         clock_out="2024-01-05T23:59:00+00:00",
     )
 
-    entries_matrix = await db_calculate_payroll(
-        matrix_id,
-        period_start="2024-01-01",
-        period_end="2024-01-06",
-        # branch_id intentionally omitted → aggregates across all branches
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_branch_scope_matrix"):
+            entries_matrix = await db_calculate_payroll(
+                matrix_id,
+                period_start="2024-01-01",
+                period_end="2024-01-06",
+                # branch_id intentionally omitted → aggregates across all branches
+            )
 
     # The matrix-wide payroll only lists staff with restaurant_id=matrix_id.
     # Tips are distributed per-check among ALL on-shift staff (both matrix and
@@ -715,11 +738,13 @@ async def test_payroll_multiple_staff_independent(patched_pool):
         )
 
     from app.repositories.staff_repo import db_calculate_payroll
-    entries = await db_calculate_payroll(
-        restaurant_id,
-        period_start="2024-01-01",
-        period_end="2024-01-08",
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=conn._pool_shim)):
+        with bypass_tenant_scope("test_payroll_multiple_staff_independent"):
+            entries = await db_calculate_payroll(
+                restaurant_id,
+                period_start="2024-01-01",
+                period_end="2024-01-08",
+            )
 
     assert len(entries) == 2, f"Expected 2 entries, got {len(entries)}"
     entry_map = {e["name"]: e for e in entries}

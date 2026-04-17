@@ -22,16 +22,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
+from app.services.tenant_context import bypass_tenant_scope
 
 import pytest
 
 
 # ── Pool shim ────────────────────────────────────────────────────────────────
 #
-# Repository functions call `pool = await _get_pool()` then
-# `async with pool.acquire() as conn: ...`.
-# We wrap the already-open test connection so the function stays inside the
-# same open transaction that conftest.db_conn manages.
+# Repository functions (staff_repo) call tenant_connection() which calls
+# `pool = await get_pool()` then `async with pool.acquire() as conn: ...`.
+# We patch app.services.database.get_pool + wrap in bypass_tenant_scope so
+# the function stays inside the same open transaction that conftest.db_conn manages.
 
 def _make_pool_for_conn(conn):
     """Return a fake pool whose .acquire() yields `conn` without touching it."""
@@ -560,10 +561,11 @@ class TestTipDistributionFlow:
         from app.repositories.staff_repo import db_calculate_tips_by_attendance
 
         pool = _make_pool_for_conn(conn)
-        with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-            result = await db_calculate_tips_by_attendance(
-                rest_id, PERIOD_START, PERIOD_END
-            )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with bypass_tenant_scope("test_tip_distribution_flow"):
+                result = await db_calculate_tips_by_attendance(
+                    rest_id, PERIOD_START, PERIOD_END
+                )
 
         assert result["total_tips"] == 40_000
         assert result["unallocated"] == 0
@@ -607,10 +609,11 @@ class TestTipDistributionFlow:
         from app.repositories.staff_repo import db_calculate_tips_by_attendance
 
         pool = _make_pool_for_conn(conn)
-        with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-            result = await db_calculate_tips_by_attendance(
-                rest_id, PERIOD_START, PERIOD_END
-            )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with bypass_tenant_scope("test_tip_distribution_flow"):
+                result = await db_calculate_tips_by_attendance(
+                    rest_id, PERIOD_START, PERIOD_END
+                )
 
         assert result["total_tips"] == 100_000
         assert result["unallocated"] == 0
@@ -648,10 +651,11 @@ class TestTipDistributionFlow:
         from app.repositories.staff_repo import db_calculate_tips_by_attendance
 
         pool = _make_pool_for_conn(conn)
-        with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-            result = await db_calculate_tips_by_attendance(
-                rest_id, PERIOD_START, PERIOD_END
-            )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with bypass_tenant_scope("test_tip_distribution_flow"):
+                result = await db_calculate_tips_by_attendance(
+                    rest_id, PERIOD_START, PERIOD_END
+                )
 
         assert result["total_tips"] == 50_000
         assert result["unallocated"] == 50_000
@@ -689,10 +693,11 @@ class TestTipDistributionFlow:
         from app.repositories.staff_repo import db_calculate_tips_by_attendance
 
         pool = _make_pool_for_conn(conn)
-        with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-            result = await db_calculate_tips_by_attendance(
-                rest_id, PERIOD_START, PERIOD_END
-            )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with bypass_tenant_scope("test_tip_distribution_flow"):
+                result = await db_calculate_tips_by_attendance(
+                    rest_id, PERIOD_START, PERIOD_END
+                )
 
         assert result["entries"] == []
         assert result["total_tips"] == 0
@@ -731,10 +736,11 @@ class TestTipDistributionFlow:
         from app.repositories.staff_repo import db_calculate_tips_by_attendance
 
         pool = _make_pool_for_conn(conn)
-        with patch("app.repositories.staff_repo._get_pool", return_value=pool):
-            result = await db_calculate_tips_by_attendance(
-                rest_id, PERIOD_START, PERIOD_END
-            )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+            with bypass_tenant_scope("test_tip_distribution_flow"):
+                result = await db_calculate_tips_by_attendance(
+                    rest_id, PERIOD_START, PERIOD_END
+                )
 
         assert result["total_tips"] == 50_000
         assert result["unallocated"] == 0
