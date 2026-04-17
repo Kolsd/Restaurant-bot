@@ -1393,6 +1393,11 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
         return f"Lo siento, '{e}' ya no está disponible en el inventario. ¿Te gustaría elegir otra opción?"
     except Exception:
         log.exception("execute_action_failed", action=action, phone=_ofuscar_phone(phone), bot_number=bot_number)
+        # For order-creating actions, returning the hallucinated reply is worse than returning
+        # an error — the customer thinks the order was placed when it wasn't.
+        _ORDER_ACTIONS = {"delivery", "pickup", "place_order", "reserve", "reservation"}
+        if action in _ORDER_ACTIONS:
+            return "Lo sentimos, hubo un problema técnico al procesar tu pedido. Por favor intenta de nuevo en un momento."
 
     # If any item had an unparseable qty, append a single friendly note (not one per item).
     if _qty_parse_failed and reply:
