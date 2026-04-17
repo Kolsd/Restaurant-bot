@@ -21,6 +21,7 @@ Fallback in-process dict entries are tuples of (expire_at: float, value: Any).
 from __future__ import annotations
 
 import asyncio
+import copy
 import time
 import uuid
 from typing import Any
@@ -38,6 +39,8 @@ _fb_checkout: dict[str, tuple[float, Any]] = {}
 _fb_cooldown: dict[str, float] = {}  # key → expire_at_monotonic
 _fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:bot_number → asyncio.Lock (fallback only)
 _fb_cart_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
+_fb_nps_transition_locks: dict[str, asyncio.Lock] = {}  # nps_lock key → asyncio.Lock (fallback only)
+_fb_nps_transition_owner: dict[str, str] = {}  # nps_lock key → owner token (fallback only)
 
 # Rate-limit fallback warnings: family → last_warned_monotonic
 _fb_warn_last: dict[str, float] = {}
@@ -63,11 +66,14 @@ def _fb_purge_expired(store: dict) -> None:
         store.pop(k, None)
 
 
-def _fb_enforce_size_cap(store: dict) -> None:
+def _fb_enforce_size_cap(store: dict, family: str = "unknown") -> None:
     if len(store) <= _FB_MAX_SIZE:
         return
     _fb_purge_expired(store)
     if len(store) > _FB_MAX_SIZE:
+        _maybe_warn(f"{family}_cap")
+        log.warning("state_store.fallback_capacity_exceeded",
+                    family=family, current_size=len(store), max_size=_FB_MAX_SIZE)
         drop = sorted(store.items(), key=lambda x: x[1][0] if isinstance(x[1], tuple) else x[1])
         for k, _ in drop[: len(store) // 2]:
             store.pop(k, None)
@@ -84,8 +90,8 @@ def _fb_get(store: dict, key: str) -> Any | None:
     return value
 
 
-def _fb_set(store: dict, key: str, value: Any, ttl_seconds: int) -> None:
-    _fb_enforce_size_cap(store)
+def _fb_set(store: dict, key: str, value: Any, ttl_seconds: int, family: str = "unknown") -> None:
+    _fb_enforce_size_cap(store, family)
     store[key] = (time.monotonic() + ttl_seconds, value)
 
 
@@ -106,7 +112,9 @@ async def nps_get(phone: str, bot_number: str) -> dict | None:
         raw = await r.get(key)
         return _rc.decode(raw)
     _maybe_warn("nps")
-    return _fb_get(_fb_nps, key)
+    value = _fb_get(_fb_nps, key)
+    # deepcopy so callers cannot mutate shared fallback state across workers
+    return copy.deepcopy(value) if isinstance(value, dict) else value
 
 
 async def nps_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 86400) -> None:
@@ -116,7 +124,7 @@ async def nps_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 8
         await r.set(key, _rc.encode(state), ex=ttl_seconds)
         return
     _maybe_warn("nps")
-    _fb_set(_fb_nps, key, state, ttl_seconds)
+    _fb_set(_fb_nps, key, state, ttl_seconds, family="nps")
 
 
 async def nps_delete(phone: str, bot_number: str) -> None:
@@ -152,6 +160,9 @@ async def nps_mark_done(phone: str, bot_number: str) -> None:
         for k in expired:
             _fb_nps_done.pop(k, None)
         if len(_fb_nps_done) >= _FB_MAX_SIZE:
+            _maybe_warn("nps_done_cap")
+            log.warning("state_store.fallback_capacity_exceeded",
+                        family="nps_done", current_size=len(_fb_nps_done), max_size=_FB_MAX_SIZE)
             drop = sorted(_fb_nps_done.items(), key=lambda x: x[1])
             for k, _ in drop[: len(_fb_nps_done) // 2]:
                 _fb_nps_done.pop(k, None)
@@ -181,7 +192,9 @@ async def checkout_get(phone: str, bot_number: str) -> dict | None:
         raw = await r.get(key)
         return _rc.decode(raw)
     _maybe_warn("checkout")
-    return _fb_get(_fb_checkout, key)
+    value = _fb_get(_fb_checkout, key)
+    # deepcopy so callers cannot mutate shared fallback state across workers
+    return copy.deepcopy(value) if isinstance(value, dict) else value
 
 
 async def checkout_set(phone: str, bot_number: str, state: dict, ttl_seconds: int = 1800) -> None:
@@ -191,7 +204,7 @@ async def checkout_set(phone: str, bot_number: str, state: dict, ttl_seconds: in
         await r.set(key, _rc.encode(state), ex=ttl_seconds)
         return
     _maybe_warn("checkout")
-    _fb_set(_fb_checkout, key, state, ttl_seconds)
+    _fb_set(_fb_checkout, key, state, ttl_seconds, family="checkout")
 
 
 async def checkout_delete(phone: str, bot_number: str) -> None:
@@ -251,6 +264,9 @@ async def table_cooldown_acquire(
         for k in expired:
             _fb_cooldown.pop(k, None)
         if len(_fb_cooldown) >= _FB_MAX_SIZE:
+            _maybe_warn("cooldown_cap")
+            log.warning("state_store.fallback_capacity_exceeded",
+                        family="cooldown", current_size=len(_fb_cooldown), max_size=_FB_MAX_SIZE)
             drop = sorted(_fb_cooldown.items(), key=lambda x: x[1][1] if isinstance(x[1], tuple) else x[1])
             for k, _ in drop[: len(_fb_cooldown) // 2]:
                 _fb_cooldown.pop(k, None)
@@ -348,7 +364,12 @@ async def cart_lock_release(phone: str, bot_number: str, token: str | None = Non
 
 
 async def nps_transition_lock_acquire(phone: str, bot_number: str, ttl_seconds: int = 10) -> str | None:
-    """Acquire atomic lock for NPS state transition. Returns token or None."""
+    """Acquire atomic lock for NPS state transition. Returns token or None.
+
+    Redis path: SET NX — only one worker acquires; others get None.
+    Fallback path: asyncio.Lock per key (same as cart_lock_acquire) — prevents
+    double-fire within a single worker. Returns None on timeout (5s cap).
+    """
     key = f"mesio:nps_lock:{phone}:{bot_number}"
     token = str(uuid.uuid4())
     r = await _rc.get_redis()
@@ -358,13 +379,26 @@ async def nps_transition_lock_acquire(phone: str, bot_number: str, ttl_seconds: 
             return token if result is not None else None
         except Exception:
             _maybe_warn("nps_lock")
-            return token  # degraded: single-worker safe, return token
-    # Fallback: no distributed lock available (single-worker safe anyway)
-    return token
+            # Redis error mid-flight — fall through to in-process lock so the
+            # caller still gets a serialised path within this worker.
+    # Fallback: in-process asyncio.Lock (single-worker safe only)
+    _maybe_warn("nps_lock")
+    if key not in _fb_nps_transition_locks:
+        _fb_nps_transition_locks[key] = asyncio.Lock()
+    lock = _fb_nps_transition_locks[key]
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=5.0)
+        _fb_nps_transition_owner[key] = token
+        return token
+    except (asyncio.TimeoutError, Exception):
+        return None
 
 
 async def nps_transition_lock_release(phone: str, bot_number: str, token: str) -> bool:
-    """Release a previously acquired NPS transition lock. Ownership-safe via Lua."""
+    """Release a previously acquired NPS transition lock. Ownership-safe via Lua.
+
+    Fallback path mirrors cart_lock_release: verifies token before releasing.
+    """
     key = f"mesio:nps_lock:{phone}:{bot_number}"
     r = await _rc.get_redis()
     if r is not None:
@@ -376,7 +410,19 @@ async def nps_transition_lock_release(phone: str, bot_number: str, token: str) -
         except Exception:
             _maybe_warn("nps_lock_release")
             return False
-    # Fallback: nothing to release
+    # Fallback: release asyncio.Lock only if this token is the current owner
+    _maybe_warn("nps_lock")
+    if _fb_nps_transition_owner.get(key) != token:
+        log.warning("nps_lock.release_ownership_mismatch_fallback", key=key)
+        return False
+    _fb_nps_transition_owner.pop(key, None)
+    lock = _fb_nps_transition_locks.get(key)
+    if lock is not None and lock.locked():
+        lock.release()
+    # Clean up the lock object if no longer held
+    lock = _fb_nps_transition_locks.get(key)
+    if lock is not None and not lock.locked():
+        _fb_nps_transition_locks.pop(key, None)
     return True
 
 
