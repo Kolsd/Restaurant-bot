@@ -1106,13 +1106,14 @@ async def db_get_schedules(restaurant_id: int) -> list:
 async def db_delete_schedule(schedule_id: str) -> bool:
     """Delete a schedule entry. Returns True if a row was deleted.
 
-    # Cross-tenant: keyed by schedule UUID only — uses bypass_tenant_scope internally.
+    # Requires active tenant_scope() — caller (staff.py delete_schedule) enters
+    # tenant_scope via get_current_restaurant_scoped dep.  RLS on staff_schedules
+    # enforces restaurant_id automatically; no bypass needed.
     """
-    with bypass_tenant_scope("staff_schedule_delete: keyed by schedule UUID; admin caller in staff.py validates restaurant ownership before passing schedule_id"):
-        async with tenant_connection() as conn:
-            result = await conn.execute(
-                "DELETE FROM staff_schedules WHERE id = $1::uuid", schedule_id
-            )
+    async with tenant_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM staff_schedules WHERE id = $1::uuid", schedule_id
+        )
     return result == "DELETE 1"
 
 
