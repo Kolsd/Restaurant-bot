@@ -1,4 +1,6 @@
+import asyncio
 import os
+import time
 import asyncpg
 import json
 from datetime import date, datetime, timedelta
@@ -28,6 +30,118 @@ class UsageLimitExceeded(Exception):
             "Actualiza tu plan para continuar."
         )
 
+class DBCircuitOpen(ConnectionError):
+    """
+    Raised by get_pool() when the DB circuit breaker is in the open state.
+
+    Callers that catch this should fail fast (return 503 / log and skip work)
+    rather than waiting for a pool acquire timeout.
+    """
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CIRCUIT BREAKER STATE (process-local — each worker has its own)
+# ══════════════════════════════════════════════════════════════════════
+#
+# States:
+#   "closed"    — normal operation, requests go through
+#   "open"      — too many recent failures, fail fast until cooldown expires
+#   "half_open" — cooldown elapsed, next call is a probe; success → closed,
+#                 failure → back to open
+#
+# Inspired by the Redis circuit breaker in app/services/redis_client.py.
+# Intentionally process-local (no Redis sync) — each uvicorn worker breaks
+# independently.  That is acceptable because each worker shares the same
+# asyncpg pool and will observe the same connection failures.
+
+_DB_CIRCUIT_FAIL_THRESHOLD = 5       # consecutive failures to trip open
+_DB_CIRCUIT_WINDOW_SECONDS = 30.0    # sliding window for counting failures
+_DB_CIRCUIT_COOLDOWN_SECONDS = 30.0  # stay open this long before half_open probe
+
+_db_circuit_state: str = "closed"
+_db_circuit_fail_count: int = 0
+_db_circuit_opened_at: float | None = None
+_db_circuit_lock: asyncio.Lock | None = None   # lazily created (event loop needed)
+_db_circuit_fail_log_at: float = 0.0           # rate-limit the fail-fast log
+
+# Track timestamps of recent failures for sliding window
+_db_circuit_fail_times: list[float] = []
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _get_circuit_lock() -> asyncio.Lock:
+    """Return module-level Lock, creating it on first use (inside a running loop)."""
+    global _db_circuit_lock
+    if _db_circuit_lock is None:
+        _db_circuit_lock = asyncio.Lock()
+    return _db_circuit_lock
+
+
+def _circuit_prune_window(now: float) -> None:
+    """Remove failure timestamps outside the counting window."""
+    global _db_circuit_fail_times
+    cutoff = now - _DB_CIRCUIT_WINDOW_SECONDS
+    _db_circuit_fail_times = [t for t in _db_circuit_fail_times if t >= cutoff]
+
+
+async def _circuit_record_failure(now: float) -> None:
+    """Record a connection failure; trip to open if threshold exceeded."""
+    global _db_circuit_state, _db_circuit_opened_at, _db_circuit_fail_times, _db_circuit_fail_count
+    async with _get_circuit_lock():
+        _db_circuit_fail_times.append(now)
+        _circuit_prune_window(now)
+        _db_circuit_fail_count = len(_db_circuit_fail_times)
+        if _db_circuit_state in ("closed", "half_open") and _db_circuit_fail_count >= _DB_CIRCUIT_FAIL_THRESHOLD:
+            _db_circuit_state = "open"
+            _db_circuit_opened_at = now
+            log.error(
+                "db.circuit_opened",
+                fail_count=_db_circuit_fail_count,
+                window_seconds=_DB_CIRCUIT_WINDOW_SECONDS,
+                cooldown_seconds=_DB_CIRCUIT_COOLDOWN_SECONDS,
+            )
+        elif _db_circuit_state == "half_open":
+            # Probe failed — reset cooldown
+            _db_circuit_state = "open"
+            _db_circuit_opened_at = now
+            log.warning("db.circuit_probe_failed", fail_count=_db_circuit_fail_count)
+
+
+async def _circuit_record_success() -> None:
+    """Reset circuit breaker after a successful connection."""
+    global _db_circuit_state, _db_circuit_fail_count, _db_circuit_opened_at, _db_circuit_fail_times
+    async with _get_circuit_lock():
+        if _db_circuit_state != "closed":
+            log.info("db.circuit_closed", previous_state=_db_circuit_state)
+        _db_circuit_state = "closed"
+        _db_circuit_fail_count = 0
+        _db_circuit_opened_at = None
+        _db_circuit_fail_times = []
+
+
+def get_circuit_state() -> dict:
+    """
+    Return current circuit breaker state dict.
+
+    Intended for consumption by /health/metrics.  Lock-free read — eventual
+    consistency is acceptable for an observability endpoint.
+
+    Wire-in snippet for health.py agent:
+
+        from app.services.database import get_circuit_state
+        ...
+        circuit = get_circuit_state()
+        metrics["db_circuit_state"] = circuit["state"]
+        metrics["db_circuit_fail_count"] = circuit["fail_count"]
+        metrics["db_circuit_opened_at"] = circuit["opened_at"]
+    """
+    return {
+        "state": _db_circuit_state,
+        "fail_count": _db_circuit_fail_count,
+        "opened_at": _db_circuit_opened_at,
+    }
+
+
 _pool = None
 
 SESSION_TTL_HOURS = 72  # V-06: tokens expiran en 72 horas
@@ -55,12 +169,61 @@ def _serialize(d: dict) -> dict:
     return result
 
 async def get_pool():
-    global _pool
-    if _pool is None:
-        database_url = os.getenv("DATABASE_URL", "")
-        if not database_url:
-            raise RuntimeError("DATABASE_URL no esta configurada")
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    """
+    Return the asyncpg connection pool.
+
+    Wraps pool creation with a circuit breaker:
+      - "closed"    — normal; attempt pool creation/return.
+      - "open"      — fail fast with DBCircuitOpen (no wait).
+      - "half_open" — attempt one probe; on success → close circuit,
+                      on failure → re-open and re-raise.
+
+    Failures counted: asyncpg.PostgresConnectionError, asyncio.TimeoutError,
+    OSError (covers network-level errors).  Decimal/business exceptions are NOT
+    counted — they don't indicate pool degradation.
+    """
+    global _pool, _db_circuit_fail_log_at, _db_circuit_state
+
+    now = time.monotonic()
+
+    # ── Circuit open: fail fast ───────────────────────────────────────────────
+    if _db_circuit_state == "open":
+        elapsed = now - (_db_circuit_opened_at or now)
+        if elapsed < _DB_CIRCUIT_COOLDOWN_SECONDS:
+            # Rate-limit the fail-fast log to once per 5 seconds
+            if (now - _db_circuit_fail_log_at) >= 5.0:
+                log.warning(
+                    "db.circuit_fail_fast",
+                    state=_db_circuit_state,
+                    cooldown_remaining_s=round(_DB_CIRCUIT_COOLDOWN_SECONDS - elapsed, 1),
+                )
+                _db_circuit_fail_log_at = now
+            raise DBCircuitOpen(
+                f"DB circuit breaker is open — failing fast "
+                f"({round(_DB_CIRCUIT_COOLDOWN_SECONDS - elapsed, 1)}s until probe)"
+            )
+        else:
+            # Cooldown elapsed → transition to half_open for a probe
+            async with _get_circuit_lock():
+                # Re-check inside lock to avoid races with concurrent callers
+                if _db_circuit_state == "open":
+                    _db_circuit_state = "half_open"
+                    log.info("db.circuit_half_open", elapsed_s=round(elapsed, 1))
+
+    # ── Pool already created: return immediately ──────────────────────────────
+    if _pool is not None:
+        # Only reset on healthy return when in half_open, not every call
+        if _db_circuit_state == "half_open":
+            await _circuit_record_success()
+        return _pool
+
+    # ── Create pool (or probe in half_open) ───────────────────────────────────
+    database_url = os.getenv("DATABASE_URL", "")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL no esta configurada")
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+    try:
         _pool = await asyncpg.create_pool(
             database_url,
             min_size=2,
@@ -70,7 +233,16 @@ async def get_pool():
                 'jsonb', encoder=json.dumps, decoder=json.loads, schema='pg_catalog'
             )
         )
-    return _pool
+        await _circuit_record_success()
+        return _pool
+    except (asyncpg.PostgresError, asyncio.TimeoutError, OSError, ConnectionError) as exc:
+        # asyncpg.PostgresError is the base for connection-time failures like
+        # CannotConnectNowError, InvalidAuthorizationSpecificationError,
+        # InsufficientPrivilegeError, etc.  OSError covers ECONNREFUSED at
+        # the socket layer.  TimeoutError covers slow-connect scenarios.
+        _pool = None  # ensure we retry next time
+        await _circuit_record_failure(time.monotonic())
+        raise
 
 async def init_pool():
     """Warm up the asyncpg connection pool. No DDL — use Alembic for schema."""
