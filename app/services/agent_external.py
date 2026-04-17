@@ -217,6 +217,21 @@ async def execute_external_action(
     if action == "pickup" and restaurant_obj and not restaurant_obj.get("parent_restaurant_id"):
         parent_id = restaurant_obj.get("id")
         cart_data = await db.db_get_cart(phone, bot_number)
+
+        # Check if restaurant has branches at all
+        branches_list: list = []
+        try:
+            _pool = await db.get_pool()
+            async with _pool.acquire() as _conn:
+                branches_list = await _conn.fetch(
+                    "SELECT id, name, address, whatsapp_number FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name",
+                    parent_id,
+                )
+        except Exception:
+            log.exception("pickup_branches_query_failed", phone=phone, parent_id=parent_id)
+
+        has_branches = len(branches_list) > 0
+
         if cart_data.get("latitude") is not None and cart_data.get("longitude") is not None:
             try:
                 nearest = await db.db_find_nearest_branch_any(
@@ -242,6 +257,24 @@ async def execute_external_action(
                     log.info("pickup_branch_routed", branch=branch_row["name"], bot=effective_bot_number)
             except Exception:
                 log.exception("pickup_branch_routing_failed", phone=phone, branch_id=parsed.get("branch_id"))
+
+        # GUARD: multi-branch restaurant but no branch was resolved → ask customer
+        if has_branches and "branch_id" not in routing_context:
+            log.warning(
+                "pickup_missing_branch",
+                phone=phone,
+                has_gps=cart_data.get("latitude") is not None,
+                llm_branch_id=parsed.get("branch_id"),
+            )
+            branch_lines = "\n".join(
+                f"• *{b['name']}* — {b['address'] or 'sin dirección'}" for b in branches_list
+            )
+            return (
+                f"¿En cuál sucursal prefieres recoger tu pedido? 🛍️\n\n"
+                f"{branch_lines}\n\n"
+                f"También puedes compartirnos tu ubicación 📍 (ícono de clip en WhatsApp) "
+                f"y te asignamos automáticamente la más cercana."
+            )
 
     # ── Migrate cart if routed to different branch ────────────────────
     if effective_bot_number != bot_number:
