@@ -746,18 +746,8 @@ async def update_order_status(request: Request, order_id: str):
 
     return {"success": True, "order_id": order_id, "status": status}
 
-_KITCHEN_ROLES = {"cocina", "owner", "admin", "gerente"}
-
 @router.get("/cocina", response_class=HTMLResponse)
-async def kitchen_display(request: Request):
-    from fastapi.responses import RedirectResponse
-    try:
-        user = await get_current_user(request)
-        user_roles = {r.strip() for r in user.get("role", "").split(",")}
-        if not user_roles.intersection(_KITCHEN_ROLES):
-            return RedirectResponse("/login", status_code=302)
-    except HTTPException:
-        return RedirectResponse("/login", status_code=302)
+async def kitchen_display():
     return HTMLResponse((STATIC / "html" / "kitchen.html").read_text(encoding="utf-8"))
 
 @router.get("/bar", response_class=HTMLResponse)
