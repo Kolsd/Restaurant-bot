@@ -184,7 +184,12 @@ async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
 
 async def db_update_inventory_item(item_id: int, fields: dict) -> dict | None:
     async with _tenant_connection() as conn:
-        existing = await conn.fetchrow("SELECT * FROM inventory WHERE id = $1", item_id)
+        # FOR UPDATE acquires a row-level lock for the duration of the
+        # tenant_connection() transaction, preventing a concurrent admin edit
+        # from producing a lost-update (TOCTOU: read-then-write race).
+        existing = await conn.fetchrow(
+            "SELECT * FROM inventory WHERE id = $1 FOR UPDATE", item_id
+        )
         if not existing:
             return None
 
