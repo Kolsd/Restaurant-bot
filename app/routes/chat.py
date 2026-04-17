@@ -383,7 +383,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                             log.error("chat.gps_cart_save_failed", phone=user_phone, error=str(e))
 
                         maps_url = f"https://maps.google.com/?q={lat},{lon}"
-                        user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon}). Quiero hacer un pedido de domicilio."
+                        user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon})."
                     else:
                         log.warning("chat.gps_missing_coordinates", phone=user_phone)
                         user_text = ""
