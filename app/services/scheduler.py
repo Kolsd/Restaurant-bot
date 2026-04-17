@@ -458,6 +458,15 @@ async def _run_weekly_owner_reports():
             )
 
 
+async def _renew_or_abort(token: str, ttl_seconds: int = 90) -> bool:
+    """
+    Renew the scheduler leader lease.  Returns False if the lease was lost
+    (another worker took over), signalling that the current tick should stop.
+    """
+    from app.services import state_store  # noqa: PLC0415
+    return await state_store.scheduler_leader_renew(token, ttl_seconds=ttl_seconds)
+
+
 async def _scheduler_loop():
     from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
 
@@ -468,30 +477,57 @@ async def _scheduler_loop():
 
         # Leader election: only one worker runs the scheduler tick.
         # TTL=90s covers the 60s sleep + processing time.
-        from app.services import state_store
-        if not await state_store.scheduler_leader_acquire(ttl_seconds=90):
+        # acquire() now returns a UUID token (or None if not leader).
+        from app.services import state_store  # noqa: PLC0415
+        leader_token = await state_store.scheduler_leader_acquire(ttl_seconds=90)
+        if not leader_token:
             continue
 
         # The scheduler tick enumerates all restaurants (cross-tenant) and then
         # performs per-restaurant operations.  The bypass allows cross-tenant DB
         # queries; individual per-restaurant helpers apply tenant_scope() internally
         # when they need to call tenant-scoped repos.
+        #
+        # We renew the lease at each phase boundary.  If a slow DB or Anthropic
+        # rate-limit caused a previous phase to exceed the TTL, another worker
+        # will have stolen the lease and renew returns False — we break out
+        # immediately rather than double-executing the remaining phases.
         with bypass_tenant_scope("scheduler_leader_tick"):
             await _run_inactivity_check()
 
+            if not await _renew_or_abort(leader_token):
+                log.warning("scheduler.tick_aborted_after_inactivity_check")
+                continue
+
             from app.services.alerts import check_alerts  # late import — avoids circular
             await check_alerts()
+
+            if not await _renew_or_abort(leader_token):
+                log.warning("scheduler.tick_aborted_after_alerts")
+                continue
 
             _reminder_counter += 1
             # Run reservation reminders every 5 minutes
             if _reminder_counter % 5 == 0:
                 await _run_reservation_reminders()
+                if not await _renew_or_abort(leader_token):
+                    log.warning("scheduler.tick_aborted_after_reminders")
+                    continue
+
             # Run deposit expiry every 10 minutes
             if _reminder_counter % 10 == 0:
                 await _run_deposit_expiry()
+                if not await _renew_or_abort(leader_token):
+                    log.warning("scheduler.tick_aborted_after_deposit_expiry")
+                    continue
+
             # Capture occupancy snapshots every 15 minutes
             if _reminder_counter % 15 == 0:
                 await _run_occupancy_snapshot()
+                if not await _renew_or_abort(leader_token):
+                    log.warning("scheduler.tick_aborted_after_occupancy_snapshot")
+                    continue
+
             # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)
             await _run_weekly_owner_reports()
 

@@ -469,23 +469,77 @@ async def rate_limit_check(key: str, max_requests: int, window_seconds: int) -> 
 
 # ── Scheduler leader election ────────────────────────────────────────────────
 
-async def scheduler_leader_acquire(ttl_seconds: int = 90) -> bool:
+_SCHEDULER_LEADER_KEY = "mesio:scheduler_leader"
+
+# Lua: compare-and-PEXPIRE (renew TTL only if caller owns the lock).
+# Returns 1 if renewed, 0 if mismatch (no longer leader).
+_LUA_RENEW = (
+    "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+    "  return redis.call('PEXPIRE', KEYS[1], ARGV[2]) "
+    "else "
+    "  return 0 "
+    "end"
+)
+
+
+async def scheduler_leader_acquire(ttl_seconds: int = 90) -> str | None:
     """
     Try to acquire the scheduler leader lock.
 
     Only one worker should run the scheduler tick. Uses Redis SET NX with a TTL
     slightly longer than the scheduler tick interval (60s tick → 90s TTL).
 
-    Returns True if this worker is the leader, False otherwise.
-    Falls back to True (run everywhere) if Redis is unavailable.
+    Returns the owner token (str) if this worker is the leader, None otherwise.
+    Callers that only check truthiness (``if not token:``) keep working unchanged.
+    Falls back to a constant sentinel token "fallback" when Redis is unavailable
+    (single-process mode — no race condition in that case).
     """
-    key = "mesio:scheduler_leader"
+    key = _SCHEDULER_LEADER_KEY
+    token = str(uuid.uuid4())
     r = await _rc.get_redis()
     if r is not None:
-        result = await r.set(key, "1", nx=True, ex=ttl_seconds)
+        result = await r.set(key, token, nx=True, ex=ttl_seconds)
         if result is not None:
-            log.info("scheduler.leader_acquired")
-        return result is not None  # True → acquired, None → already held
+            log.info("scheduler.leader_acquired", token=token[:8])
+            return token
+        return None  # lock already held by another worker
     # No Redis → fall back to running on all workers (degraded but functional)
     _maybe_warn("scheduler_leader")
+    return "fallback"
+
+
+async def scheduler_leader_renew(token: str, ttl_seconds: int = 90) -> bool:
+    """
+    Extend the scheduler leader lease if this worker still owns it.
+
+    Uses an atomic Lua script: GET key → compare → PEXPIRE.
+    Returns True  → lease renewed, this worker is still leader.
+    Returns False → lease was lost (another worker took over); caller should abort the tick.
+
+    Fallback (no Redis / "fallback" sentinel): always returns True.
+    Only the single-process case reaches here with token=="fallback"; no race possible.
+    """
+    if token == "fallback":
+        # No Redis in use — single process, can't lose the lease.
+        return True
+
+    key = _SCHEDULER_LEADER_KEY
+    r = await _rc.get_redis()
+    if r is not None:
+        try:
+            ttl_ms = ttl_seconds * 1000
+            result = await r.eval(_LUA_RENEW, 1, key, token, str(ttl_ms))
+            renewed = int(result) == 1
+            if not renewed:
+                log.warning("scheduler.lease_lost_mid_tick", token=token[:8])
+            else:
+                log.debug("scheduler.lease_renewed", token=token[:8], ttl_seconds=ttl_seconds)
+            return renewed
+        except Exception as exc:
+            log.error("scheduler.leader_renew_failed", error=str(exc))
+            # On Redis error mid-tick, assume we're still leader to avoid
+            # silently abandoning a partially complete tick.  The lease will
+            # expire normally if Redis stays down.
+            return True
+    # No Redis reachable — same as fallback token, no race.
     return True
