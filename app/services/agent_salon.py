@@ -43,6 +43,15 @@ def _resolve_tip(mode: str, value, subtotal) -> Decimal:
     return quantize_money(value_d)
 
 
+def _serialize_money_for_state(value, currency=None) -> str:
+    """
+    Serialize a monetary value to a str for safe storage in state_store (Redis/JSON).
+    Decimal is NOT JSON-serializable; always call this before checkout_set.
+    Read back with to_decimal(state.get("field")).
+    """
+    return str(quantize_money(to_decimal(value), currency))  # JSON boundary: Decimal→str
+
+
 # Payment-method keywords used both in handle_checkout_flow and in the bill pre-parse
 _PAYMENT_METHODS_MAP: dict[str, str] = {
     "efectivo": "efectivo", "cash": "efectivo",
@@ -169,9 +178,13 @@ def _ask_payment_for_check(state: dict, idx: int) -> str:
     n = state["split_count"]
     check_amounts = state.get("check_amounts") or []
     if n == 1:
-        amount_str = f" ({_fmt_cop(check_amounts[0])})" if check_amounts else ""
+        # check_amounts entries may be str (from _serialize_money_for_state) — coerce to float for display only
+        amount_str = f" ({_fmt_cop(float(to_decimal(check_amounts[0])))})" if check_amounts else ""  # JSON boundary
         return f"¿Cómo vas a pagar{amount_str}? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
-    amount_str = f" — {_fmt_cop(check_amounts[idx])}" if check_amounts and idx < len(check_amounts) else ""
+    amount_str = (
+        f" — {_fmt_cop(float(to_decimal(check_amounts[idx])))}"  # JSON boundary
+        if check_amounts and idx < len(check_amounts) else ""
+    )
     return f"¿Cómo paga la persona {idx + 1} de {n}{amount_str}? (Efectivo, Nequi, Daviplata, Tarjeta, Transferencia)"
 
 
@@ -228,8 +241,20 @@ async def _save_checkout_proposal(
     return [c["id"] for c in created]
 
 
-async def _auto_confirm_checks(check_ids: list[str], base_order_id: str, payments_per_check: list, tip_per_check: float, state: dict) -> None:
-    """Auto-confirma checks de solo-efectivo cuando el cliente solicitó factura."""
+async def _auto_confirm_checks(
+    check_ids: list[str],
+    base_order_id: str,
+    payments_per_check: list,
+    tip_per_check: float,
+    state: dict,
+) -> dict:
+    """
+    Auto-confirma checks de solo-efectivo cuando el cliente solicitó factura.
+
+    Returns {"success": True} on full success, or {"success": False, "reason": str}
+    if any DB call fails. The caller MUST check success before appending the
+    "factura generada" message — DB inconsistency must never be hidden from staff.
+    """
     factura_name = state.get("factura_name", "Consumidor Final")
     factura_nit  = state.get("factura_nit", "222222222")
     for i, check_id in enumerate(check_ids):
@@ -255,7 +280,15 @@ async def _auto_confirm_checks(check_ids: list[str], base_order_id: str, payment
             )
             log.info("auto_confirm_check_ok", check_id=check_id, base_order_id=base_order_id)
         except Exception:
-            log.exception("auto_confirm_check_failed", check_id=check_id, base_order_id=base_order_id)
+            log.exception(
+                "auto_confirm_check_failed",
+                check_id=check_id,
+                base_order_id=base_order_id,
+                check_ids=check_ids,
+                tip_per_check=tip_per_check,
+            )
+            return {"success": False, "reason": "db_error"}
+    return {"success": True}
 
 
 def _parse_item_assignments(msg: str, items: list, total: float) -> list[float] | None:
@@ -305,7 +338,9 @@ def _parse_item_assignments(msg: str, items: list, total: float) -> list[float] 
     if remainder > to_decimal("0.5"):
         amounts.append(remainder)
 
-    return [float(a) for a in amounts] if amounts else None  # JSON boundary
+    # JSON boundary: amounts stored as str (via _serialize_money_for_state) to avoid
+    # float representation drift when read back from state_store.
+    return [_serialize_money_for_state(a) for a in amounts] if amounts else None
 
 
 # ─── Checkout state machine ──────────────────────────────────────────────────
@@ -470,9 +505,12 @@ async def handle_checkout_flow(
 
         check_amounts = state.get("check_amounts") or []
         if check_amounts and idx < len(check_amounts):
-            per_check_total = float(quantize_money(to_decimal(check_amounts[idx])))  # JSON boundary
+            # check_amounts entries are str (from _serialize_money_for_state) — re-coerce safely
+            per_check_total = _serialize_money_for_state(to_decimal(check_amounts[idx]))
         else:
-            per_check_total = float(quantize_money(to_decimal(state["subtotal"]) / state["split_count"]))  # JSON boundary
+            per_check_total = _serialize_money_for_state(
+                to_decimal(state["subtotal"]) / to_decimal(state["split_count"])
+            )
         state["payments"][idx] = [{"method": method, "amount": per_check_total}]
         idx += 1
         state["current_check_idx"] = idx
@@ -491,12 +529,12 @@ async def handle_checkout_flow(
         state["requires_proof"] = needs_proof
         await state_store.checkout_set(phone, bot_number, state)
 
-        total_with_tip = float(quantize_money(to_decimal(state["subtotal"]) + to_decimal(state["tip_amount"])))  # JSON boundary
+        total_with_tip = float(quantize_money(to_decimal(state["subtotal"]) + to_decimal(state["tip_amount"])))  # JSON boundary: display only
         lines = ["✅ ¡Listo! Aquí está el resumen de tu pago:"]
         for i, pmts in enumerate(state["payments"]):
             if pmts:
                 m = pmts[0]["method"].capitalize()
-                a = _fmt_cop(pmts[0]["amount"])
+                a = _fmt_cop(float(to_decimal(pmts[0]["amount"])))  # JSON boundary: str→Decimal→float for display
                 lines.append(f"  Parte {i+1}: {a} · {m}")
         if to_decimal(state["tip_amount"]) > ZERO:
             lines.append(f"  Propina: {_fmt_cop(float(to_decimal(state['tip_amount'])))}")  # JSON boundary: display only
@@ -514,6 +552,7 @@ async def handle_checkout_flow(
             await state_store.checkout_delete(phone, bot_number)
             return "Hubo un problema al procesar tu pago. Por favor pide ayuda al mesero."
 
+        _auto_confirm_ok = True  # assume success unless we attempt and fail
         if state.get("wants_factura") and not needs_proof and created_check_ids:
             _digital = {"nequi", "daviplata", "transferencia"}
             _all_cash = not any(
@@ -521,20 +560,30 @@ async def handle_checkout_flow(
                 for p in state["payments"] if p
             )
             if _all_cash:
-                try:
-                    tip_per_check = float(quantize_money(to_decimal(state["tip_amount"]) / state["split_count"]))  # JSON boundary
-                    await _auto_confirm_checks(
-                        check_ids=created_check_ids,
-                        base_order_id=state["base_order_id"],
-                        payments_per_check=state["payments"],
-                        tip_per_check=tip_per_check,
-                        state=state,
-                    )
+                tip_per_check = float(quantize_money(to_decimal(state["tip_amount"]) / state["split_count"]))  # JSON boundary
+                _confirm_result = await _auto_confirm_checks(
+                    check_ids=created_check_ids,
+                    base_order_id=state["base_order_id"],
+                    payments_per_check=state["payments"],
+                    tip_per_check=tip_per_check,
+                    state=state,
+                )
+                if _confirm_result.get("success"):
                     lines.append("🧾 Tu factura ha sido generada automáticamente. ¡Gracias!")
-                except Exception:
-                    log.exception("auto_confirm_failed", base_order_id=state.get("base_order_id"))
+                else:
+                    # DB failure — do NOT lie to the customer. A human must verify.
+                    # Preserve checkout state so a human can resolve it.
+                    _auto_confirm_ok = False
+                    log.error(
+                        "auto_confirm_db_failure_human_needed",
+                        base_order_id=state.get("base_order_id"),
+                        check_ids=created_check_ids,
+                    )
+                    lines.append(
+                        "Hubo un problema registrando tu pago — un mesero va a verificar la cuenta en unos segundos."
+                    )
 
-        if not needs_proof:
+        if not needs_proof and _auto_confirm_ok:
             await state_store.checkout_delete(phone, bot_number)
 
         return "\n".join(lines)
@@ -545,7 +594,16 @@ async def handle_checkout_flow(
             return "Por favor envía la foto del comprobante de pago para confirmar tu pedido."
         return None  # auto-confirmed, shouldn't reach here
 
-    return None
+    # ── Paso desconocido o estado corrupto — limpiar y notificar ────────
+    log.error(
+        "checkout_unknown_step",
+        step=state.get("step"),
+        phone=_ofuscar_phone(phone),
+        bot_number=bot_number,
+        base_order_id=state.get("base_order_id"),
+    )
+    await state_store.checkout_delete(phone, bot_number)
+    return "Tuvimos un problema con el flujo de pago. Por favor, avísale al mesero o inicia de nuevo."
 
 
 # ─── Salon action handler ────────────────────────────────────────────────────
