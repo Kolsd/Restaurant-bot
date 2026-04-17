@@ -388,7 +388,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div class="main">
   <div class="segmented-control">
     <button id="tab-mesas" class="seg-btn active" onclick="switchTab('mesas')">🪑 Mesas</button>
-    <button id="tab-proposals" class="seg-btn" onclick="switchTab('proposals')">💳 Comprobantes <span id="proposals-badge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+    <button id="tab-pickup" class="seg-btn" onclick="switchTab('pickup')">🛍️ Para Recoger <span id="pickup-badge" style="display:none;background:#8b5cf6;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+    <button id="tab-proposals" class="seg-btn" onclick="switchTab('proposals')">🛵 Domicilios <span id="proposals-badge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
   </div>
 
   <div id="view-mesas" style="display:flex; gap:0; min-height:calc(100vh - 160px);">
@@ -414,9 +415,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     </div>
   </div>
 
+  <div id="view-pickup" style="display:none;">
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>🛍️ Pedidos Para Recoger</span>
+    </div>
+    <div id="pickup-list" style="display:flex;flex-wrap:wrap;gap:12px;padding:16px;">
+      <p style="color:#999;">Cargando...</p>
+    </div>
+  </div>
+
   <div id="view-proposals" style="display:none;">
     <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
-      <span>Comprobantes de Pago — Mesas y Domicilios</span>
+      <span>🛵 Domicilios Pendientes</span>
       <button onclick="openQuickInvoiceModal()"
         style="background:var(--primary);color:white;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;">
         ➕ Nueva Factura
@@ -616,7 +626,7 @@ function switchTab(tabId) {
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tabId).classList.add('active');
 
-  ['mesas', 'proposals'].forEach(id => {
+  ['mesas', 'pickup', 'proposals'].forEach(id => {
     const el = document.getElementById('view-' + id);
     if (el) el.style.display = 'none';
   });
@@ -624,6 +634,7 @@ function switchTab(tabId) {
   document.getElementById('view-' + tabId).style.display = 'block';
 
   if (tabId === 'proposals') loadPaymentProofs();
+  if (tabId === 'pickup') loadPickupOrders();
 }
 
 // ── RECEIPT HTML BUILDER (shared by preview + print) ──
@@ -1612,7 +1623,9 @@ async function confirmarDomicilio(id) {
         await fetch(`/api/delivery/orders/${id}/status`, {
             method: 'PATCH', headers: reqHeaders, body: JSON.stringify({status: 'confirmado'})
         });
-        loadPaymentProofs();
+        const activeTab = document.querySelector('.seg-btn.active')?.id;
+        if (activeTab === 'tab-pickup') { loadPickupOrders(); _refreshPickupBadge(); }
+        else loadPaymentProofs();
     } catch(e) {}
 }
 
@@ -1730,21 +1743,21 @@ async function loadPaymentProofs() {
     _proposalsCache = {};
     proposals.forEach(p => { _proposalsCache[p.base_order_id] = p; });
 
-    const pendingOrders = allOrders.filter(o => o.status === 'pendiente');
+    const pendingDomicilios = allOrders.filter(o => o.status === 'pendiente' && o.order_type !== 'recoger');
     const voucherPhones = new Set(allConvs.filter(c => c.has_voucher).map(c => c.phone));
 
-    const total = proposals.length + pendingOrders.length;
+    const total = proposals.length + pendingDomicilios.length;
     const badge = document.getElementById('proposals-badge');
     if (badge) { badge.textContent = total; badge.style.display = total > 0 ? 'inline' : 'none'; }
 
     if (total === 0) {
-      container.innerHTML = '<div style="padding:32px;text-align:center;color:#999;font-size:14px;">✅ No hay comprobantes ni pedidos pendientes.</div>';
+      container.innerHTML = '<div style="padding:32px;text-align:center;color:#999;font-size:14px;">✅ No hay comprobantes ni domicilios pendientes.</div>';
       return;
     }
 
     container.innerHTML =
       proposals.map(p => renderProposalCard(p)).join('') +
-      pendingOrders.map(o => renderDeliveryCard(o, voucherPhones.has(o.phone))).join('');
+      pendingDomicilios.map(o => renderDeliveryCard(o, voucherPhones.has(o.phone))).join('');
   } catch(e) {
     console.error('loadPaymentProofs:', e);
     container.innerHTML = `<p style="color:#e74c3c;padding:20px;">Error de red: ${e.message}</p>`;
@@ -1753,6 +1766,79 @@ async function loadPaymentProofs() {
 
 // Alias para referencias internas (confirmProposal, etc.)
 function loadCheckoutProposals() { loadPaymentProofs(); }
+
+// ── PEDIDOS PARA RECOGER ───────────────────────────────────────────
+async function loadPickupOrders() {
+  const container = document.getElementById('pickup-list');
+  if (!container) return;
+  try {
+    const [domRes, convRes] = await Promise.all([
+      fetch('/api/delivery/orders',          { headers: reqHeaders }),
+      fetch('/api/dashboard/conversations',  { headers: reqHeaders }),
+    ]);
+    const allOrders = domRes.ok  ? ((await domRes.json()).orders        || []) : [];
+    const allConvs  = convRes.ok ? ((await convRes.json()).conversations || []) : [];
+
+    const pickups = allOrders.filter(o => o.status === 'pendiente' && o.order_type === 'recoger');
+    const voucherPhones = new Set(allConvs.filter(c => c.has_voucher).map(c => c.phone));
+
+    const badge = document.getElementById('pickup-badge');
+    if (badge) { badge.textContent = pickups.length; badge.style.display = pickups.length > 0 ? 'inline' : 'none'; }
+
+    if (pickups.length === 0) {
+      container.innerHTML = '<div style="padding:32px;text-align:center;color:#999;font-size:14px;">✅ No hay pedidos para recoger pendientes.</div>';
+      return;
+    }
+    container.innerHTML = pickups.map(o => renderPickupCard(o, voucherPhones.has(o.phone))).join('');
+  } catch(e) {
+    console.error('loadPickupOrders:', e);
+    container.innerHTML = `<p style="color:#e74c3c;padding:20px;">Error de red: ${e.message}</p>`;
+  }
+}
+
+function renderPickupCard(o, hasVoucher) {
+  let itemsHtml = '';
+  try {
+    const arr = typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []);
+    itemsHtml = arr.map(i => `<div style="font-size:13px;padding:2px 0;">${_escHtml(String(i.quantity||1))}× ${_escHtml(i.name)}</div>`).join('');
+  } catch(e) {}
+
+  const isPaid = ['nequi','daviplata','transferencia'].includes((o.payment_method||'').toLowerCase());
+  const voucherBadge = isPaid
+    ? (hasVoucher
+        ? '<span style="background:#27ae60;color:white;border-radius:4px;padding:1px 7px;font-size:11px;">📎 Comprobante recibido</span>'
+        : '<span style="background:#f39c12;color:white;border-radius:4px;padding:1px 7px;font-size:11px;">⏳ Esperando comprobante</span>')
+    : '<span style="background:#6b7280;color:white;border-radius:4px;padding:1px 7px;font-size:11px;">💵 Paga al recoger</span>';
+
+  return `
+    <div style="background:white;border-radius:12px;padding:18px;min-width:260px;max-width:300px;box-shadow:0 2px 10px rgba(139,92,246,0.12);border-top:4px solid #8b5cf6;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span style="background:#8b5cf6;color:white;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:700;">🛍️ Para Recoger</span>
+        <span style="font-size:12px;color:#999;">${_escHtml(o.phone||'')}</span>
+      </div>
+      <div style="margin-bottom:8px;">${voucherBadge}</div>
+      <div style="border-top:1px solid #f3f0ff;padding-top:8px;margin-bottom:8px;">${itemsHtml}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="font-size:13px;color:#666;">${_escHtml(o.payment_method||'Sin método')}</span>
+        <strong style="font-size:16px;color:#18181b;">${fmt(o.total||0)}</strong>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="confirmarDomicilio('${o.id}')"
+          style="flex:1;background:#8b5cf6;color:white;border:none;border-radius:8px;padding:10px 14px;cursor:pointer;font-size:13px;font-weight:600;">
+          ✅ Listo para recoger
+        </button>
+        <button onclick="openChatModal('${_escHtml(o.phone||'')}')"
+          style="background:#f3f0ff;color:#8b5cf6;border:none;border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13px;">
+          💬
+        </button>
+        ${_isAdminOrOwner()
+          ? `<button onclick="cancelarDomicilio('${o.id}')"
+               style="background:#fee2e2;color:#dc2626;border:none;border-radius:8px;padding:10px 10px;cursor:pointer;font-size:13px;"
+               title="Solo admin/owner">❌</button>`
+          : ''}
+      </div>
+    </div>`;
+}
 
 function renderDeliveryCard(o, hasVoucher) {
   let itemsHtml = '';
@@ -2088,13 +2174,26 @@ async function cancelarDomicilio(id) {
     } catch(e) { alert('Error: ' + e.message); }
 }
 
+async function _refreshPickupBadge() {
+  try {
+    const r = await fetch('/api/delivery/orders', { headers: reqHeaders });
+    if (!r.ok) return;
+    const orders = (await r.json()).orders || [];
+    const count = orders.filter(o => o.status === 'pendiente' && o.order_type === 'recoger').length;
+    const badge = document.getElementById('pickup-badge');
+    if (badge) { badge.textContent = count; badge.style.display = count > 0 ? 'inline' : 'none'; }
+  } catch(e) {}
+}
+
 loadBillingConfig();
 loadCajaOrders();
 loadPaymentProofs();
+_refreshPickupBadge();
 
 setInterval(() => {
   loadCajaOrders();
   loadPaymentProofs();
+  _refreshPickupBadge();
 }, 5000);
 
 </script>
