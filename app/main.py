@@ -156,7 +156,7 @@ async def security_headers_middleware(request: Request, call_next):
     # CDN allowlist rationale:
     #   script-src   cdnjs + jsdelivr + unpkg  → Chart.js, qrcodejs, Leaflet
     #   style-src    jsdelivr + unpkg          → Leaflet CSS (only external stylesheet today)
-    #   connect-src  unpkg                     → Leaflet fetches its .js.map in dev
+    #   connect-src  cdnjs + jsdelivr + unpkg  → lib .js.map fetches in devtools
     response.headers.setdefault(
         "Content-Security-Policy",
         (
@@ -177,7 +177,9 @@ async def security_headers_middleware(request: Request, call_next):
             "https://nominatim.openstreetmap.org "
             "https://res.cloudinary.com "
             "https://api.cloudinary.com "
-            "https://unpkg.com; "
+            "https://cdn.jsdelivr.net "
+            "https://unpkg.com "
+            "https://cdnjs.cloudflare.com; "
             "frame-ancestors 'none'"
         ),
     )
