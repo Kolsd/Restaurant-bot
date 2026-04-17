@@ -715,6 +715,7 @@ def _make_commit_mocks(monkeypatch, stock_row=None, execute_side_effect=None):
 async def test_commit_insufficient_stock_raises(monkeypatch):
     """Stock insuficiente en path legado → InsufficientStockError."""
     from app.repositories.orders_repo import commit_order_transaction, InsufficientStockError
+    from app.services.tenant_context import tenant_scope
 
     conn = MagicMock()
     txn = MagicMock()
@@ -726,7 +727,8 @@ async def test_commit_insufficient_stock_raises(monkeypatch):
     inv_row = make_row({"id": 1, "current_stock": 2.0, "linked_dishes": '["Pizza"]',
                         "min_stock": 0})
     conn.fetch = AsyncMock(side_effect=[[], [inv_row]])
-    # fetchrow para INSERT order → devuelve None (UPDATE stock falla → sin stock)
+    # fetchval → set_config GUC (tenant_connection); fetchrow → UPDATE stock falla → sin stock
+    conn.fetchval = AsyncMock(return_value=None)
     conn.fetchrow = AsyncMock(return_value=None)
     conn.execute = AsyncMock()
     pool = make_pool(conn)
@@ -734,16 +736,19 @@ async def test_commit_insufficient_stock_raises(monkeypatch):
     cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
     order = _make_order_payload()
 
-    with pytest.raises(InsufficientStockError):
-        await commit_order_transaction(pool, restaurant_id=1,
-                                       conversation_id="+57300",
-                                       cart=cart, order_payload=order)
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(1):
+            with pytest.raises(InsufficientStockError):
+                await commit_order_transaction(pool, restaurant_id=1,
+                                               conversation_id="+57300",
+                                               cart=cart, order_payload=order)
 
 
 @pytest.mark.asyncio
 async def test_commit_inserts_order(monkeypatch):
     """Con stock suficiente → INSERT en orders."""
     from app.repositories.orders_repo import commit_order_transaction
+    from app.services.tenant_context import tenant_scope
 
     insert_calls = []
     conn = MagicMock()
@@ -752,6 +757,7 @@ async def test_commit_inserts_order(monkeypatch):
     txn.__aexit__ = AsyncMock(return_value=False)
     conn.transaction = MagicMock(return_value=txn)
     conn.fetch = AsyncMock(return_value=[])
+    conn.fetchval = AsyncMock(return_value=None)
     conn.fetchrow = AsyncMock(return_value=make_row({"stock": 5}))
     async def capture_execute(q, *args):
         insert_calls.append(q)
@@ -760,8 +766,11 @@ async def test_commit_inserts_order(monkeypatch):
 
     cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
     order = _make_order_payload()
-    await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
-                                   cart=cart, order_payload=order)
+
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(1):
+            await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
+                                           cart=cart, order_payload=order)
     assert any("INSERT" in q and "orders" in q.lower() for q in insert_calls)
 
 
@@ -769,6 +778,7 @@ async def test_commit_inserts_order(monkeypatch):
 async def test_commit_deletes_cart(monkeypatch):
     """commit_order_transaction borra el carrito del cliente."""
     from app.repositories.orders_repo import commit_order_transaction
+    from app.services.tenant_context import tenant_scope
 
     executed = []
     conn = MagicMock()
@@ -777,6 +787,7 @@ async def test_commit_deletes_cart(monkeypatch):
     txn.__aexit__ = AsyncMock(return_value=False)
     conn.transaction = MagicMock(return_value=txn)
     conn.fetch = AsyncMock(return_value=[])
+    conn.fetchval = AsyncMock(return_value=None)
     conn.fetchrow = AsyncMock(return_value=make_row({"stock": 5}))
     async def capture_execute(q, *args):
         executed.append(q)
@@ -785,8 +796,11 @@ async def test_commit_deletes_cart(monkeypatch):
 
     cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
     order = _make_order_payload()
-    await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
-                                   cart=cart, order_payload=order)
+
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(1):
+            await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
+                                           cart=cart, order_payload=order)
     assert any("DELETE" in q and "cart" in q.lower() for q in executed)
 
 

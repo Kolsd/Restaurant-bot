@@ -230,7 +230,7 @@ async def commit_order_transaction(
     )
 
     try:
-        async with pool.acquire() as conn:
+        async with _tenant_connection() as conn:
             async with conn.transaction():
                 # 1a. For sub-orders: recompute sub_number atomically inside the
                 #     transaction to prevent two concurrent workers from calculating
@@ -261,8 +261,8 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
+                                base_order_id, sub_number, restaurant_id)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
                         order_payload["id"],
                         order_payload["phone"],
                         json.dumps(order_payload["items"]),
@@ -279,6 +279,7 @@ async def commit_order_transaction(
                         order_payload.get("payment_method", ""),
                         base_order_id,
                         order_payload["sub_number"],
+                        restaurant_id,
                     )
                 else:
                     await conn.execute(
@@ -286,8 +287,8 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                                base_order_id, sub_number, restaurant_id)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
                            ON CONFLICT (id) DO UPDATE SET
                                items          = EXCLUDED.items,
                                subtotal       = EXCLUDED.subtotal,
@@ -318,6 +319,7 @@ async def commit_order_transaction(
                         order_payload.get("payment_method", ""),
                         None,
                         order_payload.get("sub_number", 1),
+                        restaurant_id,
                     )
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)
@@ -360,8 +362,8 @@ async def db_save_order(order: dict):
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
                 subtotal, delivery_fee, total, status, paid, payment_url, bot_number,
-                payment_method, base_order_id, sub_number)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                payment_method, base_order_id, sub_number, restaurant_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 subtotal=EXCLUDED.subtotal,
@@ -381,7 +383,8 @@ async def db_save_order(order: dict):
         order["subtotal"], order["delivery_fee"], order["total"],
         order["status"], order["paid"], order.get("payment_url", ""),
         order.get("bot_number", ""), order.get("payment_method", ""),
-        order.get("base_order_id"), order.get("sub_number", 1))
+        order.get("base_order_id"), order.get("sub_number", 1),
+        order.get("restaurant_id"))
 
 async def db_confirm_payment(order_id: str, transaction_id: str):
     """
