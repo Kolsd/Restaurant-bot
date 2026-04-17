@@ -60,10 +60,11 @@ async def find_dish(dish_name: str, bot_number: str) -> dict | None:
                 log.info("find_dish.matched", query=dish_name, matched=dish_name_stored, method="exact")
                 return {**dish, "category": category}
 
-    # Pass 2: substring matches — collect all and pick the one whose length is
-    # closest to the query (avoids always returning the first-inserted item).
-    # Require the search term to be at least 40% of the menu item name length
-    # to avoid matching a 2-char query against a 30-char name.
+    # Pass 2: substring matches — collect all and pick the one whose name length
+    # is closest to the query (avoids always returning the first-inserted item).
+    # Require ratio = min(lens) / max(lens) >= 0.4 to prevent a 1-char query
+    # from matching a long dish name (e.g. "a" must NOT match "Ajiaco").
+    # The ratio is bidirectional: it bounds both query-in-name AND name-in-query.
     candidates = []
     for category, dishes in menu.items():
         if not isinstance(dishes, list):
@@ -77,12 +78,13 @@ async def find_dish(dish_name: str, bot_number: str) -> dict | None:
             dish_lower = dish_name_stored.lower()
             item_len = len(dish_lower)
             query_len = len(name_lower)
-            if item_len == 0:
+            if item_len == 0 or query_len == 0:
                 continue
-            ratio = query_len / item_len
-            if name_lower in dish_lower and ratio >= 0.4:
-                candidates.append({**dish, "category": category})
-            elif dish_lower in name_lower and ratio >= 0.4:
+            # Bidirectional ratio: always in [0, 1], guards both match directions
+            ratio = min(query_len, item_len) / max(query_len, item_len)
+            if ratio < 0.4:
+                continue
+            if name_lower in dish_lower or dish_lower in name_lower:
                 candidates.append({**dish, "category": category})
 
     if not candidates:
@@ -161,18 +163,41 @@ async def clear_cart(phone: str, bot_number: str):
         raise
 
 
-async def migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
-    """Migrate cart from one bot_number to another under a distributed lock."""
+async def migrate_cart(phone: str, from_bot_number: str, to_bot_number: str) -> bool:
+    """Migrate cart from one bot_number to another under a distributed lock.
+
+    Locks both bot_numbers in deterministic sorted order to prevent deadlocks.
+    Returns False if either lock cannot be acquired; re-raises non-contention errors.
+    """
     keys = sorted([from_bot_number, to_bot_number])
     try:
         async with _cart_lock(phone, keys[0]):
-            async with _cart_lock(phone, keys[1]):
-                await db.db_migrate_cart(phone, from_bot_number, to_bot_number)
+            # Second lock acquired inside the first — if it fails, the first
+            # _cart_lock's finally block releases the first lock automatically.
+            try:
+                async with _cart_lock(phone, keys[1]):
+                    await db.db_migrate_cart(phone, from_bot_number, to_bot_number)
+            except RuntimeError as e:
+                if "cart_lock_contention" in str(e):
+                    log.warning(
+                        "cart_migration_lock_contention",
+                        phone=phone,
+                        failed_lock=keys[1],
+                        reason="second lock unavailable — first lock released by context manager",
+                    )
+                    return False
+                raise
     except RuntimeError as e:
-        if str(e) == "cart_lock_contention":
-            log.warning("cart.migrate_lock_contention", phone=phone)
-            return
+        if "cart_lock_contention" in str(e):
+            log.warning(
+                "cart_migration_lock_contention",
+                phone=phone,
+                failed_lock=keys[0],
+                reason="first lock unavailable",
+            )
+            return False
         raise
+    return True
         
 async def get_cart_total(phone: str, bot_number: str) -> float:
     cart = await db.db_get_cart(phone, bot_number)
