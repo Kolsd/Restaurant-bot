@@ -41,6 +41,28 @@ from app.services.tenant_db import tenant_connection
 from app.services.tenant_context import bypass_tenant_scope
 
 
+def _normalize_roles(d: dict) -> None:
+    """Normalize the JSONB 'roles' field to always be a plain Python list.
+
+    asyncpg may return JSONB as a Python list, a JSON string, or None depending
+    on codec registration. Fallback to [role] when roles is empty.
+    """
+    raw = d.get("roles")
+    if isinstance(raw, list):
+        roles = raw
+    elif isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            roles = parsed if isinstance(parsed, list) else []
+        except Exception:
+            roles = []
+    else:
+        roles = []
+    if not roles and d.get("role"):
+        roles = [d["role"]]
+    d["roles"] = roles
+
+
 def _ensure_datetime(val) -> datetime:
     """Coerce date strings to datetime objects for asyncpg TIMESTAMPTZ binding."""
     if isinstance(val, datetime):
@@ -185,10 +207,7 @@ async def db_get_team_staff_by_branch(restaurant_id: int) -> list:
     result = []
     for r in rows:
         d = dict(r)
-        roles_list = d.get("roles") or []
-        if not roles_list and d.get("role"):
-            roles_list = [d["role"]]
-        d["roles"] = roles_list
+        _normalize_roles(d)
         d["source"] = "staff"
         d["branch_id"] = restaurant_id
         result.append(d)
@@ -211,10 +230,7 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
     if not row:
         return None
     d = dict(row)
-    roles_list = d.get("roles") or []
-    if not roles_list and d.get("role"):
-        roles_list = [d["role"]]
-    d["roles"] = roles_list
+    _normalize_roles(d)
     return d
 
 
@@ -236,10 +252,7 @@ async def db_get_staff_candidates_by_name(name: str) -> list:
     result = []
     for row in rows:
         d = dict(row)
-        roles_list = d.get("roles") or []
-        if not roles_list and d.get("role"):
-            roles_list = [d["role"]]
-        d["roles"] = roles_list
+        _normalize_roles(d)
         result.append(d)
     return result
 
@@ -1830,10 +1843,7 @@ async def db_get_staff_profile(staff_id: str) -> dict | None:
         return None
     d = dict(row)
     d["id"] = str(d["id"])
-    roles_list = d.get("roles") or []
-    if not roles_list and d.get("role"):
-        roles_list = [d["role"]]
-    d["roles"] = roles_list
+    _normalize_roles(d)
     return d
 
 
