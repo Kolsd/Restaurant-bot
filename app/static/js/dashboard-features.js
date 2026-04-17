@@ -1374,9 +1374,16 @@ async function createTable() {
 async function deleteTable(tableId) {
   if (!confirm('¿Eliminar esta mesa?')) return;
   try {
-    await fetch('/api/tables/' + tableId, { method: 'DELETE', headers: window._dashHeaders });
-    loadTables();
-  } catch(e) {}
+    const r = await fetch('/api/tables/' + tableId, { method: 'DELETE', headers: window._dashHeaders });
+    if (r.ok) {
+      mesioToast('Mesa eliminada', 'success');
+      loadTables();
+    } else {
+      mesioToast('No pude eliminar la mesa', 'error');
+    }
+  } catch(e) {
+    mesioToast('No pude eliminar la mesa', 'error');
+  }
 }
 
 // ── MI EQUIPO ─────────────────────────────────────────────────────────
@@ -1448,7 +1455,10 @@ function renderBranches(branches) {
 function formatRoles(roleStr) { return ''; } // Ya no es necesaria aquí pero la dejamos vacía por si acaso
 
 async function loadBranchUsers(branchId) {
-  const h = window._dashHeaders;
+  // Remove X-Branch-ID from the headers when querying by explicit branch_id param
+  // to avoid the global branch selector overriding the intended query target.
+  const h = Object.assign({}, window._dashHeaders);
+  delete h['X-Branch-ID'];
   try {
     const r = await fetch('/api/team/users?branch_id=' + branchId, { headers: h });
     if (!r.ok) return;
@@ -1517,27 +1527,11 @@ async function updatePinLocation(latlng) {
   document.getElementById('branch-lon').value = latlng.lng;
   
   try {
-      // Añadimos &addressdetails=1 para que nos dé las partes separadas
-      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}&addressdetails=1`);
+      // Usamos el proxy interno /api/geocode/reverse — nunca llamamos Nominatim directamente desde el browser
+      const res = await fetch(`/api/geocode/reverse?lat=${latlng.lat}&lon=${latlng.lng}`, { headers: window._dashHeaders });
       if (res.ok) {
           const data = await res.json();
-          if (data && data.address) {
-              const a = data.address;
-              
-              // Extraemos solo lo útil: Calle, Número, Barrio, Ciudad
-              const street = a.road || a.pedestrian || a.path || '';
-              const number = a.house_number || '';
-              const hood   = a.neighbourhood || a.suburb || '';
-              const city   = a.city || a.town || a.county || '';
-              
-              // Armamos una dirección comercial natural
-              let cleanAddress = `${street} ${number}`.trim();
-              if (hood) cleanAddress += `, ${hood}`;
-              if (city) cleanAddress += `, ${city}`;
-              
-              // Limpiamos comas extra y lo ponemos en el input
-              document.getElementById('branch-address').value = cleanAddress.replace(/^,|,$/g, '').trim() || data.display_name;
-          } else if (data && data.display_name) {
+          if (data && data.display_name) {
               document.getElementById('branch-address').value = data.display_name;
           }
       }
@@ -1556,29 +1550,34 @@ async function validateAddress() {
   btn.textContent = 'Buscando...'; btn.disabled = true;
   
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressInput)}&limit=1`);
+    // Usamos el proxy interno /api/geocode — nunca llamamos Nominatim directamente desde el browser
+    const r = await fetch(`/api/geocode?address=${encodeURIComponent(addressInput)}`, { headers: window._dashHeaders });
     if (r.ok) {
       const data = await r.json();
-      if (data && data.length > 0) {
-          const lat = parseFloat(data[0].lat);
-          const lon = parseFloat(data[0].lon);
-          
+      if (data && data.latitude != null) {
+          const lat = data.latitude;
+          const lon = data.longitude;
+
           document.getElementById('branch-lat').value = lat;
           document.getElementById('branch-lon').value = lon;
-          
+
           if (locationMap && locationMarker) {
               const newPos = new L.LatLng(lat, lon);
               locationMap.setView(newPos, 16);
               locationMarker.setLatLng(newPos);
           }
       } else {
-          alert('❌ No se encontró la dirección exacta. Por favor, haz clic directamente en el mapa para ubicar el marcador.');
+          mesioToast('No se encontró la dirección exacta. Haz clic en el mapa para ubicar el marcador.', 'error');
       }
+    } else if (r.status === 404) {
+      mesioToast('No se encontró la dirección exacta. Haz clic en el mapa para ubicar el marcador.', 'error');
+    } else {
+      mesioToast('Error de geocodificación. Usa el clic en el mapa.', 'error');
     }
   } catch(e) {
-    alert('❌ Error de red al buscar. Usa el clic en el mapa.');
-  } finally { 
-    btn.textContent = prev; btn.disabled = false; 
+    mesioToast('Error de red al buscar. Usa el clic en el mapa.', 'error');
+  } finally {
+    btn.textContent = prev; btn.disabled = false;
   }
 }
 
@@ -1704,16 +1703,29 @@ async function sendInvite() {
   const password = document.getElementById('invite-password').value.trim();
   const phone    = (document.getElementById('invite-phone') || {}).value?.trim() || '';
 
-  if (!username || !password) { alert('El usuario y la contraseña son obligatorios.'); return; }
+  if (!username || !password) { mesioToast('El usuario y la contraseña son obligatorios.', 'error'); return; }
+
+  const submitBtn = document.querySelector('#modal-invite button[onclick="sendInvite()"]');
+  if (submitBtn) submitBtn.disabled = true;
 
   try {
     const r = await fetch('/api/team/invite', {
       method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, pin: '', phone, role: 'admin', branch_id: currentBranchId }),
     });
-    if (r.ok) { closeInviteModal(); loadBranches(); alert('¡Admin creado exitosamente!'); }
-    else { const e = await r.json(); alert('Error: ' + (e.detail || 'No se pudo crear')); }
-  } catch(e) {}
+    if (r.ok) {
+      closeInviteModal();
+      loadBranches();
+      mesioToast('Admin creado exitosamente.', 'success');
+    } else {
+      const e = await r.json();
+      mesioToast('Error: ' + (e.detail || 'No se pudo crear'), 'error');
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  } catch(e) {
+    mesioToast('Error creando admin. Intenta de nuevo.', 'error');
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 async function deleteBranch(id, name) {
@@ -1813,7 +1825,7 @@ async function loadSessions() {
         <td>${fmtDur(s.started_at, s.closed_at)}</td>
         <td>${reasonBadge(s.closed_by)}</td>
         <td style="font-size:12px;${warn?'color:#BA7517;font-weight:500;':'color:#888;'}">${_escHtml(s.closed_by_username||'—')}${warn?' ⚠️':''}</td>
-        <td style="font-weight:500;">${s.total_spent?'$'+Number(s.total_spent).toLocaleString('es-CO'):'—'}</td>
+        <td style="font-weight:500;">${s.total_spent?mesioFmt(s.total_spent):'—'}</td>
         <td>
           ${!s.total_spent
             ? `<button onclick="callWaiterAdmin('${safeBotNumber}','${safePhone}','${safeTableName}','${safeTableId}')"
@@ -1857,7 +1869,7 @@ async function viewSession(id, tableName, phone, closedBy) {
     _addText(infoEl, 'Cerrada por: '); _addBold(infoEl, `${reason.icon} ${reason.text}`);
     if (session.closed_by_username) { _addText(infoEl, ' · usuario: '); _addBold(infoEl, session.closed_by_username); }
     _addText(infoEl, ` · duración: ${fmtDur(session.started_at, session.closed_at)}`);
-    if (session.total_spent) { _addText(infoEl, ' · total: '); _addBold(infoEl, `$${Number(session.total_spent).toLocaleString('es-CO')}`); }
+    if (session.total_spent) { _addText(infoEl, ' · total: '); _addBold(infoEl, mesioFmt(session.total_spent)); }
     const chatEl = document.getElementById('ses-modal-msgs');
     if (!msgs.length) {
       chatEl.textContent = '';
@@ -1952,20 +1964,9 @@ async function reopenFromModal() {
   } catch(e) { showSesFeedback('Error de conexión.', false); }
 }
 
-async function sendMsgFromModal() {
-  const headers = window._dashHeaders;
-  if (!_currentSesId) return;
-  const msg = document.getElementById('ses-msg-input').value.trim();
-  if (!msg) { showSesFeedback('Escribe un mensaje primero.', false); return; }
-  try {
-    const r = await fetch('/api/table-sessions/' + _currentSesId + '/send-message', {
-      method:'POST', headers:{ ...headers,'Content-Type':'application/json' },
-      body: JSON.stringify({ message: msg })
-    });
-    if (r.ok) { document.getElementById('ses-msg-input').value = ''; showSesFeedback('✅ Mensaje enviado al cliente.'); }
-    else { const e = await r.json(); showSesFeedback('Error: ' + (e.detail||'No se pudo enviar.'), false); }
-  } catch(e) { showSesFeedback('Error de conexión.', false); }
-}
+// sendMsgFromModal removed — the backend endpoint /api/table-sessions/{id}/send-message
+// was never implemented. The button and input row were also removed from dashboard.html
+// and dashboard-demo.html.
 
 async function alertWaiterFromModal() {
   const headers = window._dashHeaders;
@@ -2014,9 +2015,9 @@ function renderPOSFromCache() {
     mainEl.appendChild(cacheTag);
   }
   document.getElementById('ai-stock-text').textContent = stockText || '';
-  if (upsells) document.getElementById('upsell-container').innerHTML = upsells;
+  if (upsells) _renderUpsells(upsells);
   if (topHora) document.getElementById('pos-hora-pico').textContent = topHora[0] + 'h';
-  if (avgTicket) document.getElementById('pos-ticket').textContent = '$' + avgTicket.toLocaleString('es-CO');
+  if (avgTicket) document.getElementById('pos-ticket').textContent = mesioFmt(avgTicket);
   if (topPlato) { document.getElementById('pos-top-plato').textContent = topPlato[0]; document.getElementById('pos-top-sub').textContent = topPlato[1] + ' pedidos'; }
   renderHoraDist(horaCounts || {});
   renderDemandBars(horaCounts || {});
@@ -2031,7 +2032,7 @@ async function loadPOSDataFresh() {
     const orders = (await r.json()).orders || [];
     const paid = orders.filter(o => o.paid);
     const avgTicket = paid.length > 0 ? Math.round(paid.reduce((s,o) => s+o.total, 0) / paid.length) : 0;
-    document.getElementById('pos-ticket').textContent = avgTicket > 0 ? '$' + avgTicket.toLocaleString('es-CO') : '—';
+    document.getElementById('pos-ticket').textContent = avgTicket > 0 ? mesioFmt(avgTicket) : '—';
     document.getElementById('pos-ticket-trend').textContent = paid.length + ' pedidos pagados esta semana';
 
     const platoCounts = {};
@@ -2135,11 +2136,34 @@ async function generateAIInsights(orders, avgTicket, topPlato, topHora) {
       ctx + '\n\nGenera 3 sugerencias de upsell para el bot de WhatsApp.'
     );
     const sugerencias = JSON.parse(raw.replace(/```json|```/g,'').trim());
-    const upsellHtml = sugerencias.map(s => `
-      <div class="upsell-card"><span class="upsell-icon">${_escHtml(s.icon)}</span><span class="upsell-text">${_escHtml(s.texto)}</span><span class="upsell-badge">${_escHtml(s.ganancia)}</span></div>`).join('');
-    document.getElementById('upsell-container').innerHTML = upsellHtml;
-    if (posCache.data) posCache.data.upsells = upsellHtml;
+    _renderUpsells(sugerencias);
+    // Cache structured data, not HTML — avoids storing LLM-generated markup
+    if (posCache.data) posCache.data.upsells = sugerencias;
   } catch(e) { document.getElementById('upsell-container').innerHTML = '<div class="empty-state">Conecta más pedidos.</div>'; }
+}
+
+// Renders upsell suggestions from structured data using textContent — no XSS risk
+function _renderUpsells(sugerencias) {
+  const container = document.getElementById('upsell-container');
+  if (!container || !Array.isArray(sugerencias)) return;
+  container.textContent = '';
+  sugerencias.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'upsell-card';
+    const icon = document.createElement('span');
+    icon.className = 'upsell-icon';
+    icon.textContent = s.icon || '';
+    const text = document.createElement('span');
+    text.className = 'upsell-text';
+    text.textContent = s.texto || '';
+    const badge = document.createElement('span');
+    badge.className = 'upsell-badge';
+    badge.textContent = s.ganancia || '';
+    card.appendChild(icon);
+    card.appendChild(text);
+    card.appendChild(badge);
+    container.appendChild(card);
+  });
 }
 
 async function askMesioAI() {
@@ -2162,9 +2186,20 @@ async function askMesioAI() {
         max_tokens: 1000
       })
     });
+    if (!resp.ok) {
+      const code = resp.status;
+      if (code === 429) throw new Error('rate_limit');
+      throw new Error('http_' + code);
+    }
     const d = await resp.json();
     responseDiv.textContent = '✦ ' + (d.text || 'No pude procesar.');
-  } catch(e) { responseDiv.textContent = 'Error al conectar.'; }
+  } catch(e) {
+    if (e.message === 'rate_limit') {
+      responseDiv.textContent = 'Demasiadas consultas a la IA. Espera un minuto.';
+    } else {
+      responseDiv.textContent = 'Error al conectar con la IA. Intenta de nuevo.';
+    }
+  }
   btn.textContent = 'Preguntar a Mesio IA →'; btn.disabled = false;
 }
 
@@ -2196,7 +2231,8 @@ async function loadTableOrdersSection() {
   try {
     // ── 1. Cargar pedidos de mesa ──
     const rMesa = await fetch('/api/table-orders', { headers: h });
-    const { orders: allMesa = [] } = rMesa.ok ? await rMesa.json() : { orders: [] };
+    if (!rMesa.ok) { mesioToast('Error cargando pedidos de mesas', 'error'); return; }
+    const { orders: allMesa = [] } = await rMesa.json();
 
     const dNow = new Date();
     const today = `${dNow.getFullYear()}-${String(dNow.getMonth()+1).padStart(2,'0')}-${String(dNow.getDate()).padStart(2,'0')}`;
@@ -2248,7 +2284,7 @@ async function loadTableOrdersSection() {
     });
     const domEntregados = extOrders.filter(o => (o.status||'').includes('entregado')).length;
 
-    const fmt = n => '$' + Number(n).toLocaleString('es-CO');
+    const fmt = n => mesioFmt(n);
 
     // ── 3. Métricas salón ──
     const enCocina   = active.filter(o => ['recibido','en_preparacion'].includes(o.status));
@@ -2417,7 +2453,7 @@ async function markTableInvoiced(orderId) {
   const existingModal = document.getElementById('_svc-modal');
   if (existingModal) existingModal.remove();
 
-  const fmtLocal = n => '$' + Math.round(Number(n)).toLocaleString('es-CO');
+  const fmtLocal = n => mesioFmt(Math.round(Number(n)));
 
   const overlay = document.createElement('div');
   overlay.id = '_svc-modal';
@@ -2640,6 +2676,10 @@ async function _resLoadDay() {
 
   try {
     const r = await fetch(url, { headers: window._dashHeaders });
+    if (r.status === 403) {
+      list.innerHTML = '<div class="empty-state" style="padding:2rem;text-align:center;color:#888;">El módulo de reservaciones no está activo en tu plan. Habilítalo desde Configuración.</div>';
+      return;
+    }
     if (r.ok) {
       const data = await r.json();
       _resData = data.reservations || data || [];
