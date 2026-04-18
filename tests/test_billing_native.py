@@ -267,7 +267,10 @@ async def test_db_save_fiscal_invoice_se_llama_con_cufe(adapter):
     assert len(call_args["cufe"]) == 96
     assert call_args["dian_status"] == "accepted"   # mock retorna accepted
     assert call_args["dian_response"] is not None    # respuesta del proveedor persistida
-    assert call_args["restaurant_id"] == 42
+    # Post-Wave-2: billing.py sends the tenant key under `org_id`, not
+    # `restaurant_id`. The integer value is the same (org_id == old
+    # restaurant_id for every Matriz, by migration 0034 invariant).
+    assert call_args["org_id"] == 42
     assert call_args["order_id"] == "MESA-ABC123"
 
 

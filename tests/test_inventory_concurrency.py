@@ -276,15 +276,15 @@ async def test_for_update_called_on_read_in_update_item():
     conn = AsyncMock()
     existing_row = MagicMock()
     existing_row.__iter__ = lambda s: iter({
-        "id": 1, "restaurant_id": 5, "name": "Papa", "unit": "kg",
+        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
         "current_stock": 10.0, "min_stock": 1.0,
         "linked_dishes": json.dumps(["Papas Fritas"]),
         "cost_per_unit": 500.0,
     }.items())
-    existing_row.keys = lambda: ["id", "restaurant_id", "name", "unit",
+    existing_row.keys = lambda: ["id", "org_id", "restaurant_id", "name", "unit",
                                   "current_stock", "min_stock", "linked_dishes", "cost_per_unit"]
     existing_row.__getitem__ = lambda s, k: {
-        "id": 1, "restaurant_id": 5, "name": "Papa", "unit": "kg",
+        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
         "current_stock": 10.0, "min_stock": 1.0,
         "linked_dishes": json.dumps(["Papas Fritas"]),
         "cost_per_unit": 500.0,
@@ -292,15 +292,15 @@ async def test_for_update_called_on_read_in_update_item():
 
     updated_row = MagicMock()
     updated_row.__iter__ = lambda s: iter({
-        "id": 1, "restaurant_id": 5, "name": "Papa", "unit": "kg",
+        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
         "current_stock": 8.0, "min_stock": 1.0,
         "linked_dishes": json.dumps(["Papas Fritas"]),
         "cost_per_unit": 500.0,
     }.items())
-    updated_row.keys = lambda: ["id", "restaurant_id", "name", "unit",
+    updated_row.keys = lambda: ["id", "org_id", "restaurant_id", "name", "unit",
                                   "current_stock", "min_stock", "linked_dishes", "cost_per_unit"]
     updated_row.__getitem__ = lambda s, k: {
-        "id": 1, "restaurant_id": 5, "name": "Papa", "unit": "kg",
+        "id": 1, "org_id": 5, "restaurant_id": 5, "name": "Papa", "unit": "kg",
         "current_stock": 8.0, "min_stock": 1.0,
         "linked_dishes": json.dumps(["Papas Fritas"]),
         "cost_per_unit": 500.0,
@@ -361,7 +361,7 @@ async def test_adjust_stock_uses_delta_update_not_toctou():
         "linked_dishes": json.dumps(["Arroz con leche"]),
         "cost_per_unit": 200.0,
     }.items())
-    updated_row.keys = lambda: ["id", "restaurant_id", "name", "unit",
+    updated_row.keys = lambda: ["id", "org_id", "restaurant_id", "name", "unit",
                                   "current_stock", "min_stock", "linked_dishes", "cost_per_unit"]
     updated_row.__getitem__ = lambda s, k: {
         "id": 7, "restaurant_id": 3, "name": "Arroz", "unit": "kg",

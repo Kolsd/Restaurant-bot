@@ -249,9 +249,11 @@ class TestDbUpdateMenuValidation:
         assert result is True
         # execute is called at least once for the UPDATE (bypass mode also calls SET LOCAL ROLE)
         assert mock_conn.execute.call_count >= 1
+        # Post-Wave-2: menu now lives on organizations.menu, written via the
+        # locations join. Old SQL was "UPDATE restaurants SET menu = ...".
         update_calls = [
             c for c in mock_conn.execute.call_args_list
-            if c.args and "UPDATE restaurants SET menu" in str(c.args[0])
+            if c.args and "UPDATE organizations SET menu" in str(c.args[0])
         ]
         assert len(update_calls) == 1
 

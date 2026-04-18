@@ -264,6 +264,9 @@ class TestComputeWeeklyStats:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _fake_restaurant(overrides: dict | None = None) -> dict:
+    # Post-Wave-2: scheduler.py reads owner_phone + timezone from features
+    # via _features_dict(). Top-level keys are kept for backwards-compat with
+    # places that still inspect them, but the source of truth is features.
     r = {
         "id":               1,
         "name":             "El Restaurante",
@@ -271,9 +274,19 @@ def _fake_restaurant(overrides: dict | None = None) -> dict:
         "wa_phone_id":      "ph123",
         "owner_phone":      "+573009999999",
         "timezone":         "America/Bogota",
-        "features":         {"weekly_report_enabled": True},
+        "features":         {
+            "weekly_report_enabled": True,
+            "owner_phone":           "+573009999999",
+            "timezone":              "America/Bogota",
+        },
     }
     if overrides:
+        # If the caller overrides owner_phone/timezone at top level, mirror
+        # the change into features so the scheduler reads the same value.
+        if "owner_phone" in overrides:
+            r["features"]["owner_phone"] = overrides["owner_phone"]
+        if "timezone" in overrides:
+            r["features"]["timezone"] = overrides["timezone"]
         r.update(overrides)
     return r
 
@@ -504,11 +517,18 @@ def _clear_route_auth():
 class TestDashboardEndpoints:
 
     def _make_restaurant(self, features=None, owner_phone=None, timezone="America/Bogota"):
+        # Post-Wave-2: routes/settings_routes.py reads owner_phone + timezone
+        # from features.* (not from top-level columns). Build features that
+        # contain those keys so the GET endpoint surfaces them correctly.
+        feats = dict(features or {})
+        feats.setdefault("timezone", timezone)
+        if owner_phone is not None:
+            feats.setdefault("owner_phone", owner_phone)
         return {
             "id":               1,
             "name":             "Restaurante Test",
             "whatsapp_number":  "+57300",
-            "features":         features or {},
+            "features":         feats,
             "owner_phone":      owner_phone,
             "timezone":         timezone,
         }
@@ -687,11 +707,18 @@ class TestDashboardEndpointsExtra:
     """Additional coverage for GET/PATCH endpoints not covered in Block E."""
 
     def _make_restaurant(self, features=None, owner_phone=None, timezone="America/Bogota"):
+        # Post-Wave-2: routes/settings_routes.py reads owner_phone + timezone
+        # from features.* (not from top-level columns). Build features that
+        # contain those keys so the GET endpoint surfaces them correctly.
+        feats = dict(features or {})
+        feats.setdefault("timezone", timezone)
+        if owner_phone is not None:
+            feats.setdefault("owner_phone", owner_phone)
         return {
             "id":               1,
             "name":             "Restaurante Test",
             "whatsapp_number":  "+57300",
-            "features":         features or {},
+            "features":         feats,
             "owner_phone":      owner_phone,
             "timezone":         timezone,
         }
