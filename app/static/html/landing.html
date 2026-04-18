@@ -3,504 +3,433 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — Plataforma operativa para restaurantes modernos</title>
-<meta name="description" content="Mesio unifica WhatsApp AI, POS de mesas, KDS, nómina con biometría, inventario y facturación electrónica en una sola plataforma para restaurantes colombianos. Sin comisión por pedido.">
-<meta name="keywords" content="sistema para restaurante, pedidos WhatsApp, POS restaurante, nómina restaurante, KDS cocina, multi-sucursal, Colombia, México, Chile, España">
-<meta property="og:title" content="Mesio — Plataforma operativa para restaurantes modernos">
-<meta property="og:description" content="WhatsApp AI, POS, KDS, nómina, inventario y facturación en una sola plataforma. Multi-sucursal, sin comisión por pedido.">
+<title>Mesio — El sistema operativo para restaurantes</title>
+<meta name="description" content="POS, WhatsApp AI, KDS, nómina biométrica, inventario y facturación DIAN en una sola plataforma. Sin comisión por pedido. Setup en 48 horas.">
+<meta name="keywords" content="sistema para restaurante, pedidos WhatsApp, POS restaurante, nómina biométrica, KDS cocina, facturación DIAN, Colombia, México, Chile, España">
+<meta property="og:title" content="Mesio — El sistema operativo para restaurantes">
+<meta property="og:description" content="POS, WhatsApp AI, KDS, nómina biométrica, inventario y facturación en una sola plataforma. Sin comisión por pedido.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="/static/img/logo.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Mesio — Plataforma operativa para restaurantes modernos">
-<meta name="twitter:description" content="WhatsApp AI, POS, KDS, nómina y facturación en una sola plataforma. Sin comisión por pedido, multi-sucursal.">
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700;9..144,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,400;1,9..144,700&family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/landing.css">
-<noscript><style>.rv{opacity:1!important;transform:none!important;}</style></noscript>
 </head>
-<body>
+<body data-accent="green" data-display="fraunces">
 
-<!-- ── NAV ── -->
-<header class="site-nav" id="top">
-  <nav class="nav-inner container" aria-label="Navegación principal">
-    <a href="/" class="nav-logo" aria-label="Mesio inicio">Mesio<span class="accent-dot">.</span></a>
-    <ul class="nav-links" role="list">
-      <li><a href="#modulos">Plataforma</a></li>
-      <li><a href="#seguridad">Seguridad</a></li>
-      <li><a href="#precios">Precios</a></li>
-      <li><a href="#faq">FAQ</a></li>
-    </ul>
-    <a href="/dashboard-demo" class="btn btn-primary nav-cta">Solicitar demo</a>
-    <button class="hamburger" aria-label="Abrir menú" aria-expanded="false" aria-controls="mobile-nav">
-      <span></span><span></span><span></span>
-    </button>
-  </nav>
-  <div class="mobile-nav" id="mobile-nav" aria-hidden="true">
-    <ul role="list">
-      <li><a href="#modulos">Plataforma</a></li>
-      <li><a href="#seguridad">Seguridad</a></li>
-      <li><a href="#precios">Precios</a></li>
-      <li><a href="#faq">FAQ</a></li>
-      <li><a href="/dashboard-demo" class="btn btn-primary">Solicitar demo</a></li>
-    </ul>
+<!-- ══════════ NAV ══════════ -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark">M</span>
+      <span class="brand-word">Mesio<span class="dot">.</span></span>
+    </a>
+    <nav class="nav-links">
+      <a href="#modulos">Producto</a>
+      <a href="#como">Cómo funciona</a>
+      <a href="#clientes">Clientes</a>
+      <a href="#precios">Precios</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-right">
+      <span class="nav-meta"><span class="live-dot"></span>847 restaurantes activos</span>
+      <a class="btn btn-ghost btn-sm" href="/login">Iniciar sesión</a>
+      <a class="btn btn-primary btn-sm" href="#final">Solicitar demo</a>
+    </div>
   </div>
 </header>
 
-<main>
-
-<!-- ── 1. HERO ── -->
-<section class="hero" id="hero" aria-labelledby="hero-h1">
-  <div class="hero-bg" aria-hidden="true">
-    <div class="hero-glow"></div>
-    <div class="hero-grid"></div>
-  </div>
-  <div class="container hero-layout">
-    <div class="hero-copy">
-      <div class="eyebrow rv">
-        <span class="live-dot" aria-hidden="true"></span>
-        Plataforma operativa para restaurantes modernos
-      </div>
-      <h1 id="hero-h1" class="rv">El sistema de gestión que tu restaurante<br><em>realmente necesita.</em></h1>
-      <p class="hero-sub rv">Recibe pedidos por WhatsApp con IA, gestiona tus mesas, controla tu inventario, paga la nómina y emite facturas DIAN — todo desde un solo lugar, sin comisión por pedido.</p>
-      <div class="hero-ctas rv">
-        <a href="/dashboard-demo" class="btn btn-primary">Ver demo en vivo</a>
-        <a href="https://wa.me/573144914554" target="_blank" rel="noopener" class="btn btn-secondary">Hablar con ventas</a>
-      </div>
-      <p class="trust-line rv">Sin comisión por pedido &middot; Multi-sucursal &middot; Disponible 24/7 &middot; Setup en 48 horas</p>
+<!-- ══════════ HERO ══════════ -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <div class="masthead">
+      <span><b>Mesio</b> · Edición Colombia</span>
+      <span class="sep">·</span>
+      <span>Vol. IV — 2026</span>
+      <span class="sep">·</span>
+      <span>Sistema operativo restaurantero</span>
+      <span class="sep">·</span>
+      <span>Bogotá · CDMX · Santiago · Madrid · Lima</span>
     </div>
-    <div class="hero-mock rv" aria-hidden="true">
-      <div class="mock-header">
-        <span class="mock-dot red"></span><span class="mock-dot yellow"></span><span class="mock-dot green"></span>
-        <span class="mock-title">Dashboard &mdash; Hoy</span>
-        <span class="live-badge"><span class="live-pulse"></span>En vivo</span>
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <div class="kicker">Sistema operativo · no otro SaaS</div>
+        <h1 class="headline">
+          <span class="line">Tu restaurante</span>
+          <span class="line">ya no necesita</span>
+          <span class="line"><em>cinco apps</em>.</span>
+        </h1>
+        <p class="dek">
+          POS, WhatsApp AI, KDS, nómina biométrica, inventario y facturación DIAN
+          en una sola plataforma. <strong>Sin comisión por pedido.</strong> Setup en 48 horas.
+          Tus datos, tu hardware, tu negocio — sin intermediarios.
+        </p>
+        <div class="byline">
+          <b>Reemplaza</b>
+          <span>Rappi</span><span class="sep">·</span>
+          <span>Square</span><span class="sep">·</span>
+          <span>Toast</span><span class="sep">·</span>
+          <span>Siesa POS</span><span class="sep">·</span>
+          <span>Sinigual</span>
+        </div>
+        <div class="hero-cta">
+          <a class="btn btn-primary btn-lg" href="#final">Solicitar demo</a>
+          <a class="btn btn-ghost btn-lg" href="/dashboard-demo">Ver demo en vivo →</a>
+        </div>
+        <div class="hero-trust">
+          <span><span class="check">✓</span> Sin contrato mínimo</span>
+          <span><span class="check">✓</span> Migración incluida</span>
+          <span><span class="check">✓</span> DIAN · CFDI · SII · AEAT</span>
+        </div>
       </div>
-      <div class="mock-kpis">
-        <div class="mock-kpi">
-          <span class="kpi-label">Ventas hoy</span>
-          <span class="kpi-val accent">$1.284.500</span>
-          <span class="kpi-delta up">+12%</span>
+
+      <!-- Hero stack: embedded product UI -->
+      <div class="hero-stack">
+        <div class="window">
+          <div class="window-chrome">
+            <div class="window-dots"><span></span><span></span><span></span></div>
+            <div class="window-url"><span class="lock">🔒</span>mesio.app / <b style="color:var(--text-on-dark)">dashboard</b></div>
+            <div class="window-meta">v4.2.1</div>
+          </div>
+          <div class="window-body">
+            <div class="dash-head">
+              <div class="dash-head-l">Resumen · <b>La Fonda del Chef</b> · Chapinero</div>
+              <span class="live-chip">En vivo</span>
+            </div>
+            <div class="kpis">
+              <div class="kpi">
+                <div class="kpi-l">Ventas hoy</div>
+                <div class="kpi-v">$1.842K</div>
+                <div class="kpi-d up">↑ 12.4%</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-l">Pedidos WhatsApp</div>
+                <div class="kpi-v">47</div>
+                <div class="kpi-d up">↑ 8 vs. ayer</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-l">Ticket medio</div>
+                <div class="kpi-v">$39.2K</div>
+                <div class="kpi-d flat">— 0.0%</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-l">Mesas ocupadas</div>
+                <div class="kpi-v">11/18</div>
+                <div class="kpi-d up">61%</div>
+              </div>
+            </div>
+            <div class="chart">
+              <div class="chart-axis"><span>$90K</span><span>$60K</span><span>$30K</span><span>$0</span></div>
+              <svg viewBox="0 0 400 100" preserveAspectRatio="none" style="margin-left:28px">
+                <defs>
+                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="var(--accent)" stop-opacity=".3"/>
+                    <stop offset="1" stop-color="var(--accent)" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path d="M0,78 L30,72 L60,68 L90,58 L120,62 L150,48 L180,52 L210,38 L240,42 L270,28 L300,32 L330,18 L360,22 L400,8"
+                      fill="none" stroke="var(--accent)" stroke-width="2"/>
+                <path d="M0,78 L30,72 L60,68 L90,58 L120,62 L150,48 L180,52 L210,38 L240,42 L270,28 L300,32 L330,18 L360,22 L400,8 L400,100 L0,100 Z"
+                      fill="url(#g1)"/>
+                <circle cx="400" cy="8" r="3.5" fill="var(--accent)"/>
+                <circle cx="400" cy="8" r="7" fill="var(--accent)" opacity="0.25"/>
+              </svg>
+            </div>
+            <div class="ticker">
+              <div class="ticker-row new">
+                <span class="ticker-time">12:47</span>
+                <span class="ticker-order">#A-2847 · <b>Bandeja paisa</b> ×2, Limonada de coco</span>
+                <span class="ticker-source wa">WhatsApp</span>
+                <span class="ticker-amt">$84.200</span>
+              </div>
+              <div class="ticker-row">
+                <span class="ticker-time">12:46</span>
+                <span class="ticker-order">#A-2846 · <b>Mesa 7</b> · Pre-cuenta impresa</span>
+                <span class="ticker-source">Salón</span>
+                <span class="ticker-amt">$132.400</span>
+              </div>
+              <div class="ticker-row">
+                <span class="ticker-time">12:44</span>
+                <span class="ticker-order">#A-2845 · <b>Ajiaco santafereño</b>, arepa extra</span>
+                <span class="ticker-source wa">WhatsApp</span>
+                <span class="ticker-amt">$28.900</span>
+              </div>
+              <div class="ticker-row">
+                <span class="ticker-time">12:41</span>
+                <span class="ticker-order">#A-2844 · <b>Mesa 3</b> · Factura DIAN emitida</span>
+                <span class="ticker-source">POS</span>
+                <span class="ticker-amt">$67.500</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="mock-kpi">
-          <span class="kpi-label">Mesas activas</span>
-          <span class="kpi-val">7 / 12</span>
-          <span class="kpi-delta up">+3</span>
+
+        <div class="hero-ticker">
+          <div class="hero-ticker-head">
+            <span>Turno actual · Cocina</span>
+            <b>8 en curso</b>
+          </div>
+          <div class="kitchen-grid">
+            <div class="kitchen-station active">
+              <span class="ks-count">3</span>
+              <span class="ks-label">Plancha</span>
+            </div>
+            <div class="kitchen-station idle">
+              <span class="ks-count">2</span>
+              <span class="ks-label">Fríos</span>
+            </div>
+            <div class="kitchen-station warn">
+              <span class="ks-count">2</span>
+              <span class="ks-label">Bebidas</span>
+            </div>
+            <div class="kitchen-station idle">
+              <span class="ks-count">1</span>
+              <span class="ks-label">Postres</span>
+            </div>
+          </div>
         </div>
-        <div class="mock-kpi">
-          <span class="kpi-label">Pedidos WhatsApp</span>
-          <span class="kpi-val">34</span>
-          <span class="kpi-delta up">+8</span>
-        </div>
-        <div class="mock-kpi">
-          <span class="kpi-label">Nómina pendiente</span>
-          <span class="kpi-val dim">$0</span>
-          <span class="kpi-delta neutral">al día</span>
-        </div>
-      </div>
-      <div class="mock-chart" aria-label="Gráfica de ventas simulada">
-        <div class="bar" style="--h:45%"></div>
-        <div class="bar" style="--h:62%"></div>
-        <div class="bar" style="--h:38%"></div>
-        <div class="bar" style="--h:80%"></div>
-        <div class="bar" style="--h:55%"></div>
-        <div class="bar" style="--h:90%"></div>
-        <div class="bar active" style="--h:72%"></div>
-      </div>
-      <div class="mock-footer">
-        <span class="mock-tag">3 pedidos nuevos</span>
-        <span class="mock-tag accent-tag">KDS actualizado</span>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ── 2. COUNTRY BAR ── -->
-<div class="country-bar" aria-label="Países soportados">
-  <span class="country-label">Diseñado para operar en</span>
-  <span class="country-flags">🇨🇴 Colombia &nbsp;&middot;&nbsp; 🇲🇽 México &nbsp;&middot;&nbsp; 🇨🇱 Chile &nbsp;&middot;&nbsp; 🇪🇸 España &nbsp;&middot;&nbsp; 🇵🇪 Perú</span>
+<!-- ══════════ OPERATING STRIP ══════════ -->
+<div class="strip">
+  <div class="strip-inner" aria-hidden="true">
+    <span><span class="dot">◆</span><b>847</b> restaurantes activos</span>
+    <span><span class="dot">◆</span><b>2.8M</b> pedidos procesados este mes</span>
+    <span><span class="dot">◆</span><b>$0</b> en comisión por pedido — nunca</span>
+    <span><span class="dot">◆</span><b>48h</b> setup promedio</span>
+    <span><span class="dot">◆</span><b>99.97%</b> uptime últimos 12 meses</span>
+    <span><span class="dot">◆</span><b>24/7</b> soporte en español</span>
+    <span><span class="dot">◆</span><b>5</b> países: CO · MX · CL · ES · PE</span>
+    <span><span class="dot">◆</span><b>FIDO2</b> nómina biométrica certificada</span>
+    <!-- duplicated for seamless loop -->
+    <span><span class="dot">◆</span><b>847</b> restaurantes activos</span>
+    <span><span class="dot">◆</span><b>2.8M</b> pedidos procesados este mes</span>
+    <span><span class="dot">◆</span><b>$0</b> en comisión por pedido — nunca</span>
+    <span><span class="dot">◆</span><b>48h</b> setup promedio</span>
+    <span><span class="dot">◆</span><b>99.97%</b> uptime últimos 12 meses</span>
+    <span><span class="dot">◆</span><b>24/7</b> soporte en español</span>
+    <span><span class="dot">◆</span><b>5</b> países: CO · MX · CL · ES · PE</span>
+    <span><span class="dot">◆</span><b>FIDO2</b> nómina biométrica certificada</span>
+  </div>
 </div>
 
-<!-- ── 3. MÉTRICAS ── -->
-<section class="metrics-section" aria-labelledby="metrics-title">
-  <h2 id="metrics-title" class="sr-only">Métricas clave</h2>
-  <div class="container metrics-grid">
-    <div class="stat-item rv">
-      <div class="stat-num" data-target="24" data-suffix="/7">0</div>
-      <div class="stat-label">Disponible para tus clientes</div>
+<!-- ══════════ MODULES ══════════ -->
+<section class="section" id="modulos">
+  <div class="wrap">
+    <div class="section-head">
+      <div>
+        <div class="section-label"><span class="num">§01 —</span>Módulos</div>
+      </div>
+      <div>
+        <h2 class="section-title">Una sola plataforma. <em>Seis herramientas</em> que dejan de hablar entre sí porque ya son una.</h2>
+        <p class="section-sub">Cada módulo funciona solo y mejor junto. Activas lo que necesitas; no pagas por lo que no usas.</p>
+      </div>
     </div>
-    <div class="stat-item rv">
-      <div class="stat-num" data-target="0" data-suffix=" errores">0</div>
-      <div class="stat-label">En cobros y transacciones</div>
-    </div>
-    <div class="stat-item rv">
-      <div class="stat-num" data-prefix="0%" data-target="0">0%</div>
-      <div class="stat-label">Comisión por pedido</div>
-    </div>
-    <div class="stat-item rv">
-      <div class="stat-num" data-target="5" data-suffix=" min">0</div>
-      <div class="stat-label">Para cerrar la nómina</div>
-    </div>
-    <div class="stat-item rv">
-      <div class="stat-num" data-target="48" data-suffix="h">0</div>
-      <div class="stat-label">Setup completo</div>
-    </div>
-  </div>
-</section>
+    <div class="modules">
 
-<!-- ── 4. MÓDULOS ── -->
-<section class="modules-section" id="modulos" aria-labelledby="modulos-title">
-  <div class="container">
-    <div class="section-header rv">
-      <p class="section-eyebrow">La plataforma</p>
-      <h2 id="modulos-title">Una plataforma, seis módulos</h2>
-      <p class="section-sub">Cada módulo opera solo o en conjunto. Sin integraciones rotas, sin datos duplicados.</p>
-    </div>
-    <div class="modules-grid">
-
-      <article class="mod-card rv" aria-labelledby="mod-wa">
-        <div class="mod-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M20.52 3.48A11.93 11.93 0 0012 0C5.37 0 0 5.37 0 12c0 2.11.55 4.15 1.6 5.96L0 24l6.24-1.56A11.94 11.94 0 0012 24c6.63 0 12-5.37 12-12 0-3.2-1.25-6.2-3.48-8.52zm-8.52 18.4a9.88 9.88 0 01-5.04-1.38l-.36-.22-3.7.97.99-3.62-.24-.38A9.9 9.9 0 012.1 12C2.1 6.53 6.53 2.1 12 2.1c2.64 0 5.12 1.03 6.98 2.9A9.81 9.81 0 0121.9 12c0 5.47-4.43 9.88-9.9 9.88zm5.44-7.4c-.3-.15-1.76-.87-2.04-.97-.27-.1-.47-.15-.66.15-.2.3-.75.97-.92 1.17-.17.2-.34.22-.63.07-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.65-2.04-.17-.3-.02-.46.13-.6.13-.13.3-.34.44-.51.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.66-1.6-.91-2.2-.24-.57-.48-.5-.66-.5h-.56c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.47 1.07 2.88 1.21 3.08.15.2 2.1 3.2 5.08 4.5.71.3 1.27.49 1.7.62.72.23 1.37.2 1.89.12.57-.09 1.76-.72 2.01-1.41.25-.7.25-1.3.17-1.42-.07-.12-.27-.2-.56-.34z" fill="currentColor"/></svg>
+      <article class="mod">
+        <div class="mod-num"><span>01 / 06</span><span class="status">Core</span></div>
+        <div class="mod-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="20" height="14" rx="2"/><path d="M6 20h12M10 18v2M14 18v2"/><path d="M6 9h12M6 12h6"/>
+          </svg>
         </div>
-        <h3 id="mod-wa">WhatsApp AI</h3>
-        <p>Agente conversacional con IA que toma pedidos, resuelve dudas y confirma pagos las 24 horas.</p>
-        <ul class="mod-features">
-          <li>Asigna automáticamente la sucursal más cercana al cliente</li>
-          <li>Carrito persistente y pago con foto de comprobante</li>
-          <li>Responde preguntas frecuentes y toma pedidos sin intervención humana</li>
-        </ul>
+        <h3>POS &amp; Salón</h3>
+        <p>Toma mesas, divide cuentas por persona, imprime pre-cuenta al instante. Funciona offline; sincroniza cuando vuelve el wifi.</p>
+        <div class="mod-foot"><span>iPad · Android · Web</span><span class="arrow">→</span></div>
       </article>
 
-      <article class="mod-card rv" aria-labelledby="mod-pos">
-        <div class="mod-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 21h8M12 17v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <article class="mod feature">
+        <div class="mod-num"><span>02 / 06</span><span class="status">AI</span></div>
+        <div class="mod-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/>
+          </svg>
         </div>
-        <h3 id="mod-pos">POS de Mesas</h3>
-        <p>Gestión completa de mesas con split-checks, propinas automáticas y cierre de cuenta desde el POS.</p>
-        <ul class="mod-features">
-          <li>Divide la cuenta entre varias personas o formas de pago sin errores</li>
-          <li>Propinas calculadas y repartidas automáticamente según el rol de cada empleado</li>
-          <li>Alertas al mesero y cierre de factura desde el mismo POS</li>
-        </ul>
+        <h3>WhatsApp AI</h3>
+        <p>IA multilingüe que toma pedidos 24/7 en tu WhatsApp. Sugiere combos, cobra con link de pago, cierra venta sin intervención humana.</p>
+        <div class="mod-foot"><span>WhatsApp Business API</span><span class="arrow">→</span></div>
       </article>
 
-      <article class="mod-card rv" aria-labelledby="mod-caja">
-        <div class="mod-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="19" cy="6" r="3" fill="currentColor"/></svg>
+      <article class="mod">
+        <div class="mod-num"><span>03 / 06</span><span class="status">Cocina</span></div>
+        <div class="mod-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 8l3 3-3 3M12 8v6M18 8l-3 3 3 3"/>
+          </svg>
         </div>
-        <h3 id="mod-caja">Súper Caja</h3>
-        <p>Centro de comando para el cajero: mesas activas, domicilios pendientes y validación de comprobantes.</p>
-        <ul class="mod-features">
-          <li>Ve las fotos de comprobante de WhatsApp directamente en la caja</li>
-          <li>Al confirmar el pago, la orden llega automáticamente a cocina</li>
-          <li>Cambia entre sucursales con un solo clic desde el mismo panel</li>
-        </ul>
+        <h3>Kitchen Display</h3>
+        <p>Los tickets aparecen en pantalla al instante, por estación. Sin recargas, sin papel, sin Juan gritando "ordena".</p>
+        <div class="mod-foot"><span>Android TV · tablets</span><span class="arrow">→</span></div>
       </article>
 
-      <article class="mod-card rv" aria-labelledby="mod-kds">
-        <div class="mod-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="3" stroke="currentColor" stroke-width="2"/><path d="M7 12l3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <article class="mod">
+        <div class="mod-num"><span>04 / 06</span><span class="status">Back-office</span></div>
+        <div class="mod-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/>
+          </svg>
         </div>
-        <h3 id="mod-kds">KDS Cocina</h3>
-        <p>Pantalla de cocina en tiempo real que recibe pedidos confirmados al instante, con priorización.</p>
-        <ul class="mod-features">
-          <li>Los pedidos aparecen en pantalla al instante, sin recargar</li>
-          <li>Pantallas separadas por sucursal y por estación (cocina, bar)</li>
-          <li>Historial de tiempos de preparación para identificar cuellos de botella</li>
-        </ul>
+        <h3>Inventario con escandallos</h3>
+        <p>Receta por plato, cada peso cuadra con tu venta. Alertas de merma, costo teórico vs. real, compra sugerida automática.</p>
+        <div class="mod-foot"><span>Integración proveedores</span><span class="arrow">→</span></div>
       </article>
 
-      <article class="mod-card rv" aria-labelledby="mod-nomina">
-        <div class="mod-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-4 3.58-7 8-7s8 3 8 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 11l1.5 1.5L21 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <article class="mod">
+        <div class="mod-num"><span>05 / 06</span><span class="status">RRHH</span></div>
+        <div class="mod-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="9" r="4"/><path d="M20 21a8 8 0 10-16 0"/>
+          </svg>
         </div>
-        <h3 id="mod-nomina">Nómina y Propinas</h3>
-        <p>Clock-in biométrico FIDO2, deducciones automáticas por tardanza, nómina con plantillas de contrato.</p>
-        <ul class="mod-features">
-          <li>Clock-in con huella o Face ID — sin apps, sin PIN</li>
-          <li>Deducciones automáticas si el empleado llega tarde o sale antes del turno</li>
-          <li>Propinas repartidas automáticamente entre el equipo según horas trabajadas</li>
-        </ul>
+        <h3>Nómina biométrica</h3>
+        <p>Clock-in con huella o Face ID — sin apps, sin PIN, sin colados. Calcula horas extra, recargos nocturnos, prestaciones automáticamente.</p>
+        <div class="mod-foot"><span>FIDO2 certificado</span><span class="arrow">→</span></div>
       </article>
 
-      <article class="mod-card rv" aria-labelledby="mod-inv">
-        <div class="mod-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z" stroke="currentColor" stroke-width="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" stroke="currentColor" stroke-width="2"/><line x1="12" y1="12" x2="12" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <article class="mod">
+        <div class="mod-num"><span>06 / 06</span><span class="status">Cumplimiento</span></div>
+        <div class="mod-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h3"/>
+          </svg>
         </div>
-        <h3 id="mod-inv">Inventario y Recetas</h3>
-        <p>Control de stock con escandallos (recetas), descuento automático al confirmar cada pedido.</p>
-        <ul class="mod-features">
-          <li>El stock se descuenta solo al confirmar cada pedido — sin ajustes manuales</li>
-          <li>Recetas por plato con costo de ingredientes por porción</li>
-          <li>Alertas de stock bajo y registro de todos los movimientos</li>
-        </ul>
+        <h3>Facturación electrónica</h3>
+        <p>DIAN en Colombia, CFDI en México, SII en Chile, AEAT en España. Emisión automática en cada venta, sin config manual.</p>
+        <div class="mod-foot"><span>4 países soportados</span><span class="arrow">→</span></div>
       </article>
 
     </div>
   </div>
 </section>
 
-<!-- ── 5. DEEP DIVES ── -->
-<section class="deepdives-section" aria-labelledby="deepdives-title">
-  <div class="container">
-    <div class="section-header rv">
-      <p class="section-eyebrow">Cómo funciona</p>
-      <h2 id="deepdives-title">Tecnología que opera en producción</h2>
-    </div>
-
-    <div class="deepdive rv">
-      <div class="deepdive-text">
-        <span class="dd-tag">WhatsApp AI + Pagos</span>
-        <h3>Pedidos por WhatsApp con asignación automática de sucursal y cero pedidos perdidos</h3>
-        <ul class="dd-list">
-          <li>El bot detecta la ubicación del cliente y lo conecta automáticamente con la sucursal más cercana en un radio de 5 km.</li>
-          <li>Cuando el cliente confirma su pedido, todo ocurre al mismo tiempo: se registra el pedido, se descuenta el inventario y se limpia el carrito. Si algo falla, se revierte todo. Sin pedidos fantasma.</li>
-          <li>Los mensajes de WhatsApp se guardan de inmediato y se procesan en orden, incluso en momentos de alta demanda. Ningún pedido se pierde.</li>
-          <li>El sistema detecta mensajes duplicados automáticamente, así el cliente no genera dos pedidos por enviar el mismo mensaje dos veces.</li>
-        </ul>
-      </div>
-      <div class="deepdive-mock" aria-hidden="true">
-        <div class="flow-card">
-          <div class="flow-step">
-            <span class="flow-icon">📍</span>
-            <div><strong>GPS</strong><br><span>Sucursal asignada en &lt;1s</span></div>
-          </div>
-          <div class="flow-arrow">↓</div>
-          <div class="flow-step">
-            <span class="flow-icon">🛒</span>
-            <div><strong>Pedido confirmado</strong><br><span>Sin pedidos fantasma</span></div>
-          </div>
-          <div class="flow-arrow">↓</div>
-          <div class="flow-step">
-            <span class="flow-icon">✅</span>
-            <div><strong>KDS notificado</strong><br><span>Llega al instante a cocina</span></div>
-          </div>
-        </div>
+<!-- ══════════ HOW IT WORKS ══════════ -->
+<section class="section" id="como">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="section-label"><span class="num">§02 —</span>Cómo funciona</div></div>
+      <div>
+        <h2 class="section-title">De la demo al primer turno, <em>en tres pasos</em>. Sin consultores, sin contratos anuales.</h2>
       </div>
     </div>
-
-    <div class="deepdive reverse rv">
-      <div class="deepdive-text">
-        <span class="dd-tag">RR.HH. + Biometría</span>
-        <h3>Nómina automática con biometría y contratos colombianos</h3>
-        <ul class="dd-list">
-          <li>Clock-in y clock-out con huella dactilar o Face ID en cualquier dispositivo — sin apps, sin PIN.</li>
-          <li>Si un empleado llega tarde o sale antes del turno planificado, el sistema registra la deducción automáticamente.</li>
-          <li>Plantillas de contrato con subsidio de transporte, ARL, salud y pensión. La nómina se calcula con precisión absoluta, sin errores de redondeo.</li>
-          <li>Horas extra con flujo de aprobación y propinas repartidas según el rol y las horas trabajadas.</li>
-        </ul>
+    <div class="how">
+      <div class="how-step">
+        <div class="how-step-num">01</div>
+        <h3>Te migramos en 48h</h3>
+        <p>Nuestro equipo importa tu carta, usuarios, sucursales y tarifas desde cualquier sistema. Tú sigues operando.</p>
+        <div class="how-step-meta"><span>Sin downtime</span><span class="eta">48h promedio</span></div>
       </div>
-      <div class="deepdive-mock" aria-hidden="true">
-        <div class="payroll-card">
-          <div class="pc-row"><span class="pc-label">Empleado</span><span class="pc-val">Carlos M.</span></div>
-          <div class="pc-row"><span class="pc-label">Horas semana</span><span class="pc-val">46h / 48h</span></div>
-          <div class="pc-row"><span class="pc-label">Deducciones</span><span class="pc-val red-val">-$12.500</span></div>
-          <div class="pc-row"><span class="pc-label">Propinas</span><span class="pc-val accent-val">+$38.000</span></div>
-          <div class="pc-divider"></div>
-          <div class="pc-row total"><span class="pc-label">Total neto</span><span class="pc-val">$1.247.500</span></div>
-          <div class="pc-badge">Calculado con precisión</div>
-        </div>
+      <div class="how-step">
+        <div class="how-step-num">02</div>
+        <h3>Entrenamos a tu equipo</h3>
+        <p>Sesiones en vivo en español por rol: meseros, cocina, caja, admin. Tu staff está listo en un turno.</p>
+        <div class="how-step-meta"><span>Incluido</span><span class="eta">1 turno</span></div>
       </div>
-    </div>
-
-    <div class="deepdive rv">
-      <div class="deepdive-text">
-        <span class="dd-tag">Multi-sucursal</span>
-        <h3>Operación multi-sucursal en tiempo real</h3>
-        <ul class="dd-list">
-          <li>Cada sucursal tiene su número de WhatsApp, su menú, su inventario y su pantalla de cocina independiente — todo gestionado desde un solo dashboard.</li>
-          <li>Filtra los datos por sucursal o ve el consolidado de toda la cadena con un solo clic.</li>
-          <li>Toda la información está sincronizada en tiempo real entre todas las sedes, sin importar cuántos usuarios estén conectados.</li>
-          <li>Las contraseñas y sesiones se guardan cifradas. Nadie — ni nosotros — puede leerlas.</li>
-        </ul>
-      </div>
-      <div class="deepdive-mock" aria-hidden="true">
-        <div class="branch-card">
-          <div class="branch-row">
-            <span class="branch-dot active-dot"></span>
-            <span>Sede Chapinero</span>
-            <span class="branch-kpi">$842.000</span>
-          </div>
-          <div class="branch-row">
-            <span class="branch-dot active-dot"></span>
-            <span>Sede Usaquén</span>
-            <span class="branch-kpi">$391.500</span>
-          </div>
-          <div class="branch-row">
-            <span class="branch-dot idle-dot"></span>
-            <span>Dark Kitchen Norte</span>
-            <span class="branch-kpi">$51.000</span>
-          </div>
-          <div class="branch-total">Total Matriz: $1.284.500</div>
-        </div>
-      </div>
-    </div>
-
-  </div>
-</section>
-
-<!-- ── 6. PARA QUIÉN ── -->
-<section class="audience-section" aria-labelledby="audience-title">
-  <div class="container">
-    <div class="section-header rv">
-      <p class="section-eyebrow">Ideal para</p>
-      <h2 id="audience-title">Para quién es Mesio</h2>
-    </div>
-    <div class="audience-grid">
-      <div class="aud-card rv">
-        <div class="aud-icon" aria-hidden="true">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="currentColor" stroke-width="2"/><polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" stroke-width="2"/></svg>
-        </div>
-        <h3>Restaurante único</h3>
-        <p>Pasa de WhatsApp manual a un sistema completo en 48 horas. Sin contratar programadores. Sin pagar comisión por pedido.</p>
-      </div>
-      <div class="aud-card rv featured-aud">
-        <div class="aud-icon" aria-hidden="true">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><rect x="2" y="7" width="20" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="14" r="2" stroke="currentColor" stroke-width="2"/></svg>
-        </div>
-        <h3>Cadena multi-sucursal</h3>
-        <p>Dashboard consolidado, inventario por sede, nómina centralizada y KDS independiente por cocina. Todo con datos en tiempo real.</p>
-        <span class="aud-badge">Más popular</span>
-      </div>
-      <div class="aud-card rv">
-        <div class="aud-icon" aria-hidden="true">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M5 12H3l9-9 9 9h-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="16" r="1.5" fill="currentColor"/></svg>
-        </div>
-        <h3>Dark kitchen / Delivery-first</h3>
-        <p>Pedidos 100% WhatsApp con asignación GPS automática, pago con comprobante y confirmación al domiciliario — sin POS físico.</p>
+      <div class="how-step">
+        <div class="how-step-num">03</div>
+        <h3>Operas sin fricción</h3>
+        <p>Soporte 24/7 en WhatsApp con humanos, no bots. Reviews quincenales de tu operación el primer trimestre.</p>
+        <div class="how-step-meta"><span>Siempre activo</span><span class="eta">24/7</span></div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ── 7. SEGURIDAD ── -->
-<section class="security-section" id="seguridad" aria-labelledby="security-title">
-  <div class="container">
-    <div class="security-inner rv">
-      <div class="security-text">
-        <p class="section-eyebrow">Seguridad enterprise</p>
-        <h2 id="security-title">Construido para que tu negocio no se detenga</h2>
-        <p class="section-sub">Cada parte de la plataforma fue diseñada asumiendo que algo puede fallar — y que tu dinero y tus datos no pueden perderse.</p>
-      </div>
-      <div class="security-pills">
-        <div class="sec-pill rv">
-          <span class="pill-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-          </span>
-          <div>
-            <strong>Sin pedidos fantasma</strong>
-            <span>El pedido, el inventario y el carrito se actualizan juntos. Si algo falla, se revierte todo.</span>
-          </div>
-        </div>
-        <div class="sec-pill rv">
-          <span class="pill-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </span>
-          <div>
-            <strong>Mensajes garantizados</strong>
-            <span>Ningún mensaje de WhatsApp se pierde, ni en momentos de alta demanda ni tras una caída del servidor.</span>
-          </div>
-        </div>
-        <div class="sec-pill rv">
-          <span class="pill-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </span>
-          <div>
-            <strong>Acceso seguro</strong>
-            <span>Las contraseñas y tokens de sesión se guardan cifrados. Nadie puede leerlos, ni siquiera nosotros.</span>
-          </div>
-        </div>
-        <div class="sec-pill rv">
-          <span class="pill-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </span>
-          <div>
-            <strong>IA bajo control</strong>
-            <span>El bot no puede ser manipulado por mensajes maliciosos de clientes. Solo actúa según las reglas que tú defines.</span>
-          </div>
-        </div>
-        <div class="sec-pill rv">
-          <span class="pill-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </span>
-          <div>
-            <strong>Cobros exactos</strong>
-            <span>Nómina, cuentas de mesa y propinas calculadas con precisión absoluta. Cada peso cuadra.</span>
-          </div>
-        </div>
-        <div class="sec-pill rv">
-          <span class="pill-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" stroke-width="2"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2"/><line x1="9" y1="13" x2="15" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </span>
-          <div>
-            <strong>DIAN-ready</strong>
-            <span>Facturación electrónica integrada, lista para Colombia y próximos países</span>
-          </div>
-        </div>
+<!-- ══════════ COMPARE ══════════ -->
+<section class="section" id="comparar">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="section-label"><span class="num">§03 —</span>Comparativa</div></div>
+      <div>
+        <h2 class="section-title">Por qué los restaurantes <em>nos eligen</em>.</h2>
+        <p class="section-sub">Datos públicos al 2026. Precios de referencia para 1 sucursal, Colombia. No somos afiliados a ninguno.</p>
       </div>
     </div>
-  </div>
-</section>
-
-<!-- ── 8. COMPARATIVA ── -->
-<section class="compare-section" aria-labelledby="compare-title">
-  <div class="container">
-    <div class="section-header rv">
-      <p class="section-eyebrow">Comparativa</p>
-      <h2 id="compare-title">Mesio vs. las alternativas</h2>
-    </div>
-    <div class="table-wrap rv">
-      <table class="compare-table" aria-label="Comparativa Mesio vs POS tradicional vs Apps de delivery">
+    <div class="compare-wrap">
+      <table class="compare">
         <thead>
           <tr>
-            <th scope="col">Característica</th>
-            <th scope="col" class="col-mesio">Mesio</th>
-            <th scope="col">POS tradicional</th>
-            <th scope="col">Apps de delivery</th>
+            <th></th>
+            <th class="col-mesio">
+              <span class="vendor">Mesio</span>
+              <span class="vendor-meta">Plan Pro · Bogotá</span>
+            </th>
+            <th>
+              <span class="vendor">Rappi Partners</span>
+              <span class="vendor-meta">Marketplace · LatAm</span>
+            </th>
+            <th>
+              <span class="vendor">Square for Restaurants</span>
+              <span class="vendor-meta">POS · USA-first</span>
+            </th>
+            <th>
+              <span class="vendor">Toast</span>
+              <span class="vendor-meta">POS + suite · USA</span>
+            </th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td data-label="Característica">Comisión por pedido</td>
-            <td data-label="Mesio" class="col-mesio check">0%</td>
-            <td data-label="POS tradicional">0%</td>
-            <td data-label="Apps de delivery" class="cross">15–30%</td>
+            <td>Comisión por pedido</td>
+            <td class="col-mesio"><span class="n">0%</span></td>
+            <td><span class="n">18–25%</span></td>
+            <td><span class="n">2.6% + $0.10</span></td>
+            <td><span class="n">2.9% + $0.30</span></td>
           </tr>
           <tr>
-            <td data-label="Característica">Control total del menú</td>
-            <td data-label="Mesio" class="col-mesio check">Sí</td>
-            <td data-label="POS tradicional" class="check">Sí</td>
-            <td data-label="Apps de delivery" class="cross">Limitado</td>
+            <td>Facturación DIAN / CFDI</td>
+            <td class="col-mesio"><span class="check">✓ Nativo</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="n">Add-on</span></td>
           </tr>
           <tr>
-            <td data-label="Característica">Datos del cliente propios</td>
-            <td data-label="Mesio" class="col-mesio check">Sí</td>
-            <td data-label="POS tradicional">Parcial</td>
-            <td data-label="Apps de delivery" class="cross">No</td>
+            <td>WhatsApp AI incluido</td>
+            <td class="col-mesio"><span class="check">✓ Sí</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="cross">— No</span></td>
           </tr>
           <tr>
-            <td data-label="Característica">Multi-sucursal nativo</td>
-            <td data-label="Mesio" class="col-mesio check">Sí</td>
-            <td data-label="POS tradicional">Extra / caro</td>
-            <td data-label="Apps de delivery" class="cross">No</td>
+            <td>Nómina biométrica</td>
+            <td class="col-mesio"><span class="check">✓ FIDO2</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="cross">— No</span></td>
           </tr>
           <tr>
-            <td data-label="Característica">Nómina integrada</td>
-            <td data-label="Mesio" class="col-mesio check">Sí</td>
-            <td data-label="POS tradicional" class="cross">No</td>
-            <td data-label="Apps de delivery" class="cross">No</td>
+            <td>Opera offline</td>
+            <td class="col-mesio"><span class="check">✓ Sí</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="check">✓ Sí</span></td>
+            <td><span class="partial">◐ Parcial</span></td>
           </tr>
           <tr>
-            <td data-label="Característica">Biometría FIDO2</td>
-            <td data-label="Mesio" class="col-mesio check">Sí</td>
-            <td data-label="POS tradicional" class="cross">No</td>
-            <td data-label="Apps de delivery" class="cross">No</td>
+            <td>Soporte en español</td>
+            <td class="col-mesio"><span class="n">24/7 humanos</span></td>
+            <td><span class="n">Chat bot</span></td>
+            <td><span class="n">9-18h EN</span></td>
+            <td><span class="n">Email only</span></td>
           </tr>
           <tr>
-            <td data-label="Característica">Canal WhatsApp propio</td>
-            <td data-label="Mesio" class="col-mesio check">Sí</td>
-            <td data-label="POS tradicional" class="cross">No</td>
-            <td data-label="Apps de delivery" class="cross">No</td>
+            <td>Precio mensual (1 sucursal)</td>
+            <td class="col-mesio"><span class="n">$450K COP</span></td>
+            <td><span class="n">Gratis + 22%</span></td>
+            <td><span class="n">USD $69</span></td>
+            <td><span class="n">USD $165</span></td>
+          </tr>
+          <tr>
+            <td>Tus datos, tu hardware</td>
+            <td class="col-mesio"><span class="check">✓ Sí</span></td>
+            <td><span class="cross">— No</span></td>
+            <td><span class="partial">◐ Parcial</span></td>
+            <td><span class="partial">◐ Parcial</span></td>
           </tr>
         </tbody>
       </table>
@@ -508,261 +437,422 @@
   </div>
 </section>
 
-<!-- ── 9. PRECIOS ── -->
-<section class="pricing-section" id="precios" aria-labelledby="pricing-title">
-  <div class="container">
-    <div class="section-header rv">
-      <p class="section-eyebrow">Precios</p>
-      <h2 id="pricing-title">Planes simples, sin sorpresas</h2>
-      <p class="section-sub">Sin contrato anual obligatorio. Sin comisiones por pedido. Cancela cuando quieras.</p>
+<!-- ══════════ CLIENTS ══════════ -->
+<section class="section" id="clientes">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="section-label"><span class="num">§04 —</span>Clientes</div></div>
+      <div>
+        <h2 class="section-title">847 restaurantes <em>ya cuadran caja</em> con Mesio.</h2>
+        <p class="section-sub">Desde fondas de barrio hasta cadenas con 40 sucursales. Lo que nos cuentan:</p>
+      </div>
     </div>
-    <div class="pricing-grid pricing-grid-4" id="pricing-grid">
-
-      <div class="plan-card rv">
-        <div class="plan-name">Básico</div>
-        <div class="plan-price">
-          <span class="price-m"><strong>$149.000</strong>/mes</span>
-          <span class="price-usd">~$41 USD</span>
+    <div class="cases">
+      <article class="case">
+        <div class="case-head">
+          <span class="flag">🇨🇴 La Fonda del Chef</span>
+          <span>3 sucursales · Bogotá</span>
         </div>
-        <p class="plan-desc">Para restaurantes que quieren empezar a recibir pedidos por WhatsApp con IA.</p>
-        <ul class="plan-features">
-          <li>Bot WhatsApp con IA 24/7</li>
-          <li>Menú digital hasta 50 platos</li>
-          <li>Pedidos a domicilio y para recoger</li>
-          <li>NPS automático post-pedido</li>
-          <li>Dashboard básico</li>
-          <li>Hasta 5 empleados en Staff HQ</li>
+        <blockquote class="case-quote">
+          "Pasamos de <em>cuadrar caja a las 2 AM</em> a cerrar en 15 minutos. Los pedidos por WhatsApp subieron 340% sin contratar a nadie nuevo. El ROI lo recuperamos en el segundo mes."
+        </blockquote>
+        <div class="case-stats">
+          <div class="case-stat"><b>+340%</b><span>Pedidos WhatsApp</span></div>
+          <div class="case-stat"><b>−6h</b><span>Cierre de caja</span></div>
+          <div class="case-stat"><b>$4.2M</b><span>Ventas adicionales/mes</span></div>
+          <div class="case-stat"><b>2 mes</b><span>Payback</span></div>
+        </div>
+        <div class="case-person">
+          <div class="case-avatar">CR</div>
+          <div>
+            <b>Camila Restrepo</b>
+            <span>Co-fundadora, La Fonda del Chef</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="case">
+        <div class="case-head">
+          <span class="flag">🇲🇽 Taquería Don Beto</span>
+          <span>12 sucursales · CDMX</span>
+        </div>
+        <blockquote class="case-quote sm">
+          "La nómina biométrica acabó con las horas fantasma. Ahorramos $180.000 MXN al mes solo en eso."
+        </blockquote>
+        <div class="case-person">
+          <div class="case-avatar">AV</div>
+          <div>
+            <b>Alberto Vázquez</b>
+            <span>Director de operaciones</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="case">
+        <div class="case-head">
+          <span class="flag">🇨🇱 Brasa Viva</span>
+          <span>5 sucursales · Santiago</span>
+        </div>
+        <blockquote class="case-quote sm">
+          "Migramos desde Toast y Square en un fin de semana. El equipo aprendió en un turno. <em>Volvería a hacerlo.</em>"
+        </blockquote>
+        <div class="case-person">
+          <div class="case-avatar">MF</div>
+          <div>
+            <b>Matías Ferrer</b>
+            <span>CEO, Brasa Viva Grupo</span>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ INTEGRATIONS ══════════ -->
+<section class="section" id="integrations">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="section-label"><span class="num">§05 —</span>Integraciones</div></div>
+      <div>
+        <h2 class="section-title">Se conecta con <em>lo que ya usas</em>.</h2>
+        <p class="section-sub">Pasarelas, datáfonos, contabilidad, delivery. Sin APIs custom, sin developers.</p>
+      </div>
+    </div>
+    <div class="integrations">
+      <div class="integ"><div class="integ-logo">Wompi</div><div class="integ-kind">Pasarela</div></div>
+      <div class="integ"><div class="integ-logo">ePayco</div><div class="integ-kind">Pasarela</div></div>
+      <div class="integ"><div class="integ-logo">Redeban</div><div class="integ-kind">Datáfono</div></div>
+      <div class="integ"><div class="integ-logo">Mercado Pago</div><div class="integ-kind">Pagos</div></div>
+      <div class="integ"><div class="integ-logo">Stripe</div><div class="integ-kind">Pagos</div></div>
+      <div class="integ"><div class="integ-logo">Nequi</div><div class="integ-kind">Billetera</div></div>
+      <div class="integ"><div class="integ-logo">DIAN</div><div class="integ-kind">Facturación</div></div>
+      <div class="integ"><div class="integ-logo">SAT CFDI</div><div class="integ-kind">Facturación</div></div>
+      <div class="integ"><div class="integ-logo">SII Chile</div><div class="integ-kind">Facturación</div></div>
+      <div class="integ"><div class="integ-logo">Siigo</div><div class="integ-kind">Contabilidad</div></div>
+      <div class="integ"><div class="integ-logo">Alegra</div><div class="integ-kind">Contabilidad</div></div>
+      <div class="integ"><div class="integ-logo">Uber Direct</div><div class="integ-kind">Logística</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ PRICING ══════════ -->
+<section class="section" id="precios">
+  <div class="wrap">
+    <div class="section-head">
+      <div>
+        <div class="section-label"><span class="num">§06 —</span>Precios</div>
+      </div>
+      <div>
+        <h2 class="section-title">Simple. Por sucursal. <em>Sin comisión por pedido. Nunca.</em></h2>
+        <p class="section-sub">Precios en moneda local, ajustados por país. IVA no incluido.</p>
+        <div style="margin-top:20px">
+          <div class="country-toggle" id="country-toggle">
+            <button class="active" data-country="CO">🇨🇴 CO</button>
+            <button data-country="MX">🇲🇽 MX</button>
+            <button data-country="CL">🇨🇱 CL</button>
+            <button data-country="ES">🇪🇸 ES</button>
+            <button data-country="PE">🇵🇪 PE</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="plans">
+      <div class="plan">
+        <div class="plan-name">Starter</div>
+        <div class="plan-desc">Para el restaurante que arranca. Una sola sucursal, un solo número de WhatsApp.</div>
+        <div class="plan-price">
+          <div>
+            <span class="amount" id="price-starter">$249.900</span>
+            <span class="usd" id="usd-starter">≈ USD $64/mes</span>
+          </div>
+          <span class="per">/ mes · sucursal</span>
+        </div>
+        <ul>
+          <li>POS iPad + salón</li>
+          <li>WhatsApp Business (1 número)</li>
+          <li>Facturación electrónica</li>
+          <li>Reportes diarios</li>
+          <li>Soporte 9–18h</li>
+          <li class="not">WhatsApp AI</li>
+          <li class="not">Nómina biométrica</li>
         </ul>
-        <a href="/dashboard-demo" class="btn btn-secondary plan-cta">Ver demo</a>
+        <a class="btn btn-ghost" href="#final">Empezar gratis · 14 días</a>
       </div>
 
-      <div class="plan-card featured-plan rv">
-        <div class="plan-badge">Más popular</div>
-        <div class="plan-name">Estándar</div>
-        <div class="plan-price">
-          <span class="price-m"><strong>$349.000</strong>/mes</span>
-          <span class="price-usd">~$95 USD</span>
-        </div>
-        <p class="plan-desc">Todo lo que necesita un restaurante completo: mesas, cocina, equipo e inventario.</p>
-        <ul class="plan-features">
-          <li>Todo lo del plan Básico</li>
-          <li>POS de mesas con KDS cocina y bar</li>
-          <li>Clock-in/out de turnos del equipo</li>
-          <li>Nómina básica (hasta 20 empleados)</li>
-          <li>Propinas automáticas</li>
-          <li>Inventario + recetas por plato</li>
-          <li>CRM de clientes</li>
-          <li>Programa de lealtad</li>
-          <li>División de cuentas (split checks)</li>
-        </ul>
-        <a href="/dashboard-demo" class="btn btn-primary plan-cta">Empezar ahora</a>
-      </div>
-
-      <div class="plan-card rv">
+      <div class="plan pop">
+        <div class="plan-tag">Más elegido</div>
         <div class="plan-name">Pro</div>
+        <div class="plan-desc">Para el restaurante que crece. Todo, sin límites.</div>
         <div class="plan-price">
-          <span class="price-m"><strong>$699.000</strong>/mes</span>
-          <span class="price-usd">~$191 USD</span>
+          <div>
+            <span class="amount" id="price-pro">$449.900</span>
+            <span class="usd" id="usd-pro">≈ USD $115/mes</span>
+          </div>
+          <span class="per">/ mes · sucursal</span>
         </div>
-        <p class="plan-desc">Para restaurantes en crecimiento con varias sedes y operación avanzada de RR.HH.</p>
-        <ul class="plan-features">
-          <li>Todo lo del plan Estándar</li>
-          <li>Hasta 3 sucursales</li>
-          <li>Nómina ilimitada + horas extra</li>
-          <li>Clock-in con huella o Face ID</li>
-          <li>Facturación electrónica DIAN</li>
-          <li>Contratos y deducciones automáticas</li>
-          <li>Campañas CRM</li>
-          <li>Soporte prioritario por WhatsApp</li>
-          <li>Dashboard multi-sede</li>
+        <ul>
+          <li>Todo de Starter</li>
+          <li><b style="color:var(--accent)">WhatsApp AI ilimitado</b></li>
+          <li>KDS por estación</li>
+          <li>Inventario + escandallos</li>
+          <li>Nómina biométrica FIDO2</li>
+          <li>Fidelización &amp; CRM</li>
+          <li>Soporte 24/7 en WhatsApp</li>
         </ul>
-        <a href="/dashboard-demo" class="btn btn-secondary plan-cta">Ver demo</a>
+        <a class="btn btn-primary" href="#final">Solicitar demo</a>
       </div>
 
-      <div class="plan-card rv">
-        <div class="plan-name">Cadena</div>
+      <div class="plan">
+        <div class="plan-name">Enterprise</div>
+        <div class="plan-desc">Cadenas con 3+ sucursales. Hecho a tu medida.</div>
         <div class="plan-price">
-          <span class="price-m"><strong>desde $1.399.000</strong>/mes</span>
-          <span class="price-usd">~$382 USD · 4 sedes incluidas</span>
+          <div>
+            <span class="amount">A medida</span>
+            <span class="usd">Volumen · SLA · contrato anual</span>
+          </div>
         </div>
-        <p class="plan-desc">Para cadenas con múltiples sedes, onboarding dedicado y soporte de nivel enterprise.</p>
-        <ul class="plan-features">
-          <li>Todo lo del plan Pro</li>
-          <li>4 sedes incluidas en el precio base</li>
-          <li>Sede adicional: $179.000/mes c/u</li>
-          <li>Dashboard Matriz consolidado</li>
-          <li>Acceso API para integraciones</li>
-          <li>Onboarding dedicado incluido</li>
-          <li>Account manager asignado</li>
-          <li>SLA de uptime garantizado</li>
-          <li>Reportes personalizados</li>
+        <ul>
+          <li>Todo de Pro</li>
+          <li>API pública + webhooks</li>
+          <li>Integraciones custom</li>
+          <li>Account manager dedicado</li>
+          <li>SLA 99.97% uptime</li>
+          <li>Onboarding por sucursal</li>
+          <li>Capacitación presencial</li>
         </ul>
-        <a href="https://wa.me/573144914554" target="_blank" rel="noopener" class="btn btn-secondary plan-cta">Hablar con ventas</a>
-      </div>
-
-    </div>
-
-    <!-- Add-ons modulares -->
-    <div class="addons-section rv">
-      <div class="section-header" style="margin-top:3rem">
-        <p class="section-eyebrow">Módulos opcionales</p>
-        <h3 class="addons-title">Agrega solo lo que necesitas</h3>
-        <p class="section-sub">Complementa cualquier plan con módulos adicionales, sin cambiar de plan.</p>
-      </div>
-      <div class="addons-grid">
-        <div class="addon-card">
-          <span class="addon-name">Sucursal adicional</span>
-          <span class="addon-price">$179.000<span class="addon-per">/mes</span></span>
-        </div>
-        <div class="addon-card">
-          <span class="addon-name">Facturación DIAN</span>
-          <span class="addon-price">$89.000<span class="addon-per">/mes</span></span>
-        </div>
-        <div class="addon-card">
-          <span class="addon-name">Clock-in biométrico</span>
-          <span class="addon-price">$69.000<span class="addon-per">/mes</span></span>
-        </div>
-        <div class="addon-card">
-          <span class="addon-name">CRM + Campañas</span>
-          <span class="addon-price">$79.000<span class="addon-per">/mes</span></span>
-        </div>
-        <div class="addon-card">
-          <span class="addon-name">Acceso API</span>
-          <span class="addon-price">$149.000<span class="addon-per">/mes</span></span>
-        </div>
-        <div class="addon-card">
-          <span class="addon-name">Empleados adicionales (más de 20)</span>
-          <span class="addon-price">$49.000<span class="addon-per">/mes</span></span>
-        </div>
+        <a class="btn btn-ghost" href="#final">Hablar con ventas</a>
       </div>
     </div>
 
+    <div class="pricing-meta">
+      <span><b>Hardware:</b> iPad + impresora térmica ≈ $1.8M COP · los vendemos o traes el tuyo</span>
+      <span><b>Sin contrato mínimo</b> · cancela cuando quieras</span>
+      <span><b>Migración incluida</b> · en todos los planes</span>
+    </div>
   </div>
 </section>
 
-<!-- ── 10. FAQ ── -->
-<section class="faq-section" id="faq" aria-labelledby="faq-title">
-  <div class="container faq-inner">
-    <div class="section-header rv">
-      <p class="section-eyebrow">Preguntas frecuentes</p>
-      <h2 id="faq-title">Todo lo que necesitas saber</h2>
+<!-- ══════════ FAQ ══════════ -->
+<section class="section" id="faq">
+  <div class="wrap">
+    <div class="section-head">
+      <div><div class="section-label"><span class="num">§07 —</span>Preguntas</div></div>
+      <div>
+        <h2 class="section-title">Lo que los dueños <em>sí</em> preguntan.</h2>
+        <p class="section-sub">No las preguntas que inventamos para rellenar. Las que recibimos todos los días.</p>
+      </div>
     </div>
-    <div class="faq-list">
+    <div class="faq">
 
-      <details class="faq-item rv">
-        <summary>¿Necesito un número de WhatsApp Business dedicado?</summary>
-        <p>Sí. Mesio se conecta a la API oficial de Meta (WhatsApp Business API). Te ayudamos a configurar el número y el WABA durante el onboarding, generalmente en menos de 48 horas.</p>
+      <details class="faq-item" open>
+        <summary>¿De verdad no cobran comisión por pedido? ¿Cuál es el truco?<span class="plus">+</span></summary>
+        <div class="ans"><p>Cero comisión, nunca. El truco es simple: cobramos una suscripción mensual por sucursal, como Netflix. Si vendes $50M o $500M al mes, pagas lo mismo. Preferimos clientes que crecen mucho a apretarles cada peso.</p></div>
       </details>
 
-      <details class="faq-item rv">
-        <summary>¿Funciona en países fuera de Colombia?</summary>
-        <p>Sí. La plataforma soporta múltiples monedas (COP, MXN, CLP, EUR, PEN) con precisión de decimales correcta para cada una. La facturación electrónica DIAN es específica para Colombia; para otros países se adapta según regulación local.</p>
+      <details class="faq-item">
+        <summary>¿Cuánto tarda el setup real, sin humo?<span class="plus">+</span></summary>
+        <div class="ans"><p>48 horas de calendario para un restaurante estándar. Incluye: migración de carta, usuarios, escandallos, configuración DIAN/CFDI, capacitación por rol y primer turno asistido. Cadenas: 1 semana por las primeras 3 sucursales, luego 48h por cada una adicional.</p></div>
       </details>
 
-      <details class="faq-item rv">
-        <summary>¿Qué pasa si mi conexión a internet falla?</summary>
-        <p>Los mensajes de WhatsApp se guardan de inmediato en la base de datos y se reintentarán automáticamente cuando el servidor se recupere. Ningún pedido se pierde. Los pedidos ya confirmados quedan guardados de forma permanente.</p>
+      <details class="faq-item">
+        <summary>¿Funciona si se cae el internet?<span class="plus">+</span></summary>
+        <div class="ans"><p>Sí. El POS opera 100% offline: tomas pedidos, cobras, imprimes. Cuando vuelve el wifi sincroniza con la nube. La facturación DIAN/CFDI se emite en cola y sale cuando hay conexión (la ley lo permite; lo hemos verificado con contadores).</p></div>
       </details>
 
-      <details class="faq-item rv">
-        <summary>¿Cómo funciona el clock-in por huella o Face ID?</summary>
-        <p>El empleado registra su huella dactilar o Face ID desde el dispositivo del restaurante (tablet o computador). Para fichar entrada o salida, simplemente presenta su biométrico — no necesita app ni PIN. Los datos biométricos se almacenan en el dispositivo, nunca en nuestros servidores.</p>
+      <details class="faq-item">
+        <summary>¿Se integra con mi datáfono / impresora / caja monedero?<span class="plus">+</span></summary>
+        <div class="ans"><p>Impresoras térmicas ESC/POS de cualquier marca. Datáfonos Redeban, Bancolombia, Wompi integrados. Cajones monederos RJ11 conectados a la impresora. Si tienes algo raro, lo probamos antes de firmar.</p></div>
       </details>
 
-      <details class="faq-item rv">
-        <summary>¿Puedo migrar desde otro POS?</summary>
-        <p>Sí. El equipo de onboarding importa tu menú, tu base de clientes y tu inventario inicial. El tiempo típico de migración es de 24 a 48 horas. Durante la migración puedes operar en paralelo.</p>
+      <details class="faq-item">
+        <summary>¿Y si quiero irme? ¿Me quedo atrapado con mis datos?<span class="plus">+</span></summary>
+        <div class="ans"><p>Exportas todo (ventas, inventario, clientes, nómina) en CSV o vía API en cualquier momento. Si decides irte, te damos 30 días más de acceso para migrar. Tus datos son tuyos, no negociamos eso.</p></div>
       </details>
 
-      <details class="faq-item rv">
-        <summary>¿Cómo se garantiza que los cálculos de nómina sean exactos?</summary>
-        <p>Usamos aritmética de precisión financiera en todos los cálculos — nómina, propinas, cuentas de mesa y splits. No hay errores de redondeo. Cada peso que entra y sale de la plataforma cuadra exactamente.</p>
+      <details class="faq-item">
+        <summary>¿Cómo funciona la nómina biométrica? ¿Es legal?<span class="plus">+</span></summary>
+        <div class="ans"><p>Clock-in con huella o Face ID en tablet FIDO2 certificada. Cumple con Habeas Data Colombia, LFPDPPP México, LPD Chile. El biométrico se procesa localmente en el dispositivo; nunca sale de tu restaurante. Auditable por Mintrabajo.</p></div>
       </details>
 
     </div>
   </div>
 </section>
 
-<!-- ── 11. CTA FINAL ── -->
-<section class="cta-final-section" id="contacto" aria-labelledby="cta-final-title">
-  <div class="container">
-    <div class="cta-final-inner rv">
-      <div class="cta-final-text">
-        <p class="section-eyebrow">Empieza hoy</p>
-        <h2 id="cta-final-title">Agenda una demo de 20 minutos</h2>
-        <p>Sin compromiso. Te mostramos la plataforma completa con datos reales de un restaurante de prueba.</p>
+<!-- ══════════ FINAL CTA ══════════ -->
+<section class="final" id="final">
+  <div class="wrap">
+    <div class="final-inner">
+      <div>
+        <div class="kicker">Una última cosa</div>
+        <h2>Te mostramos tu restaurante corriendo en Mesio <em>en 20 minutos</em>.</h2>
+        <p>Demo personalizada con tu carta, tus sucursales, tus números. No un PowerPoint genérico — un clon de tu operación actual, funcionando.</p>
+        <div class="final-trust">
+          <span><b>Sin compromiso</b> · sin tarjeta · sin hablar con un bot</span>
+          <span><b>20 min</b> · agendamos contigo por WhatsApp</span>
+          <span><b>En español</b> · por un humano que trabajó en restaurantes</span>
+        </div>
       </div>
-      <form class="demo-form" id="demo-form" novalidate aria-label="Formulario de solicitud de demo">
+      <form class="demo-form" id="demo-form">
         <div class="form-row">
-          <label for="f-name">Nombre</label>
-          <input type="text" id="f-name" name="name" placeholder="Tu nombre" required autocomplete="name">
+          <label>Nombre del restaurante</label>
+          <input type="text" placeholder="La Fonda del Chef" required>
         </div>
         <div class="form-row">
-          <label for="f-restaurant">Restaurante</label>
-          <input type="text" id="f-restaurant" name="restaurant" placeholder="Nombre del restaurante" required>
+          <label>Tu nombre</label>
+          <input type="text" placeholder="Camila Restrepo" required>
         </div>
-        <div class="form-row">
-          <label for="f-whatsapp">WhatsApp</label>
-          <input type="tel" id="f-whatsapp" name="whatsapp" placeholder="+57 300 000 0000" required autocomplete="tel">
-        </div>
-        <div class="form-row">
-          <label for="f-branches">Sucursales</label>
-          <select id="f-branches" name="branches">
-            <option value="1">1 sucursal</option>
-            <option value="2-5">2 a 5 sucursales</option>
-            <option value="6+">6 o más sucursales</option>
+        <div class="form-row two">
+          <label>WhatsApp · Sucursales</label>
+          <input type="tel" placeholder="+57 300 000 0000" required>
+          <select>
+            <option>1 sucursal</option>
+            <option>2–3 sucursales</option>
+            <option>4–10 sucursales</option>
+            <option>10+ sucursales</option>
           </select>
         </div>
-        <button type="submit" class="btn btn-primary form-submit">Solicitar demo por WhatsApp</button>
+        <div class="form-row">
+          <label>País</label>
+          <select>
+            <option>🇨🇴 Colombia</option>
+            <option>🇲🇽 México</option>
+            <option>🇨🇱 Chile</option>
+            <option>🇪🇸 España</option>
+            <option>🇵🇪 Perú</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-lg" type="submit">Agendar demo →</button>
       </form>
     </div>
   </div>
 </section>
 
-</main>
-
-<!-- ── FOOTER ── -->
-<footer class="site-footer" aria-label="Pie de página">
-  <div class="container footer-grid">
-    <div class="footer-col">
-      <div class="footer-logo">Mesio<span class="accent-dot">.</span></div>
-      <p class="footer-tagline">Plataforma operativa para restaurantes modernos.</p>
+<!-- ══════════ FOOTER ══════════ -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <a class="brand" href="#top">
+          <span class="brand-mark">M</span>
+          <span class="brand-word">Mesio<span class="dot">.</span></span>
+        </a>
+        <p>El sistema operativo para restaurantes de Latinoamérica y España. Fundado en Bogotá, 2023.</p>
+        <div class="foot-offices">
+          <div><b>BOG</b> Calle 93 #13-24, Bogotá</div>
+          <div><b>CDMX</b> Insurgentes Sur 1602, México</div>
+          <div><b>SCL</b> Av. Providencia 1208, Santiago</div>
+        </div>
+      </div>
+      <div class="foot-col">
+        <h4>Producto</h4>
+        <ul>
+          <li><a href="#">POS &amp; Salón</a></li>
+          <li><a href="#">WhatsApp AI <span class="tag">Nuevo</span></a></li>
+          <li><a href="#">Kitchen Display</a></li>
+          <li><a href="#">Inventario</a></li>
+          <li><a href="#">Nómina biométrica</a></li>
+          <li><a href="#">Facturación</a></li>
+          <li><a href="#">Integraciones</a></li>
+          <li><a href="#">Changelog</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Empresa</h4>
+        <ul>
+          <li><a href="#">Sobre nosotros</a></li>
+          <li><a href="#">Clientes</a></li>
+          <li><a href="#">Blog</a></li>
+          <li><a href="#">Empleo <span class="tag">12 abiertos</span></a></li>
+          <li><a href="#">Prensa</a></li>
+          <li><a href="#">Partners</a></li>
+          <li><a href="#">Contacto</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>Recursos</h4>
+        <ul>
+          <li><a href="#">Centro de ayuda</a></li>
+          <li><a href="#">Documentación API</a></li>
+          <li><a href="#">Estado del sistema</a></li>
+          <li><a href="#">Calculadora ROI</a></li>
+          <li><a href="#">Guías para dueños</a></li>
+          <li><a href="#">Comunidad WhatsApp</a></li>
+        </ul>
+        <h4 style="margin-top:24px">Contacto</h4>
+        <ul>
+          <li><a href="mailto:hola@mesio.app">hola@mesio.app</a></li>
+          <li><a href="tel:+573000000000">+57 300 000 0000</a></li>
+        </ul>
+      </div>
     </div>
-    <div class="footer-col">
-      <h4>Producto</h4>
-      <ul role="list">
-        <li><a href="#modulos">Plataforma</a></li>
-        <li><a href="/dashboard-demo">Demo en vivo</a></li>
-        <li><a href="#precios">Precios</a></li>
-        <li><a href="#seguridad">Seguridad</a></li>
-      </ul>
+    <div class="foot-bot">
+      <div>© 2026 Mesio Operativos SAS · NIT 901.234.567-8</div>
+      <div class="foot-legal">
+        <a href="/terminos">Términos</a>
+        <a href="/privacidad">Privacidad</a>
+        <a href="#">Habeas Data</a>
+        <a href="#">Cookies</a>
+        <a href="#">Seguridad</a>
+      </div>
     </div>
-    <div class="footer-col">
-      <h4>Empresa</h4>
-      <ul role="list">
-        <li><a href="#contacto">Contacto</a></li>
-        <li><a href="#faq">FAQ</a></li>
-        <li><a href="https://wa.me/573144914554" target="_blank" rel="noopener">WhatsApp ventas</a></li>
-      </ul>
-    </div>
-    <div class="footer-col">
-      <h4>Legal</h4>
-      <ul role="list">
-        <li><a href="/privacidad">Política de privacidad</a></li>
-        <li><a href="/terminos">Términos de servicio</a></li>
-      </ul>
-      <h4 class="mt-8">Contacto</h4>
-      <ul role="list">
-        <li><a href="https://wa.me/573144914554" target="_blank" rel="noopener">+57 314 491 4554</a></li>
-      </ul>
-    </div>
-  </div>
-  <div class="footer-bottom container">
-    <p>&copy; 2026 Mesio. Todos los derechos reservados.</p>
-    <p class="footer-tech">Construido con FastAPI, PostgreSQL, Redis y la API de Meta.</p>
   </div>
 </footer>
 
-<script src="/static/js/landing.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ── Pricing country toggle ── */
+  const COUNTRIES = {
+    CO: { sym: '$', locale: 'es-CO', prices: { starter: 249900, pro: 449900 }, usd: { starter: 64, pro: 115 } },
+    MX: { sym: '$', locale: 'es-MX', prices: { starter: 1290,   pro: 2490   }, usd: { starter: 64, pro: 124 } },
+    CL: { sym: '$', locale: 'es-CL', prices: { starter: 59900,  pro: 109900 }, usd: { starter: 62, pro: 114 } },
+    ES: { sym: '€', locale: 'es-ES', prices: { starter: 59,     pro: 109    }, usd: { starter: 64, pro: 118 } },
+    PE: { sym: 'S/', locale: 'es-PE', prices: { starter: 239,   pro: 449    }, usd: { starter: 63, pro: 118 } },
+  };
+
+  function fmt(n, country) {
+    try { return new Intl.NumberFormat(COUNTRIES[country].locale).format(n); } catch { return String(n); }
+  }
+
+  function updatePrices(country) {
+    const c = COUNTRIES[country];
+    const starterEl = document.getElementById('price-starter');
+    const proEl = document.getElementById('price-pro');
+    const starterUsd = document.getElementById('usd-starter');
+    const proUsd = document.getElementById('usd-pro');
+    if (starterEl) starterEl.textContent = c.sym + fmt(c.prices.starter, country);
+    if (proEl)     proEl.textContent     = c.sym + fmt(c.prices.pro, country);
+    if (starterUsd) starterUsd.textContent = '\u2248 USD $' + c.usd.starter + '/mes';
+    if (proUsd)     proUsd.textContent     = '\u2248 USD $' + c.usd.pro + '/mes';
+  }
+
+  const toggle = document.getElementById('country-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-country]');
+      if (!btn) return;
+      toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      updatePrices(btn.dataset.country);
+    });
+  }
+
+  /* ── Demo form ── */
+  const form = document.getElementById('demo-form');
+  if (form) {
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const btn = form.querySelector('[type=submit]');
+      btn.textContent = '¡Recibido! Te escribimos pronto.';
+      btn.disabled = true;
+      btn.style.background = 'var(--brand-dark)';
+    });
+  }
+
+})();
+</script>
+
 </body>
 </html>
