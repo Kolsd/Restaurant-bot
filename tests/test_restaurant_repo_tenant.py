@@ -142,8 +142,14 @@ async def test_4_global_fn_works_inside_bypass_scope():
     tenant_connection, so bypass has no effect on it — it just succeeds.
     """
     conn = _make_conn()
+    # Post-Wave-2: db_get_restaurant_by_phone JOINs locations and exposes
+    # `org_id` + `location_id`; the returned `id` is overridden with `org_id`
+    # so bot-runtime callers using restaurant_obj["id"] as the tenant key
+    # land on organizations.id (not locations.id).
     expected_row = {
-        "id": 7,
+        "id": 7,                  # location.id pre-override
+        "org_id": 42,             # tenant key — id is overridden to this
+        "location_id": 7,
         "name": "Restaurante Demo",
         "whatsapp_number": "573001234567",
         "wa_access_token": "tok",
@@ -173,4 +179,6 @@ async def test_4_global_fn_works_inside_bypass_scope():
 
     # Result should be the serialized row (or at minimum not None)
     assert result is not None
-    assert result["id"] == 7
+    assert result["id"] == 42                # id is overridden with org_id
+    assert result["org_id"] == 42
+    assert result["location_id"] == 7
