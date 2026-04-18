@@ -176,6 +176,23 @@ _TRIGGER_FUNCTIONS = [
 # ---------------------------------------------------------------------------
 
 def upgrade() -> None:
+    # ── Deployment gate (HARD BLOCK) ──────────────────────────────────────────
+    # This migration drops restaurant_id columns and renames the restaurants table.
+    # The app code must be Wave 2-ready BEFORE it runs. Set
+    # ALLOW_ORG_LOCATION_WAVE2=1 in the environment only after:
+    #   - Wave 1 (0034-0036) has been in production for ≥7 days
+    #   - Zero TenantNotSetError logs in the last 7 days
+    #   - All route handlers have migrated off legacy restaurant_id queries
+    #   - Explicit go/no-go decision documented
+    import os
+    if os.environ.get("ALLOW_ORG_LOCATION_WAVE2") != "1":
+        raise RuntimeError(
+            "Migration 0037 is deployment-gated. It will drop legacy columns "
+            "that app code still depends on. To apply, set environment variable "
+            "ALLOW_ORG_LOCATION_WAVE2=1 and re-run alembic upgrade head. "
+            "See ORG_LOCATION_MIGRATION_PLAN.md §5 for the full cutover gate."
+        )
+
     # ── Step 1: Drop auto-populate triggers (all tables touched by 0036) ──────
 
     all_trigger_tables = list(_RLS_TABLES) + _EXTRA_TRIGGER_TABLES
@@ -332,9 +349,16 @@ def downgrade() -> None:
     """
     logger.info("0037 downgrade: starting partial rollback")
 
-    # ── Step 1: Drop the retrocompat VIEW so column additions don't conflict ───
+    # ── Step 1: Drop the retrocompat VIEW and restore the original table name ──
+    # The VIEW is dropped first so that the rename below can take its slot.
+    # restaurants_deprecated still holds all the original data (0037 upgrade
+    # did ALTER TABLE RENAME, not DROP). So the downgrade brings it back.
     op.execute(sa.text("DROP VIEW IF EXISTS restaurants"))
     logger.info("0037 downgrade: dropped retrocompat VIEW restaurants")
+    op.execute(sa.text(
+        "ALTER TABLE IF EXISTS restaurants_deprecated RENAME TO restaurants"
+    ))
+    logger.info("0037 downgrade: restored restaurants_deprecated -> restaurants")
 
     # ── Step 2: Restore restaurant_id columns ─────────────────────────────────
     logger.info("0037 downgrade: restoring restaurant_id columns on %d tables",
