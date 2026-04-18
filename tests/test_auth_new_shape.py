@@ -98,7 +98,7 @@ _LOC_SECONDARY = _FakeRecord({
     "legacy_restaurant_id": 20,
 })
 
-_MAPPING_ROW = _FakeRecord({"org_id": 1, "location_id": 10})
+_MAPPING_ROW = _FakeRecord({"org_id": 1, "location_id": 10})  # kept for reference, no longer used by app code
 
 _USER_ROW = {
     "username": "owner@test.com",
@@ -142,14 +142,7 @@ _MAPPING_BRANCH_ROW = _FakeRecord({"org_id": 1, "location_id": 11})
 
 async def test_login_returns_org_and_locations_for_owner():
     """Admin/owner login returns org, locations, default_location_id keys."""
-    conn = _make_conn()
-
-    # Mapping table lookup for admin login
-    conn.fetchrow = AsyncMock(return_value=_MAPPING_ROW)
-    pool = _make_pool(conn)
-
     with (
-        patch("app.services.database.get_pool", AsyncMock(return_value=pool)),
         patch("app.services.auth.db.db_get_user", AsyncMock(return_value=_USER_ROW)),
         patch(
             "app.services.auth.db.db_get_restaurant_by_id",
@@ -167,6 +160,11 @@ async def test_login_returns_org_and_locations_for_owner():
         patch(
             "app.services.auth.verify_password",
             return_value=True,
+        ),
+        # Post-0037: location lookup replaces mapping table
+        patch(
+            "app.repositories.restaurant_repo.db_get_location_by_id",
+            AsyncMock(return_value=dict(_LOC_PRIMARY)),
         ),
         patch(
             "app.repositories.restaurant_repo.db_get_org_by_id",
@@ -208,12 +206,7 @@ async def test_login_returns_org_and_locations_for_owner():
 
 async def test_login_returns_staff_scoped_locations_for_mesero():
     """Staff login returns only the Location(s) that staff belongs to."""
-    conn = _make_conn()
-    conn.fetchrow = AsyncMock(return_value=_MAPPING_BRANCH_ROW)
-    pool = _make_pool(conn)
-
     with (
-        patch("app.services.database.get_pool", AsyncMock(return_value=pool)),
         patch("app.services.auth.db.db_get_user", AsyncMock(return_value=None)),
         patch(
             "app.services.auth.db.db_get_staff_candidates_by_name",
@@ -264,12 +257,7 @@ async def test_login_returns_staff_scoped_locations_for_mesero():
 
 async def test_login_preserves_legacy_restaurant_key():
     """The legacy ``restaurant`` key is always present with the pre-S3 shape."""
-    conn = _make_conn()
-    conn.fetchrow = AsyncMock(return_value=_MAPPING_ROW)
-    pool = _make_pool(conn)
-
     with (
-        patch("app.services.database.get_pool", AsyncMock(return_value=pool)),
         patch("app.services.auth.db.db_get_user", AsyncMock(return_value=_USER_ROW)),
         patch(
             "app.services.auth.db.db_get_restaurant_by_id",
@@ -284,6 +272,11 @@ async def test_login_preserves_legacy_restaurant_key():
             AsyncMock(return_value="tok-legacy"),
         ),
         patch("app.services.auth.verify_password", return_value=True),
+        # Post-0037: location lookup replaces mapping table
+        patch(
+            "app.repositories.restaurant_repo.db_get_location_by_id",
+            AsyncMock(return_value=dict(_LOC_PRIMARY)),
+        ),
         patch(
             "app.repositories.restaurant_repo.db_get_org_by_id",
             AsyncMock(return_value={

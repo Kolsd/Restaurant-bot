@@ -44,10 +44,23 @@ async def test_login_success():
     mock_restaurant = {"id": 1, "whatsapp_number": "+57300", "name": "El Bistro", "features": {}}
     fake_token = "a" * 64
 
+    mock_location = {
+        "id": 1, "org_id": 1, "name": "El Bistro",
+        "is_primary": True, "whatsapp_number": "+57300", "active": True,
+    }
+    mock_org = {
+        "id": 1, "name": "El Bistro", "whatsapp_number": "+57300",
+        "features": {}, "subscription_plan": "free",
+    }
+    mock_org_locations = [mock_location]
+
     with (
         patch.object(auth.db, "db_get_user",           AsyncMock(return_value=mock_user)),
         patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
         patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value=fake_token)),
+        patch("app.repositories.restaurant_repo.db_get_location_by_id", AsyncMock(return_value=mock_location)),
+        patch("app.repositories.restaurant_repo.db_get_org_by_id",      AsyncMock(return_value=mock_org)),
+        patch("app.repositories.restaurant_repo.db_get_org_locations",  AsyncMock(return_value=mock_org_locations)),
     ):
         result = await auth.login("owner", "supersecreta")
 

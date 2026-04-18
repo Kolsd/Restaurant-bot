@@ -18,6 +18,9 @@ from typing import Callable
 from fastapi import Request, HTTPException, Depends
 from app.services.auth import verify_token
 from app.services import database as db
+from app.services.logging import get_logger
+
+_log = get_logger(__name__)
 
 
 async def verify_superadmin(request: Request) -> None:
@@ -305,35 +308,34 @@ async def require_page_access(request: Request, path: str):
 async def _resolve_org_id_for_user(user: dict) -> int | None:
     """Resolve the org_id for a user dict.
 
-    Looks up the _migration_restaurant_to_location mapping table to translate
-    the user's restaurant_id to an org_id.  Falls back to restaurant_id if
-    no mapping row exists (safe during migration rollout when some tenants
-    haven't been backfilled yet).
+    Post-0037 (Wave 2): we read org_id directly from canonical sources:
+      - Staff: user["restaurant_id"] is already s.org_id (see deps.get_current_user line ~60).
+      - Admin/users: lookup via db_get_location_by_id(branch_id) → row["org_id"].
 
-    Returns None if no restaurant/org can be determined.
+    Falls back to int(rid) for Matriz invariant (organizations.id == old
+    restaurants.id, guaranteed by migration 0034). The fallback is logged so
+    we can monitor how many tenants still hit it.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
-
     rid = user.get("restaurant_id") or user.get("branch_id")
     if not rid:
         return None
 
-    try:
-        pool = await db.get_pool()
-        with bypass_tenant_scope("deps_resolve_org_id_for_user"):
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT org_id FROM _migration_restaurant_to_location "
-                    "WHERE old_restaurant_id = $1",
-                    int(rid),
-                )
-        if row:
-            return int(row["org_id"])
-    except Exception:
-        pass
+    # Staff: user["restaurant_id"] already comes from staff.org_id (canonical).
+    # The dict produced by get_current_user puts s.org_id under "restaurant_id"
+    # for backward compat; for staff users it IS the org_id directly.
+    if str(user.get("username", "")).startswith("staff:"):
+        return int(rid)
 
-    # Fallback: use restaurant_id directly (valid for single-location Matrizes
-    # where organizations.id == restaurants.id by migration 0034 invariant).
+    # Admin/owner: resolve via locations table.
+    # TODO: mover org_id al payload del JWT para evitar este round-trip por request
+    try:
+        loc = await db.db_get_location_by_id(int(rid))
+        if loc and loc.get("org_id"):
+            return int(loc["org_id"])
+    except Exception:
+        _log.exception("auth.deps.location_lookup_failed", branch_id=int(rid))
+
+    _log.warning("auth.org_id_fallback_used", branch_id=int(rid))
     return int(rid)
 
 
