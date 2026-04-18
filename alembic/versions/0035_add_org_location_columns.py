@@ -381,19 +381,31 @@ def upgrade() -> None:
                 f"Investigate: SELECT restaurant_id, COUNT(*) FROM {tbl} "
                 f"WHERE {column} IS NULL GROUP BY 1 ORDER BY 2 DESC;"
             )
-        # Log a sample of orphan restaurant_ids so they show up in deploy logs.
-        try:
+        # Log a sample of orphan restaurant_ids / branch_ids so they show up in
+        # deploy logs. Pre-check column existence via information_schema to avoid
+        # aborting the current transaction on a missing column.
+        sample_col = None
+        for candidate in ("restaurant_id", "branch_id"):
+            has_col = conn.execute(sa.text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = 'public' "
+                "  AND table_name = :t AND column_name = :c"
+            ), {"t": tbl, "c": candidate}).scalar()
+            if has_col:
+                sample_col = candidate
+                break
+        if sample_col:
             sample = conn.execute(sa.text(
-                f"SELECT DISTINCT restaurant_id FROM {tbl} "
+                f"SELECT DISTINCT {sample_col} FROM {tbl} "
                 f"WHERE {column} IS NULL LIMIT 10"
             )).fetchall()
             logger.warning(
-                "0035 orphan cleanup: %s has %d orphan rows (sample restaurant_ids: %s)",
-                tbl, count, [r[0] for r in sample],
+                "0035 orphan cleanup: %s has %d orphan rows (sample %s: %s)",
+                tbl, count, sample_col, [r[0] for r in sample],
             )
-        except Exception:  # noqa: BLE001 — table may lack restaurant_id (restaurant_tables)
+        else:
             logger.warning(
-                "0035 orphan cleanup: %s has %d orphan rows (no restaurant_id column)",
+                "0035 orphan cleanup: %s has %d orphan rows (no restaurant_id/branch_id column)",
                 tbl, count,
             )
         conn.execute(sa.text(f"DELETE FROM {tbl} WHERE {column} IS NULL"))
