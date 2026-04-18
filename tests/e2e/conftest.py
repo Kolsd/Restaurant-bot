@@ -24,13 +24,35 @@ import json
 import os
 import time
 
-# Load .env so that DATABASE_URL_ADMIN / ANTHROPIC_API_KEY are available
-# when running pytest directly without pre-setting env vars.
-try:
-    from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv(override=False)  # don't override vars already set in the shell
-except ImportError:
-    pass
+# .env loading is INTENTIONALLY deferred to fixture scope (see _ensure_dotenv_loaded
+# below). Loading it at module import poisons os.environ for every other test in the
+# suite — pytest collects all conftest.py files regardless of which test paths the
+# user runs, so a module-level load_dotenv() leaks DATABASE_URL into integration
+# tests that should skip when no DB is configured.
+def _ensure_dotenv_loaded() -> None:
+    """Idempotent .env loader. Call from inside an e2e fixture, never at module top."""
+    try:
+        from dotenv import load_dotenv as _load_dotenv  # type: ignore
+        _load_dotenv(override=False)
+    except ImportError:
+        pass
+
+
+def _dotenv_peek(key: str) -> str | None:
+    """Read a single key from .env WITHOUT mutating os.environ.
+
+    Used by pytest_collection_modifyitems where we need to see env values to
+    decide skip markers, but cannot afford to leak them into the global env
+    (e.g. DATABASE_URL leaking would force integration tests to attempt DB
+    connections instead of skipping cleanly).
+    """
+    if os.environ.get(key):
+        return os.environ[key]
+    try:
+        from dotenv import dotenv_values  # type: ignore
+        return dotenv_values().get(key)
+    except ImportError:
+        return None
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -52,7 +74,8 @@ def pytest_collection_modifyitems(items):
     Skip E2E tests if ANTHROPIC_API_KEY is not set.
     This prevents confusing AuthenticationError failures mid-test.
     """
-    if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+    # Read ANTHROPIC_API_KEY from env or .env without mutating os.environ.
+    if not (_dotenv_peek("ANTHROPIC_API_KEY") or "").strip():
         skip_marker = pytest.mark.skip(
             reason=(
                 "ANTHROPIC_API_KEY not set. "
@@ -113,6 +136,11 @@ async def test_pool():
     from pathlib import Path
 
     REPO_ROOT = Path(__file__).parent.parent.parent
+
+    # E2E tests are about to run — now it's safe to materialise .env into
+    # os.environ. This is fixture-scoped, so non-e2e tests collected in the
+    # same pytest session never see these values.
+    _ensure_dotenv_loaded()
 
     url = os.environ.get("TEST_DATABASE_URL", "").strip()
 
