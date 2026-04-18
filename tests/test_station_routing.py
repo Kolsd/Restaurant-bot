@@ -175,7 +175,10 @@ def test_ruta_cocina_sigue_funcionando(client, monkeypatch):
     response = client.get("/cocina", headers={"Authorization": "Bearer cocina-token"})
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "station=kitchen" in response.text
+    # Inline <script> moved to external file under CSP hardening — assert the
+    # kitchen-specific JS bundle (which contains the station=kitchen fetch) is
+    # referenced instead of the literal string.
+    assert "/static/js/pages/kitchen.js" in response.text
 
 
 # ══════════════════════════════════════════════════════════════════════

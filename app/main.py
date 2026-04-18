@@ -150,9 +150,17 @@ async def security_headers_middleware(request: Request, call_next):
             "Strict-Transport-Security",
             "max-age=31536000; includeSubDomains; preload",
         )
-    # CSP — permissive baseline; inline scripts still required by current frontend.
-    # TODO: remove 'unsafe-inline' once inline <script> blocks are migrated to
-    #       external .js files (tracked as a separate hardening wave).
+    # CSP — permissive baseline; 'unsafe-inline' still required by current frontend.
+    # CSP hardening progress (Sprint v11.1):
+    #   - DONE: inline <script>/<style> BLOCKS extracted from mesero.html,
+    #     kitchen.html, caja.html → /static/js/pages/*.js + /static/css/pages/*.css.
+    #   - PENDING (blocks 'unsafe-inline' removal):
+    #     1. Inline <script>/<style> blocks in 15 remaining HTML files
+    #        (bar, billing, dashboard, settings, staff-hq, login, etc.)
+    #     2. Inline event handlers (onclick=, etc.) — caja.html alone has 57
+    #     3. Inline style="" attributes — caja.html alone has 201
+    #   Until those three categories are migrated, dropping 'unsafe-inline'
+    #   would break every dashboard page. Tracked as a follow-up sprint.
     # CDN allowlist rationale:
     #   script-src   cdnjs + jsdelivr + unpkg  → Chart.js, qrcodejs, Leaflet
     #   style-src    jsdelivr + unpkg          → Leaflet CSS (only external stylesheet today)
