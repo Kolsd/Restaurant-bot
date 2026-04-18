@@ -17,10 +17,15 @@ if config.config_file_name is not None:
 # DATABASE_URL_ADMIN if set.  Runtime (app) connects as non-superuser via
 # DATABASE_URL so Row-Level Security actually enforces.  If DATABASE_URL_ADMIN
 # is not set we fall back to DATABASE_URL for backward compatibility.
-_database_url = os.environ.get("DATABASE_URL_ADMIN") or os.environ.get("DATABASE_URL", "")
+_database_url = (
+    os.environ.get("DATABASE_URL_ADMIN")
+    or os.environ.get("DATABASE_URL")
+    or os.environ.get("PROD_DATABASE_URL", "")
+)
 if not _database_url:
     raise RuntimeError(
-        "Neither DATABASE_URL_ADMIN nor DATABASE_URL environment variable is set."
+        "No database URL found. Set one of: DATABASE_URL_ADMIN, DATABASE_URL, "
+        "or PROD_DATABASE_URL environment variable."
     )
 # Normalize to postgresql:// (required by SQLAlchemy / psycopg2)
 if _database_url.startswith("postgres://"):

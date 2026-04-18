@@ -218,9 +218,15 @@ async def get_pool():
         return _pool
 
     # ── Create pool (or probe in half_open) ───────────────────────────────────
-    database_url = os.getenv("DATABASE_URL", "")
+    database_url = (
+        os.getenv("DATABASE_URL")
+        or os.getenv("PROD_DATABASE_URL")
+        or ""
+    )
     if not database_url:
-        raise RuntimeError("DATABASE_URL no esta configurada")
+        raise RuntimeError(
+            "No database URL found. Set DATABASE_URL (preferred) or PROD_DATABASE_URL."
+        )
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
     try:
