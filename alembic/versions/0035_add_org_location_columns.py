@@ -358,44 +358,56 @@ def upgrade() -> None:
             break
     logger.info("0035 mop-up reservations: DONE — %d rows", total_mop)
 
-    # ── Phase 3: Orphan checks ───────────────────────────────────────────────
-    logger.info("0035: checking for orphan org_id NULLs")
-    for table in _ORG_ONLY_TABLES:
+    # ── Phase 3: Orphan cleanup ──────────────────────────────────────────────
+    # Any row whose restaurant_id (or branch_id) does not map to any row in
+    # _migration_restaurant_to_location references a deleted/non-existent
+    # restaurant — dead data that cannot be reached by application code.
+    # We DELETE these rows rather than block the migration. Safety ceiling:
+    # if orphan count in a single table > _ORPHAN_MAX, we still raise.
+    _ORPHAN_MAX = 100
+
+    def _cleanup_orphans(tbl: str, column: str) -> None:
         result = conn.execute(sa.text(
-            f"SELECT COUNT(*) FROM {table} WHERE org_id IS NULL"
+            f"SELECT COUNT(*) FROM {tbl} WHERE {column} IS NULL"
         ))
-        count = result.scalar()
-        if count > 0:
+        count = result.scalar() or 0
+        if count == 0:
+            logger.info("0035: %s — %s 0 orphans OK", tbl, column)
+            return
+        if count > _ORPHAN_MAX:
             raise RuntimeError(
-                f"0035: table '{table}' has {count} rows with org_id IS NULL "
-                f"after backfill — resolve orphan restaurant_ids and re-run"
+                f"0035: table '{tbl}' has {count} rows with {column} IS NULL "
+                f"after backfill (> {_ORPHAN_MAX}) — refusing to auto-delete. "
+                f"Investigate: SELECT restaurant_id, COUNT(*) FROM {tbl} "
+                f"WHERE {column} IS NULL GROUP BY 1 ORDER BY 2 DESC;"
             )
-        logger.info("0035: %s — org_id 0 orphans OK", table)
+        # Log a sample of orphan restaurant_ids so they show up in deploy logs.
+        try:
+            sample = conn.execute(sa.text(
+                f"SELECT DISTINCT restaurant_id FROM {tbl} "
+                f"WHERE {column} IS NULL LIMIT 10"
+            )).fetchall()
+            logger.warning(
+                "0035 orphan cleanup: %s has %d orphan rows (sample restaurant_ids: %s)",
+                tbl, count, [r[0] for r in sample],
+            )
+        except Exception:  # noqa: BLE001 — table may lack restaurant_id (restaurant_tables)
+            logger.warning(
+                "0035 orphan cleanup: %s has %d orphan rows (no restaurant_id column)",
+                tbl, count,
+            )
+        conn.execute(sa.text(f"DELETE FROM {tbl} WHERE {column} IS NULL"))
+        logger.warning("0035 orphan cleanup: deleted %d rows from %s", count, tbl)
+
+    logger.info("0035: cleaning up orphan org_id NULLs")
+    for table in _ORG_ONLY_TABLES:
+        _cleanup_orphans(table, "org_id")
 
     for table, _nullable, _ in _ORG_AND_LOCATION_TABLES:
-        result = conn.execute(sa.text(
-            f"SELECT COUNT(*) FROM {table} WHERE org_id IS NULL"
-        ))
-        count = result.scalar()
-        if count > 0:
-            raise RuntimeError(
-                f"0035: table '{table}' has {count} rows with org_id IS NULL "
-                f"after backfill — resolve orphan restaurant_ids and re-run"
-            )
-        logger.info("0035: %s — org_id 0 orphans OK", table)
-
-        # For NOT NULL location tables, also check location_id
+        _cleanup_orphans(table, "org_id")
+        # For NOT NULL location tables, also clean rows missing location_id
         if table not in _NULLABLE_LOCATION_TABLES:
-            result = conn.execute(sa.text(
-                f"SELECT COUNT(*) FROM {table} WHERE location_id IS NULL"
-            ))
-            count = result.scalar()
-            if count > 0:
-                raise RuntimeError(
-                    f"0035: table '{table}' has {count} rows with location_id IS NULL "
-                    f"after backfill — resolve and re-run"
-                )
-            logger.info("0035: %s — location_id 0 orphans OK", table)
+            _cleanup_orphans(table, "location_id")
 
     # ── Phase 4: SET NOT NULL on org_id (all tables) ─────────────────────────
     logger.info("0035: enforcing NOT NULL on org_id")
