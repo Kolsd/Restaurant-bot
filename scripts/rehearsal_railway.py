@@ -618,7 +618,7 @@ async def _run_checks(conn, aio_url: str) -> None:
     # We also verify current_user == mesio_app inside the tx to catch any
     # silent SET LOCAL ROLE failure.
 
-    # Diagnostic: RLS/FORCE state on orders
+    # Diagnostic: RLS/FORCE state + mesio_app grants on orders
     try:
         rls_enabled = await conn.fetchval(
             "SELECT relrowsecurity FROM pg_class "
@@ -628,14 +628,36 @@ async def _run_checks(conn, aio_url: str) -> None:
             "SELECT relforcerowsecurity FROM pg_class "
             "WHERE relname='orders' AND relnamespace='public'::regnamespace"
         )
+        has_select = await conn.fetchval(
+            "SELECT has_table_privilege('mesio_app', 'public.orders', 'SELECT')"
+        )
         if not rls_enabled:
             _fail("6-rls", "orders table does NOT have RLS enabled (relrowsecurity=false)")
         elif not force_enabled:
             _fail("6-force", "orders table does NOT have FORCE RLS (relforcerowsecurity=false)")
+        elif not has_select:
+            _fail("6-grant", "mesio_app does NOT have SELECT on orders — grants got lost post-0037")
+            # Re-grant for subsequent checks so at least 6o can still run
+            await conn.execute(
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mesio_app"
+            )
+            log.info("   diagnostic: re-granted DML to mesio_app for remaining checks")
         else:
-            log.info("   diagnostic: orders has RLS enabled + FORCE RLS on")
+            log.info("   diagnostic: orders RLS+FORCE on, mesio_app has SELECT")
     except Exception as e:
-        _fail("6-diag", f"RLS/FORCE check error: {e}")
+        _fail("6-diag", f"RLS/FORCE/grant check error: {e}")
+
+    # Always re-grant right before the scoped tests: some migrations may have
+    # CREATE'd new objects post stage 3 that need explicit grants.
+    try:
+        await conn.execute(
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mesio_app"
+        )
+        await conn.execute(
+            "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO mesio_app"
+        )
+    except Exception as e:
+        log.warning("   diagnostic: post-migration re-grant warned: %s", e)
 
     # 6m: scoped read (must be in a transaction for SET LOCAL to stick).
     # Pick an org that actually has orders so the count is meaningful — if
