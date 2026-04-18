@@ -1,6 +1,7 @@
 # Railway build configuration.
-# Adds postgresql-client so pg_dump / psql are available at runtime.
-# Needed by scripts/rehearsal_railway.py for the staging-rehearsal flow.
+# Adds postgresql v17 client tools (pg_dump, psql) so scripts/rehearsal_railway.py
+# can dump the Railway-hosted Postgres v17 server (apt's postgresql-client is v16
+# which aborts with a version-mismatch error against v17 servers).
 
 [phases.setup]
-aptPkgs = ["postgresql-client"]
+nixPkgs = ["postgresql_17"]
