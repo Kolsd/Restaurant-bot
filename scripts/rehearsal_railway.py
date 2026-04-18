@@ -676,12 +676,21 @@ def main() -> None:
     deferred_path = os.path.join(versions_dir, "0037_drop_legacy_rls_and_restaurant_id.py.deferred")
     active_path = os.path.join(versions_dir, "0037_drop_legacy_rls_and_restaurant_id.py")
 
-    # Env vars
-    prod_admin_url = os.environ.get("DATABASE_URL_ADMIN", "")
+    # Env vars — Railway's default Postgres gives a single DATABASE_URL
+    # (postgres superuser). Fall back to it if the optional DATABASE_URL_ADMIN
+    # isn't set, which is the common setup on Railway Postgres services.
+    prod_admin_url = (
+        os.environ.get("DATABASE_URL_ADMIN")
+        or os.environ.get("DATABASE_URL")
+        or ""
+    )
     test_url = os.environ.get("TEST_DATABASE_URL", "")
 
     if not prod_admin_url:
-        log.error("DATABASE_URL_ADMIN not set -- cannot pg_dump from prod.")
+        log.error(
+            "Neither DATABASE_URL_ADMIN nor DATABASE_URL is set — cannot "
+            "pg_dump from prod. Set DATABASE_URL on the Restaurant-bot service."
+        )
         sys.exit(1)
     if not test_url:
         log.error("TEST_DATABASE_URL not set -- cannot run rehearsal against test DB.")
