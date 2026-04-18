@@ -213,15 +213,25 @@ async def db_get_pending_nps_score(phone: str, bot_number: str) -> int | None:
 
 # ── NPS WAITING STATE (persiste el estado "waiting_score" en DB) ──────
 
-async def db_save_nps_waiting(phone: str, bot_number: str):
+async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | None = None):
     """Persists that we are waiting for an NPS score from this customer.
-    Called when trigger_nps is invoked so state survives server restarts."""
+    Called when trigger_nps is invoked so state survives server restarts.
+
+    restaurant_id is NOT NULL in the schema (Alembic 0028). If not passed, it is
+    resolved from the restaurants table via bot_number.
+    """
     async with _tenant_connection() as conn:
+        if restaurant_id is None:
+            restaurant_id = await conn.fetchval(
+                "SELECT id FROM restaurants WHERE whatsapp_number=$1", bot_number
+            )
+            if restaurant_id is None:
+                raise ValueError(f"Cannot resolve restaurant_id for bot_number {bot_number}")
         await conn.execute("""
-            INSERT INTO nps_waiting (phone, bot_number, created_at)
-            VALUES ($1, $2, NOW())
+            INSERT INTO nps_waiting (phone, bot_number, restaurant_id, created_at)
+            VALUES ($1, $2, $3, NOW())
             ON CONFLICT (phone, bot_number) DO UPDATE SET created_at = NOW()
-        """, phone, bot_number)
+        """, phone, bot_number, restaurant_id)
 
 
 async def db_get_nps_waiting(phone: str, bot_number: str) -> bool:

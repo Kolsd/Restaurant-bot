@@ -424,11 +424,16 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
     if not order:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-    # Ownership check: staff user can only touch orders of their own restaurant (or branch children).
+    # Ownership check: staff user can only touch orders of their own restaurant or its branches.
     order_rid = order.get("restaurant_id")
     user_rid = user.get("branch_id") or user.get("restaurant_id")
     if order_rid and user_rid and int(order_rid) != int(user_rid):
-        raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
+        # Allow Matriz admin to manage orders on any of its branches
+        with bypass_tenant_scope("update_delivery_status: check parent ownership"):
+            order_restaurant = await db.db_get_restaurant_by_id(int(order_rid))
+        parent_rid = (order_restaurant or {}).get("parent_restaurant_id")
+        if parent_rid is None or int(parent_rid) != int(user_rid):
+            raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
 
     scope_rid = int(order_rid) if order_rid else int(user_rid) if user_rid else None
     if not scope_rid:

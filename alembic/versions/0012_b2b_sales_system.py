@@ -20,6 +20,20 @@ depends_on    = None
 
 
 def upgrade() -> None:
+    # ── Ensure prospects exists before sales_conversations references it ───
+    # On the production DB prospects was a runtime DDL table before migration 0020
+    # formalised it.  On a fresh DB (CI / test env) we need a minimal stub here so
+    # the REFERENCES prospects(id) FK in sales_conversations doesn't fail.
+    # Migration 0020 uses CREATE TABLE IF NOT EXISTS so this is fully idempotent.
+    op.execute("""
+    CREATE TABLE IF NOT EXISTS prospects (
+        id         SERIAL PRIMARY KEY,
+        phone      TEXT NOT NULL,
+        name       TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """)
+
     # ── Sales inbox (durable queue, mirrors webhook_inbox pattern) ────────
     op.execute("""
     CREATE TABLE IF NOT EXISTS sales_inbox (

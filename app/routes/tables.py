@@ -926,8 +926,13 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
     user = await get_current_user(request)
 
     # Obtener el ticket completo para validar cantidades
+    # First try with the user's branch filter; if nothing found (e.g. Matriz admin
+    # handling a branch order), retry without the branch filter. The ownership
+    # check below still enforces restaurant boundaries.
     with bypass_tenant_scope("create_checks: ticket lookup by order ID across branches"):
         ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+        if not ticket:
+            ticket = await db.db_get_order_ticket_data(base_order_id, None)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
 

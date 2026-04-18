@@ -1,3 +1,7 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+timeout = 900
+markers = [
+    "e2e: end-to-end tests that require real Postgres, Anthropic API, and full app stack (deselect with -m 'not e2e')",
+]

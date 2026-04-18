@@ -10,7 +10,7 @@ from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
 from app.services.money import to_decimal, money_mul, money_sum, ZERO
-from app.services.tenant_context import bypass_tenant_scope_if_unset as _bypass_tenant
+from app.services.tenant_context import bypass_tenant_scope_if_unset as _bypass_tenant, tenant_scope
 from app.services.tenant_db import tenant_connection as _tenant_conn
 from app.repositories.orders_repo import (
     InsufficientStockError,
@@ -162,7 +162,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 session = await db.db_get_active_session(phone, bot_number)
                 if session and session.get("table_id") != table["id"]:
                     await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
-                await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
             table["is_new_session"] = True
             return table
 
@@ -260,7 +260,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                         )
                         if row:
                             table = dict(row)
-                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
                             table["is_new_session"] = True
                             return table
                 except (ValueError, TypeError):
@@ -274,7 +274,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                     for row in all_tables:
                         if row["number"] == num_mesa:
                             table = dict(row)
-                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
                             table["is_new_session"] = True
                             return table
                 except (ValueError, TypeError):
@@ -289,7 +289,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 for row in all_tables:
                     if row["name"].lower() == candidate:
                         table = dict(row)
-                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"])
+                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
                         table["is_new_session"] = True
                         return table
 
@@ -499,7 +499,16 @@ async def trigger_nps(phone: str, bot_number: str, restaurant_name: str):
             return
         await state_store.nps_set(phone, bot_number, {"state": "waiting_score", "score": 0})
         try:
-            await db.db_save_nps_waiting(phone, bot_number)
+            # Resolve restaurant_id under bypass (cross-tenant pre-resolution)
+            # so the subsequent tenant-scoped write has the right scope.
+            with _bypass_tenant("trigger_nps: pre-resolve restaurant_id from bot_number"):
+                _rest = await db.db_get_restaurant_by_bot_number(bot_number)
+            _rid = (_rest or {}).get("id")
+            if _rid is not None:
+                with tenant_scope(_rid):
+                    await db.db_save_nps_waiting(phone, bot_number, restaurant_id=_rid)
+            else:
+                log.warning("nps_save_waiting_no_restaurant", bot_number=bot_number)
         except Exception:
             log.exception("nps_save_waiting_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
         log.info("nps.triggered", phone=_ofuscar_phone(phone), bot_number=bot_number)
@@ -946,6 +955,7 @@ async def _validate_tool_call(
     session_state: dict | None = None,
     full_history: list | None = None,
     restaurant_obj: dict | None = None,
+    user_message: str | None = None,
 ) -> tuple[str | None, str | None, dict]:
     """
     Validate a tool call before execution. Returns (tool_name, reply, tool_input).
@@ -1022,27 +1032,23 @@ async def _validate_tool_call(
             total=str(resolved_total),
         )
 
-    # 3. Duplicate order detection — same items within 60 seconds
-    if tool_name in _ORDER_TOOLS:
-        items = tool_input.get("items", [])
-        item_key = _make_order_fingerprint(items)
-        is_ok = await state_store.rate_limit_check(
-            f"order_dedup:{phone}:{bot_number}:{item_key}", max_requests=1, window_seconds=60
-        )
-        if not is_ok:
-            log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=_ofuscar_phone(phone), fingerprint=item_key)
-            return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
-
-    # 3b. Confirmation guard for place_order on first order at table.
+    # 3. Confirmation guard for place_order on first order at table.
     # On the very first order (no committed order yet in this session), the bot
     # MUST have received an explicit confirmation word in the last 2 user turns
     # before charging the customer. Sub-orders (has_order=True) are already past
     # the confirmation step and may proceed directly.
+    # IMPORTANT: this runs BEFORE the dedup guard so a call that returns
+    # "awaiting_confirmation" does not burn the dedup counter — otherwise the
+    # follow-up call after the user confirms would be blocked as a duplicate.
     if tool_name == "place_order" and table_context:
         _ss = session_state or {}
         _has_prior_order = _ss.get("has_order", False)
         if not _has_prior_order:
-            _hist = full_history or []
+            # Include the current user message — it's not yet in full_history
+            # (gets appended after this turn completes), but the LLM already saw it.
+            _hist = list(full_history or [])
+            if user_message:
+                _hist.append({"role": "user", "content": user_message})
             if not _last_messages_have_confirmation(_hist):
                 items = tool_input.get("items", [])
                 items_label = ", ".join(
@@ -1054,6 +1060,17 @@ async def _validate_tool_call(
                     phone=_ofuscar_phone(phone), items=items_label
                 )
                 return None, f"¿Confirmas tu pedido de {items_label}? 😊", {}
+
+    # 3b. Duplicate order detection — same items within 60 seconds
+    if tool_name in _ORDER_TOOLS:
+        items = tool_input.get("items", [])
+        item_key = _make_order_fingerprint(items)
+        is_ok = await state_store.rate_limit_check(
+            f"order_dedup:{phone}:{bot_number}:{item_key}", max_requests=1, window_seconds=60
+        )
+        if not is_ok:
+            log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=_ofuscar_phone(phone), fingerprint=item_key)
+            return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
 
     # 4. Delivery without address
     if tool_name == "create_delivery_order":
@@ -1782,6 +1799,7 @@ async def _call_llm_and_execute(
         session_state=session_state,
         full_history=full_history,
         restaurant_obj=restaurant_obj,
+        user_message=user_message_clean,
     )
 
     # ── CATEGORY A safety net: action-announcement without tool execution ──

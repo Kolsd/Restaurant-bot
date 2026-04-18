@@ -145,11 +145,25 @@ async def db_get_table_by_id(table_id: str):
 async def db_save_table_order(order: dict):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
+        # restaurant_id is NOT NULL since Alembic 0028. Fall back to branch_id
+        # (they are the same integer for dine-in orders — the sub-restaurant
+        # that owns the table) or resolve from restaurant_tables if missing.
+        rid = order.get('restaurant_id') or order.get('branch_id')
+        if rid is None:
+            rid = await conn.fetchval(
+                "SELECT branch_id FROM restaurant_tables WHERE id=$1",
+                order['table_id'],
+            )
+            if rid is None:
+                raise ValueError(
+                    f"Cannot resolve restaurant_id for table_order {order['id']} "
+                    f"(table_id={order['table_id']})"
+                )
         await conn.execute("""
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
-                 base_order_id, sub_number, station, branch_id)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                 base_order_id, sub_number, station, branch_id, restaurant_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 status=EXCLUDED.status,
@@ -165,7 +179,8 @@ async def db_save_table_order(order: dict):
             order.get('base_order_id'),
             order.get('sub_number', 1),
             order.get('station', 'all'),
-            order.get('branch_id'))  # 🛡️ Parámetro $12: Grabado con éxito
+            order.get('branch_id'),
+            rid)
 
 
 async def db_get_base_order_status(base_order_id: str) -> str | None:
@@ -478,10 +493,24 @@ async def db_get_active_session(phone: str, bot_number: str) -> dict | None:
         return _serialize(dict(row)) if row else None
 
 
-async def db_create_table_session(phone: str, bot_number: str, table_id: str, table_name: str) -> dict:
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+async def db_create_table_session(phone: str, bot_number: str, table_id: str, table_name: str, restaurant_id: int | None = None) -> dict:
+    """# Requires active tenant_scope() or bypass_tenant_scope().
+
+    restaurant_id is required by the schema (NOT NULL since Alembic 0028).
+    If not passed, it is resolved from restaurant_tables.branch_id.
+    """
     async with tenant_connection() as conn:
-        row = await conn.fetchrow("INSERT INTO table_sessions (phone, bot_number, table_id, table_name, status, last_activity) VALUES ($1, $2, $3, $4, 'active', NOW()) RETURNING *", phone, bot_number, table_id, table_name)
+        if restaurant_id is None:
+            restaurant_id = await conn.fetchval(
+                "SELECT branch_id FROM restaurant_tables WHERE id=$1", table_id
+            )
+            if restaurant_id is None:
+                raise ValueError(f"Cannot resolve restaurant_id for table {table_id}")
+        row = await conn.fetchrow(
+            "INSERT INTO table_sessions (phone, bot_number, table_id, table_name, restaurant_id, status, last_activity) "
+            "VALUES ($1, $2, $3, $4, $5, 'active', NOW()) RETURNING *",
+            phone, bot_number, table_id, table_name, restaurant_id,
+        )
         return _serialize(dict(row))
 
 

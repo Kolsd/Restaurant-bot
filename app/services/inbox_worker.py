@@ -360,6 +360,23 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
     else:
         user_text = payload.get("user_text", "")
 
+    # If the message carried GPS coordinates (location message type), persist them
+    # to the cart here — inside tenant_scope — since bypass_tenant_scope in the
+    # webhook route takes precedence over nested tenant_scope (see tenant_context.py).
+    gps_lat = payload.get("gps_lat")
+    gps_lon = payload.get("gps_lon")
+    if gps_lat is not None and gps_lon is not None and _tenant_id is not None:
+        try:
+            with tenant_scope(_tenant_id):
+                from app.services import database as _db2  # noqa: PLC0415
+                cart = await _db2.db_get_cart(user_phone, bot_number)
+                cart["latitude"] = float(gps_lat)
+                cart["longitude"] = float(gps_lon)
+                await _db2.db_save_cart(user_phone, bot_number, cart)
+                log.info("inbox.gps_cart_saved", phone=user_phone, lat=gps_lat, lon=gps_lon)
+        except Exception:
+            log.exception("inbox.gps_cart_save_failed", phone=user_phone)
+
     # Wrap _process_message in tenant_scope so that any tenant-scoped repo calls
     # downstream (agent.py → orders.py → customer_profiles_repo, etc.) have an
     # active tenant context.  If restaurant could not be resolved, skip the scope

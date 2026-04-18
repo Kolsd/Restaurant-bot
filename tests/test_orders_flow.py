@@ -808,6 +808,7 @@ async def test_commit_deletes_cart(monkeypatch):
 async def test_commit_zero_stock_raises(monkeypatch):
     """Stock = 0 con quantity > 0 → InsufficientStockError (escandallo path)."""
     from app.repositories.orders_repo import commit_order_transaction, InsufficientStockError
+    from app.services.tenant_context import tenant_scope
 
     conn = MagicMock()
     txn = MagicMock()
@@ -819,6 +820,8 @@ async def test_commit_zero_stock_raises(monkeypatch):
     locked_row = make_row({"id": 10, "current_stock": 0.0, "min_stock": 0,
                            "linked_dishes": "[]"})
     conn.fetch = AsyncMock(side_effect=[[recipe_row], [locked_row]])
+    # fetchval → set_config GUC (tenant_connection)
+    conn.fetchval = AsyncMock(return_value=None)
     # UPDATE RETURNING → None (no hay stock)
     conn.fetchrow = AsyncMock(return_value=None)
     conn.execute = AsyncMock()
@@ -827,15 +830,18 @@ async def test_commit_zero_stock_raises(monkeypatch):
     cart = {"items": _make_order_payload()["items"], "bot_number": "+57999"}
     order = _make_order_payload(qty=3)
 
-    with pytest.raises(InsufficientStockError):
-        await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
-                                       cart=cart, order_payload=order)
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(1):
+            with pytest.raises(InsufficientStockError):
+                await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
+                                               cart=cart, order_payload=order)
 
 
 @pytest.mark.asyncio
 async def test_commit_float_total_coerced(monkeypatch):
     """Total como float en el payload se coerce a Decimal (sin TypeError)."""
     from app.repositories.orders_repo import commit_order_transaction
+    from app.services.tenant_context import tenant_scope
 
     conn = MagicMock()
     txn = MagicMock()
@@ -843,6 +849,7 @@ async def test_commit_float_total_coerced(monkeypatch):
     txn.__aexit__ = AsyncMock(return_value=False)
     conn.transaction = MagicMock(return_value=txn)
     conn.fetch = AsyncMock(return_value=[])
+    conn.fetchval = AsyncMock(return_value=None)
     conn.fetchrow = AsyncMock(return_value=make_row({"stock": 10}))
     conn.execute = AsyncMock()
     pool = make_pool(conn)
@@ -852,8 +859,10 @@ async def test_commit_float_total_coerced(monkeypatch):
     cart = {"items": order["items"], "bot_number": "+57999"}
 
     # No debe lanzar TypeError
-    await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
-                                   cart=cart, order_payload=order)
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(1):
+            await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
+                                           cart=cart, order_payload=order)
     assert conn.execute.called
 
 
@@ -884,6 +893,7 @@ async def test_commit_db_error_raises_order_commit_error(monkeypatch):
 async def test_commit_no_items_no_inventory_deduction(monkeypatch):
     """Orden sin items (edge case) → no intenta descontar inventario."""
     from app.repositories.orders_repo import commit_order_transaction
+    from app.services.tenant_context import tenant_scope
 
     conn = MagicMock()
     txn = MagicMock()
@@ -891,6 +901,7 @@ async def test_commit_no_items_no_inventory_deduction(monkeypatch):
     txn.__aexit__ = AsyncMock(return_value=False)
     conn.transaction = MagicMock(return_value=txn)
     conn.fetch = AsyncMock(return_value=[])
+    conn.fetchval = AsyncMock(return_value=None)
     conn.fetchrow = AsyncMock(return_value=None)  # no se debe llamar para inventario
     conn.execute = AsyncMock()
     pool = make_pool(conn)
@@ -899,7 +910,9 @@ async def test_commit_no_items_no_inventory_deduction(monkeypatch):
     order["items"] = []  # sin items
     cart = {"items": [], "bot_number": "+57999"}
 
-    await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
-                                   cart=cart, order_payload=order)
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(1):
+            await commit_order_transaction(pool, restaurant_id=1, conversation_id="+57300",
+                                           cart=cart, order_payload=order)
     # fetchrow no llamado para inventario (no hay items)
     conn.fetchrow.assert_not_awaited()

@@ -33,7 +33,14 @@ async def _is_rate_limited(phone: str) -> bool:
 
 # ── META SIGNATURE VERIFICATION (V-02) ──────────────────────────────
 def _verify_meta_signature(body: bytes, signature_header: str) -> bool:
-    """Verifica X-Hub-Signature-256 de Meta para autenticar el webhook."""
+    """Verifica X-Hub-Signature-256 de Meta para autenticar el webhook.
+
+    When the env var DISABLE_META_SIGNATURE_VERIFY=1 is set (E2E test mode only),
+    signature verification is skipped and the function returns True unconditionally.
+    NEVER set this in production.
+    """
+    if os.getenv("DISABLE_META_SIGNATURE_VERIFY", "").strip() in ("1", "true", "yes"):
+        return True
     app_secret = os.getenv("META_APP_SECRET", "")
     if not app_secret:
         log.error("meta.signature.no_secret_configured")
@@ -374,14 +381,9 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     lat, lon = loc.get("latitude"), loc.get("longitude")
 
                     if lat is not None and lon is not None:
-                        try:
-                            cart = await db.db_get_cart(user_phone, bot_number)
-                            cart["latitude"] = lat
-                            cart["longitude"] = lon
-                            await db.db_save_cart(user_phone, bot_number, cart)
-                        except Exception as e:
-                            log.error("chat.gps_cart_save_failed", phone=user_phone, error=str(e))
-
+                        # GPS coords are saved to cart by the inbox worker (within proper
+                        # tenant_scope). Saving here is impossible — bypass_tenant_scope
+                        # takes precedence over nested tenant_scope in tenant_context.py.
                         maps_url = f"https://maps.google.com/?q={lat},{lon}"
                         user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon})."
                     else:
@@ -500,6 +502,10 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         "bot_number": bot_number,
                         "phone_id":   phone_id,
                     }
+                    # Carry GPS coords so inbox_worker can persist to cart within tenant_scope
+                    if msg_type == "location" and lat is not None and lon is not None:
+                        enqueue_payload["gps_lat"] = lat
+                        enqueue_payload["gps_lon"] = lon
                     inserted = await inbox_repo.enqueue(
                         pool,
                         provider="meta_whatsapp",
