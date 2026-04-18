@@ -112,18 +112,26 @@ def _run(cmd: str, timeout: int = 600, capture: bool = True) -> subprocess.Compl
 
 
 def _psql_exec(test_url: str, sql: str, timeout: int = 30) -> subprocess.CompletedProcess:
-    """Run a SQL statement against test DB via psql, return CompletedProcess."""
-    return _run(
-        f'psql "{test_url}" -v ON_ERROR_STOP=1 -c "{sql}"',
+    """Run a SQL statement against test DB via psql, return CompletedProcess.
+    Passes SQL via stdin to avoid shell-dollar expansion (eats $$ blocks).
+    """
+    return subprocess.run(
+        ["psql", test_url, "-v", "ON_ERROR_STOP=1", "-f", "-"],
+        input=sql,
         timeout=timeout,
+        capture_output=True,
+        text=True,
     )
 
 
 def _psql_query(test_url: str, sql: str) -> str | None:
     """Run a scalar SQL query, return trimmed result or None on error."""
-    result = _run(
-        f'psql "{test_url}" -t -A -c "{sql}"',
+    result = subprocess.run(
+        ["psql", test_url, "-t", "-A", "-f", "-"],
+        input=sql,
         timeout=30,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return None
