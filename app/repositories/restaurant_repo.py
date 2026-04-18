@@ -331,11 +331,11 @@ async def db_get_restaurant_detail_stats(restaurant_id: int, wa: str) -> dict:
         if has_invoices:
             invoices_30d = await conn.fetchrow(
                 "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_cents),0) AS total "
-                "FROM fiscal_invoices WHERE restaurant_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
+                "FROM fiscal_invoices WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
                 restaurant_id,
             )
             invoices_all = await conn.fetchval(
-                "SELECT COUNT(*) FROM fiscal_invoices WHERE restaurant_id=$1", restaurant_id
+                "SELECT COUNT(*) FROM fiscal_invoices WHERE org_id=$1", restaurant_id
             )
         else:
             invoices_30d = None
@@ -367,7 +367,7 @@ async def db_get_billing_stats() -> list[dict]:
             return []
         rows = await conn.fetch(
             """
-            SELECT fi.restaurant_id, r.name AS restaurant_name,
+            SELECT fi.org_id AS restaurant_id, o.name AS restaurant_name,
                    COUNT(fi.id) AS total_invoices,
                    COUNT(fi.id) FILTER (WHERE fi.created_at >= NOW()-INTERVAL '30 days') AS invoices_30d,
                    COUNT(fi.id) FILTER (WHERE fi.dian_status='accepted') AS accepted,
@@ -375,8 +375,8 @@ async def db_get_billing_stats() -> list[dict]:
                    COALESCE(SUM(fi.total_cents) FILTER (WHERE fi.dian_status='accepted'),0) AS total_billed_cents,
                    MAX(fi.created_at) AS last_invoice_at
             FROM fiscal_invoices fi
-            JOIN restaurants r ON r.id = fi.restaurant_id
-            GROUP BY fi.restaurant_id, r.name
+            JOIN organizations o ON o.id = fi.org_id
+            GROUP BY fi.org_id, o.name
             ORDER BY total_invoices DESC
             """
         )
@@ -652,6 +652,7 @@ async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
             """
             SELECT
                 r.id AS restaurant_id,
+                (SELECT org_id FROM locations WHERE id = r.id) AS org_id,
                 r.name,
                 r.menu,
                 p.menu AS parent_menu,
@@ -666,8 +667,8 @@ async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
         if not rest:
             return None
         inv_rows = await conn.fetch(
-            "SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1",
-            rest["restaurant_id"],
+            "SELECT dish_name, available FROM menu_availability WHERE org_id = $1",
+            rest["org_id"],
         )
     availability = {r["dish_name"]: r["available"] for r in inv_rows}
 
@@ -852,6 +853,21 @@ async def db_get_user(username: str):
         return dict(row) if row else None
 
 
+async def db_update_user_password(username: str, password_hash: str) -> bool:
+    """Update users.password_hash for a given username.
+
+    Returns True if a row was updated, False otherwise. GLOBAL table — no
+    tenant_scope required.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE users SET password_hash=$1 WHERE username=$2",
+            password_hash, username.lower().strip(),
+        )
+    return result.endswith(" 1")
+
+
 async def db_create_user(username: str, password_hash: str, restaurant_name: str,
                           role: str = "owner", branch_id: int = None, parent_user: str = None):
     import asyncpg  # noqa: PLC0415
@@ -877,10 +893,29 @@ async def db_get_all_users():
 # ── Restaurant lookup functions ───────────────────────────────────────────────
 
 async def db_get_restaurant_by_phone(whatsapp_number: str):
+    """Return restaurant row for bot runtime.
+
+    Post-Wave-2: `id` is overridden with `org_id` so downstream code using
+    `restaurant_obj["id"]` as the tenant key (for FKs into organizations, RLS,
+    etc.) works correctly. The original location_id is preserved under
+    `location_id`. Callers needing the sede identifier should use that.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM restaurants WHERE whatsapp_number=$1", _normalize_phone(whatsapp_number.strip()))
-        return _serialize(dict(row)) if row else None
+        row = await conn.fetchrow(
+            """
+            SELECT r.*, l.org_id, l.id AS location_id
+            FROM restaurants r
+            JOIN locations l ON l.id = r.id
+            WHERE r.whatsapp_number=$1
+            """,
+            _normalize_phone(whatsapp_number.strip()),
+        )
+        if not row:
+            return None
+        d = _serialize(dict(row))
+        d["id"] = d["org_id"]  # bot runtime expects tenant key here
+        return d
 
 
 async def db_get_restaurant_by_bot_number(whatsapp_number: str):
@@ -895,10 +930,30 @@ async def db_get_restaurant_by_name(name: str):
 
 
 async def db_get_restaurant_by_id(restaurant_id: int):
+    """Lookup restaurant by location_id (VIEW id) OR org_id.
+
+    Post-Wave-2: accepts either a location_id or an org_id. The returned
+    dict's `id` field is normalized to org_id (tenant key) for consistency
+    with db_get_restaurant_by_phone. `location_id` is preserved.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM restaurants WHERE id=$1", restaurant_id)
-        return _serialize(dict(row)) if row else None
+        row = await conn.fetchrow(
+            """
+            SELECT r.*, l.org_id, l.id AS location_id
+            FROM restaurants r
+            JOIN locations l ON l.id = r.id
+            WHERE r.id = $1 OR l.org_id = $1
+            ORDER BY (l.org_id = $1) DESC, l.is_primary DESC
+            LIMIT 1
+            """,
+            restaurant_id,
+        )
+        if not row:
+            return None
+        d = _serialize(dict(row))
+        d["id"] = d["org_id"]
+        return d
 
 
 async def db_get_all_restaurants(parent_id: int = None):
@@ -1282,7 +1337,7 @@ async def db_update_subscription(restaurant_id: int, new_status: str):
 async def db_get_menu_availability(restaurant_id: int):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with _tenant_connection() as conn:
-        rows = await conn.fetch("SELECT dish_name, available FROM menu_availability WHERE restaurant_id = $1", restaurant_id)
+        rows = await conn.fetch("SELECT dish_name, available FROM menu_availability WHERE org_id = $1", restaurant_id)
         return {r['dish_name']: r['available'] for r in rows}
 
 
@@ -1393,8 +1448,8 @@ async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
         # constraint (also restored by 0037b) keeps backward-compat for any
         # concurrent code path that reads by restaurant_id.
         await conn.execute(
-            """INSERT INTO subscription_usage (restaurant_id, org_id, usage_date, total_tokens)
-               VALUES ($1, $1, CURRENT_DATE, $2)
+            """INSERT INTO subscription_usage (org_id, usage_date, total_tokens)
+               VALUES ($1, CURRENT_DATE, $2)
                ON CONFLICT (org_id, usage_date) DO UPDATE
                SET total_tokens = subscription_usage.total_tokens + $2,
                    updated_at   = NOW()""",
@@ -1410,8 +1465,8 @@ async def db_increment_invoice_usage(restaurant_id: int) -> None:
     await _ensure_usage_table()
     async with _tenant_connection() as conn:
         await conn.execute(
-            """INSERT INTO subscription_usage (restaurant_id, org_id, usage_date, total_invoices)
-               VALUES ($1, $1, CURRENT_DATE, 1)
+            """INSERT INTO subscription_usage (org_id, usage_date, total_invoices)
+               VALUES ($1, CURRENT_DATE, 1)
                ON CONFLICT (org_id, usage_date) DO UPDATE
                SET total_invoices = subscription_usage.total_invoices + 1,
                    updated_at     = NOW()""",
@@ -1451,7 +1506,7 @@ async def db_check_usage_limits(restaurant_id: int) -> None:
         usage = await conn.fetchrow(
             """SELECT total_tokens, total_invoices
                FROM subscription_usage
-               WHERE restaurant_id = $1 AND usage_date = CURRENT_DATE""",
+               WHERE org_id = $1 AND usage_date = CURRENT_DATE""",
             restaurant_id,
         )
         used_tokens   = usage["total_tokens"]   if usage else 0

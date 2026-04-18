@@ -43,6 +43,13 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
+def _is_legacy_hash(hashed_password: str) -> bool:
+    """Bcrypt hashes always start with $2 ($2a$, $2b$, $2y$). Anything else
+    we treat as legacy (currently: sha256 plain hex). Used by login() to
+    decide whether to opportunistically rehash on successful verification.
+    """
+    return not (hashed_password or "").startswith("$2")
+
 def verify_password(plain_password: str, hashed_password: str, _username: str = "") -> bool:
     try:
         return pwd_context.verify(plain_password, hashed_password)
@@ -69,6 +76,19 @@ async def login(username: str, password: str) -> dict:
         member = next((c for c in candidates if verify_password(password, c["pin"], c.get("name", ""))), None)
         if not member:
             return {"success": False, "error": "Usuario o contraseña incorrectos"}
+
+        # Opportunistic legacy → bcrypt upgrade. We hold the plaintext only
+        # here; rehash + persist before continuing. Failure to upgrade must
+        # NOT block the login (best-effort, logged for observability).
+        if _is_legacy_hash(member.get("pin", "")) and member.get("org_id"):
+            try:
+                from app.repositories.staff_repo import db_update_staff_pin_hash  # noqa: PLC0415
+                await db_update_staff_pin_hash(
+                    str(member["id"]), int(member["org_id"]), hash_password(password)
+                )
+                _log.info("auth.password.legacy_upgraded", scope="staff", staff_id=str(member["id"]))
+            except Exception:
+                _log.exception("auth.password.legacy_upgrade_failed", scope="staff", staff_id=str(member.get("id")))
 
         token = await sessions_repo.create_session(f"staff:{member['id']}")
 
@@ -148,6 +168,15 @@ async def login(username: str, password: str) -> dict:
 
     if not verify_password(password, user["password_hash"], username):
         return {"success": False, "error": "Contraseña incorrecta"}
+
+    # Opportunistic legacy → bcrypt upgrade for admin/owner users.
+    # Best-effort: rehash failure must not block the login.
+    if _is_legacy_hash(user.get("password_hash", "")):
+        try:
+            await db.db_update_user_password(username, hash_password(password))
+            _log.info("auth.password.legacy_upgraded", scope="user", username_prefix=(username[:3] + "***"))
+        except Exception:
+            _log.exception("auth.password.legacy_upgrade_failed", scope="user")
 
     token = await sessions_repo.create_session(username.lower().strip())
 

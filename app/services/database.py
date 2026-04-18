@@ -308,6 +308,7 @@ from app.repositories.conversations_repo import (
 from app.repositories.restaurant_repo import (
     db_get_user,
     db_create_user,
+    db_update_user_password,
     db_get_all_users,
     db_get_restaurant_by_phone,
     db_get_restaurant_by_bot_number,

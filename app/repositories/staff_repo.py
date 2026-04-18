@@ -290,6 +290,25 @@ async def db_create_staff(
     return _serialize(dict(row))
 
 
+async def db_update_staff_pin_hash(staff_id: str, org_id: int, new_pin_hash: str) -> bool:
+    """Update only staff.pin (bcrypt hash) for a single staff row.
+
+    Used by auth.login() to upgrade legacy sha256 PINs to bcrypt on first
+    successful login. Cross-tenant by design — login resolves the tenant
+    AFTER PIN verification, so we bypass scope here and constrain by both
+    staff_id and org_id (caller already authenticated the row).
+
+    Returns True if a row was updated.
+    """
+    with bypass_tenant_scope("staff_pin_legacy_upgrade: post-login rehash before tenant_scope is established"):
+        async with tenant_connection() as conn:
+            result = await conn.execute(
+                "UPDATE staff SET pin=$1, updated_at=NOW() WHERE id=$2::uuid AND org_id=$3",
+                new_pin_hash, staff_id, org_id,
+            )
+    return result.endswith(" 1")
+
+
 async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> dict | None:
     """
     Update mutable staff fields (name, role, roles, pin, phone, active).
