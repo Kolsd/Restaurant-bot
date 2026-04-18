@@ -672,6 +672,19 @@ async def execute_salon_action(
 
         def _order_base(order_id: str, these_items: list, these_total: int,
                         sub_num: int, station: str) -> dict:
+            # org_id is the tenant key (FK into organizations). Post-Wave-2,
+            # restaurant_obj["id"] is normalized to org_id. branch_id remains
+            # the location_id (sede) for operational scoping.
+            org_id_val = (
+                table_context.get("org_id")
+                or (restaurant_obj.get("org_id") if restaurant_obj else None)
+                or (restaurant_obj.get("id") if restaurant_obj else None)
+            )
+            branch_id_val = (
+                table_context.get("branch_id")
+                or table_context.get("location_id")
+                or (restaurant_obj.get("location_id") if restaurant_obj else None)
+            )
             return {
                 "id":            order_id,
                 "table_id":      table_context["id"],
@@ -684,7 +697,8 @@ async def execute_salon_action(
                 "base_order_id": base_order_id,
                 "sub_number":    sub_num,
                 "station":       station,
-                "branch_id":     table_context.get("branch_id") or (restaurant_obj.get("id") if restaurant_obj else None),
+                "branch_id":     branch_id_val,
+                "org_id":        org_id_val,
             }
 
         _is_duplicate_order = False

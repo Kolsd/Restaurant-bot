@@ -145,13 +145,13 @@ async def db_get_table_by_id(table_id: str):
 async def db_save_table_order(order: dict):
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
-        # restaurant_id is NOT NULL since Alembic 0028. Fall back to branch_id
-        # (they are the same integer for dine-in orders — the sub-restaurant
-        # that owns the table) or resolve from restaurant_tables if missing.
-        rid = order.get('restaurant_id') or order.get('org_id') or order.get('branch_id')
+        # org_id is NOT NULL (FK into organizations). Post-Wave-2 we NEVER
+        # fall back to branch_id — it's a location_id now, not a tenant key.
+        # Resolve from restaurant_tables.org_id if the caller didn't provide.
+        rid = order.get('org_id') or order.get('restaurant_id')
         if rid is None:
             rid = await conn.fetchval(
-                "SELECT branch_id FROM restaurant_tables WHERE id=$1",
+                "SELECT org_id FROM restaurant_tables WHERE id=$1",
                 order['table_id'],
             )
             if rid is None:
@@ -459,7 +459,8 @@ async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, m
                 return _serialize(dict(row))
 
         row = await conn.fetchrow(
-            "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+            "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, org_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, NULLIF(current_setting('app.org_id', true), '')::bigint) RETURNING *",
             table_id, table_name, phone, bot_number, alert_type, message,
         )
         return _serialize(dict(row))
@@ -493,23 +494,37 @@ async def db_get_active_session(phone: str, bot_number: str) -> dict | None:
         return _serialize(dict(row)) if row else None
 
 
-async def db_create_table_session(phone: str, bot_number: str, table_id: str, table_name: str, restaurant_id: int | None = None) -> dict:
+async def db_create_table_session(
+    phone: str,
+    bot_number: str,
+    table_id: str,
+    table_name: str,
+    org_id: int | None = None,
+    location_id: int | None = None,
+) -> dict:
     """# Requires active tenant_scope() or bypass_tenant_scope().
 
-    restaurant_id is required by the schema (NOT NULL since Alembic 0028).
-    If not passed, it is resolved from restaurant_tables.branch_id.
+    org_id is required by schema (NOT NULL). If not passed, resolved from
+    restaurant_tables.org_id. location_id is also persisted when available.
     """
     async with tenant_connection() as conn:
-        if restaurant_id is None:
-            restaurant_id = await conn.fetchval(
-                "SELECT branch_id FROM restaurant_tables WHERE id=$1", table_id
+        if org_id is None or location_id is None:
+            tbl = await conn.fetchrow(
+                "SELECT org_id, location_id FROM restaurant_tables WHERE id=$1",
+                table_id,
             )
-            if restaurant_id is None:
-                raise ValueError(f"Cannot resolve restaurant_id for table {table_id}")
+            if not tbl:
+                raise ValueError(f"Cannot resolve org for table {table_id}")
+            if org_id is None:
+                org_id = tbl["org_id"]
+            if location_id is None:
+                location_id = tbl["location_id"]
+        if org_id is None:
+            raise ValueError(f"Cannot resolve org_id for table {table_id}")
         row = await conn.fetchrow(
-            "INSERT INTO table_sessions (phone, bot_number, table_id, table_name, org_id, status, last_activity) "
-            "VALUES ($1, $2, $3, $4, $5, 'active', NOW()) RETURNING *",
-            phone, bot_number, table_id, table_name, restaurant_id,
+            "INSERT INTO table_sessions (phone, bot_number, table_id, table_name, org_id, location_id, status, last_activity) "
+            "VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW()) RETURNING *",
+            phone, bot_number, table_id, table_name, org_id, location_id,
         )
         return _serialize(dict(row))
 
@@ -1346,8 +1361,8 @@ async def db_insert_session_waiter_alert(
     """
     async with tenant_connection() as conn:
         await conn.execute(
-            "INSERT INTO waiter_alerts (table_id, table_name, message, status) "
-            "VALUES ($1, $2, $3, 'active')",
+            "INSERT INTO waiter_alerts (table_id, table_name, message, status, org_id) "
+            "VALUES ($1, $2, $3, 'active', NULLIF(current_setting('app.org_id', true), '')::bigint)",
             table_id, table_name, message,
         )
 
@@ -1420,7 +1435,8 @@ async def db_session_alert_waiter(session_id: int, message: str) -> bool:
         session = await conn.fetchrow("SELECT * FROM table_sessions WHERE id = $1", session_id)
         if session:
             await conn.execute(
-                "INSERT INTO waiter_alerts (table_id, table_name, message, status) VALUES ($1, $2, $3, 'active')",
+                "INSERT INTO waiter_alerts (table_id, table_name, message, status, org_id) "
+                "VALUES ($1, $2, $3, 'active', NULLIF(current_setting('app.org_id', true), '')::bigint)",
                 session["table_id"], session["table_name"], message,
             )
             return True

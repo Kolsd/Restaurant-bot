@@ -162,7 +162,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 session = await db.db_get_active_session(phone, bot_number)
                 if session and session.get("table_id") != table["id"]:
                     await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
-                await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
+                await db.db_create_table_session(phone, bot_number, table["id"], table["name"], org_id=table.get("org_id"), location_id=table.get("location_id"))
             table["is_new_session"] = True
             return table
 
@@ -260,7 +260,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                         )
                         if row:
                             table = dict(row)
-                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"], org_id=table.get("org_id"), location_id=table.get("location_id"))
                             table["is_new_session"] = True
                             return table
                 except (ValueError, TypeError):
@@ -274,7 +274,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                     for row in all_tables:
                         if row["number"] == num_mesa:
                             table = dict(row)
-                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
+                            await db.db_create_table_session(phone, bot_number, table["id"], table["name"], org_id=table.get("org_id"), location_id=table.get("location_id"))
                             table["is_new_session"] = True
                             return table
                 except (ValueError, TypeError):
@@ -289,7 +289,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 for row in all_tables:
                     if row["name"].lower() == candidate:
                         table = dict(row)
-                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"], restaurant_id=table.get("branch_id"))
+                        await db.db_create_table_session(phone, bot_number, table["id"], table["name"], org_id=table.get("org_id"), location_id=table.get("location_id"))
                         table["is_new_session"] = True
                         return table
 
