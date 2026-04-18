@@ -76,34 +76,55 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
         SIM_BOT_NUMBER,
     )
 
-    # ── 1. Restaurant ──────────────────────────────────────────────────────────
-    existing = await conn.fetchrow(
-        "SELECT id FROM restaurants WHERE whatsapp_number = $1",
+    # ── 1. Restaurant (post-0037: insert Organization + primary Location) ──────
+    # The `restaurants` table is now a read-only VIEW over organizations+locations.
+    # We seed the Org (tenant) and its primary Location.
+    #
+    # NOTE on identifiers:
+    #   restaurant_id returned by this seed == org_id (the tenant key). This
+    #   matches the runtime code which uses org_id as the tenant scope.
+    #   location_id is the primary Location for operational scoping.
+    existing_org = await conn.fetchrow(
+        "SELECT id FROM organizations WHERE whatsapp_number = $1",
         SIM_BOT_NUMBER,
     )
 
-    if existing:
-        restaurant_id: int = existing["id"]
-        log.info("seed.restaurant_exists", restaurant_id=restaurant_id)
+    if existing_org:
+        org_id: int = existing_org["id"]
+        loc_id = await conn.fetchval(
+            "SELECT id FROM locations WHERE org_id = $1 AND is_primary = true",
+            org_id,
+        )
+        log.info("seed.restaurant_exists", org_id=org_id, location_id=loc_id)
     else:
-        # slug is NOT NULL UNIQUE (migration 0025). Provide a stable sim slug.
-        await conn.execute(
+        org_id = await conn.fetchval(
             """
-            INSERT INTO restaurants (name, whatsapp_number, address, menu, features, slug)
-            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
+            INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
+            VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+            ON CONFLICT (whatsapp_number) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id
             """,
             SIM_RESTAURANT_NAME,
             SIM_BOT_NUMBER,
-            SIM_ADDRESS,
             json.dumps(DEMO_MENU),
             json.dumps(SIM_FEATURES),
             "mesio-test-sim",
         )
-        restaurant_id = await conn.fetchval(
-            "SELECT id FROM restaurants WHERE whatsapp_number = $1",
-            SIM_BOT_NUMBER,
+        loc_id = await conn.fetchval(
+            """
+            INSERT INTO locations (
+                org_id, name, code, address,
+                active, is_primary, timezone, legacy_restaurant_id
+            )
+            VALUES ($1, $2, 'principal', $3, true, true, 'America/Bogota', NULL)
+            RETURNING id
+            """,
+            org_id, SIM_RESTAURANT_NAME, SIM_ADDRESS,
         )
-        log.info("seed.restaurant_created", restaurant_id=restaurant_id)
+        log.info("seed.restaurant_created", org_id=org_id, location_id=loc_id)
+
+    # For legacy compat downstream, restaurant_id IS the org_id (tenant key).
+    restaurant_id = org_id
 
     # ── 2. Owner user ──────────────────────────────────────────────────────────
     existing_user = await conn.fetchrow(
@@ -143,28 +164,32 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
         if not existing_table:
             await conn.execute(
                 """
-                INSERT INTO restaurant_tables (id, number, name, branch_id, active)
-                VALUES ($1, $2, $3, $4, TRUE)
+                INSERT INTO restaurant_tables (
+                    id, number, name, branch_id, active, org_id, location_id
+                )
+                VALUES ($1, $2, $3, $4, TRUE, $5, $6)
                 ON CONFLICT (id) DO NOTHING
                 """,
                 table_id,
                 n,
                 f"Mesa {n}",
-                restaurant_id,
+                loc_id,    # branch_id = the primary location id (legacy fk)
+                org_id,    # org_id for RLS + tenant scope
+                loc_id,    # location_id for operational routing
             )
 
     log.info("seed.tables_seeded", count=SIM_TABLE_COUNT)
 
-    # ── 4. subscription_usage for current month ────────────────────────────────
+    # ── 4. subscription_usage for current month (post-0037: use org_id) ────────
     await conn.execute(
         """
-        INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens, total_invoices)
+        INSERT INTO subscription_usage (org_id, usage_date, total_tokens, total_invoices)
         VALUES ($1, CURRENT_DATE, 0, 0)
-        ON CONFLICT (restaurant_id, usage_date) DO NOTHING
+        ON CONFLICT (org_id, usage_date) DO NOTHING
         """,
-        restaurant_id,
+        org_id,
     )
-    log.info("seed.subscription_usage_seeded", restaurant_id=restaurant_id)
+    log.info("seed.subscription_usage_seeded", org_id=org_id)
 
     return {"restaurant_id": restaurant_id, "bot_number": SIM_BOT_NUMBER}
 
@@ -198,21 +223,22 @@ async def truncate_test_data(conn: asyncpg.Connection) -> None:
     await conn.execute(f"TRUNCATE TABLE {tables_sql} CASCADE")
     log.info("seed.truncated", tables=_TRUNCATE_TABLES)
 
-    # Re-seed subscription_usage so UsageLimitExceeded doesn't fire
-    restaurant_id = await conn.fetchval(
-        "SELECT id FROM restaurants WHERE whatsapp_number = $1",
+    # Re-seed subscription_usage so UsageLimitExceeded doesn't fire.
+    # Post-0037: query organizations (not restaurants VIEW) and use org_id.
+    org_id = await conn.fetchval(
+        "SELECT id FROM organizations WHERE whatsapp_number = $1",
         SIM_BOT_NUMBER,
     )
-    if restaurant_id is not None:
+    if org_id is not None:
         await conn.execute(
             """
-            INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens, total_invoices)
+            INSERT INTO subscription_usage (org_id, usage_date, total_tokens, total_invoices)
             VALUES ($1, CURRENT_DATE, 0, 0)
-            ON CONFLICT (restaurant_id, usage_date) DO NOTHING
+            ON CONFLICT (org_id, usage_date) DO NOTHING
             """,
-            restaurant_id,
+            org_id,
         )
-        log.info("seed.subscription_usage_reseeded", restaurant_id=restaurant_id)
+        log.info("seed.subscription_usage_reseeded", org_id=org_id)
 
 
 def reset_state_store_fallbacks() -> None:
