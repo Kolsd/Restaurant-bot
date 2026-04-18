@@ -767,7 +767,7 @@ class MesioNativeAdapter(BillingAdapter):
         # Persistir en fiscal_invoices
         fiscal_id = await db.db_save_fiscal_invoice({
             "billing_log_id":    None,
-            "restaurant_id":     restaurant_id,
+            "org_id":            restaurant_id,
             "order_id":          order.get("id", ""),
             "resolution_number": resolution["resolution_number"],
             "prefix":            prefix,
@@ -1010,7 +1010,7 @@ class MesioNativeAdapter(BillingAdapter):
         # Persistir en estado pendiente antes de llamar a MATIAS
         fiscal_id = await db.db_save_fiscal_invoice({
             "billing_log_id":    None,
-            "restaurant_id":     restaurant_id,
+            "org_id":            restaurant_id,
             "order_id":          order.get("id", ""),
             "resolution_number": resolution["resolution_number"],
             "prefix":            prefix,
@@ -1177,11 +1177,20 @@ def get_adapter(provider: str) -> BillingAdapter:
 # ══════════════════════════════════════════════════════════════════════
 
 async def get_billing_config(restaurant_id: int) -> Optional[dict]:
-    """Lee la config de billing del restaurante desde la BD."""
+    """Lee la config de billing del restaurante desde la BD.
+
+    Queries `organizations.billing_config` (mirrored from restaurants in 0037c).
+    The `restaurant_id` param may be an org_id (Matriz) or a location_id
+    (Sucursal) — both resolve to the same org_id via the locations table.
+    """
     pool  = await db.get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT billing_config FROM restaurants WHERE id=$1", restaurant_id
+            """SELECT o.billing_config
+               FROM organizations o
+               WHERE o.id = $1
+                  OR o.id = (SELECT org_id FROM locations WHERE id = $1)""",
+            restaurant_id,
         )
         if not row or not row["billing_config"]:
             return None
@@ -1189,11 +1198,15 @@ async def get_billing_config(restaurant_id: int) -> Optional[dict]:
         return cfg if isinstance(cfg, dict) else json.loads(cfg)
 
 async def save_billing_config(restaurant_id: int, config: dict) -> None:
+    """Writes billing_config to organizations (org-level config)."""
     pool = await db.get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE restaurants SET billing_config=$1::jsonb WHERE id=$2",
-            json.dumps(config), restaurant_id
+            """UPDATE organizations
+               SET billing_config = $1::jsonb
+               WHERE id = $2
+                  OR id = (SELECT org_id FROM locations WHERE id = $2)""",
+            json.dumps(config), restaurant_id,
         )
 
 async def get_billing_log(restaurant_id: int, limit: int = 50) -> list:
@@ -1201,7 +1214,7 @@ async def get_billing_log(restaurant_id: int, limit: int = 50) -> list:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT * FROM billing_log
-               WHERE restaurant_id=$1
+               WHERE org_id=$1
                ORDER BY created_at DESC LIMIT $2""",
             restaurant_id, limit
         )
@@ -1214,7 +1227,7 @@ async def log_billing_event(restaurant_id: int, order_id: str,
     async with pool.acquire() as conn:
         await conn.execute(
             """INSERT INTO billing_log
-               (restaurant_id, order_id, provider, status, external_id, error_message)
+               (org_id, order_id, provider, status, external_id, error_message)
                VALUES ($1,$2,$3,$4,$5,$6)""",
             restaurant_id, order_id, provider, status, external_id, error
         )

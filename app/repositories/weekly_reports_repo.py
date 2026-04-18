@@ -197,14 +197,13 @@ async def compute_weekly_stats(
         reviews_public_new = int(nps_row["reviews_public_new"] or 0)
 
         # ── 5. Dormant frequent customers ─────────────────────────────────────
-        # customer_profiles has restaurant_id directly (Feature 2 / migration 0021).
         dormant_count = await conn.fetchval(
             """
             SELECT COUNT(*)
             FROM customer_profiles
-            WHERE restaurant_id = $1
-              AND total_orders  >= $2
-              AND last_seen     <  NOW() - MAKE_INTERVAL(days => $3)
+            WHERE org_id       = $1
+              AND total_orders >= $2
+              AND last_seen    <  NOW() - MAKE_INTERVAL(days => $3)
             """,
             restaurant_id,
             MIN_DORMANT_ORDERS,
@@ -372,9 +371,9 @@ async def save_report(
         row = await conn.fetchrow(
             """
             INSERT INTO weekly_reports
-                (restaurant_id, org_id, week_start, payload, message_text,
+                (org_id, week_start, payload, message_text,
                  owner_phone, delivery_status, error_message)
-            VALUES ($1, $1, $2, $3::jsonb, $4, $5, $6, $7)
+            VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)
             ON CONFLICT (org_id, week_start) DO NOTHING
             RETURNING *
             """,
@@ -431,7 +430,7 @@ async def already_sent_for_week(restaurant_id: int, week_start: date) -> bool:
         row = await conn.fetchval(
             """
             SELECT 1 FROM weekly_reports
-             WHERE restaurant_id   = $1
+             WHERE org_id          = $1
                AND week_start      = $2
                AND delivery_status = 'sent'
              LIMIT 1
@@ -447,10 +446,10 @@ async def get_recent_reports(restaurant_id: int, limit: int = 12) -> list[dict]:
     async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, restaurant_id, week_start, generated_at, sent_at,
+            SELECT id, org_id, week_start, generated_at, sent_at,
                    payload, message_text, owner_phone, delivery_status, error_message
               FROM weekly_reports
-             WHERE restaurant_id = $1
+             WHERE org_id = $1
              ORDER BY week_start DESC
              LIMIT $2
             """,

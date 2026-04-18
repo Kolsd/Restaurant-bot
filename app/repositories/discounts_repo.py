@@ -70,7 +70,7 @@ async def db_get_active_discount(
             f"""
             SELECT *
             FROM   time_slot_discounts
-            WHERE  restaurant_id   = $1
+            WHERE  org_id          = $1
               AND  active          = TRUE
               AND  day_of_week     = {dow}
               AND  start_time     <= {now_t}
@@ -95,7 +95,7 @@ async def db_get_all_discounts(restaurant_id: int) -> list[dict]:
             """
             SELECT *
             FROM   time_slot_discounts
-            WHERE  restaurant_id = $1
+            WHERE  org_id = $1
             ORDER  BY day_of_week, start_time
             """,
             restaurant_id,
@@ -122,9 +122,9 @@ async def db_create_discount(
         row = await conn.fetchrow(
             """
             INSERT INTO time_slot_discounts
-                (restaurant_id, org_id, branch_id, day_of_week, start_time, end_time,
+                (org_id, branch_id, day_of_week, start_time, end_time,
                  discount_percent, label)
-            VALUES ($1, $1, $2, $3, $4::time, $5::time, $6, $7)
+            VALUES ($1, $2, $3, $4::time, $5::time, $6, $7)
             ON CONFLICT (org_id, branch_id, day_of_week, start_time)
             DO UPDATE SET
                 end_time         = EXCLUDED.end_time,

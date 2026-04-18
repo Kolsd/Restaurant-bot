@@ -67,7 +67,7 @@ async def _deduct_inventory_in_tx(
         recipe_rows = await conn.fetch(
             """SELECT r.ingredient_id, r.quantity AS recipe_qty
                FROM dish_recipes r
-               WHERE r.restaurant_id = $1 AND r.dish_name = $2""",
+               WHERE r.org_id = $1 AND r.dish_name = $2""",
             restaurant_id, dish_name,
         )
 
@@ -132,7 +132,7 @@ async def _deduct_inventory_in_tx(
             rows = await conn.fetch(
                 """SELECT id, current_stock, linked_dishes, min_stock
                    FROM inventory
-                   WHERE restaurant_id = $1
+                   WHERE org_id = $1
                      AND linked_dishes @> $2::jsonb
                    FOR UPDATE""",
                 restaurant_id, json.dumps([dish_name]),
@@ -177,9 +177,9 @@ async def _sync_dish_availability_conn(
     """Mirror of database._sync_dish_availability_conn — used inside the transaction."""
     for name in dish_names:
         await conn.execute(
-            """INSERT INTO menu_availability (dish_name, restaurant_id, available, updated_at)
+            """INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
                VALUES ($1, $2, $3, NOW())
-               ON CONFLICT (dish_name, restaurant_id)
+               ON CONFLICT (dish_name, org_id)
                DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
             name, restaurant_id, available,
         )
@@ -261,7 +261,7 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, restaurant_id)
+                                base_order_id, sub_number, org_id)
                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
                         order_payload["id"],
                         order_payload["phone"],
@@ -287,7 +287,7 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, restaurant_id)
+                                base_order_id, sub_number, org_id)
                            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
                            ON CONFLICT (id) DO UPDATE SET
                                items          = EXCLUDED.items,
@@ -362,7 +362,7 @@ async def db_save_order(order: dict):
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
                 subtotal, delivery_fee, total, status, paid, payment_url, bot_number,
-                payment_method, base_order_id, sub_number, restaurant_id)
+                payment_method, base_order_id, sub_number, org_id)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
@@ -384,7 +384,7 @@ async def db_save_order(order: dict):
         order["status"], order["paid"], order.get("payment_url", ""),
         order.get("bot_number", ""), order.get("payment_method", ""),
         order.get("base_order_id"), order.get("sub_number", 1),
-        order.get("restaurant_id"))
+        order.get("restaurant_id") or order.get("org_id"))
 
 async def db_confirm_payment(order_id: str, transaction_id: str):
     """

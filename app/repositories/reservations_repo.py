@@ -189,7 +189,7 @@ async def db_get_available_tables(
 
         rows = await conn.fetch(
             """SELECT t.* FROM restaurant_tables t
-               WHERE t.restaurant_id=$1
+               WHERE t.branch_id=$1
                  AND t.active = TRUE
                  AND t.capacity >= $2
                  AND t.id NOT IN (

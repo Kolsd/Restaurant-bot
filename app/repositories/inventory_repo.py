@@ -38,9 +38,9 @@ async def _sync_dish_availability_conn(conn, dish_names: list, available: bool, 
     """Activa o desactiva platos usando una conexión existente (dentro de transacción)."""
     for name in dish_names:
         await conn.execute(
-            """INSERT INTO menu_availability (dish_name, restaurant_id, available, updated_at)
+            """INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
                VALUES ($1, $2, $3, NOW())
-               ON CONFLICT (dish_name, restaurant_id)
+               ON CONFLICT (dish_name, org_id)
                DO UPDATE SET available = EXCLUDED.available, updated_at = NOW()""",
             name, restaurant_id, available
         )
@@ -77,7 +77,7 @@ async def _sync_ingredient_dishes_conn(
 
     # Stock agotado o en mínimo — marcar platos como no disponibles
     recipe_rows = await conn.fetch(
-        "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND restaurant_id = $2",
+        "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND org_id = $2",
         ingredient_id, restaurant_id,
     )
     dish_names = [r["dish_name"] for r in recipe_rows]
@@ -105,21 +105,21 @@ async def _recheck_dishes_for_ingredient_conn(
     log = get_logger(__name__)
 
     recipe_rows = await conn.fetch(
-        "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND restaurant_id = $2",
+        "SELECT dish_name FROM dish_recipes WHERE ingredient_id = $1 AND org_id = $2",
         ingredient_id, restaurant_id,
     )
     for row in recipe_rows:
         dish_name = row["dish_name"]
         # Contar ingredientes totales vs ingredientes con stock OK
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM dish_recipes WHERE dish_name = $1 AND restaurant_id = $2",
+            "SELECT COUNT(*) FROM dish_recipes WHERE dish_name = $1 AND org_id = $2",
             dish_name, restaurant_id,
         )
         ok = await conn.fetchval(
             """SELECT COUNT(*)
                FROM dish_recipes r
                JOIN inventory i ON i.id = r.ingredient_id
-               WHERE r.dish_name = $1 AND r.restaurant_id = $2
+               WHERE r.dish_name = $1 AND r.org_id = $2
                  AND i.current_stock > i.min_stock""",
             dish_name, restaurant_id,
         )
@@ -157,7 +157,7 @@ async def db_init_dish_recipes():
 async def db_get_inventory(restaurant_id: int) -> list:
     async with _tenant_connection() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM inventory WHERE restaurant_id = $1 ORDER BY name ASC",
+            "SELECT * FROM inventory WHERE org_id = $1 ORDER BY name ASC",
             restaurant_id
         )
     return [_serialize(dict(r)) for r in rows]
@@ -169,7 +169,7 @@ async def db_create_inventory_item(restaurant_id: int, name: str, unit: str,
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO inventory
-               (restaurant_id, name, unit, current_stock, min_stock, linked_dishes, cost_per_unit)
+               (org_id, name, unit, current_stock, min_stock, linked_dishes, cost_per_unit)
                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
                RETURNING *""",
             restaurant_id, name, unit, current_stock, min_stock,
@@ -223,7 +223,7 @@ async def db_update_inventory_item(item_id: int, fields: dict) -> dict | None:
         if isinstance(dishes, str):
             dishes = json.loads(dishes)
 
-        restaurant_id = existing["restaurant_id"]
+        restaurant_id = existing["org_id"]
 
         await _sync_dish_availability(dishes, new_stock > 0, restaurant_id)
         return item
@@ -241,7 +241,7 @@ async def db_adjust_inventory_stock(item_id: int, quantity_delta: float,
             """UPDATE inventory
                SET current_stock = GREATEST(0, current_stock + $1),
                    updated_at = NOW()
-               WHERE id = $2 AND restaurant_id = $3
+               WHERE id = $2 AND org_id = $3
                RETURNING *""",
             quantity_delta, item_id, restaurant_id
         )
@@ -268,7 +268,7 @@ async def db_get_inventory_item(item_id: int) -> dict | None:
     """Obtiene un item de inventario por ID. Tenant-scoped via RLS."""
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id, restaurant_id, name, unit, current_stock, min_stock, "
+            "SELECT id, org_id, name, unit, current_stock, min_stock, "
             "linked_dishes, cost_per_unit FROM inventory WHERE id = $1",
             item_id,
         )
@@ -291,7 +291,7 @@ async def db_get_inventory_alerts(restaurant_id: int) -> list:
     async with _tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT * FROM inventory
-               WHERE restaurant_id = $1
+               WHERE org_id = $1
                  AND current_stock <= min_stock
                ORDER BY current_stock ASC""",
             restaurant_id
@@ -337,7 +337,7 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                 recipe_rows = await conn.fetch(
                     """SELECT r.ingredient_id, r.quantity AS recipe_qty
                        FROM dish_recipes r
-                       WHERE r.restaurant_id = $1 AND r.dish_name = $2""",
+                       WHERE r.org_id = $1 AND r.dish_name = $2""",
                     restaurant_id, dish_name
                 )
 
@@ -398,7 +398,7 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
                     rows = await conn.fetch(
                         """SELECT id, current_stock, linked_dishes, min_stock
                            FROM inventory
-                           WHERE restaurant_id = $1
+                           WHERE org_id = $1
                              AND linked_dishes @> $2::jsonb
                            FOR UPDATE""",
                         restaurant_id, json.dumps([dish_name])
@@ -453,12 +453,12 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
     async with _tenant_connection() as conn:
         async with conn.transaction():
             await conn.execute(
-                "DELETE FROM dish_recipes WHERE restaurant_id=$1 AND dish_name=$2",
+                "DELETE FROM dish_recipes WHERE org_id=$1 AND dish_name=$2",
                 restaurant_id, dish_name
             )
             for line in lines:
                 await conn.execute(
-                    """INSERT INTO dish_recipes (restaurant_id, dish_name, ingredient_id, quantity)
+                    """INSERT INTO dish_recipes (org_id, dish_name, ingredient_id, quantity)
                        VALUES ($1, $2, $3, $4)""",
                     restaurant_id, dish_name,
                     int(line["ingredient_id"]), float(line["quantity"])
@@ -475,7 +475,7 @@ async def db_upsert_dish_recipe(restaurant_id: int, dish_name: str, lines: list)
                     """SELECT COUNT(*)
                        FROM dish_recipes r
                        JOIN inventory i ON i.id = r.ingredient_id
-                       WHERE r.dish_name = $1 AND r.restaurant_id = $2
+                       WHERE r.dish_name = $1 AND r.org_id = $2
                          AND i.current_stock <= i.min_stock""",
                     dish_name, restaurant_id,
                 )
@@ -501,7 +501,7 @@ async def db_get_dish_recipe(restaurant_id: int, dish_name: str) -> list:
                    ROUND((r.quantity * i.cost_per_unit)::numeric, 2) AS line_cost
             FROM dish_recipes r
             JOIN inventory i ON r.ingredient_id = i.id
-            WHERE r.restaurant_id = $1 AND r.dish_name = $2
+            WHERE r.org_id = $1 AND r.dish_name = $2
             ORDER BY i.name
         """, restaurant_id, dish_name)
         return [_serialize(dict(r)) for r in rows]
@@ -516,7 +516,7 @@ async def db_get_all_recipes(restaurant_id: int) -> list:
                    ROUND(SUM(r.quantity * i.cost_per_unit)::numeric, 2) AS food_cost
             FROM dish_recipes r
             JOIN inventory i ON r.ingredient_id = i.id
-            WHERE r.restaurant_id = $1
+            WHERE r.org_id = $1
             GROUP BY r.dish_name
             ORDER BY r.dish_name
         """, restaurant_id)
@@ -527,7 +527,7 @@ async def db_delete_dish_recipe(restaurant_id: int, dish_name: str):
     """Elimina todos los ingredientes del escandallo de un plato."""
     async with _tenant_connection() as conn:
         await conn.execute(
-            "DELETE FROM dish_recipes WHERE restaurant_id=$1 AND dish_name=$2",
+            "DELETE FROM dish_recipes WHERE org_id=$1 AND dish_name=$2",
             restaurant_id, dish_name
         )
 
@@ -553,7 +553,7 @@ async def db_get_food_costs(restaurant_id: int) -> list:
                 ) AS breakdown
             FROM dish_recipes r
             JOIN inventory i ON r.ingredient_id = i.id
-            WHERE r.restaurant_id = $1
+            WHERE r.org_id = $1
             GROUP BY r.dish_name
             ORDER BY r.dish_name
         """, restaurant_id)

@@ -148,7 +148,7 @@ async def db_save_table_order(order: dict):
         # restaurant_id is NOT NULL since Alembic 0028. Fall back to branch_id
         # (they are the same integer for dine-in orders — the sub-restaurant
         # that owns the table) or resolve from restaurant_tables if missing.
-        rid = order.get('restaurant_id') or order.get('branch_id')
+        rid = order.get('restaurant_id') or order.get('org_id') or order.get('branch_id')
         if rid is None:
             rid = await conn.fetchval(
                 "SELECT branch_id FROM restaurant_tables WHERE id=$1",
@@ -156,13 +156,13 @@ async def db_save_table_order(order: dict):
             )
             if rid is None:
                 raise ValueError(
-                    f"Cannot resolve restaurant_id for table_order {order['id']} "
+                    f"Cannot resolve org_id for table_order {order['id']} "
                     f"(table_id={order['table_id']})"
                 )
         await conn.execute("""
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
-                 base_order_id, sub_number, station, branch_id, restaurant_id)
+                 base_order_id, sub_number, station, branch_id, org_id)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
@@ -507,7 +507,7 @@ async def db_create_table_session(phone: str, bot_number: str, table_id: str, ta
             if restaurant_id is None:
                 raise ValueError(f"Cannot resolve restaurant_id for table {table_id}")
         row = await conn.fetchrow(
-            "INSERT INTO table_sessions (phone, bot_number, table_id, table_name, restaurant_id, status, last_activity) "
+            "INSERT INTO table_sessions (phone, bot_number, table_id, table_name, org_id, status, last_activity) "
             "VALUES ($1, $2, $3, $4, $5, 'active', NOW()) RETURNING *",
             phone, bot_number, table_id, table_name, restaurant_id,
         )

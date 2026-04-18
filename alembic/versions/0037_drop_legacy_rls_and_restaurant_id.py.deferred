@@ -5,7 +5,8 @@ DO NOT RUN THIS MIGRATION UNTIL:
   1. Wave 1 (migrations 0034-0036 + code wave 1) has been in PRODUCTION for ≥7 days.
   2. Monitoring query shows ZERO rows with org_id IS NULL in all Location-level tables.
   3. Monitoring query shows ZERO TenantNotSetError logs in the last 7 days.
-  4. Alembic head is 0036 and application is running Wave 2 code (sets app.org_id directly).
+  4. Alembic head is 0037b_recovery_cons and application is running Wave 2 code
+     (sets app.org_id directly).
 
 Running prematurely will:
   - Break the retry path for old webhook payloads still in webhook_inbox whose
@@ -30,20 +31,23 @@ DDL SEQUENCE (in order):
   4. Drop restaurant_id column from Org-level tables (15 tables).
   5. Drop restaurant_id column from Location-level tables (18 tables).
      restaurant_tables is skipped (no restaurant_id column; uses branch_id only).
+  5b. Migrate billing_config to organizations + backfill from restaurants.
   6. Rename restaurants table → restaurants_deprecated and create a
-     retrocompat VIEW named restaurants that emulates the old flat shape.
+     retrocompat VIEW named restaurants that emulates the old flat shape,
+     including billing_config from organizations.
   7. Validation block: asserts zero restaurant_id columns remain, view exists,
      no tenant_isolation policies remain.
 
 DOWNGRADE:
   Partial downgrade is implemented: adds columns back (NOT NULL with default -1
   sentinel so FK constraints are not violated), backfills from the mapping table,
+  recreates the UNIQUE constraints that CASCADE-dropped with restaurant_id,
   recreates triggers and tenant_isolation policies.
   The restaurants table rename is NOT reversed in downgrade — it is too risky.
   For a full restore after a failed deployment, use pg_dump from before 0037.
 
 Revision ID: 0037_drop_legacy_rls
-Revises: 0036_dual_rls_policies
+Revises: 0037b_recovery_cons  (was 0036_dual_rls_policies before 0037b was inserted)
 Create Date: 2026-04-17
 """
 
@@ -53,7 +57,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0037_drop_legacy_rls"
-down_revision = "0036_dual_rls_policies"
+down_revision = "0037c_billing_conf"
 branch_labels = None
 depends_on = None
 
@@ -226,6 +230,26 @@ def upgrade() -> None:
         ))
         logger.info("0037: dropped restaurant_id from %s (extra table)", table)
 
+    # ── Step 5b: Migrate billing_config to organizations ─────────────────────
+    # billing_config lives on restaurants (the raw table, not yet renamed).
+    # Routes querying restaurants for billing_config will work via the VIEW after
+    # this step because the VIEW exposes o.billing_config.
+    # Uses IF EXISTS on the column add in case an older deployment never had
+    # billing_config on the restaurants table.
+    logger.info("0037: adding billing_config to organizations + backfilling from restaurants")
+    op.execute(sa.text(
+        "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS billing_config JSONB"
+    ))
+    op.execute(sa.text("""
+        UPDATE organizations o
+        SET billing_config = r.billing_config
+        FROM restaurants r
+        WHERE o.id = r.id
+          AND o.billing_config IS NULL
+          AND r.billing_config IS NOT NULL
+    """))
+    logger.info("0037: billing_config backfilled into organizations")
+
     # ── Step 6: Rename restaurants table, create retrocompat VIEW ─────────────
     logger.info("0037: renaming restaurants → restaurants_deprecated")
     op.execute(sa.text("ALTER TABLE restaurants RENAME TO restaurants_deprecated"))
@@ -247,6 +271,7 @@ def upgrade() -> None:
             COALESCE(l.wa_phone_id, o.wa_phone_id) AS wa_phone_id,
             COALESCE(l.wa_access_token, o.wa_access_token) AS wa_access_token,
             o.slug,
+            o.billing_config,
             l.created_at,
             l.updated_at
         FROM locations l
@@ -373,6 +398,75 @@ def downgrade() -> None:
               AND t.restaurant_id IS NULL
         """))
         logger.info("0037 downgrade: restaurant_id restored on %s (extra)", table)
+
+    # ── Step 2b: Restore UNIQUE constraints CASCADE-dropped with restaurant_id ──
+    # When restaurant_id was dropped in upgrade() with CASCADE, any UNIQUE
+    # constraints referencing that column were silently removed. This caused
+    # the production outage after the premature 0037 run (recovered by 0037b).
+    # Here we restore the legacy (restaurant_id-based) constraints so the DB
+    # is in the same state it was in before 0037 ran.
+    #
+    # Safety: each add is wrapped in a DO $$ ... EXCEPTION $$ block. If duplicate
+    # rows were written during the window when the constraint was absent, the add
+    # is skipped (with a WARNING logged) and the operator must clean up manually.
+    logger.info("0037 downgrade: restoring UNIQUE constraints dropped by CASCADE")
+
+    _LEGACY_UNIQUE_CONSTRAINTS = [
+        # (table, constraint_name, columns_csv)
+        ("subscription_usage",  "subscription_usage_rest_date_uq",
+         "restaurant_id, usage_date"),
+        ("customer_profiles",   "customer_profiles_rest_phone_uq",
+         "restaurant_id, phone"),
+        ("fiscal_invoices",     "fiscal_invoices_rest_num_uq",
+         "restaurant_id, resolution_number, invoice_number"),
+        ("dish_recipes",        "dish_recipes_rest_dish_uq",
+         "restaurant_id, dish_name, ingredient_id"),
+        ("loyalty_customers",   "loyalty_customers_rest_phone_uq",
+         "restaurant_id, phone"),
+        ("weekly_reports",      "weekly_reports_rest_week_uq",
+         "restaurant_id, week_start"),
+        ("payroll_runs",        "payroll_runs_rest_period_uq",
+         "restaurant_id, period_start, period_end"),
+        ("time_slot_discounts", "time_slot_discounts_rest_slot_uq",
+         "restaurant_id, branch_id, day_of_week, start_time"),
+    ]
+
+    for table, name, cols in _LEGACY_UNIQUE_CONSTRAINTS:
+        op.execute(sa.text(f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = '{name}'
+                      AND conrelid = '{table}'::regclass
+                ) THEN
+                    BEGIN
+                        ALTER TABLE {table}
+                            ADD CONSTRAINT {name} UNIQUE ({cols});
+                        RAISE NOTICE '0037 downgrade: restored UNIQUE %', '{name}';
+                    EXCEPTION WHEN unique_violation OR exclusion_violation THEN
+                        RAISE WARNING
+                            '0037 downgrade: SKIPPED constraint % on % — '
+                            'duplicate rows detected. Manual cleanup required.',
+                            '{name}', '{table}';
+                    END;
+                ELSE
+                    RAISE NOTICE '0037 downgrade: constraint % already exists, skipped', '{name}';
+                END IF;
+            END $$;
+        """))
+        logger.info("0037 downgrade: processed UNIQUE constraint %s on %s", name, table)
+
+    # ── Step 2c: Drop billing_config from organizations (reverse of step 5b) ──
+    # Only drop if it was NOT present before 0037 ran. We cannot know for certain,
+    # so we use IF EXISTS to be idempotent. Operators who had billing_config on
+    # organizations before 0037 will lose it here — acceptable given this is a
+    # downgrade path.
+    logger.info("0037 downgrade: dropping billing_config from organizations")
+    op.execute(sa.text(
+        "ALTER TABLE organizations DROP COLUMN IF EXISTS billing_config"
+    ))
+    logger.info("0037 downgrade: billing_config dropped from organizations")
 
     # ── Step 3: Recreate trigger functions ────────────────────────────────────
     logger.info("0037 downgrade: recreating trigger functions")

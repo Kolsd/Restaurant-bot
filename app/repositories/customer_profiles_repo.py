@@ -41,11 +41,11 @@ async def get_profile(restaurant_id: int, phone: str) -> Optional[dict]:
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, restaurant_id, phone, display_name, preferences,
+            SELECT id, org_id, phone, display_name, preferences,
                    last_order_summary, total_orders, total_spent,
                    first_seen, last_seen
               FROM customer_profiles
-             WHERE restaurant_id = $1
+             WHERE org_id = $1
                AND phone = $2
             """,
             restaurant_id,
@@ -69,20 +69,16 @@ async def upsert_profile_from_message(
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
-        # Insert both restaurant_id and org_id (same value during Wave 1).
-        # ON CONFLICT uses the new org_id-based constraint (restored by 0037b)
-        # which is NOT NULL and reliable.  Legacy restaurant_id constraint is also
-        # present for any concurrent reads that filter by restaurant_id.
         row = await conn.fetchrow(
             """
             INSERT INTO customer_profiles
-                (restaurant_id, org_id, phone, display_name, last_seen)
+                (org_id, phone, display_name, last_seen)
             VALUES
-                ($1, $1, $2, $3, NOW())
+                ($1, $2, $3, NOW())
             ON CONFLICT (org_id, phone) DO UPDATE
                 SET last_seen    = NOW(),
                     display_name = COALESCE($3, customer_profiles.display_name)
-            RETURNING id, restaurant_id, phone, display_name, preferences,
+            RETURNING id, org_id, phone, display_name, preferences,
                       last_order_summary, total_orders, total_spent,
                       first_seen, last_seen
             """,
@@ -137,7 +133,7 @@ async def update_preference(
                        to_jsonb($4::text),
                        true           -- create_missing = true
                    )
-             WHERE restaurant_id = $1
+             WHERE org_id = $1
                AND phone = $2
             """,
             restaurant_id,
@@ -187,7 +183,7 @@ async def increment_after_order(
                    total_spent        = total_spent + $3,
                    last_order_summary = $4,
                    last_seen          = NOW()
-             WHERE restaurant_id = $1
+             WHERE org_id = $1
                AND phone = $2
             """,
             restaurant_id,

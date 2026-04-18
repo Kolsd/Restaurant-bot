@@ -38,7 +38,7 @@ async def record_event(
         async with _tenant_connection() as conn:
             await conn.execute(
                 """
-                INSERT INTO menu_events (restaurant_id, dish_name, event_type, phone, bot_number)
+                INSERT INTO menu_events (org_id, dish_name, event_type, phone, bot_number)
                 VALUES ($1, $2, $3, $4, $5)
                 """,
                 restaurant_id,
@@ -82,7 +82,7 @@ async def get_dish_analytics(
                 COUNT(*) FILTER (WHERE event_type = 'add_to_cart') AS add_to_carts,
                 COUNT(*) FILTER (WHERE event_type = 'ordered')     AS orders
             FROM menu_events
-            WHERE restaurant_id = $1
+            WHERE org_id = $1
               AND created_at >= NOW() - ($2 || ' days')::INTERVAL
             GROUP BY dish_name
             ORDER BY views DESC, dish_name

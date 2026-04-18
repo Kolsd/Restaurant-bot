@@ -74,16 +74,10 @@ async def db_save_history(
     location_id: int | None = None,
 ):
     async with _tenant_connection() as conn:
-        # Belt-and-suspenders: explicitly set BOTH restaurant_id and org_id so the
-        # NOT NULL constraint on org_id is satisfied even if the auto-populate trigger
-        # did not fire (e.g. if the downgrade/reapply cycle left the trigger missing).
-        # During Wave 1 both GUCs are set by tenant_db.py, so both NULLIF expressions
-        # resolve to the same integer value.
         await conn.execute("""
             INSERT INTO conversations (phone, bot_number, history, branch_id, location_id,
-                                       restaurant_id, org_id, updated_at)
+                                       org_id, updated_at)
             VALUES ($1, $2, $3, $4, $5,
-                    NULLIF(current_setting('app.restaurant_id', true), '')::int,
                     NULLIF(current_setting('app.org_id', true), '')::bigint,
                     NOW())
             ON CONFLICT (phone, bot_number)
@@ -174,8 +168,8 @@ async def db_get_conversation_details(phone: str, bot_number: str = ""):
 async def db_toggle_bot(phone: str, bot_number: str, pause: bool):
     async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, bot_paused, restaurant_id, updated_at)
-            VALUES ($1,$2,$3,NULLIF(current_setting('app.restaurant_id', true), '')::int,NOW())
+            INSERT INTO conversations (phone, bot_number, bot_paused, org_id, updated_at)
+            VALUES ($1,$2,$3,NULLIF(current_setting('app.org_id', true), '')::bigint,NOW())
             ON CONFLICT (phone, bot_number) DO UPDATE SET bot_paused=EXCLUDED.bot_paused, updated_at=NOW()
         """, phone, bot_number, pause)
 
@@ -249,8 +243,9 @@ async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | 
     """Persists that we are waiting for an NPS score from this customer.
     Called when trigger_nps is invoked so state survives server restarts.
 
-    restaurant_id is NOT NULL in the schema (Alembic 0028). If not passed, it is
-    resolved from the restaurants table via bot_number.
+    restaurant_id param kept for caller compatibility (Wave 1). The value is passed
+    as org_id into the nps_waiting table (org_id == restaurant_id during Wave 1).
+    If not passed, it is resolved from the restaurants VIEW via bot_number.
     """
     async with _tenant_connection() as conn:
         if restaurant_id is None:
@@ -260,7 +255,7 @@ async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | 
             if restaurant_id is None:
                 raise ValueError(f"Cannot resolve restaurant_id for bot_number {bot_number}")
         await conn.execute("""
-            INSERT INTO nps_waiting (phone, bot_number, restaurant_id, created_at)
+            INSERT INTO nps_waiting (phone, bot_number, org_id, created_at)
             VALUES ($1, $2, $3, NOW())
             ON CONFLICT (phone, bot_number) DO UPDATE SET created_at = NOW()
         """, phone, bot_number, restaurant_id)
@@ -301,8 +296,8 @@ async def db_get_cart(phone: str, bot_number: str) -> dict:
 async def db_save_cart(phone: str, bot_number: str, cart_data: dict):
     async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO carts (phone, bot_number, cart_data, updated_at, restaurant_id)
-            VALUES ($1, $2, $3::jsonb, NOW(), current_setting('app.restaurant_id', true)::int)
+            INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id)
+            VALUES ($1, $2, $3::jsonb, NOW(), NULLIF(current_setting('app.org_id', true), '')::bigint)
             ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
         """, phone, bot_number, json.dumps(cart_data))
 
@@ -319,8 +314,8 @@ async def db_migrate_cart(phone: str, from_bot_number: str, to_bot_number: str):
         row = await conn.fetchrow("SELECT cart_data FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)
         if row:
             await conn.execute("""
-                INSERT INTO carts (phone, bot_number, cart_data, updated_at, restaurant_id)
-                VALUES ($1, $2, $3::jsonb, NOW(), current_setting('app.restaurant_id', true)::int)
+                INSERT INTO carts (phone, bot_number, cart_data, updated_at, org_id)
+                VALUES ($1, $2, $3::jsonb, NOW(), NULLIF(current_setting('app.org_id', true), '')::bigint)
                 ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data=EXCLUDED.cart_data, updated_at=NOW()
             """, phone, to_bot_number, row["cart_data"])
             await conn.execute("DELETE FROM carts WHERE phone=$1 AND bot_number=$2", phone, from_bot_number)

@@ -127,7 +127,7 @@ async def _record_attendance_deduction(
     deduction_amount = quantize_money(money_mul(Decimal(minutes_diff) / Decimal("60"), hourly_rate))
     await conn.execute(
         """INSERT INTO attendance_deductions
-           (shift_id, staff_id, restaurant_id, type, scheduled_time,
+           (shift_id, staff_id, org_id, type, scheduled_time,
             actual_time, minutes_diff, deduction_amount)
            VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)""",
         shift_id, staff_id, restaurant_id, deduction_type,
@@ -188,9 +188,9 @@ async def db_get_staff(restaurant_id: int) -> list:
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
-            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
+            "SELECT id::text, org_id, name, username, role, roles, active, phone, "
             "document_number, created_at, updated_at FROM staff "
-            "WHERE restaurant_id=$1 ORDER BY name ASC",
+            "WHERE org_id=$1 ORDER BY name ASC",
             restaurant_id,
         )
     return [_serialize(dict(r)) for r in rows]
@@ -204,7 +204,7 @@ async def db_get_team_staff_by_branch(restaurant_id: int) -> list:
     async with tenant_connection() as conn:
         rows = await conn.fetch(
             "SELECT id::text, name, role, roles, phone, active "
-            "FROM staff WHERE restaurant_id=$1 ORDER BY name ASC",
+            "FROM staff WHERE org_id=$1 ORDER BY name ASC",
             restaurant_id,
         )
     result = []
@@ -224,9 +224,9 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
+            "SELECT id::text, org_id, name, username, role, roles, active, phone, pin, "
             "document_number, hourly_rate, photo_url "
-            "FROM staff WHERE restaurant_id=$1 "
+            "FROM staff WHERE org_id=$1 "
             "AND (LOWER(username)=LOWER($2) OR LOWER(name)=LOWER($2)) AND active=true",
             restaurant_id, name,
         )
@@ -246,10 +246,10 @@ async def db_get_staff_candidates_by_name(name: str) -> list:
     with bypass_tenant_scope("staff_pin_login_cross_tenant: name/username may exist in multiple tenants; caller in auth.py resolves tenant after PIN verification"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
-                "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, pin, "
+                "SELECT id::text, org_id, name, username, role, roles, active, phone, pin, "
                 "document_number, hourly_rate "
                 "FROM staff WHERE (LOWER(name)=LOWER($1) OR LOWER(username)=LOWER($1)) AND active=true "
-                "ORDER BY restaurant_id",
+                "ORDER BY org_id",
                 name,
             )
     result = []
@@ -281,9 +281,9 @@ async def db_create_staff(
         username = await _generate_username(name)
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO staff (restaurant_id, name, username, role, pin, phone, roles, document_number)
+            """INSERT INTO staff (org_id, name, username, role, pin, phone, roles, document_number)
                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-               RETURNING id::text, restaurant_id, name, username, role, roles, active, phone,
+               RETURNING id::text, org_id, name, username, role, roles, active, phone,
                          document_number, created_at, updated_at""",
             restaurant_id, name, username, role, pin_hash, phone, json.dumps(roles), document_number,
         )
@@ -323,8 +323,8 @@ async def db_update_staff(staff_id: str, restaurant_id: int, fields: dict) -> di
 
         sql = (
             f"UPDATE staff SET {', '.join(set_parts)}, updated_at=NOW() "
-            f"WHERE id=$1::uuid AND restaurant_id=$2 "
-            f"RETURNING id::text, restaurant_id, name, username, role, roles, active, phone, "
+            f"WHERE id=$1::uuid AND org_id=$2 "
+            f"RETURNING id::text, org_id, name, username, role, roles, active, phone, "
             f"document_number, created_at, updated_at"
         )
         row = await conn.fetchrow(sql, staff_id, restaurant_id, *values)
@@ -338,7 +338,7 @@ async def db_delete_staff(staff_id: str, restaurant_id: int) -> bool:
     """
     async with tenant_connection() as conn:
         result = await conn.execute(
-            "DELETE FROM staff WHERE id=$1::uuid AND restaurant_id=$2",
+            "DELETE FROM staff WHERE id=$1::uuid AND org_id=$2",
             staff_id, restaurant_id,
         )
     return result.split()[-1] != "0"  # "DELETE N" → True si N > 0
@@ -361,9 +361,9 @@ async def db_clock_in(staff_id: str, restaurant_id: int) -> dict:
     async with tenant_connection() as conn:
         try:
             row = await conn.fetchrow(
-                """INSERT INTO staff_shifts (staff_id, restaurant_id)
+                """INSERT INTO staff_shifts (staff_id, org_id)
                    VALUES ($1::uuid, $2)
-                   RETURNING id::text, staff_id::text, restaurant_id,
+                   RETURNING id::text, staff_id::text, org_id,
                              clock_in, clock_out, notes, created_at""",
                 staff_id, restaurant_id,
             )
@@ -420,9 +420,9 @@ async def db_clock_out(staff_id: str, restaurant_id: int) -> dict | None:
             """UPDATE staff_shifts
                SET clock_out = NOW()
                WHERE staff_id = $1::uuid
-                 AND restaurant_id = $2
+                 AND org_id = $2
                  AND clock_out IS NULL
-               RETURNING id::text, staff_id::text, restaurant_id,
+               RETURNING id::text, staff_id::text, org_id,
                          clock_in, clock_out, notes, created_at""",
             staff_id, restaurant_id,
         )
@@ -474,7 +474,7 @@ async def db_get_open_shifts(restaurant_id: int) -> list:
                       s.name AS staff_name, s.role AS staff_role
                FROM staff_shifts ss
                JOIN staff s ON ss.staff_id = s.id
-               WHERE ss.restaurant_id=$1 AND ss.clock_out IS NULL
+               WHERE ss.org_id=$1 AND ss.clock_out IS NULL
                ORDER BY ss.clock_in ASC""",
             restaurant_id,
         )
@@ -511,7 +511,7 @@ async def db_get_shifts(
                       )) / 3600.0 AS hours_worked
                FROM staff_shifts ss
                JOIN staff s ON ss.staff_id = s.id
-               WHERE ss.restaurant_id=$1
+               WHERE ss.org_id=$1
                  AND ss.clock_in >= $2
                  AND ss.clock_in <  $3
                ORDER BY ss.clock_in DESC""",
@@ -583,7 +583,7 @@ async def db_calculate_tip_pool(
                 ) AS effective_hours
             FROM staff_shifts ss
             JOIN staff s ON ss.staff_id = s.id
-            WHERE ss.restaurant_id = $1
+            WHERE ss.org_id = $1
               AND ss.clock_in  < $3::timestamptz
               AND (ss.clock_out > $2::timestamptz OR ss.clock_out IS NULL)
             GROUP BY ss.staff_id, s.name, s.role
@@ -709,7 +709,7 @@ async def db_calculate_tips_by_attendance(
                 """SELECT ss.staff_id::text, s.name, s.role
                    FROM staff_shifts ss
                    JOIN staff s ON s.id = ss.staff_id
-                   WHERE ss.restaurant_id = ANY($1::int[])
+                   WHERE ss.org_id = ANY($1::int[])
                      AND ss.clock_in <= $2
                      AND (ss.clock_out IS NULL OR ss.clock_out >= $2)
                      AND s.role = ANY($3::text[])""",
@@ -778,11 +778,11 @@ async def db_save_tip_distribution(
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO tip_distributions
-               (restaurant_id, period_start, period_end,
+               (org_id, period_start, period_end,
                 total_tips, distribution, pct_config, created_by)
                VALUES ($1, $2, $3,
                        $4, $5::jsonb, $6::jsonb, $7)
-               RETURNING id::text, restaurant_id, period_start, period_end,
+               RETURNING id::text, org_id, period_start, period_end,
                          total_tips, distribution, pct_config, created_by, created_at""",
             restaurant_id,
             _ensure_datetime(period_start),
@@ -802,10 +802,10 @@ async def db_get_tip_distributions(restaurant_id: int, limit: int = 20) -> list:
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id::text, restaurant_id, period_start, period_end,
+            """SELECT id::text, org_id, period_start, period_end,
                       total_tips, distribution, pct_config, created_by, created_at
                FROM tip_distributions
-               WHERE restaurant_id=$1
+               WHERE org_id=$1
                ORDER BY created_at DESC
                LIMIT $2""",
             restaurant_id, limit,
@@ -870,7 +870,7 @@ async def db_get_webauthn_credentials_by_restaurant(restaurant_id: int) -> list:
                       wc.sign_count, wc.transports, wc.device_name, s.name AS staff_name
                FROM webauthn_credentials wc
                JOIN staff s ON wc.staff_id = s.id
-               WHERE s.restaurant_id = $1 AND s.active = TRUE
+               WHERE s.org_id = $1 AND s.active = TRUE
                ORDER BY wc.created_at DESC""",
             restaurant_id,
         )
@@ -886,7 +886,7 @@ async def db_get_webauthn_credential(credential_id: str) -> dict | None:
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 """SELECT wc.id::text, wc.staff_id::text, wc.credential_id, wc.public_key,
-                          wc.sign_count, wc.transports, s.restaurant_id, s.name AS staff_name
+                          wc.sign_count, wc.transports, s.org_id, s.name AS staff_name
                    FROM webauthn_credentials wc
                    JOIN staff s ON wc.staff_id = s.id
                    WHERE wc.credential_id = $1""",
@@ -934,7 +934,7 @@ async def db_save_webauthn_challenge(
     """
     async with tenant_connection() as conn:
         await conn.execute(
-            """INSERT INTO webauthn_challenges (challenge, staff_id, type, restaurant_id)
+            """INSERT INTO webauthn_challenges (challenge, staff_id, type, org_id)
                VALUES ($1, $2, $3, $4)""",
             challenge, staff_id, challenge_type, restaurant_id,
         )
@@ -951,7 +951,7 @@ async def db_consume_webauthn_challenge(challenge: str) -> dict | None:
                 """DELETE FROM webauthn_challenges
                    WHERE challenge = $1
                      AND created_at > NOW() - INTERVAL '5 minutes'
-                   RETURNING id::text, challenge, staff_id::text, type, restaurant_id""",
+                   RETURNING id::text, challenge, staff_id::text, type, org_id""",
                 challenge,
             )
     return _serialize(dict(row)) if row else None
@@ -1063,9 +1063,9 @@ async def db_upsert_schedule(
         )
         row = await conn.fetchrow(
             """INSERT INTO staff_schedules
-                   (staff_id, restaurant_id, day_of_week, start_time, end_time)
+                   (staff_id, org_id, day_of_week, start_time, end_time)
                VALUES ($1::uuid, $2, $3, $4, $5)
-               RETURNING id::text, staff_id::text, restaurant_id,
+               RETURNING id::text, staff_id::text, org_id,
                          day_of_week, start_time::text, end_time::text, active""",
             staff_id, restaurant_id, day_of_week, start_time, end_time,
         )
@@ -1088,9 +1088,9 @@ async def db_bulk_upsert_schedules(
                 entry["staff_id"], entry["day_of_week"],
             )
             row = await conn.fetchrow(
-                """INSERT INTO staff_schedules (staff_id, restaurant_id, day_of_week, start_time, end_time)
+                """INSERT INTO staff_schedules (staff_id, org_id, day_of_week, start_time, end_time)
                    VALUES ($1::uuid, $2, $3, $4, $5)
-                   RETURNING id::text, staff_id::text, restaurant_id, day_of_week,
+                   RETURNING id::text, staff_id::text, org_id, day_of_week,
                              start_time::text, end_time::text""",
                 entry["staff_id"], restaurant_id, entry["day_of_week"],
                 entry["start_time"], entry["end_time"],
@@ -1112,7 +1112,7 @@ async def db_get_schedules(restaurant_id: int) -> list:
                       ss.start_time::text, ss.end_time::text, ss.active
                FROM staff_schedules ss
                JOIN staff s ON ss.staff_id = s.id
-               WHERE ss.restaurant_id = $1 AND ss.active = TRUE
+               WHERE ss.org_id = $1 AND ss.active = TRUE
                ORDER BY s.name, ss.day_of_week""",
             restaurant_id,
         )
@@ -1167,8 +1167,8 @@ async def db_edit_shift(
     params.append(restaurant_id)
     query = (
         f"UPDATE staff_shifts SET {', '.join(parts)} "
-        f"WHERE id = ${idx}::uuid AND restaurant_id = ${idx + 1} "
-        "RETURNING id::text, staff_id::text, restaurant_id, clock_in, clock_out, notes"
+        f"WHERE id = ${idx}::uuid AND org_id = ${idx + 1} "
+        "RETURNING id::text, staff_id::text, org_id, clock_in, clock_out, notes"
     )
     async with tenant_connection() as conn:
         row = await conn.fetchrow(query, *params)
@@ -1207,7 +1207,7 @@ async def db_get_timecard(
                  ), 0) AS break_hours
                FROM staff_shifts ss
                JOIN staff s ON ss.staff_id = s.id
-               WHERE ss.restaurant_id = $1
+               WHERE ss.org_id = $1
                  AND ss.clock_in >= $2::timestamptz
                  AND ss.clock_in <  $3::timestamptz
                GROUP BY ss.staff_id, s.name, s.role, DATE(ss.clock_in)
@@ -1287,7 +1287,7 @@ async def db_get_attendance_report(
                  ON sch.staff_id    = ss.staff_id
                 AND sch.day_of_week = EXTRACT(ISODOW FROM ss.clock_in)::int - 1
                 AND sch.active      = TRUE
-               WHERE ss.restaurant_id = $1
+               WHERE ss.org_id = $1
                  AND ss.clock_in >= $2::timestamptz
                  AND ss.clock_in <  $3::timestamptz
                ORDER BY ss.clock_in DESC""",
@@ -1331,10 +1331,10 @@ async def db_list_deduction_items(staff_id: str, restaurant_id: int) -> list:
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id::text, staff_id::text, restaurant_id, category, label,
+            """SELECT id::text, staff_id::text, org_id, category, label,
                       type, amount, active, created_at
                FROM staff_deduction_items
-               WHERE staff_id=$1::uuid AND restaurant_id=$2
+               WHERE staff_id=$1::uuid AND org_id=$2
                ORDER BY created_at ASC""",
             staff_id, restaurant_id,
         )
@@ -1356,9 +1356,9 @@ async def db_create_deduction_item(
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO staff_deduction_items
-               (staff_id, restaurant_id, category, label, type, amount)
+               (staff_id, org_id, category, label, type, amount)
                VALUES ($1::uuid, $2, $3, $4, $5, $6)
-               RETURNING id::text, staff_id::text, restaurant_id, category, label,
+               RETURNING id::text, staff_id::text, org_id, category, label,
                          type, amount, active, created_at""",
             staff_id, restaurant_id, category, label, item_type, to_decimal(amount),
         )
@@ -1387,8 +1387,8 @@ async def db_update_deduction_item(
         idx += 1
     sql = (
         f"UPDATE staff_deduction_items SET {', '.join(set_parts)} "
-        f"WHERE id=$1::uuid AND restaurant_id=$2 "
-        f"RETURNING id::text, staff_id::text, restaurant_id, category, label, "
+        f"WHERE id=$1::uuid AND org_id=$2 "
+        f"RETURNING id::text, staff_id::text, org_id, category, label, "
         f"type, amount, active, created_at"
     )
     async with tenant_connection() as conn:
@@ -1403,7 +1403,7 @@ async def db_delete_deduction_item(item_id: str, restaurant_id: int) -> bool:
     """
     async with tenant_connection() as conn:
         result = await conn.execute(
-            "DELETE FROM staff_deduction_items WHERE id=$1::uuid AND restaurant_id=$2",
+            "DELETE FROM staff_deduction_items WHERE id=$1::uuid AND org_id=$2",
             item_id, restaurant_id,
         )
     return result.split()[-1] != "0"
@@ -1442,7 +1442,7 @@ async def db_calculate_payroll(
     async with tenant_connection() as conn:
         staff_rows = await conn.fetch(
             """SELECT id::text, name, role, hourly_rate, deductions
-               FROM staff WHERE restaurant_id = $1 AND active = TRUE""",
+               FROM staff WHERE org_id = $1 AND active = TRUE""",
             restaurant_id,
         )
 
@@ -1525,10 +1525,10 @@ async def db_save_payroll_run(
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO payroll_runs
-                   (restaurant_id, period_start, period_end,
+                   (org_id, period_start, period_end,
                     snapshot, config, total_gross, total_net, created_by)
                VALUES ($1, $2::date, $3::date, $4::jsonb, $5::jsonb, $6, $7, $8)
-               RETURNING id::text, restaurant_id, period_start, period_end,
+               RETURNING id::text, org_id, period_start, period_end,
                          status, total_gross, total_net, created_by, created_at""",
             restaurant_id, period_start, period_end,
             json.dumps(snapshot), json.dumps(config),
@@ -1544,10 +1544,10 @@ async def db_get_payroll_runs(restaurant_id: int, limit: int = 20) -> list:
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id::text, restaurant_id, period_start, period_end,
+            """SELECT id::text, org_id, period_start, period_end,
                       status, total_gross, total_net, created_by, created_at, approved_at
                FROM payroll_runs
-               WHERE restaurant_id = $1
+               WHERE org_id = $1
                ORDER BY created_at DESC
                LIMIT $2""",
             restaurant_id, limit,
@@ -1562,11 +1562,11 @@ async def db_get_payroll_run(run_id: str, restaurant_id: int) -> dict | None:
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT id::text, restaurant_id, period_start, period_end,
+            """SELECT id::text, org_id, period_start, period_end,
                       status, snapshot, config, total_gross, total_net,
                       created_by, created_at, approved_at
                FROM payroll_runs
-               WHERE id = $1::uuid AND restaurant_id = $2""",
+               WHERE id = $1::uuid AND org_id = $2""",
             run_id, restaurant_id,
         )
     return _serialize(dict(row)) if row else None
@@ -1581,7 +1581,7 @@ async def db_approve_payroll_run(run_id: str, restaurant_id: int) -> dict | None
         row = await conn.fetchrow(
             """UPDATE payroll_runs
                SET status = 'approved', approved_at = NOW()
-               WHERE id = $1::uuid AND restaurant_id = $2 AND status = 'draft'
+               WHERE id = $1::uuid AND org_id = $2 AND status = 'draft'
                RETURNING id::text, status, approved_at""",
             run_id, restaurant_id,
         )
@@ -1597,12 +1597,12 @@ async def db_list_contract_templates(restaurant_id: int) -> list:
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id::text, restaurant_id, name, weekly_hours, monthly_salary,
+            """SELECT id::text, org_id, name, weekly_hours, monthly_salary,
                       pay_period, transport_subsidy, arl_pct, health_pct, pension_pct,
                       other_benefits, breaks_billable, lunch_billable, lunch_minutes,
                       active, created_at
                FROM contract_templates
-               WHERE restaurant_id = $1
+               WHERE org_id = $1
                ORDER BY active DESC, name""",
             restaurant_id,
         )
@@ -1617,11 +1617,11 @@ async def db_create_contract_template(restaurant_id: int, data: dict) -> dict:
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO contract_templates
-               (restaurant_id, name, weekly_hours, monthly_salary, pay_period,
+               (org_id, name, weekly_hours, monthly_salary, pay_period,
                 transport_subsidy, arl_pct, health_pct, pension_pct,
                 other_benefits, breaks_billable, lunch_billable, lunch_minutes)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-               RETURNING id::text, restaurant_id, name, weekly_hours, monthly_salary,
+               RETURNING id::text, org_id, name, weekly_hours, monthly_salary,
                          pay_period, transport_subsidy, arl_pct, health_pct, pension_pct,
                          other_benefits, breaks_billable, lunch_billable, lunch_minutes,
                          active, created_at""",
@@ -1664,8 +1664,8 @@ async def db_update_contract_template(template_id: str, restaurant_id: int, data
         idx += 1
     sql = (
         f"UPDATE contract_templates SET {', '.join(set_parts)} "
-        f"WHERE id=$1::uuid AND restaurant_id=$2 "
-        f"RETURNING id::text, restaurant_id, name, weekly_hours, monthly_salary, pay_period, "
+        f"WHERE id=$1::uuid AND org_id=$2 "
+        f"RETURNING id::text, org_id, name, weekly_hours, monthly_salary, pay_period, "
         f"transport_subsidy, arl_pct, health_pct, pension_pct, other_benefits, "
         f"breaks_billable, lunch_billable, lunch_minutes, active, created_at"
     )
@@ -1687,7 +1687,7 @@ async def db_delete_contract_template(template_id: str, restaurant_id: int) -> b
         if in_use:
             return False
         result = await conn.execute(
-            "DELETE FROM contract_templates WHERE id=$1::uuid AND restaurant_id=$2",
+            "DELETE FROM contract_templates WHERE id=$1::uuid AND org_id=$2",
             template_id, restaurant_id,
         )
     return result.split()[-1] != "0"
@@ -1710,7 +1710,7 @@ async def db_assign_staff_contract(
                SET contract_template_id = $1::uuid,
                    contract_overrides   = $2::jsonb,
                    contract_start       = $3::date
-               WHERE id = $4::uuid AND restaurant_id = $5
+               WHERE id = $4::uuid AND org_id = $5
                RETURNING id::text, name, role, contract_template_id::text,
                          contract_overrides, contract_start""",
             template_id,
@@ -1733,7 +1733,7 @@ async def db_list_overtime_requests(
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    clauses = ["o.restaurant_id = $1"]
+    clauses = ["o.org_id = $1"]
     values: list = [restaurant_id]
     idx = 2
     if week_start:
@@ -1748,7 +1748,7 @@ async def db_list_overtime_requests(
     async with tenant_connection() as conn:
         rows = await conn.fetch(
             f"""SELECT o.id::text, o.staff_id::text, s.name AS staff_name, s.role,
-                       o.restaurant_id, o.week_start, o.regular_minutes,
+                       o.org_id, o.week_start, o.regular_minutes,
                        o.overtime_minutes, o.overtime_rate, o.status,
                        o.approved_by::text, o.approved_at, o.notes, o.created_at
                 FROM overtime_requests o
@@ -1775,14 +1775,14 @@ async def db_upsert_overtime_request(
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO overtime_requests
-               (staff_id, restaurant_id, week_start, regular_minutes, overtime_minutes, overtime_rate)
+               (staff_id, org_id, week_start, regular_minutes, overtime_minutes, overtime_rate)
                VALUES ($1::uuid, $2, $3::date, $4, $5, $6)
                ON CONFLICT (staff_id, week_start) DO UPDATE
                  SET regular_minutes  = EXCLUDED.regular_minutes,
                      overtime_minutes = EXCLUDED.overtime_minutes,
                      overtime_rate    = EXCLUDED.overtime_rate,
                      status           = 'pending'
-               RETURNING id::text, staff_id::text, restaurant_id, week_start,
+               RETURNING id::text, staff_id::text, org_id, week_start,
                          regular_minutes, overtime_minutes, overtime_rate, status, created_at""",
             staff_id, restaurant_id, week_start,
             regular_minutes, overtime_minutes, to_decimal(overtime_rate),
@@ -1805,8 +1805,8 @@ async def db_review_overtime_request(
         row = await conn.fetchrow(
             """UPDATE overtime_requests
                SET status=$3, approved_by=$4::uuid, approved_at=NOW(), notes=$5
-               WHERE id=$1::uuid AND restaurant_id=$2
-               RETURNING id::text, staff_id::text, restaurant_id, week_start,
+               WHERE id=$1::uuid AND org_id=$2
+               RETURNING id::text, staff_id::text, org_id, week_start,
                          regular_minutes, overtime_minutes, overtime_rate,
                          status, approved_by::text, approved_at, notes""",
             request_id, restaurant_id, status,
@@ -1825,9 +1825,9 @@ async def db_get_staff_restaurant_id(staff_id: str) -> int | None:
     with bypass_tenant_scope("staff_self_service_restaurant_id: UUID from verified staff JWT; needed to resolve tenant before entering tenant_scope in caller"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
-                "SELECT restaurant_id FROM staff WHERE id=$1::uuid", staff_id
+                "SELECT org_id FROM staff WHERE id=$1::uuid", staff_id
             )
-    return row["restaurant_id"] if row else None
+    return row["org_id"] if row else None
 
 
 async def db_get_staff_profile(staff_id: str) -> dict | None:
@@ -1838,7 +1838,7 @@ async def db_get_staff_profile(staff_id: str) -> dict | None:
     with bypass_tenant_scope("staff_self_service_profile: UUID from verified staff JWT in sessions_repo; staff can only read their own row"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
-                "SELECT id::text, restaurant_id, name, username, role, roles, active, phone, "
+                "SELECT id::text, org_id, name, username, role, roles, active, phone, "
                 "document_number, hourly_rate, photo_url FROM staff WHERE id=$1::uuid",
                 staff_id,
             )
@@ -1959,7 +1959,7 @@ async def db_get_active_staff_basic(staff_id: str) -> dict | None:
     with bypass_tenant_scope("staff_self_service_basic: UUID from verified staff JWT; used by WebAuthn register-options before restaurant scope is known"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
-                "SELECT id::text, name, restaurant_id FROM staff WHERE id = $1::uuid AND active = TRUE",
+                "SELECT id::text, name, org_id FROM staff WHERE id = $1::uuid AND active = TRUE",
                 staff_id,
             )
     return dict(row) if row else None
@@ -1972,7 +1972,7 @@ async def db_has_staff(restaurant_id: int) -> bool:
     """
     async with tenant_connection() as conn:
         exists = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM staff WHERE restaurant_id = $1 LIMIT 1)",
+            "SELECT EXISTS(SELECT 1 FROM staff WHERE org_id = $1 LIMIT 1)",
             restaurant_id,
         )
     return bool(exists)

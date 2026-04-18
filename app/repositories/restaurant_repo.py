@@ -205,13 +205,27 @@ async def db_delete_user(username: str) -> None:
 async def db_set_restaurant_wa_credentials(
     whatsapp_number: str, wa_phone_id: str, wa_access_token: str
 ) -> None:
-    """Persist wa_phone_id + wa_access_token right after restaurant creation."""
+    """Persist wa_phone_id + wa_access_token right after restaurant creation.
+
+    Targets organizations first (default number), then falls back to locations
+    (override number for multi-number chains).
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            """UPDATE restaurants
+        # Try organization-level number first
+        updated_org = await conn.execute(
+            """UPDATE organizations
                SET wa_phone_id = $1, wa_access_token = $2
-               WHERE whatsapp_number = $3""",
+               WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') =
+                     replace(replace($3, '+', ''), ' ', '')""",
+            wa_phone_id, wa_access_token, whatsapp_number,
+        )
+        # Also update location-level override if this number is a location override
+        await conn.execute(
+            """UPDATE locations
+               SET wa_phone_id = $1, wa_access_token = $2
+               WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') =
+                     replace(replace($3, '+', ''), ' ', '')""",
             wa_phone_id, wa_access_token, whatsapp_number,
         )
 
@@ -231,31 +245,59 @@ async def db_update_restaurant_fields(
 ) -> None:
     """
     Update any subset of restaurant fields atomically.
-    Each non-None kwarg is applied as a separate UPDATE statement within one connection.
+    Each non-None kwarg is routed to organizations or locations depending on column ownership.
+    restaurant_id is a Location id (via the VIEW); org-level fields resolve via subquery.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _tenant_connection() as conn:
-        if name is not None:
-            await conn.execute("UPDATE restaurants SET name=$1 WHERE id=$2", name, restaurant_id)
+        # --- Location-level fields ---
         if address is not None and latitude is not None and longitude is not None:
             await conn.execute(
-                "UPDATE restaurants SET address=$1, latitude=$2, longitude=$3 WHERE id=$4",
+                "UPDATE locations SET address=$1, latitude=$2, longitude=$3 WHERE id=$4",
                 address, latitude, longitude, restaurant_id,
             )
+        # --- Org-level name (update both: org.name for Matriz, loc.name for branches) ---
+        if name is not None:
+            await conn.execute("UPDATE locations SET name=$1 WHERE id=$2", name, restaurant_id)
+            await conn.execute(
+                """UPDATE organizations SET name=$1
+                   WHERE id = (SELECT org_id FROM locations WHERE id=$2 AND is_primary)""",
+                name, restaurant_id,
+            )
+        # --- Org-level default credential fields ---
         if whatsapp_number is not None:
-            await conn.execute("UPDATE restaurants SET whatsapp_number=$1 WHERE id=$2", whatsapp_number, restaurant_id)
+            await conn.execute(
+                """UPDATE organizations SET whatsapp_number=$1
+                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
+                whatsapp_number, restaurant_id,
+            )
         if wa_phone_id is not None:
-            await conn.execute("UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2", wa_phone_id, restaurant_id)
+            await conn.execute(
+                """UPDATE organizations SET wa_phone_id=$1
+                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
+                wa_phone_id, restaurant_id,
+            )
         if wa_access_token is not None:
-            await conn.execute("UPDATE restaurants SET wa_access_token=$1 WHERE id=$2", wa_access_token, restaurant_id)
+            await conn.execute(
+                """UPDATE organizations SET wa_access_token=$1
+                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
+                wa_access_token, restaurant_id,
+            )
         if features is not None:
             await conn.execute(
-                "UPDATE restaurants SET features=$1::jsonb WHERE id=$2",
-                features, restaurant_id,
+                """UPDATE organizations SET features=$1::jsonb
+                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
+                _json.dumps(features) if isinstance(features, dict) else features,
+                restaurant_id,
             )
         if menu is not None:
-            await conn.execute("UPDATE restaurants SET menu=$1::jsonb WHERE id=$2", menu, restaurant_id)
+            await conn.execute(
+                """UPDATE organizations SET menu=$1::jsonb
+                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
+                _json.dumps(menu) if isinstance(menu, dict) else menu,
+                restaurant_id,
+            )
 
 
 # ── Restaurant detail stats (superadmin dashboard) ───────────────────────────
@@ -390,21 +432,25 @@ async def db_save_restaurant_settings(
     Persist restaurant features JSONB and optionally update lat/lon.
     Called from POST /api/settings.
 
+    features → organizations (org-level config).
+    lat/lon  → locations (physical address of the location).
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _tenant_connection() as conn:
         await conn.execute(
-            "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
+            """UPDATE organizations SET features = $1::jsonb
+               WHERE id = (SELECT org_id FROM locations WHERE id = $2)""",
             _json.dumps(features), restaurant_id,
         )
         try:
             if latitude is not None:
                 await conn.execute(
-                    "UPDATE restaurants SET latitude=$1 WHERE id=$2", latitude, restaurant_id
+                    "UPDATE locations SET latitude=$1 WHERE id=$2", latitude, restaurant_id
                 )
             if longitude is not None:
                 await conn.execute(
-                    "UPDATE restaurants SET longitude=$1 WHERE id=$2", longitude, restaurant_id
+                    "UPDATE locations SET longitude=$1 WHERE id=$2", longitude, restaurant_id
                 )
         except (ValueError, TypeError):
             pass
@@ -414,18 +460,34 @@ async def db_update_restaurant_owner_phone(
     restaurant_id: int,
     phone: str | None,
 ) -> None:
-    """Set or clear the owner_phone column for weekly reports delivery.
+    """Set or clear the owner_phone for weekly reports delivery.
 
-    Pass None or empty string to clear the phone (set NULL).
+    owner_phone is not a column in the VIEW (it was a legacy restaurants column).
+    It is stored inside organizations.features as features->>'owner_phone' so that
+    scheduler.py can read it via restaurant.get("features", {}).get("owner_phone").
+
+    Pass None or empty string to clear the phone (removes the key from features).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _tenant_connection() as conn:
-        await conn.execute(
-            "UPDATE restaurants SET owner_phone = $1 WHERE id = $2",
-            phone or None,
-            restaurant_id,
-        )
+        if phone:
+            # Merge the owner_phone key into the existing features JSONB
+            await conn.execute(
+                """UPDATE organizations
+                   SET features = COALESCE(features, '{}'::jsonb) || jsonb_build_object('owner_phone', $1::text)
+                   WHERE id = (SELECT org_id FROM locations WHERE id = $2)""",
+                phone,
+                restaurant_id,
+            )
+        else:
+            # Remove the key to clear it
+            await conn.execute(
+                """UPDATE organizations
+                   SET features = COALESCE(features, '{}'::jsonb) - 'owner_phone'
+                   WHERE id = (SELECT org_id FROM locations WHERE id = $1)""",
+                restaurant_id,
+            )
 
 
 async def db_update_restaurant_timezone(
@@ -434,11 +496,13 @@ async def db_update_restaurant_timezone(
 ) -> None:
     """Set the IANA timezone for the restaurant (used by scheduler and weekly reports).
 
+    timezone lives in locations (physical timezone of the location).
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _tenant_connection() as conn:
         await conn.execute(
-            "UPDATE restaurants SET timezone = $1 WHERE id = $2",
+            "UPDATE locations SET timezone = $1 WHERE id = $2",
             timezone,
             restaurant_id,
         )
@@ -458,9 +522,9 @@ async def db_merge_restaurant_features(
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
             """
-            UPDATE restaurants
+            UPDATE organizations
                SET features = COALESCE(features, '{}'::jsonb) || $2::jsonb
-             WHERE id = $1
+             WHERE id = (SELECT org_id FROM locations WHERE id = $1)
             RETURNING features
             """,
             restaurant_id,
@@ -668,39 +732,68 @@ async def db_set_branch_parent(
     wa_phone_id: str,
     wa_access_token: str,
 ) -> None:
-    """Link a newly created restaurant to its parent (branch creation flow)."""
+    """Link a newly created location to its org (branch creation flow).
+
+    parent_restaurant_id is a location id (VIEW). We resolve the org_id from it,
+    then assign the new location (looked up by whatsapp_number) to the same org.
+    wa_phone_id and wa_access_token are branch-level overrides → locations.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE restaurants
-            SET parent_restaurant_id = $1,
-                wa_phone_id = $3,
-                wa_access_token = $4
-            WHERE whatsapp_number = $2
-            """,
-            parent_restaurant_id,
-            whatsapp_number,
-            wa_phone_id,
-            wa_access_token,
-        )
+        async with conn.transaction():
+            # Resolve the org_id from the parent location id
+            org_id = await conn.fetchval(
+                "SELECT org_id FROM locations WHERE id = $1",
+                parent_restaurant_id,
+            )
+            if org_id is None:
+                log.warning(
+                    "db_set_branch_parent.parent_not_found",
+                    parent_restaurant_id=parent_restaurant_id,
+                    whatsapp_number=whatsapp_number,
+                )
+                return
+            # Update the branch location: assign to same org, set wa credentials
+            await conn.execute(
+                """UPDATE locations
+                   SET org_id = $1, wa_phone_id = $2, wa_access_token = $3
+                   WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') =
+                         replace(replace($4, '+', ''), ' ', '')""",
+                org_id,
+                wa_phone_id,
+                wa_access_token,
+                whatsapp_number,
+            )
 
 
 async def db_delete_branch(branch_id: int, parent_restaurant_id: int) -> bool:
     """
-    Verify the branch belongs to the parent, then delete its users and restaurant row.
+    Verify the branch belongs to the same org as the parent, then delete its location row.
+    Users linked to this branch (by branch_id) have their branch_id nulled automatically
+    via CASCADE if the FK is set, or are updated explicitly here to avoid orphans.
     Returns False if not found / not owned.
+
+    Only non-primary locations can be deleted this way (primary = Matriz; the route
+    already blocks deleting the Matriz before calling this function).
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        is_my_branch = await conn.fetchval(
-            "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
-            branch_id, parent_restaurant_id,
-        )
-        if not is_my_branch:
-            return False
-        await conn.execute("DELETE FROM users WHERE branch_id=$1", branch_id)
-        await conn.execute("DELETE FROM restaurants WHERE id=$1", branch_id)
+        async with conn.transaction():
+            # Verify branch belongs to the same org as parent, and is NOT primary
+            branch_row = await conn.fetchrow(
+                """SELECT l.id, l.org_id, l.is_primary
+                   FROM locations l
+                   WHERE l.id = $1
+                     AND l.org_id = (SELECT org_id FROM locations WHERE id = $2)
+                     AND l.is_primary = false""",
+                branch_id, parent_restaurant_id,
+            )
+            if not branch_row:
+                return False
+            # Nullify users referencing this branch to avoid FK errors
+            await conn.execute("UPDATE users SET branch_id=NULL WHERE branch_id=$1", branch_id)
+            # Delete the non-primary location
+            await conn.execute("DELETE FROM locations WHERE id=$1", branch_id)
     return True
 
 
@@ -912,49 +1005,79 @@ async def db_check_module(bot_number: str, module_name: str) -> bool:
 
 async def db_create_restaurant(name: str, whatsapp_number: str, address: str, menu: dict,
                                 latitude: float = None, longitude: float = None, features: dict = None):
+    """Create a new restaurant (organization + primary location).
+
+    Preserves legacy signature; internally creates an organization row and
+    a primary location row.  ON CONFLICT: if the whatsapp_number already belongs
+    to an organization, updates that org and its primary location instead.
+    """
     if features is None:
         features = {}
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        # 🛡️ FIX: Los diccionarios entran directo a asyncpg (sin json.dumps)
-        await conn.execute("""
-            INSERT INTO restaurants (name, whatsapp_number, address, menu, latitude, longitude, features)
-            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
-            ON CONFLICT (whatsapp_number) DO UPDATE
-            SET name=EXCLUDED.name, address=EXCLUDED.address, menu=EXCLUDED.menu,
-                latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, features=EXCLUDED.features
-        """, name, whatsapp_number, address, menu, latitude, longitude, features)
+        async with conn.transaction():
+            menu_json = _json.dumps(menu) if isinstance(menu, dict) else (menu or "[]")
+            features_json = _json.dumps(features) if isinstance(features, dict) else (features or "{}")
+            normalized_wa = _normalize_phone(whatsapp_number) if whatsapp_number else None
+
+            # Upsert organization
+            org_row = await conn.fetchrow(
+                """INSERT INTO organizations (name, whatsapp_number, menu, features)
+                   VALUES ($1, $2, $3::jsonb, $4::jsonb)
+                   ON CONFLICT (whatsapp_number) DO UPDATE
+                   SET name = EXCLUDED.name,
+                       menu = EXCLUDED.menu,
+                       features = EXCLUDED.features,
+                       updated_at = NOW()
+                   WHERE organizations.whatsapp_number IS NOT NULL
+                   RETURNING id""",
+                name, normalized_wa, menu_json, features_json,
+            )
+            if org_row is None:
+                # whatsapp_number is NULL — no conflict clause applies; just fetch
+                org_row = await conn.fetchrow(
+                    "SELECT id FROM organizations WHERE name=$1 ORDER BY id DESC LIMIT 1", name
+                )
+
+            org_id = org_row["id"]
+
+            # Upsert primary location
+            await conn.execute(
+                """INSERT INTO locations
+                       (org_id, name, code, address, latitude, longitude, active, is_primary, timezone)
+                   VALUES ($1, $2, 'principal', $3, $4, $5, true, true, 'America/Bogota')
+                   ON CONFLICT (org_id) WHERE is_primary DO UPDATE
+                   SET name = EXCLUDED.name,
+                       address = EXCLUDED.address,
+                       latitude = EXCLUDED.latitude,
+                       longitude = EXCLUDED.longitude,
+                       updated_at = NOW()""",
+                org_id, name, address, latitude, longitude,
+            )
 
 
 async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
     """
-    Sincroniza (sobrescribe) la columna 'menu' de todas las sucursales hijas
-    con el JSON exacto de la Casa Matriz.
-    Devuelve el número de sucursales actualizadas.
+    In the Org/Location model, menu lives on organizations and is shared by all
+    locations via the VIEW JOIN — there is no per-branch menu column to sync.
+
+    This function is retained for backward compatibility.  It returns the number
+    of sibling locations (branch count) so the caller can display a meaningful
+    count, but no database write is performed (the org menu was already updated
+    by db_update_menu or db_update_restaurant_fields).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _tenant_connection() as conn:
-        # 1. Obtener el menú de la matriz
-        parent = await conn.fetchrow("SELECT menu FROM restaurants WHERE id = $1", parent_restaurant_id)
-        if not parent or not parent["menu"]:
-            return 0
-
-        menu_jsonb = parent["menu"]
-
-        # 2. Hacer UPDATE masivo en las sucursales hijas
-        result = await conn.execute(
-            "UPDATE restaurants SET menu = $1 WHERE parent_restaurant_id = $2",
-            menu_jsonb, parent_restaurant_id
+        # Count sibling locations in the same org (excluding the primary/Matriz)
+        count = await conn.fetchval(
+            """SELECT COUNT(*)
+               FROM locations
+               WHERE org_id = (SELECT org_id FROM locations WHERE id = $1)
+                 AND is_primary = false""",
+            parent_restaurant_id,
         )
-
-        # El result de execute suele ser un string como "UPDATE 3"
-        try:
-            count = int(result.split()[-1])
-        except Exception:
-            count = 0
-
-        return count
+    return int(count or 0)
 
 
 async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
@@ -996,7 +1119,8 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
 
     async with _tenant_connection() as conn:
         result = await conn.execute(
-            "UPDATE restaurants SET menu = $1::jsonb WHERE id = $2",
+            """UPDATE organizations SET menu = $1::jsonb
+               WHERE id = (SELECT org_id FROM locations WHERE id = $2)""",
             json.dumps(menu_data, default=lambda o: float(o) if isinstance(o, Decimal) else str(o)), restaurant_id  # JSON boundary
         )
         return result == "UPDATE 1"
@@ -1141,9 +1265,16 @@ async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
 
 
 async def db_update_subscription(restaurant_id: int, new_status: str):
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    """Update subscription_status on the organizations table.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     async with _tenant_connection() as conn:
-        await conn.execute("UPDATE restaurants SET subscription_status=$2 WHERE id=$1", restaurant_id, new_status)
+        await conn.execute(
+            """UPDATE organizations SET subscription_status=$1
+               WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
+            new_status, restaurant_id,
+        )
 
 
 # ── Menu availability ─────────────────────────────────────────────────────────

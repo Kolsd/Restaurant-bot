@@ -146,7 +146,7 @@ async def db_save_occupancy_snapshot(
         await conn.execute(
             """
             INSERT INTO occupancy_snapshots
-                (restaurant_id, branch_id, total_tables, occupied_tables,
+                (org_id, branch_id, total_tables, occupied_tables,
                  total_capacity, seated_guests)
             VALUES ($1, $2, $3, $4, $5, $6)
             """,
@@ -187,7 +187,7 @@ async def db_get_occupancy_stats(
                              ELSE 0 END
                     ), 0)::float AS avg_utilization
                 FROM occupancy_snapshots
-                WHERE restaurant_id = $1
+                WHERE org_id = $1
                   AND branch_id = $2
                   AND snapshot_at >= $3::timestamptz
                   AND snapshot_at <= ($4::date + interval '1 day')::timestamptz
@@ -213,7 +213,7 @@ async def db_get_occupancy_stats(
                              ELSE 0 END
                     ), 0)::float AS avg_utilization
                 FROM occupancy_snapshots
-                WHERE restaurant_id = $1
+                WHERE org_id = $1
                   AND snapshot_at >= $2::timestamptz
                   AND snapshot_at <= ($3::date + interval '1 day')::timestamptz
                 """,

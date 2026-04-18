@@ -119,7 +119,7 @@ async def count_marketing_this_month(restaurant_id: int, tz_name: str) -> int:
             """
             SELECT COUNT(*)
             FROM marketing_messages_log
-            WHERE restaurant_id = $1
+            WHERE org_id  = $1
               AND status        = 'sent'
               AND sent_at       >= $2
               AND sent_at       <  $3
@@ -256,7 +256,7 @@ async def log_marketing_message(
         row_id = await conn.fetchval(
             """
             INSERT INTO marketing_messages_log
-                (restaurant_id, customer_phone, message_type, template_name,
+                (org_id, customer_phone, message_type, template_name,
                  message_body, cost_estimate_usd, status, error, meta_message_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
@@ -293,7 +293,7 @@ async def get_at_risk_customers(restaurant_id: int, limit: int = 50) -> list[dic
                 total_orders,
                 total_spent
             FROM customer_profiles
-            WHERE restaurant_id  = $1
+            WHERE org_id         = $1
               AND total_orders   >= $2
               AND last_seen      <  NOW() - MAKE_INTERVAL(days => $3)
             ORDER BY last_seen ASC
@@ -327,7 +327,7 @@ async def get_recent_marketing_messages(restaurant_id: int, limit: int = 50) -> 
                    message_body, sent_at, cost_estimate_usd, status,
                    error, meta_message_id
             FROM marketing_messages_log
-            WHERE restaurant_id = $1
+            WHERE org_id = $1
             ORDER BY sent_at DESC
             LIMIT $2
             """,

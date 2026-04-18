@@ -58,7 +58,7 @@ async def db_get_loyalty_balance(restaurant_id: int, phone: str) -> dict | None:
     await _ensure_loyalty_tables()
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT points_balance FROM loyalty_customers WHERE restaurant_id=$1 AND phone=$2",
+            "SELECT points_balance FROM loyalty_customers WHERE org_id=$1 AND phone=$2",
             restaurant_id, _normalize_phone(phone),
         )
         if not row:
@@ -88,19 +88,19 @@ async def db_accrue_loyalty_points(
         points = max(1, int(total_cop / 1000) * cfg["points_per_1k"])
         # Idempotencia: verificar si ya se procesó este order_id
         existing = await conn.fetchval(
-            "SELECT id FROM loyalty_ledger WHERE restaurant_id=$1 AND order_id=$2 AND delta > 0 LIMIT 1",
+            "SELECT id FROM loyalty_ledger WHERE org_id=$1 AND order_id=$2 AND delta > 0 LIMIT 1",
             restaurant_id, order_id,
         )
         if existing:
             return 0
         await conn.execute(
-            """INSERT INTO loyalty_ledger (restaurant_id, phone, delta, reason, order_id)
+            """INSERT INTO loyalty_ledger (org_id, phone, delta, reason, order_id)
                VALUES ($1, $2, $3, 'purchase', $4)""",
             restaurant_id, clean_phone, points, order_id,
         )
         await conn.execute(
-            """INSERT INTO loyalty_customers (restaurant_id, org_id, phone, points_balance, total_earned)
-               VALUES ($1, $1, $2, $3, $3)
+            """INSERT INTO loyalty_customers (org_id, phone, points_balance, total_earned)
+               VALUES ($1, $2, $3, $3)
                ON CONFLICT (org_id, phone) DO UPDATE
                SET points_balance = loyalty_customers.points_balance + $3,
                    total_earned   = loyalty_customers.total_earned   + $3,
@@ -131,7 +131,7 @@ async def db_redeem_loyalty_points(
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             "SELECT points_balance FROM loyalty_customers "
-            "WHERE restaurant_id=$1 AND phone=$2 FOR UPDATE",
+            "WHERE org_id=$1 AND phone=$2 FOR UPDATE",
             restaurant_id, clean_phone,
         )
         current = row["points_balance"] if row else 0
@@ -141,7 +141,7 @@ async def db_redeem_loyalty_points(
                 f"se intentaron canjear {points}"
             )
         await conn.execute(
-            """INSERT INTO loyalty_ledger (restaurant_id, phone, delta, reason, order_id)
+            """INSERT INTO loyalty_ledger (org_id, phone, delta, reason, order_id)
                VALUES ($1, $2, $3, 'redeem', $4)""",
             restaurant_id, clean_phone, -points, order_id,
         )
@@ -150,7 +150,7 @@ async def db_redeem_loyalty_points(
                SET points_balance = points_balance  - $3,
                    total_redeemed = total_redeemed  + $3,
                    updated_at     = NOW()
-               WHERE restaurant_id=$1 AND phone=$2
+               WHERE org_id=$1 AND phone=$2
                RETURNING points_balance""",
             restaurant_id, clean_phone, points,
         )
@@ -180,7 +180,7 @@ async def db_adjust_loyalty_points(
         if delta < 0:
             row = await conn.fetchrow(
                 "SELECT points_balance FROM loyalty_customers "
-                "WHERE restaurant_id=$1 AND phone=$2 FOR UPDATE",
+                "WHERE org_id=$1 AND phone=$2 FOR UPDATE",
                 restaurant_id, clean_phone,
             )
             current = row["points_balance"] if row else 0
@@ -190,14 +190,14 @@ async def db_adjust_loyalty_points(
                     f"({current} + {delta} = {current + delta})"
                 )
         await conn.execute(
-            """INSERT INTO loyalty_ledger (restaurant_id, phone, delta, reason)
+            """INSERT INTO loyalty_ledger (org_id, phone, delta, reason)
                VALUES ($1, $2, $3, $4)""",
             restaurant_id, clean_phone, delta, reason[:100],
         )
         new_balance = await conn.fetchval(
             """INSERT INTO loyalty_customers
-                   (restaurant_id, org_id, phone, points_balance, total_earned, total_redeemed)
-               VALUES ($1, $1, $2, GREATEST(0, $3), GREATEST(0, $3), 0)
+                   (org_id, phone, points_balance, total_earned, total_redeemed)
+               VALUES ($1, $2, GREATEST(0, $3), GREATEST(0, $3), 0)
                ON CONFLICT (org_id, phone) DO UPDATE
                SET points_balance = GREATEST(0, loyalty_customers.points_balance + $3),
                    total_earned   = CASE WHEN $3 > 0
@@ -228,7 +228,7 @@ async def db_get_loyalty_ledger(
         rows = await conn.fetch(
             """SELECT id, delta, reason, order_id, created_at
                FROM loyalty_ledger
-               WHERE restaurant_id=$1 AND phone=$2
+               WHERE org_id=$1 AND phone=$2
                ORDER BY created_at DESC
                LIMIT $3""",
             restaurant_id, _normalize_phone(phone), limit,
@@ -247,7 +247,7 @@ async def db_get_loyalty_stats(restaurant_id: int, limit: int = 100) -> list[dic
         rows = await conn.fetch(
             """SELECT phone, points_balance, total_earned, total_redeemed, updated_at
                FROM loyalty_customers
-               WHERE restaurant_id=$1
+               WHERE org_id=$1
                ORDER BY points_balance DESC
                LIMIT $2""",
             restaurant_id, limit,

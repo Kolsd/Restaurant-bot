@@ -30,7 +30,7 @@ async def db_get_fiscal_resolution(restaurant_id: int) -> dict | None:
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM fiscal_resolution WHERE restaurant_id=$1",
+            "SELECT * FROM fiscal_resolution WHERE org_id=$1",
             restaurant_id
         )
     return _serialize(dict(row)) if row else None
@@ -42,17 +42,13 @@ async def db_upsert_fiscal_resolution(restaurant_id: int, data: dict) -> None:
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
-        # ON CONFLICT uses org_id (new named constraint fiscal_resolution_org_uq from
-        # 0037b).  org_id == restaurant_id during Wave 1.  The old inline
-        # UNIQUE (restaurant_id) on this table was an anonymous system constraint;
-        # 0037b does NOT restore it to avoid a naming conflict.  The named legacy
-        # constraint is not needed here since new inserts always set org_id.
+        # ON CONFLICT uses org_id (named constraint fiscal_resolution_org_uq from 0037b).
         await conn.execute(
             """INSERT INTO fiscal_resolution
-               (restaurant_id, org_id, resolution_number, resolution_date, prefix,
+               (org_id, resolution_number, resolution_date, prefix,
                 from_number, to_number, valid_from, valid_to,
                 technical_key, current_number, environment, software_id, software_pin)
-               VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                ON CONFLICT (org_id) DO UPDATE SET
                  resolution_number = EXCLUDED.resolution_number,
                  resolution_date   = EXCLUDED.resolution_date,
@@ -89,7 +85,7 @@ async def db_claim_next_invoice_number(restaurant_id: int) -> int:
             """UPDATE fiscal_resolution
                SET current_number = current_number + 1,
                    updated_at     = NOW()
-               WHERE restaurant_id = $1
+               WHERE org_id = $1
                  AND current_number + 1 <= to_number
                RETURNING current_number, from_number, to_number,
                          valid_from, valid_to, resolution_number, prefix""",
@@ -131,7 +127,7 @@ async def db_save_fiscal_invoice(data: dict) -> int:
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO fiscal_invoices
-               (billing_log_id, restaurant_id, order_id,
+               (billing_log_id, org_id, order_id,
                 resolution_number, prefix, invoice_number,
                 issue_date, issue_time,
                 subtotal_cents, tax_regime, tax_pct, tax_cents, total_cents,
@@ -143,7 +139,7 @@ async def db_save_fiscal_invoice(data: dict) -> int:
                 $19,$20,$21,$22,$23,$24,$25)
                RETURNING id""",
             data.get("billing_log_id"),
-            data["restaurant_id"], data["order_id"],
+            data.get("org_id") or data["restaurant_id"], data["order_id"],
             data["resolution_number"], data.get("prefix", ""), data["invoice_number"],
             issue_date, issue_time,
             data["subtotal_cents"], data.get("tax_regime", "iva"),
@@ -173,7 +169,7 @@ async def db_get_fiscal_invoices(restaurant_id: int, limit: int = 50) -> list:
                       cufe, qr_data, customer_nit, customer_name,
                       payment_method, dian_status, created_at
                FROM fiscal_invoices
-               WHERE restaurant_id=$1
+               WHERE org_id=$1
                ORDER BY created_at DESC LIMIT $2""",
             restaurant_id, limit
         )
@@ -197,7 +193,7 @@ async def db_get_next_invoice_number(
         val = await conn.fetchval(
             """SELECT COALESCE(MAX(invoice_number), $3 - 1) + 1
                FROM fiscal_invoices
-               WHERE restaurant_id = $1 AND prefix = $2""",
+               WHERE org_id = $1 AND prefix = $2""",
             restaurant_id, prefix, start_at,
         )
     return int(val)

@@ -160,8 +160,8 @@ async def get_weekly_reports(
 
     settings = {
         "enabled": features.get("weekly_report_enabled", True),
-        "owner_phone": restaurant.get("owner_phone"),
-        "timezone": restaurant.get("timezone") or "America/Bogota",
+        "owner_phone": features.get("owner_phone"),
+        "timezone": features.get("timezone") or "America/Bogota",
     }
 
     return {"reports": reports, "settings": settings}

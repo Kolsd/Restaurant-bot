@@ -266,10 +266,10 @@ async def analytics_restaurants(_: None = Depends(verify_superadmin)):
                     GROUP BY bot_number
                 ) c_last ON c_last.bot_number = r.whatsapp_number
                 LEFT JOIN (
-                    SELECT restaurant_id, COUNT(*) AS staff_count
+                    SELECT org_id, COUNT(*) AS staff_count
                     FROM staff
-                    GROUP BY restaurant_id
-                ) s ON s.restaurant_id = r.id
+                    GROUP BY org_id
+                ) s ON s.org_id = r.id
                 ORDER BY r.created_at DESC
                 """
             )
