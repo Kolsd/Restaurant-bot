@@ -635,28 +635,44 @@ async def _run_checks(conn, aio_url: str) -> None:
         _fail("6m", f"scoped RLS test error: {e}")
 
     # -- 6n. mesio_app with no scope sees 0 rows -------------------------------
+    # Strict mode: first verify the connection is actually as mesio_app (not
+    # silently falling through to superuser via Postgres trust auth). If we
+    # can't confirm the identity, use SET LOCAL ROLE which is authoritative.
+    #
+    # Also verify FORCE ROW LEVEL SECURITY is on — if a migration dropped it,
+    # that's the real bug to surface, not the row count.
     try:
-        import asyncpg as apg  # type: ignore[import]
-        aio_url_app = re.sub(r"://[^:@]*:[^@]*@", "://mesio_app:rehearsal@", aio_url)
-        try:
-            app_conn = await apg.connect(aio_url_app)
-            zero = await app_conn.fetchval("SELECT COUNT(*) FROM orders")
-            await app_conn.close()
-            if zero == 0:
-                _ok("6n", "mesio_app + no scope -> orders: 0 (fail-closed)")
-            else:
-                _fail("6n", f"mesio_app + no scope -> orders: {zero} (RLS NOT fail-closed!)")
-        except asyncpg.InsufficientPrivilegeError:
-            _ok("6n", "mesio_app + no scope -> InsufficientPrivilegeError (fail-closed)")
-        except Exception as e2:
-            # If mesio_app password not set, test via SET ROLE
-            await conn.execute("SET LOCAL ROLE mesio_app")
+        # Diagnostic: check FORCE RLS state on orders
+        force_enabled = await conn.fetchval(
+            "SELECT relforcerowsecurity FROM pg_class "
+            "WHERE relname='orders' AND relnamespace='public'::regnamespace"
+        )
+        rls_enabled = await conn.fetchval(
+            "SELECT relrowsecurity FROM pg_class "
+            "WHERE relname='orders' AND relnamespace='public'::regnamespace"
+        )
+        if not rls_enabled:
+            _fail("6n-rls", "orders table does NOT have RLS enabled (relrowsecurity=false)")
+        elif not force_enabled:
+            _fail("6n-force", "orders table does NOT have FORCE RLS (relforcerowsecurity=false)")
+        else:
+            log.info("   diagnostic: orders has RLS enabled + FORCE RLS on")
+
+        # Use SET LOCAL ROLE — authoritative. If direct mesio_app connection
+        # silently falls through to postgres via trust auth, this avoids false
+        # positives.
+        await conn.execute("SET LOCAL ROLE mesio_app")
+        actual_user = await conn.fetchval("SELECT current_user")
+        if actual_user != "mesio_app":
+            await conn.execute("RESET ROLE")
+            _fail("6n", f"SET LOCAL ROLE landed on {actual_user!r}, not mesio_app")
+        else:
             # Ensure no org_id is set
             await conn.execute("SELECT set_config('app.org_id', '', true)")
             zero = await conn.fetchval("SELECT COUNT(*) FROM orders")
             await conn.execute("RESET ROLE")
             if zero == 0:
-                _ok("6n", "mesio_app + no scope (via SET ROLE) -> orders: 0 (fail-closed)")
+                _ok("6n", f"mesio_app + no scope -> orders: 0 (fail-closed, RLS+FORCE verified)")
             else:
                 _fail("6n", f"mesio_app + no scope -> orders: {zero} (RLS NOT fail-closed!)")
     except Exception as e:
