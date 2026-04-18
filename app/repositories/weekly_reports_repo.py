@@ -5,15 +5,19 @@ Computes last-week KPIs for a restaurant and persists the report record.
 The scheduler tick (which calls these functions and sends the WhatsApp message)
 is implemented in a later round — do NOT import scheduler or bot runtime here.
 
-Query strategy (derived from existing repo patterns):
+Query strategy (derived from existing repo patterns; post-Wave-2 the
+canonical tenant key is org_id — restaurant_id mentions below describe
+the legacy SHAPE preserved for backwards compat in function signatures,
+not the column name):
 - delivery/pickup orders  → JOIN restaurants r ON r.whatsapp_number = o.bot_number
-                            WHERE r.id = $restaurant_id
-- table orders            → WHERE branch_id = $restaurant_id
-                            OR (branch_id IS NULL AND $restaurant_id is the matriz)
+                            WHERE r.id = $location_id  (restaurants is a VIEW
+                            over locations JOIN organizations; r.id == locations.id)
+- table orders            → WHERE branch_id = $location_id
+                            OR (branch_id IS NULL AND $location_id is the matriz)
 - NPS responses           → bot_number LIKE base_bot_number || '%'
                             where base_bot_number = split_part(r.whatsapp_number, '_b', 1)
                             This covers both exact matches and sucursal suffixes (_b<ts>).
-- dormant customers       → customer_profiles WHERE restaurant_id = $1
+- dormant customers       → customer_profiles WHERE org_id = $1
                             AND total_orders >= MIN_DORMANT_ORDERS
                             AND last_seen < NOW() - MAKE_INTERVAL(days => DORMANT_DAYS)
 """

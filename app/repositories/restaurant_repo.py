@@ -1198,11 +1198,19 @@ def _register_sync_handler(type_name: str):
 
 @_register_sync_handler("staff_shift")
 async def _sync_staff_shift(conn, restaurant_id: int, data: dict):
-    """Upsert a staff_shifts record by its client-generated UUID."""
+    """Upsert a staff_shifts record by its client-generated UUID.
+
+    Wave-2: the `restaurant_id` parameter name is the legacy interface
+    (kept for backwards compat with sync route signature) — the value is
+    the canonical tenant key (org_id), so we write it to the `org_id`
+    column. `location_id` is left NULL (post-0037d nullable) because the
+    offline client only knows its tenant, not which sede the shift was
+    clocked at; the staff_id FK still ties the row back to a sede.
+    """
     await conn.execute(
         """
         INSERT INTO staff_shifts
-            (id, staff_id, restaurant_id, clock_in, clock_out, notes)
+            (id, staff_id, org_id, clock_in, clock_out, notes)
         VALUES ($1, $2::uuid, $3, $4::timestamptz, $5::timestamptz, $6)
         ON CONFLICT (id) DO UPDATE
             SET clock_out = EXCLUDED.clock_out,
@@ -1219,11 +1227,16 @@ async def _sync_staff_shift(conn, restaurant_id: int, data: dict):
 
 @_register_sync_handler("staff")
 async def _sync_staff(conn, restaurant_id: int, data: dict):
-    """Upsert a staff record by its client-generated UUID."""
+    """Upsert a staff record by its client-generated UUID.
+
+    Wave-2: same convention as _sync_staff_shift — the legacy
+    restaurant_id param name carries the tenant key (org_id) value.
+    location_id is nullable post-0037d.
+    """
     await conn.execute(
         """
         INSERT INTO staff
-            (id, restaurant_id, name, role, pin, active)
+            (id, org_id, name, role, pin, active)
         VALUES ($1::uuid, $2, $3, $4, $5, $6)
         ON CONFLICT (id) DO UPDATE
             SET name   = EXCLUDED.name,
@@ -1342,12 +1355,19 @@ async def db_get_menu_availability(restaurant_id: int):
 
 
 async def db_set_dish_availability(restaurant_id: int, dish_name: str, available: bool):
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    """# Requires active tenant_scope() or bypass_tenant_scope().
+
+    Wave-2: `restaurant_id` param name kept for the legacy interface,
+    value is the org_id tenant key. menu_availability lost the
+    restaurant_id column in 0037 (the unique constraint was recreated
+    as (dish_name, org_id) — see inventory_repo._sync_dish_availability_conn
+    for the canonical pattern).
+    """
     async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO menu_availability (dish_name, restaurant_id, available, updated_at)
+            INSERT INTO menu_availability (dish_name, org_id, available, updated_at)
             VALUES ($1, $2, $3, NOW())
-            ON CONFLICT (dish_name, restaurant_id) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
+            ON CONFLICT (dish_name, org_id) DO UPDATE SET available=EXCLUDED.available, updated_at=NOW()
         """, dish_name, restaurant_id, available)
 
 
