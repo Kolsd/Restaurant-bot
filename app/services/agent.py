@@ -838,9 +838,11 @@ def _make_order_fingerprint(items: list) -> str:
 
 
 _CONFIRM_WORDS = frozenset([
-    "sí", "si", "sip", "sipo", "dale", "dale!", "ok", "okay", "va", "perfecto",
+    "sí", "si", "sii", "siii", "siiii", "sip", "sipo", "dale", "dale!",
+    "ok", "okay", "va", "vale", "bueno", "perfecto", "claro", "correcto",
     "confirmo", "confirma", "confirmar", "confirmado", "listo", "procede",
     "manda", "mándalo", "mándalos", "siga", "adelante", "hágale", "hagale",
+    "bien", "excelente", "genial",
     "yes", "yep", "sure", "please", "go ahead", "proceed",
 ])
 
@@ -862,8 +864,10 @@ def _last_messages_have_confirmation(full_history: list) -> bool:
         else:
             text = str(content)
         lowered = text.lower().strip()
-        # Exact single-word match OR the word appears surrounded by word boundaries
-        words = set(re.split(r"\W+", lowered))
+        # Collapse elongations: "siii"→"si", "vaaale"→"vale". Users stretch
+        # vowels for emphasis; the match set uses the base form.
+        normalized = re.sub(r"([aeiou])\1{1,}", r"\1", lowered)
+        words = set(re.split(r"\W+", normalized)) | set(re.split(r"\W+", lowered))
         if words & _CONFIRM_WORDS:
             return True
     return False
