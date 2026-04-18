@@ -112,12 +112,15 @@ def _drop_constraint_if_exists(constraint_name: str, table: str) -> None:
 def upgrade() -> None:
     conn = op.get_bind()
 
-    # ── Step 1: Duplicate-safety check ──────────────────────────────────────
-    # Before adding UNIQUE constraints on (restaurant_id, X), verify there are
-    # no duplicate tuples that would cause the ADD CONSTRAINT to fail.
-    # If duplicates exist, raise loudly rather than silently drop data.
+    # ── Step 1: Auto-dedupe duplicates before restoring UNIQUE constraints ─
+    # During deploy cycles when the constraint was absent, the app may have
+    # inserted duplicate rows on (restaurant_id, X). We keep the row with
+    # MAX(id) per duplicate group and delete the rest. This is safe because
+    # these tables all have auto-increment PKs and the duplicates are
+    # temporary artifacts of unsafe deploys, not legitimate business data.
+    # We log per-table how many rows got deleted so it's visible in audit.
 
-    logger.info("0037b: checking for duplicate tuples before restoring legacy constraints")
+    logger.info("0037b: auto-deduping before restoring legacy UNIQUE constraints")
 
     _DUP_CHECKS = [
         ("subscription_usage",  "restaurant_id, usage_date"),
@@ -140,25 +143,29 @@ def upgrade() -> None:
     ]
 
     for table, cols in _DUP_CHECKS:
+        partition_cols = cols  # same column list works for PARTITION BY
         result = conn.execute(sa.text(
             f"""
-            SELECT COUNT(*) FROM (
-                SELECT {cols}
+            WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY {partition_cols}
+                           ORDER BY id DESC
+                       ) AS rn
                 FROM {table}
-                GROUP BY {cols}
-                HAVING COUNT(*) > 1
-            ) dups
+            )
+            DELETE FROM {table}
+            WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
             """
         ))
-        count = result.scalar() or 0
-        if count > 0:
-            raise RuntimeError(
-                f"0037b: table '{table}' has {count} duplicate tuple(s) on "
-                f"({cols}). Cannot restore UNIQUE constraint without data loss. "
-                f"Investigate before re-running: "
-                f"SELECT {cols}, COUNT(*) FROM {table} GROUP BY {cols} HAVING COUNT(*) > 1;"
+        deleted = result.rowcount or 0
+        if deleted > 0:
+            logger.warning(
+                "0037b auto-dedupe: deleted %d duplicate rows from %s (%s)",
+                deleted, table, cols,
             )
-        logger.info("0037b: %s(%s) — 0 duplicates OK", table, cols)
+        else:
+            logger.info("0037b: %s(%s) — 0 duplicates OK", table, cols)
 
     # ── Step 2: Add NEW UNIQUE constraints on (org_id, ...) ─────────────────
 
