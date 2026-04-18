@@ -195,9 +195,12 @@ async def snapshot_db_state(
             return []
         return [dict(r) for r in rows]
 
-    # ── restaurant_id for this bot ────────────────────────────────────────────
-    restaurant_id = await conn.fetchval(
-        "SELECT id FROM restaurants WHERE whatsapp_number = $1",
+    # ── org_id for this bot (Wave 2: tenant key is org_id, not restaurant_id) ─
+    # The `restaurants` VIEW is now (locations JOIN organizations) so its `id`
+    # is really the location_id — useless for the snapshot which needs the org.
+    # Query organizations directly instead.
+    org_id = await conn.fetchval(
+        "SELECT id FROM organizations WHERE whatsapp_number = $1",
         bot_number,
     )
 
@@ -225,7 +228,7 @@ async def snapshot_db_state(
             """,
             user_phone,
         )
-    ) if restaurant_id else []
+    ) if org_id else []
 
     # ── carts ─────────────────────────────────────────────────────────────────
     # NOTE: carts table uses `cart_data` (not `items`) as the JSONB column name.
@@ -245,7 +248,7 @@ async def snapshot_db_state(
 
     # ── waiter_alerts ─────────────────────────────────────────────────────────
     waiter_alerts: list[dict] = []
-    if restaurant_id:
+    if org_id:
         # Alerts are tied to bot_number or to the restaurant's tables
         waiter_alerts = _rows_to_dicts(
             await conn.fetch(
@@ -260,18 +263,18 @@ async def snapshot_db_state(
             )
         )
 
-    # ── reservations ─────────────────────────────────────────────────────────
+    # ── reservations (Wave 2: filter by org_id, not restaurant_id) ───────────
     reservations: list[dict] = []
-    if restaurant_id:
+    if org_id:
         reservations = _rows_to_dicts(
             await conn.fetch(
                 """
                 SELECT id, phone, guests, date, time, status, created_at
                 FROM reservations
-                WHERE restaurant_id = $1
+                WHERE org_id = $1
                 ORDER BY created_at DESC
                 """,
-                restaurant_id,
+                org_id,
             )
         )
 
@@ -304,16 +307,16 @@ async def snapshot_db_state(
         "dead_letters": int(inbox_row["dead_letters"]) if inbox_row else 0,
     }
 
-    # ── subscription_usage ────────────────────────────────────────────────────
+    # ── subscription_usage (Wave 2: filter by org_id) ────────────────────────
     usage_row = None
-    if restaurant_id:
+    if org_id:
         usage_row = await conn.fetchrow(
             """
             SELECT total_tokens, total_invoices
             FROM subscription_usage
-            WHERE restaurant_id = $1 AND usage_date = CURRENT_DATE
+            WHERE org_id = $1 AND usage_date = CURRENT_DATE
             """,
-            restaurant_id,
+            org_id,
         )
     subscription_usage = dict(usage_row) if usage_row else {}
 

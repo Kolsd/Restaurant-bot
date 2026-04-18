@@ -56,6 +56,7 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
     # Import agent lazily to avoid circular imports at module load time
     from app.services import agent as _agent  # noqa: PLC0415
     from app.services.database import _normalize_phone as _norm  # noqa: PLC0415
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
 
     # Match production's chat.py:284 behavior: Meta webhook normalizes bot_number
     # via _normalize_phone (strips '+' and spaces) BEFORE calling chat().
@@ -63,6 +64,23 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
     # normalized. Scenarios use "+57TESTBOT1" for readability, we strip here.
     normalized_bot = _norm(scenario.bot_number)
     normalized_user = _norm(scenario.user_phone)
+
+    # ── Resolve org_id for tenant_scope wrapping (Wave 2 / Rule 14) ───────────
+    # Production's inbox_worker._handle_meta_whatsapp wraps agent.chat in
+    # tenant_scope(org["id"]) after resolving from bot_number. The sim bypasses
+    # the inbox so it must do the same here — otherwise every repo call inside
+    # agent.chat raises TenantNotSetError. Cross-tenant lookup needs a bypass.
+    async with pool.acquire() as conn:
+        with bypass_tenant_scope("ai_sim_resolve_org_for_scope"):
+            org_id = await conn.fetchval(
+                "SELECT id FROM organizations WHERE whatsapp_number = $1",
+                normalized_bot,
+            )
+    if org_id is None:
+        raise RuntimeError(
+            f"runner: could not resolve org_id for bot_number={normalized_bot!r}. "
+            f"Did seed_restaurant run?"
+        )
 
     transcript: list[TurnResult] = []
     total_latency_ms = 0
@@ -96,12 +114,15 @@ async def run_scenario(scenario: Scenario, pool: asyncpg.Pool) -> ScenarioResult
 
         try:
             t_start = time.monotonic()
-            raw_result = await _agent.chat(
-                user_phone=normalized_user,
-                user_message=user_text,
-                bot_number=normalized_bot,
-                meta_phone_id="",
-            )
+            # Rule 14: agent.chat must run inside tenant_scope(org_id). In
+            # production, inbox_worker does this. The sim replicates that here.
+            with tenant_scope(org_id):
+                raw_result = await _agent.chat(
+                    user_phone=normalized_user,
+                    user_message=user_text,
+                    bot_number=normalized_bot,
+                    meta_phone_id="",
+                )
             latency_ms = int((time.monotonic() - t_start) * 1000)
 
             if raw_result is None:

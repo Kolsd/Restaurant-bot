@@ -209,6 +209,7 @@ _TRUNCATE_TABLES = [
     "table_checks",
     "waiter_alerts",
     "nps_responses",
+    "nps_waiting",
     "reservations",
     "webhook_inbox",
     "subscription_usage",
@@ -216,15 +217,33 @@ _TRUNCATE_TABLES = [
 
 
 async def truncate_test_data(conn: asyncpg.Connection) -> None:
-    """Truncate all volatile tables (CASCADE) and re-seed subscription_usage.
+    """Truncate all volatile tables and re-seed subscription_usage.
 
-    NOTE: This does real TRUNCATE — not a rollback trick. Required because
+    NOTE: This does real cleanup — not a rollback trick. Required because
     agent.chat() opens its own pool connections and commits independently.
+
+    Wave 2 / FORCE RLS note: TRUNCATE requires ownership or TRUNCATE privilege.
+    If the sim runs as `mesio_app` (non-superuser, DML-only) TRUNCATE fails with
+    `permission denied for table ...`. We fall back to DELETE FROM inside a
+    transaction with `SET LOCAL ROLE mesio_superadmin` (BYPASSRLS) so DELETE is
+    not filtered by org_isolation.
     """
-    # Build a single TRUNCATE statement for all tables
     tables_sql = ", ".join(_TRUNCATE_TABLES)
-    await conn.execute(f"TRUNCATE TABLE {tables_sql} CASCADE")
-    log.info("seed.truncated", tables=_TRUNCATE_TABLES)
+    try:
+        await conn.execute(f"TRUNCATE TABLE {tables_sql} CASCADE")
+        log.info("seed.truncated_via_truncate", tables=_TRUNCATE_TABLES)
+    except asyncpg.InsufficientPrivilegeError:
+        # mesio_app lacks TRUNCATE on RLS-forced tables. Use DELETE with
+        # BYPASSRLS role so we see (and delete) rows from every org.
+        log.warning("seed.truncate_denied_falling_back_to_delete")
+        async with conn.transaction():
+            await conn.execute("SET LOCAL ROLE mesio_superadmin")
+            # DELETE in reverse of _TRUNCATE_TABLES order so child tables
+            # disappear before parents. _TRUNCATE_TABLES is authored with
+            # parent-first ordering on the TRUNCATE CASCADE path, so reverse.
+            for tbl in reversed(_TRUNCATE_TABLES):
+                await conn.execute(f"DELETE FROM {tbl}")
+        log.info("seed.truncated_via_delete", tables=_TRUNCATE_TABLES)
 
     # Re-seed subscription_usage so UsageLimitExceeded doesn't fire.
     # Post-0037: query organizations (not restaurants VIEW) and use org_id.

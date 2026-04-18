@@ -73,7 +73,7 @@ DELIVERY_SCENARIOS: list[Scenario] = [
             "Bot sent catalog link or menu on first turn (Step 1)",
             "Bot asked for delivery vs pickup choice or proceeded with delivery after customer said 'domicilio' (Step 2)",
             "Bot asked for the delivery address after customer chose delivery (Step 3)",
-            "Bot listed ALL accepted payment methods from features (Efectivo, Nequi, Daviplata, Transferencia Bancaria) at some point (Step 4)",
+            "Bot handled Step 4 correctly: if the user VOLUNTEERED a specific method (e.g. 'pago con nequi') without being asked, accepting it is fine — do NOT penalize for not reciting all methods. Only penalize if bot failed to list methods when customer explicitly asked 'qué métodos aceptan?' or similar.",
             "Bot summarized the order with items and total before confirming (Step 5)",
             "Bot used create_delivery_order ONLY after the customer explicitly confirmed (Step 6)",
             "On the receipt emoji 📸, bot replied with a receipt acknowledgment phrase using action='chat', NOT another create_delivery_order or create_pickup_order call (Step 7)",

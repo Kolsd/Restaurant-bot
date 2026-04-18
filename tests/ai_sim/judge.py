@@ -108,7 +108,9 @@ def _format_db_state(db_state: DBSnapshot) -> str:
     if db_state.reservations:
         parts.append(f"reservations ({len(db_state.reservations)} rows):")
         for row in db_state.reservations[:3]:
-            parts.append(f"  - guests={row.get('guests','?')} status={row.get('status','?')} date={row.get('date_time','?')}")
+            _date = row.get('date') or row.get('date_time') or '?'
+            _time = row.get('time') or ''
+            parts.append(f"  - guests={row.get('guests','?')} status={row.get('status','?')} date={_date} time={_time}")
 
     inbox = db_state.webhook_inbox_stats
     parts.append(f"webhook_inbox: total={inbox.get('total',0)} pending={inbox.get('pending',0)} dead_letters={inbox.get('dead_letters',0)}")
