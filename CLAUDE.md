@@ -831,6 +831,22 @@ Estas reglas protegen los flujos críticos del bot de WhatsApp. Toda modificaci�
 - `orders.py process_order_callback` (Wompi) DEBE entrar en `tenant_scope(order["restaurant_id"])` tras cargar la orden.
 - NO volver a "silent fail" en el bot runtime. Si un `TenantNotSetError` aparece en producción, es un gap de wiring, NO un caso a suprimir.
 
+### 15. Confirmación de pedido: vocabulario amplio + elongación de vocales
+- `_CONFIRM_WORDS` en `agent.py` incluye `vale, bueno, claro, correcto, bien, excelente, genial, sii/siii/siiii` además del set clásico (`sí, ok, dale, perfecto, listo, ...`). PROHIBIDO recortarlo "porque parece largo" — cada palabra está ahí porque un usuario real la usó y el bot ignoró su confirmación.
+- `_last_messages_have_confirmation` colapsa elongaciones de vocal (`re.sub(r"([aeiou])\1{1,}", r"\1", lowered)`) ANTES de matchear: `vaaaaale`→`vale`, `siiii`→`si`. NO remover la normalización — los usuarios estiran vocales en WhatsApp constantemente.
+- El match union incluye AMBAS formas (lowered + normalized) para no perder tokens donde la elongación accidentalmente cae sobre una palabra válida.
+
+### 16. Single-location restaurants: no preguntar sucursal
+- `agent.py` inyecta `[UBICACION_UNICA: ...]` en el contexto cuando `db_get_branches` retorna lista vacía (tenant de una sola sede). Esto es la contraparte explícita del `[SUCURSALES: ...]` del caso multi-sede.
+- `agent_external.py` STEP 2 tiene una `CRITICAL — SINGLE-LOCATION RULE` que dice "si NO hay [SUCURSALES] block, hay UNA sola sede; NUNCA preguntes cuál sucursal".
+- Sin estos hints el LLM preguntaba "¿de qué sucursal?" en restaurantes de UNA sola sede, rompiendo el flujo pickup/delivery. Si tocás el system prompt o la inyección de contexto, MANTENER ambos hints.
+
+### 17. Bill request fires waiter_alert al instante (no espera al checkout completo)
+- `agent_salon.py` checkout flow llama a `db.db_create_waiter_alert(alert_type='bill', ...)` **en el momento que el cliente pide la cuenta**, ANTES de que termine la state machine de checkout (split → tip → método → factura).
+- Razón: staff de piso necesita ver "mesa X pidió la cuenta" en el POS al instante, no después de 4 turnos de conversación.
+- El alert es un **hint, no un commitment**. El pago real sigue su flujo normal — esto solo notifica.
+- Failure de crear el alert se loguea pero NO bloquea el checkout (best-effort). Si removés el try/except, el bot deja de procesar checkouts cuando waiter_alerts esté caído.
+
 ## Frontend — Patrones y Convenciones
 
 ### Design System (`tokens.css`)
