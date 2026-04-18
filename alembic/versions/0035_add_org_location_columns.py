@@ -213,25 +213,33 @@ def _batched_backfill_org_and_location(
                 """
             )
         elif has_branch_id:
-            # COALESCE pattern: prefer branch mapping, fall back to restaurant_id mapping
+            # COALESCE pattern: prefer branch mapping, fall back to restaurant_id mapping.
+            # Resolution is done in a CTE because Postgres does not allow the UPDATE
+            # target alias `t` to be referenced from inside a FROM-clause JOIN's ON.
             query = sa.text(
                 f"""
                 WITH batch AS (
-                    SELECT ctid
+                    SELECT ctid, restaurant_id, branch_id
                     FROM {table}
                     WHERE org_id IS NULL
                     LIMIT {_BATCH}
                     FOR UPDATE SKIP LOCKED
+                ),
+                resolved AS (
+                    SELECT b.ctid,
+                           COALESCE(mb.org_id,      mr.org_id)      AS org_id,
+                           COALESCE(mb.location_id, mr.location_id) AS location_id
+                    FROM batch b
+                    JOIN _migration_restaurant_to_location mr
+                      ON mr.old_restaurant_id = b.restaurant_id
+                    LEFT JOIN _migration_restaurant_to_location mb
+                      ON mb.old_restaurant_id = b.branch_id
                 )
                 UPDATE {table} t
-                SET org_id      = COALESCE(mb.org_id,      mr.org_id),
-                    location_id = COALESCE(mb.location_id, mr.location_id)
-                FROM _migration_restaurant_to_location mr
-                LEFT JOIN _migration_restaurant_to_location mb
-                    ON mb.old_restaurant_id = t.branch_id,
-                batch
-                WHERE t.ctid          = batch.ctid
-                  AND t.restaurant_id = mr.old_restaurant_id
+                SET org_id      = r.org_id,
+                    location_id = r.location_id
+                FROM resolved r
+                WHERE t.ctid = r.ctid
                 RETURNING 1
                 """
             )
