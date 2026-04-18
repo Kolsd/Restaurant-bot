@@ -1155,7 +1155,8 @@ async def _validate_tool_call(
 async def execute_action(parsed: dict, phone: str, bot_number: str,
                          table_context: dict | None, session_state: dict,
                          full_history: list = None, restaurant_obj: dict = None,
-                         routing_context: dict = None, message: str = "") -> str:
+                         routing_context: dict = None, message: str = "",
+                         location_id: int | None = None) -> str:
     action = parsed.get("action", "chat")
     items  = parsed.get("items", [])
     reply  = parsed.get("reply", "")
@@ -1314,6 +1315,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
             result = await execute_external_action(
                 parsed, phone, bot_number, restaurant_obj,
                 routing_context or {}, reply,
+                location_id=location_id,
             )
             reply = result
             if cart_errors:
@@ -1726,6 +1728,7 @@ async def _call_llm_and_execute(
     bot_number: str,
     user_message_clean: str,
     menu_url: str,
+    location_id: int | None = None,
 ) -> tuple[str, dict]:
     """
     Build messages list, call Claude, parse the response, execute the action.
@@ -1829,6 +1832,7 @@ async def _call_llm_and_execute(
         parsed, user_phone, bot_number, table_context, session_state,
         full_history=full_history, restaurant_obj=restaurant_obj,
         routing_context=routing_context, message=user_message_clean,
+        location_id=location_id,
     )
     assistant_message = (assistant_message or "").replace("[LINK_MENU]", menu_url)
 
@@ -1872,51 +1876,95 @@ async def _maybe_append_nps_prompt(
     return assistant_message, nps_interactive
 
 
+async def _resolve_location_id(
+    table_context: dict | None,
+    routing_context: dict,
+    user_phone: str,
+    bot_number: str,
+    incoming_location_id: int | None = None,
+) -> int | None:
+    """
+    Determine the location_id for history/order routing, in priority order:
+      1. incoming_location_id  — resolved by inbox_worker (QR or phone override)
+      2. table_context["location_id"]  — QR-embedded or session-resolved mesa
+      3. routing_context["location_id"]  — set by execute_external_action GPS routing
+      4. conversations.location_id  — last known from prior turns in this conversation
+      5. None  — exploratory chat; agent resolves lazily on order tool call
+
+    The legacy branch_id fields in table_context / routing_context are also
+    accepted (renamed aliases) for backward compatibility with existing agent code
+    that still populates branch_id while the Wave 1 migration is in flight.
+    """
+    # Priority 1: inbox-resolved (QR or phone-override)
+    if incoming_location_id is not None:
+        return incoming_location_id
+
+    # Priority 2: table context (session or QR)
+    if table_context:
+        # Prefer explicit location_id, fall back to legacy branch_id alias
+        loc = table_context.get("location_id") or table_context.get("branch_id")
+        if loc:
+            return int(loc)
+
+    # Priority 3: routing context from GPS/pickup branch routing
+    if routing_context:
+        loc = routing_context.get("location_id") or routing_context.get("branch_id")
+        if loc:
+            return int(loc)
+
+    # Priority 4: persisted from prior turns in this conversation
+    try:
+        from app.repositories.conversations_repo import db_get_conversation_location_id  # noqa: PLC0415
+        persisted = await db_get_conversation_location_id(user_phone, bot_number)
+        if persisted is not None:
+            return int(persisted)
+    except Exception:
+        log.exception("resolve_location_id.conversation_lookup_failed",
+                      phone=_ofuscar_phone(user_phone), bot_number=bot_number)
+
+    return None
+
+
 async def _resolve_branch_id(
     table_context: dict | None,
     routing_context: dict,
     user_phone: str,
     bot_number: str,
+    incoming_location_id: int | None = None,
 ) -> int | None:
     """
-    Determine the branch_id for history storage via table context, routing
-    context, or active order lookup — in that priority order.
+    Backward-compatible alias for _resolve_location_id.
+
+    Returns the same value — a location_id (Wave 1: == branch_id or None).
+    Call sites that still pass routing_context["branch_id"] continue to work.
     """
-    branch_id = table_context.get("branch_id") if table_context else None
-
-    if not branch_id and routing_context.get("branch_id"):
-        return routing_context["branch_id"]
-
-    if not branch_id:
-        try:
-            # Cross-tenant: lookup active order by phone across all restaurants to
-            # detect branch routing. Ownership validated downstream via bot_number match.
-            with _bypass_tenant("agent._resolve_branch_id: cross-tenant order lookup by phone to detect branch routing"):
-                async with _tenant_conn() as conn:
-                    active_order = await conn.fetchrow(
-                        "SELECT bot_number FROM orders "
-                        "WHERE phone=$1 AND status NOT IN ('entregado', 'cancelado') "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        user_phone,
-                    )
-                    if active_order and active_order["bot_number"] != bot_number:
-                        b_id = await conn.fetchval(
-                            "SELECT id FROM restaurants WHERE whatsapp_number=$1",
-                            active_order["bot_number"],
-                        )
-                        if b_id:
-                            branch_id = b_id
-        except Exception:
-            log.exception("branch_detection_failed", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
-
-    return branch_id
+    return await _resolve_location_id(
+        table_context,
+        routing_context,
+        user_phone,
+        bot_number,
+        incoming_location_id=incoming_location_id,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main orchestrator
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_id: str = "") -> dict:
+async def chat(
+    user_phone: str,
+    user_message: str,
+    bot_number: str,
+    meta_phone_id: str = "",
+    location_id: int | None = None,
+) -> dict:
+    """Main chat orchestrator.
+
+    location_id: resolved by the inbox worker before dispatch (from QR deep-link or
+    Location phone override).  May be None for exploratory chat; the agent resolves
+    it lazily via _resolve_location_id when an order tool is executed.
+    Persisted on conversations.location_id so subsequent turns remember the Location.
+    """
     # 1. Sanitize incoming text
     user_message_clean = _clean_incoming_message(user_message)
 
@@ -1963,6 +2011,7 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     assistant_message, routing_context = await _call_llm_and_execute(
         enriched, full_history, feats, table_context, session_state,
         restaurant_obj, user_phone, bot_number, user_message_clean, menu_url,
+        location_id=location_id,
     )
 
     # 9. Optionally append NPS prompt when the flow just opened
@@ -1974,13 +2023,24 @@ async def chat(user_phone: str, user_message: str, bot_number: str, meta_phone_i
     full_history.append({"role": "user",      "content": user_message_clean})
     full_history.append({"role": "assistant", "content": assistant_message})
 
-    branch_id = await _resolve_branch_id(table_context, routing_context, user_phone, bot_number)
+    # Resolve final location_id for this turn: inbox-provided > table/routing/conversation
+    resolved_location_id = await _resolve_location_id(
+        table_context,
+        routing_context,
+        user_phone,
+        bot_number,
+        incoming_location_id=location_id,
+    )
+
+    # Legacy branch_id alias: use resolved_location_id (same value in Wave 1)
+    branch_id = resolved_location_id
 
     await db.db_save_history(
         user_phone,
         bot_number,
         full_history[-(HISTORY_WINDOW * 2 + 2):],
         branch_id=branch_id,
+        location_id=resolved_location_id,
     )
 
     # 11. Return result

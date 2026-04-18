@@ -547,8 +547,10 @@ async def test_inbox_handler_passes_correct_fields(monkeypatch):
     from app.services import inbox_worker
     # Handler now fetches wa_access_token from DB at dispatch time (Rule 6).
     monkeypatch.setattr(
-        db_mod, "db_get_restaurant_by_phone",
-        AsyncMock(return_value={"id": 1, "wa_access_token": "META_TOKEN"}),
+        "app.repositories.restaurant_repo.db_get_org_by_phone",
+        AsyncMock(return_value={"id": 1, "name": "Test Org", "wa_access_token": "META_TOKEN",
+                               "wa_phone_id": "phid-001", "whatsapp_number": "+573009999999",
+                               "menu": {}, "features": {}, "matched_location_id": None}),
     )
     process_mock = AsyncMock()
     with patch("app.routes.chat._process_message", process_mock):
@@ -560,6 +562,7 @@ async def test_inbox_handler_passes_correct_fields(monkeypatch):
     process_mock.assert_awaited_once_with(
         user_phone="+573001111111", user_text="Una arepa",
         bot_number="+573009999999", phone_id="phid-001", access_token="META_TOKEN",
+        location_id=None,
     )
 
 

@@ -328,6 +328,19 @@ from app.repositories.restaurant_repo import (
     db_increment_invoice_usage,
     db_check_usage_limits,
 )
+
+# === Org/Location lookups (Bloque S3) ===
+from app.repositories.restaurant_repo import (
+    db_get_org_by_id,
+    db_get_org_by_phone,
+    db_get_org_locations,
+    db_get_primary_location,
+    db_get_location_by_id,
+    db_resolve_location_by_gps,
+    db_update_organization,
+    db_update_location,
+    db_create_location,
+)
 # Re-export mutable dict and decorator so test_sync.py can access db._SYNC_HANDLERS / db._register_sync_handler
 from app.repositories.restaurant_repo import _SYNC_HANDLERS, _register_sync_handler  # noqa: F401
 

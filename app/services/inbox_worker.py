@@ -256,6 +256,48 @@ async def run_worker(stop_event: asyncio.Event) -> None:
 
 # ── Handler: meta_whatsapp ────────────────────────────────────────────────────
 
+def _extract_location_from_payload(payload: dict) -> int | None:
+    """Extract location_id embedded in QR-based webhook payloads.
+
+    Formats supported (first match wins):
+    1. payload['context']['location_id']  — future deep-link metadata field
+    2. Text body matching pattern 'mesio://loc/<id>'  — QR deep-link payload
+    3. Interactive button_reply whose id starts with 'loc:<id>'  — button QR
+
+    Returns an int location_id or None if no location tag is found.
+    Note: the caller MUST validate that the returned id belongs to the resolved
+    Org (db_get_location_by_id + check org_id) before trusting it.
+    """
+    import re as _re  # noqa: PLC0415
+
+    # Format 1: explicit context field
+    ctx_loc = payload.get("context", {})
+    if isinstance(ctx_loc, dict) and ctx_loc.get("location_id"):
+        try:
+            return int(ctx_loc["location_id"])
+        except (TypeError, ValueError):
+            pass
+
+    # Format 2: mesio://loc/<id> deep-link in message body
+    user_text = payload.get("user_text", "") or ""
+    m = _re.search(r"mesio://loc/(\d+)", user_text)
+    if m:
+        try:
+            return int(m.group(1))
+        except (TypeError, ValueError):
+            pass
+
+    # Format 3: interactive button id "loc:<id>"
+    button_id = payload.get("button_id", "") or ""
+    if button_id.startswith("loc:"):
+        try:
+            return int(button_id[4:])
+        except (TypeError, ValueError):
+            pass
+
+    return None
+
+
 async def _handle_meta_whatsapp(payload: dict) -> None:
     """
     Reconstruct the arguments that routes/chat.py's _process_message expects
@@ -270,10 +312,29 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
 
     access_token is fetched from the DB at dispatch time so it is never
     stored in the inbox table (including dead-letter rows).
+
+    Org routing (Wave 1):
+        db_get_org_by_phone(bot_number) resolves the Organization that owns
+        this WhatsApp number.  The Org dict is shaped like a restaurant dict
+        (has id, name, menu, features, wa_access_token, wa_phone_id,
+        whatsapp_number) so downstream code requires no changes.
+
+        location_id is resolved here if:
+          a) The incoming phone number matched a Location override → matched_location_id
+          b) The payload embeds a QR deep-link → _extract_location_from_payload
+
+        In all other cases (exploratory chat, unknown channel) location_id=None
+        and the agent resolves it later when the customer places an order.
+
+    Rule 14 (CLAUDE.md): tenant_scope(org["id"]) wrapping _process_message is
+    MANDATORY — do NOT conditional it or catch TenantNotSetError.
     """
     import os
     from app.routes.chat import _process_message, _send_wa_text
-    from app.services import database as _db
+    from app.repositories.restaurant_repo import (  # noqa: PLC0415
+        db_get_org_by_phone,
+        db_get_location_by_id,
+    )
     from app.services.transcription import (
         download_whatsapp_media,
         transcribe_audio,
@@ -289,17 +350,44 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
     user_phone = payload["user_phone"]
     phone_id   = payload["phone_id"]
 
-    # Fetch access_token (same lookup the handler already does for text messages).
-    # Connection is acquired and released here, BEFORE any long I/O — Rule 4.
-    restaurant = await _db.db_get_restaurant_by_phone(bot_number)
-    if restaurant and restaurant.get("wa_access_token"):
-        access_token = restaurant["wa_access_token"]
+    # ── Resolve Org from bot_number (Rule 4: short connection, released before dispatch)
+    org = await db_get_org_by_phone(bot_number)
+    if org is None:
+        # Org not found — ack without retry.  This is a permanent configuration
+        # error (bot number not registered), not a transient failure.
+        # Raising here would trigger inbox retry backoff needlessly (Rule 6).
+        log.warning("inbox.org_not_found", bot_number=bot_number, user_phone=user_phone)
+        return
+
+    # Extract access_token from Org.  Fallback to env var if not configured (Rule 8).
+    if org.get("wa_access_token"):
+        access_token = org["wa_access_token"]
     else:
         access_token = os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
 
-    # Resolve tenant_id for downstream tenant-scoped repo calls.
-    # If restaurant cannot be resolved, proceed without scope (legacy path).
-    _tenant_id = restaurant["id"] if restaurant else None
+    # ── Resolve location_id (best-effort, pre-dispatch) ──────────────────────
+    # Priority: QR deep-link > Location phone override > None
+    matched_location_id: int | None = org.pop("matched_location_id", None)
+    qr_location_id: int | None = _extract_location_from_payload(payload)
+
+    location_id: int | None = qr_location_id or matched_location_id
+
+    # Validate QR-embedded location_id belongs to this Org (cross-org spoof prevention)
+    if qr_location_id is not None:
+        try:
+            loc = await db_get_location_by_id(qr_location_id)
+            if loc is None or loc.get("org_id") != org["id"]:
+                log.warning(
+                    "inbox.qr_location_invalid",
+                    qr_location_id=qr_location_id,
+                    org_id=org["id"],
+                )
+                location_id = matched_location_id  # fall back to phone-match override
+        except Exception:
+            log.exception("inbox.qr_location_validate_failed", qr_location_id=qr_location_id)
+            location_id = matched_location_id
+
+    _tenant_id: int = org["id"]  # Wave 1: org_id == tenant scope key
 
     # ── Voice note: transcribe before calling _process_message ────────────────
     if payload.get("needs_transcription"):
@@ -365,7 +453,7 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
     # webhook route takes precedence over nested tenant_scope (see tenant_context.py).
     gps_lat = payload.get("gps_lat")
     gps_lon = payload.get("gps_lon")
-    if gps_lat is not None and gps_lon is not None and _tenant_id is not None:
+    if gps_lat is not None and gps_lon is not None:
         try:
             with tenant_scope(_tenant_id):
                 from app.services import database as _db2  # noqa: PLC0415
@@ -377,26 +465,17 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
         except Exception:
             log.exception("inbox.gps_cart_save_failed", phone=user_phone)
 
-    # Wrap _process_message in tenant_scope so that any tenant-scoped repo calls
-    # downstream (agent.py → orders.py → customer_profiles_repo, etc.) have an
-    # active tenant context.  If restaurant could not be resolved, skip the scope
-    # and let the existing error handling in _process_message deal with it.
-    if _tenant_id is not None:
-        with tenant_scope(_tenant_id):
-            await _process_message(
-                user_phone   = user_phone,
-                user_text    = user_text,
-                bot_number   = bot_number,
-                phone_id     = phone_id,
-                access_token = access_token,
-            )
-    else:
+    # Rule 14 (CLAUDE.md): tenant_scope(org_id) wrapping _process_message is
+    # MANDATORY.  The org dict is shaped like a restaurant dict so _process_message
+    # and the agent pipeline work without modification.
+    with tenant_scope(_tenant_id):
         await _process_message(
             user_phone   = user_phone,
             user_text    = user_text,
             bot_number   = bot_number,
             phone_id     = phone_id,
             access_token = access_token,
+            location_id  = location_id,
         )
 
 

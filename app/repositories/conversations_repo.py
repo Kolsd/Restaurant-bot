@@ -52,14 +52,36 @@ async def db_get_history(phone: str, bot_number: str = "") -> list:
             return h if isinstance(h, list) else json.loads(h)
         return []
 
-async def db_save_history(phone: str, bot_number: str, history: list, branch_id: int = None):
+
+async def db_get_conversation_location_id(phone: str, bot_number: str) -> int | None:
+    """Return the last known location_id for a conversation, or None if not yet resolved.
+
+    Used by _resolve_location_id in agent.py to persist the resolved Location
+    across conversation turns without requiring re-resolution each time.
+    """
+    async with _tenant_connection() as conn:
+        return await conn.fetchval(
+            "SELECT location_id FROM conversations WHERE phone=$1 AND bot_number=$2",
+            phone, bot_number,
+        )
+
+
+async def db_save_history(
+    phone: str,
+    bot_number: str,
+    history: list,
+    branch_id: int = None,
+    location_id: int | None = None,
+):
     async with _tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, history, branch_id, restaurant_id, updated_at)
-            VALUES ($1, $2, $3, $4, NULLIF(current_setting('app.restaurant_id', true), '')::int, NOW())
+            INSERT INTO conversations (phone, bot_number, history, branch_id, location_id, restaurant_id, updated_at)
+            VALUES ($1, $2, $3, $4, $5, NULLIF(current_setting('app.restaurant_id', true), '')::int, NOW())
             ON CONFLICT (phone, bot_number)
-            DO UPDATE SET history=EXCLUDED.history, branch_id=EXCLUDED.branch_id, updated_at=NOW()
-        """, phone, bot_number, json.dumps(history[-20:]), branch_id)
+            DO UPDATE SET history=EXCLUDED.history, branch_id=EXCLUDED.branch_id,
+                          location_id=COALESCE(EXCLUDED.location_id, conversations.location_id),
+                          updated_at=NOW()
+        """, phone, bot_number, json.dumps(history[-20:]), branch_id, location_id)
 
 async def db_get_all_conversations(bot_number: str = None, branch_id: int | str = None, date_from: str = None, date_to: str = None):
     async with _tenant_connection() as conn:

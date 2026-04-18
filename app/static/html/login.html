@@ -356,6 +356,7 @@
   function persistSession(data, rolesArr, restaurantObj, resolvedRestaurantId) {
     localStorage.setItem('rb_token',      data.token);
     localStorage.setItem('rb_role',       rolesArr.join(','));
+    // Legacy key — preserved during Wave 1 for backward compat
     localStorage.setItem('rb_restaurant', JSON.stringify({
       id:              resolvedRestaurantId,
       branch_id:       resolvedRestaurantId,
@@ -366,6 +367,13 @@
       currency:        restaurantObj.currency        || 'COP',
       features:        restaurantObj.features        || {},
     }));
+
+    // New Org/Location keys (Wave 1 S5)
+    if (data.org) {
+      if (typeof mesioSetOrg === 'function') {
+        mesioSetOrg(data.org, data.locations || [], data.default_location_id);
+      }
+    }
 
     if (data.staff_id) {
       localStorage.setItem('rb_staff_id', String(data.staff_id));

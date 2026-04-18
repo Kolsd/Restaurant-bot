@@ -1093,7 +1093,7 @@ class TestBotWhatsAppFlows:
 
         called_with = {}
 
-        async def fake_process(user_phone, user_text, bot_number, phone_id, access_token):
+        async def fake_process(user_phone, user_text, bot_number, phone_id, access_token, **kwargs):
             called_with.update({
                 "user_phone": user_phone,
                 "user_text": user_text,
@@ -1102,8 +1102,10 @@ class TestBotWhatsAppFlows:
 
         monkeypatch.setattr("app.routes.chat._process_message", fake_process)
         monkeypatch.setattr(
-            "app.services.database.db_get_restaurant_by_phone",
-            AsyncMock(return_value={"id": 1, "wa_access_token": "tok-abc"}),
+            "app.repositories.restaurant_repo.db_get_org_by_phone",
+            AsyncMock(return_value={"id": 1, "name": "Test Org", "wa_access_token": "tok-abc",
+                                   "wa_phone_id": "phone-id-123", "whatsapp_number": "+573009876543",
+                                   "menu": {}, "features": {}, "matched_location_id": None}),
         )
 
         payload = {
@@ -1205,8 +1207,10 @@ class TestBotWhatsAppFlows:
 
         monkeypatch.setattr("app.routes.chat._process_message", fake_process)
         monkeypatch.setattr(
-            db, "db_get_restaurant_by_phone",
-            AsyncMock(return_value={"id": 1, "wa_access_token": "tok"}),
+            "app.repositories.restaurant_repo.db_get_org_by_phone",
+            AsyncMock(return_value={"id": 1, "name": "Test Org", "wa_access_token": "tok",
+                                   "wa_phone_id": "pid", "whatsapp_number": "+573009876543",
+                                   "menu": {}, "features": {}, "matched_location_id": None}),
         )
 
         stop = asyncio.Event()

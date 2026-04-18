@@ -5,9 +5,18 @@ ContextVar-based tenant isolation primitives.
 
 WHY: asyncpg connections are acquired per-request; we need a way to ensure
 every DB call within a request is automatically scoped to the correct
-restaurant_id without threading the ID through every function signature.
+org_id without threading the ID through every function signature.
 ContextVars propagate into asyncio Tasks (copy-on-write), so each concurrent
 request gets its own isolated tenant identity.
+
+Wave 2 semantics (Bloque S6):
+  - The ContextVar holds an org_id. Call sites that previously passed
+    restaurant_id continue to work for single-location tenants because
+    organizations.id == old restaurants.id for every Matriz (migration 0034).
+  - tenant_scope() parameter is kept as-is for now; callers migrate to
+    passing org_id explicitly in Bloque S7.
+  - current_org_id() is the canonical accessor; get_current_tenant() and
+    current_tenant_id() are aliases retained for backward compatibility.
 """
 from __future__ import annotations
 
@@ -21,7 +30,9 @@ log = get_logger(__name__)
 
 # ── ContextVars ───────────────────────────────────────────────────────────────
 
-# Holds the restaurant_id for the current async context (request/task).
+# Holds the org_id for the current async context (request/task).
+# Named "mesio_current_tenant" for ContextVar identity stability — renaming
+# would invalidate any snapshot/copy already in flight (e.g. running tasks).
 _current_tenant: ContextVar[Optional[int]] = ContextVar(
     "mesio_current_tenant", default=None
 )
@@ -74,6 +85,33 @@ def get_current_tenant() -> Optional[int]:
     return tid
 
 
+def current_org_id() -> Optional[int]:
+    """Return the active org_id for the current async context.
+
+    This is the canonical Wave 2 accessor. The ContextVar holds an org_id
+    (callers that previously passed restaurant_id continue to work for
+    single-location tenants because organizations.id == old restaurants.id
+    for every Matriz, guaranteed by migration 0034).
+
+    Returns:
+        None  — when bypass is active (cross-tenant admin operation).
+        int   — the pinned org_id.
+
+    Raises:
+        TenantNotSetError — when neither tenant nor bypass is set.
+    """
+    return get_current_tenant()
+
+
+def current_tenant_id() -> Optional[int]:
+    """Alias for current_org_id() — retained for backward compatibility.
+
+    Deprecated: new code should call current_org_id() directly. This alias
+    will be removed in Bloque S7 once all call sites are updated.
+    """
+    return get_current_tenant()
+
+
 def peek_tenant() -> Optional[int]:
     """Non-raising read of the current tenant — safe to use in logging/debugging."""
     return _current_tenant.get()
@@ -82,27 +120,36 @@ def peek_tenant() -> Optional[int]:
 # ── Context managers ──────────────────────────────────────────────────────────
 
 @contextmanager
-def tenant_scope(restaurant_id: int) -> Generator[int, None, None]:
-    """Pin the current async context to *restaurant_id*.
+def tenant_scope(org_id: int) -> Generator[int, None, None]:
+    """Pin the current async context to *org_id*.
 
-    Validates that restaurant_id is a positive integer; raises ValueError
-    otherwise so callers fail fast on bad data (e.g. None slipping through).
+    Validates that org_id is a positive integer; raises ValueError otherwise
+    so callers fail fast on bad data (e.g. None slipping through).
 
     Nested scopes are supported: the inner scope shadows the outer one and the
     outer value is restored on exit (ContextVar token reset).
+
+    Wave 2 (Bloque S6): the parameter was restaurant_id in Wave 1; it is now
+    org_id. Existing call sites that pass restaurant_id continue to work for
+    single-location tenants because organizations.id == old restaurants.id for
+    every Matriz (guaranteed by migration 0034). Multi-branch call sites must
+    be updated to pass org_id explicitly (tracked in Bloque S7).
+
+    The value pinned here is used by tenant_db.tenant_connection() to set
+    app.org_id for the duration of the DB transaction.
     """
-    if not isinstance(restaurant_id, int) or isinstance(restaurant_id, bool):
+    if not isinstance(org_id, int) or isinstance(org_id, bool):
         raise ValueError(
-            f"restaurant_id must be a positive int, got {restaurant_id!r}"
+            f"org_id must be a positive int, got {org_id!r}"
         )
-    if restaurant_id <= 0:
+    if org_id <= 0:
         raise ValueError(
-            f"restaurant_id must be > 0, got {restaurant_id}"
+            f"org_id must be > 0, got {org_id}"
         )
 
-    token = _current_tenant.set(restaurant_id)
+    token = _current_tenant.set(org_id)
     try:
-        yield restaurant_id
+        yield org_id
     finally:
         _current_tenant.reset(token)
 

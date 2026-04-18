@@ -135,10 +135,17 @@ async def execute_external_action(
     restaurant_obj: dict | None,
     routing_context: dict,
     reply: str,
+    location_id: int | None = None,
 ) -> str:
     """
     Handle external-specific actions: delivery, pickup, change_payment.
     Returns the reply string (possibly enriched with payment instructions).
+
+    location_id: pre-resolved location from inbox_worker (QR/phone override) or
+    conversation state.  When provided AND the Org has a ``locations`` table entry,
+    we use Org-based routing (db_resolve_location_by_gps /
+    db_get_org_locations) instead of the legacy restaurants/branches table.
+    routing_context["location_id"] is populated when a Location is resolved here.
     """
     action = parsed.get("action", "")
 
@@ -164,7 +171,7 @@ async def execute_external_action(
         log.warning("pickup_cash_rejected", phone=phone)
         return "Los pedidos para recoger requieren pago anticipado para garantizar tu pedido. ¿Con cuál método prefieres pagar? (Nequi, Daviplata, Transferencia Bancaria)"
 
-    # ── Delivery branch routing (GPS or geocoded address) ─────────────
+    # ── Delivery branch/location routing (GPS or geocoded address) ───────────
     effective_bot_number = bot_number
     if action == "delivery" and restaurant_obj and not restaurant_obj.get("parent_restaurant_id"):
         customer_lat, customer_lon = None, None
@@ -184,97 +191,201 @@ async def execute_external_action(
                 log.exception("geocode_address_failed", address=address, phone=phone)
 
         if customer_lat is not None and customer_lon is not None:
-            parent_id = restaurant_obj.get("id")
-            try:
-                nearest = await db.db_find_nearest_branch(customer_lat, customer_lon, parent_id)
-                if nearest:
-                    effective_bot_number = nearest["whatsapp_number"] or bot_number
-                    routing_context["branch_id"] = nearest["id"]
-                    log.info("delivery_routed", branch=nearest["name"], bot=effective_bot_number)
-                else:
-                    if not has_gps:
-                        # Geocoded but no branch in range — accept text address, continue
-                        log.info("delivery_routing_geocode_no_branch", address=address, phone=phone)
-                    else:
-                        pool = await db.get_pool()
-                        async with pool.acquire() as conn:
-                            abs_nearest = await conn.fetchrow('''
-                                SELECT name, address,
-                                       (6371 * acos(cos(radians($1)) * cos(radians(latitude::float)) * cos(radians(longitude::float) - radians($2)) + sin(radians($1)) * sin(radians(latitude::float)))) AS distance_km
-                                FROM restaurants
-                                WHERE parent_restaurant_id = $3 AND latitude IS NOT NULL AND longitude IS NOT NULL
-                                ORDER BY distance_km ASC LIMIT 1
-                            ''', customer_lat, customer_lon, parent_id)
+            org_id = restaurant_obj.get("id")
 
-                        branch_info = f"{abs_nearest['name']} ({abs_nearest['address']})" if abs_nearest else "nuestra sucursal más cercana"
-                        return f"Lo siento mucho, verificamos tu ubicación GPS y estás fuera de nuestra zona de cobertura para domicilios. 😔\n\nSin embargo, tu pedido sigue guardado en el carrito. Puedes cambiarlo a la modalidad de Recoger y pasar por él a {branch_info}. ¿Te gustaría que lo preparemos para recoger?"
+            # Wave 1: try Org-based Location routing first (new model).
+            # Falls through to legacy restaurants routing if no Location rows exist.
+            _org_location_resolved = False
+            try:
+                from app.repositories.restaurant_repo import (  # noqa: PLC0415
+                    db_resolve_location_by_gps,
+                    db_get_org_locations,
+                )
+                nearest_loc = await db_resolve_location_by_gps(org_id, customer_lat, customer_lon, radius_km=5.0)
+                if nearest_loc is not None:
+                    routing_context["location_id"] = nearest_loc["id"]
+                    routing_context["branch_id"] = nearest_loc["id"]  # backward-compat alias
+                    _org_location_resolved = True
+                    # Use Location's own WhatsApp number if it has one (multi-number chain)
+                    if nearest_loc.get("whatsapp_number"):
+                        effective_bot_number = nearest_loc["whatsapp_number"]
+                    log.info(
+                        "delivery_routed_by_location",
+                        location_id=nearest_loc["id"],
+                        location_name=nearest_loc.get("name"),
+                        distance_km=nearest_loc.get("distance_km"),
+                    )
+                else:
+                    # Out of coverage — check if there are ANY locations with GPS
+                    all_locs = await db_get_org_locations(org_id)
+                    locs_with_gps = [l for l in all_locs if l.get("latitude") is not None]
+                    if locs_with_gps and has_gps:
+                        # Org has GPS-enabled locations but none in range
+                        closest = min(locs_with_gps, key=lambda l: abs(l["latitude"] - customer_lat) + abs(l["longitude"] - customer_lon))
+                        branch_info = f"{closest['name']} ({closest.get('address', 'sin dirección')})"
+                        return (
+                            f"Lo siento mucho, verificamos tu ubicación GPS y estás fuera de nuestra zona de cobertura para domicilios. 😔\n\n"
+                            f"Sin embargo, tu pedido sigue guardado en el carrito. Puedes cambiarlo a la modalidad de Recoger y pasar por él a {branch_info}. "
+                            f"¿Te gustaría que lo preparemos para recoger?"
+                        )
+                    elif locs_with_gps:
+                        # Geocoded but no location in range — accept text address, continue
+                        log.info("delivery_routing_geocode_no_location", address=address, phone=phone)
+                        _org_location_resolved = True  # don't fall through to restaurants
             except Exception:
-                log.exception("delivery_routing_failed", phone=phone, bot_number=bot_number)
+                log.exception("delivery_org_routing_failed", phone=phone, org_id=org_id)
+
+            # Legacy restaurants routing (Wave 1 fallback when locations table is empty)
+            if not _org_location_resolved:
+                try:
+                    parent_id = org_id
+                    nearest = await db.db_find_nearest_branch(customer_lat, customer_lon, parent_id)
+                    if nearest:
+                        effective_bot_number = nearest["whatsapp_number"] or bot_number
+                        routing_context["branch_id"] = nearest["id"]
+                        log.info("delivery_routed", branch=nearest["name"], bot=effective_bot_number)
+                    else:
+                        if not has_gps:
+                            # Geocoded but no branch in range — accept text address, continue
+                            log.info("delivery_routing_geocode_no_branch", address=address, phone=phone)
+                        else:
+                            pool = await db.get_pool()
+                            async with pool.acquire() as conn:
+                                abs_nearest = await conn.fetchrow('''
+                                    SELECT name, address,
+                                           (6371 * acos(cos(radians($1)) * cos(radians(latitude::float)) * cos(radians(longitude::float) - radians($2)) + sin(radians($1)) * sin(radians(latitude::float)))) AS distance_km
+                                    FROM restaurants
+                                    WHERE parent_restaurant_id = $3 AND latitude IS NOT NULL AND longitude IS NOT NULL
+                                    ORDER BY distance_km ASC LIMIT 1
+                                ''', customer_lat, customer_lon, parent_id)
+
+                            branch_info = f"{abs_nearest['name']} ({abs_nearest['address']})" if abs_nearest else "nuestra sucursal más cercana"
+                            return f"Lo siento mucho, verificamos tu ubicación GPS y estás fuera de nuestra zona de cobertura para domicilios. 😔\n\nSin embargo, tu pedido sigue guardado en el carrito. Puedes cambiarlo a la modalidad de Recoger y pasar por él a {branch_info}. ¿Te gustaría que lo preparemos para recoger?"
+                except Exception:
+                    log.exception("delivery_routing_failed", phone=phone, bot_number=bot_number)
         # If geocoding failed or was not attempted, accept the text address as-is.
         # GPS is preferred but NEVER a hard requirement — text addresses are valid.
 
-    # ── Pickup branch routing (multi-branch only) ─────────────────────
+    # ── Pickup branch/location routing (multi-location only) ─────────────────
     if action == "pickup" and restaurant_obj and not restaurant_obj.get("parent_restaurant_id"):
-        parent_id = restaurant_obj.get("id")
+        org_id = restaurant_obj.get("id")
         cart_data = await db.db_get_cart(phone, bot_number)
 
-        # Check if restaurant has branches at all
-        branches_list: list = []
+        # Wave 1: try Org-based Location routing for pickup
+        _pickup_org_resolved = False
         try:
-            _pool = await db.get_pool()
-            async with _pool.acquire() as _conn:
-                branches_list = await _conn.fetch(
-                    "SELECT id, name, address, whatsapp_number FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name",
-                    parent_id,
-                )
+            from app.repositories.restaurant_repo import db_get_org_locations  # noqa: PLC0415
+            org_locations = await db_get_org_locations(org_id)
+            if org_locations:
+                _pickup_org_resolved = True
+                if len(org_locations) == 1:
+                    # Single location — auto-assign without asking
+                    only_loc = org_locations[0]
+                    routing_context["location_id"] = only_loc["id"]
+                    routing_context["branch_id"] = only_loc["id"]
+                    if only_loc.get("whatsapp_number"):
+                        effective_bot_number = only_loc["whatsapp_number"]
+                    log.info("pickup_auto_single_location", location_id=only_loc["id"], location_name=only_loc.get("name"))
+                elif cart_data.get("latitude") is not None and cart_data.get("longitude") is not None:
+                    # GPS available — route to nearest Location
+                    from app.repositories.restaurant_repo import db_resolve_location_by_gps  # noqa: PLC0415
+                    nearest_loc = await db_resolve_location_by_gps(
+                        org_id,
+                        float(cart_data["latitude"]),
+                        float(cart_data["longitude"]),
+                    )
+                    if nearest_loc:
+                        routing_context["location_id"] = nearest_loc["id"]
+                        routing_context["branch_id"] = nearest_loc["id"]
+                        if nearest_loc.get("whatsapp_number"):
+                            effective_bot_number = nearest_loc["whatsapp_number"]
+                        log.info("pickup_gps_routed_by_location", location_id=nearest_loc["id"])
+                    else:
+                        # GPS but no location in range → ask customer to pick
+                        loc_lines = "\n".join(
+                            f"• *{l['name']}* — {l.get('address') or 'sin dirección'}" for l in org_locations
+                        )
+                        return (
+                            f"¿En cuál sede prefieres recoger tu pedido? \n\n"
+                            f"{loc_lines}\n\n"
+                            f"También puedes compartirnos tu ubicación 📍 (ícono de clip en WhatsApp) "
+                            f"y te asignamos automáticamente la más cercana."
+                        )
+                elif "location_id" not in routing_context:
+                    # Multiple locations, no GPS → ask customer
+                    loc_lines = "\n".join(
+                        f"• *{l['name']}* — {l.get('address') or 'sin dirección'}" for l in org_locations
+                    )
+                    return (
+                        f"¿En cuál sede prefieres recoger tu pedido? \n\n"
+                        f"{loc_lines}\n\n"
+                        f"También puedes compartirnos tu ubicación 📍 (ícono de clip en WhatsApp) "
+                        f"y te asignamos automáticamente la más cercana."
+                    )
         except Exception:
-            log.exception("pickup_branches_query_failed", phone=phone, parent_id=parent_id)
+            log.exception("pickup_org_routing_failed", phone=phone, org_id=org_id)
 
-        has_branches = len(branches_list) > 0
+        if not _pickup_org_resolved:
+            # Legacy restaurants-based pickup routing (Wave 1 fallback)
+            parent_id = org_id
 
-        if cart_data.get("latitude") is not None and cart_data.get("longitude") is not None:
-            try:
-                nearest = await db.db_find_nearest_branch_any(
-                    float(cart_data["latitude"]), float(cart_data["longitude"]), parent_id
-                )
-                if nearest:
-                    effective_bot_number = nearest["whatsapp_number"] or bot_number
-                    routing_context["branch_id"] = nearest["id"]
-                    log.info("pickup_gps_routed", branch=nearest["name"], bot=effective_bot_number)
-            except Exception:
-                log.exception("pickup_gps_routing_failed", phone=phone, bot_number=bot_number)
-        elif parsed.get("branch_id"):
+            # Check if restaurant has branches at all
+            branches_list: list = []
             try:
                 _pool = await db.get_pool()
                 async with _pool.acquire() as _conn:
-                    branch_row = await _conn.fetchrow(
-                        "SELECT id, name, whatsapp_number FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
-                        int(parsed["branch_id"]), parent_id,
+                    branches_list = await _conn.fetch(
+                        "SELECT id, name, address, whatsapp_number FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name",
+                        parent_id,
                     )
-                if branch_row:
-                    effective_bot_number = branch_row["whatsapp_number"] or bot_number
-                    routing_context["branch_id"] = branch_row["id"]
-                    log.info("pickup_branch_routed", branch=branch_row["name"], bot=effective_bot_number)
             except Exception:
-                log.exception("pickup_branch_routing_failed", phone=phone, branch_id=parsed.get("branch_id"))
+                log.exception("pickup_branches_query_failed", phone=phone, parent_id=parent_id)
 
-        # GUARD: multi-branch restaurant but no branch was resolved → ask customer
-        if has_branches and "branch_id" not in routing_context:
-            log.warning(
-                "pickup_missing_branch",
-                phone=phone,
-                has_gps=cart_data.get("latitude") is not None,
-                llm_branch_id=parsed.get("branch_id"),
-            )
-            branch_lines = "\n".join(
-                f"• *{b['name']}* — {b['address'] or 'sin dirección'}" for b in branches_list
-            )
-            return (
-                f"¿En cuál sucursal prefieres recoger tu pedido? 🛍️\n\n"
-                f"{branch_lines}\n\n"
-                f"También puedes compartirnos tu ubicación 📍 (ícono de clip en WhatsApp) "
-                f"y te asignamos automáticamente la más cercana."
-            )
+            has_branches = len(branches_list) > 0
+
+            if cart_data.get("latitude") is not None and cart_data.get("longitude") is not None:
+                try:
+                    nearest = await db.db_find_nearest_branch_any(
+                        float(cart_data["latitude"]), float(cart_data["longitude"]), parent_id
+                    )
+                    if nearest:
+                        effective_bot_number = nearest["whatsapp_number"] or bot_number
+                        routing_context["branch_id"] = nearest["id"]
+                        log.info("pickup_gps_routed", branch=nearest["name"], bot=effective_bot_number)
+                except Exception:
+                    log.exception("pickup_gps_routing_failed", phone=phone, bot_number=bot_number)
+            elif parsed.get("branch_id"):
+                try:
+                    _pool = await db.get_pool()
+                    async with _pool.acquire() as _conn:
+                        branch_row = await _conn.fetchrow(
+                            "SELECT id, name, whatsapp_number FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
+                            int(parsed["branch_id"]), parent_id,
+                        )
+                    if branch_row:
+                        effective_bot_number = branch_row["whatsapp_number"] or bot_number
+                        routing_context["branch_id"] = branch_row["id"]
+                        log.info("pickup_branch_routed", branch=branch_row["name"], bot=effective_bot_number)
+                except Exception:
+                    log.exception("pickup_branch_routing_failed", phone=phone, branch_id=parsed.get("branch_id"))
+
+            # GUARD (legacy path only): multi-branch restaurant but no branch was resolved → ask customer
+            if has_branches and "branch_id" not in routing_context:
+                log.warning(
+                    "pickup_missing_branch",
+                    phone=phone,
+                    has_gps=cart_data.get("latitude") is not None,
+                    llm_branch_id=parsed.get("branch_id"),
+                )
+                branch_lines = "\n".join(
+                    f"• *{b['name']}* — {b['address'] or 'sin dirección'}" for b in branches_list
+                )
+                return (
+                    f"¿En cuál sucursal prefieres recoger tu pedido? 🛍️\n\n"
+                    f"{branch_lines}\n\n"
+                    f"También puedes compartirnos tu ubicación 📍 (ícono de clip en WhatsApp) "
+                    f"y te asignamos automáticamente la más cercana."
+                )
 
     # ── Migrate cart if routed to different branch ────────────────────
     if effective_bot_number != bot_number:

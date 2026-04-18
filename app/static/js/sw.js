@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v24';  // ← incrementar para limpiar el caché viejo
+const CACHE_VERSION  = 'v25';  // ← S5 Wave 1: mesio-utils.js Org/Location helpers
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [

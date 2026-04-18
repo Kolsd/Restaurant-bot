@@ -4,11 +4,29 @@ app/services/tenant_db.py
 Async context managers that acquire a DB connection and enforce tenant
 isolation at the PostgreSQL session level.
 
-WHY: By setting `app.restaurant_id` as a session-local GUC (or switching to a
-restricted role for superadmin), future Row-Level Security policies can
-filter every query automatically without requiring WHERE clauses scattered
+WHY: By setting `app.org_id` as a session-local GUC (or switching to a
+restricted role for superadmin), the org_isolation RLS policy (migration 0036)
+filters every query automatically without requiring WHERE clauses scattered
 across every repository function. This file wires the ContextVar from
 tenant_context.py into the actual asyncpg connection lifecycle.
+
+Wave 2 semantics (Bloque S6 / migration 0037):
+  - Only `app.org_id` is set. The legacy `app.restaurant_id` GUC is no longer
+    needed because migration 0037 dropped the tenant_isolation policy that read
+    it on all 33 RLS tables.
+  - `tenant_scope(org_id)` takes an org_id (was: restaurant_id). The ContextVar
+    semantics are unchanged; only the VALUE passed by callers changes — from
+    restaurant_id to org_id. Because organizations.id == old restaurants.id for
+    every Matriz (guaranteed by migration 0034), existing call sites that have
+    not yet been updated to use org_id explicitly will still work correctly for
+    single-location tenants.
+
+IMPORTANT — deploy in lockstep:
+  This file MUST NOT be deployed before migration 0037 runs. If deployed while
+  0036 is head and tenant_isolation is still active, the legacy policy reads
+  app.restaurant_id (which we no longer set), so all RLS reads return 0 rows
+  (fail-closed). Deploy this code change in the same Railway release that runs
+  `alembic upgrade head` to 0037, or strictly after.
 """
 from __future__ import annotations
 
@@ -70,17 +88,23 @@ async def _await_acquire_ctx(ctx: object) -> asyncpg.Connection:
 
 @asynccontextmanager
 async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
-    """Acquire a transactional connection scoped to the current tenant.
+    """Acquire a transactional connection scoped to the current tenant (org).
 
     Behaviour:
-    - Bypass active  → executes `SET LOCAL ROLE mesio_superadmin` (admin ops)
-    - Tenant set     → executes `SELECT set_config('app.restaurant_id', $1, true)`
-                       using a parameterised call — never an f-string.
+    - Bypass active  → executes `SET LOCAL ROLE mesio_superadmin` (admin ops).
+    - Tenant set     → executes `SELECT set_config('app.org_id', $1, true)`.
+                       Parameter-safe: never an f-string.
     - Neither        → raises TenantNotSetError immediately (before touching DB).
     - Pool exhausted → raises PoolAcquireTimeout after POOL_ACQUIRE_TIMEOUT seconds.
 
     The `conn.transaction()` context manager handles rollback on any exception,
     so callers do not need to catch asyncpg errors here.
+
+    Wave 2 (Bloque S6): only app.org_id is set. The value passed via
+    tenant_scope() should be the org_id (not restaurant_id). For existing call
+    sites that have not yet been updated, organisations.id == old restaurants.id
+    for every Matriz (guaranteed by migration 0034), so the integer is
+    interchangeable for single-location tenants.
     """
     from app.services.database import get_pool  # lazy import — breaks import cycle
 
@@ -128,9 +152,14 @@ async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
                 )
                 await conn.execute("SET LOCAL ROLE mesio_superadmin")
             else:
-                # Parameter-safe: str(tenant_id) passed as $1, never interpolated.
+                # Wave 2: only app.org_id is set. Relies on migration 0037 having
+                # dropped tenant_isolation (which read app.restaurant_id). Deploying
+                # this code BEFORE 0037 runs will cause RLS to filter on a NULL GUC
+                # → fail-closed reads return 0 rows. Deploy in lockstep.
+                #
+                # Parameter-safe: tenant_id is passed as $1 and never interpolated.
                 await conn.fetchval(
-                    "SELECT set_config('app.restaurant_id', $1, true)",
+                    "SELECT set_config('app.org_id', $1, true)",
                     str(tenant_id),
                 )
             yield conn

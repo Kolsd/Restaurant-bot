@@ -1,6 +1,18 @@
 """
-Shared FastAPI dependencies for route authentication and restaurant resolution.
-Import these instead of redefining per-router auth helpers.
+Authentication dependencies.
+
+WAVE 1 SEMANTICS (Bloque S3 of Org/Location migration):
+  - get_current_restaurant / _scoped: LEGACY aliases.  Return Org shaped as
+    restaurant dict (id = org.id, name = org.name, etc.) — unchanged behaviour.
+  - get_current_org: preferred dep for routes that should scope on Org.
+  - get_current_org_scoped: yield-based variant of get_current_org that enters
+    tenant_scope(org_id).  Use for new RLS-compliant routes.
+  - get_current_location / require_location: optional deps for routes that
+    need a specific Location (validates X-Location-ID header ownership).
+
+Route migration cadence:
+  - New routes should use get_current_org_scoped + optional get_current_location.
+  - Existing routes stay on get_current_restaurant_scoped until Bloque S6.
 """
 from typing import Callable
 from fastapi import Request, HTTPException, Depends
@@ -269,3 +281,180 @@ async def require_page_access(request: Request, path: str):
         raise HTTPException(status_code=403, detail="Rol no autorizado para esta página")
 
     return None
+
+
+# ── Org/Location dependencies (Bloque S3) ────────────────────────────────────
+#
+# Wave 1 semantics:
+#   - get_current_restaurant / _scoped: UNCHANGED — legacy aliases that return
+#     the same shape as before.  All existing routes continue to work.
+#   - get_current_org: new preferred dep.  During Wave 1 the org_id equals the
+#     old restaurant_id (guaranteed by migration 0034), so passing it to
+#     tenant_scope() works correctly.
+#   - get_current_org_scoped: yield-based, enters tenant_scope(org_id).
+#   - get_current_location / require_location: validate X-Location-ID header.
+
+
+async def _resolve_org_id_for_user(user: dict) -> int | None:
+    """Resolve the org_id for a user dict.
+
+    Looks up the _migration_restaurant_to_location mapping table to translate
+    the user's restaurant_id to an org_id.  Falls back to restaurant_id if
+    no mapping row exists (safe during migration rollout when some tenants
+    haven't been backfilled yet).
+
+    Returns None if no restaurant/org can be determined.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    rid = user.get("restaurant_id") or user.get("branch_id")
+    if not rid:
+        return None
+
+    try:
+        pool = await db.get_pool()
+        with bypass_tenant_scope("deps_resolve_org_id_for_user"):
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT org_id FROM _migration_restaurant_to_location "
+                    "WHERE old_restaurant_id = $1",
+                    int(rid),
+                )
+        if row:
+            return int(row["org_id"])
+    except Exception:
+        pass
+
+    # Fallback: use restaurant_id directly (valid for single-location Matrizes
+    # where organizations.id == restaurants.id by migration 0034 invariant).
+    return int(rid)
+
+
+async def get_current_org(request: Request) -> dict:
+    """Return the Organization dict for the authenticated user.
+
+    Raises 403 if no Org can be resolved.
+
+    Wave 1: the Org id equals the old restaurant_id for Matrizes.  For staff
+    whose restaurant_id is a Sucursal, the mapping table translates to the
+    correct parent Org id.
+
+    The result is cached on request.state.mesio_org to avoid duplicate DB
+    lookups when both get_current_org and get_current_location are used as
+    dependencies in the same request.
+    """
+    cached = getattr(request.state, "mesio_org", None)
+    if cached is not None:
+        return cached
+
+    user = await get_current_user(request)
+    org_id = await _resolve_org_id_for_user(user)
+    if not org_id:
+        raise HTTPException(status_code=403, detail="Organization not found")
+
+    org = await db.db_get_org_by_id(org_id)
+    if not org:
+        # Fallback: shape a minimal org from restaurant data so legacy code keeps
+        # working even before the organizations table is populated.
+        r = await get_current_restaurant(request)
+        import json as _json  # noqa: PLC0415
+        feats = r.get("features") or {}
+        if isinstance(feats, str):
+            try:
+                feats = _json.loads(feats)
+            except Exception:
+                feats = {}
+        org = {
+            "id":              r.get("id"),
+            "name":            r.get("name"),
+            "whatsapp_number": r.get("whatsapp_number"),
+            "features":        feats,
+            "subscription_plan": r.get("subscription_plan", "free"),
+            "subscription_status": r.get("subscription_status", "active"),
+        }
+
+    request.state.mesio_org = org
+    return org
+
+
+async def get_current_org_scoped(request: Request):
+    """Yield-based dep that enters tenant_scope(org_id) for the request.
+
+    Preferred replacement for get_current_restaurant_scoped on new routes.
+
+    Wave 1 reasoning (see ORG_LOCATION_MIGRATION_PLAN.md §4.5):
+      tenant_scope(org_id) sets BOTH GUCs:
+        app.restaurant_id = org_id  → legacy tenant_isolation policy matches
+                                       Matriz rows (restaurant_id == org_id)
+        app.org_id = org_id         → new org_isolation policy matches ALL rows
+                                       belonging to this Org (org_id == org_id)
+      So calling tenant_scope with the org_id gives full RLS coverage under
+      both policies for the duration of the request.
+    """
+    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+
+    org = await get_current_org(request)
+    org_id = org.get("id")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="Organization ID not found")
+
+    with tenant_scope(int(org_id)):
+        yield org
+
+
+async def get_current_location(
+    request: Request,
+    org: dict = Depends(get_current_org),
+) -> "dict | None":
+    """Resolve Location from the X-Location-ID request header.
+
+    Returns:
+      dict  — the Location row if X-Location-ID is a valid int and belongs to
+              the current Org.
+      None  — if the header is missing or equal to "all" (queries without
+              location filter are allowed).
+
+    Raises 403 if the location_id belongs to a different Org (cross-org spoofing
+    attempt).
+    Raises 400 if the header value is non-numeric and not "all".
+    """
+    loc_header = request.headers.get("X-Location-ID", "").strip()
+    if not loc_header or loc_header.lower() == "all":
+        return None
+
+    if not loc_header.isdigit():
+        raise HTTPException(
+            status_code=400,
+            detail=f"X-Location-ID must be a positive integer or 'all', got {loc_header!r}",
+        )
+
+    location_id = int(loc_header)
+    loc = await db.db_get_location_by_id(location_id)
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    # Cross-org ownership check
+    if loc.get("org_id") != org.get("id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Location does not belong to your organization",
+        )
+
+    return loc
+
+
+async def require_location(
+    request: Request,
+    location: "dict | None" = Depends(get_current_location),
+) -> dict:
+    """Like get_current_location but raises 400 if no Location is specified.
+
+    Use for routes where a specific Location is mandatory (e.g. staff clock-in,
+    per-sede inventory edits).
+    """
+    if location is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint requires a specific X-Location-ID header",
+        )
+    return location

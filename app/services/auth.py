@@ -6,6 +6,38 @@ from app.services.logging import get_logger
 
 _log = get_logger(__name__)
 
+
+# ── Org/Location shape helpers (Bloque S3) ────────────────────────────────────
+
+def _loc_summary(loc: dict) -> dict:
+    """Return a slim Location dict safe for embedding in login responses."""
+    return {
+        "id":               loc.get("id"),
+        "name":             loc.get("name"),
+        "is_primary":       loc.get("is_primary", False),
+        "whatsapp_number":  loc.get("whatsapp_number"),
+        "active":           loc.get("active", True),
+    }
+
+
+async def _build_org_shape(org: dict) -> dict:
+    """Return the ``org`` sub-dict for login responses from an Org row."""
+    feats = org.get("features") or {}
+    if isinstance(feats, str):
+        try:
+            feats = _json.loads(feats)
+        except Exception:
+            feats = {}
+    return {
+        "id":                 org.get("id"),
+        "name":               org.get("name"),
+        "whatsapp_number":    org.get("whatsapp_number"),
+        "features":           feats,
+        "subscription_plan":  org.get("subscription_plan"),
+        "locale":             feats.get("locale",   "es-CO"),
+        "currency":           feats.get("currency", "COP"),
+    }
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
@@ -46,6 +78,12 @@ async def login(username: str, password: str) -> dict:
         whatsapp_number = ""
         features: dict = {}
         restaurant_name = ""
+
+        # ── New shape: resolve Org + Location (Bloque S3) ─────────────────────
+        org_shape: dict | None = None
+        locations_list: list = []
+        default_location_id: int | None = None
+
         try:
             if branch_id:
                 restaurant = await db.db_get_restaurant_by_id(branch_id)
@@ -54,27 +92,62 @@ async def login(username: str, password: str) -> dict:
                     whatsapp_number = restaurant.get("whatsapp_number", "")
                     raw = restaurant.get("features") or {}
                     features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
-        except Exception:
-            from app.services.logging import get_logger as _get_log  # noqa: PLC0415
-            _get_log(__name__).exception("auth.staff_login.features_parse_error")
 
-        return {
+                # Resolve Org/Location via mapping table
+                from app.repositories.restaurant_repo import (  # noqa: PLC0415
+                    db_get_org_by_id,
+                    db_get_org_locations,
+                    db_get_primary_location,
+                )
+                from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+                from app.services.database import get_pool  # noqa: PLC0415
+
+                pool = await get_pool()
+                with bypass_tenant_scope("auth_staff_login_org_resolve"):
+                    async with pool.acquire() as conn:
+                        mapping = await conn.fetchrow(
+                            "SELECT org_id, location_id FROM _migration_restaurant_to_location "
+                            "WHERE old_restaurant_id = $1",
+                            branch_id,
+                        )
+
+                if mapping:
+                    org_obj = await db_get_org_by_id(int(mapping["org_id"]))
+                    if org_obj:
+                        org_shape = await _build_org_shape(org_obj)
+                    # For staff: only the Location they belong to
+                    loc = await db_get_location_by_id_safe(int(mapping["location_id"]))
+                    if loc:
+                        locations_list = [_loc_summary(loc)]
+                        default_location_id = loc["id"]
+
+        except Exception:
+            _log.exception("auth.staff_login.org_resolve_error")
+
+        legacy_restaurant = {
+            "id":               branch_id,
+            "name":             restaurant_name,
+            "username":         member["name"],
+            "role":             role,
+            "branch_id":        branch_id,
+            "whatsapp_number":  whatsapp_number,
+            "features":         features,
+            "locale":           features.get("locale",   "es-CO"),
+            "currency":         features.get("currency", "COP"),
+        }
+
+        response: dict = {
             "success":  True,
             "token":    token,
             "role":     role,
             "staff_id": member["id"],
-            "restaurant": {
-                "id":               branch_id,
-                "name":             restaurant_name,
-                "username":         member["name"],
-                "role":             role,
-                "branch_id":        branch_id,
-                "whatsapp_number":  whatsapp_number,
-                "features":         features,
-                "locale":           features.get("locale",   "es-CO"),
-                "currency":         features.get("currency", "COP"),
-            },
+            "restaurant": legacy_restaurant,  # legacy key — kept for backward compat
         }
+        if org_shape is not None:
+            response["org"] = org_shape
+            response["locations"] = locations_list
+            response["default_location_id"] = default_location_id
+        return response
 
     if not verify_password(password, user["password_hash"], username):
         return {"success": False, "error": "Contraseña incorrecta"}
@@ -85,6 +158,12 @@ async def login(username: str, password: str) -> dict:
     branch_id = user.get("branch_id")
     whatsapp_number = ""
     features: dict = {}
+
+    # ── New shape: resolve Org + Locations (Bloque S3) ────────────────────────
+    org_shape: dict | None = None
+    locations_list: list = []
+    default_location_id: int | None = None
+
     try:
         if branch_id:
             restaurant = await db.db_get_restaurant_by_id(branch_id)
@@ -106,26 +185,67 @@ async def login(username: str, password: str) -> dict:
                 branch_id = all_restaurants[0].get("id")
                 raw = all_restaurants[0].get("features") or {}
                 features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
-    except Exception:
-        from app.services.logging import get_logger as _get_log  # noqa: PLC0415
-        _get_log(__name__).exception("auth.admin_login.restaurant_resolve_error")
 
-    return {
+        # Resolve Org via mapping table (Bloque S3)
+        if branch_id:
+            from app.repositories.restaurant_repo import (  # noqa: PLC0415
+                db_get_org_by_id,
+                db_get_org_locations,
+                db_get_primary_location,
+            )
+            from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+            from app.services.database import get_pool  # noqa: PLC0415
+
+            pool = await get_pool()
+            with bypass_tenant_scope("auth_admin_login_org_resolve"):
+                async with pool.acquire() as conn:
+                    mapping = await conn.fetchrow(
+                        "SELECT org_id, location_id FROM _migration_restaurant_to_location "
+                        "WHERE old_restaurant_id = $1",
+                        branch_id,
+                    )
+
+            if mapping:
+                org_obj = await db_get_org_by_id(int(mapping["org_id"]))
+                if org_obj:
+                    org_shape = await _build_org_shape(org_obj)
+                    all_locs = await db_get_org_locations(int(mapping["org_id"]))
+                    locations_list = [_loc_summary(loc) for loc in all_locs]
+                    primary = next((loc for loc in all_locs if loc.get("is_primary")), None)
+                    default_location_id = primary["id"] if primary else (all_locs[0]["id"] if all_locs else None)
+
+    except Exception:
+        _log.exception("auth.admin_login.org_resolve_error")
+
+    legacy_restaurant = {
+        "id": branch_id,
+        "name": user["restaurant_name"],
+        "username": username,
+        "role": role,
+        "branch_id": branch_id,
+        "whatsapp_number": whatsapp_number,
+        "features": features,
+        "locale":   features.get("locale",   "es-CO"),
+        "currency": features.get("currency", "COP"),
+    }
+
+    response: dict = {
         "success": True,
         "token": token,
         "role": role,
-        "restaurant": {
-            "id": branch_id,
-            "name": user["restaurant_name"],
-            "username": username,
-            "role": role,
-            "branch_id": branch_id,
-            "whatsapp_number": whatsapp_number,
-            "features": features,
-            "locale":   features.get("locale",   "es-CO"),
-            "currency": features.get("currency", "COP"),
-        },
+        "restaurant": legacy_restaurant,  # legacy key — kept for backward compat
     }
+    if org_shape is not None:
+        response["org"] = org_shape
+        response["locations"] = locations_list
+        response["default_location_id"] = default_location_id
+    return response
+
+
+async def db_get_location_by_id_safe(location_id: int) -> dict | None:
+    """Thin helper used inside auth.py to avoid a circular import in the common case."""
+    from app.repositories.restaurant_repo import db_get_location_by_id  # noqa: PLC0415
+    return await db_get_location_by_id(location_id)
 
 async def verify_token(token: str) -> str | None:
     return await sessions_repo.get_session(token)

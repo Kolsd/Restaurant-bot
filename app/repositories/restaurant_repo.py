@@ -1369,3 +1369,622 @@ async def db_get_restaurant_by_slug(slug: str) -> dict | None:
     if not row:
         return None
     return dict(row)
+
+
+# ── Org/Location lookups (Bloque S3) ─────────────────────────────────────────
+#
+# These functions operate on the `organizations` and `locations` tables
+# introduced by migration 0034.  Neither table is in _RLS_TABLES (only
+# tenant-content tables have RLS policies).  However:
+#   - Functions called PRE-SCOPE (webhook resolution, public lookups) use
+#     _get_pool() directly — GLOBAL pattern, same as db_get_restaurant_by_phone.
+#   - Functions called WITHIN an authenticated scope use _tenant_connection() or
+#     _get_pool() depending on whether they are tenant-specific operations.
+#     For org/location tables without RLS, _get_pool() is fine; we keep
+#     _tenant_connection() only where the operation is logically tenant-bound
+#     (e.g. update org settings from an authenticated admin request).
+#
+# Bypass is still used in pre-scope helpers for audit-log consistency (all
+# cross-tenant reads should produce a bypass log entry).
+
+
+async def db_get_org_by_id(org_id: int) -> dict | None:
+    """Fetch an Organization by PK.
+
+    organizations has no RLS policy (it IS the tenant container), so we use
+    bypass_tenant_scope for audit-log consistency.  Safe from any call site.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_get_org_by_id_lookup"):
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                       menu, features, subscription_plan, subscription_status,
+                       created_at, updated_at
+                FROM organizations
+                WHERE id = $1
+                """,
+                org_id,
+            )
+    if not row:
+        return None
+    d = _serialize(dict(row))
+    # Deserialize JSONB fields that asyncpg may return as dicts or strings
+    for field in ("menu", "features"):
+        val = d.get(field)
+        if isinstance(val, str):
+            try:
+                d[field] = _json.loads(val)
+            except Exception:
+                d[field] = {} if field == "features" else []
+        elif val is None:
+            d[field] = {} if field == "features" else []
+    return d
+
+
+async def db_get_org_by_phone(phone: str) -> dict | None:
+    """Resolve which Organization owns a given WhatsApp number.
+
+    Checks both:
+      1. organizations.whatsapp_number (Org-level default number)
+      2. locations.whatsapp_number (Location-level override for multi-number chains)
+
+    Location match is preferred (more specific).  If matched via a Location
+    override, the returned dict includes ``matched_location_id`` (else None).
+
+    This is called PRE-SCOPE from inbox_worker dispatch resolution, so it uses
+    the GLOBAL pool pattern + bypass_tenant_scope for audit-log consistency.
+
+    Phone normalization is applied before querying (strip +, spaces).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    normalized = _normalize_phone(phone)
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_get_org_by_phone_webhook_resolve"):
+        async with pool.acquire() as conn:
+            # Try Location-level override first (more specific routing)
+            loc_row = await conn.fetchrow(
+                """
+                SELECT l.id AS location_id, o.id, o.name, o.slug,
+                       o.whatsapp_number, o.wa_phone_id, o.wa_access_token,
+                       o.menu, o.features, o.subscription_plan, o.subscription_status,
+                       o.created_at, o.updated_at
+                FROM locations l
+                JOIN organizations o ON o.id = l.org_id
+                WHERE replace(replace(l.whatsapp_number, '+', ''), ' ', '') = $1
+                  AND l.active = true
+                """,
+                normalized,
+            )
+            if loc_row:
+                d = _serialize(dict(loc_row))
+                matched_location_id = d.pop("location_id", None)
+                for field in ("menu", "features"):
+                    val = d.get(field)
+                    if isinstance(val, str):
+                        try:
+                            d[field] = _json.loads(val)
+                        except Exception:
+                            d[field] = {} if field == "features" else []
+                    elif val is None:
+                        d[field] = {} if field == "features" else []
+                d["matched_location_id"] = matched_location_id
+                return d
+
+            # Fall back to Org-level number
+            org_row = await conn.fetchrow(
+                """
+                SELECT id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                       menu, features, subscription_plan, subscription_status,
+                       created_at, updated_at
+                FROM organizations
+                WHERE replace(replace(whatsapp_number, '+', ''), ' ', '') = $1
+                """,
+                normalized,
+            )
+            if not org_row:
+                return None
+            d = _serialize(dict(org_row))
+            for field in ("menu", "features"):
+                val = d.get(field)
+                if isinstance(val, str):
+                    try:
+                        d[field] = _json.loads(val)
+                    except Exception:
+                        d[field] = {} if field == "features" else []
+                elif val is None:
+                    d[field] = {} if field == "features" else []
+            d["matched_location_id"] = None
+            return d
+
+
+async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[dict]:
+    """List Locations for an Org, ordered by is_primary DESC, name ASC.
+
+    Caller must be in tenant_scope(org_id) or bypass_tenant_scope; locations
+    has no RLS policy so bypass is not strictly required, but we use
+    _get_pool() + bypass for consistency with the GLOBAL pattern for
+    cross-tenant/admin lookups.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_get_org_locations_list"):
+        async with pool.acquire() as conn:
+            if active_only:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, org_id, name, code, address, latitude, longitude,
+                           whatsapp_number, wa_phone_id, wa_access_token,
+                           active, is_primary, timezone, opening_hours,
+                           created_at, updated_at, legacy_restaurant_id
+                    FROM locations
+                    WHERE org_id = $1 AND active = true
+                    ORDER BY is_primary DESC, name ASC
+                    """,
+                    org_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, org_id, name, code, address, latitude, longitude,
+                           whatsapp_number, wa_phone_id, wa_access_token,
+                           active, is_primary, timezone, opening_hours,
+                           created_at, updated_at, legacy_restaurant_id
+                    FROM locations
+                    WHERE org_id = $1
+                    ORDER BY is_primary DESC, name ASC
+                    """,
+                    org_id,
+                )
+    result = []
+    for row in rows:
+        d = _serialize(dict(row))
+        val = d.get("opening_hours")
+        if isinstance(val, str):
+            try:
+                d["opening_hours"] = _json.loads(val)
+            except Exception:
+                d["opening_hours"] = {}
+        elif val is None:
+            d["opening_hours"] = {}
+        result.append(d)
+    return result
+
+
+async def db_get_primary_location(org_id: int) -> dict | None:
+    """Return the is_primary Location for an Org.
+
+    Invariant (enforced by UNIQUE partial index ux_locations_org_primary):
+    exactly one is_primary per Org.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_get_primary_location_lookup"):
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, org_id, name, code, address, latitude, longitude,
+                       whatsapp_number, wa_phone_id, wa_access_token,
+                       active, is_primary, timezone, opening_hours,
+                       created_at, updated_at, legacy_restaurant_id
+                FROM locations
+                WHERE org_id = $1 AND is_primary = true
+                """,
+                org_id,
+            )
+    if not row:
+        return None
+    d = _serialize(dict(row))
+    val = d.get("opening_hours")
+    if isinstance(val, str):
+        try:
+            d["opening_hours"] = _json.loads(val)
+        except Exception:
+            d["opening_hours"] = {}
+    elif val is None:
+        d["opening_hours"] = {}
+    return d
+
+
+async def db_get_location_by_id(location_id: int) -> dict | None:
+    """Fetch a Location by PK.  Returns None if not found.
+
+    Includes org_id so the caller can validate ownership (e.g. in
+    get_current_location dep — prevent cross-org location spoofing).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_get_location_by_id_lookup"):
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, org_id, name, code, address, latitude, longitude,
+                       whatsapp_number, wa_phone_id, wa_access_token,
+                       active, is_primary, timezone, opening_hours,
+                       created_at, updated_at, legacy_restaurant_id
+                FROM locations
+                WHERE id = $1
+                """,
+                location_id,
+            )
+    if not row:
+        return None
+    d = _serialize(dict(row))
+    val = d.get("opening_hours")
+    if isinstance(val, str):
+        try:
+            d["opening_hours"] = _json.loads(val)
+        except Exception:
+            d["opening_hours"] = {}
+    elif val is None:
+        d["opening_hours"] = {}
+    return d
+
+
+async def db_resolve_location_by_gps(
+    org_id: int,
+    lat: float,
+    lon: float,
+    radius_km: float = 5.0,
+) -> dict | None:
+    """Find the nearest active Location to (lat, lon) within radius_km.
+
+    Returns None if no active Location of the Org is within range.
+
+    Uses the same Haversine formula as db_find_nearest_branch for consistency:
+      distance_km = 6371 * acos(
+        cos(radians(lat1)) * cos(radians(lat2))
+        * cos(radians(lon2) - radians(lon1))
+        + sin(radians(lat1)) * sin(radians(lat2))
+      )
+
+    For orgs with few locations (typical: 1-5), we fetch all active locations
+    with GPS and filter in Python — simpler and avoids earthdistance extension
+    dependency.
+    """
+    import math  # noqa: PLC0415
+
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_resolve_location_by_gps"):
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, org_id, name, code, address, latitude, longitude,
+                       whatsapp_number, wa_phone_id, wa_access_token,
+                       active, is_primary, timezone, opening_hours,
+                       created_at, updated_at, legacy_restaurant_id
+                FROM locations
+                WHERE org_id = $1
+                  AND active = true
+                  AND latitude IS NOT NULL
+                  AND longitude IS NOT NULL
+                """,
+                org_id,
+            )
+
+    if not rows:
+        return None
+
+    # Haversine filter in Python
+    def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        lat1_r = math.radians(lat1)
+        lat2_r = math.radians(lat2)
+        cos_product = (
+            math.cos(lat1_r)
+            * math.cos(lat2_r)
+            * math.cos(math.radians(lon2) - math.radians(lon1))
+            + math.sin(lat1_r) * math.sin(lat2_r)
+        )
+        # Clamp to [-1, 1] to guard against floating-point drift
+        cos_product = max(-1.0, min(1.0, cos_product))
+        return 6371.0 * math.acos(cos_product)
+
+    best: dict | None = None
+    best_dist = float("inf")
+    for row in rows:
+        dist = _haversine(lat, lon, float(row["latitude"]), float(row["longitude"]))
+        if dist <= radius_km and dist < best_dist:
+            best_dist = dist
+            best = row
+
+    if best is None:
+        return None
+
+    d = _serialize(dict(best))
+    val = d.get("opening_hours")
+    if isinstance(val, str):
+        try:
+            d["opening_hours"] = _json.loads(val)
+        except Exception:
+            d["opening_hours"] = {}
+    elif val is None:
+        d["opening_hours"] = {}
+    d["distance_km"] = round(best_dist, 3)
+    return d
+
+
+async def db_update_organization(org_id: int, **fields) -> dict | None:
+    """Update Org fields.  Returns the updated row or None if not found.
+
+    Accepted fields: name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+    menu, features, subscription_plan, subscription_status.
+
+    Called from authenticated admin routes; uses bypass_tenant_scope since
+    organizations has no RLS and we need to update the container itself.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    _ALLOWED_ORG_FIELDS = {
+        "name", "slug", "whatsapp_number", "wa_phone_id", "wa_access_token",
+        "menu", "features", "subscription_plan", "subscription_status",
+    }
+    _JSONB_FIELDS = {"menu", "features"}
+
+    updates = {k: v for k, v in fields.items() if k in _ALLOWED_ORG_FIELDS}
+    if not updates:
+        log.warning("db_update_organization.no_valid_fields", org_id=org_id)
+        return await db_get_org_by_id(org_id)
+
+    set_clauses = []
+    params: list = []
+    idx = 1
+    for col, val in updates.items():
+        if col in _JSONB_FIELDS:
+            # Serialize dicts to JSON string for the ::jsonb cast
+            if isinstance(val, dict):
+                val = _json.dumps(val)
+            set_clauses.append(f"{col} = ${idx}::jsonb")
+        else:
+            set_clauses.append(f"{col} = ${idx}")
+        params.append(val)
+        idx += 1
+    # Always update updated_at
+    set_clauses.append("updated_at = NOW()")
+    params.append(org_id)
+
+    sql = (
+        f"UPDATE organizations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted above
+        f"WHERE id = ${idx} RETURNING id, name, slug, whatsapp_number, wa_phone_id, "
+        f"wa_access_token, menu, features, subscription_plan, subscription_status, "
+        f"created_at, updated_at"
+    )
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_update_organization_admin"):
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(sql, *params)
+
+    if not row:
+        return None
+    d = _serialize(dict(row))
+    for field in ("menu", "features"):
+        val = d.get(field)
+        if isinstance(val, str):
+            try:
+                d[field] = _json.loads(val)
+            except Exception:
+                d[field] = {} if field == "features" else []
+        elif val is None:
+            d[field] = {} if field == "features" else []
+    return d
+
+
+async def db_update_location(location_id: int, **fields) -> dict | None:
+    """Update Location fields.  Returns the updated row or None if not found.
+
+    Accepted fields: name, code, address, latitude, longitude,
+    whatsapp_number, wa_phone_id, wa_access_token, active,
+    opening_hours, timezone.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    _ALLOWED_LOC_FIELDS = {
+        "name", "code", "address", "latitude", "longitude",
+        "whatsapp_number", "wa_phone_id", "wa_access_token",
+        "active", "opening_hours", "timezone",
+    }
+    _JSONB_FIELDS = {"opening_hours"}
+
+    updates = {k: v for k, v in fields.items() if k in _ALLOWED_LOC_FIELDS}
+    if not updates:
+        log.warning("db_update_location.no_valid_fields", location_id=location_id)
+        return await db_get_location_by_id(location_id)
+
+    set_clauses = []
+    params: list = []
+    idx = 1
+    for col, val in updates.items():
+        if col in _JSONB_FIELDS:
+            if isinstance(val, dict):
+                val = _json.dumps(val)
+            set_clauses.append(f"{col} = ${idx}::jsonb")
+        else:
+            set_clauses.append(f"{col} = ${idx}")
+        params.append(val)
+        idx += 1
+    set_clauses.append("updated_at = NOW()")
+    params.append(location_id)
+
+    sql = (
+        f"UPDATE locations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted
+        f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, latitude, longitude, "
+        f"whatsapp_number, wa_phone_id, wa_access_token, active, is_primary, timezone, "
+        f"opening_hours, created_at, updated_at, legacy_restaurant_id"
+    )
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_update_location_admin"):
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(sql, *params)
+
+    if not row:
+        return None
+    d = _serialize(dict(row))
+    val = d.get("opening_hours")
+    if isinstance(val, str):
+        try:
+            d["opening_hours"] = _json.loads(val)
+        except Exception:
+            d["opening_hours"] = {}
+    elif val is None:
+        d["opening_hours"] = {}
+    return d
+
+
+async def db_create_location(org_id: int, name: str, **fields) -> dict:
+    """Create a new Location for an Org.  is_primary defaults to false.
+
+    Accepted extra fields: code, address, latitude, longitude,
+    whatsapp_number, wa_phone_id, wa_access_token, active,
+    opening_hours, timezone, legacy_restaurant_id.
+
+    Returns the created row as a dict.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    _ALLOWED_CREATE_FIELDS = {
+        "code", "address", "latitude", "longitude",
+        "whatsapp_number", "wa_phone_id", "wa_access_token",
+        "active", "opening_hours", "timezone", "legacy_restaurant_id",
+    }
+
+    extra = {k: v for k, v in fields.items() if k in _ALLOWED_CREATE_FIELDS}
+
+    # Build dynamic INSERT
+    col_names = ["org_id", "name"]
+    col_values: list = [org_id, name]
+    placeholders = ["$1", "$2"]
+    idx = 3
+    for col, val in extra.items():
+        col_names.append(col)
+        if col == "opening_hours" and isinstance(val, dict):
+            val = _json.dumps(val)
+            placeholders.append(f"${idx}::jsonb")
+        else:
+            placeholders.append(f"${idx}")
+        col_values.append(val)
+        idx += 1
+
+    sql = (
+        f"INSERT INTO locations ({', '.join(col_names)}) "  # noqa: S608 — col names are whitelisted
+        f"VALUES ({', '.join(placeholders)}) "
+        f"RETURNING id, org_id, name, code, address, latitude, longitude, "
+        f"whatsapp_number, wa_phone_id, wa_access_token, active, is_primary, timezone, "
+        f"opening_hours, created_at, updated_at, legacy_restaurant_id"
+    )
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_create_location_admin"):
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(sql, *col_values)
+
+    d = _serialize(dict(row))
+    val = d.get("opening_hours")
+    if isinstance(val, str):
+        try:
+            d["opening_hours"] = _json.loads(val)
+        except Exception:
+            d["opening_hours"] = {}
+    elif val is None:
+        d["opening_hours"] = {}
+    return d
+
+
+async def db_list_organizations() -> list[dict]:
+    """List all Organizations with a location_count aggregate.
+
+    Called from internal superadmin; uses bypass + global pool (cross-tenant).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_list_organizations_superadmin"):
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT o.id, o.name, o.slug, o.whatsapp_number,
+                       o.wa_phone_id, o.subscription_plan, o.subscription_status,
+                       o.features, o.created_at, o.updated_at,
+                       COUNT(l.id)::int AS location_count
+                FROM organizations o
+                LEFT JOIN locations l ON l.org_id = o.id
+                GROUP BY o.id
+                ORDER BY o.created_at DESC
+                """
+            )
+    result = []
+    for row in rows:
+        d = _serialize(dict(row))
+        val = d.get("features")
+        if isinstance(val, str):
+            try:
+                d["features"] = _json.loads(val)
+            except Exception:
+                d["features"] = {}
+        elif val is None:
+            d["features"] = {}
+        result.append(d)
+    return result
+
+
+async def db_create_organization(
+    name: str,
+    whatsapp_number: str | None = None,
+    wa_phone_id: str | None = None,
+    wa_access_token: str | None = None,
+    slug: str | None = None,
+    features: dict | None = None,
+    subscription_plan: str = "free",
+) -> dict:
+    """Insert a new Organization row and return the created record.
+
+    Called from internal superadmin routes (cross-tenant, bypass needed).
+    Slug uniqueness is enforced by DB UNIQUE constraint; duplicate slug raises
+    asyncpg.UniqueViolationError which the route converts to 409.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    if features is None:
+        features = {}
+
+    pool = await _get_pool()
+    with bypass_tenant_scope("db_create_organization_superadmin"):
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO organizations
+                    (name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                     features, subscription_plan)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                RETURNING id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                          menu, features, subscription_plan, subscription_status,
+                          created_at, updated_at
+                """,
+                name,
+                slug or None,
+                whatsapp_number or None,
+                wa_phone_id or None,
+                wa_access_token or None,
+                _json.dumps(features),
+                subscription_plan,
+            )
+    d = _serialize(dict(row))
+    for field in ("menu", "features"):
+        val = d.get(field)
+        if isinstance(val, str):
+            try:
+                d[field] = _json.loads(val)
+            except Exception:
+                d[field] = {} if field == "features" else []
+        elif val is None:
+            d[field] = {} if field == "features" else []
+    return d

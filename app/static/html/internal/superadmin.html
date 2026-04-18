@@ -137,6 +137,12 @@ input:checked+.slider:before{transform:translateX(18px);}
 .plan-pro{background:#E6F1FB;color:#185FA5;}
 .plan-premium{background:#EEE8FD;color:#5B21B6;}
 
+/* ── Org/Location tabs ── */
+.org-tab-btn{padding:10px 20px;font-size:13px;font-weight:500;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#888;transition:color .15s,border-color .15s;}
+.org-tab-btn.active{border-bottom-color:#1D9E75;color:#1D9E75;}
+.org-tab-panel{display:none;}
+.org-tab-panel.active{display:block;}
+
 @media(max-width:768px){
   .sidebar{display:none;}
   .main{margin-left:0;padding:1rem;}
@@ -171,10 +177,13 @@ input:checked+.slider:before{transform:translateX(18px);}
     <div class="nav-group-label">Principal</div>
     <button class="nav-item active" id="nav-resumen" onclick="showSection('resumen',this)">🏢 Resumen</button>
 
-    <div class="nav-group-label">Clientes</div>
+    <div class="nav-group-label">Clientes (legacy)</div>
     <button class="nav-item" id="nav-restaurantes" onclick="showSection('restaurantes',this)">🍽️ Restaurantes</button>
     <button class="nav-item" id="nav-nuevo" onclick="showSection('nuevo',this)">➕ Nuevo cliente</button>
     <button class="nav-item" id="nav-usuarios" onclick="showSection('usuarios',this)">👥 Usuarios</button>
+
+    <div class="nav-group-label">Org + Sedes</div>
+    <button class="nav-item" id="nav-orgloc" onclick="showSection('orgloc',this)">🏗️ Organizaciones &amp; Sedes</button>
 
     <div class="nav-group-label">Herramientas</div>
     <a class="nav-item" href="/crm" target="_blank" style="text-decoration:none;">📊 CRM Mesio ↗</a>
@@ -182,12 +191,12 @@ input:checked+.slider:before{transform:translateX(18px);}
     <a class="nav-item" href="/monitoring" target="_blank" style="text-decoration:none;">🖥️ Monitoring ↗</a>
 
     <div class="nav-group-label">Financiero</div>
-    <button class="nav-item" id="nav-dian" onclick="showSection('dian',this)">📄 DIAN & Folios</button>
+    <button class="nav-item" id="nav-dian" onclick="showSection('dian',this)">📄 DIAN &amp; Folios</button>
 
     <div style="margin-top:auto;padding-top:1rem;">
       <button class="btn btn-secondary btn-sm" onclick="doLogout()" style="width:100%;justify-content:center;">Cerrar sesión</button>
     </div>
-    <div class="live-badge" style="margin-top:8px;">Mesio HQ v2</div>
+    <div class="live-badge" style="margin-top:8px;">Mesio HQ v3</div>
   </div>
 
   <!-- Main -->
@@ -540,8 +549,196 @@ input:checked+.slider:before{transform:translateX(18px);}
       </div>
     </div>
 
+    <!-- ══ ORG + SEDES ══════════════════════════════════════════════════════ -->
+    <div id="orgloc" class="section">
+
+      <!-- Tab bar -->
+      <div style="display:flex;gap:0;border-bottom:0.5px solid #e0e0d8;margin-bottom:1.25rem;">
+        <button id="orgtab-btn-orgs" class="org-tab-btn active"
+                onclick="switchOrgTab('orgs')"
+                style="padding:10px 20px;font-size:13px;font-weight:500;border:none;background:none;cursor:pointer;border-bottom:2px solid #1D9E75;color:#1D9E75;">
+          Organizaciones
+        </button>
+        <button id="orgtab-btn-sedes" class="org-tab-btn"
+                onclick="switchOrgTab('sedes')"
+                style="padding:10px 20px;font-size:13px;font-weight:500;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#888;">
+          Sedes
+        </button>
+      </div>
+
+      <!-- ── Tab: Organizaciones ── -->
+      <div id="orgtab-orgs" class="org-tab-panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+          <span style="font-size:14px;font-weight:600;">Todas las organizaciones</span>
+          <button class="btn btn-primary btn-sm" onclick="openOrgModal()">+ Nueva organización</button>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden;">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Nombre</th><th>Slug</th><th>WhatsApp</th>
+                <th>Plan</th><th>Sedes</th><th>Estado</th><th>Creado</th><th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="orgs-tbody">
+              <tr><td colspan="9" class="empty-state">Cargando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Tab: Sedes ── -->
+      <div id="orgtab-sedes" class="org-tab-panel" style="display:none;">
+        <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <label style="font-size:12px;color:#888;font-weight:600;">Organización:</label>
+            <select id="sedes-org-filter" class="field-input" style="width:220px;"
+                    onchange="onSedesOrgFilterChange()">
+              <option value="">Todas las organizaciones</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openLocationModal(null, null)">+ Nueva sede</button>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden;">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Organización</th><th>Nombre</th><th>Código</th>
+                <th>Dirección</th><th>WhatsApp</th><th>Principal</th><th>Activa</th><th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="sedes-tbody">
+              <tr><td colspan="9" class="empty-state">Cargando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /orgloc -->
+
   </div><!-- /main -->
 </div><!-- /app -->
+
+<!-- ══ MODAL: Organización ══════════════════════════════════════════════════ -->
+<div id="org-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:16px;padding:2rem;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+      <strong id="org-modal-title" style="font-size:16px;">Nueva organización</strong>
+      <button onclick="closeOrgModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&#x2715;</button>
+    </div>
+    <input type="hidden" id="org-modal-org-id">
+    <div class="form-grid">
+      <div class="form-full">
+        <label class="field-label">Nombre *</label>
+        <input id="om-name" class="field-input" placeholder="Ej. Burger House">
+      </div>
+      <div>
+        <label class="field-label">Slug (URL)</label>
+        <input id="om-slug" class="field-input" placeholder="burger-house">
+      </div>
+      <div>
+        <label class="field-label">WhatsApp default</label>
+        <input id="om-whatsapp" class="field-input" placeholder="+57300...">
+      </div>
+      <div>
+        <label class="field-label">WA Phone Number ID</label>
+        <input id="om-wa-phone-id" class="field-input" placeholder="ID del número">
+      </div>
+      <div>
+        <label class="field-label">Meta Access Token</label>
+        <input id="om-wa-token" class="field-input" type="password" placeholder="EAA...">
+      </div>
+      <div>
+        <label class="field-label">Plan</label>
+        <select id="om-plan" class="field-input">
+          <option value="free">Free</option>
+          <option value="basic">Basic</option>
+          <option value="pro">Pro</option>
+          <option value="premium">Premium</option>
+        </select>
+      </div>
+    </div>
+    <div id="org-modal-error" style="color:#C0392B;font-size:12px;margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeOrgModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitOrgModal()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL: Sede ══════════════════════════════════════════════════════════ -->
+<div id="loc-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:16px;padding:2rem;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+      <strong id="loc-modal-title" style="font-size:16px;">Nueva sede</strong>
+      <button onclick="closeLocModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&#x2715;</button>
+    </div>
+    <input type="hidden" id="loc-modal-loc-id">
+    <input type="hidden" id="loc-modal-org-id">
+    <div class="form-grid">
+      <div class="form-full">
+        <label class="field-label">Organización *</label>
+        <select id="lm-org-select" class="field-input">
+          <option value="">Selecciona org...</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Nombre *</label>
+        <input id="lm-name" class="field-input" placeholder="Ej. Sede Norte">
+      </div>
+      <div>
+        <label class="field-label">Código</label>
+        <input id="lm-code" class="field-input" placeholder="norte">
+      </div>
+      <div class="form-full">
+        <label class="field-label">Dirección</label>
+        <input id="lm-address" class="field-input" placeholder="Calle 93 #15-32, Bogotá">
+      </div>
+      <div>
+        <label class="field-label">Latitud</label>
+        <input id="lm-lat" class="field-input" type="number" step="any" placeholder="4.6097">
+      </div>
+      <div>
+        <label class="field-label">Longitud</label>
+        <input id="lm-lon" class="field-input" type="number" step="any" placeholder="-74.0817">
+      </div>
+      <div>
+        <label class="field-label">WhatsApp (override)</label>
+        <input id="lm-whatsapp" class="field-input" placeholder="+57300... (deja vacío para heredar)">
+      </div>
+      <div>
+        <label class="field-label">WA Phone Number ID</label>
+        <input id="lm-wa-phone-id" class="field-input" placeholder="ID override">
+      </div>
+      <div>
+        <label class="field-label">Meta Token override</label>
+        <input id="lm-wa-token" class="field-input" type="password" placeholder="EAA...">
+      </div>
+      <div>
+        <label class="field-label">Zona horaria</label>
+        <select id="lm-timezone" class="field-input">
+          <option value="America/Bogota">América/Bogotá (COT)</option>
+          <option value="America/Mexico_City">América/México (CST)</option>
+          <option value="America/Lima">América/Lima (PET)</option>
+          <option value="America/Santiago">América/Santiago (CLT)</option>
+          <option value="America/Buenos_Aires">América/Buenos Aires (ART)</option>
+          <option value="UTC">UTC</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding-top:20px;">
+        <label class="switch"><input type="checkbox" id="lm-active" checked><span class="slider"></span></label>
+        <span style="font-size:13px;">Sede activa</span>
+      </div>
+    </div>
+    <div id="loc-modal-error" style="color:#C0392B;font-size:12px;margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeLocModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitLocModal()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/internal/superadmin.js"></script>
 
 <script>
 // ── Estado global ──────────────────────────────────────────────────────
@@ -659,7 +856,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ── Sección / nav ──────────────────────────────────────────────────
-const SECTION_TITLES = {resumen:'Resumen',restaurantes:'Restaurantes',nuevo:'Nuevo cliente',usuarios:'Usuarios',dian:'DIAN & Folios'};
+const SECTION_TITLES = {
+  resumen:'Resumen',restaurantes:'Restaurantes',nuevo:'Nuevo cliente',
+  usuarios:'Usuarios',dian:'DIAN & Folios',
+  orgloc:'Organizaciones & Sedes'
+};
 
 function showSection(id, btn) {
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -670,6 +871,7 @@ function showSection(id, btn) {
   if(id==='restaurantes') loadRestaurants();
   if(id==='usuarios')     loadUsers();
   if(id==='dian')         loadDIAN();
+  if(id==='orgloc' && window.initOrgLocationTabs) initOrgLocationTabs();
 }
 
 // ── Load all data ──────────────────────────────────────────────────

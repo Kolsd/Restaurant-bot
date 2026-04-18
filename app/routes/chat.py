@@ -156,11 +156,29 @@ async def verify_meta_webhook(request: Request):
 
 
 # ── BACKGROUND TASK (V-03: webhook async) ────────────────────────────
-async def _process_message(user_phone: str, user_text: str, bot_number: str,
-                            phone_id: str, access_token: str):
-    """Procesamiento real de la IA — corre en background, desacoplado del ACK."""
+async def _process_message(
+    user_phone: str,
+    user_text: str,
+    bot_number: str,
+    phone_id: str,
+    access_token: str,
+    location_id: int | None = None,
+):
+    """Procesamiento real de la IA — corre en background, desacoplado del ACK.
+
+    location_id: resolved by the inbox worker before dispatch.  May be None for
+    exploratory chat; the agent resolves it lazily when needed (e.g. on delivery/
+    pickup tool calls).  Passed through to agent.chat() so that it can persist
+    the Location on the conversation row and route orders correctly.
+    """
     try:
-        result = await chat(user_phone, user_text, bot_number, meta_phone_id=phone_id)
+        result = await chat(
+            user_phone,
+            user_text,
+            bot_number,
+            meta_phone_id=phone_id,
+            location_id=location_id,
+        )
         log.info("chat.ai_result", phone=user_phone, has_message=bool(result and result.get("message")))
 
         if result and result.get("message"):
@@ -391,7 +409,10 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         user_text = ""
                 elif msg_type == "interactive":
                     button_reply = message.get("interactive", {}).get("button_reply", {})
-                    user_text = button_reply.get("id", "") or button_reply.get("title", "")
+                    # Capture the raw button id so _extract_location_from_payload
+                    # can detect "loc:<id>" QR button payloads in the inbox worker.
+                    _interactive_button_id = button_reply.get("id", "")
+                    user_text = _interactive_button_id or button_reply.get("title", "")
                 elif msg_type == "image":
                     image_id = message.get("image", {}).get("id", "")
                     media_url = f"/api/media/{image_id}?bot={bot_number}"
@@ -506,6 +527,10 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     if msg_type == "location" and lat is not None and lon is not None:
                         enqueue_payload["gps_lat"] = lat
                         enqueue_payload["gps_lon"] = lon
+                    # Carry raw button_id so _extract_location_from_payload can detect
+                    # QR deep-links embedded as "loc:<id>" interactive button payloads.
+                    if msg_type == "interactive" and locals().get("_interactive_button_id"):
+                        enqueue_payload["button_id"] = _interactive_button_id
                     inserted = await inbox_repo.enqueue(
                         pool,
                         provider="meta_whatsapp",

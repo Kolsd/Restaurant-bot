@@ -693,46 +693,82 @@ function setCustomPeriod(btn) {
 window.loadGlobalBranches = async function() {
   const role = (localStorage.getItem('rb_role') || '').toLowerCase();
   if (!role.includes('owner')) return;
-  
+
   const select = document.getElementById('global-branch-select');
   if (!select) return;
-  
+
   try {
-      // 🛡️ Antes de hacer peticiones, recuperamos la memoria si existe
+      // Restore previously selected branch from session
       const savedBranch = sessionStorage.getItem('rb_active_branch_id');
       if (savedBranch) {
           window._dashHeaders['X-Branch-ID'] = savedBranch;
       }
 
+      // Wave 1 S5: try to populate from cached locations first (instant, no network round-trip)
+      const cachedLocations = (typeof mesioGetLocations === 'function') ? mesioGetLocations() : [];
+
       const r = await fetch('/api/team/branches', { headers: window._dashHeaders });
       if (r.ok) {
           const data = await r.json();
           const branches = data.branches || [];
-          
-          if(branches.length === 0) return;
 
-          select.innerHTML = '<option value="matriz">🏠 Casa Matriz</option>';
-          select.innerHTML += '<option value="all">🌐 Todas las Sucursales</option>';
-          
+          if (branches.length === 0 && cachedLocations.length === 0) return;
+
+          select.innerHTML = '';
+          const optMatriz = document.createElement('option');
+          optMatriz.value = 'matriz';
+          optMatriz.textContent = 'Casa Matriz';
+          select.appendChild(optMatriz);
+
+          const optAll = document.createElement('option');
+          optAll.value = 'all';
+          optAll.textContent = 'Todas las Sucursales';
+          select.appendChild(optAll);
+
           branches.forEach(b => {
               const opt = document.createElement('option');
               opt.value = b.id;
-              opt.textContent = `📍 ${b.name}`;
+              // textContent — safe (XSS rule)
+              opt.textContent = b.name;
               select.appendChild(opt);
           });
-          
-          // Asignar el valor visual en el selector
+
+          // Wave 1 S5: sync X-Location-ID alongside legacy X-Branch-ID on selector change.
+          // If a location matches the current branch value, keep them in sync.
           if (window._dashHeaders['X-Branch-ID']) {
               select.value = window._dashHeaders['X-Branch-ID'];
           }
           select.style.display = 'block';
+
+          // Wave 1 S5: mirror current branch selection into location storage so
+          // mesioHeaders() sends the matching X-Location-ID on subsequent API calls.
+          _syncLocationFromBranchSelect(select.value, cachedLocations);
       }
   } catch(e) { console.error('Error cargando sucursales globales', e); }
 };
 
-window.changeGlobalBranch = function() { 
+// Wave 1 S5: keep rb_current_location_id in sync with the branch selector value.
+// During Wave 1, branch ids and location ids are the same integer — restaurant/branch
+// migration maps branch_id → location_id 1:1. Once Wave 2 lands this helper can be removed.
+function _syncLocationFromBranchSelect(branchVal, locations) {
+  if (typeof mesioSetCurrentLocationId !== 'function') return;
+  if (!branchVal || branchVal === 'matriz') {
+    // Matriz: use the primary location id if available, else "all"
+    const primary = (locations || []).find(l => l.is_primary);
+    mesioSetCurrentLocationId(primary ? primary.id : null);
+  } else if (branchVal === 'all') {
+    mesioSetCurrentLocationId(null); // "all" stored as absence / "all"
+  } else {
+    const n = parseInt(branchVal, 10);
+    mesioSetCurrentLocationId(Number.isFinite(n) ? n : null);
+  }
+}
+
+window.changeGlobalBranch = function() {
   const select = document.getElementById('global-branch-select');
   const val = select ? select.value : '';
+  // Wave 1 S5: mirror selection into location storage
+  _syncLocationFromBranchSelect(val, (typeof mesioGetLocations === 'function') ? mesioGetLocations() : []);
 
   // 🛡️ BLOQUEO INTELIGENTE CON MODAL ELEGANTE
   if (val === 'all') {
