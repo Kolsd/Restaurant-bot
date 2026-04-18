@@ -39,7 +39,7 @@ NO RLS POLICY CHANGES: that is migration 0036 (Bloque S2).
 NO restaurant_id DROPS: those happen in migration 0037 (Bloque S6).
 
 Revision ID: 0035_add_org_location_columns
-Revises: 0034_create_organizations_locations
+Revises: 0034_org_locations
 Create Date: 2026-04-17
 """
 
@@ -49,7 +49,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0035_add_org_location_columns"
-down_revision = "0034_create_organizations_locations"
+down_revision = "0034_org_locations"
 branch_labels = None
 depends_on = None
 

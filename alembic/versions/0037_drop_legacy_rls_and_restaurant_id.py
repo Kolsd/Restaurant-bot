@@ -42,7 +42,7 @@ DOWNGRADE:
   The restaurants table rename is NOT reversed in downgrade — it is too risky.
   For a full restore after a failed deployment, use pg_dump from before 0037.
 
-Revision ID: 0037_drop_legacy_rls_and_restaurant_id
+Revision ID: 0037_drop_legacy_rls
 Revises: 0036_dual_rls_policies
 Create Date: 2026-04-17
 """
@@ -52,7 +52,7 @@ import logging
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0037_drop_legacy_rls_and_restaurant_id"
+revision = "0037_drop_legacy_rls"
 down_revision = "0036_dual_rls_policies"
 branch_labels = None
 depends_on = None

@@ -29,7 +29,7 @@ NO CODE CHANGES YET: the app still reads from `restaurants`. This migration
 is purely additive — it creates new tables and populates them from existing
 data. No existing columns are modified.
 
-Revision ID: 0034_create_organizations_locations
+Revision ID: 0034_org_locations
 Revises: 0033_processed_wompi_events
 Create Date: 2026-04-17
 """
@@ -39,7 +39,7 @@ import logging
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0034_create_organizations_locations"
+revision = "0034_org_locations"
 down_revision = "0033_processed_wompi_events"
 branch_labels = None
 depends_on = None
