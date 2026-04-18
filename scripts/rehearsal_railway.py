@@ -160,8 +160,8 @@ def stage1_preflight(prod_admin_url: str, test_url: str) -> None:
         log.error("Missing pg client tools -- cannot continue.")
         sys.exit(1)
 
-    log.info("DATABASE_URL_ADMIN (prod, read-only): %s", _redact(prod_admin_url))
-    log.info("TEST_DATABASE_URL  (test, read-write): %s", _redact(test_url))
+    log.info("PROD URL (read-only source): %s", _redact(prod_admin_url))
+    log.info("TEST URL (write target):     %s", _redact(test_url))
 
     # Safety: URLs must differ
     if prod_admin_url.rstrip("/") == test_url.rstrip("/"):
@@ -185,7 +185,57 @@ def stage1_preflight(prod_admin_url: str, test_url: str) -> None:
         )
         # Not a hard abort -- Railway allows multiple DBs on one cluster.
 
-    log.info("Preflight OK -- URLs are distinct, tools available.")
+    # Anti-swap guard: query both URLs, confirm prod has data and test has less.
+    # Uses `restaurants` table as the signal (always populated in prod, likely
+    # empty or tiny in test).
+    def _count_restaurants(url: str) -> int | None:
+        r = _psql_exec(
+            url,
+            "SELECT COALESCE((SELECT COUNT(*)::int FROM restaurants), -1)",
+            timeout=15,
+        )
+        if r.returncode != 0:
+            return None
+        # psql default output has a header + data; find the integer line.
+        for line in r.stdout.splitlines():
+            s = line.strip()
+            if s.lstrip("-").isdigit():
+                return int(s)
+        return None
+
+    log.info("Anti-swap guard: counting rows in `restaurants` on each URL...")
+    prod_count = _count_restaurants(prod_admin_url)
+    test_count = _count_restaurants(test_url)
+    log.info("  PROD restaurants count: %s", prod_count if prod_count is not None else "n/a")
+    log.info("  TEST restaurants count: %s", test_count if test_count is not None else "n/a")
+
+    # If prod has 0 rows but test has many, they're clearly swapped.
+    if prod_count == 0 and (test_count or 0) > 0:
+        log.error(
+            "ABORT: swap detected — the 'prod' URL has 0 restaurants but the "
+            "'test' URL has %d. Your env vars are flipped. Swap PROD_DATABASE_URL "
+            "and TEST_DATABASE_URL and re-run.",
+            test_count,
+        )
+        sys.exit(1)
+    # If prod has 0 rows, something is off regardless — abort.
+    if prod_count in (0, None, -1):
+        log.error(
+            "ABORT: the 'prod' URL has 0 or unreadable restaurants table. "
+            "Either PROD_DATABASE_URL is pointing at the wrong DB, or the DB "
+            "genuinely is empty (not expected for a running Mesio prod)."
+        )
+        sys.exit(1)
+    # If test has more rows than prod, very suspicious.
+    if (test_count or 0) > prod_count:
+        log.error(
+            "ABORT: 'test' URL has MORE restaurants (%d) than 'prod' (%d). "
+            "Likely swapped. Not proceeding.",
+            test_count, prod_count,
+        )
+        sys.exit(1)
+
+    log.info("Preflight OK -- URLs are distinct, tools available, swap guard passed.")
 
 
 def stage2_copy_prod_to_test(prod_admin_url: str, test_url: str) -> None:
@@ -676,11 +726,13 @@ def main() -> None:
     deferred_path = os.path.join(versions_dir, "0037_drop_legacy_rls_and_restaurant_id.py.deferred")
     active_path = os.path.join(versions_dir, "0037_drop_legacy_rls_and_restaurant_id.py")
 
-    # Env vars — Railway's default Postgres gives a single DATABASE_URL
-    # (postgres superuser). Fall back to it if the optional DATABASE_URL_ADMIN
-    # isn't set, which is the common setup on Railway Postgres services.
+    # Env vars — explicit names to avoid ambiguity when two Postgres services
+    # are both linked to the Restaurant-bot service on Railway.
+    # Preferred: PROD_DATABASE_URL and TEST_DATABASE_URL set explicitly.
+    # Fallbacks kept for convenience but logged so the operator can verify.
     prod_admin_url = (
-        os.environ.get("DATABASE_URL_ADMIN")
+        os.environ.get("PROD_DATABASE_URL")
+        or os.environ.get("DATABASE_URL_ADMIN")
         or os.environ.get("DATABASE_URL")
         or ""
     )
@@ -688,8 +740,8 @@ def main() -> None:
 
     if not prod_admin_url:
         log.error(
-            "Neither DATABASE_URL_ADMIN nor DATABASE_URL is set — cannot "
-            "pg_dump from prod. Set DATABASE_URL on the Restaurant-bot service."
+            "No prod URL found. Set PROD_DATABASE_URL on Restaurant-bot to "
+            "the URL of the 'Postgres' (production) service."
         )
         sys.exit(1)
     if not test_url:
