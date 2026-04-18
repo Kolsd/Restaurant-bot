@@ -189,16 +189,15 @@ _NEW_POLICY_EXPR = (
 # Tables that have a branch_id column. For these we create the "with branch"
 # trigger variant that can resolve location_id from branch_id.
 _TABLES_WITH_BRANCH_ID = {
-    "occupancy_snapshots",
-    "table_sessions",
-    "time_slot_discounts",
-    "waiter_alerts",
-    "orders",
-    "table_orders",
-    "carts",
-    "conversations",
-    "nps_responses",
-    "nps_waiting",
+    # Only tables with a real branch_id column in the schema.
+    # (Must match _ORG_AND_LOCATION_TABLES classification in migration 0035.)
+    "occupancy_snapshots",   # 0017
+    "time_slot_discounts",   # 0015
+    "table_orders",          # 0013
+    "conversations",         # 0026
+    "nps_responses",         # 0026
+    # NOT included (no branch_id column):
+    #   orders, table_sessions, waiter_alerts, carts, nps_waiting
 }
 
 # Tables where location_id column is nullable by design (per §2.3 / 0035).

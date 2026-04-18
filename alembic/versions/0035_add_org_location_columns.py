@@ -91,21 +91,21 @@ _ORG_AND_LOCATION_TABLES = [
     ("staff_deduction_items",   False, False),
     ("staff_schedules",         False, False),
     ("staff_shifts",            False, False),
-    ("table_sessions",          False, True),   # has branch_id (via 0028)
+    ("table_sessions",          False, False),  # no branch_id column in schema
     ("time_slot_discounts",     False, True),   # has branch_id (per 0015/0018)
     ("tip_distributions",       False, False),
-    ("waiter_alerts",           False, True),   # has branch_id (via 0028)
+    ("waiter_alerts",           False, False),  # no branch_id column in schema
     ("webauthn_challenges",     False, False),
     # Location-level, NOT NULL, branch_id
-    ("orders",                  False, True),   # branch_id per 0001
+    ("orders",                  False, False),  # no branch_id column in schema
     ("table_orders",            False, True),   # branch_id per 0013/0018
     # Org-level but with nullable location_id
-    ("carts",                   True,  True),   # branch_id via 0028; location nullable
+    ("carts",                   True,  False),  # no branch_id column; location nullable
     ("conversations",           True,  True),   # branch_id via 0026/0027
     ("loyalty_ledger",          True,  False),
     ("menu_events",             True,  False),
     ("nps_responses",           True,  True),   # branch_id via 0026/0027
-    ("nps_waiting",             True,  True),   # branch_id via 0028
+    ("nps_waiting",             True,  False),  # no branch_id column in schema
     ("payroll_runs",            True,  False),
     ("weekly_reports",          True,  False),
     # Extra tables outside RLS set (plan §2.3)

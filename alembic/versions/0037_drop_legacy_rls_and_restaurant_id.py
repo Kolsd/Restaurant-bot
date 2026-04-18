@@ -445,8 +445,9 @@ def downgrade() -> None:
         "loyalty_customers", "marketing_messages_log", "subscription_usage",
     }
     _BRANCH_ID_TABLES_SET = {
-        "occupancy_snapshots", "table_sessions", "time_slot_discounts", "waiter_alerts",
-        "orders", "table_orders", "carts", "conversations", "nps_responses", "nps_waiting",
+        # Only tables with a real branch_id column — must match migrations 0035/0036.
+        "occupancy_snapshots", "time_slot_discounts",
+        "table_orders", "conversations", "nps_responses",
     }
 
     all_trigger_tables = list(_RLS_TABLES) + _EXTRA_TRIGGER_TABLES
