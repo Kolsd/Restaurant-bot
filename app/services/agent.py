@@ -1685,6 +1685,10 @@ async def _build_enriched_user_message(
                     for b in branches
                 )
                 branches_note = f"\n[SUCURSALES:\n{branch_lines}]"
+            else:
+                # Single-location restaurant — tell the LLM explicitly so it
+                # never asks "¿de cuál sucursal?" (there is only one).
+                branches_note = "\n[UBICACION_UNICA: Este restaurante tiene UNA sola sede. NUNCA preguntes al cliente cuál sucursal prefiere — procede directo al siguiente paso.]"
         except Exception:
             log.exception("branches_context_failed", bot_number=bot_number)
 
