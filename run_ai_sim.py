@@ -71,10 +71,16 @@ def _validate_env() -> bool:
                 f"         You may be pointing at a PRODUCTION database.\n"
                 f"         The simulation will TRUNCATE several tables between scenarios.\n"
             )
-            answer = input("Continue anyway? [y/N] ").strip().lower()
-            if answer not in ("y", "yes"):
-                print("Aborted.")
-                sys.exit(1)
+            # Skip the interactive prompt when running in a non-tty environment
+            # (CI, Railway one-off deploy) or when AI_SIM_ASSUME_YES=1 is set.
+            if os.environ.get("AI_SIM_ASSUME_YES") == "1" or not sys.stdin.isatty():
+                print("Non-interactive mode: proceeding (set AI_SIM_ASSUME_YES=0 "
+                      "to force abort, or point DATABASE_URL at a 'test'/'sim' DB).")
+            else:
+                answer = input("Continue anyway? [y/N] ").strip().lower()
+                if answer not in ("y", "yes"):
+                    print("Aborted.")
+                    sys.exit(1)
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not anthropic_key:
