@@ -1,0 +1,6 @@
+# Railway build configuration.
+# Adds postgresql-client so pg_dump / psql are available at runtime.
+# Needed by scripts/rehearsal_railway.py for the staging-rehearsal flow.
+
+[phases.setup]
+aptPkgs = ["postgresql-client"]
