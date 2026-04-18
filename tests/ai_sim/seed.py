@@ -97,11 +97,14 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
         )
         log.info("seed.restaurant_exists", org_id=org_id, location_id=loc_id)
     else:
+        # UNIQUE index on organizations.whatsapp_number is PARTIAL
+        # (WHERE whatsapp_number IS NOT NULL in 0034), so ON CONFLICT can't
+        # use it without specifying the predicate. Plain INSERT — existence
+        # check above already prevented dupes.
         org_id = await conn.fetchval(
             """
             INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
             VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
-            ON CONFLICT (whatsapp_number) DO UPDATE SET name = EXCLUDED.name
             RETURNING id
             """,
             SIM_RESTAURANT_NAME,
