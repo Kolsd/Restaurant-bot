@@ -4,6 +4,6 @@ builder = "nixpacks"
 [deploy]
 # V-13 FIX: 4 workers uvicorn para soportar carga real
 # (Railway Pro recomendado — 8GB RAM, sin límite CPU)
-startCommand = "if [ \"$REHEARSAL_MODE\" = '1' ]; then python scripts/rehearsal_railway.py; elif [ \"$WORKER_MODE\" = 'inbox' ]; then alembic upgrade head && python scripts/run_inbox_worker.py; else alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop; fi"
+startCommand = "if [ \"$AI_SIM_MODE\" = '1' ]; then DATABASE_URL=\"$TEST_DATABASE_URL\" python run_ai_sim.py ${AI_SIM_ARGS:-}; elif [ \"$REHEARSAL_MODE\" = '1' ]; then python scripts/rehearsal_railway.py; elif [ \"$WORKER_MODE\" = 'inbox' ]; then alembic upgrade head && python scripts/run_inbox_worker.py; else alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop; fi"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
