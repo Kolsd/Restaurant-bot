@@ -284,18 +284,45 @@ def stage2_copy_prod_to_test(prod_admin_url: str, test_url: str) -> None:
     # Grant to current user so the migration runner can SET LOCAL ROLE mesio_superadmin
     _psql_exec(test_url, "GRANT mesio_superadmin TO CURRENT_USER;", timeout=10)
 
-    log.info("Roles ready. Starting pg_dump | psql pipeline (timeout 10 min)...")
-    dump_cmd = (
-        f'pg_dump --no-owner --no-acl --no-privileges "{prod_admin_url}" '
-        f'| psql "{test_url}"'
+    # Two separate subprocesses — prior pipe form swallowed pg_dump failures
+    # because the shell exit code came from psql (which reads empty stdin OK).
+    import tempfile, os as _os
+    dump_path = tempfile.mkstemp(suffix=".sql", prefix="mesio_rehearsal_")[1]
+    log.info("Running pg_dump to %s (timeout 10 min)...", dump_path)
+    dump_proc = subprocess.run(
+        ["pg_dump", "--no-owner", "--no-acl", "--no-privileges",
+         "-f", dump_path, prod_admin_url],
+        capture_output=True, text=True, timeout=600,
     )
-    result = _run(dump_cmd, timeout=600, capture=True)
-    if result.returncode != 0:
-        log.error("pg_dump | psql FAILED. Last 30 lines of stderr:")
-        for line in result.stderr.splitlines()[-30:]:
+    if dump_proc.returncode != 0:
+        log.error("pg_dump FAILED (rc=%d):", dump_proc.returncode)
+        for line in dump_proc.stderr.splitlines()[-30:]:
+            log.error("  %s", line)
+        try: _os.remove(dump_path)
+        except Exception: pass
+        sys.exit(1)
+    dump_size = _os.path.getsize(dump_path)
+    log.info("pg_dump OK (%d bytes written).", dump_size)
+    if dump_size < 1024:
+        log.error("Dump is suspiciously small (<1KB). Aborting.")
+        log.error("Dump preview: %r", open(dump_path).read()[:500])
+        _os.remove(dump_path)
+        sys.exit(1)
+
+    log.info("Running psql restore (timeout 10 min)...")
+    with open(dump_path) as dump_in:
+        psql_proc = subprocess.run(
+            ["psql", "-v", "ON_ERROR_STOP=1", test_url],
+            stdin=dump_in, capture_output=True, text=True, timeout=600,
+        )
+    try: _os.remove(dump_path)
+    except Exception: pass
+    if psql_proc.returncode != 0:
+        log.error("psql restore FAILED (rc=%d):", psql_proc.returncode)
+        for line in psql_proc.stderr.splitlines()[-30:]:
             log.error("  %s", line)
         sys.exit(1)
-    log.info("Data copy complete.")
+    log.info("Data copy complete (dump %d bytes applied).", dump_size)
 
 
 def stage3_grant_dml(test_url: str) -> None:
