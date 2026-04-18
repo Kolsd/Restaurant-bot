@@ -195,8 +195,10 @@ async def db_save_nps_response(phone: str, bot_number: str, score: int, comment:
 
         # 2. Guardamos la calificación amarrada a esa sucursal
         await conn.execute("""
-            INSERT INTO nps_responses (phone, bot_number, score, comment, branch_id, created_at)
-            VALUES ($1, $2, $3, $4, $5, NOW())
+            INSERT INTO nps_responses (phone, bot_number, score, comment, branch_id, org_id, created_at)
+            VALUES ($1, $2, $3, $4, $5,
+                    NULLIF(current_setting('app.org_id', true), '')::bigint,
+                    NOW())
         """, phone, bot_number, score, comment, branch_id)
 
 
@@ -205,8 +207,10 @@ async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
     Returns the inserted row id so it can be updated later."""
     async with _tenant_connection() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO nps_responses (phone, bot_number, score, comment)
-               VALUES ($1, $2, $3, '__pending__') RETURNING id""",
+            """INSERT INTO nps_responses (phone, bot_number, score, comment, org_id)
+               VALUES ($1, $2, $3, '__pending__',
+                       NULLIF(current_setting('app.org_id', true), '')::bigint)
+               RETURNING id""",
             phone, bot_number, score
         )
         return row["id"] if row else 0

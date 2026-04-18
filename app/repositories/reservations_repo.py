@@ -67,8 +67,10 @@ async def db_add_reservation(
         else:
             row = await conn.fetchrow(
                 """INSERT INTO reservations
-                   (name, "date", "time", guests, phone, bot_number, notes, status, created_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW())
+                   (name, "date", "time", guests, phone, bot_number, notes, status, org_id, created_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending',
+                           NULLIF(current_setting('app.org_id', true), '')::bigint,
+                           NOW())
                    RETURNING *""",
                 name, date_str, time_str, guests, phone, bot_number, notes,
             )
