@@ -63,19 +63,23 @@ async def upsert_profile_from_message(
 ) -> dict:
     """Insert or update last_seen + optional display_name. Returns the profile dict.
 
-    Uses INSERT ... ON CONFLICT (restaurant_id, phone) DO UPDATE. Idempotent.
+    Uses INSERT ... ON CONFLICT (org_id, phone) DO UPDATE. Idempotent.
     When display_name is None the existing value is preserved via COALESCE.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
+        # Insert both restaurant_id and org_id (same value during Wave 1).
+        # ON CONFLICT uses the new org_id-based constraint (restored by 0037b)
+        # which is NOT NULL and reliable.  Legacy restaurant_id constraint is also
+        # present for any concurrent reads that filter by restaurant_id.
         row = await conn.fetchrow(
             """
             INSERT INTO customer_profiles
-                (restaurant_id, phone, display_name, last_seen)
+                (restaurant_id, org_id, phone, display_name, last_seen)
             VALUES
-                ($1, $2, $3, NOW())
-            ON CONFLICT (restaurant_id, phone) DO UPDATE
+                ($1, $1, $2, $3, NOW())
+            ON CONFLICT (org_id, phone) DO UPDATE
                 SET last_seen    = NOW(),
                     display_name = COALESCE($3, customer_profiles.display_name)
             RETURNING id, restaurant_id, phone, display_name, preferences,

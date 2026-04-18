@@ -42,13 +42,18 @@ async def db_upsert_fiscal_resolution(restaurant_id: int, data: dict) -> None:
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
+        # ON CONFLICT uses org_id (new named constraint fiscal_resolution_org_uq from
+        # 0037b).  org_id == restaurant_id during Wave 1.  The old inline
+        # UNIQUE (restaurant_id) on this table was an anonymous system constraint;
+        # 0037b does NOT restore it to avoid a naming conflict.  The named legacy
+        # constraint is not needed here since new inserts always set org_id.
         await conn.execute(
             """INSERT INTO fiscal_resolution
-               (restaurant_id, resolution_number, resolution_date, prefix,
+               (restaurant_id, org_id, resolution_number, resolution_date, prefix,
                 from_number, to_number, valid_from, valid_to,
                 technical_key, current_number, environment, software_id, software_pin)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-               ON CONFLICT (restaurant_id) DO UPDATE SET
+               VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+               ON CONFLICT (org_id) DO UPDATE SET
                  resolution_number = EXCLUDED.resolution_number,
                  resolution_date   = EXCLUDED.resolution_date,
                  prefix            = EXCLUDED.prefix,

@@ -1256,10 +1256,15 @@ async def db_increment_token_usage(restaurant_id: int, tokens: int) -> None:
         return
     await _ensure_usage_table()
     async with _tenant_connection() as conn:
+        # Insert both restaurant_id and org_id (same value during Wave 1).
+        # ON CONFLICT uses the new org_id-based constraint which is NOT NULL and
+        # guaranteed to exist after migration 0037b.  The legacy restaurant_id
+        # constraint (also restored by 0037b) keeps backward-compat for any
+        # concurrent code path that reads by restaurant_id.
         await conn.execute(
-            """INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens)
-               VALUES ($1, CURRENT_DATE, $2)
-               ON CONFLICT (restaurant_id, usage_date) DO UPDATE
+            """INSERT INTO subscription_usage (restaurant_id, org_id, usage_date, total_tokens)
+               VALUES ($1, $1, CURRENT_DATE, $2)
+               ON CONFLICT (org_id, usage_date) DO UPDATE
                SET total_tokens = subscription_usage.total_tokens + $2,
                    updated_at   = NOW()""",
             restaurant_id, tokens,
@@ -1274,9 +1279,9 @@ async def db_increment_invoice_usage(restaurant_id: int) -> None:
     await _ensure_usage_table()
     async with _tenant_connection() as conn:
         await conn.execute(
-            """INSERT INTO subscription_usage (restaurant_id, usage_date, total_invoices)
-               VALUES ($1, CURRENT_DATE, 1)
-               ON CONFLICT (restaurant_id, usage_date) DO UPDATE
+            """INSERT INTO subscription_usage (restaurant_id, org_id, usage_date, total_invoices)
+               VALUES ($1, $1, CURRENT_DATE, 1)
+               ON CONFLICT (org_id, usage_date) DO UPDATE
                SET total_invoices = subscription_usage.total_invoices + 1,
                    updated_at     = NOW()""",
             restaurant_id,

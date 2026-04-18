@@ -99,9 +99,9 @@ async def db_accrue_loyalty_points(
             restaurant_id, clean_phone, points, order_id,
         )
         await conn.execute(
-            """INSERT INTO loyalty_customers (restaurant_id, phone, points_balance, total_earned)
-               VALUES ($1, $2, $3, $3)
-               ON CONFLICT (restaurant_id, phone) DO UPDATE
+            """INSERT INTO loyalty_customers (restaurant_id, org_id, phone, points_balance, total_earned)
+               VALUES ($1, $1, $2, $3, $3)
+               ON CONFLICT (org_id, phone) DO UPDATE
                SET points_balance = loyalty_customers.points_balance + $3,
                    total_earned   = loyalty_customers.total_earned   + $3,
                    updated_at     = NOW()""",
@@ -196,9 +196,9 @@ async def db_adjust_loyalty_points(
         )
         new_balance = await conn.fetchval(
             """INSERT INTO loyalty_customers
-                   (restaurant_id, phone, points_balance, total_earned, total_redeemed)
-               VALUES ($1, $2, GREATEST(0, $3), GREATEST(0, $3), 0)
-               ON CONFLICT (restaurant_id, phone) DO UPDATE
+                   (restaurant_id, org_id, phone, points_balance, total_earned, total_redeemed)
+               VALUES ($1, $1, $2, GREATEST(0, $3), GREATEST(0, $3), 0)
+               ON CONFLICT (org_id, phone) DO UPDATE
                SET points_balance = GREATEST(0, loyalty_customers.points_balance + $3),
                    total_earned   = CASE WHEN $3 > 0
                                     THEN loyalty_customers.total_earned + $3

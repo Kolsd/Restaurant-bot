@@ -74,12 +74,22 @@ async def db_save_history(
     location_id: int | None = None,
 ):
     async with _tenant_connection() as conn:
+        # Belt-and-suspenders: explicitly set BOTH restaurant_id and org_id so the
+        # NOT NULL constraint on org_id is satisfied even if the auto-populate trigger
+        # did not fire (e.g. if the downgrade/reapply cycle left the trigger missing).
+        # During Wave 1 both GUCs are set by tenant_db.py, so both NULLIF expressions
+        # resolve to the same integer value.
         await conn.execute("""
-            INSERT INTO conversations (phone, bot_number, history, branch_id, location_id, restaurant_id, updated_at)
-            VALUES ($1, $2, $3, $4, $5, NULLIF(current_setting('app.restaurant_id', true), '')::int, NOW())
+            INSERT INTO conversations (phone, bot_number, history, branch_id, location_id,
+                                       restaurant_id, org_id, updated_at)
+            VALUES ($1, $2, $3, $4, $5,
+                    NULLIF(current_setting('app.restaurant_id', true), '')::int,
+                    NULLIF(current_setting('app.org_id', true), '')::bigint,
+                    NOW())
             ON CONFLICT (phone, bot_number)
             DO UPDATE SET history=EXCLUDED.history, branch_id=EXCLUDED.branch_id,
                           location_id=COALESCE(EXCLUDED.location_id, conversations.location_id),
+                          org_id=COALESCE(EXCLUDED.org_id, conversations.org_id),
                           updated_at=NOW()
         """, phone, bot_number, json.dumps(history[-20:]), branch_id, location_id)
 

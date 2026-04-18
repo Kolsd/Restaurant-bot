@@ -122,10 +122,10 @@ async def db_create_discount(
         row = await conn.fetchrow(
             """
             INSERT INTO time_slot_discounts
-                (restaurant_id, branch_id, day_of_week, start_time, end_time,
+                (restaurant_id, org_id, branch_id, day_of_week, start_time, end_time,
                  discount_percent, label)
-            VALUES ($1, $2, $3, $4::time, $5::time, $6, $7)
-            ON CONFLICT (restaurant_id, branch_id, day_of_week, start_time)
+            VALUES ($1, $1, $2, $3, $4::time, $5::time, $6, $7)
+            ON CONFLICT (org_id, branch_id, day_of_week, start_time)
             DO UPDATE SET
                 end_time         = EXCLUDED.end_time,
                 discount_percent = EXCLUDED.discount_percent,

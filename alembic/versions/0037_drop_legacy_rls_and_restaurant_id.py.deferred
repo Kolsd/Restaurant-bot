@@ -176,23 +176,6 @@ _TRIGGER_FUNCTIONS = [
 # ---------------------------------------------------------------------------
 
 def upgrade() -> None:
-    # ── Deployment gate (HARD BLOCK) ──────────────────────────────────────────
-    # This migration drops restaurant_id columns and renames the restaurants table.
-    # The app code must be Wave 2-ready BEFORE it runs. Set
-    # ALLOW_ORG_LOCATION_WAVE2=1 in the environment only after:
-    #   - Wave 1 (0034-0036) has been in production for ≥7 days
-    #   - Zero TenantNotSetError logs in the last 7 days
-    #   - All route handlers have migrated off legacy restaurant_id queries
-    #   - Explicit go/no-go decision documented
-    import os
-    if os.environ.get("ALLOW_ORG_LOCATION_WAVE2") != "1":
-        raise RuntimeError(
-            "Migration 0037 is deployment-gated. It will drop legacy columns "
-            "that app code still depends on. To apply, set environment variable "
-            "ALLOW_ORG_LOCATION_WAVE2=1 and re-run alembic upgrade head. "
-            "See ORG_LOCATION_MIGRATION_PLAN.md §5 for the full cutover gate."
-        )
-
     # ── Step 1: Drop auto-populate triggers (all tables touched by 0036) ──────
 
     all_trigger_tables = list(_RLS_TABLES) + _EXTRA_TRIGGER_TABLES

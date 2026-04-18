@@ -4,6 +4,6 @@ builder = "nixpacks"
 [deploy]
 # V-13 FIX: 4 workers uvicorn para soportar carga real
 # (Railway Pro recomendado — 8GB RAM, sin límite CPU)
-startCommand = "mv alembic/versions/0037_drop_legacy_rls_and_restaurant_id.py.deferred alembic/versions/0037_drop_legacy_rls_and_restaurant_id.py 2>/dev/null; alembic downgrade 0036_dual_rls_policies 2>/dev/null || true; mv alembic/versions/0037_drop_legacy_rls_and_restaurant_id.py alembic/versions/0037_drop_legacy_rls_and_restaurant_id.py.deferred 2>/dev/null; alembic upgrade head && if [ \"$WORKER_MODE\" = 'inbox' ]; then python scripts/run_inbox_worker.py; else uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop; fi"
+startCommand = "alembic upgrade head && if [ \"$WORKER_MODE\" = 'inbox' ]; then python scripts/run_inbox_worker.py; else uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4 --loop uvloop; fi"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

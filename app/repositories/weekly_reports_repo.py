@@ -363,7 +363,7 @@ async def save_report(
     delivery_status: str = "pending",
     error_message: Optional[str] = None,
 ) -> Optional[dict]:
-    """INSERT the report row.  ON CONFLICT (restaurant_id, week_start) DO NOTHING.
+    """INSERT the report row.  ON CONFLICT (org_id, week_start) DO NOTHING.
 
     Returns the inserted row as a dict, or None if the row already existed
     (meaning the report was already generated for this week — idempotent).
@@ -372,10 +372,10 @@ async def save_report(
         row = await conn.fetchrow(
             """
             INSERT INTO weekly_reports
-                (restaurant_id, week_start, payload, message_text,
+                (restaurant_id, org_id, week_start, payload, message_text,
                  owner_phone, delivery_status, error_message)
-            VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)
-            ON CONFLICT (restaurant_id, week_start) DO NOTHING
+            VALUES ($1, $1, $2, $3::jsonb, $4, $5, $6, $7)
+            ON CONFLICT (org_id, week_start) DO NOTHING
             RETURNING *
             """,
             restaurant_id,
