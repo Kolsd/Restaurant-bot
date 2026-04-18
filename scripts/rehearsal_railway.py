@@ -284,6 +284,12 @@ def stage2_copy_prod_to_test(prod_admin_url: str, test_url: str) -> None:
     # Grant to current user so the migration runner can SET LOCAL ROLE mesio_superadmin
     _psql_exec(test_url, "GRANT mesio_superadmin TO CURRENT_USER;", timeout=10)
 
+    # DROP SCHEMA + CREATE SCHEMA at stage 2 top removes the default
+    # USAGE grant to PUBLIC, which prevents mesio_app from accessing ANY
+    # object in the schema regardless of table-level grants. Restore it.
+    _psql_exec(test_url, "GRANT USAGE ON SCHEMA public TO mesio_app;", timeout=10)
+    _psql_exec(test_url, "GRANT USAGE, CREATE ON SCHEMA public TO PUBLIC;", timeout=10)
+
     # Two separate subprocesses — prior pipe form swallowed pg_dump failures
     # because the shell exit code came from psql (which reads empty stdin OK).
     import tempfile, os as _os
