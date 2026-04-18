@@ -75,13 +75,24 @@ async def db_get_tables(branch_id: int = None, is_main: bool = False):
 
 async def db_create_table(table_id: str, number: int, name: str, branch_id: int = None,
                           capacity: int = 4, table_type: str = "interior", zone: str = ""):
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+    """# Requires active tenant_scope() or bypass_tenant_scope().
+
+    Wave-2: restaurant_tables has org_id NOT NULL + location_id NOT NULL
+    (location_id is NOT in 0037d's _RELAX_TABLES list — restaurant_tables
+    is admin-config, always inserted with explicit sede context). The
+    INSERT must populate both: org_id from the GUC, location_id from
+    branch_id (they describe the same sede — branch_id is the legacy
+    column name, location_id is the canonical Wave-2 column).
+    """
     async with tenant_connection() as conn:
         await conn.execute("""
-            INSERT INTO restaurant_tables (id, number, name, branch_id, active, capacity, table_type, zone)
-            VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7)
+            INSERT INTO restaurant_tables
+                (id, number, name, branch_id, location_id, org_id, active, capacity, table_type, zone)
+            VALUES ($1, $2, $3, $4, $4,
+                    NULLIF(current_setting('app.org_id', true), '')::bigint,
+                    TRUE, $5, $6, $7)
             ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, name=EXCLUDED.name,
-                branch_id=EXCLUDED.branch_id, active=TRUE,
+                branch_id=EXCLUDED.branch_id, location_id=EXCLUDED.location_id, active=TRUE,
                 capacity=EXCLUDED.capacity, table_type=EXCLUDED.table_type, zone=EXCLUDED.zone
         """, table_id, number, name, branch_id, capacity, table_type, zone)
 
@@ -113,9 +124,13 @@ async def db_auto_create_table(restaurant_id: int, is_main_restaurant: bool) -> 
         table_id = f"table-{restaurant_id}-{new_number}"
 
         # 4. Insertar o reactivar si el ID ya existía en la base de datos
+        # Wave-2: same shape as db_create_table — must populate org_id (from GUC)
+        # and location_id (mirror of branch_id) explicitly. See db_create_table.
         await conn.execute("""
-            INSERT INTO restaurant_tables (id, number, name, branch_id, active)
-            VALUES ($1, $2, $3, $4, TRUE)
+            INSERT INTO restaurant_tables (id, number, name, branch_id, location_id, org_id, active)
+            VALUES ($1, $2, $3, $4, $4,
+                    NULLIF(current_setting('app.org_id', true), '')::bigint,
+                    TRUE)
             ON CONFLICT (id) DO UPDATE SET active=TRUE, name=EXCLUDED.name, number=EXCLUDED.number
         """, table_id, new_number, table_name, branch_id)
 
