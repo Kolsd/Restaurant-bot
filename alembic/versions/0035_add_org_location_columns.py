@@ -539,29 +539,34 @@ def upgrade() -> None:
     iteration = 0
     while True:
         iteration += 1
+        # Resolution happens in a CTE because Postgres does not allow the UPDATE
+        # target alias (`rd`) to be referenced from inside a FROM-clause JOIN's ON.
         result = conn.execute(sa.text(
             f"""
             WITH batch AS (
-                SELECT rd.ctid
+                SELECT rd.ctid, rd.reservation_id
                 FROM reservation_deposits rd
                 WHERE rd.org_id IS NULL
                 LIMIT {_BATCH}
                 FOR UPDATE SKIP LOCKED
+            ),
+            resolved AS (
+                SELECT b.ctid,
+                       COALESCE(mb.org_id,      mr.org_id)      AS org_id,
+                       COALESCE(mb.location_id, mr.location_id) AS location_id
+                FROM batch b
+                JOIN reservations r ON r.id = b.reservation_id
+                LEFT JOIN _migration_restaurant_to_location mr
+                  ON mr.old_restaurant_id = r.restaurant_id
+                LEFT JOIN _migration_restaurant_to_location mb
+                  ON mb.old_restaurant_id = r.branch_id
+                WHERE COALESCE(mb.org_id, mr.org_id) IS NOT NULL
             )
             UPDATE reservation_deposits rd
-            SET org_id      = COALESCE(mb.org_id,      mr.org_id),
-                location_id = COALESCE(mb.location_id, mr.location_id)
-            FROM batch
-            JOIN reservations r ON r.id = rd.reservation_id
-            -- Primary join: resolve via restaurant_id (preferred)
-            LEFT JOIN _migration_restaurant_to_location mr
-                ON mr.old_restaurant_id = r.restaurant_id
-            -- Secondary join: resolve via branch_id (fallback for NULL restaurant_id)
-            LEFT JOIN _migration_restaurant_to_location mb
-                ON mb.old_restaurant_id = r.branch_id
-            WHERE rd.ctid = batch.ctid
-              -- At least one mapping must resolve
-              AND COALESCE(mb.org_id, mr.org_id) IS NOT NULL
+            SET org_id      = res.org_id,
+                location_id = res.location_id
+            FROM resolved res
+            WHERE rd.ctid = res.ctid
             RETURNING 1
             """
         ))
@@ -576,16 +581,8 @@ def upgrade() -> None:
             break
     logger.info("0035 backfill reservation_deposits: DONE — %d rows", total_rd)
 
-    # Orphan check for reservation_deposits
-    result = conn.execute(sa.text(
-        "SELECT COUNT(*) FROM reservation_deposits WHERE org_id IS NULL"
-    ))
-    count = result.scalar()
-    if count > 0:
-        raise RuntimeError(
-            f"0035: reservation_deposits has {count} rows with org_id IS NULL "
-            f"— likely reservations with NULL restaurant_id. Resolve and re-run."
-        )
+    # Orphan cleanup for reservation_deposits (same soft-delete policy).
+    _cleanup_orphans("reservation_deposits", "org_id")
 
     op.execute(sa.text(
         "ALTER TABLE reservation_deposits ALTER COLUMN org_id SET NOT NULL"
