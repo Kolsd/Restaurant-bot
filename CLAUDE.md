@@ -1122,3 +1122,111 @@ psql $DATABASE_URL_ADMIN -c "
 ```
 
 O usar `services/alerts.py` y agregar un check personalizado al scheduler.
+
+---
+
+## Wave 2 (Org/Location) — Estado Post-Deploy y Aprendizajes Críticos
+
+**Fecha aplicado a prod: 2026-04-18.** Esta sección documenta el estado post-migración y las lecciones aprendidas durante el despliegue (que costó ~8-10 horas de iteración reactiva que podrían haberse evitado).
+
+### Estado actual del schema (post-0037)
+
+- **Tablas nuevas canónicas:** `organizations` (tenant) + `locations` (sede). Ver `ORG_LOCATION_MIGRATION_PLAN.md` §2 para el mapeo completo.
+- **`restaurants` es ahora una VIEW read-only** sobre `locations JOIN organizations`. Cada fila de la VIEW representa una Location con los datos de su Org injerados. `id` de la VIEW == `location_id`.
+- **`restaurants_deprecated`** — tabla real con los datos originales. No tocar. Se dropeará en migración 0038 (pendiente, ~2 semanas post-estabilización).
+- **`restaurant_id` column** — DROPEADA de las 33 tablas RLS (+ reservation_deposits + reservations + restaurant_tables). Solo existe en `restaurants_deprecated`.
+- **`org_id` + `location_id`** — las columnas canónicas. `org_id` es el tenant key (equivale al viejo `restaurant_id` de la Matriz). `location_id` es la sede operativa.
+- **RLS:** policy `tenant_isolation` (legacy por `restaurant_id`) **DROPPED**. Policy `org_isolation` (por `org_id`) activa en las 33 tablas + FORCE RLS.
+- **Triggers auto-populate:** DROPPED. App code debe setear `org_id` y `location_id` explícitamente en INSERTs.
+- **Migración head actual:** `0037_drop_legacy_rls`. Cadena: `0036 -> 0037b_recovery_cons -> 0037c_billing_conf -> 0037d_relax_location -> 0037_drop_legacy_rls`.
+- **billing_config** — migrado a `organizations.billing_config` (0037c) y expuesto en la VIEW `restaurants`.
+- **location_id nullable** en 18 tablas operativas (0037d): orders, table_orders, staff, staff_shifts, staff_schedules, staff_deduction_items, attendance_deductions, fiscal_invoices, fiscal_resolution, inventory, menu_availability, occupancy_snapshots, overtime_requests, table_sessions, time_slot_discounts, tip_distributions, waiter_alerts, webauthn_challenges. Cuando el código quede 100% Wave 2-ready, una migración futura puede re-enforce NOT NULL.
+
+### Patrón obligatorio post-Wave-2 para SQL nuevo
+
+- **Reads:** `FROM restaurants` SIGUE funcionando (VIEW). Retorna shape idéntico al viejo. `WHERE id = $1` se interpreta como filtrado por `location_id`.
+- **Writes a restaurants:** PROHIBIDAS. Routear UPDATE/INSERT/DELETE al `organizations` + `locations` apropiado. Ver `app/repositories/restaurant_repo.py` para ejemplos (`db_update_restaurant_fields`, `db_create_restaurant`, etc. ya reescritos).
+- **Queries en tablas operativas:** usar `org_id` (no `restaurant_id`). RLS hace el filtrado via `app.org_id` GUC.
+- **`app.restaurant_id` GUC:** LEGACY — sigue siendo seteado por `tenant_db.py` por compatibilidad, pero NO USAR en queries nuevas. Usar `current_setting('app.org_id', true)`.
+- **INSERTs en tablas Location-level** (orders, staff, inventory, etc.): setear `org_id` + `location_id` explícitamente. Los triggers auto-populate YA NO EXISTEN.
+- **`features` como dict:** `restaurants.features` puede venir como str JSON o dict dependiendo del driver/VIEW. Usar helper como `_features_dict()` en `scheduler.py` para normalizar.
+
+### Variables de entorno (estado consolidado post-Wave-2)
+
+| Variable | Uso | Dónde |
+|---|---|---|
+| `DATABASE_URL` | Runtime app (postgres o mesio_app) | Restaurant-bot |
+| `PROD_DATABASE_URL` | Alias explícito para prod (requerido para rehearsal) | Restaurant-bot |
+| `TEST_DATABASE_URL` | Apunta al Postgres Test de Railway | Restaurant-bot |
+| `DATABASE_URL_ADMIN` | Superuser URL, opcional (cae a DATABASE_URL) | Migraciones |
+| `ANTHROPIC_API_KEY` | Requerido por bot + AI sim | Restaurant-bot |
+| `REDIS_URL` | Estado compartido multi-worker | Restaurant-bot + worker |
+| `REHEARSAL_MODE=1` | Dispara `scripts/rehearsal_railway.py` en lugar de uvicorn | PROD CAIDO mientras esté activo |
+| `AI_SIM_MODE=1` | Dispara `run_ai_sim.py` contra TEST_DATABASE_URL en lugar de uvicorn | PROD CAIDO mientras esté activo |
+| `AI_SIM_ASSUME_YES=1` | Skip prompt interactivo del sim (auto en non-tty) | Opcional |
+| `AI_SIM_ARGS` | Args extra para run_ai_sim.py (ej: `--only mesa`) | Opcional |
+
+**CRITICO:** después de correr rehearsal o AI sim, BORRAR `REHEARSAL_MODE` / `AI_SIM_MODE` de Variables en Railway o quedará prod caído. El deploy normal solo corre si ninguno de estos flags está seteado.
+
+### Rehearsal infrastructure
+
+- **Script:** `scripts/rehearsal_railway.py` — corre dentro de Railway (sin Docker local), hace pg_dump prod -> restore test -> alembic upgrade head -> 14 smoke checks -> reporta PASS/FAIL.
+- **Trigger:** `REHEARSAL_MODE=1` en Restaurant-bot.
+- **Prereqs:** `PROD_DATABASE_URL` + `TEST_DATABASE_URL` seteadas. `nixpacks.toml` provee postgresql_17 para pg_dump.
+- **Uso típico:** antes de cualquier migración destructiva, se corre el rehearsal -> pasa -> aplicar a prod.
+- **Limitación conocida:** el rehearsal NO valida el refactor del código app contra el schema post-migración. Solo valida la migración en sí. Para eso está `run_ai_sim.py` — pero ver abajo.
+
+### ai_sim — estado pendiente
+
+**El sim `run_ai_sim.py` NO funciona post-Wave-2.** Fue escrito con supuestos pre-migración:
+- `tests/ai_sim/runner.py:99` llama `agent.chat()` sin envolver en `tenant_scope(org_id)` -> falla con `TenantNotSetError` (en prod, el `inbox_worker._handle_meta_whatsapp` hace el wrap, pero el sim lo bypassa).
+- `tests/ai_sim/assertions.py` tiene ~9 queries que hacen `WHERE restaurant_id = $1` en tablas post-migración -> `UndefinedColumnError`.
+- `truncate_test_data` en `tests/ai_sim/seed.py` obtiene `permission denied for table table_sessions` contra Test DB con FORCE RLS.
+- `tests/ai_sim/seed.py` ya fue migrado (INSERT en organizations + locations), pero downstream no.
+
+**No correr el sim hasta que se haga el refactor completo.** Es trabajo diferido. Cuando se retome:
+1. Reescribir runner.py para resolver `org_id` del bot_number (o pasarlo del seed) y envolver cada scenario en `tenant_scope(org_id)`.
+2. Reescribir assertions.py: cada query de `restaurant_id` -> `org_id`.
+3. Diagnosticar el permission denied en `table_sessions`. Posiblemente necesita: conectar como `mesio_app` en vez de `postgres` (para simular prod real), o configurar explícitos GRANTs en el Test DB.
+4. Probar que los 20 escenarios pasan post-refactor antes de declarar "sim validado".
+
+### Errores recurrentes que ya vimos (y sus fixes)
+
+Lecciones que se fueron ganando a lo largo de la migración. Aplicar PROACTIVAMENTE antes de escribir código nuevo:
+
+1. **Alembic `version_num VARCHAR(32)`** — cualquier revision_id > 32 chars crashea el UPDATE final. Usar IDs cortos (ej. `0034_org_locations`, no `0034_create_organizations_locations`).
+
+2. **UPDATE target alias dentro de FROM-clause JOIN** — Postgres rechaza `UPDATE t ... FROM x JOIN y ON y.col = t.col` porque `t` no es visible en el JOIN ON. Usar CTE intermedia que resuelve el mapping, luego UPDATE usando solo ctid de la CTE.
+
+3. **`ON CONFLICT` con índice UNIQUE parcial** — no funciona sin especificar el predicado. Si el índice es `... WHERE col IS NOT NULL`, hay que hacer `ON CONFLICT (col) WHERE col IS NOT NULL`. Alternativa: check de existencia antes del INSERT.
+
+4. **`SET LOCAL ROLE` no persiste en asyncpg sin transacción** — cada `execute()` en autocommit es su propia TX. `SET LOCAL` se pierde. Envolver en `async with conn.transaction():`.
+
+5. **`::regclass` cast confunde parameter substitution** — SQLAlchemy `text()` con `:param::regclass` falla porque `::` parece inicio de parámetro. Usar JOIN explícito a `pg_class` por nombre.
+
+6. **Shell `$$` expande a PID** — los bloques `DO $$ BEGIN ... END $$;` de PL/pgSQL se rompen si pasan por bash con interpolación. Pasar SQL por stdin (`psql -f -` con `input=sql`), no con `-c "..."`.
+
+7. **pg_dump version mismatch** — Railway Postgres es v17, el apt default de Ubuntu 24 es v16. En nixpacks.toml usar `nixPkgs = ["python312", "gcc", "postgresql_17"]`. Recordar: nixPkgs REEMPLAZA los packages default, hay que re-incluir python + gcc.
+
+8. **Orphan `restaurant_id` después de tenant borrado** — producción tenía filas con `restaurant_id` apuntando a un tenant eliminado. Migraciones de backfill deben auto-dedupear / auto-delete esas filas con log de advertencia, no crashear. Ceiling de seguridad: si hay >100 orphans, sí crashear.
+
+9. **Duplicados aparecidos entre drop/recreate de UNIQUE** — durante downgrades encadenados, el app puede insertar duplicados en la ventana sin constraint. Migraciones de recuperación deben auto-dedupear con `ROW_NUMBER() OVER (PARTITION BY ...)` manteniendo MAX(id).
+
+10. **Railway deploy == `alembic upgrade head` siempre corre** — significa que un archivo `.deferred` (extensión no-`.py`) es la única forma de "esconder" una migración del upgrade automático.
+
+11. **Grant USAGE on schema public** — después de `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`, se pierde el `GRANT USAGE ON SCHEMA public TO PUBLIC` default. Sin eso, grants table-level no alcanzan — el rol ni siquiera ve las tablas. Siempre re-grant después de recrear schema.
+
+12. **Variables ambiguas cuando Railway linkea múltiples DBs** — al linkear 2 Postgres a un mismo servicio, `DATABASE_URL` puede resolverse a cualquiera. Usar nombres explícitos (`PROD_DATABASE_URL`, `TEST_DATABASE_URL`) + anti-swap guard que verifica row counts antes de cualquier escritura.
+
+### Lección estratégica principal
+
+**No ser reactivo.** La migración Wave 2 costó ~8 horas de iteración principalmente por pushear sin haber pensado proactivamente qué podría fallar. La regla:
+
+Antes de cualquier `git push` que toque migraciones, schema, o deploys:
+1. Leer mentalmente cada línea del código que se modifica.
+2. Pensar "¿qué supuestos estoy haciendo?" y listar los 3-5 principales.
+3. Verificar cada supuesto contra el código real (grep, read) antes de asumir.
+4. Considerar: ¿qué pasa si corre en un estado distinto al esperado? (DB a mitad de migración, env var faltante, tool ausente).
+5. Si el deploy afecta prod (no solo tests), ¿está el rollback probado?
+
+Para migraciones grandes: **staging rehearsal obligatorio ANTES** de tocar prod. `scripts/rehearsal_railway.py` existe exactamente para esto. Nunca saltar este paso.
