@@ -1530,10 +1530,10 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
     organizations has no RLS policy (it IS the tenant container), so we use
     bypass_tenant_scope for audit-log consistency.  Safe from any call site.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_get_org_by_id_lookup"):
+    with bypass_tenant_scope_if_unset("db_get_org_by_id_lookup"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1576,11 +1576,11 @@ async def db_get_org_by_phone(phone: str) -> dict | None:
 
     Phone normalization is applied before querying (strip +, spaces).
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     normalized = _normalize_phone(phone)
     pool = await _get_pool()
-    with bypass_tenant_scope("db_get_org_by_phone_webhook_resolve"):
+    with bypass_tenant_scope_if_unset("db_get_org_by_phone_webhook_resolve"):
         async with pool.acquire() as conn:
             # Try Location-level override first (more specific routing)
             loc_row = await conn.fetchrow(
@@ -1646,10 +1646,10 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
     _get_pool() + bypass for consistency with the GLOBAL pattern for
     cross-tenant/admin lookups.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_get_org_locations_list"):
+    with bypass_tenant_scope_if_unset("db_get_org_locations_list"):
         async with pool.acquire() as conn:
             if active_only:
                 rows = await conn.fetch(
@@ -1698,10 +1698,10 @@ async def db_get_primary_location(org_id: int) -> dict | None:
     Invariant (enforced by UNIQUE partial index ux_locations_org_primary):
     exactly one is_primary per Org.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_get_primary_location_lookup"):
+    with bypass_tenant_scope_if_unset("db_get_primary_location_lookup"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1734,10 +1734,10 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
     Includes org_id so the caller can validate ownership (e.g. in
     get_current_location dep — prevent cross-org location spoofing).
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_get_location_by_id_lookup"):
+    with bypass_tenant_scope_if_unset("db_get_location_by_id_lookup"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
@@ -1787,10 +1787,10 @@ async def db_resolve_location_by_gps(
     """
     import math  # noqa: PLC0415
 
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_resolve_location_by_gps"):
+    with bypass_tenant_scope_if_unset("db_resolve_location_by_gps"):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -1857,7 +1857,7 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
     Called from authenticated admin routes; uses bypass_tenant_scope since
     organizations has no RLS and we need to update the container itself.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_ORG_FIELDS = {
         "name", "slug", "whatsapp_number", "wa_phone_id", "wa_access_token",
@@ -1895,7 +1895,7 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
     )
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_update_organization_admin"):
+    with bypass_tenant_scope_if_unset("db_update_organization_admin"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(sql, *params)
 
@@ -1921,7 +1921,7 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
     whatsapp_number, wa_phone_id, wa_access_token, active,
     opening_hours, timezone.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_LOC_FIELDS = {
         "name", "code", "address", "latitude", "longitude",
@@ -1958,7 +1958,7 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
     )
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_update_location_admin"):
+    with bypass_tenant_scope_if_unset("db_update_location_admin"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(sql, *params)
 
@@ -1985,7 +1985,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
 
     Returns the created row as a dict.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     _ALLOWED_CREATE_FIELDS = {
         "code", "address", "latitude", "longitude",
@@ -2019,7 +2019,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
     )
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_create_location_admin"):
+    with bypass_tenant_scope_if_unset("db_create_location_admin"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(sql, *col_values)
 
@@ -2040,10 +2040,10 @@ async def db_list_organizations() -> list[dict]:
 
     Called from internal superadmin; uses bypass + global pool (cross-tenant).
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_list_organizations_superadmin"):
+    with bypass_tenant_scope_if_unset("db_list_organizations_superadmin"):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -2087,13 +2087,13 @@ async def db_create_organization(
     Slug uniqueness is enforced by DB UNIQUE constraint; duplicate slug raises
     asyncpg.UniqueViolationError which the route converts to 409.
     """
-    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     if features is None:
         features = {}
 
     pool = await _get_pool()
-    with bypass_tenant_scope("db_create_organization_superadmin"):
+    with bypass_tenant_scope_if_unset("db_create_organization_superadmin"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
