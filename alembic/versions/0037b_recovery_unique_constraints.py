@@ -481,9 +481,11 @@ def upgrade() -> None:
     ]
 
     for cname, tname in _EXPECTED_NEW:
+        # Avoid the :param::cast ambiguity by joining to pg_class manually.
         exists = conn.execute(sa.text(
-            "SELECT 1 FROM pg_constraint "
-            "WHERE conname = :cname AND conrelid = :tname::regclass"
+            "SELECT 1 FROM pg_constraint c "
+            "JOIN pg_class t ON c.conrelid = t.oid "
+            "WHERE c.conname = :cname AND t.relname = :tname"
         ), {"cname": cname, "tname": tname}).scalar()
         if not exists:
             raise RuntimeError(
