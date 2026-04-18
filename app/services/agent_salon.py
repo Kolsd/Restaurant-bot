@@ -1025,14 +1025,42 @@ async def execute_salon_action(
                         step=_checkout_state["step"],
                     )
 
+                    # Notify staff that the customer asked for the bill.
+                    # This is a hint (not a commitment) — staff sees "mesa X
+                    # pidió la cuenta" even if the checkout flow is still
+                    # collecting tip/method/factura from the customer.
+                    try:
+                        await db.db_create_waiter_alert(
+                            phone=phone,
+                            bot_number=bot_number,
+                            alert_type="bill",
+                            message=f"La mesa {table_name} pidió la cuenta (subtotal: {_fmt_cop(total)}).",
+                            table_id=table_id,
+                            table_name=table_name,
+                        )
+                    except Exception:
+                        log.exception(
+                            "checkout_start_bill_alert_failed",
+                            phone=_ofuscar_phone(phone),
+                            bot_number=bot_number,
+                        )
+
                     if _checkout_state["step"] == "asking_tip":
                         # Customer already answered the split question — show tip menu
                         subtotal_d = to_decimal(total)
                         tip_10 = _resolve_tip("percent", 10, subtotal_d)
                         tip_15 = _resolve_tip("percent", 15, subtotal_d)
                         tip_20 = _resolve_tip("percent", 20, subtotal_d)
+                        split_n = _checkout_state.get("split_count", 1) or 1
+                        header = "¡Claro! Vamos a procesar tu cuenta."
+                        if split_n and split_n > 1:
+                            per_check = quantize_money(to_decimal(total) / to_decimal(split_n))
+                            header = (
+                                f"¡Perfecto! Dividimos la cuenta en {split_n} partes iguales "
+                                f"de {_fmt_cop(float(per_check))} cada una."
+                            )
                         lines = [
-                            "¡Claro! Vamos a procesar tu cuenta.",
+                            header,
                             f"Subtotal: {_fmt_cop(total)}",
                             "¿Deseas agregar una propina?",
                             f"  1) 10% → {_fmt_cop(tip_10)}",
