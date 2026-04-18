@@ -19,6 +19,26 @@ except ImportError:
 log = get_logger(__name__)
 
 
+def _features_dict(restaurant: dict) -> dict:
+    """Return restaurant['features'] as a dict, parsing JSON string if needed.
+
+    When reading from the `restaurants` VIEW (post-0037), asyncpg may return
+    the JSONB `features` field as a raw string depending on driver/version.
+    This helper normalizes to a dict so downstream `.get()` calls are safe.
+    """
+    raw = restaurant.get("features")
+    if not raw:
+        return {}
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {}
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
 def _local_now(tz_name: str) -> datetime:
     """Return current datetime in the given IANA timezone. Falls back to America/Bogota."""
     try:
@@ -308,7 +328,7 @@ async def _run_weekly_owner_reports():
         restaurant_name = restaurant.get("name", f"Restaurant {rid}")
         try:
             # ── 1. Resolve timezone and local time ────────────────────────────
-            tz_name = (restaurant.get("features") or {}).get("timezone") or "America/Bogota"
+            tz_name = _features_dict(restaurant).get("timezone") or "America/Bogota"
             local_now = _local_now(tz_name)
 
             # ── 2. Only proceed on Monday 09:xx local time ────────────────────
@@ -367,7 +387,7 @@ async def _run_weekly_owner_reports():
                 continue
 
             # ── 9. Resolve owner phone ────────────────────────────────────────
-            owner_phone = (restaurant.get("features") or {}).get("owner_phone")
+            owner_phone = _features_dict(restaurant).get("owner_phone")
 
             # ── 10. Build payload and persist the report row ──────────────────
             payload = weekly_reports_repo.build_payload(stats, week_start, week_end)
