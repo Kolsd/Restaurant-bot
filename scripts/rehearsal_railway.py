@@ -608,73 +608,76 @@ async def _run_checks(conn, aio_url: str) -> None:
     else:
         _fail("6l", f"Missing UNIQUE constraints: {missing_constraints}")
 
-    # -- 6m. mesio_app with org_id GUC sees rows -------------------------------
-    try:
-        first_org = await conn.fetchval("SELECT id FROM organizations ORDER BY id LIMIT 1")
-        if first_org is None:
-            _fail("6m", "No organizations found -- cannot test scoped RLS")
-        else:
-            # Open a second connection as mesio_app to test RLS
-            import asyncpg as apg  # type: ignore[import]
-            aio_url_app = re.sub(r"://[^:@]*:[^@]*@", "://mesio_app:rehearsal@", aio_url)
-            # Fall back to same URL if mesio_app role has a different password setup
-            try:
-                app_conn = await apg.connect(aio_url_app)
-                await app_conn.execute(f"SET LOCAL app.org_id = '{first_org}'")
-                order_count = await app_conn.fetchval("SELECT COUNT(*) FROM orders")
-                await app_conn.close()
-                _ok("6m", f"mesio_app + app.org_id={first_org} -> orders: {order_count}")
-            except Exception as e2:
-                # Try via superuser connection with SET ROLE
-                await conn.execute(f"SET LOCAL ROLE mesio_app")
-                await conn.execute(f"SET LOCAL app.org_id = '{first_org}'")
-                order_count = await conn.fetchval("SELECT COUNT(*) FROM orders")
-                await conn.execute("RESET ROLE")
-                _ok("6m", f"mesio_app + app.org_id={first_org} (via SET ROLE) -> orders: {order_count}")
-    except Exception as e:
-        _fail("6m", f"scoped RLS test error: {e}")
-
-    # -- 6n. mesio_app with no scope sees 0 rows -------------------------------
-    # Strict mode: first verify the connection is actually as mesio_app (not
-    # silently falling through to superuser via Postgres trust auth). If we
-    # can't confirm the identity, use SET LOCAL ROLE which is authoritative.
+    # -- 6m/6n. RLS scoped + fail-closed tests ---------------------------------
+    # CRITICAL: asyncpg runs each execute() in its OWN implicit transaction when
+    # not wrapped. `SET LOCAL ROLE` and `SET LOCAL app.*` only persist within
+    # a transaction. So we MUST wrap these in `async with conn.transaction():`
+    # otherwise the SELECT runs as postgres (BYPASSRLS) and the result is a
+    # false positive showing all rows globally.
     #
-    # Also verify FORCE ROW LEVEL SECURITY is on — if a migration dropped it,
-    # that's the real bug to surface, not the row count.
+    # We also verify current_user == mesio_app inside the tx to catch any
+    # silent SET LOCAL ROLE failure.
+
+    # Diagnostic: RLS/FORCE state on orders
     try:
-        # Diagnostic: check FORCE RLS state on orders
-        force_enabled = await conn.fetchval(
-            "SELECT relforcerowsecurity FROM pg_class "
-            "WHERE relname='orders' AND relnamespace='public'::regnamespace"
-        )
         rls_enabled = await conn.fetchval(
             "SELECT relrowsecurity FROM pg_class "
             "WHERE relname='orders' AND relnamespace='public'::regnamespace"
         )
+        force_enabled = await conn.fetchval(
+            "SELECT relforcerowsecurity FROM pg_class "
+            "WHERE relname='orders' AND relnamespace='public'::regnamespace"
+        )
         if not rls_enabled:
-            _fail("6n-rls", "orders table does NOT have RLS enabled (relrowsecurity=false)")
+            _fail("6-rls", "orders table does NOT have RLS enabled (relrowsecurity=false)")
         elif not force_enabled:
-            _fail("6n-force", "orders table does NOT have FORCE RLS (relforcerowsecurity=false)")
+            _fail("6-force", "orders table does NOT have FORCE RLS (relforcerowsecurity=false)")
         else:
             log.info("   diagnostic: orders has RLS enabled + FORCE RLS on")
+    except Exception as e:
+        _fail("6-diag", f"RLS/FORCE check error: {e}")
 
-        # Use SET LOCAL ROLE — authoritative. If direct mesio_app connection
-        # silently falls through to postgres via trust auth, this avoids false
-        # positives.
-        await conn.execute("SET LOCAL ROLE mesio_app")
-        actual_user = await conn.fetchval("SELECT current_user")
-        if actual_user != "mesio_app":
-            await conn.execute("RESET ROLE")
-            _fail("6n", f"SET LOCAL ROLE landed on {actual_user!r}, not mesio_app")
+    # 6m: scoped read (must be in a transaction for SET LOCAL to stick).
+    # Pick an org that actually has orders so the count is meaningful — if
+    # no org has orders, fall back to the first org (count will be 0, still
+    # validates that RLS scoping doesn't error).
+    try:
+        picked_org = await conn.fetchval(
+            "SELECT org_id FROM orders GROUP BY org_id ORDER BY COUNT(*) DESC LIMIT 1"
+        )
+        if picked_org is None:
+            picked_org = await conn.fetchval("SELECT id FROM organizations ORDER BY id LIMIT 1")
+        if picked_org is None:
+            _fail("6m", "No organizations found -- cannot test scoped RLS")
         else:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL ROLE mesio_app")
+                actual = await conn.fetchval("SELECT current_user")
+                if actual != "mesio_app":
+                    raise RuntimeError(f"SET LOCAL ROLE landed on {actual!r}, not mesio_app")
+                await conn.execute(
+                    "SELECT set_config('app.org_id', $1, true)", str(picked_org)
+                )
+                order_count = await conn.fetchval("SELECT COUNT(*) FROM orders")
+            # Pass criterion: no error. Count is informational.
+            _ok("6m", f"mesio_app + app.org_id={picked_org} -> orders: {order_count} (RLS scoped OK)")
+    except Exception as e:
+        _fail("6m", f"scoped RLS test error: {e}")
+
+    # 6n: no-scope read (must be 0 due to fail-closed RLS)
+    try:
+        async with conn.transaction():
+            await conn.execute("SET LOCAL ROLE mesio_app")
+            actual = await conn.fetchval("SELECT current_user")
+            if actual != "mesio_app":
+                raise RuntimeError(f"SET LOCAL ROLE landed on {actual!r}, not mesio_app")
             # Ensure no org_id is set
             await conn.execute("SELECT set_config('app.org_id', '', true)")
             zero = await conn.fetchval("SELECT COUNT(*) FROM orders")
-            await conn.execute("RESET ROLE")
-            if zero == 0:
-                _ok("6n", f"mesio_app + no scope -> orders: 0 (fail-closed, RLS+FORCE verified)")
-            else:
-                _fail("6n", f"mesio_app + no scope -> orders: {zero} (RLS NOT fail-closed!)")
+        if zero == 0:
+            _ok("6n", "mesio_app + no scope -> orders: 0 (fail-closed, RLS+FORCE verified)")
+        else:
+            _fail("6n", f"mesio_app + no scope -> orders: {zero} (RLS NOT fail-closed!)")
     except Exception as e:
         _fail("6n", f"fail-closed RLS test error: {e}")
 
