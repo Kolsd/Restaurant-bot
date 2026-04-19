@@ -197,8 +197,22 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     # All inner db_create_table_session calls use bypass because this is pre-resolution.
     with _bypass_tenant("agent.detect_table_context: pre-tenant text-based table lookup by bot_number"):
         async with _tenant_conn() as conn:
+            # Wave-2: same non-determinism class as db_get_restaurant_by_phone
+            # (fixed in commit 41feb26). Multiple locations can share an
+            # org-inherited whatsapp_number via the VIEW's COALESCE; without an
+            # explicit ORDER BY + LIMIT 1, fetchrow returns an arbitrary one
+            # and detect_table_context resolves the manual table number against
+            # the wrong sede. Mirror the resolver's deterministic ordering.
             bot_rest = await conn.fetchrow(
-                "SELECT id, parent_restaurant_id, features FROM restaurants WHERE whatsapp_number = $1", bot_number
+                """
+                SELECT r.id, r.parent_restaurant_id, r.features
+                FROM restaurants r
+                JOIN locations l ON l.id = r.id
+                WHERE r.whatsapp_number = $1
+                ORDER BY (l.whatsapp_number = $1) DESC NULLS LAST, l.id ASC
+                LIMIT 1
+                """,
+                bot_number,
             )
             if not bot_rest:
                 return None
