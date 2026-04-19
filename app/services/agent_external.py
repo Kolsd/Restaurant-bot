@@ -252,10 +252,14 @@ async def execute_external_action(
                             pool = await db.get_pool()
                             async with pool.acquire() as conn:
                                 abs_nearest = await conn.fetchrow('''
-                                    SELECT name, address,
-                                           (6371 * acos(cos(radians($1)) * cos(radians(latitude::float)) * cos(radians(longitude::float) - radians($2)) + sin(radians($1)) * sin(radians(latitude::float)))) AS distance_km
-                                    FROM restaurants
-                                    WHERE parent_restaurant_id = $3 AND latitude IS NOT NULL AND longitude IS NOT NULL
+                                    SELECT r.name, r.address,
+                                           (6371 * acos(cos(radians($1)) * cos(radians(r.latitude::float)) * cos(radians(r.longitude::float) - radians($2)) + sin(radians($1)) * sin(radians(r.latitude::float)))) AS distance_km
+                                    FROM restaurants r
+                                    JOIN locations l ON l.id = r.id
+                                    WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $3)
+                                      AND l.id != $3
+                                      AND r.latitude IS NOT NULL
+                                      AND r.longitude IS NOT NULL
                                     ORDER BY distance_km ASC LIMIT 1
                                 ''', customer_lat, customer_lon, parent_id)
 
@@ -335,7 +339,14 @@ async def execute_external_action(
                 _pool = await db.get_pool()
                 async with _pool.acquire() as _conn:
                     branches_list = await _conn.fetch(
-                        "SELECT id, name, address, whatsapp_number FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name",
+                        """
+                        SELECT r.id, r.name, r.address, r.whatsapp_number
+                        FROM restaurants r
+                        JOIN locations l ON l.id = r.id
+                        WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $1)
+                          AND l.id != $1
+                        ORDER BY r.name
+                        """,
                         parent_id,
                     )
             except Exception:
@@ -359,7 +370,14 @@ async def execute_external_action(
                     _pool = await db.get_pool()
                     async with _pool.acquire() as _conn:
                         branch_row = await _conn.fetchrow(
-                            "SELECT id, name, whatsapp_number FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
+                            """
+                            SELECT r.id, r.name, r.whatsapp_number
+                            FROM restaurants r
+                            JOIN locations l ON l.id = r.id
+                            WHERE l.id = $1
+                              AND l.org_id = (SELECT org_id FROM locations WHERE id = $2)
+                              AND l.id != $2
+                            """,
                             int(parsed["branch_id"]), parent_id,
                         )
                     if branch_row:

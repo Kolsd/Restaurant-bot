@@ -687,7 +687,7 @@ async def db_calculate_tips_by_attendance(
             rest_ids = [branch_id]
         else:
             branches = await conn.fetch(
-                "SELECT id FROM restaurants WHERE id=$1 OR parent_restaurant_id=$1",
+                "SELECT id FROM locations WHERE org_id = (SELECT org_id FROM locations WHERE id = $1)",
                 restaurant_id,
             )
             rest_ids = [r["id"] for r in branches]

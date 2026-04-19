@@ -131,11 +131,6 @@ async def compute_weekly_stats(
         # Exclude statuses in REVENUE_STATUSES_TABLE_EXCLUDE.
         table_row = await conn.fetchrow(
             """
-            WITH is_matriz AS (
-                SELECT (parent_restaurant_id IS NULL) AS val
-                FROM restaurants
-                WHERE id = $1
-            )
             SELECT
                 COALESCE(SUM(CASE WHEN o.created_at >= $2 AND o.created_at < $3
                                   THEN o.total ELSE 0 END), 0) AS revenue_current,
@@ -145,11 +140,11 @@ async def compute_weekly_stats(
                            THEN 1 END)                         AS count_current,
                 COUNT(CASE WHEN o.created_at >= $4 AND o.created_at < $2
                            THEN 1 END)                         AS count_previous
-            FROM table_orders o, is_matriz m
+            FROM table_orders o
             WHERE o.status <> ALL($5)
               AND (
                   o.branch_id = $1
-                  OR (m.val AND o.branch_id IS NULL)
+                  OR o.branch_id IS NULL
               )
             """,
             restaurant_id,

@@ -205,7 +205,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
             # the wrong sede. Mirror the resolver's deterministic ordering.
             bot_rest = await conn.fetchrow(
                 """
-                SELECT r.id, r.parent_restaurant_id, r.features
+                SELECT r.id, r.features
                 FROM restaurants r
                 JOIN locations l ON l.id = r.id
                 WHERE r.whatsapp_number = $1
@@ -241,16 +241,18 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 extracted=extracted_val,
             )
 
-            root_id = bot_rest["parent_restaurant_id"] if bot_rest["parent_restaurant_id"] else bot_rest["id"]
+            # Wave-2: no parent_restaurant_id. root_id is the resolved location_id;
+            # _all_franchise_tables fetches all org locations via org_id.
+            root_id = bot_rest["id"]
 
-            # Helper: fetch all active tables for this franchise
+            # Helper: fetch all active tables for this franchise (org-wide)
             async def _all_franchise_tables():
                 return await conn.fetch(
                     """
                     SELECT t.* FROM restaurant_tables t
-                    LEFT JOIN restaurants r ON t.branch_id = r.id
+                    JOIN locations l ON l.id = t.branch_id
                     WHERE t.active = TRUE
-                      AND (t.branch_id = $1 OR r.parent_restaurant_id = $1)
+                      AND l.org_id = (SELECT org_id FROM locations WHERE id = $1)
                     """,
                     root_id
                 )
@@ -263,7 +265,11 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                     t_num = int(t_num_str)
 
                     valid_rest = await conn.fetchval(
-                        "SELECT id FROM restaurants WHERE id = $1 AND (id = $2 OR parent_restaurant_id = $2)",
+                        """
+                        SELECT l.id FROM locations l
+                        WHERE l.id = $1
+                          AND l.org_id = (SELECT org_id FROM locations WHERE id = $2)
+                        """,
                         r_id, root_id
                     )
                     if valid_rest:

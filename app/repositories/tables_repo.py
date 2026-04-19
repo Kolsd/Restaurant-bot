@@ -1247,7 +1247,12 @@ async def db_verify_branch_is_child(branch_id: int, parent_id: int) -> bool:
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id FROM restaurants WHERE id = $1 AND parent_restaurant_id = $2",
+            """
+            SELECT id FROM locations
+            WHERE id = $1
+              AND org_id = (SELECT org_id FROM locations WHERE id = $2)
+              AND id != $2
+            """,
             branch_id, parent_id,
         )
     return row is not None

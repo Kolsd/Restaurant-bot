@@ -652,14 +652,15 @@ async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
             """
             SELECT
                 r.id AS restaurant_id,
-                (SELECT org_id FROM locations WHERE id = r.id) AS org_id,
+                l.org_id,
                 r.name,
                 r.menu,
-                p.menu AS parent_menu,
+                o.menu AS parent_menu,
                 r.features,
-                p.features AS parent_features
+                o.features AS parent_features
             FROM restaurants r
-            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
+            JOIN locations l ON l.id = r.id
+            JOIN organizations o ON o.id = l.org_id
             WHERE replace(replace(r.whatsapp_number, '+', ''), ' ', '') = $1
             """,
             normalized_bot_number,
@@ -707,7 +708,14 @@ async def db_get_branches(parent_restaurant_id: int) -> list[dict]:
     """
     async with _tenant_connection() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY id ASC",
+            """
+            SELECT r.*
+            FROM restaurants r
+            JOIN locations l ON l.id = r.id
+            WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $1)
+              AND l.id != $1
+            ORDER BY l.id ASC
+            """,
             parent_restaurant_id,
         )
     return [_serialize(dict(r)) for r in rows]
@@ -735,9 +743,9 @@ async def db_set_branch_parent(
 ) -> None:
     """Link a newly created location to its org (branch creation flow).
 
-    parent_restaurant_id is a location id (VIEW). We resolve the org_id from it,
-    then assign the new location (looked up by whatsapp_number) to the same org.
-    wa_phone_id and wa_access_token are branch-level overrides → locations.
+    parent_restaurant_id is a location id used to resolve the org_id.
+    The new location (looked up by whatsapp_number) is assigned to the same org.
+    wa_phone_id and wa_access_token are branch-level overrides stored on locations.
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
@@ -1015,19 +1023,21 @@ async def db_find_nearest_branch(customer_lat: float, customer_lon: float, paren
     pool = await _get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, name, whatsapp_number, latitude, longitude,
-                   features->>'delivery_radius_km' AS radius_km,
+            SELECT r.id, r.name, r.whatsapp_number, r.latitude, r.longitude,
+                   r.features->>'delivery_radius_km' AS radius_km,
                    (
                      6371 * acos(
-                       cos(radians($1)) * cos(radians(latitude::float))
-                       * cos(radians(longitude::float) - radians($2))
-                       + sin(radians($1)) * sin(radians(latitude::float))
+                       cos(radians($1)) * cos(radians(r.latitude::float))
+                       * cos(radians(r.longitude::float) - radians($2))
+                       + sin(radians($1)) * sin(radians(r.latitude::float))
                      )
                    ) AS distance_km
-            FROM restaurants
-            WHERE parent_restaurant_id = $3
-              AND latitude IS NOT NULL
-              AND longitude IS NOT NULL
+            FROM restaurants r
+            JOIN locations l ON l.id = r.id
+            WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $3)
+              AND l.id != $3
+              AND r.latitude IS NOT NULL
+              AND r.longitude IS NOT NULL
             ORDER BY distance_km ASC
         """, customer_lat, customer_lon, parent_id)
         for r in rows:
@@ -1043,16 +1053,18 @@ async def db_find_nearest_branch_any(customer_lat: float, customer_lon: float, p
     pool = await _get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
-            SELECT id, name, address, whatsapp_number,
+            SELECT r.id, r.name, r.address, r.whatsapp_number,
                    (6371 * acos(
-                     cos(radians($1)) * cos(radians(latitude::float))
-                     * cos(radians(longitude::float) - radians($2))
-                     + sin(radians($1)) * sin(radians(latitude::float))
+                     cos(radians($1)) * cos(radians(r.latitude::float))
+                     * cos(radians(r.longitude::float) - radians($2))
+                     + sin(radians($1)) * sin(radians(r.latitude::float))
                    )) AS distance_km
-            FROM restaurants
-            WHERE parent_restaurant_id = $3
-              AND latitude IS NOT NULL
-              AND longitude IS NOT NULL
+            FROM restaurants r
+            JOIN locations l ON l.id = r.id
+            WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $3)
+              AND l.id != $3
+              AND r.latitude IS NOT NULL
+              AND r.longitude IS NOT NULL
             ORDER BY distance_km ASC
             LIMIT 1
         """, customer_lat, customer_lon, parent_id)
@@ -1155,12 +1167,13 @@ async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _tenant_connection() as conn:
-        # Count sibling locations in the same org (excluding the primary/Matriz)
+        # Count sibling locations in the same org (all OTHER locations).
+        # Post-Wave-2: no is_primary column. Count all locations except the one passed in.
         count = await conn.fetchval(
             """SELECT COUNT(*)
                FROM locations
                WHERE org_id = (SELECT org_id FROM locations WHERE id = $1)
-                 AND is_primary = false""",
+                 AND id != $1""",
             parent_restaurant_id,
         )
     return int(count or 0)
@@ -1323,9 +1336,10 @@ async def db_get_menu(whatsapp_number: str):
         row = await conn.fetchrow("""
             SELECT
                 r.menu,
-                p.menu AS parent_menu
+                o.menu AS parent_menu
             FROM restaurants r
-            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
+            JOIN locations l ON l.id = r.id
+            JOIN organizations o ON o.id = l.org_id
             WHERE r.whatsapp_number = $1
         """, whatsapp_number)
 
@@ -1594,9 +1608,10 @@ async def db_get_restaurant_by_slug(slug: str) -> dict | None:
         row = await conn.fetchrow(
             """
             SELECT r.id, r.name, r.slug, r.whatsapp_number, r.menu, r.features, r.address,
-                   p.menu AS parent_menu
+                   o.menu AS parent_menu
             FROM restaurants r
-            LEFT JOIN restaurants p ON r.parent_restaurant_id = p.id
+            JOIN locations l ON l.id = r.id
+            JOIN organizations o ON o.id = l.org_id
             WHERE r.slug = $1
             """,
             slug,
