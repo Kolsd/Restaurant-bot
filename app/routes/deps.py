@@ -117,30 +117,51 @@ async def get_current_restaurant(request: Request) -> dict:
         if r:
             return r
 
-    # 3. Fallback para el Owner/Admin
-    all_r = await db.db_get_all_restaurants()
-    if all_r:
-        main_rest = all_r[0]
+    # 3. Fallback para el Owner/Admin (sin branch_id en su registro de users).
+    # Wave-2: resolve the owner's org by NAME match against organizations,
+    # then return any one location of that org as the default sede dict.
+    # No cross-tenant fallback: if name match fails, raise 403 — much safer
+    # than the old `db_get_all_restaurants()[0]` which returned any tenant
+    # globally and would silently log the user into someone else's data.
+    target_name = (user.get("restaurant_name") or "").lower().strip()
+    if not target_name:
+        raise HTTPException(status_code=403, detail="Restaurant not found")
 
-        # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sede.
-        # Post-Wave-2 model: every restaurant is a `locations` row; the historical
-        # "matriz vs branch" distinction is just `is_primary` on the location.
-        # The selected sede must belong to the SAME org as the authenticated owner —
-        # we verify via org_id, not via parent_restaurant_id (legacy emulated column).
-        branch_header = request.headers.get("X-Branch-ID")
-        if branch_header and branch_header.isdigit():
-            target_id = int(branch_header)
-            target_rest = await db.db_get_restaurant_by_id(target_id)
-            if (
-                target_rest
-                and target_rest.get("org_id")
-                and target_rest.get("org_id") == main_rest.get("org_id")
-            ):
-                return target_rest
+    all_orgs = await db.db_get_all_orgs(active_only=False)
+    matching_org = next(
+        (o for o in all_orgs if (o.get("name") or "").lower().strip() == target_name),
+        None,
+    )
+    if matching_org is None:
+        raise HTTPException(status_code=403, detail="Restaurant not found")
 
-        return main_rest
+    # Get any location of this org as the default sede (peers — no "primary").
+    from app.repositories.restaurant_repo import db_get_org_locations  # noqa: PLC0415
+    locations = await db_get_org_locations(matching_org["id"], active_only=True)
+    if not locations:
+        raise HTTPException(status_code=403, detail="Restaurant has no active locations")
 
-    raise HTTPException(status_code=403, detail="Restaurant not found")
+    # Default sede = first location ordered by id (deterministic, no judgement).
+    default_loc = locations[0]
+    main_rest = await db.db_get_restaurant_by_id(default_loc["id"])
+    if main_rest is None:
+        raise HTTPException(status_code=403, detail="Restaurant not found")
+
+    # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sede.
+    # The selected sede must belong to the SAME org as the authenticated owner —
+    # verified via org_id (not the legacy parent_restaurant_id column).
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit():
+        target_id = int(branch_header)
+        target_rest = await db.db_get_restaurant_by_id(target_id)
+        if (
+            target_rest
+            and target_rest.get("org_id")
+            and target_rest.get("org_id") == main_rest.get("org_id")
+        ):
+            return target_rest
+
+    return main_rest
 
 
 # NOTE: Decision — get_current_restaurant is called as a regular async function
