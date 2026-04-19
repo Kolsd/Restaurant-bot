@@ -318,13 +318,17 @@ async def _run_weekly_owner_reports():
     dashboard_url = os.getenv("APP_DOMAIN", "https://mesio.com").rstrip("/") + "/dashboard"
 
     try:
-        restaurants = await db.db_get_all_restaurants()
+        # Wave-2 canonical: weekly reports are per-business (per-org), not per-sede.
+        # Use the org-level enumeration primitive instead of db_get_all_restaurants
+        # which would return one row per is_primary location and depend on the
+        # vestigial Matriz invariant. db_get_all_orgs returns active orgs only.
+        restaurants = await db.db_get_all_orgs(active_only=True)
     except Exception:
         log.exception("scheduler.weekly_reports.fetch_restaurants_failed")
         return
 
     for restaurant in restaurants:
-        rid = restaurant.get("id")
+        rid = restaurant.get("id")  # org_id — what tenant_scope expects
         restaurant_name = restaurant.get("name", f"Restaurant {rid}")
         try:
             # ── 1. Resolve timezone and local time ────────────────────────────

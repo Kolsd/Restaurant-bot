@@ -168,19 +168,35 @@ INSERT cross-tenant  → InsufficientPrivilegeError (scope=8 intentando restaura
 bypass_tenant_scope  → orders=15 (todo)
 ```
 
-### Modelo Wave-2: NO existe Matriz como entidad
+### Modelo Wave-2: NO existe Matriz como entidad. Tampoco "primary".
 
-Post-Wave-2 el schema canónico es `organizations` + `locations`. La distinción histórica "matriz vs branch" **no existe a nivel de datos** — solo `is_primary=true` marca la sede principal de un org. Implicaciones para código nuevo:
+Post-Wave-2 el schema canónico es `organizations` + `locations`. **Cada location es un peer del resto** — no hay "matriz", no hay "principal". Un org tiene N locations, todas equivalentes operacionalmente.
 
-1. **NUNCA** depender de la "Matriz invariant" (`org_id == matriz_location_id`) como hecho forward-going. Esa igualdad solo es cierta para orgs migradas por 0034 (existentes al deploy de Wave-2). Para orgs creadas POST-deploy, `org_id` y `location_id` son enteros independientes (auto-incrementados por separado).
-2. **NUNCA** asumir que `restaurant.get("location_id") or org_id` es un fallback válido. Es la "Matriz invariant trick" disfrazada — da el answer equivocado para orgs nuevas.
-3. **Resolución correcta** de location_id cuando se necesita la sede:
-   - Si el dict viene de `db_get_restaurant_by_id` → usar `restaurant["location_id"]` (siempre populado).
-   - Si el dict viene de `db_get_all_restaurants` → idem (post-paso 7 también populado).
-   - Si no se tiene un dict → query `SELECT id FROM locations WHERE org_id=$1 AND is_primary=true`.
-4. **`parent_restaurant_id IS NULL` es legacy emulation.** El equivalente nuevo es `is_primary = true` en locations. Para queries nuevas usar la versión nueva.
-5. **`is_main_restaurant` parameter es vestigial.** No introducir en código nuevo. Si lo encuentras, refactorizar a usar `is_primary`.
-6. **`X-Branch-ID` header SIEMPRE carga un `location_id`**. Si una ruta lo recibe, NO mezclar con `restaurant["id"]` (= org_id) — son dos integers distintos. Ver Paso 5 commits da08f5e + Paso 6 commit c442bba.
+`locations.is_primary` existe en el schema **solo como scaffold de migración** (para mapear "qué location vieja era el matriz" durante el backfill 0034). **Es vestigial. NO usar en código nuevo.**
+
+#### Reglas para código nuevo
+
+1. **Enumerar negocios** → `db_get_all_orgs()` (devuelve org rows). NO `db_get_all_restaurants()` que filtra por `is_primary=true` y perpetúa el modelo viejo.
+2. **Enumerar sedes de un negocio** → `db_get_org_locations(org_id)` (todas las locations, no solo "primary").
+3. **NUNCA filtrar por `is_primary = true`** para encontrar "el restaurante principal". Esa pregunta no tiene sentido en el modelo nuevo. Si necesitás un default determinístico (ej. "primera location del org"), usar `ORDER BY id ASC LIMIT 1` — no es "la primary", es solo "una determinística".
+4. **NUNCA depender de la "Matriz invariant"** (`org_id == matriz_location_id`). Solo es cierta para orgs migradas por 0034 (existentes al deploy de Wave-2). Para orgs creadas POST-deploy, `org_id` y `location_id` son enteros independientes (auto-incrementados por separado).
+5. **NUNCA asumir que `restaurant.get("location_id") or org_id` es un fallback válido.** Es la "Matriz invariant trick" disfrazada — da el answer equivocado para orgs nuevas.
+6. **Resolución correcta** de location_id cuando se necesita la sede:
+   - Si el dict viene de `db_get_restaurant_by_id` o `db_get_all_restaurants` → usar `restaurant["location_id"]` (siempre populado post-Paso 7).
+   - Si no se tiene un dict → query `SELECT id FROM locations WHERE org_id = $1 ORDER BY id ASC LIMIT 1` (cualquier sede, sin valor judgement de "primary").
+7. **`parent_restaurant_id IS NULL` es legacy emulation.** El VIEW `restaurants` lo expone para backwards compat de código viejo. Para queries nuevas, usar `db_get_all_orgs()` directamente.
+8. **`is_main_restaurant` parameter es vestigial.** No introducir en código nuevo.
+9. **`X-Branch-ID` header SIEMPRE carga un `location_id`**. Si una ruta lo recibe, NO mezclar con `restaurant["id"]` (= org_id) — son dos integers distintos. Ver Paso 5 commits da08f5e + Paso 6 commit c442bba.
+
+#### Deprecation status (vivo)
+
+| Symbol | Status | Replacement |
+|---|---|---|
+| `db_get_all_restaurants()` | DEPRECATED for "list businesses" semantic | `db_get_all_orgs()` |
+| `locations.is_primary` (column) | VESTIGIAL — only for migration backfill | (nothing — sedes are peers) |
+| `parent_restaurant_id IS NULL` filter | LEGACY EMULATION (via VIEW) | `db_get_all_orgs()` |
+| `is_main_restaurant` parameter | VESTIGIAL | (drop) |
+| "Matriz invariant" fallback | REMOVED (Paso 7) | Explicit `restaurant["location_id"]` |
 
 ### Patrón de uso
 
@@ -992,7 +1008,7 @@ Wrapper Cloudinary. Funciones clave:
 - **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
 - **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
-- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`. Baseline actual: **936 passed / 0 failed / 70 skipped en ~15s**. Los 70 skipped son integration tests que requieren `TEST_DATABASE_URL`. Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
+- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`. Baseline actual: **942 passed / 0 failed / 70 skipped en ~15s**. Los 70 skipped son integration tests que requieren `TEST_DATABASE_URL`. Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.

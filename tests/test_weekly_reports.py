@@ -301,6 +301,10 @@ def _patch_scheduler_deps(monkeypatch, *, restaurants, local_now_dt,
 
     # Monday 2026-04-13 09:30 in Bogota tz
     monkeypatch.setattr(sched, "_local_now", lambda tz: local_now_dt)
+    # Wave-2: scheduler now uses db_get_all_orgs (org-level enumeration) for
+    # weekly reports. Patch both names so tests still drive the same fixture
+    # whichever call path is taken.
+    monkeypatch.setattr(db_module, "db_get_all_orgs", AsyncMock(return_value=restaurants))
     monkeypatch.setattr(db_module, "db_get_all_restaurants", AsyncMock(return_value=restaurants))
 
     already_sent_mock = AsyncMock(return_value=already_sent)

@@ -338,6 +338,7 @@ from app.repositories.restaurant_repo import (
 
 # === Org/Location lookups (Bloque S3) ===
 from app.repositories.restaurant_repo import (
+    db_get_all_orgs,
     db_get_org_by_id,
     db_get_org_by_phone,
     db_get_org_locations,

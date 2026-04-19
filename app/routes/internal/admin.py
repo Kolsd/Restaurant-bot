@@ -249,7 +249,13 @@ async def admin_get_restaurants(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    return {"restaurants": await db.db_get_all_restaurants()}
+    # Wave-2 canonical: the Mesio internal admin view enumerates CUSTOMER
+    # BUSINESSES (one row per org), not "primary locations". The endpoint
+    # path stays /restaurants and the response key stays "restaurants" for
+    # frontend backwards compat — the shape is org-level data which is what
+    # the admin actually wants (one entry per tenant). Active orgs only;
+    # use active_only=False if you also need cancelled tenants.
+    return {"restaurants": await db.db_get_all_orgs(active_only=False)}
 
 
 @router.post("/create-user")

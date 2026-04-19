@@ -1665,6 +1665,59 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
     return d
 
 
+async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
+    """Return ALL organizations (one row per tenant business).
+
+    This is the canonical Wave-2 primitive for "enumerate every customer".
+    Use it whenever the conceptual loop is per-tenant (scheduler ticks,
+    Mesio internal admin views, billing aggregations) — NOT
+    db_get_all_restaurants() which leans on the legacy "matriz" mental
+    model and the vestigial is_primary flag.
+
+    Returned dicts contain only Organization-level fields. If a caller
+    ALSO needs sede-level info (whatsapp_number per location, address,
+    etc.), follow up with db_get_org_locations(org_id) — locations are
+    all peers, none of them is "the primary".
+
+    No RLS on `organizations` (it IS the tenant container), so this works
+    from any call site without an active tenant_scope.
+    """
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
+
+    where = ""
+    if active_only:
+        # subscription_status is the per-org active flag; default 'active'.
+        where = "WHERE subscription_status = 'active'"
+
+    pool = await _get_pool()
+    with bypass_tenant_scope_if_unset("db_get_all_orgs_enumerate"):
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
+                       menu, features, subscription_plan, subscription_status,
+                       created_at, updated_at
+                FROM organizations
+                {where}
+                ORDER BY id ASC
+                """
+            )
+    result = []
+    for row in rows:
+        d = _serialize(dict(row))
+        for field in ("menu", "features"):
+            val = d.get(field)
+            if isinstance(val, str):
+                try:
+                    d[field] = _json.loads(val)
+                except Exception:
+                    d[field] = {} if field == "features" else []
+            elif val is None:
+                d[field] = {} if field == "features" else []
+        result.append(d)
+    return result
+
+
 async def db_get_org_by_phone(phone: str) -> dict | None:
     """Resolve which Organization owns a given WhatsApp number.
 
