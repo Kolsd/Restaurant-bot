@@ -229,3 +229,89 @@ def test_closed_sessions_resolves_org_id_from_branch_id_for_tenant_scope(
         f"tenant_scope received {captured} — expected [{ORG_ID}]. The fix resolves "
         "org_id from db_get_restaurant_by_id(location_id) before scoping."
     )
+
+
+# ── Test 5 — GET /api/pos/tables-status (Paso 6: inverse audit) ───────────────
+
+def test_pos_tables_status_passes_location_id_to_branch_query_and_org_id_to_scope(
+    client, matriz_org_dict, admin_user
+):
+    """The POS map endpoint must:
+      - tenant_scope(org_id) — for RLS
+      - db_get_tables(branch_id=location_id) — to filter by sede
+      - db_get_pending_orders_by_branch(location_id) — same
+
+    Pre-fix, both DB calls received org_id. For multi-branch tenants where
+    org_id != location_id_of_branches the queries returned wrong rows or
+    none at all (staff at sub-sucursal saw matriz tables, not their own).
+    """
+    captured_scope: list = []
+    db_get_tables_mock = AsyncMock(return_value=[])
+    db_pending_mock = AsyncMock(return_value=[])
+
+    patches = _patch_tenant_scope_capture(captured_scope) + [
+        patch("app.routes.tables.require_auth", AsyncMock(return_value=None)),
+        patch("app.routes.tables.get_current_restaurant", AsyncMock(return_value=matriz_org_dict)),
+        patch("app.routes.tables.db.db_get_tables", db_get_tables_mock),
+        patch("app.routes.tables.tr.db_get_pending_orders_by_branch", db_pending_mock),
+        patch("app.routes.tables.tr.db_get_active_session_table_ids", AsyncMock(return_value=set())),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        resp = client.get("/api/pos/tables-status",
+                          headers={"Authorization": "Bearer test"})
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert resp.status_code == 200, resp.text
+    assert captured_scope == [ORG_ID], (
+        f"tenant_scope must receive ORG_ID ({ORG_ID}), got {captured_scope}"
+    )
+
+    # The branch-filter calls MUST receive location_id (not org_id)
+    db_get_tables_mock.assert_awaited_once()
+    assert db_get_tables_mock.await_args.kwargs.get("branch_id") == LOCATION_ID, (
+        f"db_get_tables expected branch_id={LOCATION_ID} (location_id), "
+        f"got {db_get_tables_mock.await_args.kwargs.get('branch_id')} — "
+        "regression of the Paso 6 inverse-conflation fix"
+    )
+
+    db_pending_mock.assert_awaited_once_with(LOCATION_ID)
+
+
+def test_pos_tables_status_falls_back_to_org_id_when_location_id_missing(
+    client, admin_user
+):
+    """If the restaurant dict somehow lacks location_id (legacy callers,
+    pre-Wave-2 cached sessions), fall back to org_id so we don't crash with
+    None being passed into the SQL filter."""
+    captured_scope: list = []
+    db_get_tables_mock = AsyncMock(return_value=[])
+    matriz_no_loc = {
+        "id": ORG_ID,
+        "org_id": ORG_ID,
+        # location_id intentionally absent
+        "name": "Test", "whatsapp_number": "+57300",
+    }
+
+    patches = _patch_tenant_scope_capture(captured_scope) + [
+        patch("app.routes.tables.require_auth", AsyncMock(return_value=None)),
+        patch("app.routes.tables.get_current_restaurant", AsyncMock(return_value=matriz_no_loc)),
+        patch("app.routes.tables.db.db_get_tables", db_get_tables_mock),
+        patch("app.routes.tables.tr.db_get_pending_orders_by_branch", AsyncMock(return_value=[])),
+        patch("app.routes.tables.tr.db_get_active_session_table_ids", AsyncMock(return_value=set())),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        resp = client.get("/api/pos/tables-status",
+                          headers={"Authorization": "Bearer test"})
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert resp.status_code == 200, resp.text
+    # Fallback: branch_id == org_id (correct under Matriz invariant)
+    assert db_get_tables_mock.await_args.kwargs.get("branch_id") == ORG_ID

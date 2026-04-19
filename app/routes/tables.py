@@ -804,14 +804,26 @@ async def get_pos_menu(request: Request):
 async def get_tables_status(request: Request):
     """Devuelve todas las mesas y su estado actual (ideal para pintar el mapa)"""
     await require_auth(request)
-    
+
     # 1. Resolución de contexto inteligente
     restaurant = await get_current_restaurant(request)
-    branch_id = restaurant["id"]
 
-    with tenant_scope(branch_id):
-        tables = await db.db_get_tables(branch_id=branch_id)
-        pending_orders = await tr.db_get_pending_orders_by_branch(branch_id)
+    # Wave-2: separate the two concerns explicitly.
+    #   - org_id        : tenant key for tenant_scope() / RLS GUC
+    #   - location_id   : the sede id stored in restaurant_tables.branch_id
+    # restaurant["id"] is normalized to org_id by db_get_restaurant_by_id;
+    # the actual sede identifier lives under restaurant["location_id"]. For
+    # Matriz invariant tenants (single sede, where org_id == matriz_location_id
+    # by 0034 backfill) the two are equal, but for multi-branch tenants —
+    # especially staff at a sub-sucursal — they DIFFER and conflating them
+    # makes db_get_tables / db_get_pending_orders_by_branch return rows from
+    # the wrong sede (or zero rows).
+    org_id = restaurant["id"]
+    location_id = restaurant.get("location_id") or org_id
+
+    with tenant_scope(org_id):
+        tables = await db.db_get_tables(branch_id=location_id)
+        pending_orders = await tr.db_get_pending_orders_by_branch(location_id)
 
     # db_get_active_session_table_ids uses bypass internally (cross-tenant)
     session_map = await tr.db_get_active_session_table_ids()
