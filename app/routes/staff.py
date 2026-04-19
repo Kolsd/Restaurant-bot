@@ -109,26 +109,18 @@ async def list_staff(
     request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Retorna el staff filtrado por la sucursal seleccionada en el selector global."""
-    # 🛡️ FILTRO GLOBAL: Si el Owner seleccionó una sucursal, usamos ese ID
-    branch_id = restaurant["id"]
-    branch_header = request.headers.get("X-Branch-ID")
+    """Retorna el staff de la organización del usuario autenticado.
 
-    if branch_header and branch_header.isdigit():
-        target_id = int(branch_header)
-        # Validate ownership: the target branch must be the same restaurant or
-        # a direct child of the authenticated restaurant (which must be a matrix).
-        if target_id != restaurant["id"]:
-            if restaurant.get("parent_restaurant_id") is not None:
-                # Authenticated restaurant is itself a branch — cannot impersonate others.
-                raise HTTPException(status_code=403, detail="No autorizado para ver datos de otra sucursal")
-            # Authenticated restaurant is a matrix — verify target is its direct child.
-            target_rest = await db.db_get_restaurant_by_id(target_id)
-            if not target_rest or target_rest.get("parent_restaurant_id") != restaurant["id"]:
-                raise HTTPException(status_code=403, detail="No autorizado para ver datos de esta sucursal")
-        branch_id = target_id
-
-    staff = await db.db_get_staff(branch_id)
+    Wave-2: db_get_staff filtra por org_id. Staff es organization-level —
+    todas las sedes de un org comparten el mismo equipo en el dashboard de
+    administración. El X-Branch-ID header no aplica aquí: pasarlo como
+    branch_id pre-Paso-10 lo convertía en location_id y la query devolvía
+    cero filas en multi-branch (bug enmascarado por Matriz invariant). Si
+    el producto eventualmente quiere "ver staff por sede", agregar un repo
+    method dedicado que filtre staff.location_id en vez de overridear org_id.
+    """
+    org_id = restaurant["id"]
+    staff = await db.db_get_staff(org_id)
     return {"staff": staff}
 
 
@@ -138,18 +130,24 @@ async def create_staff(
     body: StaffCreate,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Crea un empleado en la sucursal que el Owner tenga seleccionada."""
-    branch_id = restaurant["id"]
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
+    """Crea un empleado en la organización del usuario autenticado.
+
+    Wave-2: db_create_staff INSERTs INTO staff (org_id, ...) — el primer
+    argumento es la TENANT KEY (org_id), no la sede. Pre-Paso-10 el override
+    X-Branch-ID convertía branch_id en location_id y el INSERT escribía
+    org_id = location_id (FK violation o asignación a otro org).
+    El header X-Branch-ID podría usarse a futuro para popular staff.location_id
+    (asignar empleado a sede); por ahora db_create_staff no recibe ese param,
+    así que ignoramos el header para no introducir un parámetro no soportado.
+    """
+    org_id = restaurant["id"]
 
     pin_hash = _pwd_ctx.hash(body.password)
     roles = [r.strip().lower() for r in body.roles if r.strip()] if body.roles else [body.role.strip().lower()]
     full_name = f"{body.name.strip()} {body.last_name.strip()}".strip() if body.last_name else body.name.strip()
 
     member = await db.db_create_staff(
-        restaurant_id=branch_id,
+        restaurant_id=org_id,
         name=full_name,
         role=roles[0] if roles else "mesero",
         pin_hash=pin_hash,
@@ -788,12 +786,21 @@ async def payroll_calculate(
     period_end: str,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Calculate payroll for all staff in the selected branch/period."""
-    branch_id = restaurant["id"]
+    """Calculate payroll for all staff of the org in the given period.
+
+    Wave-2: payroll is org-level (one cálculo por business). The X-Branch-ID
+    header narrows TIP aggregation to a specific sede via db_calculate_payroll's
+    optional branch_id param — staff list (filtered by org_id) stays the same,
+    only tip totals get scoped per location_id when requested.
+    """
+    org_id = restaurant["id"]
     branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
-    entries = await db.db_calculate_payroll(branch_id, period_start, period_end)
+    branch_location_id = (
+        int(branch_header) if branch_header and branch_header.isdigit() else None
+    )
+    entries = await db.db_calculate_payroll(
+        org_id, period_start, period_end, branch_id=branch_location_id,
+    )
     return {"entries": entries}
 
 
@@ -803,18 +810,27 @@ async def save_payroll_run(
     body: dict,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Save payroll calculation as a draft run."""
+    """Save payroll calculation as a draft run.
+
+    Wave-2: db_save_payroll_run keys by org_id (one run per business per
+    period). The X-Branch-ID header is honored only for the per-sede tip
+    aggregation passed into db_calculate_payroll's branch_id param —
+    NOT as the run's tenant key.
+    """
     period_start = body.get("period_start")
     period_end   = body.get("period_end")
     if not period_start or not period_end:
         raise HTTPException(status_code=422, detail="period_start y period_end son requeridos.")
-    branch_id = restaurant["id"]
+    org_id = restaurant["id"]
     branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
-    entries = await db.db_calculate_payroll(branch_id, period_start, period_end)
+    branch_location_id = (
+        int(branch_header) if branch_header and branch_header.isdigit() else None
+    )
+    entries = await db.db_calculate_payroll(
+        org_id, period_start, period_end, branch_id=branch_location_id,
+    )
     run = await db.db_save_payroll_run(
-        restaurant_id=branch_id,
+        restaurant_id=org_id,
         period_start=period_start,
         period_end=period_end,
         snapshot=entries,
@@ -829,12 +845,14 @@ async def list_payroll_runs(
     request: Request,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """List recent payroll runs."""
-    branch_id = restaurant["id"]
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
-    runs = await db.db_get_payroll_runs(branch_id)
+    """List recent payroll runs.
+
+    Wave-2: payroll_runs.org_id is the tenant key — runs are per-business,
+    not per-sede. X-Branch-ID would convert org_id to location_id and the
+    WHERE org_id = location_id filter returns 0 rows in multi-branch.
+    """
+    org_id = restaurant["id"]
+    runs = await db.db_get_payroll_runs(org_id)
     return {"runs": runs}
 
 
@@ -1006,12 +1024,14 @@ async def list_overtime_requests(
     status: str | None = None,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """List overtime requests for review."""
-    branch_id = restaurant["id"]
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit():
-        branch_id = int(branch_header)
-    requests = await db.db_list_overtime_requests(branch_id, week_start, status)
+    """List overtime requests for review.
+
+    Wave-2: overtime_requests.org_id is the tenant key — requests are
+    org-level. X-Branch-ID would convert org_id to location_id and the
+    WHERE org_id = location_id filter returns 0 rows in multi-branch.
+    """
+    org_id = restaurant["id"]
+    requests = await db.db_list_overtime_requests(org_id, week_start, status)
     return {"overtime_requests": requests}
 
 
