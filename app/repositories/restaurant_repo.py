@@ -1820,7 +1820,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                     """
                     SELECT id, org_id, name, code, address, latitude, longitude,
                            whatsapp_number, wa_phone_id, wa_access_token,
-                           active, is_primary, timezone, opening_hours,
+                           active, timezone, opening_hours,
                            created_at, updated_at, legacy_restaurant_id
                     FROM locations
                     WHERE org_id = $1 AND active = true
@@ -1833,7 +1833,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                     """
                     SELECT id, org_id, name, code, address, latitude, longitude,
                            whatsapp_number, wa_phone_id, wa_access_token,
-                           active, is_primary, timezone, opening_hours,
+                           active, timezone, opening_hours,
                            created_at, updated_at, legacy_restaurant_id
                     FROM locations
                     WHERE org_id = $1
@@ -1912,7 +1912,7 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
                 """
                 SELECT id, org_id, name, code, address, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
-                       active, is_primary, timezone, opening_hours,
+                       active, timezone, opening_hours,
                        created_at, updated_at, legacy_restaurant_id
                 FROM locations
                 WHERE id = $1
@@ -1965,7 +1965,7 @@ async def db_resolve_location_by_gps(
                 """
                 SELECT id, org_id, name, code, address, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
-                       active, is_primary, timezone, opening_hours,
+                       active, timezone, opening_hours,
                        created_at, updated_at, legacy_restaurant_id
                 FROM locations
                 WHERE org_id = $1
@@ -2122,7 +2122,7 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
     sql = (
         f"UPDATE locations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted
         f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, latitude, longitude, "
-        f"whatsapp_number, wa_phone_id, wa_access_token, active, is_primary, timezone, "
+        f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
         f"opening_hours, created_at, updated_at, legacy_restaurant_id"
     )
 
@@ -2183,7 +2183,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
         f"INSERT INTO locations ({', '.join(col_names)}) "  # noqa: S608 — col names are whitelisted
         f"VALUES ({', '.join(placeholders)}) "
         f"RETURNING id, org_id, name, code, address, latitude, longitude, "
-        f"whatsapp_number, wa_phone_id, wa_access_token, active, is_primary, timezone, "
+        f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
         f"opening_hours, created_at, updated_at, legacy_restaurant_id"
     )
 
