@@ -91,8 +91,11 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
 
     if existing_org:
         org_id: int = existing_org["id"]
+        # Post-0038: locations.is_primary was dropped (every location is a peer).
+        # The seed creates exactly one location per org, so just take any one
+        # — the first by id is deterministic and stable.
         loc_id = await conn.fetchval(
-            "SELECT id FROM locations WHERE org_id = $1 AND is_primary = true",
+            "SELECT id FROM locations WHERE org_id = $1 ORDER BY id ASC LIMIT 1",
             org_id,
         )
         log.info("seed.restaurant_exists", org_id=org_id, location_id=loc_id)
@@ -113,13 +116,13 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
             json.dumps(SIM_FEATURES),
             "mesio-test-sim",
         )
+        # Post-0038: no is_primary column, no legacy_restaurant_id concern.
         loc_id = await conn.fetchval(
             """
             INSERT INTO locations (
-                org_id, name, code, address,
-                active, is_primary, timezone, legacy_restaurant_id
+                org_id, name, code, address, active, timezone
             )
-            VALUES ($1, $2, 'principal', $3, true, true, 'America/Bogota', NULL)
+            VALUES ($1, $2, 'principal', $3, true, 'America/Bogota')
             RETURNING id
             """,
             org_id, SIM_RESTAURANT_NAME, SIM_ADDRESS,
