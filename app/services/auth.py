@@ -248,6 +248,16 @@ async def login(username: str, password: str) -> dict:
         _log.error("auth.login.org_resolve_failed_hard", branch_id=branch_id, username=username)
         return {"success": False, "error": "Problema con la configuración de la sucursal"}
 
+    # Wave-2 Paso 9: also fail if branch_id never got resolved at all (orphaned
+    # owner — user record has no branch_id AND no org with matching name).
+    # Pre-Paso-9 the legacy fallback would impersonate any tenant globally;
+    # post-fix we leave branch_id None and must NOT proceed to issue a session
+    # with empty restaurant data — the user has no resolvable tenant context.
+    if branch_id is None:
+        _log.error("auth.login.no_tenant_context", username=username,
+                   restaurant_name=user.get("restaurant_name"))
+        return {"success": False, "error": "Problema con la configuración de la sucursal"}
+
     legacy_restaurant = {
         "id": branch_id,
         "name": user["restaurant_name"],
