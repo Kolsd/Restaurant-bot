@@ -266,14 +266,17 @@ async def get_menu_availability(request: Request):
     await require_auth(request)
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    branch_header = request.headers.get("X-Branch-ID")
-    
-    restaurant_id = user.get("branch_id") or restaurant["id"]
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        restaurant_id = int(branch_header)
 
-    with tenant_scope(restaurant_id):
-        availability = await db.db_get_menu_availability(restaurant_id)
+    # Wave-2: menu_availability rows are keyed by (dish_name, org_id) — the
+    # same menu state applies to every branch of an org. Always scope by
+    # org_id (restaurant["id"] is normalized to org_id post-Wave-2). The
+    # X-Branch-ID header used to be honored here pre-Wave-2 as if menu
+    # availability were per-branch; since it is not, the override is a
+    # no-op for the org_id resolution and we leave it out.
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        availability = await db.db_get_menu_availability(org_id)
     return {"availability": availability}
 
 @router.post("/api/menu/availability")
@@ -281,18 +284,19 @@ async def set_dish_availability(request: Request):
     await require_auth(request)
     body = await request.json()
     if not body.get("dish_name"): raise HTTPException(status_code=400, detail="dish_name requerido")
-    
-    user = await get_current_user(request)
-    restaurant = await get_current_restaurant(request)
-    branch_header = request.headers.get("X-Branch-ID")
-    
-    restaurant_id = user.get("branch_id") or restaurant["id"]
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        restaurant_id = int(branch_header)
 
-    with tenant_scope(restaurant_id):
+    await get_current_user(request)
+    restaurant = await get_current_restaurant(request)
+
+    # Wave-2: same as GET — menu_availability is keyed by (dish_name, org_id).
+    # The X-Branch-ID override would have written a row scoped to a
+    # location_id, which violates the unique constraint shape and would
+    # never be read back by GET (which scopes by org_id). Always use org_id.
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
         await db.db_set_dish_availability(
-            restaurant_id=restaurant_id,
+            restaurant_id=org_id,
             dish_name=body["dish_name"],
             available=body.get("available", True)
         )

@@ -527,8 +527,14 @@ async def get_closed_sessions(request: Request, hours: int = 24):
     try:
         # db_get_closed_sessions uses tenant_connection() — must be wrapped in tenant_scope.
         # branch_id may be an int, "all", or None; fall back to bypass when cross-tenant.
+        # Wave-2: branch_id from get_dashboard_filters is a LOCATION_ID (from
+        # user.branch_id or X-Branch-ID header). tenant_scope() requires an
+        # org_id; we resolve it via db_get_restaurant_by_id which normalizes
+        # `id` to org_id regardless of which key was passed in.
         if isinstance(branch_id, int):
-            with tenant_scope(branch_id):
+            branch_rest = await db.db_get_restaurant_by_id(branch_id)
+            org_id_for_scope = branch_rest["id"] if branch_rest else branch_id
+            with tenant_scope(org_id_for_scope):
                 rows = await tr.db_get_closed_sessions(hours, bot_number)
         else:
             from app.services.tenant_context import bypass_tenant_scope as _bypass

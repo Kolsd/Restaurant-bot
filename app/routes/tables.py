@@ -129,20 +129,28 @@ async def create_table(request: Request):
     await require_auth(request)
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    
-    restaurant_id = restaurant["id"]
 
-    # 🛡️ Forzamos la lectura del selector de sucursales igual que en el GET
-    # Esto asegura que la mesa se cree donde el dueño está mirando
+    # Wave-2: restaurant["id"] is normalized to org_id (the tenant key, same
+    # for the Matriz AND all its branches). The X-Branch-ID header carries
+    # a LOCATION_ID (the sede the admin is viewing in the dropdown). These
+    # are TWO DIFFERENT integers — must NOT be conflated:
+    #   - tenant_scope() expects org_id (sets app.org_id GUC for RLS)
+    #   - db_auto_create_table() expects the sede / branch id (used as
+    #     branch_id and location_id columns on restaurant_tables)
+    org_id = restaurant["id"]
+    branch_location_id = restaurant.get("location_id") or org_id
+
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and ("owner" in user.get("role", "") or "admin" in user.get("role", "")):
-        branch_id = int(branch_header)
-        branch_rest = await db.db_get_restaurant_by_id(branch_id)
+        candidate = int(branch_header)
+        branch_rest = await db.db_get_restaurant_by_id(candidate)
         if branch_rest:
-            restaurant_id = branch_id
+            # Header value is the location_id of the selected sede. The
+            # org_id stays the same — all branches of a Matriz share one org.
+            branch_location_id = candidate
 
-    with tenant_scope(restaurant_id):
-        new_table = await db.db_auto_create_table(restaurant_id, is_main_restaurant=False)
+    with tenant_scope(org_id):
+        new_table = await db.db_auto_create_table(branch_location_id, is_main_restaurant=False)
 
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
 
