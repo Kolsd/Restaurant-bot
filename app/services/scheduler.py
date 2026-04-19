@@ -239,40 +239,53 @@ async def _run_occupancy_snapshot():
     from app.services.tenant_context import tenant_scope  # noqa: PLC0415
 
     try:
-        restaurants = await db.db_get_all_restaurants()
+        # Wave-2: occupancy is per-SEDE (each location has its own tables),
+        # not per-business. Iterate every (org, location) pair so a multi-sede
+        # tenant gets one snapshot row per sede instead of one per "matriz".
+        # The old loop relied on the Matriz invariant (rid == location_id of
+        # the primary sede) and silently dropped data for sub-sucursales.
+        orgs = await db.db_get_all_orgs(active_only=True)
         pool = await db.get_pool()
-        for rest in restaurants:
-            rid = rest["id"]
-            async with pool.acquire() as conn:
-                # Count distinct active table sessions and sum capacities
-                tables_row = await conn.fetchrow(
-                    """
-                    SELECT
-                        COUNT(rt.id)::int AS total_tables,
-                        COUNT(rt.id) FILTER (
-                            WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
-                        )::int AS occupied_tables,
-                        COALESCE(SUM(rt.capacity), 0)::int AS total_capacity,
-                        COALESCE(SUM(rt.capacity) FILTER (
-                            WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
-                        ), 0)::int AS seated_guests
-                    FROM restaurant_tables rt
-                    LEFT JOIN table_sessions ts
-                        ON ts.table_id = rt.id AND ts.closed_at IS NULL
-                    WHERE rt.branch_id = $1 AND rt.active = TRUE
-                    """,
-                    rid,
-                )
-            if tables_row:
-                with tenant_scope(rid):
-                    await rr.db_save_occupancy_snapshot(
-                        restaurant_id=rid,
-                        branch_id=rid,
-                        total_tables=tables_row["total_tables"],
-                        occupied_tables=tables_row["occupied_tables"],
-                        total_capacity=tables_row["total_capacity"],
-                        seated_guests=tables_row["seated_guests"],
+        for org in orgs:
+            org_id = org["id"]
+            try:
+                with bypass_tenant_scope("scheduler.occupancy_snapshot.list_locations"):
+                    locations = await db.db_get_org_locations(org_id, active_only=True)
+            except Exception:
+                log.exception("scheduler.occupancy_snapshot.locations_failed", org_id=org_id)
+                continue
+
+            for loc in locations:
+                location_id = loc["id"]
+                async with pool.acquire() as conn:
+                    tables_row = await conn.fetchrow(
+                        """
+                        SELECT
+                            COUNT(rt.id)::int AS total_tables,
+                            COUNT(rt.id) FILTER (
+                                WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
+                            )::int AS occupied_tables,
+                            COALESCE(SUM(rt.capacity), 0)::int AS total_capacity,
+                            COALESCE(SUM(rt.capacity) FILTER (
+                                WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
+                            ), 0)::int AS seated_guests
+                        FROM restaurant_tables rt
+                        LEFT JOIN table_sessions ts
+                            ON ts.table_id = rt.id AND ts.closed_at IS NULL
+                        WHERE rt.branch_id = $1 AND rt.active = TRUE
+                        """,
+                        location_id,
                     )
+                if tables_row:
+                    with tenant_scope(org_id):
+                        await rr.db_save_occupancy_snapshot(
+                            restaurant_id=org_id,
+                            branch_id=location_id,
+                            total_tables=tables_row["total_tables"],
+                            occupied_tables=tables_row["occupied_tables"],
+                            total_capacity=tables_row["total_capacity"],
+                            seated_guests=tables_row["seated_guests"],
+                        )
     except Exception:
         log.exception("scheduler.occupancy_snapshot_failed")
 

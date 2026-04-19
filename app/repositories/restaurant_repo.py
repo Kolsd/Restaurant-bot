@@ -1400,13 +1400,6 @@ async def db_set_dish_availability(restaurant_id: int, dish_name: str, available
         """, dish_name, restaurant_id, available)
 
 
-# ── Settings wrapper ──────────────────────────────────────────────────────────
-
-async def db_get_restaurant_settings() -> dict:
-    all_r = await db_get_all_restaurants()
-    return all_r[0] if all_r else {}
-
-
 # ── NPS analytics ─────────────────────────────────────────────────────────────
 
 async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: int | str = None) -> dict:
