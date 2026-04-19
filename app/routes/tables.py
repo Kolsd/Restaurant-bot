@@ -161,7 +161,7 @@ async def create_table(request: Request):
             branch_location_id = candidate
 
     with tenant_scope(org_id):
-        new_table = await db.db_auto_create_table(branch_location_id, is_main_restaurant=False)
+        new_table = await db.db_auto_create_table(branch_location_id)
 
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
 

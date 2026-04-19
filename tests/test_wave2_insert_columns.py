@@ -247,7 +247,7 @@ async def test_auto_create_table_inserts_org_id_and_location_id():
     pool = _make_pool(conn)
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
         with tenant_scope(7):
-            result = await db_auto_create_table(restaurant_id=7, is_main_restaurant=False)
+            result = await db_auto_create_table(restaurant_id=7)
 
     sql_blob = _all_execute_sql(conn)
     assert "insert into restaurant_tables" in sql_blob

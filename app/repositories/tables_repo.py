@@ -54,12 +54,11 @@ async def db_init_tables():
     pass
 
 
-async def db_get_tables(branch_id: int = None, is_main: bool = False):
+async def db_get_tables(branch_id: int = None):
     """
     Devuelve las mesas.
     Si branch_id tiene un número, trae las de esa sucursal/matriz.
     Si branch_id es None, trae TODAS las mesas (admin global).
-    (is_main ya no se usa — branch_id siempre es NOT NULL tras migración 0018)
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -97,15 +96,19 @@ async def db_create_table(table_id: str, number: int, name: str, branch_id: int 
         """, table_id, number, name, branch_id, capacity, table_type, zone)
 
 
-async def db_auto_create_table(restaurant_id: int, is_main_restaurant: bool) -> dict:
+async def db_auto_create_table(restaurant_id: int) -> dict:
     """
     Crea una mesa automáticamente buscando el primer número disponible.
     El nombre será {restaurant_id}-{numero}. (Ej. "1-1", "2-1").
     Reutiliza automáticamente los números de las mesas que hayan sido borradas.
 
+    Wave-2: `restaurant_id` aquí es la location_id de la sede donde se crea
+    la mesa (no el org_id). Naming legacy preservado por backward-compat con
+    el call site, pero la semántica es sede-level.
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    # branch_id is always the restaurant_id (parent or branch)
+    # branch_id is always the location id of the sede this table belongs to.
     branch_id = restaurant_id
 
     async with tenant_connection() as conn:
@@ -1021,7 +1024,7 @@ async def db_update_table_position(table_id: str, position_x: float, position_y:
         return _serialize(dict(row)) if row else None
 
 
-async def db_get_floor_plan(branch_id: int = None, is_main: bool = False):
+async def db_get_floor_plan(branch_id: int = None):
     """Get all tables with positions and current occupancy for floor plan view.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
