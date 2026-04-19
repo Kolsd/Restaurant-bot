@@ -12,6 +12,11 @@ Requires DATABASE_URL or TEST_DATABASE_URL environment variable.
 
 Run:
     pytest tests/test_integration_flows.py -v
+
+Wave-2 changes (post-0037/0038):
+  • restaurants is a READ-ONLY VIEW — INSERT goes to organizations + locations.
+  • staff / staff_shifts / table_orders / inventory / carts use org_id.
+  • asyncpg >=0.30 __slots__ on Connection — use _ConnProxy for extra attrs.
 """
 
 from __future__ import annotations
@@ -22,8 +27,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
-from app.services.tenant_context import bypass_tenant_scope
+from app.services.tenant_context import tenant_scope
 
+import asyncpg
 import pytest
 
 
@@ -65,20 +71,46 @@ def _dt_naive(iso: str) -> datetime:
 
 # ── Shared test-data helpers ──────────────────────────────────────────────────
 
+
 async def _insert_restaurant(conn, *, tip_distribution: dict | None = None) -> int:
+    """
+    Insert a minimal org + location pair and return the org_id.
+
+    Wave-2: restaurants is a VIEW where id = location_id.
+    We insert the location with an explicit id = org_id so that:
+      - `restaurants WHERE id = org_id` resolves correctly (VIEW id = location_id)
+      - `ss.org_id = ANY([org_id])` in the tip query matches staff/shifts
+        inserted with org_id = org_id
+      - tenant_scope(org_id) → app.org_id = org_id → RLS passes for
+        staff/shifts/table_orders inserted with org_id = org_id
+
+    This works because locations.id is a plain SERIAL (not GENERATED ALWAYS),
+    so explicit id inserts are allowed.
+    """
     features: dict = {}
     if tip_distribution is not None:
         features["tip_distribution"] = tip_distribution
-    return await conn.fetchval(
-        """
-        INSERT INTO restaurants (name, whatsapp_number, address, features)
-        VALUES ($1, $2, '', $3::jsonb)
-        RETURNING id
-        """,
+    org_id = await conn.fetchval(
+        """INSERT INTO organizations (name, whatsapp_number, features)
+           VALUES ($1, $2, $3::jsonb)
+           RETURNING id""",
         "Test Restaurant",
         f"+57{uuid.uuid4().int % 10_000_000_000:010d}",
         json.dumps(features),
     )
+    # Insert location with explicit id = org_id (see docstring for rationale)
+    await conn.execute(
+        """INSERT INTO locations (id, org_id, name, code, address, active, timezone)
+           VALUES ($1, $1, 'Test Restaurant', 'main', NULL, true, 'America/Bogota')""",
+        org_id,
+    )
+    # Advance locations sequence past org_id to prevent future auto-id collisions.
+    # setval is non-transactional — rollback undoes the INSERT but not the seq bump.
+    await conn.execute(
+        "SELECT setval('locations_id_seq', GREATEST(nextval('locations_id_seq'), $1))",
+        org_id,
+    )
+    return org_id
 
 
 async def _insert_staff(
@@ -89,11 +121,14 @@ async def _insert_staff(
     role: str = "mesero",
     hourly_rate: int = 15_000,
 ) -> str:
-    """Insert a staff member and return their UUID string."""
+    """Insert a staff member and return their UUID string.
+
+    Wave-2: staff uses org_id (not restaurant_id).
+    """
     unique_username = f"test_{uuid.uuid4().hex[:12]}"
     row = await conn.fetchrow(
         """
-        INSERT INTO staff (id, restaurant_id, name, role, pin, hourly_rate, username)
+        INSERT INTO staff (id, org_id, name, role, pin, hourly_rate, username)
         VALUES ($1, $2, $3, $4, '', $5, $6)
         RETURNING id
         """,
@@ -115,11 +150,14 @@ async def _insert_inventory(
     current_stock: float = 50.0,
     min_stock: float = 5.0,
 ) -> int:
-    """Insert an inventory item and return its id."""
+    """Insert an inventory item and return its id.
+
+    Wave-2: inventory uses org_id (not restaurant_id).
+    """
     return await conn.fetchval(
         """
         INSERT INTO inventory
-            (restaurant_id, name, unit, current_stock, min_stock)
+            (org_id, name, unit, current_stock, min_stock)
         VALUES ($1, $2, 'unit', $3, $4)
         RETURNING id
         """,
@@ -138,9 +176,13 @@ async def _insert_shift(
     clock_in: str,
     clock_out: str | None = None,
 ) -> None:
+    """Insert a staff_shift row.
+
+    Wave-2: staff_shifts uses org_id (not restaurant_id).
+    """
     await conn.execute(
         """
-        INSERT INTO staff_shifts (id, staff_id, restaurant_id, clock_in, clock_out)
+        INSERT INTO staff_shifts (id, staff_id, org_id, clock_in, clock_out)
         VALUES ($1, $2::uuid, $3, $4, $5)
         """,
         uuid.uuid4(),
@@ -152,14 +194,21 @@ async def _insert_shift(
 
 
 async def _insert_table_order(conn, *, restaurant_id: int) -> str:
-    """Insert a table_order row and return its base_order_id (same as id)."""
+    """Insert a table_order row and return its base_order_id (same as id).
+
+    Wave-2: table_orders uses org_id (not restaurant_id).
+    branch_id is INTEGER (int4) while org_id is BIGINT (int8) — use explicit
+    casts to avoid AmbiguousParameterError when the same Python int is bound
+    to both columns in one VALUES row.
+    """
     base_id = _uid()
     await conn.execute(
         """
-        INSERT INTO table_orders (id, table_id, table_name, phone, base_order_id, branch_id)
-        VALUES ($1, 'T1', 'Mesa 1', '+57300', $1, $2)
+        INSERT INTO table_orders (id, table_id, table_name, phone, base_order_id, branch_id, org_id)
+        VALUES ($1, 'T1', 'Mesa 1', '+57300', $1, $2::int, $3::bigint)
         """,
         base_id,
+        restaurant_id,
         restaurant_id,
     )
     return base_id
@@ -245,14 +294,15 @@ class TestDeliveryOrderFlow:
         phone = "+573001111111"
         bot_number = str(rid)
 
-        # Insert a cart row
+        # Insert a cart row (Wave-2: carts has org_id NOT NULL)
         await conn.execute(
             """
-            INSERT INTO carts (phone, bot_number, cart_data, updated_at)
-            VALUES ($1, $2, $3::jsonb, NOW())
+            INSERT INTO carts (phone, bot_number, org_id, cart_data, updated_at)
+            VALUES ($1, $2, $3, $4::jsonb, NOW())
             """,
             phone,
             bot_number,
+            rid,
             json.dumps({"items": [{"name": dish_name, "quantity": 2, "price": 25_000}]}),
         )
 
@@ -278,13 +328,15 @@ class TestDeliveryOrderFlow:
         from app.repositories import orders_repo
 
         fake_pool = _make_pool_for_conn(conn)
-        await orders_repo.commit_order_transaction(
-            fake_pool,
-            restaurant_id=rid,
-            conversation_id=phone,
-            cart={"bot_number": bot_number},
-            order_payload=order_payload,
-        )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
+            with tenant_scope(rid):
+                await orders_repo.commit_order_transaction(
+                    fake_pool,
+                    restaurant_id=rid,
+                    conversation_id=phone,
+                    cart={"bot_number": bot_number},
+                    order_payload=order_payload,
+                )
 
         # Inventory decremented by 2
         new_stock = await conn.fetchval(
@@ -342,14 +394,16 @@ class TestDeliveryOrderFlow:
         }
 
         fake_pool = _make_pool_for_conn(conn)
-        with pytest.raises(InsufficientStockError) as exc_info:
-            await orders_repo.commit_order_transaction(
-                fake_pool,
-                restaurant_id=rid,
-                conversation_id="+573009999999",
-                cart={"bot_number": str(rid)},
-                order_payload=order_payload,
-            )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
+            with tenant_scope(rid):
+                with pytest.raises(InsufficientStockError) as exc_info:
+                    await orders_repo.commit_order_transaction(
+                        fake_pool,
+                        restaurant_id=rid,
+                        conversation_id="+573009999999",
+                        cart={"bot_number": str(rid)},
+                        order_payload=order_payload,
+                    )
 
         assert exc_info.value.requested == 5.0
 
@@ -371,13 +425,15 @@ class TestDeliveryOrderFlow:
         phone = "+573002222222"
         bot_number = str(rid)
 
+        # Wave-2: carts has org_id NOT NULL
         await conn.execute(
             """
-            INSERT INTO carts (phone, bot_number, cart_data, updated_at)
-            VALUES ($1, $2, $3::jsonb, NOW())
+            INSERT INTO carts (phone, bot_number, org_id, cart_data, updated_at)
+            VALUES ($1, $2, $3, $4::jsonb, NOW())
             """,
             phone,
             bot_number,
+            rid,
             json.dumps({"items": [{"name": "Café Americano", "quantity": 1, "price": 5_000}]}),
         )
 
@@ -404,13 +460,15 @@ class TestDeliveryOrderFlow:
         }
 
         fake_pool = _make_pool_for_conn(conn)
-        await orders_repo.commit_order_transaction(
-            fake_pool,
-            restaurant_id=rid,
-            conversation_id=phone,
-            cart={"bot_number": bot_number},
-            order_payload=order_payload,
-        )
+        with patch("app.services.database.get_pool", AsyncMock(return_value=fake_pool)):
+            with tenant_scope(rid):
+                await orders_repo.commit_order_transaction(
+                    fake_pool,
+                    restaurant_id=rid,
+                    conversation_id=phone,
+                    cart={"bot_number": bot_number},
+                    order_payload=order_payload,
+                )
 
         # Order row must exist
         row = await conn.fetchrow("SELECT id, total FROM orders WHERE id = $1", order_id)
@@ -509,7 +567,6 @@ class TestTableCheckFlow:
             base_id,
         )
 
-        import asyncpg
         with pytest.raises(asyncpg.UniqueViolationError):
             await conn.execute(
                 """
@@ -562,7 +619,7 @@ class TestTipDistributionFlow:
 
         pool = _make_pool_for_conn(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with bypass_tenant_scope("test_tip_distribution_flow"):
+            with tenant_scope(rest_id):
                 result = await db_calculate_tips_by_attendance(
                     rest_id, PERIOD_START, PERIOD_END
                 )
@@ -610,7 +667,7 @@ class TestTipDistributionFlow:
 
         pool = _make_pool_for_conn(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with bypass_tenant_scope("test_tip_distribution_flow"):
+            with tenant_scope(rest_id):
                 result = await db_calculate_tips_by_attendance(
                     rest_id, PERIOD_START, PERIOD_END
                 )
@@ -652,7 +709,7 @@ class TestTipDistributionFlow:
 
         pool = _make_pool_for_conn(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with bypass_tenant_scope("test_tip_distribution_flow"):
+            with tenant_scope(rest_id):
                 result = await db_calculate_tips_by_attendance(
                     rest_id, PERIOD_START, PERIOD_END
                 )
@@ -694,7 +751,7 @@ class TestTipDistributionFlow:
 
         pool = _make_pool_for_conn(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with bypass_tenant_scope("test_tip_distribution_flow"):
+            with tenant_scope(rest_id):
                 result = await db_calculate_tips_by_attendance(
                     rest_id, PERIOD_START, PERIOD_END
                 )
@@ -737,7 +794,7 @@ class TestTipDistributionFlow:
 
         pool = _make_pool_for_conn(conn)
         with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
-            with bypass_tenant_scope("test_tip_distribution_flow"):
+            with tenant_scope(rest_id):
                 result = await db_calculate_tips_by_attendance(
                     rest_id, PERIOD_START, PERIOD_END
                 )
@@ -771,7 +828,7 @@ class TestShiftConstraints:
         # First open shift (clock_out IS NULL) is fine
         await conn.execute(
             """
-            INSERT INTO staff_shifts (id, staff_id, restaurant_id, clock_in)
+            INSERT INTO staff_shifts (id, staff_id, org_id, clock_in)
             VALUES ($1, $2::uuid, $3, NOW())
             """,
             uuid.uuid4(),
@@ -779,12 +836,11 @@ class TestShiftConstraints:
             rid,
         )
 
-        import asyncpg
         # Second open shift must be rejected by the partial unique index
         with pytest.raises(asyncpg.UniqueViolationError):
             await conn.execute(
                 """
-                INSERT INTO staff_shifts (id, staff_id, restaurant_id, clock_in)
+                INSERT INTO staff_shifts (id, staff_id, org_id, clock_in)
                 VALUES ($1, $2::uuid, $3, NOW())
                 """,
                 uuid.uuid4(),
@@ -806,7 +862,7 @@ class TestShiftConstraints:
             clock_out = base_time + timedelta(days=day_offset, hours=16)
             await conn.execute(
                 """
-                INSERT INTO staff_shifts (id, staff_id, restaurant_id, clock_in, clock_out)
+                INSERT INTO staff_shifts (id, staff_id, org_id, clock_in, clock_out)
                 VALUES ($1, $2::uuid, $3, $4, $5)
                 """,
                 uuid.uuid4(),

@@ -8,12 +8,20 @@ so the DB is left in exactly the state it was before the suite ran.
 Fixtures are defined in conftest.py:
   db_pool  — asyncpg Pool (skips if no URL)
   db_conn  — single connection wrapped in a savepoint-rolled-back transaction
+
+Wave-2 changes (post-0037/0038):
+  • restaurants is a READ-ONLY VIEW — INSERT goes to organizations + locations.
+  • inventory / carts / orders use org_id (restaurant_id dropped).
+  • commit_order_transaction uses _tenant_connection() (not the pool arg) so
+    tests must patch app.services.database.get_pool AND wrap in tenant_scope().
 """
 from __future__ import annotations
 
 import json
 import uuid
+from contextlib import asynccontextmanager
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import asyncpg
@@ -23,6 +31,7 @@ from app.repositories.orders_repo import (
     InsufficientStockError,
     OrderCommitError,
 )
+from app.services.tenant_context import tenant_scope
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -32,15 +41,37 @@ def _uid() -> str:
 
 
 async def _insert_restaurant(conn) -> int:
-    """Insert a minimal restaurant row and return its id."""
-    row = await conn.fetchrow(
-        """INSERT INTO restaurants (name, whatsapp_number, address)
-           VALUES ($1, $2, '')
+    """
+    Insert a minimal org + primary location and return the org_id.
+
+    Wave-2: restaurants is a VIEW where id = location_id.
+    We insert the location with explicit id = org_id so that:
+      - `restaurants WHERE id = org_id` VIEW lookup resolves correctly
+      - commit_order_transaction inserts orders with org_id = org_id, and RLS
+        passes because tenant_scope(org_id) sets app.org_id = org_id
+      - inventory/carts are inserted with org_id = org_id, consistent with scope
+
+    locations.id is a plain SERIAL — explicit id inserts are allowed.
+    """
+    org_id = await conn.fetchval(
+        """INSERT INTO organizations (name, whatsapp_number)
+           VALUES ($1, $2)
            RETURNING id""",
         "Restaurante Test " + _uid()[:8],
         "+57" + str(uuid.uuid4().int)[:10],
     )
-    return row["id"]
+    # Force location_id = org_id (see docstring)
+    await conn.execute(
+        """INSERT INTO locations (id, org_id, name, code, address, active, timezone)
+           VALUES ($1, $1, 'Test Location', 'main', NULL, true, 'America/Bogota')""",
+        org_id,
+    )
+    # Advance locations sequence past org_id to avoid future auto-id collisions.
+    await conn.execute(
+        "SELECT setval('locations_id_seq', GREATEST(nextval('locations_id_seq'), $1))",
+        org_id,
+    )
+    return org_id
 
 
 async def _insert_inventory_item(
@@ -51,10 +82,13 @@ async def _insert_inventory_item(
     stock: float,
     min_stock: float = 0.0,
 ) -> int:
-    """Insert an inventory item (no escandallo) linked to `name` as a dish."""
+    """Insert an inventory item (no escandallo) linked to `name` as a dish.
+
+    Wave-2: inventory uses org_id (not restaurant_id).
+    """
     row = await conn.fetchrow(
         """INSERT INTO inventory
-               (restaurant_id, name, unit, current_stock, min_stock, linked_dishes)
+               (org_id, name, unit, current_stock, min_stock, linked_dishes)
            VALUES ($1, $2, 'unidades', $3, $4, $5::jsonb)
            RETURNING id""",
         restaurant_id,
@@ -66,14 +100,18 @@ async def _insert_inventory_item(
     return row["id"]
 
 
-async def _insert_cart(conn, phone: str, bot_number: str, items: list[dict]) -> None:
-    """Upsert a cart row."""
+async def _insert_cart(conn, phone: str, bot_number: str, restaurant_id: int, items: list[dict]) -> None:
+    """Upsert a cart row.
+
+    Wave-2: carts has org_id NOT NULL — must be provided.
+    """
     await conn.execute(
-        """INSERT INTO carts (phone, bot_number, cart_data)
-           VALUES ($1, $2, $3::jsonb)
+        """INSERT INTO carts (phone, bot_number, org_id, cart_data)
+           VALUES ($1, $2, $3, $4::jsonb)
            ON CONFLICT (phone, bot_number) DO UPDATE SET cart_data = EXCLUDED.cart_data""",
         phone,
         bot_number,
+        restaurant_id,
         json.dumps({"items": items, "order_type": "domicilio", "address": "Calle 1", "notes": ""}),
     )
 
@@ -108,38 +146,16 @@ def _make_order_payload(
     }
 
 
-class _SingleConnPool:
-    """Minimal pool shim that yields the already-open test connection.
+def _make_pool_for_conn(conn):
+    """Return a fake pool whose .acquire() yields `conn` without touching it."""
 
-    commit_order_transaction calls ``async with pool.acquire() as conn:``
-    and then ``async with conn.transaction():``.
+    @asynccontextmanager
+    async def _acquire():
+        yield conn
 
-    Because the ``db_conn`` fixture has already started an outer transaction,
-    asyncpg will automatically demote the inner ``conn.transaction()`` call to
-    a SAVEPOINT — which is exactly what we want: the inner work can still be
-    rolled back on InsufficientStockError without disturbing the outer test
-    transaction that guarantees full cleanup.
-
-    We must NOT monkey-patch ``conn.transaction`` — it is a read-only property
-    on ``PoolConnectionProxy`` and patching it raises ``AttributeError``.
-    """
-
-    def __init__(self, conn):
-        self._conn = conn
-
-    def acquire(self):
-        return _ConnCtx(self._conn)
-
-
-class _ConnCtx:
-    def __init__(self, conn):
-        self._conn = conn
-
-    async def __aenter__(self):
-        return self._conn
-
-    async def __aexit__(self, *_):
-        return False
+    pool = AsyncMock()
+    pool.acquire = _acquire
+    return pool
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -167,18 +183,20 @@ async def test_happy_path_order_committed(db_conn):
     order_id = "ORD-" + _uid()
 
     items = [{"name": dish_name, "quantity": 2, "price": 17500}]
-    await _insert_cart(db_conn, phone, bot_number, items)
+    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
 
-    pool = _SingleConnPool(db_conn)
+    pool = _make_pool_for_conn(db_conn)
     payload = _make_order_payload(order_id, phone, bot_number, items)
 
-    await commit_order_transaction(
-        pool,
-        restaurant_id=restaurant_id,
-        conversation_id=phone,
-        cart={"items": items, "bot_number": bot_number},
-        order_payload=payload,
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(restaurant_id):
+            await commit_order_transaction(
+                pool,
+                restaurant_id=restaurant_id,
+                conversation_id=phone,
+                cart={"items": items, "bot_number": bot_number},
+                order_payload=payload,
+            )
 
     # Order row must exist
     order = await db_conn.fetchrow("SELECT * FROM orders WHERE id = $1", order_id)
@@ -218,19 +236,21 @@ async def test_insufficient_stock_raises_and_rolls_back(db_conn):
     order_id = "ORD-" + _uid()
 
     items = [{"name": dish_name, "quantity": 3, "price": 5000}]
-    await _insert_cart(db_conn, phone, bot_number, items)
+    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
 
-    pool = _SingleConnPool(db_conn)
+    pool = _make_pool_for_conn(db_conn)
     payload = _make_order_payload(order_id, phone, bot_number, items, subtotal=Decimal("15000"), total=Decimal("15000"))
 
-    with pytest.raises(InsufficientStockError) as exc_info:
-        await commit_order_transaction(
-            pool,
-            restaurant_id=restaurant_id,
-            conversation_id=phone,
-            cart={"items": items, "bot_number": bot_number},
-            order_payload=payload,
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(restaurant_id):
+            with pytest.raises(InsufficientStockError) as exc_info:
+                await commit_order_transaction(
+                    pool,
+                    restaurant_id=restaurant_id,
+                    conversation_id=phone,
+                    cart={"items": items, "bot_number": bot_number},
+                    order_payload=payload,
+                )
 
     err = exc_info.value
     assert err.requested == 3.0
@@ -268,7 +288,7 @@ async def test_decimal_coercion_float_inputs(db_conn):
 
     # No items → no inventory deduction needed
     items = []
-    await _insert_cart(db_conn, phone, bot_number, items)
+    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
 
     # Pass float values — commit_order_transaction must coerce without crashing.
     # Use whole-number floats so they round-trip through the INTEGER column.
@@ -279,14 +299,16 @@ async def test_decimal_coercion_float_inputs(db_conn):
         total=38000.0,         # float, whole number
     )
 
-    pool = _SingleConnPool(db_conn)
-    await commit_order_transaction(
-        pool,
-        restaurant_id=restaurant_id,
-        conversation_id=phone,
-        cart={"items": items, "bot_number": bot_number},
-        order_payload=payload,
-    )
+    pool = _make_pool_for_conn(db_conn)
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(restaurant_id):
+            await commit_order_transaction(
+                pool,
+                restaurant_id=restaurant_id,
+                conversation_id=phone,
+                cart={"items": items, "bot_number": bot_number},
+                order_payload=payload,
+            )
 
     row = await db_conn.fetchrow(
         "SELECT subtotal, delivery_fee, total FROM orders WHERE id = $1", order_id
@@ -316,19 +338,21 @@ async def test_cart_deleted_on_success(db_conn):
     order_id = "ORD-" + _uid()
 
     items = []
-    await _insert_cart(db_conn, phone, bot_number, items)
-    await _insert_cart(db_conn, other_phone, bot_number, [{"name": "pizza", "quantity": 1}])
+    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
+    await _insert_cart(db_conn, other_phone, bot_number, restaurant_id, [{"name": "pizza", "quantity": 1}])
 
-    pool = _SingleConnPool(db_conn)
+    pool = _make_pool_for_conn(db_conn)
     payload = _make_order_payload(order_id, phone, bot_number, items)
 
-    await commit_order_transaction(
-        pool,
-        restaurant_id=restaurant_id,
-        conversation_id=phone,
-        cart={"items": items, "bot_number": bot_number},
-        order_payload=payload,
-    )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(restaurant_id):
+            await commit_order_transaction(
+                pool,
+                restaurant_id=restaurant_id,
+                conversation_id=phone,
+                cart={"items": items, "bot_number": bot_number},
+                order_payload=payload,
+            )
 
     # Target cart deleted
     deleted = await db_conn.fetchrow(
@@ -359,19 +383,21 @@ async def test_cart_not_deleted_on_insufficient_stock(db_conn):
     order_id = "ORD-" + _uid()
 
     items = [{"name": dish_name, "quantity": 1, "price": 12000}]
-    await _insert_cart(db_conn, phone, bot_number, items)
+    await _insert_cart(db_conn, phone, bot_number, restaurant_id, items)
 
-    pool = _SingleConnPool(db_conn)
+    pool = _make_pool_for_conn(db_conn)
     payload = _make_order_payload(order_id, phone, bot_number, items)
 
-    with pytest.raises(InsufficientStockError):
-        await commit_order_transaction(
-            pool,
-            restaurant_id=restaurant_id,
-            conversation_id=phone,
-            cart={"items": items, "bot_number": bot_number},
-            order_payload=payload,
-        )
+    with patch("app.services.database.get_pool", AsyncMock(return_value=pool)):
+        with tenant_scope(restaurant_id):
+            with pytest.raises(InsufficientStockError):
+                await commit_order_transaction(
+                    pool,
+                    restaurant_id=restaurant_id,
+                    conversation_id=phone,
+                    cart={"items": items, "bot_number": bot_number},
+                    order_payload=payload,
+                )
 
     # Cart must still exist
     cart = await db_conn.fetchrow(

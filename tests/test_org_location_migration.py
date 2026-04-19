@@ -28,6 +28,17 @@ import logging
 
 import pytest
 
+# OBSOLETE post-0038 (2026-04-19). Originally validated transitional invariants
+# of the Wave-2 migration (0034 backfill + 0035 column adds). The artifacts
+# they assert on — `_migration_restaurant_to_location` mapping table,
+# `is_primary` column, dual restaurant_id/org_id columns — were all dropped
+# in migration 0038. The migrations they validate already shipped successfully.
+# Module-level skip preserves git history without polluting CI runs.
+pytestmark = pytest.mark.skip(
+    reason="Tests for transitional Wave-2 migration state. Artifacts dropped in 0038. "
+           "Migration 0034/0035 invariants are historical — no longer assertable on current schema."
+)
+
 _preflight_logger = logging.getLogger("mesio.migration.preflight")
 
 

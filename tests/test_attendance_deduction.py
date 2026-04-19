@@ -10,6 +10,14 @@ Requirements:
 
 Run:
   pytest tests/test_attendance_deduction.py -v
+
+Wave-2 changes (post-0037/0038):
+  • restaurants is a READ-ONLY VIEW — INSERT goes to organizations + locations.
+  • staff / staff_shifts / attendance_deductions use org_id (restaurant_id dropped).
+  • _record_attendance_deduction still takes a `restaurant_id` positional arg
+    which maps to org_id internally — callers pass org_id for that parameter.
+  • attendance_deductions has no restaurant_id column; test_deduction_row_all_columns
+    asserts on org_id instead.
 """
 
 from __future__ import annotations
@@ -55,30 +63,36 @@ async def db_conn():
 async def base_data(db_conn):
     """
     Insert the minimal rows needed for all tests:
-      - one restaurant (features->>'timezone' = 'America/Bogota')
+      - one org + location (Wave-2 equivalent of a restaurant row)
       - one staff member with hourly_rate = 12500
 
-    Returns a dict with 'restaurant_id' and 'staff_id'.
+    Returns a dict with 'restaurant_id' (org_id) and 'staff_id'.
     Does NOT insert a shift — each test that needs one creates it.
     """
-    # Restaurant ---------------------------------------------------------------
-    rest_row = await db_conn.fetchrow(
-        """INSERT INTO restaurants
-               (name, whatsapp_number, features)
+    # Org (tenant) ---------------------------------------------------------------
+    org_id = await db_conn.fetchval(
+        """INSERT INTO organizations (name, whatsapp_number, features)
            VALUES ($1, $2, $3::jsonb)
            RETURNING id""",
         "Test Restaurant",
         f"+5730099{uuid.uuid4().hex[:6]}",   # unique number per test run
         json.dumps({"timezone": "America/Bogota"}),
     )
-    restaurant_id = rest_row["id"]
+    # Peer location
+    await db_conn.fetchval(
+        """INSERT INTO locations (org_id, name, code, address, active, timezone)
+           VALUES ($1, 'Test Restaurant', 'main', NULL, true, 'America/Bogota')
+           RETURNING id""",
+        org_id,
+    )
+    restaurant_id = org_id
 
     # Staff --------------------------------------------------------------------
     # bcrypt hash of "1234" — we never validate it in these tests
     pin_hash = "$2b$12$AAAAAAAAAAAAAAAAAAAAAO9UtBzOy71JBR.oeSYHsRJyR/0MDXiWG"
     staff_row = await db_conn.fetchrow(
         """INSERT INTO staff
-               (restaurant_id, name, username, role, pin, hourly_rate)
+               (org_id, name, username, role, pin, hourly_rate)
            VALUES ($1, $2, $3, 'mesero', $4, $5)
            RETURNING id""",
         restaurant_id,
@@ -95,7 +109,7 @@ async def base_data(db_conn):
 async def _insert_open_shift(db_conn, staff_id: str, restaurant_id: int) -> str:
     """Helper: open a shift and return its id (text)."""
     row = await db_conn.fetchrow(
-        """INSERT INTO staff_shifts (staff_id, restaurant_id)
+        """INSERT INTO staff_shifts (staff_id, org_id)
            VALUES ($1::uuid, $2)
            RETURNING id::text""",
         staff_id, restaurant_id,
@@ -266,7 +280,7 @@ async def test_early_departure_20_min_correct_amount(db_conn, base_data):
     pin_hash = "$2b$12$AAAAAAAAAAAAAAAAAAAAAO9UtBzOy71JBR.oeSYHsRJyR/0MDXiWG"
     staff_row2 = await db_conn.fetchrow(
         """INSERT INTO staff
-               (restaurant_id, name, username, role, pin, hourly_rate)
+               (org_id, name, username, role, pin, hourly_rate)
            VALUES ($1, $2, $3, 'mesero', $4, $5)
            RETURNING id""",
         rid,
@@ -435,6 +449,7 @@ async def test_different_timezone_wrong_tz_gives_wrong_result(db_conn, base_data
 async def test_deduction_row_all_columns_populated(db_conn, base_data):
     """
     Verify every column of the inserted row has a sensible value.
+    Wave-2: attendance_deductions uses org_id (not restaurant_id).
     """
     rid = base_data["restaurant_id"]
     sid = base_data["staff_id"]
@@ -461,7 +476,8 @@ async def test_deduction_row_all_columns_populated(db_conn, base_data):
 
     assert str(row["shift_id"]) == shift_id
     assert str(row["staff_id"]) == sid
-    assert row["restaurant_id"] == rid
+    # Wave-2: org_id replaces restaurant_id on this table
+    assert row["org_id"] == rid
     assert row["type"] == "tardiness"
     assert row["minutes_diff"] == 15
     assert row["deduction_amount"] > 0

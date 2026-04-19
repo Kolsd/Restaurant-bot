@@ -24,7 +24,20 @@ import os
 import pytest
 import asyncpg
 
-pytestmark = pytest.mark.asyncio
+# OBSOLETE post-0038 (2026-04-19). Originally validated the dual RLS GUC
+# behavior introduced in migration 0036 (app.restaurant_id AND app.org_id
+# coexisting). The legacy app.restaurant_id GUC and the dual policy were
+# dropped in 0037; these tests assert on a transitional state that no
+# longer exists. Single-policy org_id RLS is verified by integration
+# coverage in test_payroll/test_attendance_deduction (which run real
+# tenant_scope flows against the DB).
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.skip(
+        reason="Dual RLS policy from 0036 was dropped in 0037/0038. "
+               "Tests assert on transitional state no longer present."
+    ),
+]
 
 
 # ---------------------------------------------------------------------------

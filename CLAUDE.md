@@ -268,7 +268,7 @@ with bypass_tenant_scope("webhook_enqueue_cross_tenant"):
 ### Deuda pendiente (no bloqueante)
 
 - Auditar los ~20 `bypass_tenant_scope` internos en `staff_repo.py` — varios son cuestionables (breaks, self-profile) y se pueden apretar a `tenant_connection()` si el call site siempre entra con scope.
-- ~17 integration tests (test_payroll, test_attendance_deduction) usan un fixture `_PoolShim` que escribe en `asyncpg.Connection._pool_shim`. Falla con asyncpg ≥0.30 porque `Connection` tiene `__slots__`. SKIPPEAN cuando no hay `TEST_DATABASE_URL` seteado, así que no rompen el suite normal — pero cuando se quieran activar contra DB real hay que refactorizar el fixture (proxy/namespace en vez de mutación de la connection). También usan `INSERT INTO restaurants` directo (ahora VIEW, no insertable), `restaurant_id` (columna dropeada en 0037), y `parent_restaurant_id` (columna dropeada en 0038). Refactor completo es ~2-3h mecánico, separado de todos los pasos del audit Wave-2 — bloqueado solo cuando alguien necesite correrlos contra TEST_DATABASE_URL real.
+- ~~17 integration tests + 26 más en otros archivos~~ — **CERRADO 2026-04-19**: refactorizados con `_ConnProxy` pattern (workaround `asyncpg.Connection.__slots__`) + INSERTs vía `organizations + locations` (no más `restaurants` VIEW write) + columnas `org_id` (no más `restaurant_id`). 46 tests passing post-refactor contra TEST_DATABASE_URL.
 - ~~6 X-Branch-ID conflation sites pendientes en `staff.py`~~ — **CERRADO en Paso 10**. Los 6 sitios fueron migrados al fix template: org_id consistente para queries org-level, location_id propagado al param opcional `branch_id` de `db_calculate_payroll` para tip scoping per-sede.
 - Ver `PHASE_2_3_PLAN.md` en raíz del repo para el roadmap detallado de Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA + middlewares).
 
@@ -1008,7 +1008,10 @@ Wrapper Cloudinary. Funciones clave:
 - **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
 - **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
-- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`. Baseline actual (post-Ola 2): **974 passed / 0 failed / 70 skipped en ~15s**. Los 70 skipped son integration tests que requieren `TEST_DATABASE_URL`. Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
+- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`.
+  - **Sin `TEST_DATABASE_URL`**: baseline **974 passed / 0 failed / 70 skipped en ~15s** (los 70 son integration tests gatedos por URL).
+  - **Con `TEST_DATABASE_URL` exportada**: **1020 passed / 0 failed / 24 skipped en ~5min** (los 46 integration tests adicionales: payroll, attendance, tips, order_transaction, integration_flows). Los 24 skipped restantes son: 17 tests de migración Wave-2 transicional (obsoletos post-0038, marcados `pytest.mark.skip` con razón) + 1 `test_tips::test_branch_id_filter` (limitación arquitectural del filter por sede en `db_calculate_tips_by_attendance` — flagged) + 6 e2e/health requieren extras.
+  - Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.

@@ -28,7 +28,16 @@ import os
 import pytest
 import asyncpg
 
-pytestmark = pytest.mark.asyncio
+# OBSOLETE post-0038 (2026-04-19). Tests for the dual RLS policy from
+# migration 0036 — that policy and its triggers were dropped in 0037,
+# and is_primary / mapping artifacts dropped in 0038. The whole dual
+# transitional state these tests assert on no longer exists.
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.skip(
+        reason="Dual policy + triggers + mapping table from 0036 dropped in 0037/0038."
+    ),
+]
 
 
 # ---------------------------------------------------------------------------
