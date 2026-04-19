@@ -29,8 +29,8 @@ Endpoints (all under /api/internal/admin, all require verify_superadmin):
   DELETE /organizations/{id}         → Soft-delete (or hard if ?hard=true + no recent orders)
   GET    /organizations/{id}/locations → List locations for an org
   POST   /organizations/{id}/locations → Create a location under an org
-  PATCH  /locations/{id}             → Update location fields; handles is_primary promotion
-  DELETE /locations/{id}             → Soft/hard delete; blocks primary location deletion
+  PATCH  /locations/{id}             → Update location fields (is_primary ignored, vestigial)
+  DELETE /locations/{id}             → Soft/hard delete
 """
 import os
 import io
@@ -505,11 +505,6 @@ async def create_organization(
             code="principal",
             active=True,
         )
-        # Mark it as primary (db_create_location defaults is_primary=false)
-        primary_loc = await restaurant_repo.db_update_location(
-            primary_loc["id"],
-            is_primary=True,
-        )
     except Exception as exc:
         log.exception("create_organization.primary_location_error", org_id=org["id"], detail=str(exc))
         raise HTTPException(status_code=500, detail="Org creada pero fallo al crear sede principal")
@@ -696,12 +691,10 @@ async def update_location(
 ):
     """Update location fields.
 
-    is_primary promotion: atomically demotes the current primary of the same org
-    before promoting this location.  Rejecting is_primary=false on a primary
-    location (must promote another first).
+    Post-Wave-2: is_primary is vestigial and will be dropped in migration 0038.
+    The is_primary field in the request body is silently ignored.
     """
     import asyncpg  # noqa: PLC0415
-    from app.services.database import get_pool  # noqa: PLC0415
 
     loc = await restaurant_repo.db_get_location_by_id(location_id)
     if not loc:
@@ -714,36 +707,6 @@ async def update_location(
         val = getattr(body, field)
         if val is not None:
             updates[field] = val
-
-    # Handle is_primary promotion atomically
-    if body.is_primary is True and not loc["is_primary"]:
-        pool = await get_pool()
-        with bypass_tenant_scope("promote_primary_location_atomic"):
-            async with pool.acquire() as conn:
-                async with conn.transaction():
-                    await conn.execute(
-                        "UPDATE locations SET is_primary = false WHERE org_id = $1 AND is_primary = true",
-                        loc["org_id"],
-                    )
-                    await conn.execute(
-                        "UPDATE locations SET is_primary = true, updated_at = NOW() WHERE id = $1",
-                        location_id,
-                    )
-        log.info("update_location.promoted_primary", location_id=location_id, org_id=loc["org_id"])
-        if updates:
-            try:
-                updated = await restaurant_repo.db_update_location(location_id, **updates)
-            except asyncpg.UniqueViolationError:
-                raise HTTPException(status_code=409, detail="whatsapp_number conflict")
-        else:
-            updated = await restaurant_repo.db_get_location_by_id(location_id)
-        return _ok({"location": updated})
-
-    if body.is_primary is False and loc["is_primary"]:
-        raise HTTPException(
-            status_code=400,
-            detail="No se puede retirar el estado principal directamente. Promueve otra sede primero.",
-        )
 
     if not updates:
         return _ok({"location": loc})
@@ -765,7 +728,6 @@ async def delete_location(
 ):
     """Delete a location.
 
-    Primary locations cannot be deleted — demote first.
     Soft delete (default): sets active=false.
     Hard delete: only if no orders in last 90 days.
     """
@@ -774,12 +736,6 @@ async def delete_location(
     loc = await restaurant_repo.db_get_location_by_id(location_id)
     if not loc:
         raise HTTPException(status_code=404, detail="Sede no encontrada")
-
-    if loc["is_primary"]:
-        raise HTTPException(
-            status_code=400,
-            detail="No se puede eliminar la sede principal. Promueve otra sede primero.",
-        )
 
     if hard:
         pool = await get_pool()

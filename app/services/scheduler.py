@@ -332,9 +332,9 @@ async def _run_weekly_owner_reports():
 
     try:
         # Wave-2 canonical: weekly reports are per-business (per-org), not per-sede.
-        # Use the org-level enumeration primitive instead of db_get_all_restaurants
-        # which would return one row per is_primary location and depend on the
-        # vestigial Matriz invariant. db_get_all_orgs returns active orgs only.
+        # Use the org-level enumeration primitive (db_get_all_orgs) instead of
+        # db_get_all_restaurants which returns one row per location.
+        # db_get_all_orgs returns active orgs only.
         restaurants = await db.db_get_all_orgs(active_only=True)
     except Exception:
         log.exception("scheduler.weekly_reports.fetch_restaurants_failed")

@@ -262,7 +262,7 @@ async def db_update_restaurant_fields(
             await conn.execute("UPDATE locations SET name=$1 WHERE id=$2", name, restaurant_id)
             await conn.execute(
                 """UPDATE organizations SET name=$1
-                   WHERE id = (SELECT org_id FROM locations WHERE id=$2 AND is_primary)""",
+                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
                 name, restaurant_id,
             )
         # --- Org-level default credential fields ---
@@ -782,19 +782,18 @@ async def db_delete_branch(branch_id: int, parent_restaurant_id: int) -> bool:
     via CASCADE if the FK is set, or are updated explicitly here to avoid orphans.
     Returns False if not found / not owned.
 
-    Only non-primary locations can be deleted this way (primary = Matriz; the route
-    already blocks deleting the Matriz before calling this function).
+    Any location can be deleted this way; the route-level guard is responsible
+    for any policy on protecting the last remaining location of an org.
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
             # Verify branch belongs to the same org as parent, and is NOT primary
             branch_row = await conn.fetchrow(
-                """SELECT l.id, l.org_id, l.is_primary
+                """SELECT l.id, l.org_id
                    FROM locations l
                    WHERE l.id = $1
-                     AND l.org_id = (SELECT org_id FROM locations WHERE id = $2)
-                     AND l.is_primary = false""",
+                     AND l.org_id = (SELECT org_id FROM locations WHERE id = $2)""",
                 branch_id, parent_restaurant_id,
             )
             if not branch_row:
@@ -969,15 +968,14 @@ async def db_get_restaurant_by_id(restaurant_id: int):
 async def db_get_all_restaurants(parent_id: int = None):
     """
     Post-Wave-2: every restaurant is a row in `locations` (the `restaurants`
-    table is a VIEW over locations JOIN organizations). The historical
-    "matriz vs branch" distinction is encoded as `is_primary` on the
-    location row — there is no special "matriz" entity anymore.
+    table is a VIEW over locations JOIN organizations). All locations are peers
+    — there is no special "primary" / "matriz" entity anymore.
 
-    Behaviour preserved for backwards compat:
-      parent_id passed     → return non-primary locations of that org
+    Behaviour:
+      parent_id passed     → return all OTHER locations of the same org
                              (the historical "branches of this matriz")
-      parent_id omitted    → return primary locations across all orgs
-                             (the historical "all matrices")
+      parent_id omitted    → return one deterministic location per org
+                             ordered by org_id (the historical "all matrices")
 
     Each returned dict is enriched with explicit `org_id` and `location_id`
     so callers do NOT have to depend on the 0034 backfill Matriz invariant
@@ -988,7 +986,7 @@ async def db_get_all_restaurants(parent_id: int = None):
     pool = await _get_pool()
     async with pool.acquire() as conn:
         if parent_id:
-            # Historical "branches of matriz X" → non-primary locations of
+            # Historical "branches of matriz X" → all OTHER locations of
             # the same org. Resolve via the locations table directly so the
             # query semantics survive when parent_restaurant_id is dropped.
             rows = await conn.fetch(
@@ -997,19 +995,22 @@ async def db_get_all_restaurants(parent_id: int = None):
                 FROM restaurants r
                 JOIN locations  l ON l.id = r.id
                 WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $1)
-                  AND l.is_primary = false
+                  AND l.id != $1
                 ORDER BY r.name ASC
                 """,
                 parent_id,
             )
         else:
-            # Historical "all matrices" → primary locations across all orgs.
+            # Historical "all matrices" → one deterministic location per org
+            # (lowest id), ordered by org_id.
             rows = await conn.fetch(
                 """
                 SELECT r.*, l.org_id, l.id AS location_id
                 FROM restaurants r
                 JOIN locations  l ON l.id = r.id
-                WHERE l.is_primary = true
+                WHERE l.id = (
+                    SELECT MIN(id) FROM locations l2 WHERE l2.org_id = l.org_id
+                )
                 ORDER BY l.org_id ASC
                 """
             )
@@ -1139,17 +1140,13 @@ async def db_create_restaurant(name: str, whatsapp_number: str, address: str, me
 
             org_id = org_row["id"]
 
-            # Upsert primary location
+            # Insert default location (no conflict clause — partial unique index
+            # on is_primary is dropped in migration 0038; callers must not
+            # call this function twice for the same org).
             await conn.execute(
                 """INSERT INTO locations
-                       (org_id, name, code, address, latitude, longitude, active, is_primary, timezone)
-                   VALUES ($1, $2, 'principal', $3, $4, $5, true, true, 'America/Bogota')
-                   ON CONFLICT (org_id) WHERE is_primary DO UPDATE
-                   SET name = EXCLUDED.name,
-                       address = EXCLUDED.address,
-                       latitude = EXCLUDED.latitude,
-                       longitude = EXCLUDED.longitude,
-                       updated_at = NOW()""",
+                       (org_id, name, code, address, latitude, longitude, active, timezone)
+                   VALUES ($1, $2, 'principal', $3, $4, $5, true, 'America/Bogota')""",
                 org_id, name, address, latitude, longitude,
             )
 
@@ -1806,7 +1803,7 @@ async def db_get_org_by_phone(phone: str) -> dict | None:
 
 
 async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[dict]:
-    """List Locations for an Org, ordered by is_primary DESC, name ASC.
+    """List Locations for an Org, ordered alphabetically (name ASC, id ASC).
 
     Caller must be in tenant_scope(org_id) or bypass_tenant_scope; locations
     has no RLS policy so bypass is not strictly required, but we use
@@ -1827,7 +1824,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                            created_at, updated_at, legacy_restaurant_id
                     FROM locations
                     WHERE org_id = $1 AND active = true
-                    ORDER BY is_primary DESC, name ASC
+                    ORDER BY name ASC, id ASC
                     """,
                     org_id,
                 )
@@ -1840,7 +1837,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                            created_at, updated_at, legacy_restaurant_id
                     FROM locations
                     WHERE org_id = $1
-                    ORDER BY is_primary DESC, name ASC
+                    ORDER BY name ASC, id ASC
                     """,
                     org_id,
                 )
@@ -1860,10 +1857,13 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
 
 
 async def db_get_primary_location(org_id: int) -> dict | None:
-    """Return the is_primary Location for an Org.
+    """Return the deterministic default Location for an Org (lowest id).
 
-    Invariant (enforced by UNIQUE partial index ux_locations_org_primary):
-    exactly one is_primary per Org.
+    Post-Wave-2: there is no designated "primary" location; every location is a
+    peer.  This function preserves the existing call-site contract by returning
+    the location with the smallest id (the one that was historically the Matriz
+    for orgs migrated at Wave-2).  Migration 0038 will drop the is_primary
+    column entirely.
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
@@ -1874,10 +1874,12 @@ async def db_get_primary_location(org_id: int) -> dict | None:
                 """
                 SELECT id, org_id, name, code, address, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
-                       active, is_primary, timezone, opening_hours,
+                       active, timezone, opening_hours,
                        created_at, updated_at, legacy_restaurant_id
                 FROM locations
-                WHERE org_id = $1 AND is_primary = true
+                WHERE org_id = $1
+                ORDER BY id ASC
+                LIMIT 1
                 """,
                 org_id,
             )

@@ -238,8 +238,8 @@ async def login(username: str, password: str) -> dict:
                 org_shape = await _build_org_shape(org_obj)
                 all_locs = await db_get_org_locations(org_id_resolved)
                 locations_list = [_loc_summary(l) for l in all_locs]
-                primary = next((l for l in all_locs if l.get("is_primary")), None)
-                default_location_id = primary["id"] if primary else (all_locs[0]["id"] if all_locs else None)
+                # Post-Wave-2: no primary flag — use lowest id as deterministic default
+                default_location_id = all_locs[0]["id"] if all_locs else None
 
     except Exception:
         _log.exception("auth.admin_login.org_resolve_error")
