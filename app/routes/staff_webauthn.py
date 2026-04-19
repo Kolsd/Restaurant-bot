@@ -432,13 +432,13 @@ async def delete_credential(
     if not cred:
         raise HTTPException(status_code=404, detail="Credencial no encontrada")
 
-    # Ensure the credential belongs to this restaurant or to a branch that this
-    # restaurant owns.  A matrix (parent_restaurant_id=None) may delete creds of
-    # its children; a branch may only delete its own creds.
-    if cred.get("restaurant_id") != restaurant["id"]:
-        cred_rest = await db.db_get_restaurant_by_id(cred.get("restaurant_id"))
-        if not cred_rest or cred_rest.get("parent_restaurant_id") != restaurant["id"]:
-            raise HTTPException(status_code=403, detail="No tiene permiso para eliminar esta credencial")
+    # Wave-2 ownership check: the credential's staff record belongs to an org
+    # (cred.org_id from the JOIN); the authenticated owner has restaurant.org_id
+    # (normalized by db_get_restaurant_by_id). Both must match.
+    cred_org_id = cred.get("org_id")
+    my_org_id = restaurant.get("org_id") or restaurant.get("id")
+    if not cred_org_id or not my_org_id or cred_org_id != my_org_id:
+        raise HTTPException(status_code=403, detail="No tiene permiso para eliminar esta credencial")
 
     deleted = await db.db_delete_webauthn_credential(credential_id)
     if not deleted:

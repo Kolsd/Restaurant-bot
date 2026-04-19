@@ -143,13 +143,16 @@ async def delete_branch(branch_id: int, request: Request):
     if branch_id == my_main_id:
         raise HTTPException(status_code=400, detail="No puedes eliminar la Casa Matriz desde aquí.")
 
-    # Verify that the target branch belongs to this owner's tenant before deleting
+    # Wave-2 ownership: resolve the org_id of the authenticated owner, then
+    # compare against the target branch's org_id (both via VIEW normalization).
+    my_rest = await db.db_get_restaurant_by_id(my_main_id)
+    my_org_id = (my_rest or {}).get("org_id") or my_main_id
     branch_row = await db.db_get_restaurant_by_id(branch_id)
-    if not branch_row or branch_row.get("parent_restaurant_id") != my_main_id:
+    if not branch_row or branch_row.get("org_id") != my_org_id:
         log.warning(
             "team.delete_branch_idor_attempt",
             requested_branch_id=branch_id,
-            user_restaurant_id=my_main_id,
+            user_org_id=my_org_id,
         )
         raise HTTPException(status_code=404, detail="La sucursal no existe o no pertenece a tu cuenta.")
 
@@ -171,16 +174,19 @@ async def list_team_users(request: Request, branch_id: int = None):
     elif not branch_id:
         branch_id = user.get("branch_id")
 
-    my_restaurant_id = user.get("branch_id") or user.get("restaurant_id")
+    my_main_location_id = user.get("branch_id") or user.get("restaurant_id")
 
-    # Validate that the requested branch_id belongs to the authenticated user's tenant
-    if branch_id and branch_id != my_restaurant_id:
+    # Wave-2 ownership: resolve the org_id of the authenticated owner, then
+    # compare against the target branch's org_id (both via VIEW normalization).
+    if branch_id and branch_id != my_main_location_id:
+        my_rest = await db.db_get_restaurant_by_id(my_main_location_id)
+        my_org_id = (my_rest or {}).get("org_id") or my_main_location_id
         branch_row = await db.db_get_restaurant_by_id(branch_id)
-        if not branch_row or branch_row.get("parent_restaurant_id") != my_restaurant_id:
+        if not branch_row or branch_row.get("org_id") != my_org_id:
             log.warning(
                 "team.users_idor_attempt",
                 requested_branch_id=branch_id,
-                user_restaurant_id=my_restaurant_id,
+                user_org_id=my_org_id,
             )
             raise HTTPException(status_code=403, detail="No autorizado para ver usuarios de esta sucursal")
 

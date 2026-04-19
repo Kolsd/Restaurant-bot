@@ -287,9 +287,15 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                 rest_token = rest.get("wa_access_token", "") or ""
                 log.info("orders.restaurant_resolved", name=rest_name, has_phone_id=bool(rest_phone_id), has_token=bool(rest_token))
 
-                # Si la sucursal no tiene credenciales propias, heredar del restaurante padre
-                if (not rest_phone_id or not rest_token) and rest.get("parent_restaurant_id"):
-                    parent = await db.db_get_restaurant_by_id(rest["parent_restaurant_id"])
+                # Wave-2: if branch lacks credentials, fall back to the org's primary location.
+                if (not rest_phone_id or not rest_token) and rest.get("org_id"):
+                    from app.repositories.restaurant_repo import db_get_primary_location  # noqa: PLC0415
+                    primary = await db_get_primary_location(rest["org_id"])
+                    parent = (
+                        await db.db_get_restaurant_by_id(primary["id"])
+                        if primary and primary.get("id") and primary.get("id") != rest.get("location_id")
+                        else None
+                    )
                     if parent:
                         if not rest_phone_id:
                             rest_phone_id = parent.get("wa_phone_id", "") or ""
@@ -424,15 +430,17 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
     if not order:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-    # Ownership check: staff user can only touch orders of their own restaurant or its branches.
-    order_rid = order.get("restaurant_id")
+    # Ownership check: staff user can only touch orders of their own org.
+    # Wave-2: orders carry org_id; user resolves to org_id via db_get_restaurant_by_id.
+    order_rid = order.get("org_id") or order.get("restaurant_id")
     user_rid = user.get("branch_id") or user.get("restaurant_id")
     if order_rid and user_rid and int(order_rid) != int(user_rid):
-        # Allow Matriz admin to manage orders on any of its branches
-        with bypass_tenant_scope("update_delivery_status: check parent ownership"):
-            order_restaurant = await db.db_get_restaurant_by_id(int(order_rid))
-        parent_rid = (order_restaurant or {}).get("parent_restaurant_id")
-        if parent_rid is None or int(parent_rid) != int(user_rid):
+        # Resolve the user's org_id (location_id may differ from org_id in Wave-2)
+        with bypass_tenant_scope("update_delivery_status: check org ownership"):
+            user_rest = await db.db_get_restaurant_by_id(int(user_rid))
+        user_org_id = (user_rest or {}).get("org_id") or user_rid
+        order_org_id = int(order.get("org_id") or order_rid)
+        if int(user_org_id) != order_org_id:
             raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
 
     scope_rid = int(order_rid) if order_rid else int(user_rid) if user_rid else None
