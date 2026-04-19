@@ -808,18 +808,23 @@ async def get_tables_status(request: Request):
     # 1. Resolución de contexto inteligente
     restaurant = await get_current_restaurant(request)
 
-    # Wave-2: separate the two concerns explicitly.
+    # Wave-2 model: every restaurant is a `locations` row. There is NO special
+    # "matriz" entity at the data layer — `is_primary=true` simply marks the
+    # primary sede of an org. We need TWO distinct integers here:
     #   - org_id        : tenant key for tenant_scope() / RLS GUC
     #   - location_id   : the sede id stored in restaurant_tables.branch_id
-    # restaurant["id"] is normalized to org_id by db_get_restaurant_by_id;
-    # the actual sede identifier lives under restaurant["location_id"]. For
-    # Matriz invariant tenants (single sede, where org_id == matriz_location_id
-    # by 0034 backfill) the two are equal, but for multi-branch tenants —
-    # especially staff at a sub-sucursal — they DIFFER and conflating them
-    # makes db_get_tables / db_get_pending_orders_by_branch return rows from
-    # the wrong sede (or zero rows).
+    # Both are consistently populated by db_get_restaurant_by_id (and now also
+    # by db_get_all_restaurants post the same-paso fix). If location_id is
+    # missing we fail fast — silently falling back to org_id (the old
+    # "Matriz invariant" trick) only works for orgs created BEFORE Wave-2 deploy
+    # where 0034 backfilled org_id == matriz_location_id by coincidence.
     org_id = restaurant["id"]
-    location_id = restaurant.get("location_id") or org_id
+    location_id = restaurant.get("location_id")
+    if location_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Restaurant context missing location_id — cannot resolve sede",
+        )
 
     with tenant_scope(org_id):
         tables = await db.db_get_tables(branch_id=location_id)

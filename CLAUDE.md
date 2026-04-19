@@ -168,6 +168,20 @@ INSERT cross-tenant  → InsufficientPrivilegeError (scope=8 intentando restaura
 bypass_tenant_scope  → orders=15 (todo)
 ```
 
+### Modelo Wave-2: NO existe Matriz como entidad
+
+Post-Wave-2 el schema canónico es `organizations` + `locations`. La distinción histórica "matriz vs branch" **no existe a nivel de datos** — solo `is_primary=true` marca la sede principal de un org. Implicaciones para código nuevo:
+
+1. **NUNCA** depender de la "Matriz invariant" (`org_id == matriz_location_id`) como hecho forward-going. Esa igualdad solo es cierta para orgs migradas por 0034 (existentes al deploy de Wave-2). Para orgs creadas POST-deploy, `org_id` y `location_id` son enteros independientes (auto-incrementados por separado).
+2. **NUNCA** asumir que `restaurant.get("location_id") or org_id` es un fallback válido. Es la "Matriz invariant trick" disfrazada — da el answer equivocado para orgs nuevas.
+3. **Resolución correcta** de location_id cuando se necesita la sede:
+   - Si el dict viene de `db_get_restaurant_by_id` → usar `restaurant["location_id"]` (siempre populado).
+   - Si el dict viene de `db_get_all_restaurants` → idem (post-paso 7 también populado).
+   - Si no se tiene un dict → query `SELECT id FROM locations WHERE org_id=$1 AND is_primary=true`.
+4. **`parent_restaurant_id IS NULL` es legacy emulation.** El equivalente nuevo es `is_primary = true` en locations. Para queries nuevas usar la versión nueva.
+5. **`is_main_restaurant` parameter es vestigial.** No introducir en código nuevo. Si lo encuentras, refactorizar a usar `is_primary`.
+6. **`X-Branch-ID` header SIEMPRE carga un `location_id`**. Si una ruta lo recibe, NO mezclar con `restaurant["id"]` (= org_id) — son dos integers distintos. Ver Paso 5 commits da08f5e + Paso 6 commit c442bba.
+
 ### Patrón de uso
 
 **En rutas FastAPI (admin/staff autenticado):**
@@ -978,7 +992,7 @@ Wrapper Cloudinary. Funciones clave:
 - **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
 - **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
-- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`. Baseline actual (commit c442bba): **936 passed / 0 failed / 70 skipped en ~15s**. Los 70 skipped son integration tests que requieren `TEST_DATABASE_URL`. Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
+- **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`. Baseline actual: **936 passed / 0 failed / 70 skipped en ~15s**. Los 70 skipped son integration tests que requieren `TEST_DATABASE_URL`. Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.

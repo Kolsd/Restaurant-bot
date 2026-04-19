@@ -122,13 +122,20 @@ async def get_current_restaurant(request: Request) -> dict:
     if all_r:
         main_rest = all_r[0]
 
-        # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sucursal
+        # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sede.
+        # Post-Wave-2 model: every restaurant is a `locations` row; the historical
+        # "matriz vs branch" distinction is just `is_primary` on the location.
+        # The selected sede must belong to the SAME org as the authenticated owner —
+        # we verify via org_id, not via parent_restaurant_id (legacy emulated column).
         branch_header = request.headers.get("X-Branch-ID")
         if branch_header and branch_header.isdigit():
             target_id = int(branch_header)
             target_rest = await db.db_get_restaurant_by_id(target_id)
-            # Verifica rigurosamente que sea realmente una sucursal de esta matriz
-            if target_rest and target_rest.get("parent_restaurant_id") == main_rest["id"]:
+            if (
+                target_rest
+                and target_rest.get("org_id")
+                and target_rest.get("org_id") == main_rest.get("org_id")
+            ):
                 return target_rest
 
         return main_rest

@@ -958,21 +958,50 @@ async def db_get_restaurant_by_id(restaurant_id: int):
 
 async def db_get_all_restaurants(parent_id: int = None):
     """
-    Si se pasa parent_id, solo devuelve las sucursales de ese padre.
-    Si no, devuelve todos los restaurantes principales.
+    Post-Wave-2: every restaurant is a row in `locations` (the `restaurants`
+    table is a VIEW over locations JOIN organizations). The historical
+    "matriz vs branch" distinction is encoded as `is_primary` on the
+    location row — there is no special "matriz" entity anymore.
+
+    Behaviour preserved for backwards compat:
+      parent_id passed     → return non-primary locations of that org
+                             (the historical "branches of this matriz")
+      parent_id omitted    → return primary locations across all orgs
+                             (the historical "all matrices")
+
+    Each returned dict is enriched with explicit `org_id` and `location_id`
+    so callers do NOT have to depend on the 0034 backfill Matriz invariant
+    (org_id == matriz_location_id), which only holds for orgs that existed
+    at Wave-2 deploy time. NEW orgs created after deploy have independent
+    org_id and location_id integers.
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
         if parent_id:
-            # Solo devuelve hijos reales
+            # Historical "branches of matriz X" → non-primary locations of
+            # the same org. Resolve via the locations table directly so the
+            # query semantics survive when parent_restaurant_id is dropped.
             rows = await conn.fetch(
-                "SELECT * FROM restaurants WHERE parent_restaurant_id = $1 ORDER BY name ASC",
-                parent_id
+                """
+                SELECT r.*, l.org_id, l.id AS location_id
+                FROM restaurants r
+                JOIN locations  l ON l.id = r.id
+                WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $1)
+                  AND l.is_primary = false
+                ORDER BY r.name ASC
+                """,
+                parent_id,
             )
         else:
-            # Devuelve solo los que no tienen padre (Matrices)
+            # Historical "all matrices" → primary locations across all orgs.
             rows = await conn.fetch(
-                "SELECT * FROM restaurants WHERE parent_restaurant_id IS NULL ORDER BY id ASC"
+                """
+                SELECT r.*, l.org_id, l.id AS location_id
+                FROM restaurants r
+                JOIN locations  l ON l.id = r.id
+                WHERE l.is_primary = true
+                ORDER BY l.org_id ASC
+                """
             )
         return [_serialize(dict(r)) for r in rows]
 

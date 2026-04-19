@@ -281,18 +281,22 @@ def test_pos_tables_status_passes_location_id_to_branch_query_and_org_id_to_scop
     db_pending_mock.assert_awaited_once_with(LOCATION_ID)
 
 
-def test_pos_tables_status_falls_back_to_org_id_when_location_id_missing(
+def test_pos_tables_status_fails_fast_when_location_id_missing(
     client, admin_user
 ):
-    """If the restaurant dict somehow lacks location_id (legacy callers,
-    pre-Wave-2 cached sessions), fall back to org_id so we don't crash with
-    None being passed into the SQL filter."""
+    """Post-Wave-2: a restaurant dict without location_id is a programming
+    error (the upstream resolver — db_get_restaurant_by_id or
+    db_get_all_restaurants — must populate it). The route must fail fast
+    instead of silently falling back to org_id (the old "Matriz invariant"
+    crutch) — that fallback gives the wrong sede id for orgs created
+    AFTER Wave-2 deploy where org_id != location_id by design.
+    """
     captured_scope: list = []
     db_get_tables_mock = AsyncMock(return_value=[])
     matriz_no_loc = {
         "id": ORG_ID,
         "org_id": ORG_ID,
-        # location_id intentionally absent
+        # location_id intentionally absent — simulates a misconfigured caller
         "name": "Test", "whatsapp_number": "+57300",
     }
 
@@ -312,6 +316,8 @@ def test_pos_tables_status_falls_back_to_org_id_when_location_id_missing(
         for p in patches:
             p.stop()
 
-    assert resp.status_code == 200, resp.text
-    # Fallback: branch_id == org_id (correct under Matriz invariant)
-    assert db_get_tables_mock.await_args.kwargs.get("branch_id") == ORG_ID
+    assert resp.status_code == 500, (
+        f"Expected 500 (fail-fast on missing location_id), got {resp.status_code}: {resp.text}"
+    )
+    # And critically: the broken filter call must NOT have happened
+    db_get_tables_mock.assert_not_awaited()

@@ -395,8 +395,11 @@ class TestWaiterFlows:
         patch_auth(monkeypatch, role="owner")
         table_row = {"id": "table-1", "name": "Mesa 1", "number": 1, "active": True}
         monkeypatch.setattr(db, "db_get_tables", AsyncMock(return_value=[table_row]))
+        # Wave-2: db_get_restaurant_by_id must return org_id + location_id so the
+        # route resolves the sede id without falling back to the Matriz invariant.
         monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
-            "id": 1, "name": "Test", "parent_restaurant_id": None, "features": {}
+            "id": 1, "org_id": 1, "location_id": 1,
+            "name": "Test", "parent_restaurant_id": None, "features": {}
         }))
 
         session_row = make_row({"table_id": "table-1"})
@@ -1260,7 +1263,8 @@ class TestEndToEndTableFlow:
         table_row = {"id": "t-new", "name": "Mesa 5", "number": 5, "active": True}
         monkeypatch.setattr(db, "db_get_tables", AsyncMock(return_value=[table_row]))
         monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
-            "id": 1, "name": "Test", "parent_restaurant_id": None, "features": {}
+            "id": 1, "org_id": 1, "location_id": 1,
+            "name": "Test", "parent_restaurant_id": None, "features": {}
         }))
 
         conn = AsyncMock()

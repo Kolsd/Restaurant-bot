@@ -101,12 +101,22 @@ def patch_auth(monkeypatch, *, restaurant_id: int = 1,
     any Bearer token is accepted and the given restaurant dict is returned.
 
     Returns the restaurant dict so callers can assert against it.
+
+    Wave-2: the restaurant dict includes BOTH `org_id` (tenant key) and
+    `location_id` (sede id). For Matriz invariant tenants migrated by
+    0034 they happen to share the same integer (restaurant_id), but the
+    keys exist as distinct fields so production code using the new model
+    (`tenant_scope(org_id)` + `db_get_tables(branch_id=location_id)`) works
+    correctly under mock — no implicit "Matriz invariant fallback" needed
+    in the tested code path.
     """
     if features is None:
         features = {}
 
     restaurant = {
         "id":               restaurant_id,
+        "org_id":           restaurant_id,
+        "location_id":      restaurant_id,
         "name":             "Restaurante Test",
         "whatsapp_number":  whatsapp_number,
         "features":         features,
