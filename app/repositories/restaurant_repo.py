@@ -908,6 +908,8 @@ async def db_get_restaurant_by_phone(whatsapp_number: str):
             FROM restaurants r
             JOIN locations l ON l.id = r.id
             WHERE r.whatsapp_number=$1
+            ORDER BY (l.whatsapp_number = $1) DESC NULLS LAST, l.id ASC
+            LIMIT 1
             """,
             _normalize_phone(whatsapp_number.strip()),
         )
@@ -944,7 +946,7 @@ async def db_get_restaurant_by_id(restaurant_id: int):
             FROM restaurants r
             JOIN locations l ON l.id = r.id
             WHERE r.id = $1 OR l.org_id = $1
-            ORDER BY (l.org_id = $1) DESC, l.is_primary DESC
+            ORDER BY (l.org_id = $1) DESC, l.id ASC
             LIMIT 1
             """,
             restaurant_id,
