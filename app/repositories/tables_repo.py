@@ -429,6 +429,7 @@ async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) ->
         "table_name": first.get("table_name", ""),
         "items": all_items,
         "total": float(total),  # JSON boundary
+        "org_id": first.get("org_id"),
     }
 
 

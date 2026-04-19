@@ -300,6 +300,9 @@ def _mock_auth(monkeypatch):
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
+    # Needed for create_checks org_id ownership check (Wave-2)
+    monkeypatch.setattr(db_mod, "db_get_restaurant_by_id",
+                        AsyncMock(return_value={"id": 1, "org_id": 1, "location_id": 1}))
     return db_mod
 
 
@@ -314,6 +317,7 @@ def test_create_checks_endpoint_valida_cantidades(client, monkeypatch):
             "table_name": "Mesa 5",
             "items": [{"name": "Pizza", "price": 45000, "quantity": 2}],
             "total": 90000,
+            "org_id": 1,
         }
     monkeypatch.setattr(db_mod, "db_get_order_ticket_data", mock_ticket_data)
 
@@ -342,6 +346,7 @@ def test_create_checks_endpoint_ok(client, monkeypatch):
             "table_name": "Mesa 5",
             "items": [{"name": "Pizza", "price": 45000, "quantity": 2}],
             "total": 90000,
+            "org_id": 1,
         }
     async def mock_create_checks(base_order_id, checks):
         return [{"id": "BASE-001-CHK-1", "check_number": 1, "total": 90000, "status": "open", "items": []}]

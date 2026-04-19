@@ -988,14 +988,18 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
         key = item["name"].strip().lower()
         available[key] = available.get(key, 0) + int(item.get("quantity", item.get("qty", 1)))
 
-    # Ownership check: ticket must belong to this user's restaurant
-    ticket_restaurant_id = ticket.get("restaurant_id")
-    user_restaurant_id = user.get("restaurant_id") or user.get("branch_id")
-    if ticket_restaurant_id and user_restaurant_id and ticket_restaurant_id != user_restaurant_id:
-        # Allow parent restaurant to access its branches
-        is_parent = not bool(user.get("parent_restaurant_id"))
-        if not is_parent:
-            raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu restaurante")
+    # Ownership check: ticket must belong to this user's org (Wave-2 tenant boundary)
+    ticket_org_id = ticket.get("org_id")
+    user_branch_id = user.get("branch_id") or user.get("restaurant_id")
+    user_org_id = None
+    if user_branch_id:
+        with bypass_tenant_scope("create_checks: resolve user org_id from branch_id"):
+            user_rest = await db.db_get_restaurant_by_id(int(user_branch_id))
+        if user_rest:
+            user_org_id = user_rest.get("org_id")
+    # Fail closed: if either side is unresolvable, deny rather than allow cross-tenant write
+    if ticket_org_id is None or user_org_id is None or ticket_org_id != user_org_id:
+        raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu organización")
 
     # Validar que los checks no excedan las cantidades disponibles
     check_totals: dict[str, int] = {}

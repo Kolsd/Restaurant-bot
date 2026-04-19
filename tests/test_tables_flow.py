@@ -405,6 +405,7 @@ _TICKET = {
     "base_order_id": "MESA-AA3E4A",
     "items": [{"name": "Moñona", "quantity": 1, "price": 25000}],
     "total": 25000,
+    "org_id": 1,
 }
 
 def test_create_checks_success(client, monkeypatch):

@@ -469,7 +469,8 @@ class TestWaiterFlows:
             "items": [
                 {"name": "Pasta", "price": 18000, "quantity": 1},
                 {"name": "Vino", "price": 12000, "quantity": 1},
-            ]
+            ],
+            "org_id": 1,
         }
         monkeypatch.setattr(db, "db_get_order_ticket_data", AsyncMock(return_value=ticket))
         monkeypatch.setattr(db, "db_create_checks", AsyncMock(return_value=[
@@ -496,7 +497,7 @@ class TestWaiterFlows:
     def test_split_check_excess_quantity_rejected(self, client, monkeypatch):
         """Creating checks with more qty than ordered → 400."""
         patch_auth(monkeypatch, role="mesero")
-        ticket = {"items": [{"name": "Pasta", "price": 18000, "quantity": 1}]}
+        ticket = {"items": [{"name": "Pasta", "price": 18000, "quantity": 1}], "org_id": 1}
         monkeypatch.setattr(db, "db_get_order_ticket_data", AsyncMock(return_value=ticket))
 
         resp = client.post(
@@ -1351,7 +1352,8 @@ class TestEndToEndTableFlow:
         """Cashier creates a check for the table's bill."""
         patch_auth(monkeypatch, role="caja")
         ticket = {
-            "items": [{"name": "Lomito", "price": 28000, "quantity": 1}]
+            "items": [{"name": "Lomito", "price": 28000, "quantity": 1}],
+            "org_id": 1,
         }
         monkeypatch.setattr(db, "db_get_order_ticket_data", AsyncMock(return_value=ticket))
         monkeypatch.setattr(db, "db_create_checks", AsyncMock(return_value=[
