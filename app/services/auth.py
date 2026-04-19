@@ -198,19 +198,26 @@ async def login(username: str, password: str) -> dict:
                 raw = restaurant.get("features") or {}
                 features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
         else:
-            all_restaurants = await db.db_get_all_restaurants()
-            for r in all_restaurants:
-                if r["name"].lower().strip() == user["restaurant_name"].lower().strip():
-                    whatsapp_number = r.get("whatsapp_number", "")
-                    branch_id = r.get("id")
-                    raw = r.get("features") or {}
-                    features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
-                    break
-            if not whatsapp_number and all_restaurants:
-                whatsapp_number = all_restaurants[0].get("whatsapp_number", "")
-                branch_id = all_restaurants[0].get("id")
-                raw = all_restaurants[0].get("features") or {}
-                features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
+            # Wave-2: legacy admin login path where the user record has no
+            # branch_id assigned. We look the org up by NAME match against
+            # users.restaurant_name. NO cross-tenant fallback to all_orgs[0]
+            # — that used to silently log the user into a different tenant
+            # if name matching failed (catastrophic in multi-tenant prod).
+            target_name = (user.get("restaurant_name") or "").lower().strip()
+            if target_name:
+                all_orgs = await db.db_get_all_orgs(active_only=False)
+                for o in all_orgs:
+                    if (o.get("name") or "").lower().strip() == target_name:
+                        whatsapp_number = o.get("whatsapp_number", "") or ""
+                        branch_id = o.get("id")
+                        raw = o.get("features") or {}
+                        features = _json.loads(raw) if isinstance(raw, str) else dict(raw)
+                        break
+            # If name match failed: leave branch_id/whatsapp_number empty.
+            # The downstream "if branch_id and org_shape is None" guard returns
+            # a friendly error to the client instead of impersonating another
+            # tenant. Failing the login is correct here — the user record is
+            # genuinely orphaned (no branch_id, no matching org by name).
 
         # Resolve Org via locations table (post-0037, no mapping table)
         if branch_id:

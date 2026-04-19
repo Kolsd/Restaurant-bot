@@ -43,18 +43,24 @@ _STATUS_ROLE_MAP: dict[str, set[str]] = {
 # Keys: notif_wa:{bot_number}:{phone}:{kind}  max 1 per 5 min per worker pool.
 
 async def get_table_wa_number(table: dict) -> str:
+    """Resolve the WhatsApp number to use for a wa.me link from a table dict.
+
+    Wave-2: tables belong to a SPECIFIC sede (branch_id = location_id), and
+    each sede has its own whatsapp_number on the org+location join. We must
+    NOT fall back to "any restaurant globally" — that's cross-tenant data
+    leakage (the link would point to another customer's WhatsApp).
+
+    If branch_id is missing or no restaurant resolves, return empty string —
+    the caller renders the page without a wa.me link rather than with a
+    wrong/cross-tenant one.
+    """
     wa_number = ""
     bid = table.get("branch_id")
     if bid:
         r = await db.db_get_restaurant_by_id(bid)
-        if r: wa_number = r.get("whatsapp_number", "")
-            
-    if not wa_number:
-        all_r = await db.db_get_all_restaurants()
-        if all_r:
-            matriz = next((res for res in all_r if not res.get("parent_restaurant_id")), all_r[0])
-            wa_number = matriz.get("whatsapp_number", "")
-        
+        if r:
+            wa_number = r.get("whatsapp_number", "") or ""
+
     # 🛡️ Limpiamos el sufijo _b para que el enlace wa.me sea válido
     return wa_number.split("_b")[0] if wa_number else ""
 
@@ -73,8 +79,13 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
         r = await db.db_get_restaurant_by_bot_number(session_data["bot_number"])
         if r:
             return r
-    all_r = await db.db_get_all_restaurants()
-    return all_r[0] if all_r else {}
+    # Wave-2: NO cross-tenant fallback. Returning "any restaurant globally"
+    # used to mask resolution failures by happening to point at SOME tenant —
+    # in single-tenant dev that worked; in production it would return another
+    # customer's restaurant dict for a phone we cannot identify. Fail open
+    # with an empty dict; callers (e.g. _farewell_and_nps) already short-circuit
+    # on missing whatsapp_number so this degrades gracefully without leaking.
+    return {}
 
 async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict | None, db_phone_id: str | None, username: str) -> None:
     rest = await _get_restaurant_for_table(table_id, session_data)
@@ -785,18 +796,28 @@ class ManualOrderRequest(BaseModel):
     
 @router.get("/api/pos/menu")
 async def get_pos_menu(request: Request):
-    """Devuelve el menú del restaurante para pintarlo en el POS del mesero"""
+    """Devuelve el menú del restaurante para pintarlo en el POS del mesero.
+
+    Wave-2: the menu lives at the org level (organizations.menu). The wa_number
+    used for the menu lookup must come from the staff's actual sede (resolved
+    via user.branch_id → location.whatsapp_number); we no longer fall back
+    to "any restaurant globally" — that would render another customer's menu
+    in this customer's POS (cross-tenant leak).
+    """
     user = await get_current_user(request)
-    
-    # Buscamos el número de WhatsApp asociado a la sucursal del mesero
+
     wa_number = ""
     if user and user.get("branch_id"):
         r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r: wa_number = r.get("whatsapp_number", "")
+        if r:
+            wa_number = r.get("whatsapp_number", "") or ""
+
     if not wa_number:
-        all_r = await db.db_get_all_restaurants()
-        if all_r: wa_number = all_r[0].get("whatsapp_number", "")
-        
+        # Cannot resolve the staff's sede → return empty menu rather than a
+        # cross-tenant one. The frontend handles {} gracefully (shows
+        # "menu not configured" state) instead of mixing data from another tenant.
+        return {"menu": {}}
+
     menu = await db.db_get_menu(wa_number) or {}
     return {"menu": menu}
 
