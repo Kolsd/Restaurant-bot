@@ -442,9 +442,10 @@ async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = 
             rows = await conn.fetch(
                 """SELECT o.* FROM orders o
                    JOIN restaurants r ON r.whatsapp_number = o.bot_number
+                   JOIN locations l ON l.id = r.id
                    WHERE o.order_type IN ('domicilio', 'recoger')
                      AND o.status = ANY($1)
-                     AND r.id = $2
+                     AND l.org_id = $2
                    ORDER BY o.created_at ASC""",
                 status_list, restaurant_id
             )

@@ -108,7 +108,8 @@ async def compute_weekly_stats(
                            THEN 1 END)                         AS count_previous
             FROM orders o
             JOIN restaurants r ON r.whatsapp_number = o.bot_number
-            WHERE r.id = $1
+            JOIN locations l ON l.id = r.id
+            WHERE l.org_id = $1
               AND o.order_type IN ('domicilio', 'recoger')
               AND o.status = ANY($5)
             """,

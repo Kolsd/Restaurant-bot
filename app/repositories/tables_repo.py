@@ -1299,9 +1299,10 @@ async def db_get_delivery_status_hash_for_restaurant(restaurant_id: int) -> list
             SELECT o.id, o.status
             FROM orders o
             JOIN restaurants r ON r.whatsapp_number = o.bot_number
+            JOIN locations l ON l.id = r.id
             WHERE o.order_type IN ('domicilio', 'recoger')
               AND o.status IN ('pendiente', 'confirmado', 'en_preparacion', 'listo', 'en_camino', 'en_puerta')
-              AND r.id = $1
+              AND l.org_id = $1
             ORDER BY o.id
             """,
             restaurant_id,

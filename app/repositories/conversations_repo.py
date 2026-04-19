@@ -253,16 +253,21 @@ async def db_save_nps_waiting(phone: str, bot_number: str, restaurant_id: int | 
     """
     async with _tenant_connection() as conn:
         if restaurant_id is None:
-            restaurant_id = await conn.fetchval(
-                "SELECT id FROM restaurants WHERE whatsapp_number=$1", bot_number
+            resolved_org_id = await conn.fetchval(
+                """SELECT l.org_id FROM restaurants r
+                   JOIN locations l ON l.id = r.id
+                   WHERE r.whatsapp_number = $1""",
+                bot_number
             )
-            if restaurant_id is None:
-                raise ValueError(f"Cannot resolve restaurant_id for bot_number {bot_number}")
+            if resolved_org_id is None:
+                raise ValueError(f"Cannot resolve org_id for bot_number {bot_number}")
+        else:
+            resolved_org_id = restaurant_id
         await conn.execute("""
             INSERT INTO nps_waiting (phone, bot_number, org_id, created_at)
             VALUES ($1, $2, $3, NOW())
             ON CONFLICT (phone, bot_number) DO UPDATE SET created_at = NOW()
-        """, phone, bot_number, restaurant_id)
+        """, phone, bot_number, resolved_org_id)
 
 
 async def db_get_nps_waiting(phone: str, bot_number: str) -> bool:
@@ -429,8 +434,9 @@ async def db_get_customer_order_history(
             SELECT COUNT(*)
               FROM orders o
               JOIN restaurants r ON r.whatsapp_number = o.bot_number
+              JOIN locations l ON l.id = r.id
              WHERE o.phone        = $1
-               AND r.id           = $2
+               AND l.org_id       = $2
                AND o.created_at  >= NOW() - INTERVAL '90 days'
             """,
             phone,
@@ -452,10 +458,11 @@ async def db_get_customer_order_history(
                     item->>'name'  AS dish_name,
                     o.created_at   AS ordered_at
                 FROM orders o
-                JOIN restaurants r ON r.whatsapp_number = o.bot_number,
+                JOIN restaurants r ON r.whatsapp_number = o.bot_number
+                JOIN locations l ON l.id = r.id,
                 LATERAL jsonb_array_elements(o.items) AS item
                WHERE o.phone        = $1
-                 AND r.id           = $2
+                 AND l.org_id       = $2
                  AND o.created_at  >= NOW() - INTERVAL '90 days'
                  AND item->>'name' IS NOT NULL
             )
