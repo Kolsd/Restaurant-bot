@@ -42,6 +42,48 @@ _STATUS_ROLE_MAP: dict[str, set[str]] = {
 # WA notification rate-limiting moved to Redis via state_store (multi-worker safe).
 # Keys: notif_wa:{bot_number}:{phone}:{kind}  max 1 per 5 min per worker pool.
 
+async def _get_active_session_for_table(table_id: str, org_id: int) -> dict | None:
+    """Return the active table_session row for a table_id (tenant-scoped).
+
+    Requires caller to be inside tenant_scope(org_id) already.
+    Returns None if no active session exists.
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT assigned_staff_id
+               FROM table_sessions
+               WHERE table_id = $1 AND org_id = $2 AND status = 'active'
+               ORDER BY started_at DESC LIMIT 1""",
+            table_id, org_id,
+        )
+    return dict(row) if row else None
+
+
+async def _resolve_mesero(staff_id: str | None, org_id: int) -> dict | None:
+    """Resolve staff name from staff_id UUID (GLOBAL lookup, no tenant scope needed).
+
+    Returns {"name": "...", "first_name": "..."} or None if not found.
+    """
+    if not staff_id:
+        return None
+    try:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT name FROM staff WHERE id = $1::uuid AND org_id = $2",
+                str(staff_id), org_id,
+            )
+        if not row:
+            return None
+        full_name: str = row["name"] or ""
+        first_name = full_name.split()[0] if full_name else full_name
+        return {"name": full_name, "first_name": first_name}
+    except Exception:
+        log.warning("tables.resolve_mesero_error", staff_id=staff_id)
+        return None
+
+
 async def get_table_wa_number(table: dict) -> str:
     """Resolve the WhatsApp number to use for a wa.me link from a table dict.
 
@@ -308,6 +350,23 @@ async def public_menu_context(table_id: str):
         try: features = _json.loads(features)
         except Exception: features = {}
 
+    # ── Table context: active session + assigned mesero ────────────────────
+    table_context = None
+    rid = restaurant.get("id")
+    if rid:
+        try:
+            with tenant_scope(rid):
+                session_row = await _get_active_session_for_table(table_id, rid)
+            if session_row:
+                mesero_info = await _resolve_mesero(session_row.get("assigned_staff_id"), rid)
+                table_context = {
+                    "table_name": table["name"],
+                    "assigned_mesero": mesero_info,
+                }
+        except Exception:
+            from app.services.logging import get_logger as _gl
+            _gl(__name__).warning("public_menu_context.table_context_error", table_id=table_id)
+
     return {
         "table_name": table["name"],
         "wa_url": wa_url,
@@ -318,6 +377,7 @@ async def public_menu_context(table_id: str):
         "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
         "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
         "bot_number": wa_number,
+        "table_context": table_context,
     }
 
 def build_qr_html(menu_url: str, table_name: str, width: int = 300) -> str:

@@ -543,3 +543,316 @@ async def db_live_orders(
         o.pop("_created_at", None)
 
     return {"orders": unified}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Payment status donut
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Status bucket mapping:
+#   paid      — orders.paid = TRUE, or table_checks.status = 'invoiced'
+#   pending   — orders.paid = FALSE and status NOT cancelled/disputed,
+#               or table_checks.status = 'open' / 'pending'
+#   disputed  — orders.status LIKE 'dispute%' / 'reclamacion', or
+#               orders.paid = FALSE and status = 'cancelado'
+#   courtesy  — orders.total = 0 or status = 'cortesia'/'courtesy'
+# Anything unrecognised falls into 'pending'.
+
+def _payment_bucket(paid: bool, status: str, total) -> str:
+    """Map (paid, status, total) to one of: paid / pending / disputed / courtesy."""
+    s = (status or "").strip().lower()
+    t = float(total or 0)
+
+    # Courtesy first: zero-value or explicitly tagged
+    if t == 0 or s in ("cortesia", "courtesy"):
+        return "courtesy"
+    # Disputed
+    if s.startswith("dispute") or s in ("reclamacion", "reclamado"):
+        return "disputed"
+    # Explicit cancelled-unpaid = disputed
+    if not paid and s == "cancelado":
+        return "disputed"
+    # Paid
+    if paid:
+        return "paid"
+    # Everything else is pending
+    return "pending"
+
+
+_PAYMENT_LABELS = {
+    "paid":     "Pagados",
+    "pending":  "Pendientes",
+    "disputed": "Disputa",
+    "courtesy": "Cortesía",
+}
+
+
+async def db_payment_status(
+    org_id: int,
+    period_start: str,
+    period_end: str,
+    location_id: int | None = None,
+) -> dict:
+    """Aggregate payment status buckets for the donut chart.
+
+    Sources:
+      - orders (delivery/pickup): columns paid BOOL + status TEXT + total
+      - table_checks: status 'invoiced'=paid, 'open'/'pending'=pending
+
+    Bucket rules (see _payment_bucket docstring above).
+    Both tables are RLS-protected; caller must be in tenant_scope(org_id).
+    """
+    from datetime import timedelta as _td  # noqa: PLC0415
+
+    ps = _to_date(period_start)
+    d_to_inclusive = _to_date(period_end) + _td(days=1)
+
+    async with _tenant_connection() as conn:
+        if location_id is not None:
+            order_rows = await conn.fetch(
+                """SELECT paid, status, total
+                   FROM orders
+                   WHERE created_at >= $1 AND created_at < $2
+                     AND location_id = $3""",
+                ps, d_to_inclusive, location_id,
+            )
+            check_rows = await conn.fetch(
+                """SELECT tc.status, tc.total
+                   FROM table_checks tc
+                   JOIN table_orders to2 ON to2.id = tc.base_order_id
+                   WHERE tc.created_at >= $1 AND tc.created_at < $2
+                     AND to2.branch_id = $3
+                     AND tc.status != 'cancelled'""",
+                ps, d_to_inclusive, location_id,
+            )
+        else:
+            order_rows = await conn.fetch(
+                """SELECT paid, status, total
+                   FROM orders
+                   WHERE created_at >= $1 AND created_at < $2""",
+                ps, d_to_inclusive,
+            )
+            check_rows = await conn.fetch(
+                """SELECT tc.status, tc.total
+                   FROM table_checks tc
+                   WHERE tc.created_at >= $1 AND tc.created_at < $2
+                     AND tc.status != 'cancelled'""",
+                ps, d_to_inclusive,
+            )
+
+    counts: dict[str, int] = {"paid": 0, "pending": 0, "disputed": 0, "courtesy": 0}
+
+    for row in order_rows:
+        bucket = _payment_bucket(bool(row["paid"]), row["status"], row["total"])
+        counts[bucket] += 1
+
+    for row in check_rows:
+        # table_checks: invoiced = paid, everything else = pending/courtesy
+        s = (row["status"] or "").lower()
+        t = float(row["total"] or 0)
+        if t == 0:
+            counts["courtesy"] += 1
+        elif s == "invoiced":
+            counts["paid"] += 1
+        else:
+            counts["pending"] += 1
+
+    total_count = sum(counts.values())
+    buckets = []
+    for key in ("paid", "pending", "disputed", "courtesy"):
+        c = counts[key]
+        pct = round(c / total_count * 100, 1) if total_count else 0.0
+        buckets.append({
+            "key":   key,
+            "label": _PAYMENT_LABELS[key],
+            "count": c,
+            "pct":   pct,
+        })
+
+    return {
+        "period":      {"start": period_start, "end": period_end},
+        "buckets":     buckets,
+        "total_count": total_count,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Customers at risk (wrap marketing_repo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def db_customers_at_risk(org_id: int, limit: int = 50) -> dict:
+    """Return at-risk frequent customers (dormant >= 21 days, min 3 orders).
+
+    Wraps marketing_repo.get_at_risk_customers and normalises the response
+    shape to match the documented API contract.
+    """
+    from app.repositories.marketing_repo import get_at_risk_customers  # noqa: PLC0415
+
+    limit = max(1, min(200, limit))
+    rows = await get_at_risk_customers(restaurant_id=org_id, limit=limit)
+
+    customers = []
+    for r in rows:
+        customers.append({
+            "phone":        r["customer_phone"],
+            "name":         r["customer_name"],
+            "total_orders": r["total_orders"],
+            "last_seen":    r["last_order_at"],
+            "days_since":   r["days_since"],
+            "total_spent":  r["total_spent"],  # already quantized float (JSON boundary in marketing_repo)
+        })
+
+    return {"count": len(customers), "customers": customers}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Staff performance sparkline
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def db_staff_performance(
+    org_id: int,
+    staff_id: str,
+    weeks: int = 7,
+) -> dict:
+    """Weekly sales totals for a single staff member (mesero/cajero).
+
+    Source: table_orders.waiter_staff_id (added in migration 0039).
+
+    Note: orders table (delivery/pickup) has no direct staff author column,
+    so this metric covers salon table orders only.  Documented intentionally.
+
+    Tenant-scope: staff_id must belong to the current org. Validated by
+    checking staff.org_id = org_id before querying.
+    Returns empty weeks array if staff not found or has no activity.
+    """
+    from datetime import timedelta as _td, date as _date  # noqa: PLC0415
+    from uuid import UUID  # noqa: PLC0415
+
+    weeks = max(1, min(26, weeks))
+
+    # Validate staff_id belongs to org (before any data query)
+    try:
+        _uuid = str(UUID(staff_id))  # validate UUID format
+    except (ValueError, AttributeError):
+        return {"staff_id": staff_id, "staff_name": None, "weeks": []}
+
+    async with _tenant_connection() as conn:
+        staff_row = await conn.fetchrow(
+            "SELECT name FROM staff WHERE id = $1::uuid AND org_id = $2",
+            _uuid, org_id,
+        )
+        if not staff_row:
+            return {"staff_id": staff_id, "staff_name": None, "weeks": []}
+
+        staff_name = staff_row["name"]
+
+        # Compute period: last `weeks` complete/current weeks ending today (Mon-based)
+        today = _date.today()
+        # Start of current week (Monday)
+        days_since_monday = today.weekday()  # 0=Mon
+        current_week_start = today - _td(days=days_since_monday)
+        period_start = current_week_start - _td(weeks=weeks - 1)
+
+        rows = await conn.fetch(
+            """SELECT
+                   DATE_TRUNC('week', created_at AT TIME ZONE 'UTC')::date AS week_start,
+                   COALESCE(SUM(total), 0)::numeric AS sales_total,
+                   COUNT(*)::int AS tickets_count
+               FROM table_orders
+               WHERE waiter_staff_id = $1::uuid
+                 AND org_id = $2
+                 AND created_at >= $3::date
+                 AND status NOT IN ('cancelado')
+               GROUP BY 1
+               ORDER BY 1 ASC""",
+            _uuid, org_id, str(period_start),
+        )
+
+    # Build complete week series (fill gaps with 0)
+    week_map: dict[str, dict] = {}
+    for row in rows:
+        ws = str(row["week_start"])
+        week_map[ws] = {
+            "week_start":    ws,
+            "sales_total":   int(quantize_money(to_decimal(row["sales_total"]))),  # JSON boundary
+            "tickets_count": int(row["tickets_count"]),
+        }
+
+    week_series = []
+    for i in range(weeks):
+        ws = str(current_week_start - _td(weeks=weeks - 1 - i))
+        week_series.append(week_map.get(ws, {
+            "week_start":    ws,
+            "sales_total":   0,
+            "tickets_count": 0,
+        }))
+
+    return {
+        "staff_id":   staff_id,
+        "staff_name": staff_name,
+        "weeks":      week_series,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Tips pool summary
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _current_week_bounds() -> tuple[str, str]:
+    """Return (monday_iso, sunday_iso) for the current week."""
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    sunday = monday + timedelta(days=6)
+    return str(monday), str(sunday)
+
+
+async def db_tips_pool(
+    org_id: int,
+    location_id: int,
+    period_start: str | None,
+    period_end: str | None,
+    branch_id: int | None = None,
+) -> dict:
+    """Summarise the tip pool for a period.
+
+    Wraps staff_repo.db_calculate_tips_by_attendance.
+    Returns top-5 entries_preview, pool_total, entries_count, unallocated.
+    Default period: current week (Mon–Sun).
+    """
+    from app.repositories.staff_repo import db_calculate_tips_by_attendance  # noqa: PLC0415
+
+    if not period_start or not period_end:
+        period_start, period_end = _current_week_bounds()
+
+    result = await db_calculate_tips_by_attendance(
+        restaurant_id=location_id,
+        period_start=period_start,
+        period_end=period_end,
+        branch_id=branch_id,
+    )
+
+    entries = result.get("entries", [])
+    total_tips = float(result.get("total_tips", 0))
+    unallocated = float(result.get("unallocated", 0))
+
+    # Top 5 preview with pct
+    top5 = entries[:5]
+    preview = []
+    for e in top5:
+        tip_amt = float(e.get("total_tips", 0))
+        pct = round(tip_amt / total_tips * 100, 1) if total_tips else 0.0
+        preview.append({
+            "staff_id":  e.get("staff_id"),
+            "name":      e.get("name"),
+            "role":      e.get("role"),
+            "total_tips": tip_amt,
+            "pct":        pct,
+        })
+
+    return {
+        "period":          {"start": period_start, "end": period_end},
+        "pool_total":      total_tips,
+        "entries_count":   len(entries),
+        "entries_preview": preview,
+        "unallocated":     unallocated,
+    }

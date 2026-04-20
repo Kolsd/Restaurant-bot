@@ -589,3 +589,101 @@ async def get_live_orders(
             org_id=org_id,
             limit=limit,
         )
+
+
+# ── DASHBOARD ANALYTICS — TIER 3 ─────────────────────────────────────────────
+
+
+@router.get("/api/stats/payment-status")
+async def get_payment_status(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+):
+    """Payment status donut: paid / pending / disputed / courtesy buckets.
+
+    Aggregates both orders (delivery/pickup) and table_checks (salon).
+    Period defaults to last 7 days when not supplied.
+    """
+    restaurant = await get_current_restaurant(request)
+    ps, pe = stats_repo._default_period(period_start, period_end)
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    org_id = restaurant["id"]
+    loc_id = bid if bid is not None else (
+        restaurant.get("location_id") if branch_id and branch_id not in ("all", "matriz") else None
+    )
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_payment_status(
+            org_id=org_id,
+            period_start=ps,
+            period_end=pe,
+            location_id=loc_id if branch_id else None,
+        )
+
+
+@router.get("/api/stats/customers-at-risk")
+async def get_customers_at_risk(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Frequent customers who haven't ordered in >= 21 days.
+
+    Returns count + customer list with last_seen, days_since, total_spent.
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_customers_at_risk(org_id=org_id, limit=limit)
+
+
+@router.get("/api/stats/staff-performance")
+async def get_staff_performance(
+    request: Request,
+    staff_id: str = Query(..., description="Staff UUID"),
+    weeks: int = Query(7, ge=1, le=26),
+):
+    """Weekly sales sparkline for a single staff member (table_orders only).
+
+    Returns a week series of sales_total + tickets_count.
+    Returns empty weeks array if staff not found or has no activity.
+    Note: delivery orders have no staff author column; salon only.
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_staff_performance(
+            org_id=org_id,
+            staff_id=staff_id,
+            weeks=weeks,
+        )
+
+
+@router.get("/api/stats/tips-pool")
+async def get_tips_pool(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+):
+    """Tip pool summary for a period (default: current week).
+
+    Wraps db_calculate_tips_by_attendance and returns pool_total, top-5
+    entries_preview, and unallocated amount.
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    location_id = restaurant.get("location_id") or restaurant["id"]
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_tips_pool(
+            org_id=org_id,
+            location_id=location_id,
+            period_start=period_start,
+            period_end=period_end,
+            branch_id=bid,
+        )
