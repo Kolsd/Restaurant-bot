@@ -6,7 +6,11 @@ from zoneinfo import ZoneInfo
 from app.services import database as db
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 from app.repositories import reviews_repo as rr, conversations_repo
+from app.repositories import stats_repo
 from app.services.tenant_context import tenant_scope
+from app.services.logging import get_logger
+
+_log = get_logger(__name__)
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -485,3 +489,103 @@ async def get_no_show_rate(
         "no_shows": no_shows,
         "no_show_rate_pct": rate,
     }
+
+
+# ── DASHBOARD ANALYTICS — TIER 2 ─────────────────────────────────────────────
+
+
+@router.get("/api/stats/by-channel")
+async def get_sales_by_channel(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+):
+    """Sales breakdown by channel (WhatsApp Bot, POS, QR, Delivery, etc.).
+
+    Aggregates both `orders` (delivery/pickup) and `table_orders` (salon).
+    Period defaults to the last 7 days if not supplied.
+    """
+    restaurant = await get_current_restaurant(request)
+    ps, pe = stats_repo._default_period(period_start, period_end)
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    org_id = restaurant["id"]
+    # location_id for branch filter = the branch_id header value (sede-level)
+    loc_id = bid if bid is not None else (
+        restaurant.get("location_id") if branch_id and branch_id not in ("all", "matriz") else None
+    )
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_sales_by_channel(
+            org_id=org_id,
+            period_start=ps,
+            period_end=pe,
+            location_id=loc_id if branch_id else None,
+        )
+
+
+@router.get("/api/stats/top-dishes")
+async def get_top_dishes(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+    limit:        int        = Query(10, ge=1, le=50),
+):
+    """Top N dishes by revenue with food cost and margin % for the period.
+
+    Joins JSONB items arrays from both orders and table_orders, enriches with
+    recipe-based food costs and current menu metadata.
+    """
+    restaurant = await get_current_restaurant(request)
+    ps, pe = stats_repo._default_period(period_start, period_end)
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_top_dishes(
+            org_id=org_id,
+            period_start=ps,
+            period_end=pe,
+            limit=limit,
+            location_id=bid,
+        )
+
+
+@router.get("/api/stats/inventory-critical")
+async def get_inventory_critical(
+    request: Request,
+    ok_limit: int = Query(3, ge=0, le=20),
+):
+    """Low-stock ingredients with the dishes they affect.
+
+    Returns `alerts` (critical + warning items) and `ok` (a small sample of
+    healthy items for visual reference in the dashboard card).
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_inventory_critical(
+            org_id=org_id,
+            ok_limit=ok_limit,
+        )
+
+
+@router.get("/api/stats/live-orders")
+async def get_live_orders(
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Unified live feed of active orders: delivery + table, sorted newest-first.
+
+    Intended for dashboard polling (lightweight — does not include full item lists).
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_live_orders(
+            org_id=org_id,
+            limit=limit,
+        )
