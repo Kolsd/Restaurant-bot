@@ -51,8 +51,11 @@
     try {
       const headers = Object.assign({ 'Content-Type': 'application/json' },
         mesioHeaders ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
-      // TODO: replace with actual dish ID when backend exposes it
-      // await fetch('/api/menu/availability', { method: 'PATCH', headers, body: JSON.stringify({ dish: name.textContent, available: input.checked }) });
+      const res = await fetch('/api/menu/availability', {
+        method: 'POST', headers,
+        body: JSON.stringify({ dish_name: name.textContent.trim(), available: input.checked })
+      });
+      if (!res.ok) throw new Error('status ' + res.status);
     } catch (e) {
       // Revert optimistic update on error
       input.checked = !input.checked;
@@ -96,7 +99,7 @@
   async function loadMenu() {
     try {
       const headers = mesioHeaders ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/menu', { headers });
+      const res = await fetch('/api/dashboard/menu', { headers });
       if (res.ok) {
         // Menu data loaded — dish rendering would go here
       }

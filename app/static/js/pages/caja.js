@@ -45,7 +45,7 @@ function _esc(s) {
 // ── Load billing config ──────────────────────────────
 async function _loadBillingConfig() {
   try {
-    const res = await fetch('/api/settings/billing', { headers: _hdr });
+    const res = await fetch('/api/billing/config', { headers: _hdr });
     if (res.ok) _billingConfig = await res.json();
   } catch (_) {}
 }
@@ -53,7 +53,7 @@ async function _loadBillingConfig() {
 // ── Load menu ─────────────────────────────────────────
 async function loadMenu() {
   try {
-    const res = await fetch('/api/menu', { headers: _hdr });
+    const res = await fetch('/api/pos/menu', { headers: _hdr });
     if (!res.ok) return;
     const data = await res.json();
     // data may be {categories: [...]} or {menu: {...}} — normalize
@@ -289,7 +289,7 @@ async function loadQIMMenu() {
   const area = document.getElementById('qim-menu-area');
   if (!area) return;
   try {
-    const res = await fetch('/api/menu', { headers: _hdr });
+    const res = await fetch('/api/pos/menu', { headers: _hdr });
     if (!res.ok) { area.innerHTML = '<div style="padding:20px;color:#999;">Error cargando menú</div>'; return; }
     const data = await res.json();
     let menu = data.menu || data;
@@ -352,11 +352,14 @@ async function sendToKitchen() {
   const table = _activeTables[_activeTableIdx];
   if (!table) { mesioToast('Selecciona una mesa', 'warning'); return; }
   try {
+    const total = _cart.reduce((s, i) => s + i.price * i.qty, 0);
     const body = {
-      table_id: table.id,
+      table_id: String(table.id),
+      table_name: table.name || table.table_name || String(table.id),
       items: _cart.map(i => ({ name: i.name, quantity: i.qty, price: i.price })),
+      total: total,
     };
-    const res = await fetch('/api/table-orders', { method: 'POST', headers: _hdr, body: JSON.stringify(body) });
+    const res = await fetch('/api/pos/order', { method: 'POST', headers: _hdr, body: JSON.stringify(body) });
     if (!res.ok) throw new Error('status ' + res.status);
     mesioToast('✅ Enviado a cocina', 'success');
     _cart = [];
@@ -422,7 +425,7 @@ function _pickupCard(o) {
 
 async function confirmPickup(orderId) {
   try {
-    const res = await fetch(`/api/orders/${orderId}/status`, { method: 'PATCH', headers: _hdr, body: JSON.stringify({ status: 'entregado' }) });
+    const res = await fetch(`/api/orders/${orderId}/status`, { method: 'POST', headers: _hdr, body: JSON.stringify({ status: 'entregado' }) });
     if (res.ok) { mesioToast('Pedido entregado', 'success'); loadPickupOrders(); }
   } catch (_) { mesioToast('Error', 'error'); }
 }

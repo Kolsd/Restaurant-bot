@@ -46,7 +46,7 @@ var STATUS_LABEL = {
 // ── Fetch floor plan ──────────────────────────────────────────────
 async function loadFloorPlan() {
   try {
-    var res = await fetch('/api/floor-plan', { headers: mesioHeaders() });
+    var res = await fetch('/api/tables/floor-plan', { headers: mesioHeaders() });
     if (res.status === 401) { window.location.href = '/login'; return; }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();

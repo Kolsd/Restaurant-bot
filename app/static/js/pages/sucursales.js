@@ -61,13 +61,9 @@
   async function loadLocations(period) {
     try {
       const headers = mesioHeaders ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      // Try org/locations endpoint first, fall back to branches
-      let res = await fetch('/api/org/locations', { headers });
-      if (!res.ok) {
-        res = await fetch('/api/restaurants/branches', { headers });
-      }
+      const res = await fetch('/api/team/branches', { headers });
       if (res.ok) {
-        // Locations data loaded — card rendering would replace static cards
+        // Branches data loaded — card rendering would replace static cards
       }
     } catch (e) {
       // Static placeholder remains

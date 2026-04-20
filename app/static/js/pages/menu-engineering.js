@@ -72,8 +72,10 @@
     try {
       const headers = mesioHeaders ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
       const days = period === '7 días' ? 7 : period === '90 días' ? 90 : 30;
-      // TODO: endpoint GET /api/menu-analytics/engineering?days=N (check menu_analytics_repo)
-      // const res = await fetch('/api/menu-analytics/engineering?days=' + days, { headers });
+      const res = await fetch('/api/menu/analytics?days=' + days, { headers });
+      if (res.ok) {
+        // Engineering data loaded — quadrant rendering would go here
+      }
     } catch (e) {
       // Static placeholder remains
     }

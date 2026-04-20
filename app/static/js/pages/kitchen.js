@@ -209,7 +209,7 @@ async function markListo(orderId) {
 // ── Load orders ───────────────────────────────────────
 async function loadOrders() {
   try {
-    const res = await fetch('/api/kitchen/orders', { headers: _hdr });
+    const res = await fetch('/api/table-orders', { headers: _hdr });
     mesioTrackFetch(res.ok);
     if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error('status'); }
     const data = await res.json();

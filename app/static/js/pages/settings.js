@@ -199,7 +199,7 @@ async function saveSettings() {
   try {
     var payload = collectFormData();
     var res = await fetch('/api/settings', {
-      method: 'PATCH',
+      method: 'POST',
       headers: mesioHeaders(),
       body: JSON.stringify(payload)
     });

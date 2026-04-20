@@ -72,7 +72,7 @@
   async function loadNPS(period) {
     try {
       const headers = mesioHeaders ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/stats/nps', { headers });
+      const res = await fetch('/api/nps/stats', { headers });
       if (res.ok) {
         // NPS data loaded
       }

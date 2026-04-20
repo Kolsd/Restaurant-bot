@@ -57,9 +57,9 @@
   async function loadLoyaltyCustomers() {
     try {
       const headers = mesioHeaders ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/loyalty/customers', { headers });
+      const res = await fetch('/api/loyalty/stats', { headers });
       if (res.ok) {
-        // Loyalty customers loaded
+        // Loyalty stats loaded
       }
     } catch (e) {
       // Static placeholder remains
