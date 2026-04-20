@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Sucursales</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .branch-card { background: #fff; border: 0.5px solid var(--border); border-radius: 12px; padding: 18px 20px; position: relative; overflow: hidden; }
+  .branch-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .branch-logo { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 18px; flex-shrink: 0; }
+  .branch-name { font-size: 15px; font-weight: 600; line-height: 1.2; }
+  .branch-addr { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+  .branch-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px 0; border-top: 0.5px solid var(--border); border-bottom: 0.5px solid var(--border); margin: 14px 0; }
+  .branch-kpi-lbl { font-size: 10.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
+  .branch-kpi-val { font-family: var(--font-display); font-weight: 600; font-size: 20px; letter-spacing: -0.5px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  .cmp-row { display: grid; grid-template-columns: 1.4fr repeat(7, 1fr); gap: 10px; padding: 12px 18px; border-bottom: 0.5px solid var(--border); align-items: center; font-size: 12.5px; }
+  .cmp-row.head { background: #fafaf8; font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+  .cmp-row .num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+
+  .bar-compare { display: inline-block; width: 60px; height: 6px; background: #f0f0e8; border-radius: 2px; overflow: hidden; vertical-align: middle; margin-left: 6px; }
+  .bar-compare > div { height: 100%; background: var(--brand); border-radius: 2px; }
+</style>
+</head>
+<body data-active="sucursales">
+
+<div class="app">
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="dashboard.html" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Sucursales</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg><input placeholder="Buscar…"></div>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Sucursales — La Mesa</div>
+          <div class="page-sub">Vista consolidada de Chapinero, Usaquén y Salitre. Compara rendimiento y replica las mejores prácticas.</div>
+        </div>
+        <div class="row">
+          <div class="seg">
+            <button class="seg-btn">Hoy</button>
+            <button class="seg-btn active">7 días</button>
+            <button class="seg-btn">Mes</button>
+          </div>
+          <button class="btn primary">+ Nueva sucursal</button>
+        </div>
+      </div>
+
+      <!-- Consolidated banner -->
+      <div style="background: linear-gradient(135deg, #1a2e1f 0%, #0F2F23 100%); color: #fff; border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; position: relative; overflow: hidden;">
+        <div style="position:absolute; top:-60px; right:-60px; width:200px; height:200px; background: radial-gradient(circle, rgba(29,158,117,0.3), transparent 70%);"></div>
+        <div style="font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; font-weight: 500;">Consolidado · 3 sucursales · 7 días</div>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-top: 12px;">
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 38px; letter-spacing: -1.5px; line-height: 1;">$142.8M</div>
+            <div style="font-size: 11.5px; opacity: 0.8; margin-top: 4px;">Ventas totales</div>
+          </div>
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 38px; letter-spacing: -1.5px; line-height: 1;">8.964</div>
+            <div style="font-size: 11.5px; opacity: 0.8; margin-top: 4px;">Tickets</div>
+          </div>
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 38px; letter-spacing: -1.5px; line-height: 1;">4.7 ★</div>
+            <div style="font-size: 11.5px; opacity: 0.8; margin-top: 4px;">NPS promedio</div>
+          </div>
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 38px; letter-spacing: -1.5px; line-height: 1;">62</div>
+            <div style="font-size: 11.5px; opacity: 0.8; margin-top: 4px;">Empleados</div>
+          </div>
+          <div>
+            <div style="font-family: var(--font-display); font-weight: 600; font-size: 38px; letter-spacing: -1.5px; line-height: 1; color: var(--brand);">+18.4%</div>
+            <div style="font-size: 11.5px; opacity: 0.8; margin-top: 4px;">Crecimiento YoY</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Branch cards -->
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;">
+        <div class="branch-card">
+          <div class="branch-head">
+            <div class="branch-logo" style="background: linear-gradient(135deg, #1D9E75, #0F6E56);">LM</div>
+            <div style="flex: 1;">
+              <div class="branch-name">Chapinero <span class="badge success" style="margin-left: 4px;">Principal</span></div>
+              <div class="branch-addr">Cra 13 #67-40 · 18 mesas</div>
+            </div>
+            <span class="dot live" title="Abierto"></span>
+          </div>
+          <div class="branch-kpis">
+            <div><div class="branch-kpi-lbl">Ventas 7d</div><div class="branch-kpi-val">$58.2M</div></div>
+            <div><div class="branch-kpi-lbl">Tickets</div><div class="branch-kpi-val">3.284</div></div>
+            <div><div class="branch-kpi-lbl">Ticket ø</div><div class="branch-kpi-val">$17.7k</div></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 7px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Ocupación promedio</span><span style="font-weight: 500;">76%</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">NPS</span><span style="font-weight: 500; color: var(--brand);">74</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Food cost</span><span style="font-weight: 500;">28.4%</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Staff</span><span style="font-weight: 500;">24</span></div>
+          </div>
+          <div style="margin-top: 14px; display: flex; gap: 6px;">
+            <button class="btn sm" style="flex: 1;">Dashboard</button>
+            <button class="btn sm ghost">⚙</button>
+          </div>
+        </div>
+
+        <div class="branch-card">
+          <div class="branch-head">
+            <div class="branch-logo" style="background: linear-gradient(135deg, #F59E0B, #B45309);">LM</div>
+            <div style="flex: 1;">
+              <div class="branch-name">Usaquén</div>
+              <div class="branch-addr">Cl 118 #15-22 · 14 mesas</div>
+            </div>
+            <span class="dot live"></span>
+          </div>
+          <div class="branch-kpis">
+            <div><div class="branch-kpi-lbl">Ventas 7d</div><div class="branch-kpi-val">$48.6M</div></div>
+            <div><div class="branch-kpi-lbl">Tickets</div><div class="branch-kpi-val">2.812</div></div>
+            <div><div class="branch-kpi-lbl">Ticket ø</div><div class="branch-kpi-val">$17.3k</div></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 7px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Ocupación promedio</span><span style="font-weight: 500;">68%</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">NPS</span><span style="font-weight: 500; color: var(--brand);">70</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Food cost</span><span style="font-weight: 500; color: var(--warning-text);">30.2%</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Staff</span><span style="font-weight: 500;">22</span></div>
+          </div>
+          <div style="margin-top: 14px; display: flex; gap: 6px;">
+            <button class="btn sm" style="flex: 1;">Dashboard</button>
+            <button class="btn sm ghost">⚙</button>
+          </div>
+        </div>
+
+        <div class="branch-card">
+          <div class="branch-head">
+            <div class="branch-logo" style="background: linear-gradient(135deg, #3B82F6, #1D4ED8);">LM</div>
+            <div style="flex: 1;">
+              <div class="branch-name">Salitre</div>
+              <div class="branch-addr">Av. La Esperanza #68-40 · 12 mesas</div>
+            </div>
+            <span class="dot live"></span>
+          </div>
+          <div class="branch-kpis">
+            <div><div class="branch-kpi-lbl">Ventas 7d</div><div class="branch-kpi-val">$36.0M</div></div>
+            <div><div class="branch-kpi-lbl">Tickets</div><div class="branch-kpi-val">2.168</div></div>
+            <div><div class="branch-kpi-lbl">Ticket ø</div><div class="branch-kpi-val">$16.6k</div></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 7px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Ocupación promedio</span><span style="font-weight: 500;">62%</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">NPS</span><span style="font-weight: 500;">68</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Food cost</span><span style="font-weight: 500;">27.8%</span></div>
+            <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-3);">Staff</span><span style="font-weight: 500;">16</span></div>
+          </div>
+          <div style="margin-top: 14px; display: flex; gap: 6px;">
+            <button class="btn sm" style="flex: 1;">Dashboard</button>
+            <button class="btn sm ghost">⚙</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI insight -->
+      <div style="background: linear-gradient(135deg, #fdfdf9 0%, #f0faf5 100%); border: 0.5px solid var(--border); border-left: 2px solid var(--brand); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--brand-dark); margin-bottom: 8px;"><span class="ai-spark"></span> Benchmark Mesio IA</div>
+        <div style="font-size: 13px; color: var(--text); line-height: 1.6;">
+          <strong>Chapinero</strong> lidera en NPS y ticket promedio — su protocolo de bienvenida al mesero está ausente en Usaquén. <strong>Usaquén</strong> tiene food cost 1.8pts sobre meta: causa principal identificada, merma de papa criolla 12% (vs 6% promedio). <strong>Salitre</strong> crece 32% YoY pero sub-utiliza su capacidad de salón entre 2–6 PM: oportunidad para <em>happy hour</em> dirigido a oficinistas.
+        </div>
+      </div>
+
+      <!-- Comparison table -->
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Comparativo de indicadores</div>
+            <div class="card-sub">KPIs normalizados · últimos 7 días</div>
+          </div>
+          <button class="btn sm ghost">Exportar</button>
+        </div>
+        <div class="cmp-row head">
+          <div>Indicador</div>
+          <div class="num">Chapinero</div>
+          <div class="num">Usaquén</div>
+          <div class="num">Salitre</div>
+          <div class="num">Promedio</div>
+          <div class="num">Top</div>
+          <div class="num">Meta</div>
+          <div class="num">vs meta</div>
+        </div>
+        <div class="cmp-row">
+          <div>Ventas diarias promedio</div>
+          <div class="num">$8.31M<div class="bar-compare" style="width: 40px;"><div style="width:100%;"></div></div></div>
+          <div class="num">$6.94M<div class="bar-compare" style="width: 40px;"><div style="width:84%;"></div></div></div>
+          <div class="num">$5.14M<div class="bar-compare" style="width: 40px;"><div style="width:62%;"></div></div></div>
+          <div class="num">$6.80M</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Chap.</div>
+          <div class="num" style="color: var(--text-3);">$6.50M</div>
+          <div class="num" style="color: var(--brand);">+4.6%</div>
+        </div>
+        <div class="cmp-row">
+          <div>Ticket promedio</div>
+          <div class="num">$17.7k<div class="bar-compare" style="width: 40px;"><div style="width:100%;"></div></div></div>
+          <div class="num">$17.3k<div class="bar-compare" style="width: 40px;"><div style="width:98%;"></div></div></div>
+          <div class="num">$16.6k<div class="bar-compare" style="width: 40px;"><div style="width:94%;"></div></div></div>
+          <div class="num">$17.2k</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Chap.</div>
+          <div class="num" style="color: var(--text-3);">$16k</div>
+          <div class="num" style="color: var(--brand);">+7.5%</div>
+        </div>
+        <div class="cmp-row">
+          <div>Rotación mesas / día</div>
+          <div class="num">2.8×</div>
+          <div class="num">2.4×</div>
+          <div class="num">2.1×</div>
+          <div class="num">2.4×</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Chap.</div>
+          <div class="num" style="color: var(--text-3);">2.5×</div>
+          <div class="num" style="color: var(--warning-text);">−4%</div>
+        </div>
+        <div class="cmp-row">
+          <div>NPS</div>
+          <div class="num" style="color: var(--brand);">74</div>
+          <div class="num">70</div>
+          <div class="num">68</div>
+          <div class="num">70.7</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Chap.</div>
+          <div class="num" style="color: var(--text-3);">65</div>
+          <div class="num" style="color: var(--brand);">+8.8%</div>
+        </div>
+        <div class="cmp-row">
+          <div>Food cost %</div>
+          <div class="num">28.4%</div>
+          <div class="num" style="color: var(--warning-text);">30.2%</div>
+          <div class="num" style="color: var(--brand);">27.8%</div>
+          <div class="num">28.8%</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Salitre</div>
+          <div class="num" style="color: var(--text-3);">≤28%</div>
+          <div class="num" style="color: var(--warning-text);">+2.8%</div>
+        </div>
+        <div class="cmp-row">
+          <div>Costo nómina / ventas</div>
+          <div class="num" style="color: var(--brand);">22.1%</div>
+          <div class="num">24.2%</div>
+          <div class="num">24.8%</div>
+          <div class="num">23.7%</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Chap.</div>
+          <div class="num" style="color: var(--text-3);">≤25%</div>
+          <div class="num" style="color: var(--brand);">−5.2%</div>
+        </div>
+        <div class="cmp-row">
+          <div>Tasa de reserva confirmada</div>
+          <div class="num">94%</div>
+          <div class="num">91%</div>
+          <div class="num">86%</div>
+          <div class="num">90.3%</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Chap.</div>
+          <div class="num" style="color: var(--text-3);">90%</div>
+          <div class="num" style="color: var(--brand);">+0.3%</div>
+        </div>
+        <div class="cmp-row">
+          <div>No-show rate</div>
+          <div class="num" style="color: var(--brand);">4.2%</div>
+          <div class="num">6.1%</div>
+          <div class="num">7.8%</div>
+          <div class="num">6.0%</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Chap.</div>
+          <div class="num" style="color: var(--text-3);">≤7%</div>
+          <div class="num" style="color: var(--brand);">−14%</div>
+        </div>
+        <div class="cmp-row">
+          <div>Rotación de personal (12m)</div>
+          <div class="num">12%</div>
+          <div class="num" style="color: var(--brand);">8%</div>
+          <div class="num">18%</div>
+          <div class="num">12.7%</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Usaquén</div>
+          <div class="num" style="color: var(--text-3);">≤15%</div>
+          <div class="num" style="color: var(--brand);">−15%</div>
+        </div>
+        <div class="cmp-row" style="border-bottom: none;">
+          <div>Crecimiento YoY</div>
+          <div class="num" style="color: var(--brand);">+18%</div>
+          <div class="num">+14%</div>
+          <div class="num" style="color: var(--brand);">+32%</div>
+          <div class="num">+21%</div>
+          <div class="num" style="color: var(--brand); font-weight: 600;">Salitre</div>
+          <div class="num" style="color: var(--text-3);">+15%</div>
+          <div class="num" style="color: var(--brand);">+40%</div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<script src="sidebar.js"></script>
+</body>
+</html>

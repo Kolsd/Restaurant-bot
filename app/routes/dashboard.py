@@ -151,6 +151,12 @@ async def staff_hq_page():
     p = STATIC / "html" / "staff-hq.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
+@router.get("/staff-clock", response_class=HTMLResponse)
+async def staff_clock_page():
+    """Alias of /staff-hq for the new design naming convention."""
+    p = STATIC / "html" / "staff-hq.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Staff Clock no disponible</h1>", status_code=404)
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page():
     p = STATIC / "html" / "settings.html"
@@ -165,6 +171,51 @@ async def floorplan_page():
 async def equipo_page():
     p = STATIC / "html" / "equipo.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Equipo no disponible</h1>", status_code=404)
+
+@router.get("/pedidos", response_class=HTMLResponse)
+async def pedidos_page():
+    p = STATIC / "html" / "pedidos.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Pedidos no disponible</h1>", status_code=404)
+
+@router.get("/reservaciones", response_class=HTMLResponse)
+async def reservaciones_page():
+    p = STATIC / "html" / "reservaciones.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Reservaciones no disponible</h1>", status_code=404)
+
+@router.get("/menu-admin", response_class=HTMLResponse)
+async def menu_admin_page():
+    p = STATIC / "html" / "menu-admin.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Menu Admin no disponible</h1>", status_code=404)
+
+@router.get("/menu-engineering", response_class=HTMLResponse)
+async def menu_engineering_page():
+    p = STATIC / "html" / "menu-engineering.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Menu Engineering no disponible</h1>", status_code=404)
+
+@router.get("/nps", response_class=HTMLResponse)
+async def nps_page():
+    p = STATIC / "html" / "nps.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>NPS no disponible</h1>", status_code=404)
+
+@router.get("/fidelizacion", response_class=HTMLResponse)
+async def fidelizacion_page():
+    p = STATIC / "html" / "fidelizacion.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Fidelización no disponible</h1>", status_code=404)
+
+@router.get("/clientes-riesgo", response_class=HTMLResponse)
+async def clientes_riesgo_page():
+    p = STATIC / "html" / "clientes-riesgo.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Clientes en riesgo no disponible</h1>", status_code=404)
+
+@router.get("/nomina", response_class=HTMLResponse)
+async def nomina_page():
+    p = STATIC / "html" / "nomina.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Nómina no disponible</h1>", status_code=404)
+
+@router.get("/sucursales", response_class=HTMLResponse)
+async def sucursales_page():
+    p = STATIC / "html" / "sucursales.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Sucursales no disponible</h1>", status_code=404)
 
 
 # ── PUBLIC APIs ───────────────────────────────────────────────────────

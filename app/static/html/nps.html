@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — NPS &amp; Reseñas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/nps.css">
+</head>
+<body data-active="nps">
+
+<div class="app">
+  <aside class="sidebar" data-active="nps"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="/dashboard" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">NPS &amp; Reseñas</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+          <input id="search-input" placeholder="Buscar reseña&hellip;" aria-label="Buscar reseña">
+        </div>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">NPS &amp; Reseñas</div>
+          <div class="page-sub">Mesio consolida Google, TripAdvisor, WhatsApp y encuestas post-consumo. Responde desde un solo lugar.</div>
+        </div>
+        <div class="row">
+          <div class="seg">
+            <button class="seg-btn" data-days="7">7d</button>
+            <button class="seg-btn active" data-days="30">30d</button>
+            <button class="seg-btn" data-days="90">90d</button>
+            <button class="seg-btn" data-days="365">1a</button>
+          </div>
+          <button class="btn" id="btn-send-survey">Enviar encuesta</button>
+        </div>
+      </div>
+
+      <!-- NPS hero -->
+      <div class="nps-hero">
+        <div>
+          <div class="nps-section-label">NPS actual</div>
+          <div class="score-big" id="nps-score">72</div>
+          <div class="metric-sub metric-delta up" style="margin-top: 4px;">&#9650; 8 pts vs mes anterior</div>
+          <div class="score-ring" title="Distribución NPS">
+            <div style="flex: 0 0 76%; background: var(--brand);"></div>
+            <div style="flex: 0 0 16%; background: var(--warning);"></div>
+            <div style="flex: 0 0 8%; background: var(--danger);"></div>
+          </div>
+          <div class="score-ring-labels">
+            <span id="nps-promoters">76% promo.</span>
+            <span id="nps-passives">16% pas.</span>
+            <span id="nps-detractors">8% detr.</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="nps-section-label" style="margin-bottom: 8px;">Estrellas por canal</div>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div class="channel-row">
+              <span class="source-chip source-google">Google</span>
+              <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+              <span class="channel-score">4.8</span>
+              <span class="channel-count">284 reseñas</span>
+            </div>
+            <div class="channel-row">
+              <span class="source-chip source-tripadvisor">TripAdvisor</span>
+              <div class="stars">&#9733;&#9733;&#9733;&#9733;<span class="off">&#9733;</span></div>
+              <span class="channel-score">4.5</span>
+              <span class="channel-count">88 reseñas</span>
+            </div>
+            <div class="channel-row">
+              <span class="source-chip source-internal">Encuestas</span>
+              <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+              <span class="channel-score">4.7</span>
+              <span class="channel-count">412 respuestas</span>
+            </div>
+            <div class="channel-row">
+              <span class="source-chip source-wa">WhatsApp</span>
+              <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+              <span class="channel-score">4.6</span>
+              <span class="channel-count">168 respuestas</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="nps-section-label" style="margin-bottom: 8px;">Distribución de puntajes &middot; 412 resp.</div>
+          <div class="bar-chart">
+            <div class="bar-row"><span class="lbl">&#9733;&#9733;&#9733;&#9733;&#9733;</span><div class="track"><div class="fill" style="width: 78%;"></div></div><span class="num">322</span></div>
+            <div class="bar-row"><span class="lbl">&#9733;&#9733;&#9733;&#9733;</span><div class="track"><div class="fill" style="width: 14%;"></div></div><span class="num">58</span></div>
+            <div class="bar-row"><span class="lbl">&#9733;&#9733;&#9733;</span><div class="track"><div class="fill warn" style="width: 5%;"></div></div><span class="num">19</span></div>
+            <div class="bar-row"><span class="lbl">&#9733;&#9733;</span><div class="track"><div class="fill danger" style="width: 2%;"></div></div><span class="num">8</span></div>
+            <div class="bar-row"><span class="lbl">&#9733;</span><div class="track"><div class="fill danger" style="width: 1%;"></div></div><span class="num">5</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI themes + response status -->
+      <div class="g-2" style="margin-bottom: 16px;">
+        <div class="card">
+          <div class="ai-label" style="margin-bottom: 12px;"><span class="ai-spark"></span> Temas detectados &middot; Mesio IA</div>
+          <div style="font-size: 12.5px; color: var(--text-2); margin-bottom: 12px; line-height: 1.5;">Análisis semántico de 412 reseñas del último mes. Las menciones positivas duplican a las negativas.</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="theme-chip pos">Ajiaco <b>+84</b></span>
+            <span class="theme-chip pos">Servicio atento <b>+67</b></span>
+            <span class="theme-chip pos">Ambiente familiar <b>+58</b></span>
+            <span class="theme-chip pos">Limonada hierbabuena <b>+42</b></span>
+            <span class="theme-chip pos">Bandeja paisa <b>+38</b></span>
+            <span class="theme-chip pos">Relación calidad-precio <b>+29</b></span>
+            <span class="theme-chip neg">Tiempo de espera <b>-18</b></span>
+            <span class="theme-chip neg">Parqueadero <b>-12</b></span>
+            <span class="theme-chip neg">Volumen música <b>-7</b></span>
+            <span class="theme-chip neg">Temperatura bebidas <b>-4</b></span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="row" style="margin-bottom: 10px;">
+            <div>
+              <div style="font-size: 13px; font-weight: 600;">Estado de respuestas</div>
+              <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Mesio IA responde automáticamente las 5&#9733;; las otras requieren tu atención.</div>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px;">
+            <div class="resp-stat-card brand">
+              <div class="resp-stat-label">Respondidas</div>
+              <div class="resp-stat-value brand">387</div>
+              <div class="resp-stat-sub">94% &middot; auto IA</div>
+            </div>
+            <div class="resp-stat-card warn">
+              <div class="resp-stat-label">Pendientes</div>
+              <div class="resp-stat-value warn">19</div>
+              <div class="resp-stat-sub">Revisa manualmente</div>
+            </div>
+            <div class="resp-stat-card danger">
+              <div class="resp-stat-label">Urgentes</div>
+              <div class="resp-stat-value danger">6</div>
+              <div class="resp-stat-sub">1-2&#9733; sin respuesta</div>
+            </div>
+          </div>
+          <div class="resp-time-footer">Tiempo medio de respuesta: <b style="color: var(--text);">3h 42min</b> &middot; Mesio IA responde en <b style="color: var(--brand);">8 seg</b></div>
+        </div>
+      </div>
+
+      <!-- Filters + feed -->
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Feed unificado</div>
+            <div class="card-sub">Todas las reseñas y respuestas, ordenadas por fecha</div>
+          </div>
+          <div class="row">
+            <div class="seg">
+              <button class="seg-btn active" data-feed-filter="all">Todas</button>
+              <button class="seg-btn" data-feed-filter="pending">Pendientes</button>
+              <button class="seg-btn" data-feed-filter="urgent">Urgentes</button>
+              <button class="seg-btn" data-feed-filter="5star">5&#9733;</button>
+              <button class="seg-btn" data-feed-filter="low">1-3&#9733;</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="reviews-feed">
+          <div class="review" data-status="responded">
+            <div class="rev-avatar" style="background: #FDE8CE; color: #BA7517;">MR</div>
+            <div>
+              <div class="rev-name">María Rodríguez</div>
+              <div class="rev-sub">
+                <span class="source-chip source-google">Google</span>
+                <span class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                <span>&middot; hace 2h</span>
+              </div>
+              <div class="rev-body">Mejor ajiaco que he probado en Bogotá. El servicio de Andrés fue impecable y la sopa venía bien caliente. Recomendadísimo para llevar a la familia — mi mamá que vive en el exterior se enamoró del lugar.</div>
+              <div class="rev-reply">
+                <div class="rev-reply-head">&#8627; Respuesta automática &middot; Mesio IA &middot; hace 1h</div>
+                ¡Gracias, María! Nos alegra muchísimo que tú y tu mamá hayan disfrutado el ajiaco. Un abrazo desde La Mesa — los esperamos pronto.
+              </div>
+            </div>
+            <span class="badge success">Respondida</span>
+          </div>
+
+          <div class="review" data-status="urgent">
+            <div class="rev-avatar" style="background: #DBEAFE; color: #1E40AF;">DC</div>
+            <div>
+              <div class="rev-name">Diego Cárdenas</div>
+              <div class="rev-sub">
+                <span class="source-chip source-tripadvisor">TripAdvisor</span>
+                <span class="stars">&#9733;&#9733;<span class="off">&#9733;&#9733;&#9733;</span></span>
+                <span>&middot; hace 5h</span>
+              </div>
+              <div class="rev-body">La comida muy bien, pero esperamos casi 50 minutos por la bandeja paisa un sábado a la 1pm. No había reserva pero tampoco vi que estuviera lleno. Tiempos de cocina deberían mejorar.</div>
+              <div class="rev-actions">
+                <button class="btn sm primary" data-action="suggest">&#10024; Sugerir respuesta</button>
+                <button class="btn sm ghost" data-action="reply">Responder manual</button>
+                <button class="btn sm ghost" data-action="assign">Asignar a&hellip;</button>
+              </div>
+            </div>
+            <span class="badge warn">Urgente</span>
+          </div>
+
+          <div class="review" data-status="responded">
+            <div class="rev-avatar" style="background: #EDE9FE; color: #5B21B6;">JV</div>
+            <div>
+              <div class="rev-name">Juliana Vargas</div>
+              <div class="rev-sub">
+                <span class="source-chip source-internal">Encuesta post</span>
+                <span class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                <span>&middot; hace 8h</span>
+                <span class="badge">NPS 10/10</span>
+              </div>
+              <div class="rev-body">La limonada de hierbabuena es adictiva. Además el bot de WhatsApp me recordó mi reserva y me reconoció como cliente frecuente — me sentí súper especial. 10 de 10.</div>
+              <div class="rev-reply">
+                <div class="rev-reply-head">&#8627; Respuesta automática &middot; Mesio IA &middot; hace 8h</div>
+                ¡Juliana, qué alegría leerte! La limonada es orgullo de la casa. Nos vemos pronto en tu mesa habitual.
+              </div>
+            </div>
+            <span class="badge success">Respondida</span>
+          </div>
+
+          <div class="review" data-status="urgent">
+            <div class="rev-avatar" style="background: #FEE2E2; color: #991B1B;">RG</div>
+            <div>
+              <div class="rev-name">Roberto G.</div>
+              <div class="rev-sub">
+                <span class="source-chip source-google">Google</span>
+                <span class="stars">&#9733;<span class="off">&#9733;&#9733;&#9733;&#9733;</span></span>
+                <span>&middot; ayer 18:24</span>
+              </div>
+              <div class="rev-body">Llegamos con reserva para 6, nos dieron una mesa para 4 y nos hicieron esperar 25 min por sillas adicionales. La cuenta además tuvo un error de $34k que tocó discutir. Mala experiencia para una primera visita.</div>
+              <div class="rev-actions">
+                <button class="btn sm primary" data-action="suggest">&#10024; Sugerir respuesta</button>
+                <button class="btn sm ghost" data-action="compensate">Compensar cliente</button>
+                <button class="btn sm ghost" data-action="escalate">Escalar a Carolina</button>
+              </div>
+            </div>
+            <span class="badge danger">Urgente &middot; 1&#9733;</span>
+          </div>
+
+          <div class="review" data-status="responded">
+            <div class="rev-avatar" style="background: #DCFCE7; color: #166534;">PM</div>
+            <div>
+              <div class="rev-name">Paola Moreno</div>
+              <div class="rev-sub">
+                <span class="source-chip source-wa">WhatsApp</span>
+                <span class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                <span>&middot; ayer 14:02</span>
+              </div>
+              <div class="rev-body">El domiciliario llegó antes del tiempo prometido. Comida caliente, empacada impecable. Carlos muy amable.</div>
+              <div class="rev-reply">
+                <div class="rev-reply-head">&#8627; Respuesta automática &middot; Mesio IA &middot; ayer 14:05</div>
+                ¡Gracias Paola! Carlos se va a poner feliz con tu comentario. Cuando quieras repetir, estamos a un mensaje.
+              </div>
+            </div>
+            <span class="badge success">Respondida</span>
+          </div>
+
+          <div class="review" data-status="pending">
+            <div class="rev-avatar" style="background: #F3E8FF; color: #6B21A8;">AL</div>
+            <div>
+              <div class="rev-name">Andrea L.</div>
+              <div class="rev-sub">
+                <span class="source-chip source-google">Google</span>
+                <span class="stars">&#9733;&#9733;&#9733;<span class="off">&#9733;&#9733;</span></span>
+                <span>&middot; ayer 12:18</span>
+              </div>
+              <div class="rev-body">La comida rica, pero la música estaba muy alta y no pudimos conversar. Por favor bajarla un poco los sábados al mediodía que vamos con niños.</div>
+              <div class="rev-actions">
+                <button class="btn sm primary" data-action="suggest">&#10024; Sugerir respuesta</button>
+                <button class="btn sm ghost" data-action="reply">Responder manual</button>
+              </div>
+            </div>
+            <span class="badge warn">Pendiente</span>
+          </div>
+
+          <div class="review" style="border-bottom: none;" data-status="responded">
+            <div class="rev-avatar" style="background: #FEF3C7; color: #92400E;">SM</div>
+            <div>
+              <div class="rev-name">Sebastián Mora</div>
+              <div class="rev-sub">
+                <span class="source-chip source-internal">Encuesta post</span>
+                <span class="stars">&#9733;&#9733;&#9733;&#9733;<span class="off">&#9733;</span></span>
+                <span>&middot; hace 2d</span>
+                <span class="badge">NPS 9/10</span>
+              </div>
+              <div class="rev-body">Me encanta el menú y la atención, pero el parqueadero del local es complicado. Si tuvieran un convenio con el parqueadero de al lado sería perfecto.</div>
+              <div class="rev-reply">
+                <div class="rev-reply-head">&#8627; Respuesta automática &middot; Mesio IA &middot; hace 2d</div>
+                Sebastián, gracias por la retroalimentación. Tomamos nota del tema del parqueadero — estamos trabajando en una alianza con el parqueadero adyacente. Te avisamos cuando salga.
+              </div>
+            </div>
+            <span class="badge success">Respondida</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
+<script src="/static/js/pages/nps.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+/* ── Fidelización page ───────────────────────────────────────────── */
+.tier-card { position: relative; border-radius: 12px; padding: 18px 20px; color: #fff; overflow: hidden; min-height: 160px; display: flex; flex-direction: column; }
+.tier-card.bronze { background: linear-gradient(135deg, #A97442, #6B4226); }
+.tier-card.silver { background: linear-gradient(135deg, #9CA3AF, #4B5563); }
+.tier-card.gold { background: linear-gradient(135deg, #E0A830, #A96E15); }
+.tier-card.platinum { background: linear-gradient(135deg, #1E293B, #0F172A); }
+.tier-card::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at top right, rgba(255,255,255,0.15), transparent 60%); pointer-events: none; }
+.tier-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.8; font-weight: 500; }
+.tier-val { font-family: var(--font-display); font-weight: 600; font-size: 36px; letter-spacing: -1px; line-height: 1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.tier-sub { font-size: 11.5px; opacity: 0.8; margin-top: 4px; }
+.tier-info { font-size: 11px; opacity: 0.85; line-height: 1.5; margin-top: auto; padding-top: 12px; border-top: 0.5px solid rgba(255,255,255,0.2); }
+
+.funnel-step { display: grid; grid-template-columns: 120px 1fr 80px 60px; gap: 14px; align-items: center; padding: 10px 0; }
+.funnel-label { font-size: 13px; font-weight: 500; }
+.funnel-sub { font-size: 11.5px; color: var(--text-3); }
+.funnel-track { height: 24px; background: #f0f0e8; border-radius: 4px; position: relative; overflow: hidden; }
+.funnel-fill { height: 100%; background: linear-gradient(90deg, var(--brand), var(--brand-dark)); border-radius: 4px; display: flex; align-items: center; padding: 0 10px; font-size: 11.5px; color: #fff; font-weight: 500; }
+.funnel-num { font-family: var(--font-display); font-weight: 600; font-size: 16px; text-align: right; font-variant-numeric: tabular-nums; }
+.funnel-pct { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); text-align: right; }
+
+.camp-row { display: grid; grid-template-columns: 1fr 160px 120px 120px 120px 80px; gap: 12px; padding: 12px 18px; border-bottom: 0.5px solid var(--border); align-items: center; font-size: 13px; }
+.camp-row.head { background: #fafaf8; font-size: 11.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+.camp-row:hover { background: #fafaf8; }
+.camp-row.head:hover { background: #fafaf8; }
+
+.seg-card { padding: 14px 16px; border: 0.5px solid var(--border); border-radius: 10px; background: #fff; cursor: pointer; transition: border-color .12s; }
+.seg-card:hover { border-color: var(--border-strong); }
+.seg-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.seg-card-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+
+.toggle { position: relative; display: inline-block; width: 32px; height: 18px; cursor: pointer; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; inset: 0; background: #d8d8d0; border-radius: 10px; transition: .15s; }
+.toggle-slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: .15s; box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+.toggle input:checked + .toggle-slider { background: var(--brand); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(14px); }

@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Clientes en riesgo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/clientes-riesgo.css">
+</head>
+<body data-active="riesgo">
+
+<div class="app">
+  <aside class="sidebar" data-active="riesgo"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="/dashboard" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Clientes en riesgo</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+          <input id="search-input" placeholder="Buscar cliente&hellip;" aria-label="Buscar cliente">
+        </div>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Clientes en riesgo</div>
+          <div class="page-sub">Mesio IA identifica clientes con probabilidad de churn antes de que dejen de venir. Actúa hoy para retenerlos.</div>
+        </div>
+        <div class="row">
+          <button class="btn" id="btn-export">Exportar CSV</button>
+          <button class="btn primary" id="btn-bulk-campaign">&#10024; Campaña masiva IA</button>
+        </div>
+      </div>
+
+      <!-- AI summary -->
+      <div class="ai-banner danger" style="margin-bottom: 16px;">
+        <div class="ai-banner-label danger"><span class="ai-spark"></span> Diagnóstico Mesio IA</div>
+        <div class="ai-banner-body">
+          <strong>8 clientes</strong> de alto valor (ticket promedio <strong>$186k</strong>) tienen probabilidad alta de churn. <strong>Oportunidad</strong>: $14.9M en ventas anuales si los reactivas antes de fin de mes. El patrón más común es <strong>ausencia de 35&ndash;50 días tras una experiencia con tiempo de espera alto</strong>. Mesio recomienda una oferta personalizada + llamada directa de Carolina.
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="metrics-row" style="margin-bottom: 16px;">
+        <div class="metric">
+          <div class="metric-label">Alto riesgo</div>
+          <div class="metric-value danger">8</div>
+          <div class="metric-sub">&ge;80% churn score</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Riesgo medio</div>
+          <div class="metric-value warning">24</div>
+          <div class="metric-sub">50&ndash;79%</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Vigilancia</div>
+          <div class="metric-value">62</div>
+          <div class="metric-sub">30&ndash;49%</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">$ en juego</div>
+          <div class="metric-value">$14.9M</div>
+          <div class="metric-sub">LTV estimado a 12 meses</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Reactivados este mes</div>
+          <div class="metric-value brand">18</div>
+          <div class="metric-sub">62% respuesta campaña</div>
+        </div>
+      </div>
+
+      <!-- Alto riesgo detail -->
+      <div class="card flush" style="margin-bottom: 16px;">
+        <div class="card-head" style="border-top: 2px solid var(--danger);">
+          <div>
+            <div class="card-title">&#128308; Alto riesgo &mdash; requieren acción esta semana</div>
+            <div class="card-sub">Clientes con churn score &ge;80% y LTV superior al promedio</div>
+          </div>
+          <div class="row">
+            <div class="seg">
+              <button class="seg-btn active" data-sort="score">Churn score</button>
+              <button class="seg-btn" data-sort="ltv">LTV</button>
+              <button class="seg-btn" data-sort="last">Última visita</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="risk-row head">
+          <div></div>
+          <div>Cliente</div>
+          <div class="num">Churn score</div>
+          <div class="num">Última</div>
+          <div class="num">Frecuencia</div>
+          <div class="num">LTV</div>
+          <div>Razón detectada (IA)</div>
+          <div></div>
+        </div>
+
+        <div class="risk-row">
+          <div class="risk-avatar" style="background: #FDE8CE; color: #BA7517;">JM</div>
+          <div>
+            <div style="font-weight: 500;">Juan Manuel Castaño</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 300 412 8867 &middot; VIP Platino</div>
+          </div>
+          <div class="num"><span class="score-pill hi">92%</span></div>
+          <div class="num muted">hace 52d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 40%"></div><div style="height: 70%"></div><div style="height: 90%"></div><div style="height: 85%"></div><div style="height: 60%"></div><div style="height: 20%" class="recent"></div><div style="height: 4%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$4.82M</div>
+          <div style="font-size: 12px; color: var(--text-2);">Tras disputa por cobro duplicado el 18 feb, bajó de 4&times; a 0 visitas</div>
+          <div><button class="btn sm primary" data-action="call" data-name="Juan Manuel Castaño">Llamar</button></div>
+        </div>
+
+        <div class="risk-row">
+          <div class="risk-avatar" style="background: #DBEAFE; color: #1E40AF;">DR</div>
+          <div>
+            <div style="font-weight: 500;">Diana Rubiano</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 311 228 6601 &middot; VIP Oro</div>
+          </div>
+          <div class="num"><span class="score-pill hi">89%</span></div>
+          <div class="num muted">hace 47d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 60%"></div><div style="height: 80%"></div><div style="height: 70%"></div><div style="height: 55%"></div><div style="height: 40%"></div><div style="height: 15%" class="recent"></div><div style="height: 5%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$2.94M</div>
+          <div style="font-size: 12px; color: var(--text-2);">Dejó reseña 3&#9733; mencionando espera. Sin retorno desde entonces</div>
+          <div><button class="btn sm primary" data-action="ai-offer" data-name="Diana Rubiano">&#10024; Oferta IA</button></div>
+        </div>
+
+        <div class="risk-row">
+          <div class="risk-avatar" style="background: #EDE9FE; color: #5B21B6;">LM</div>
+          <div>
+            <div style="font-weight: 500;">Luis Martín Ospina</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 318 772 0023 &middot; VIP Oro</div>
+          </div>
+          <div class="num"><span class="score-pill hi">87%</span></div>
+          <div class="num muted">hace 43d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 50%"></div><div style="height: 65%"></div><div style="height: 85%"></div><div style="height: 70%"></div><div style="height: 30%"></div><div style="height: 10%" class="recent"></div><div style="height: 0%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$2.18M</div>
+          <div style="font-size: 12px; color: var(--text-2);">Pedía siempre ajiaco; el mes anterior estuvo agotado 2&times;</div>
+          <div><button class="btn sm primary" data-action="ai-offer" data-name="Luis Martín Ospina">&#10024; Oferta IA</button></div>
+        </div>
+
+        <div class="risk-row">
+          <div class="risk-avatar" style="background: #DCFCE7; color: #166534;">VR</div>
+          <div>
+            <div style="font-weight: 500;">Valentina Rojas</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 302 118 4433 &middot; VIP Plata</div>
+          </div>
+          <div class="num"><span class="score-pill hi">85%</span></div>
+          <div class="num muted">hace 38d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 40%"></div><div style="height: 55%"></div><div style="height: 70%"></div><div style="height: 60%"></div><div style="height: 35%"></div><div style="height: 15%" class="recent"></div><div style="height: 8%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$1.62M</div>
+          <div style="font-size: 12px; color: var(--text-2);">Celebró cumpleaños aquí hace 1 año. Patrón anual interrumpido</div>
+          <div><button class="btn sm primary" data-action="call" data-name="Valentina Rojas">Llamar</button></div>
+        </div>
+
+        <div class="risk-row">
+          <div class="risk-avatar" style="background: #FEE2E2; color: #991B1B;">AC</div>
+          <div>
+            <div style="font-weight: 500;">Andrés Camacho</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 319 002 4410 &middot; VIP Plata</div>
+          </div>
+          <div class="num"><span class="score-pill hi">83%</span></div>
+          <div class="num muted">hace 41d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 70%"></div><div style="height: 85%"></div><div style="height: 60%"></div><div style="height: 45%"></div><div style="height: 30%"></div><div style="height: 10%" class="recent"></div><div style="height: 0%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$1.48M</div>
+          <div style="font-size: 12px; color: var(--text-2);">Empezó a ordenar en competencia según geofencing (opt-in)</div>
+          <div><button class="btn sm primary" data-action="ai-offer" data-name="Andrés Camacho">&#10024; Oferta IA</button></div>
+        </div>
+
+        <div class="risk-row">
+          <div class="risk-avatar" style="background: #FEF3C7; color: #92400E;">PM</div>
+          <div>
+            <div style="font-weight: 500;">Paola Moreno</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 302 114 5580 &middot; VIP Plata</div>
+          </div>
+          <div class="num"><span class="score-pill hi">82%</span></div>
+          <div class="num muted">hace 36d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 45%"></div><div style="height: 60%"></div><div style="height: 80%"></div><div style="height: 65%"></div><div style="height: 25%"></div><div style="height: 12%" class="recent"></div><div style="height: 4%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$1.34M</div>
+          <div style="font-size: 12px; color: var(--text-2);">Cliente de domicilio &middot; último pedido con demora de 65 min</div>
+          <div><button class="btn sm primary" data-action="ai-offer" data-name="Paola Moreno">&#10024; Oferta IA</button></div>
+        </div>
+
+        <div class="risk-row">
+          <div class="risk-avatar" style="background: #F3E8FF; color: #6B21A8;">CR</div>
+          <div>
+            <div style="font-weight: 500;">Camilo Rengifo</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 312 445 8120 &middot; VIP Plata</div>
+          </div>
+          <div class="num"><span class="score-pill hi">81%</span></div>
+          <div class="num muted">hace 39d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 35%"></div><div style="height: 50%"></div><div style="height: 70%"></div><div style="height: 60%"></div><div style="height: 40%"></div><div style="height: 18%" class="recent"></div><div style="height: 6%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$1.12M</div>
+          <div style="font-size: 12px; color: var(--text-2);">Dejó de abrir mensajes WhatsApp hace 3 semanas</div>
+          <div><button class="btn sm primary" data-action="ai-offer" data-name="Camilo Rengifo">&#10024; Oferta IA</button></div>
+        </div>
+
+        <div class="risk-row" style="border-bottom: none;">
+          <div class="risk-avatar" style="background: #FDE8CE; color: #BA7517;">JH</div>
+          <div>
+            <div style="font-weight: 500;">Jorge Hernández</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">+57 300 221 7780 &middot; VIP Plata</div>
+          </div>
+          <div class="num"><span class="score-pill hi">80%</span></div>
+          <div class="num muted">hace 35d</div>
+          <div class="num">
+            <div class="spark">
+              <div style="height: 55%"></div><div style="height: 75%"></div><div style="height: 85%"></div><div style="height: 50%"></div><div style="height: 25%"></div><div style="height: 14%" class="recent"></div><div style="height: 3%" class="recent"></div>
+            </div>
+          </div>
+          <div class="num mono" style="font-weight: 600;">$948k</div>
+          <div style="font-size: 12px; color: var(--text-2);">Cambio de patrón: pasó de almorzar 2&times;/sem a 0 este mes</div>
+          <div><button class="btn sm primary" data-action="call" data-name="Jorge Hernández">Llamar</button></div>
+        </div>
+      </div>
+
+      <!-- Medio riesgo compact -->
+      <div class="card flush">
+        <div class="card-head" style="border-top: 2px solid var(--warning);">
+          <div>
+            <div class="card-title">&#128993; Riesgo medio &mdash; 24 clientes</div>
+            <div class="card-sub">Candidatos para campaña automática de reactivación</div>
+          </div>
+          <button class="btn sm" id="btn-mass-offer">Enviar oferta masiva</button>
+        </div>
+        <div style="padding: 14px 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+          <div class="risk-card">
+            <div class="risk-avatar" style="background: #DBEAFE; color: #1E40AF;">MG</div>
+            <div>
+              <div class="risk-name">Manuela Gómez</div>
+              <div class="risk-sub">hace 28d &middot; 6 visitas totales</div>
+            </div>
+            <span class="score-pill md">72%</span>
+          </div>
+          <div class="risk-card">
+            <div class="risk-avatar" style="background: #FDE8CE; color: #BA7517;">RL</div>
+            <div>
+              <div class="risk-name">Rodrigo León</div>
+              <div class="risk-sub">hace 32d &middot; 4 visitas totales</div>
+            </div>
+            <span class="score-pill md">68%</span>
+          </div>
+          <div class="risk-card">
+            <div class="risk-avatar" style="background: #DCFCE7; color: #166534;">CV</div>
+            <div>
+              <div class="risk-name">Carolina Vega</div>
+              <div class="risk-sub">hace 26d &middot; 8 visitas totales</div>
+            </div>
+            <span class="score-pill md">65%</span>
+          </div>
+          <div class="risk-card">
+            <div class="risk-avatar" style="background: #EDE9FE; color: #5B21B6;">SP</div>
+            <div>
+              <div class="risk-name">Sebastián Peña</div>
+              <div class="risk-sub">hace 30d &middot; 5 visitas totales</div>
+            </div>
+            <span class="score-pill md">62%</span>
+          </div>
+          <div class="risk-card">
+            <div class="risk-avatar" style="background: #FEE2E2; color: #991B1B;">AR</div>
+            <div>
+              <div class="risk-name">Alejandra Ramos</div>
+              <div class="risk-sub">hace 24d &middot; 7 visitas totales</div>
+            </div>
+            <span class="score-pill md">58%</span>
+          </div>
+          <div class="risk-card">
+            <div class="risk-avatar" style="background: #F3E8FF; color: #6B21A8;">FO</div>
+            <div>
+              <div class="risk-name">Felipe Osorio</div>
+              <div class="risk-sub">hace 33d &middot; 3 visitas totales</div>
+            </div>
+            <span class="score-pill md">54%</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
+<script src="/static/js/pages/clientes-riesgo.js"></script>
+</body>
+</html>
