@@ -359,8 +359,8 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 3. ~~Migración `0012_b2b_sales_system.py` crea tablas huérfanas~~ — **CERRADO**: las tablas `sales_inbox|sales_knowledge_base|sales_conversations|sales_escalations` ya fueron dropeadas por migración `0031_drop_orphan_sales_tables.py`. La nota era stale. Zero callers en `app/` verified 2026-04-19.
 4. **Railway: setear `DATABASE_URL_ADMIN`** con la URL superuser, y `DATABASE_URL` apuntando al role `mesio_app` (non-superuser). Sin esto, RLS no enforce en prod.
 5. **Fase 2 + Fase 3 del roadmap de security** — ver `PHASE_2_3_PLAN.md` en raíz del repo. Top prioridad si hay tráfico real: 3.1 (precios por IA → Python) y 3.3 (webhook resilience bajo DB down).
-6. **Push acumulado a Railway** — sprint Wave-2 cleanup + Tier 1 design-driven additions (migración 0039 agrega `channel`, `waiter_staff_id`, `assigned_staff_id`). Railway corre `alembic upgrade head` automático en cada deploy. Para prod: ejecutar `scripts/rehearsal_railway.py` antes (~30min de validación end-to-end).
-7. **`legacy_restaurant_id` columna** sigue en `locations` (vestige de 0034 backfill). Future migration 0041+ puede dropearla — verificar primero `grep -rn legacy_restaurant_id app/` en cero callers reales (hay ~9 SELECT callers en `restaurant_repo.py` que propagan el valor en dicts sin leerlo).
+6. **Push acumulado a Railway** — sprint Wave-2 cleanup + Tier 1-4 design-driven backend (0039, 0041) + Sprint A-Z polish (0042 staff_comms). Railway corre `alembic upgrade head` automático en cada deploy.
+7. ~~**`legacy_restaurant_id` columna**~~ — **CERRADO** por migración `0041_drop_legacy_restaurant_id.py`. Auditado: 9 callers eran todos propagación pasiva en SELECT, zero readers reales. Dropeada.
 8. **`run_ai_sim.py` E2E unvalidated** post-Wave-2 — refactorizado en Paso 1 + seed.py post-0038, pero nunca corrido E2E. Requiere `ANTHROPIC_API_KEY` + budget (~$2-5 por full run de 20 escenarios).
 9. **CSP `'unsafe-inline'` removal** — sprint anterior Punto 3 quedó parcial (solo `<script>`/`<style>` blocks de mesero/kitchen/caja extraídos). Faltan ~280 inline `onclick=` y `style=""` attrs en 18 HTML files. DEFERRED: el rediseño frontend (Tier 1+) reemplaza esos HTMLs; hacer la limpieza después de que el rediseño esté en prod.
 10. ~~**20 `bypass_tenant_scope` internos en `staff_repo.py`**~~ — **CERRADO 2026-04-19**: audit completado. Los "79 grep hits" se descomponen en 18 calls reales + 60 comentarios de documentación + 1 import. Los 18 calls son TODOS legítimos: WebAuthn kiosko público (sin JWT), auth pre-tenant-resolve (PIN login), staff self-service pre-scope (`_resolve_staff_from_token` pattern), y tablas sin RLS (`webauthn_credentials`, `staff_breaks` no tienen `org_id`). Zero downgrades posibles.
@@ -379,14 +379,17 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 `conversations`, `carts`, `staff`, `fiscal_invoices`, `inventory`, `dish_recipes`,
 `webhook_inbox`, `sessions` (con `token_hash`)
 
-### RLS (Row-Level Security) activo en 33 tablas (Fase 1 v11.0)
+### RLS (Row-Level Security) activo en 36 tablas (Fase 1 v11.0 + Sprint C)
 `attendance_deductions`, `billing_log`, `carts`, `contract_templates`, `conversations`,
 `customer_profiles`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
 `loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
 `menu_events`, `nps_responses`, `nps_waiting`, `occupancy_snapshots`, `orders`,
-`overtime_requests`, `payroll_runs`, `staff`, `staff_deduction_items`, `staff_schedules`,
-`staff_shifts`, `subscription_usage`, `table_orders`, `table_sessions`, `time_slot_discounts`,
+`overtime_requests`, `payroll_runs`, `staff`, `staff_announcements`, `staff_deduction_items`,
+`staff_schedules`, `staff_shifts`, `staff_task_completions`, `staff_tasks`,
+`subscription_usage`, `table_orders`, `table_sessions`, `time_slot_discounts`,
 `tip_distributions`, `waiter_alerts`, `webauthn_challenges`, `weekly_reports`
+
+Tres tablas nuevas (`staff_announcements`, `staff_tasks`, `staff_task_completions`) agregadas por migración `0042_staff_comms.py` para el feature de comunicación admin↔staff.
 
 Todas con policy `tenant_isolation` + `ENABLE + FORCE ROW LEVEL SECURITY`. Tablas explícitamente GLOBAL (sin RLS por diseño): `users`, `sessions`, `webhook_inbox`, `processed_wam_ids`, `prospects*`, `crm_templates`, `sales_*`.
 
