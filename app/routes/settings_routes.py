@@ -28,6 +28,50 @@ router = APIRouter()
 
 # ── SETTINGS ─────────────────────────────────────────────────────────
 
+def _parse_features(restaurant: dict) -> dict:
+    """Normalise features field from a restaurant dict into a plain Python dict."""
+    raw = restaurant.get("features", {}) or {}
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {}
+    return dict(raw)
+
+
+def _build_settings_response(restaurant: dict, features: dict) -> dict:
+    """Build the canonical settings response payload."""
+    return {
+        "restaurant_id":       restaurant["id"],
+        "name":                restaurant.get("name", ""),
+        "whatsapp_number":     restaurant.get("whatsapp_number", ""),
+        "address":             restaurant.get("address", ""),
+        # Fields persisted in features JSONB (no dedicated column)
+        "nit":                 features.get("nit", ""),
+        "city":                features.get("city", ""),
+        "cuisine_type":        features.get("cuisine_type", ""),
+        "features":            features,
+        "payment_methods":     features.get("payment_methods", []),
+        "payment_instructions":features.get("payment_instructions", {}),
+        "google_maps_url":     features.get("google_maps_url", ""),
+        "bot_active":          features.get("bot_active", True),
+        "upsell_active":       features.get("upsell_active", True),
+        "domicilio_active":    features.get("domicilio_active", True),
+        "recoger_active":      features.get("recoger_active", True),
+        "delivery_fee":        features.get("delivery_fee", 0),
+        "min_order":           features.get("min_order", 0),
+        "delivery_radius_km":  features.get("delivery_radius_km", 5),
+        "timezone":            features.get("timezone", "America/Bogota"),
+        "currency":            features.get("currency", "COP"),
+        "locale":              features.get("locale", "es-CO"),
+        "latitude":            restaurant.get("latitude"),
+        "longitude":           restaurant.get("longitude"),
+        # Catálogo visual v2 — Fase 1
+        "bot_visual_menu":     features.get("bot_visual_menu", False),
+        "catalog_v2_enabled":  features.get("catalog_v2_enabled", True),
+    }
+
+
 @router.get("/api/settings")
 async def get_settings(request: Request):
     user = await get_current_user(request)
@@ -41,40 +85,8 @@ async def get_settings(request: Request):
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
-    raw_features = restaurant.get("features", {}) or {}
-    if isinstance(raw_features, str):
-        try:
-            features = json.loads(raw_features)
-        except Exception:
-            features = {}
-    else:
-        features = raw_features
-
-    return {
-        "restaurant_id": restaurant["id"],
-        "name": restaurant["name"],
-        "whatsapp_number": restaurant.get("whatsapp_number", ""),
-        "address": restaurant.get("address", ""),
-        "features": features,
-        "payment_methods": features.get("payment_methods", []),
-        "payment_instructions": features.get("payment_instructions", {}),
-        "google_maps_url": features.get("google_maps_url", ""),
-        "bot_active": features.get("bot_active", True),
-        "upsell_active": features.get("upsell_active", True),
-        "domicilio_active": features.get("domicilio_active", True),
-        "recoger_active": features.get("recoger_active", True),
-        "delivery_fee": features.get("delivery_fee", 0),
-        "min_order": features.get("min_order", 0),
-        "delivery_radius_km": features.get("delivery_radius_km", 5),
-        "timezone": features.get("timezone", "America/Bogota"),
-        "currency": features.get("currency", "COP"),
-        "locale": features.get("locale", "es-CO"),
-        "latitude": restaurant.get("latitude"),
-        "longitude": restaurant.get("longitude"),
-        # Catálogo visual v2 — Fase 1
-        "bot_visual_menu": features.get("bot_visual_menu", False),
-        "catalog_v2_enabled": features.get("catalog_v2_enabled", True),
-    }
+    features = _parse_features(restaurant)
+    return _build_settings_response(restaurant, features)
 
 
 @router.post("/api/settings")
@@ -91,12 +103,20 @@ async def save_settings(request: Request):
         branch_id = int(branch_header)
 
     restaurant = await db.db_get_restaurant_by_id(branch_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
     body = await request.json()
 
-    raw_features = restaurant.get("features", {}) or {}
-    current_features = json.loads(raw_features) if isinstance(raw_features, str) else dict(raw_features)
+    # ── Validation ────────────────────────────────────────────────────
+    new_name = body.get("name")
+    if new_name is not None and not str(new_name).strip():
+        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío")
 
-    updatable = [
+    current_features = _parse_features(restaurant)
+
+    # ── Features-level fields (stored in organizations.features JSONB) ─
+    _features_updatable = [
         "payment_methods", "payment_instructions", "google_maps_url", "bot_active",
         "upsell_active", "domicilio_active", "recoger_active",
         "delivery_fee", "min_order", "delivery_radius_km", "delivery_message",
@@ -104,16 +124,47 @@ async def save_settings(request: Request):
         "timezone", "currency", "locale",
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu", "catalog_v2_enabled",
+        # Extended info — no dedicated DB column; live in features JSONB
+        "nit", "city", "cuisine_type", "notifications",
     ]
-    for key in updatable:
+    features_patch: dict = {}
+    for key in _features_updatable:
         if key in body:
-            current_features[key] = body[key]
+            features_patch[key] = body[key]
 
     lat = float(body["latitude"]) if "latitude" in body and body["latitude"] not in [None, ""] else None
     lon = float(body["longitude"]) if "longitude" in body and body["longitude"] not in [None, ""] else None
+
+    # ── Persist to DB ─────────────────────────────────────────────────
     with tenant_scope(restaurant["id"]):
-        await restaurant_repo.db_save_restaurant_settings(restaurant["id"], current_features, latitude=lat, longitude=lon)
-    return {"success": True, "features": current_features}
+        # 1. Merge features patch (preserves existing keys not in patch)
+        if features_patch:
+            current_features = await restaurant_repo.db_merge_restaurant_features(
+                restaurant["id"], features_patch
+            )
+
+        # 2. Location-level fields: name, address, opening_hours, lat/lon
+        _location_updates: dict = {}
+        if new_name is not None:
+            _location_updates["name"] = str(new_name).strip()
+        if "address" in body and body["address"] is not None:
+            _location_updates["address"] = body["address"]
+        if "opening_hours" in body and isinstance(body["opening_hours"], dict):
+            _location_updates["opening_hours"] = body["opening_hours"]
+        if lat is not None:
+            _location_updates["latitude"] = lat
+        if lon is not None:
+            _location_updates["longitude"] = lon
+
+        if _location_updates:
+            await restaurant_repo.db_update_location(restaurant["id"], **_location_updates)
+
+    # Re-fetch to return authoritative state
+    updated = await db.db_get_restaurant_by_id(restaurant["id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    final_features = _parse_features(updated)
+    return _build_settings_response(updated, final_features)
 
 
 # ── WEEKLY REPORTS ────────────────────────────────────────────────────

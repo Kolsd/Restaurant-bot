@@ -255,6 +255,45 @@ async def db_get_loyalty_stats(restaurant_id: int, limit: int = 100) -> list[dic
     return [_serialize(dict(r)) for r in rows]
 
 
+async def db_get_loyalty_customers(
+    org_id: int,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """List loyalty members ordered by most recent activity.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    await _ensure_loyalty_tables()
+    limit  = min(max(1, limit),  200)
+    offset = max(0, offset)
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT phone, points_balance, total_earned, total_redeemed,
+                      updated_at AS last_activity, created_at
+               FROM loyalty_customers
+               WHERE org_id = $1
+               ORDER BY updated_at DESC NULLS LAST, total_earned DESC
+               LIMIT $2 OFFSET $3""",
+            org_id, limit, offset,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_count_loyalty_customers(org_id: int) -> int:
+    """Return total loyalty customer count for an org.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    await _ensure_loyalty_tables()
+    async with tenant_connection() as conn:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id = $1",
+            org_id,
+        )
+    return int(total or 0)
+
+
 async def db_get_phone_for_base_order(base_order_id: str) -> str | None:
     """
     Obtiene el teléfono del cliente asociado a un ticket de mesa.

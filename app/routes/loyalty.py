@@ -15,6 +15,7 @@ Diseño orientado a mínimos tokens:
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from app.services import database as db
+from app.repositories import loyalty_repo
 from app.routes.deps import get_current_restaurant_scoped, require_module
 
 router = APIRouter(prefix="/api/loyalty", tags=["loyalty"])
@@ -106,6 +107,22 @@ async def redeem_loyalty_points(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return result
+
+
+@router.get("/customers", dependencies=[_module_dep])
+async def list_loyalty_customers(
+    limit:      int  = Query(default=50, ge=1, le=200),
+    offset:     int  = Query(default=0, ge=0),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """
+    List loyalty members ordered by most recent activity.
+    Returns paginated customer list with points and activity data.
+    """
+    org_id = restaurant["id"]
+    customers = await loyalty_repo.db_get_loyalty_customers(org_id, limit=limit, offset=offset)
+    total = await loyalty_repo.db_count_loyalty_customers(org_id)
+    return {"count": total, "customers": customers}
 
 
 @router.post("/adjust", dependencies=[_module_dep])
