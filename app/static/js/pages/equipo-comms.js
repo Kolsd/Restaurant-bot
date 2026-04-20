@@ -387,7 +387,142 @@
     });
   }
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHIFT SWAP (admin view)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  const _SWAP_STATUS_LABELS = {
+    pending:          { text: 'Pendiente',        bg: '#FEF3C7', color: '#92400E' },
+    target_accepted:  { text: 'Aceptado (staff)',  bg: '#D1FAE5', color: '#065F46' },
+    target_rejected:  { text: 'Rechazado (staff)', bg: '#FEE2E2', color: '#991B1B' },
+    admin_approved:   { text: 'Aprobado',          bg: '#D1FAE5', color: '#065F46' },
+    admin_rejected:   { text: 'Rechazado',         bg: '#FEE2E2', color: '#991B1B' },
+    withdrawn:        { text: 'Retirado',          bg: '#F3F4F6', color: '#6B7280' },
+  };
+
+  async function loadShiftSwaps() {
+    const container = document.getElementById('swapList');
+    const sub       = document.getElementById('swapCountSub');
+    if (!container) return;
+    try {
+      const data  = await _api('GET', '/api/staff/shift-swap');
+      const items = data.swaps || [];
+      const pending = items.filter(s => s.status === 'pending' || s.status === 'target_accepted');
+      if (sub) sub.textContent = pending.length + ' solicitud' + (pending.length !== 1 ? 'es' : '') + ' pendiente' + (pending.length !== 1 ? 's' : '');
+      _renderSwaps(container, items);
+    } catch (err) {
+      container.innerHTML = '<div style="font-size:13px;color:var(--text-4);padding:16px 0;">No se pudieron cargar las solicitudes.</div>';
+    }
+  }
+
+  function _renderSwaps(container, items) {
+    container.innerHTML = '';
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'font-size:13px;color:var(--text-4);padding:16px 0;';
+      empty.textContent = 'No hay solicitudes de cambio de turno.';
+      container.appendChild(empty);
+      return;
+    }
+
+    items.forEach(s => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--surface-3,#f0f0f0);flex-wrap:wrap;';
+
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:200px;';
+
+      const nameEl = document.createElement('div');
+      nameEl.style.cssText = 'font-weight:600;font-size:14px;color:var(--text-1);';
+      // user-supplied names via textContent (safe)
+      const reqNameTxt = document.createTextNode((s.requester_name || 'Staff') + ' → ' + (s.target_name || 'Staff'));
+      nameEl.appendChild(reqNameTxt);
+
+      const metaEl = document.createElement('div');
+      metaEl.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:3px;';
+      const dateSpan = document.createElement('span');
+      dateSpan.textContent = 'Fecha: ' + (s.shift_date || '—');
+      if (s.shift_start_time) {
+        const timeSpan = document.createElement('span');
+        timeSpan.textContent = '  ·  ' + s.shift_start_time + (s.shift_end_time ? '–' + s.shift_end_time : '');
+        metaEl.appendChild(dateSpan);
+        metaEl.appendChild(timeSpan);
+      } else {
+        metaEl.appendChild(dateSpan);
+      }
+
+      if (s.reason) {
+        const reasonEl = document.createElement('div');
+        reasonEl.style.cssText = 'font-size:12px;color:var(--text-4);margin-top:2px;';
+        reasonEl.textContent = 'Razón: ' + s.reason;
+        info.appendChild(nameEl);
+        info.appendChild(metaEl);
+        info.appendChild(reasonEl);
+      } else {
+        info.appendChild(nameEl);
+        info.appendChild(metaEl);
+      }
+
+      const meta2 = _SWAP_STATUS_LABELS[s.status] || { text: s.status, bg: '#F3F4F6', color: '#6B7280' };
+      const badge = document.createElement('span');
+      badge.style.cssText = 'display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:' + meta2.bg + ';color:' + meta2.color + ';';
+      badge.textContent = meta2.text;
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;flex-shrink:0;align-items:center;';
+      actions.appendChild(badge);
+
+      if (s.status === 'target_accepted') {
+        const approveBtn = document.createElement('button');
+        approveBtn.className = 'btn sm';
+        approveBtn.style.cssText = 'background:var(--brand,#1D9E75);color:#fff;border-color:var(--brand,#1D9E75);';
+        approveBtn.textContent = 'Aprobar';
+        approveBtn.addEventListener('click', () => _approveSwap(s.id, s.requester_name, s.target_name, s.shift_date));
+
+        const rejectBtn = document.createElement('button');
+        rejectBtn.className = 'btn sm';
+        rejectBtn.style.cssText = 'color:var(--error,#dc2626);border-color:var(--error,#dc2626);';
+        rejectBtn.textContent = 'Rechazar';
+        rejectBtn.addEventListener('click', () => _rejectSwap(s.id));
+
+        actions.appendChild(approveBtn);
+        actions.appendChild(rejectBtn);
+      }
+
+      row.appendChild(info);
+      row.appendChild(actions);
+      container.appendChild(row);
+    });
+  }
+
+  async function _approveSwap(id, reqName, tgtName, shiftDate) {
+    const msg = '¿Aprobar el cambio de turno del ' + (shiftDate || '') + ' entre ' + (reqName || 'Staff') + ' y ' + (tgtName || 'Staff') + '?';
+    const confirmed = typeof mesioConfirm === 'function'
+      ? await mesioConfirm(msg)
+      : confirm(msg);
+    if (!confirmed) return;
+    try {
+      await _api('POST', '/api/staff/shift-swap/' + id + '/approve');
+      _toast('Cambio de turno aprobado y ejecutado.');
+      loadShiftSwaps();
+    } catch (err) {
+      _toast(err.message || 'Error al aprobar el cambio.', true);
+    }
+  }
+
+  async function _rejectSwap(id) {
+    const notes = prompt('Razón del rechazo (opcional):') || '';
+    try {
+      await _api('POST', '/api/staff/shift-swap/' + id + '/reject', { admin_notes: notes || null });
+      _toast('Cambio de turno rechazado.');
+      loadShiftSwaps();
+    } catch (err) {
+      _toast(err.message || 'Error al rechazar el cambio.', true);
+    }
+  }
+
   // ── Init ─────────────────────────────────────────────────────────────────
   loadAnnouncements();
   loadTasks();
+  loadShiftSwaps();
 })();

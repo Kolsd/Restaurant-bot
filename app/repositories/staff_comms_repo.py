@@ -1,15 +1,26 @@
 """
 app/repositories/staff_comms_repo.py
 
-Repository for admin→staff communication: announcements and task checklists.
+Repository for admin→staff communication: announcements, task checklists,
+and shift swap requests.
 
 All functions require an active tenant_scope (org_id) in the call site.
-No bypass_tenant_scope needed — all three tables are single-tenant.
+No bypass_tenant_scope needed — all tables are single-tenant.
 
 Tables:
   staff_announcements      — one-way broadcasts from admin.
   staff_tasks              — shift checklist items.
   staff_task_completions   — per-staff completion tracking.
+  shift_swap_requests      — staff↔staff shift swap lifecycle.
+
+Shift swap status lifecycle:
+  pending
+    → target_accepted  (target accepts)
+    → target_rejected  (target rejects)
+    → withdrawn        (requester cancels)
+  target_accepted
+    → admin_approved   (admin approves + executes swap)
+    → admin_rejected   (admin rejects with notes)
 """
 from __future__ import annotations
 
@@ -301,3 +312,289 @@ async def db_get_completions_for_staff(
             task_ids,
         )
     return {r["task_id"]: _row_to_dict(r) for r in rows}
+
+
+# ── Shift swap requests ───────────────────────────────────────────────────────
+
+# Valid transitions: from_status → set(allowed_to_statuses)
+_VALID_TRANSITIONS: dict[str, set[str]] = {
+    "pending":          {"target_accepted", "target_rejected", "withdrawn"},
+    "target_accepted":  {"admin_approved", "admin_rejected"},
+}
+
+
+async def db_create_shift_swap(
+    org_id: int,
+    requester_staff_id: str,
+    target_staff_id: str,
+    shift_date,                      # date or "YYYY-MM-DD" string
+    shift_start_time=None,
+    shift_end_time=None,
+    reason: str | None = None,
+) -> dict:
+    """Insert a new shift swap request in status='pending'. Returns the created row."""
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO shift_swap_requests
+                (org_id, requester_staff_id, target_staff_id,
+                 shift_date, shift_start_time, shift_end_time, reason, status)
+            VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, 'pending')
+            RETURNING *
+            """,
+            org_id,
+            str(requester_staff_id),
+            str(target_staff_id),
+            shift_date,
+            shift_start_time,
+            shift_end_time,
+            reason,
+        )
+    return _row_to_dict(row)
+
+
+async def db_list_swaps_for_target(
+    org_id: int,
+    target_staff_id: str,
+    status: str = "pending",
+) -> list[dict]:
+    """Return incoming swap requests where the caller is the target.
+
+    Joins with staff table to include requester name.
+    """
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT s.*,
+                   r.name AS requester_name,
+                   t.name AS target_name
+            FROM shift_swap_requests s
+            JOIN staff r ON r.id = s.requester_staff_id
+            JOIN staff t ON t.id = s.target_staff_id
+            WHERE s.org_id = $1
+              AND s.target_staff_id = $2::uuid
+              AND s.status = $3
+            ORDER BY s.created_at DESC
+            """,
+            org_id,
+            str(target_staff_id),
+            status,
+        )
+    return [_row_to_dict(r) for r in rows]
+
+
+async def db_list_swaps_by_requester(
+    org_id: int,
+    requester_staff_id: str,
+    limit: int = 20,
+) -> list[dict]:
+    """Return outbound swap requests created by the caller (newest first)."""
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT s.*,
+                   r.name AS requester_name,
+                   t.name AS target_name
+            FROM shift_swap_requests s
+            JOIN staff r ON r.id = s.requester_staff_id
+            JOIN staff t ON t.id = s.target_staff_id
+            WHERE s.org_id = $1
+              AND s.requester_staff_id = $2::uuid
+            ORDER BY s.created_at DESC
+            LIMIT $3
+            """,
+            org_id,
+            str(requester_staff_id),
+            limit,
+        )
+    return [_row_to_dict(r) for r in rows]
+
+
+async def db_list_swaps_admin(
+    org_id: int,
+    status: str | None = None,
+) -> list[dict]:
+    """Return all swap requests for the org (admin view).
+
+    If status is provided, filter to that status only.
+    Joins requester and target names.
+    """
+    async with tenant_connection() as conn:
+        if status:
+            rows = await conn.fetch(
+                """
+                SELECT s.*,
+                       r.name AS requester_name,
+                       t.name AS target_name
+                FROM shift_swap_requests s
+                JOIN staff r ON r.id = s.requester_staff_id
+                JOIN staff t ON t.id = s.target_staff_id
+                WHERE s.org_id = $1 AND s.status = $2
+                ORDER BY s.created_at DESC
+                """,
+                org_id,
+                status,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT s.*,
+                       r.name AS requester_name,
+                       t.name AS target_name
+                FROM shift_swap_requests s
+                JOIN staff r ON r.id = s.requester_staff_id
+                JOIN staff t ON t.id = s.target_staff_id
+                WHERE s.org_id = $1
+                ORDER BY s.created_at DESC
+                """,
+                org_id,
+            )
+    return [_row_to_dict(r) for r in rows]
+
+
+async def db_get_swap(org_id: int, swap_id: int) -> dict:
+    """Fetch a single swap request by id within this org. Returns {} if not found."""
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT s.*,
+                   r.name AS requester_name,
+                   t.name AS target_name
+            FROM shift_swap_requests s
+            JOIN staff r ON r.id = s.requester_staff_id
+            JOIN staff t ON t.id = s.target_staff_id
+            WHERE s.id = $1 AND s.org_id = $2
+            """,
+            swap_id,
+            org_id,
+        )
+    return _row_to_dict(row) if row else {}
+
+
+async def db_update_swap_status(
+    org_id: int,
+    swap_id: int,
+    new_status: str,
+    decided_by: str | None = None,
+    admin_notes: str | None = None,
+) -> dict:
+    """Transition a swap request to a new status.
+
+    Validates the transition is allowed. Raises ValueError for invalid transitions
+    or if the swap is not found.
+
+    Allowed transitions:
+        pending         → target_accepted | target_rejected | withdrawn
+        target_accepted → admin_approved  | admin_rejected
+    """
+    swap = await db_get_swap(org_id, swap_id)
+    if not swap:
+        raise ValueError(f"Swap request {swap_id} not found in org {org_id}")
+
+    current = swap["status"]
+    allowed = _VALID_TRANSITIONS.get(current, set())
+    if new_status not in allowed:
+        raise ValueError(
+            f"Invalid transition: {current!r} → {new_status!r}. "
+            f"Allowed from {current!r}: {allowed or 'none'}"
+        )
+
+    now = datetime.now(tz=timezone.utc)
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE shift_swap_requests
+            SET status     = $1,
+                decided_by = COALESCE($2, decided_by),
+                decided_at = $3,
+                admin_notes= COALESCE($4, admin_notes),
+                updated_at = $3
+            WHERE id = $5 AND org_id = $6
+            RETURNING *
+            """,
+            new_status,
+            decided_by,
+            now,
+            admin_notes,
+            swap_id,
+            org_id,
+        )
+    return _row_to_dict(row)
+
+
+async def db_execute_swap(org_id: int, swap_id: int) -> dict:
+    """Physically swap the staff_shifts rows for the two staff on the swap date.
+
+    Finds the open shift row (or most recent shift that covers shift_date) for
+    each participant and swaps their staff_id values.
+
+    If one (or both) participants have no staff_shifts row on that date, the
+    physical swap is skipped but the function still returns success — the status
+    transition was already recorded by db_update_swap_status.
+
+    Returns:
+        {
+          "requester_shift_id": int | None,
+          "target_shift_id":    int | None,
+          "swapped":            bool,
+          "swap": dict          # the swap request row
+        }
+    """
+    swap = await db_get_swap(org_id, swap_id)
+    if not swap:
+        raise ValueError(f"Swap request {swap_id} not found")
+
+    requester_id = str(swap["requester_staff_id"])
+    target_id    = str(swap["target_staff_id"])
+    shift_date   = swap["shift_date"]
+
+    async with tenant_connection() as conn:
+        # Find one shift per participant whose clock_in falls on shift_date
+        req_shift = await conn.fetchrow(
+            """
+            SELECT id, staff_id FROM staff_shifts
+            WHERE staff_id = $1::uuid
+              AND org_id   = $2
+              AND clock_in::date = $3::date
+            ORDER BY clock_in DESC
+            LIMIT 1
+            """,
+            requester_id,
+            org_id,
+            shift_date,
+        )
+        tgt_shift = await conn.fetchrow(
+            """
+            SELECT id, staff_id FROM staff_shifts
+            WHERE staff_id = $1::uuid
+              AND org_id   = $2
+              AND clock_in::date = $3::date
+            ORDER BY clock_in DESC
+            LIMIT 1
+            """,
+            target_id,
+            org_id,
+            shift_date,
+        )
+
+        if req_shift and tgt_shift:
+            # Swap staff_id on both rows atomically
+            async with conn.transaction():
+                await conn.execute(
+                    "UPDATE staff_shifts SET staff_id = $1::uuid WHERE id = $2",
+                    target_id, req_shift["id"],
+                )
+                await conn.execute(
+                    "UPDATE staff_shifts SET staff_id = $1::uuid WHERE id = $2",
+                    requester_id, tgt_shift["id"],
+                )
+            swapped = True
+        else:
+            swapped = False
+
+    return {
+        "requester_shift_id": req_shift["id"] if req_shift else None,
+        "target_shift_id":    tgt_shift["id"] if tgt_shift else None,
+        "swapped":            swapped,
+        "swap":               swap,
+    }

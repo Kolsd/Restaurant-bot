@@ -472,8 +472,21 @@ function _scRenderUpcomingShifts(container, shifts) {
     info.appendChild(timeEl);
     if (badgeRow.textContent) info.appendChild(badgeRow);
 
+    // "Cambiar" button — wires to shift swap modal
+    const swapBtn = document.createElement('button');
+    swapBtn.style.cssText = 'background:none;border:1px solid var(--sc-brand,#1D9E75);color:var(--sc-brand,#1D9E75);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;flex-shrink:0;';
+    swapBtn.textContent = 'Cambiar';
+    // Store shift data on the button for the event listener
+    swapBtn.dataset.shiftDate  = shift.date;
+    swapBtn.dataset.shiftStart = shift.start_time || '';
+    swapBtn.dataset.shiftEnd   = shift.end_time   || '';
+    swapBtn.addEventListener('click', function() {
+      scOpenSwap(this.dataset.shiftDate, this.dataset.shiftStart || null, this.dataset.shiftEnd || null);
+    });
+
     row.appendChild(badge);
     row.appendChild(info);
+    row.appendChild(swapBtn);
     container.appendChild(row);
   });
 }
@@ -826,19 +839,238 @@ function scFakeAuthSuccess() {
 }
 
 /* ── Shift swap modal ───────────────────────────────────────────── */
-let _swapShiftId = null;
+let _swapShiftDate      = null;
+let _swapShiftStart     = null;
+let _swapShiftEnd       = null;
+let _swapCoworkers      = [];
 
-function scOpenSwap(shiftId) {
-  _swapShiftId = shiftId;
+function scOpenSwap(shiftDate, shiftStart, shiftEnd) {
+  _swapShiftDate  = shiftDate  || null;
+  _swapShiftStart = shiftStart || null;
+  _swapShiftEnd   = shiftEnd   || null;
+
   const modalId = _currentLayout === 'kiosco' ? 'sc-swap-modal' : 'sc-swap-modal-m';
   const m = document.getElementById(modalId);
-  if (m) m.classList.add('open');
-  // TODO: load compatible coworkers from backend
-  // GET /api/staff/self/shift-swap (not yet implemented)
-  // For now shows static "próximamente" content
+  if (!m) { return; }
+
+  // Reset form
+  const sel = m.querySelector('.sc-swap-target-sel');
+  if (sel) sel.innerHTML = '<option value="">Cargando compañeros…</option>';
+  const reasonEl = m.querySelector('.sc-swap-reason');
+  if (reasonEl) reasonEl.value = '';
+
+  m.classList.add('open');
+  _scLoadCoworkersForSwap(m);
 }
+
+async function _scLoadCoworkersForSwap(modal) {
+  const sel = modal.querySelector('.sc-swap-target-sel');
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/staff', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const staff = (data.staff || data || []).filter(s => {
+      // Exclude self — compare by name (we don't have staff_id readily in profile cache)
+      if (_profile && _profile.name && s.name === _profile.name) return false;
+      return s.active !== false;
+    });
+    _swapCoworkers = staff;
+    sel.innerHTML = '<option value="">— Selecciona compañero —</option>';
+    staff.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name + (s.role ? ' (' + s.role + ')' : '');
+      sel.appendChild(opt);
+    });
+  } catch(_) {
+    sel.innerHTML = '<option value="">Error al cargar compañeros</option>';
+  }
+}
+
+async function scSubmitSwap(modalId) {
+  const modal = document.getElementById(modalId);
+  if (!modal) return;
+
+  const sel      = modal.querySelector('.sc-swap-target-sel');
+  const reasonEl = modal.querySelector('.sc-swap-reason');
+  const targetId = sel ? sel.value : '';
+  const reason   = reasonEl ? reasonEl.value.trim() : '';
+
+  if (!targetId) { scShowToast('Selecciona un compañero para el cambio', true); return; }
+  if (!_swapShiftDate) { scShowToast('No se encontró la fecha del turno', true); return; }
+
+  const payload = {
+    target_staff_id:  targetId,
+    shift_date:       _swapShiftDate,
+    shift_start_time: _swapShiftStart || undefined,
+    shift_end_time:   _swapShiftEnd   || undefined,
+    reason:           reason || undefined,
+  };
+
+  try {
+    const res = await fetch('/api/staff/self/shift-swap', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Error ' + res.status);
+    scShowToast('Solicitud enviada — pendiente de respuesta del compañero');
+    modal.classList.remove('open');
+    scLoadSwapOutgoing();
+  } catch (e) {
+    scShowToast(e.message || 'Error al enviar la solicitud', true);
+  }
+}
+
 function scCloseSwap()  { const m = document.getElementById('sc-swap-modal');   if (m) m.classList.remove('open'); }
 function scCloseSwapM() { const m = document.getElementById('sc-swap-modal-m'); if (m) m.classList.remove('open'); }
+
+/* ── Incoming swap requests (for me as target) ──────────────────── */
+
+async function scLoadSwapIncoming() {
+  const container = document.getElementById('sc-swap-incoming-container');
+  if (!container || !SC_TOKEN) return;
+  try {
+    const res = await fetch('/api/staff/self/shift-swap/incoming', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _scRenderSwapIncoming(container, data.swaps || []);
+  } catch(_) {
+    container.innerHTML = '';
+  }
+}
+
+function _scRenderSwapIncoming(container, swaps) {
+  container.innerHTML = '';
+  const labelEl = document.getElementById('sc-swap-incoming-label');
+  if (!swaps.length) {
+    if (labelEl) labelEl.style.display = 'none';
+    return;
+  }
+  if (labelEl) labelEl.style.display = '';
+
+  swaps.forEach(s => {
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--sc-surface-2,#F9FAFB);border-radius:10px;padding:10px 12px;margin-bottom:8px;';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:4px;';
+    titleEl.textContent = (s.requester_name || 'Compañero') + ' quiere cambiar su turno contigo';
+
+    const metaEl = document.createElement('div');
+    metaEl.style.cssText = 'font-size:12px;color:var(--sc-text-3,#9CA3AF);margin-bottom:8px;';
+    let metaTxt = 'Fecha: ' + (s.shift_date || '—');
+    if (s.shift_start_time) metaTxt += '  ·  ' + s.shift_start_time + (s.shift_end_time ? '–' + s.shift_end_time : '');
+    if (s.reason) metaTxt += '\nRazón: ' + s.reason;
+    metaEl.textContent = metaTxt;
+
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex;gap:6px;';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.style.cssText = 'background:var(--sc-brand,#1D9E75);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;';
+    acceptBtn.textContent = 'Aceptar';
+    acceptBtn.addEventListener('click', () => _scRespondSwap(s.id, 'accept', container));
+
+    const rejectBtn = document.createElement('button');
+    rejectBtn.style.cssText = 'background:#FEE2E2;color:#991B1B;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;';
+    rejectBtn.textContent = 'Rechazar';
+    rejectBtn.addEventListener('click', () => _scRespondSwap(s.id, 'reject', container));
+
+    btns.appendChild(acceptBtn);
+    btns.appendChild(rejectBtn);
+
+    card.appendChild(titleEl);
+    card.appendChild(metaEl);
+    card.appendChild(btns);
+    container.appendChild(card);
+  });
+}
+
+async function _scRespondSwap(swapId, action, container) {
+  try {
+    const res = await fetch('/api/staff/self/shift-swap/' + swapId + '/' + action, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN, 'Content-Type': 'application/json' },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Error ' + res.status);
+    const msg = action === 'accept'
+      ? '✅ Solicitud aceptada — esperando aprobación del admin'
+      : 'Solicitud rechazada';
+    scShowToast(msg);
+    scLoadSwapIncoming();
+  } catch (e) {
+    scShowToast(e.message || 'Error al responder', true);
+  }
+}
+
+/* ── Outgoing swap requests (my requests) ───────────────────────── */
+
+const _SC_SWAP_STATUS = {
+  pending:          'Pendiente',
+  target_accepted:  'Aceptado — esperando admin',
+  target_rejected:  'Rechazado por compañero',
+  admin_approved:   'Aprobado ✓',
+  admin_rejected:   'Rechazado por admin',
+  withdrawn:        'Retirado',
+};
+
+async function scLoadSwapOutgoing() {
+  const container = document.getElementById('sc-swap-outgoing-container');
+  if (!container || !SC_TOKEN) return;
+  try {
+    const res = await fetch('/api/staff/self/shift-swap/outgoing?limit=5', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _scRenderSwapOutgoing(container, data.swaps || []);
+  } catch(_) {
+    container.innerHTML = '';
+  }
+}
+
+function _scRenderSwapOutgoing(container, swaps) {
+  container.innerHTML = '';
+  // Only show active/recent ones — filter out old terminal states
+  const visible = swaps.filter(s => !['admin_approved', 'admin_rejected', 'withdrawn', 'target_rejected'].includes(s.status));
+  if (!visible.length) return;
+
+  const header = document.createElement('div');
+  header.style.cssText = 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--sc-text-3,#9CA3AF);margin-bottom:6px;';
+  header.textContent = 'Mis solicitudes de cambio';
+  container.appendChild(header);
+
+  visible.forEach(s => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--sc-border,#E5E7EB);font-size:12px;gap:8px;';
+
+    const leftEl = document.createElement('div');
+    const targetTxt = document.createElement('span');
+    targetTxt.style.fontWeight = '600';
+    targetTxt.textContent = s.target_name || 'Compañero';
+    const dateTxt = document.createElement('span');
+    dateTxt.style.cssText = 'color:var(--sc-text-3,#9CA3AF);margin-left:4px;';
+    dateTxt.textContent = '· ' + (s.shift_date || '—');
+    leftEl.appendChild(targetTxt);
+    leftEl.appendChild(dateTxt);
+
+    const statusEl = document.createElement('div');
+    statusEl.style.cssText = 'font-size:11px;color:var(--sc-brand,#1D9E75);font-weight:600;white-space:nowrap;';
+    statusEl.textContent = _SC_SWAP_STATUS[s.status] || s.status;
+
+    row.appendChild(leftEl);
+    row.appendChild(statusEl);
+    container.appendChild(row);
+  });
+}
 
 /* ── Announcements ──────────────────────────────────────────────── */
 async function scLoadAnnouncements() {

@@ -123,11 +123,20 @@
       <div class="sc-m-sect">Mis estaciones</div>
       <div class="sc-stations-m" id="sc-stations-m"></div>
 
-      <!-- UPCOMING SHIFTS (TODO) -->
+      <!-- UPCOMING SHIFTS -->
       <div class="sc-m-sect">Próximos turnos <a href="#">Calendario ↗</a></div>
       <div class="sc-m-card" id="sc-shifts-container">
         <div style="padding:14px;font-size:12px;color:var(--sc-text-3);">Cargando turnos... <span style="font-style:italic;">(Próximamente)</span></div>
       </div>
+
+      <!-- SWAP INCOMING (shown only when there are pending requests) -->
+      <div id="sc-swap-incoming-wrapper" style="margin-top:10px;">
+        <div class="sc-m-sect" id="sc-swap-incoming-label" style="display:none;">Solicitudes de cambio entrantes</div>
+        <div id="sc-swap-incoming-container"></div>
+      </div>
+
+      <!-- SWAP OUTGOING (my sent requests) -->
+      <div id="sc-swap-outgoing-container" style="margin-bottom:8px;"></div>
 
       <!-- PERFORMANCE (TODO) -->
       <div class="sc-m-sect">Mi desempeño · este mes</div>
@@ -391,10 +400,18 @@
             <div class="sc-modal-title">Pedir cambio de turno</div>
             <button class="sc-modal-close" id="sc-swap-close" aria-label="Cerrar">&times;</button>
           </div>
-          <div class="sc-modal-sub">Función próximamente — solicitud de cambio de turno entre compañeros.</div>
-          <div id="sc-swap-coworkers">
-            <p style="font-size:13px;color:var(--sc-text-3);padding:8px 0;">El backend para esta función aún no está implementado.</p>
+          <div class="sc-modal-sub">Selecciona el compañero con quien quieres cambiar el turno.</div>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
+            <select class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
+              <option value="">— Selecciona compañero —</option>
+            </select>
           </div>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
+            <input class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
+          </div>
+          <button class="sc-modal-act" style="background:var(--sc-brand,#1D9E75);color:#fff;" id="sc-swap-submit">Enviar solicitud</button>
           <button class="sc-modal-act ghost" id="sc-swap-cancel">Cancelar</button>
         </div>
       </div>
@@ -436,7 +453,18 @@
       <div class="sc-modal-title">Cambio de turno</div>
       <button class="sc-modal-close" id="sc-swap-m-close" aria-label="Cerrar">&times;</button>
     </div>
-    <div class="sc-modal-sub">Función próximamente — solicitud de cambio entre compañeros.</div>
+    <div class="sc-modal-sub">Selecciona el compañero con quien quieres cambiar.</div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
+      <select class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
+        <option value="">— Selecciona compañero —</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
+      <input class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
+    </div>
+    <button class="sc-modal-act" style="background:var(--sc-brand,#1D9E75);color:#fff;" id="sc-swap-m-submit">Enviar solicitud</button>
     <button class="sc-modal-act ghost" id="sc-swap-m-cancel">Cancelar</button>
   </div>
 </div>
@@ -540,6 +568,16 @@
   document.getElementById('sc-swap-cancel').addEventListener('click', scCloseSwap);
   document.getElementById('sc-swap-m-close').addEventListener('click', scCloseSwapM);
   document.getElementById('sc-swap-m-cancel').addEventListener('click', scCloseSwapM);
+
+  var swapSubmitK = document.getElementById('sc-swap-submit');
+  if (swapSubmitK) swapSubmitK.addEventListener('click', function() { scSubmitSwap('sc-swap-modal'); });
+
+  var swapSubmitM = document.getElementById('sc-swap-m-submit');
+  if (swapSubmitM) swapSubmitM.addEventListener('click', function() { scSubmitSwap('sc-swap-modal-m'); });
+
+  /* ── Load swap incoming/outgoing on mount ── */
+  scLoadSwapIncoming();
+  scLoadSwapOutgoing();
 
   /* ── Logout ── */
   document.getElementById('sc-logout-btn').addEventListener('click', scLogout);

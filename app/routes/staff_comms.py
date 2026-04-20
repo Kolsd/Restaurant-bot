@@ -13,6 +13,10 @@ Admin routes (owner / gerente / admin):
   GET    /api/staff/tasks/{id}/completions     who completed this task
   DELETE /api/staff/tasks/{id}                 soft-delete
 
+  GET    /api/staff/shift-swap                 all swap requests (optional status filter)
+  POST   /api/staff/shift-swap/{id}/approve    approve + execute swap
+  POST   /api/staff/shift-swap/{id}/reject     reject with notes
+
 Staff self-service routes (JWT staff:<uuid>):
   GET    /api/staff/self/announcements         active announcements
   GET    /api/staff/self/tasks                 active tasks + completed_by_me
@@ -20,6 +24,13 @@ Staff self-service routes (JWT staff:<uuid>):
   GET    /api/staff/self/tips                  tips today + this week (Sprint Y)
   GET    /api/staff/self/upcoming-shifts       next N scheduled shifts (Sprint Y)
   GET    /api/staff/self/performance           aggregate metrics last N days (Sprint Z)
+
+  POST   /api/staff/self/shift-swap            create swap request
+  GET    /api/staff/self/shift-swap/incoming   pending requests targeting me
+  GET    /api/staff/self/shift-swap/outgoing   my outbound requests
+  POST   /api/staff/self/shift-swap/{id}/accept   target accepts
+  POST   /api/staff/self/shift-swap/{id}/reject   target rejects
+  POST   /api/staff/self/shift-swap/{id}/withdraw requester withdraws
 """
 from __future__ import annotations
 
@@ -66,6 +77,18 @@ class TaskCreate(BaseModel):
 
 class TaskCompleteBody(BaseModel):
     notes: str | None = Field(None, max_length=500)
+
+
+class ShiftSwapCreate(BaseModel):
+    target_staff_id:  str             = Field(..., description="UUID of the target staff member")
+    shift_date:       str             = Field(..., description="YYYY-MM-DD date of the shift to swap")
+    shift_start_time: str | None      = None
+    shift_end_time:   str | None      = None
+    reason:           str | None      = Field(None, max_length=500)
+
+
+class SwapRejectAdminBody(BaseModel):
+    admin_notes: str | None = Field(None, max_length=500)
 
 
 # ── Admin: Announcements ─────────────────────────────────────────────────────
@@ -428,3 +451,241 @@ async def self_upcoming_shifts(
         timezone_name="America/Bogota",
     )
     return {"shifts": shifts}
+
+
+# ── Helper: extract staff_id from JWT ────────────────────────────────────────
+
+def _staff_id_from_user(user: dict) -> str:
+    """Extract UUID staff_id from user dict. Raises 403 if not a staff token."""
+    username: str = user.get("username", "")
+    if not username.startswith("staff:"):
+        raise HTTPException(status_code=403, detail="Solo el staff puede realizar esta acción.")
+    return username.split(":", 1)[1]
+
+
+def _org_id_from_user(user: dict) -> int:
+    """Extract org_id from user dict. Raises 403 if missing."""
+    org_id = user.get("restaurant_id")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo determinar la organización.")
+    return int(org_id)
+
+
+# ── Staff self-service: Shift Swap ───────────────────────────────────────────
+
+@router.post("/self/shift-swap", status_code=201)
+async def self_create_shift_swap(
+    body: ShiftSwapCreate,
+    user: dict = Depends(get_current_user_scoped),
+):
+    """Staff creates a swap request targeting a specific coworker."""
+    staff_id = _staff_id_from_user(user)
+    org_id   = _org_id_from_user(user)
+
+    if str(body.target_staff_id) == str(staff_id):
+        raise HTTPException(status_code=400, detail="No puedes solicitar un cambio contigo mismo.")
+
+    # Parse date
+    try:
+        from datetime import date as _date  # noqa: PLC0415
+        shift_date = _date.fromisoformat(body.shift_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="shift_date must be YYYY-MM-DD")
+
+    swap = await staff_comms_repo.db_create_shift_swap(
+        org_id=org_id,
+        requester_staff_id=staff_id,
+        target_staff_id=body.target_staff_id,
+        shift_date=shift_date,
+        shift_start_time=body.shift_start_time,
+        shift_end_time=body.shift_end_time,
+        reason=body.reason,
+    )
+    return {"swap": swap}
+
+
+@router.get("/self/shift-swap/incoming")
+async def self_swap_incoming(
+    user: dict = Depends(get_current_user_scoped),
+):
+    """Return pending swap requests where I am the target."""
+    staff_id = _staff_id_from_user(user)
+    org_id   = _org_id_from_user(user)
+
+    items = await staff_comms_repo.db_list_swaps_for_target(org_id, staff_id, status="pending")
+    return {"swaps": items}
+
+
+@router.get("/self/shift-swap/outgoing")
+async def self_swap_outgoing(
+    user: dict = Depends(get_current_user_scoped),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    """Return my outbound swap requests (newest first)."""
+    staff_id = _staff_id_from_user(user)
+    org_id   = _org_id_from_user(user)
+
+    items = await staff_comms_repo.db_list_swaps_by_requester(org_id, staff_id, limit=limit)
+    return {"swaps": items}
+
+
+@router.post("/self/shift-swap/{swap_id}/accept", status_code=200)
+async def self_swap_accept(
+    swap_id: int,
+    user: dict = Depends(get_current_user_scoped),
+):
+    """Target staff accepts the swap request (moves to target_accepted)."""
+    staff_id = _staff_id_from_user(user)
+    org_id   = _org_id_from_user(user)
+
+    swap = await staff_comms_repo.db_get_swap(org_id, swap_id)
+    if not swap:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+    if str(swap["target_staff_id"]) != str(staff_id):
+        raise HTTPException(status_code=403, detail="Solo el destinatario puede aceptar esta solicitud.")
+
+    try:
+        updated = await staff_comms_repo.db_update_swap_status(
+            org_id, swap_id, "target_accepted", decided_by=staff_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    log.info("shift_swap.target_accepted", swap_id=swap_id, target_id=staff_id)
+    return {"swap": updated}
+
+
+@router.post("/self/shift-swap/{swap_id}/reject", status_code=200)
+async def self_swap_reject(
+    swap_id: int,
+    user: dict = Depends(get_current_user_scoped),
+):
+    """Target staff rejects the swap request (moves to target_rejected)."""
+    staff_id = _staff_id_from_user(user)
+    org_id   = _org_id_from_user(user)
+
+    swap = await staff_comms_repo.db_get_swap(org_id, swap_id)
+    if not swap:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+    if str(swap["target_staff_id"]) != str(staff_id):
+        raise HTTPException(status_code=403, detail="Solo el destinatario puede rechazar esta solicitud.")
+
+    try:
+        updated = await staff_comms_repo.db_update_swap_status(
+            org_id, swap_id, "target_rejected", decided_by=staff_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    log.info("shift_swap.target_rejected", swap_id=swap_id, target_id=staff_id)
+    return {"swap": updated}
+
+
+@router.post("/self/shift-swap/{swap_id}/withdraw", status_code=200)
+async def self_swap_withdraw(
+    swap_id: int,
+    user: dict = Depends(get_current_user_scoped),
+):
+    """Requester withdraws their own pending swap request."""
+    staff_id = _staff_id_from_user(user)
+    org_id   = _org_id_from_user(user)
+
+    swap = await staff_comms_repo.db_get_swap(org_id, swap_id)
+    if not swap:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+    if str(swap["requester_staff_id"]) != str(staff_id):
+        raise HTTPException(status_code=403, detail="Solo el solicitante puede retirar la solicitud.")
+
+    try:
+        updated = await staff_comms_repo.db_update_swap_status(
+            org_id, swap_id, "withdrawn", decided_by=staff_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    log.info("shift_swap.withdrawn", swap_id=swap_id, requester_id=staff_id)
+    return {"swap": updated}
+
+
+# ── Admin: Shift Swap ─────────────────────────────────────────────────────────
+
+@router.get("/shift-swap")
+async def admin_list_shift_swaps(
+    status: str | None = Query(default=None),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Admin view: list all shift swap requests for the org.
+
+    Optional ?status= filter (e.g. pending, target_accepted, admin_approved …).
+    """
+    _require_admin_role(restaurant)
+    org_id = restaurant["id"]
+
+    items = await staff_comms_repo.db_list_swaps_admin(org_id, status=status)
+    return {"swaps": items}
+
+
+@router.post("/shift-swap/{swap_id}/approve", status_code=200)
+async def admin_approve_shift_swap(
+    swap_id: int,
+    request: Request,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Admin approves a target_accepted swap and executes the physical shift swap."""
+    _require_admin_role(restaurant)
+    org_id = restaurant["id"]
+
+    from app.routes.deps import get_current_user  # noqa: PLC0415
+    admin_user = await get_current_user(request)
+    decided_by = admin_user.get("username", "admin")
+
+    try:
+        updated = await staff_comms_repo.db_update_swap_status(
+            org_id, swap_id, "admin_approved", decided_by=decided_by
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # Execute the physical swap now that it's approved
+    try:
+        result = await staff_comms_repo.db_execute_swap(org_id, swap_id)
+    except Exception as exc:
+        log.exception("shift_swap.execute_failed", swap_id=swap_id, error=str(exc))
+        # Swap status is already admin_approved; physical swap failed but is non-fatal
+        return {"swap": updated, "executed": False, "detail": str(exc)}
+
+    log.info(
+        "shift_swap.admin_approved",
+        swap_id=swap_id,
+        decided_by=decided_by,
+        swapped=result["swapped"],
+    )
+    return {"swap": updated, "executed": result["swapped"]}
+
+
+@router.post("/shift-swap/{swap_id}/reject", status_code=200)
+async def admin_reject_shift_swap(
+    swap_id: int,
+    body: SwapRejectAdminBody,
+    request: Request,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Admin rejects a target_accepted swap request."""
+    _require_admin_role(restaurant)
+    org_id = restaurant["id"]
+
+    from app.routes.deps import get_current_user  # noqa: PLC0415
+    admin_user = await get_current_user(request)
+    decided_by = admin_user.get("username", "admin")
+
+    try:
+        updated = await staff_comms_repo.db_update_swap_status(
+            org_id, swap_id, "admin_rejected",
+            decided_by=decided_by,
+            admin_notes=body.admin_notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    log.info("shift_swap.admin_rejected", swap_id=swap_id, decided_by=decided_by)
+    return {"swap": updated}
