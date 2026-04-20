@@ -3,131 +3,150 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — POS Mesero</title>
-<link rel="stylesheet" href="/static/css/pages/mesero.css">
-  <link rel="stylesheet" href="/static/css/tokens.css">
-  <link rel="stylesheet" href="/static/css/mesio-role.css">
+<title>Mesio — Mesero v2</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/mesero-v2.css">
 </head>
 <body>
 
-  <header class="m-topbar">
-    <a href="/staff-hq" class="m-logo">
-      <div class="m-logo-mark">M</div>
-      <span class="m-logo-title">Mesio</span>
+<div class="mesero-layout">
+
+  <!-- ── Dark side rail ── -->
+  <aside class="m-rail">
+    <!-- Logo -->
+    <a href="/staff-hq" class="m-rail-link" title="Hub">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/>
+        <rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/>
+      </svg>
     </a>
-    <span class="m-page-label">🍽️ Mesero</span>
-    <span class="m-role-chip">Mesero</span>
-    <div id="dynamic-role-nav"></div>
-    <div class="m-topbar-right">
-      <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
-      <span class="m-topbar-clock" id="header-clock">--:--</span>
-      <button class="m-btn-logout" onclick="doLogout()">Salir</button>
-    </div>
-  </header>
+    <div class="m-rail-sep"></div>
+    <!-- Mesas (active) -->
+    <a href="/mesero" class="m-rail-link active" title="Mesas">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/>
+        <rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/>
+      </svg>
+    </a>
+    <!-- Caja -->
+    <a href="/caja" class="m-rail-link" title="Caja">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="4" width="14" height="12" rx="1"/><path d="M3 8h14"/>
+      </svg>
+    </a>
+    <!-- Cocina -->
+    <a href="/kitchen" class="m-rail-link" title="Cocina">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M4 3v6a6 6 0 0012 0V3M4 6h12M10 15v3"/>
+      </svg>
+    </a>
+    <!-- Comandas / Notes -->
+    <a href="#" class="m-rail-link" title="Comandas">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="4" y="3" width="12" height="14" rx="1"/><path d="M7 7h6M7 10h6M7 13h4"/>
+      </svg>
+    </a>
 
-  <div class="tabs">
-    <div class="tab active" id="tab-mesas" onclick="switchTab('mesas',this)">
-      🪑 Map. Mesas
+    <div class="m-rail-bottom">
+      <div class="m-rail-avatar" id="rail-avatar">VC</div>
+      <button class="m-rail-link" title="Salir" style="color:#6B7280;" id="rail-logout">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M13 4H4v12h9M8 10h10M14 7l4 3-4 3"/>
+        </svg>
+      </button>
     </div>
-    <div class="tab" id="tab-alertas" onclick="switchTab('alertas',this)">
-      🔔 Alertas
-      <span class="tab-badge tab-badge-warn" id="badge-alertas" style="display:none">0</span>
-    </div>
-    <div class="tab" id="tab-pedidos" onclick="switchTab('pedidos',this)">
-      📦 Pedidos
-      <span class="tab-badge" id="badge-pedidos" style="display:none">0</span>
-    </div>
-    <div class="tab" id="tab-chats" onclick="switchTab('chats',this)">
-      💬 WhatsApp
-    </div>
-  </div>
+  </aside>
 
-  <div class="content">
-    
-    <div id="mesas" class="section active">
-      <div class="section-header">Estado del Salón</div>
-      <div id="tables-grid" class="table-grid">
-        <div class="empty">Cargando mapa de mesas...</div>
+  <!-- ── Main content area ── -->
+  <section class="m-area">
+
+    <!-- Page header -->
+    <div class="m-head">
+      <div class="m-head-info">
+        <h1>Salón</h1>
+        <div class="m-head-sub" id="mesero-sub">Cargando estado del turno…</div>
+      </div>
+      <!-- Zone filter tabs -->
+      <div class="m-zone-tabs" role="tablist">
+        <button class="m-zone-btn active" data-zone="all" role="tab" aria-selected="true">Todas</button>
+        <button class="m-zone-btn" data-zone="terraza" role="tab" aria-selected="false">Terraza</button>
+        <button class="m-zone-btn" data-zone="salon" role="tab" aria-selected="false">Salón</button>
+        <button class="m-zone-btn" data-zone="privado" role="tab" aria-selected="false">Privado</button>
+        <button class="m-zone-btn" data-zone="barra" role="tab" aria-selected="false">Barra</button>
       </div>
     </div>
 
-    <div id="alertas" class="section">
-      <div class="section-header">Atención Requerida</div>
-      <div id="alerts-list"><div class="empty">Sin alertas activas.</div></div>
-    </div>
-
-    <div id="pedidos" class="section">
-      <div class="section-header">Cocina y Cajas</div>
-      <div id="orders-list"><div class="empty">Cargando pedidos...</div></div>
-    </div>
-
-    <div id="chats" class="section">
-      <div class="section-header">Conversaciones Bot</div>
-      <div id="chats-list"><div class="empty">Cargando conversaciones...</div></div>
-    </div>
-  </div>
-
-  <div class="toast" id="toast">
-    <span id="toast-icon">🔔</span>
-    <span id="toast-text">Notificación</span>
-  </div>
-
-  <div class="pos-modal" id="pos-modal" role="dialog" aria-modal="true" aria-labelledby="pos-table-name">
-    <div class="pos-header">
-      <div class="pos-title" id="pos-table-name">Mesa</div>
-      <button class="pos-close" onclick="closePOS()" aria-label="Cerrar POS">✕</button>
-    </div>
-    <div class="pos-body">
-      <div class="pos-menu-area" id="pos-menu-area">
-        <div class="empty">Cargando menú...</div>
+    <!-- Legend row -->
+    <div class="m-legend" role="note" aria-label="Leyenda de estados">
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-libre-bg);border-color:var(--fp-libre);"></span>Libre
       </div>
-      
-      <div class="pos-cart-backdrop" id="pos-cart-backdrop" onclick="toggleMobileCart()"></div>
-      <div class="pos-cart-area" id="pos-cart-area">
-        <div class="cart-header">
-          <span>📝 Comanda Actual</span>
-          <button class="pos-close" style="display:none;" id="mobile-cart-close" onclick="toggleMobileCart()">✕</button>
-        </div>
-        <div class="cart-items" id="pos-cart-items">
-          </div>
-        <div class="cart-footer">
-          <div class="cart-total"><span>Total:</span><span id="pos-total">$0</span></div>
-          <textarea id="pos-notes" placeholder="Notas a cocina (ej. sin cebolla, término medio)..." style="width:100%; border:1px solid #ddd; border-radius:10px; padding:10px; margin-bottom:12px; font-family:inherit; font-size:13px; resize:none; outline:none;"></textarea>
-          <button class="btn-send-order" onclick="sendPosOrder()">🚀 Enviar a Cocina</button>
-        </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-sentados-bg);border-color:var(--fp-sentados);"></span>Sentados
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-ocupada-bg);border-color:var(--fp-ocupada);"></span>Comiendo
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-factura-bg);border-color:var(--fp-factura);"></span>Facturando
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-reservada-bg);border-color:var(--fp-reservada);"></span>Reservada
+      </div>
+      <div class="m-live-row">
+        <div class="m-live-dot"></div>
+        <span style="font-size:11px;color:var(--text-3);">Sync en vivo</span>
       </div>
     </div>
-    <div class="mobile-cart-toggle" id="mobile-cart-toggle" onclick="toggleMobileCart()">
-      <span>🛒 Ver Comanda (<span id="m-cart-count">0</span>)</span>
-      <span id="m-cart-total">$0</span>
-    </div>
-  </div>
 
-  <div class="chat-modal" id="chat-modal">
-    <div class="chat-box">
-      <div style="padding: 15px; border-bottom: 1px solid #ddd; display:flex; justify-content:space-between; background:#f8f8f5;">
-        <b id="chat-phone">Cliente</b>
-        <div>
-          <button onclick="deleteCurrentChat()" style="background:none; border:none; color:red; margin-right:15px; font-weight:bold; cursor:pointer;">Limpiar</button>
-          <button onclick="closeChat()" style="background:none; border:none; font-size:18px; cursor:pointer;">✕</button>
-        </div>
+    <!-- Alert banner (hidden by default) -->
+    <div class="m-alert-banner hidden" id="mesero-alert-banner" role="alert" aria-live="polite">
+      <!-- Populated by JS -->
+    </div>
+
+    <!-- Table grid -->
+    <div class="m-floor" id="mesero-floor" role="list" aria-label="Mesas del salón">
+      <div style="padding:40px;text-align:center;color:var(--text-3);grid-column:1/-1;">Cargando mesas…</div>
+    </div>
+
+    <!-- Bottom action bar -->
+    <div class="m-action-bar" role="complementary" aria-label="Métricas del turno">
+      <div class="m-act-metric">
+        <div class="m-act-label">Mis ventas</div>
+        <div class="m-act-val" id="m-stat-ventas">—</div>
       </div>
-      <div class="chat-msgs" id="chat-msgs"></div>
-      <div style="padding: 10px; border-top: 1px solid #ddd; display: flex; gap: 8px;">
-        <input id="chat-input-msg" style="flex:1; padding: 10px; border-radius: 20px; border:1px solid #ddd; outline:none;" placeholder="Escribir al cliente...">
-        <button onclick="sendReply()" style="background:#1D9E75; color:#fff; border:none; padding:0 20px; border-radius:20px; font-weight:bold;">Enviar</button>
+      <div class="m-act-metric">
+        <div class="m-act-label">Propinas hoy</div>
+        <div class="m-act-val" id="m-stat-propinas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Mesas atendidas</div>
+        <div class="m-act-val" id="m-stat-mesas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Ticket promedio</div>
+        <div class="m-act-val" id="m-stat-ticket">—</div>
       </div>
     </div>
-  </div>
+
+  </section><!-- /.m-area -->
+
+</div><!-- /.mesero-layout -->
 
 <script src="/static/js/mesio-utils.js"></script>
-<script
-
-console.log('rb_restaurant:', localStorage.getItem('rb_restaurant'));
-console.log('rb_role:', localStorage.getItem('rb_role'));
-
-src="/static/js/roles.js"></script>
-
-<script src="/static/js/pages/mesero.js" defer></script>
+<script src="/static/js/pages/mesero-v2.js" defer></script>
+<script>
+  // Populate rail avatar initials from localStorage
+  document.addEventListener('DOMContentLoaded', () => {
+    const av = document.getElementById('rail-avatar');
+    if (av) {
+      const name = localStorage.getItem('rb_staff_name') || localStorage.getItem('rb_name') || '';
+      if (name) av.textContent = name.split(' ').map(p => p[0]).join('').slice(0,2).toUpperCase();
+    }
+    document.getElementById('rail-logout')?.addEventListener('click', () => mesioLogout());
+  });
+</script>
 </body>
 </html>

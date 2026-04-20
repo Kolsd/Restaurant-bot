@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Módulo de Caja</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/pages/caja.css">
+<link rel="stylesheet" href="/static/css/mesio-role.css">
+</head>
+<body>
+
+<header class="m-topbar">
+  <a href="/staff-hq" class="m-logo">
+    <div class="m-logo-mark">M</div>
+    <span class="m-logo-title">Mesio</span>
+  </a>
+  <span class="m-page-label">💰 Caja</span>
+  <span class="m-role-chip">Caja</span>
+  <div id="dynamic-role-nav"></div>
+  <div class="m-topbar-right">
+    <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
+    <span class="m-topbar-clock" id="header-clock">--:--</span>
+    <button class="m-btn-logout" onclick="doStaffLogout()">Salir</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="segmented-control">
+    <button id="tab-mesas" class="seg-btn active" onclick="switchTab('mesas')">🪑 Mesas</button>
+    <button id="tab-pickup" class="seg-btn" onclick="switchTab('pickup')">🛍️ Para Recoger <span id="pickup-badge" style="display:none;background:#8b5cf6;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+    <button id="tab-proposals" class="seg-btn" onclick="switchTab('proposals')">🛵 Domicilios <span id="proposals-badge" style="display:none;background:#e74c3c;color:white;border-radius:10px;padding:1px 6px;font-size:11px;margin-left:4px;">0</span></button>
+  </div>
+
+  <div id="view-mesas" style="display:flex; gap:0; min-height:calc(100vh - 160px);">
+    <div id="mesas-left" style="flex:1; overflow-y:auto;">
+      <div class="section-title">
+        Cuentas por Cobrar
+        <span style="font-size:14px; color:#71717A; font-weight:500;" id="total-pending">0 cuentas pendientes</span>
+      </div>
+      <div class="board" id="board">
+        <div class="empty-state">Cargando caja...</div>
+      </div>
+    </div>
+    <div id="mesas-right" class="caja-preview-pane" style="display:none;">
+      <div class="caja-preview-header">
+        <span>Vista previa de factura</span>
+        <button onclick="closeMesasPreview()" aria-label="Cerrar vista previa">✕</button>
+      </div>
+      <div class="thermal-paper" id="mesas-receipt-preview"></div>
+      <div class="preview-actions">
+        <button class="btn-pay" id="preview-cobrar-btn" style="flex:1;">💰 Cobrar Todo</button>
+        <button class="btn-print-factura" id="preview-print-btn" style="width:auto; padding:10px 16px;">🖨️</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-pickup" style="display:none;">
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>🛍️ Pedidos Para Recoger</span>
+    </div>
+    <div id="pickup-list" style="display:flex;flex-wrap:wrap;gap:12px;padding:16px;">
+      <p style="color:#999;">Cargando...</p>
+    </div>
+  </div>
+
+  <div id="view-proposals" style="display:none;">
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>🛵 Domicilios Pendientes</span>
+      <button onclick="openQuickInvoiceModal()"
+        style="background:var(--primary);color:white;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;">
+        ➕ Nueva Factura
+      </button>
+    </div>
+    <div id="proposals-list" style="display:flex;flex-wrap:wrap;gap:12px;padding:16px;">
+      <p style="color:#999;">Cargando...</p>
+    </div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="adj-modal" onclick="if(event.target===this)closeAdjModal()" role="dialog" aria-modal="true" aria-labelledby="adj-modal-title">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="adj-modal-title">✏️ Ajustar Factura</h3>
+      <button class="modal-close" onclick="closeAdjModal()" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="adj-items-list"></div>
+    <div class="adj-tip-row">
+      <label>Propina / Recargo extra</label>
+      <input type="number" class="adj-tip-input" id="adj-tip" placeholder="0" min="0" inputmode="decimal" oninput="updateAdjTotal()">
+    </div>
+    <div class="adj-total-preview">
+      <span class="adj-total-label">Nuevo Total</span>
+      <span class="adj-total-val" id="adj-total-val">$0</span>
+    </div>
+    <button class="btn-adj-confirm" onclick="submitAdjuste()">✅ Confirmar Ajuste</button>
+  </div>
+</div>
+
+<div class="sp-overlay" id="split-modal" onclick="if(event.target===this)closeSplitModal()" role="dialog" aria-modal="true" aria-labelledby="split-modal-title">
+  <div class="sp-box">
+    <div class="sp-head">
+      <h3 id="split-modal-title">✂️ Dividir Cuenta</h3>
+      <button class="modal-close" onclick="closeSplitModal()" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="sp-body">
+
+      <div id="split-phase-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;flex-wrap:wrap;gap:8px;">
+          <div style="font-size:12px;color:#71717A;">Asigna los ítems a cada cuenta. La suma por plato debe igualar lo pedido.</div>
+          <button onclick="addSplitCheck()" style="font-size:12px;padding:5px 12px;background:#F5F3FF;color:#7C3AED;border:1.5px solid #DDD6FE;border-radius:8px;cursor:pointer;font-weight:700;">+ Nueva Cuenta</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="split-table">
+            <thead id="split-table-head"></thead>
+            <tbody id="split-table-body"></tbody>
+          </table>
+        </div>
+        <div class="split-totals-row" id="split-totals-row"></div>
+        <div style="margin-top:.75rem;">
+          <span id="split-unassigned" class="ok">✓ Todo asignado</span>
+        </div>
+      </div>
+
+      <div id="split-phase-2" style="display:none;">
+        <div style="font-size:13px;color:#71717A;margin-bottom:1rem;">División creada. Cobra cada cuenta por separado.</div>
+        <div id="split-checks-list"></div>
+        <div id="split-complete-msg" style="display:none;text-align:center;padding:1.5rem;background:#ECFDF5;border-radius:12px;color:#059669;font-weight:700;font-size:15px;">
+          ✅ Todas las cuentas han sido cobradas. Mesa cerrada.
+        </div>
+      </div>
+
+    </div>
+    <div class="sp-foot" id="split-footer">
+      <button class="sp-btn-cancel" onclick="closeSplitModal()">Cancelar</button>
+      <button class="sp-btn-ok" id="btn-create-split" onclick="submitSplit()">Crear División</button>
+    </div>
+  </div>
+</div>
+
+<div class="pos-overlay" id="pay-modal">
+  
+  <div class="pos-controls">
+    <div style="padding:1.5rem; border-bottom:1px solid #E4E4E7; display:flex; justify-content:space-between; align-items:center; background:#FAFAFA; position:sticky; top:0; z-index:10;">
+      <div>
+        <h2 id="pay-modal-title" style="font-size:1.5rem; font-weight:800; color:#18181B;">💰 Cobrar Cuenta</h2>
+        <div id="pay-modal-subtitle" style="font-size:12px; color:#71717A; font-family:monospace; margin-top:4px;"></div>
+      </div>
+      <button onclick="closePayModal()" aria-label="Cerrar cobro" style="padding:10px 20px; border-radius:10px; border:1px solid #D1D5DB; background:#fff; font-weight:600; cursor:pointer;">✕ Volver</button>
+    </div>
+
+    <div style="padding:2rem; flex:1;">
+      <div style="background:#F3E8FF; border:1px solid #D8B4FE; padding:1.5rem; border-radius:16px; margin-bottom:2rem; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:13px; color:#6D28D9; font-weight:700; text-transform:uppercase; letter-spacing:1px;">Pendiente por cobrar</div>
+          <div id="pay-pending-display" style="font-size:2.5rem; font-weight:900; color:#7C3AED; margin-top:4px;">$0</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:13px; color:#6D28D9; font-weight:700; text-transform:uppercase; letter-spacing:1px;">Cambio a devolver</div>
+          <div id="pay-change-display" style="font-size:2.5rem; font-weight:900; color:#059669; margin-top:4px;">$0</div>
+        </div>
+      </div>
+
+      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">1. Selecciona Método de Pago</h3>
+      <div id="dynamic-pay-methods" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:1.5rem;">
+      </div>
+
+      <div id="pay-methods-list" style="margin-bottom: 2rem;"></div>
+
+      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">2. Propina (Opcional)</h3>
+      <div style="display:grid; gap:12px; margin-bottom:2rem;">
+        <div>
+          <input type="number" id="payTipAmount" placeholder="0" min="0" step="100" inputmode="decimal"
+            style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;"
+            oninput="_recalcChange()">
+          <small id="payTipBadge" style="color:#27ae60;display:none;margin-top:4px;font-size:12px;"></small>
+        </div>
+      </div>
+
+      <h3 style="margin-bottom: 1rem; color:#18181B; font-size:1.1rem;">3. Datos para Factura DIAN</h3>
+      <div style="display:grid; gap:12px;">
+        <input type="text" id="pay-customer-name" placeholder="Nombre del cliente (Ej: Consumidor Final)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
+        <input type="text" id="pay-customer-nit" placeholder="CC / NIT (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;" oninput="_recalcChange()">
+        <input type="email" id="pay-customer-email" placeholder="Email (Opcional)" style="width:100%; padding:14px; border:2px solid #E4E4E7; border-radius:12px; font-size:15px; font-weight:600; outline:none;">
+      </div>
+      <div id="pay-feedback" role="alert" aria-live="polite" style="display:none; margin-top:1.5rem; padding:12px; border-radius:10px; font-size:14px; font-weight:600;"></div>
+    </div>
+
+    <div style="padding:1.5rem; border-top:1px solid #E4E4E7; background:#FAFAFA; position:sticky; bottom:0;">
+      <button id="btn-process-pay" onclick="processPayment()" style="width:100%; background:#1D9E75; color:#fff; border:none; padding:18px; border-radius:12px; font-size:18px; font-weight:800; cursor:pointer; box-shadow:0 6px 16px rgba(29,158,117,0.3); transition:background 0.2s;">
+        Cobrar e Imprimir Factura
+      </button>
+    </div>
+  </div>
+
+  <div class="pos-receipt-pane">
+    <div style="color:#9CA3AF; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:1rem;">Previsualización de Factura</div>
+    <div class="thermal-paper" id="receipt-preview">
+      </div>
+  </div>
+
+</div>
+
+<div class="sp-overlay" id="chat-modal" onclick="if(event.target===this)closeChatModal()" role="dialog" aria-modal="true" aria-labelledby="chat-modal-title">
+  <div class="sp-box">
+    <div class="sp-head">
+      <h3 id="chat-modal-title">Chat</h3>
+      <button class="modal-close" onclick="closeChatModal()" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="sp-body" id="chat-modal-msgs" style="background:#efeae2;min-height:300px;"></div>
+    <div class="sp-foot" style="gap:8px;">
+      <input type="text" id="chat-reply-input" class="chat-input" placeholder="Escribe un mensaje..." onkeydown="if(event.key==='Enter')sendManualReply()">
+      <button class="sp-btn-ok" onclick="sendManualReply()">Enviar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/roles.js"></script>
+<script src="/static/js/pages/caja.js" defer></script>
+<!-- ── MODAL PREVIEW FACTURA (Confirmar propuesta bot) ── -->
+<div id="proposal-pay-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:12px;padding:24px;width:380px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:16px;">Vista previa de factura</h3>
+      <button onclick="document.getElementById('proposal-pay-modal').style.display='none'"
+        style="background:none;border:none;font-size:20px;cursor:pointer;color:#999;">✕</button>
+    </div>
+    <div id="ppm-preview"
+      style="flex:1;overflow-y:auto;font-family:monospace;font-size:11px;background:#f9f9f9;padding:12px;border-radius:8px;margin-bottom:16px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="document.getElementById('proposal-pay-modal').style.display='none'"
+        style="flex:1;background:#ecf0f1;color:#333;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;">
+        Cancelar
+      </button>
+      <button id="ppm-confirm-btn"
+        style="flex:2;background:#27ae60;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        ✅ Confirmar y Facturar
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL DETALLE PROPUESTA BOT ── -->
+<div id="edit-proposal-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:12px;padding:24px;width:420px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 id="epm-title" style="margin:0;font-size:16px;">Detalle propuesta</h3>
+      <button onclick="closeEditProposalModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999;">✕</button>
+    </div>
+    <div id="epm-checks" style="margin-bottom:16px;"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button id="epm-chat-btn"
+        style="background:#25D366;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        💬 Ver chat del cliente
+      </button>
+      <button id="epm-goto-btn"
+        style="background:#3498db;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        🪑 Ir a la mesa (editar división)
+      </button>
+      <button id="epm-cancel-btn"
+        style="background:#fee2e2;color:#dc2626;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:14px;font-weight:600;">
+        🗑️ Cancelar propuesta del bot
+      </button>
+    </div>
+  </div>
+</div>
+
+<iframe id="print-frame" style="display:none;position:absolute;width:0;height:0;border:0;"></iframe>
+
+<!-- ── POS NUEVA FACTURA — pantalla completa estilo mesero ── -->
+
+<div id="quick-invoice-screen" class="qim-screen">
+  <!-- Header -->
+  <div class="qim-header">
+    <div class="qim-header-title">🧾 Nueva Factura</div>
+    <div class="qim-header-right">
+      <button class="qim-close-btn" onclick="closeQuickInvoiceModal()" aria-label="Cerrar nueva factura">✕</button>
+    </div>
+  </div>
+
+  <div class="qim-body">
+    <!-- Menú izquierda -->
+    <div class="qim-menu-area" id="qim-menu-area">
+      <div style="text-align:center;padding:40px;color:#aaa;font-size:14px;">Cargando menú...</div>
+    </div>
+
+    <!-- Carrito + datos derecha -->
+    <div class="qim-cart-area">
+      <div class="qim-cart-hdr">🧾 Factura</div>
+
+      <div class="qim-cart-body">
+        <div id="qim-cart-items" class="qim-cart-empty">Toca un producto del menú para agregarlo.</div>
+      </div>
+
+      <div class="qim-cart-footer">
+        <!-- Tipo -->
+        <div>
+          <div class="qim-section-label">Tipo de venta</div>
+          <div class="qim-type-btns">
+            <button id="qim-type-salon"     class="qim-type-btn active" onclick="qimSetType('salon')">🪑 Salón</button>
+            <button id="qim-type-domicilio" class="qim-type-btn"        onclick="qimSetType('domicilio')">🛵 Domicilio</button>
+          </div>
+        </div>
+
+        <!-- Propina -->
+        <div>
+          <div class="qim-section-label">Propina</div>
+          <div class="qim-tip-btns">
+            <button class="qim-tip-btn active" id="qtip-0"  onclick="qimSetTipPct(0)">Sin propina</button>
+            <button class="qim-tip-btn"        id="qtip-10" onclick="qimSetTipPct(10)">10%</button>
+            <button class="qim-tip-btn"        id="qtip-15" onclick="qimSetTipPct(15)">15%</button>
+            <button class="qim-tip-btn"        id="qtip-20" onclick="qimSetTipPct(20)">20%</button>
+          </div>
+          <input id="qim-tip-custom" class="qim-tip-input" type="number" min="0" placeholder="Otro valor en $" oninput="qimTipCustom(this.value)">
+        </div>
+
+        <!-- Método de pago -->
+        <div>
+          <div class="qim-section-label">Método de pago</div>
+          <select id="qim-payment" class="qim-pay-select">
+            <option value="efectivo">💵 Efectivo</option>
+            <option value="tarjeta">💳 Tarjeta</option>
+            <option value="nequi">📱 Nequi</option>
+            <option value="daviplata">📱 Daviplata</option>
+            <option value="transferencia">🏦 Transferencia</option>
+          </select>
+        </div>
+
+        <!-- Datos cliente -->
+        <div>
+          <div class="qim-section-label">Cliente</div>
+          <input id="qim-customer-name"  class="qim-field" placeholder="Nombre" value="Consumidor Final" style="margin-bottom:5px;">
+          <div style="display:flex;gap:5px;">
+            <input id="qim-customer-nit"   class="qim-field" placeholder="NIT / Cédula" value="222222222" style="flex:1;">
+            <input id="qim-customer-email" class="qim-field" placeholder="Email" style="flex:1;">
+          </div>
+        </div>
+
+        <!-- Totales -->
+        <div class="qim-totals">
+          <div class="qim-totals-row"><span style="color:#71717A;">Subtotal</span><span id="qim-subtotal">$0</span></div>
+          <div class="qim-totals-row"><span style="color:#71717A;">Propina</span><span id="qim-tip-total">$0</span></div>
+          <div class="qim-totals-row"><span>Total</span><span id="qim-total">$0</span></div>
+        </div>
+
+        <!-- Botón -->
+        <button id="qim-gen-btn" class="qim-gen-btn" onclick="submitQuickInvoice()">🧾 Generar Factura</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
