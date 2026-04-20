@@ -3,22 +3,22 @@ tests/test_migration_0037.py
 
 Integration tests for migration 0037 (drop legacy RLS + restaurant_id).
 
-These tests require a real PostgreSQL database with migrations 0034-0036
-already applied. They are skipped automatically when DATABASE_URL is absent
-(unit-only CI runs).
-
-Run them only after Wave 1 has been running in staging/production for ≥7 days
-with zero TenantNotSetError and zero org_id IS NULL hits, as required by the
-deployment gate documented in migration 0037.
-
-Usage:
-    DATABASE_URL=postgres://... pytest tests/test_migration_0037.py -v
+OBSOLETE POST-0038: All 11 tests in this file assert artifacts that were
+dropped by migration 0038 (`restaurants_deprecated` table,
+`_migration_restaurant_to_location` table, `parent_restaurant_id` column,
+`is_primary` column, legacy `tenant_isolation` policies at the 0037 state).
+The test DB alembic head is ≥ 0038, so these assertions no longer hold.
+Skipped to keep CI green until this file is pruned in a future sprint.
 """
 from __future__ import annotations
 
 import os
 
 import pytest
+
+pytestmark = pytest.mark.skip(
+    reason="Obsolete post-0038: asserts artifacts dropped by migration 0038"
+)
 
 # ── Skip entire module when no real DB is available ──────────────────────────
 

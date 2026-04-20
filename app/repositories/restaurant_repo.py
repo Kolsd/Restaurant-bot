@@ -1821,7 +1821,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                     SELECT id, org_id, name, code, address, latitude, longitude,
                            whatsapp_number, wa_phone_id, wa_access_token,
                            active, timezone, opening_hours,
-                           created_at, updated_at, legacy_restaurant_id
+                           created_at, updated_at
                     FROM locations
                     WHERE org_id = $1 AND active = true
                     ORDER BY name ASC, id ASC
@@ -1834,7 +1834,7 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
                     SELECT id, org_id, name, code, address, latitude, longitude,
                            whatsapp_number, wa_phone_id, wa_access_token,
                            active, timezone, opening_hours,
-                           created_at, updated_at, legacy_restaurant_id
+                           created_at, updated_at
                     FROM locations
                     WHERE org_id = $1
                     ORDER BY name ASC, id ASC
@@ -1856,26 +1856,25 @@ async def db_get_org_locations(org_id: int, active_only: bool = True) -> list[di
     return result
 
 
-async def db_get_primary_location(org_id: int) -> dict | None:
-    """Return the deterministic default Location for an Org (lowest id).
+async def db_get_default_location(org_id: int) -> dict | None:
+    """Return a deterministic default Location for the org (ORDER BY id ASC LIMIT 1).
 
-    Post-Wave-2: there is no designated "primary" location; every location is a
-    peer.  This function preserves the existing call-site contract by returning
-    the location with the smallest id (the one that was historically the Matriz
-    for orgs migrated at Wave-2).  Migration 0038 will drop the is_primary
-    column entirely.
+    Post-Wave-2 all locations are peers — this does NOT return a "primary"
+    location (no such concept exists). Use only for legacy fallback cases where
+    a single representative location is needed (e.g. credential fallback when a
+    branch has no WhatsApp credentials configured).
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
     pool = await _get_pool()
-    with bypass_tenant_scope_if_unset("db_get_primary_location_lookup"):
+    with bypass_tenant_scope_if_unset("db_get_default_location_lookup"):
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT id, org_id, name, code, address, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
                        active, timezone, opening_hours,
-                       created_at, updated_at, legacy_restaurant_id
+                       created_at, updated_at
                 FROM locations
                 WHERE org_id = $1
                 ORDER BY id ASC
@@ -1897,6 +1896,28 @@ async def db_get_primary_location(org_id: int) -> dict | None:
     return d
 
 
+# Deprecated alias. Remove after 1-2 sprints.
+db_get_primary_location = db_get_default_location
+
+
+async def db_resolve_org_id_from_location(location_id: int) -> int | None:
+    """Resolve the org_id for a given location_id.
+
+    Used where the caller has a location_id (e.g. from `restaurant["id"]` via
+    the `restaurants` VIEW) but needs the real org_id for explicit repo queries.
+    Returns None if the location is not found.
+    """
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
+
+    pool = await _get_pool()
+    with bypass_tenant_scope_if_unset("db_resolve_org_id_from_location_lookup"):
+        async with pool.acquire() as conn:
+            return await conn.fetchval(
+                "SELECT org_id FROM locations WHERE id = $1",
+                location_id,
+            )
+
+
 async def db_get_location_by_id(location_id: int) -> dict | None:
     """Fetch a Location by PK.  Returns None if not found.
 
@@ -1913,7 +1934,7 @@ async def db_get_location_by_id(location_id: int) -> dict | None:
                 SELECT id, org_id, name, code, address, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
                        active, timezone, opening_hours,
-                       created_at, updated_at, legacy_restaurant_id
+                       created_at, updated_at
                 FROM locations
                 WHERE id = $1
                 """,
@@ -1966,7 +1987,7 @@ async def db_resolve_location_by_gps(
                 SELECT id, org_id, name, code, address, latitude, longitude,
                        whatsapp_number, wa_phone_id, wa_access_token,
                        active, timezone, opening_hours,
-                       created_at, updated_at, legacy_restaurant_id
+                       created_at, updated_at
                 FROM locations
                 WHERE org_id = $1
                   AND active = true
@@ -2123,7 +2144,7 @@ async def db_update_location(location_id: int, **fields) -> dict | None:
         f"UPDATE locations SET {', '.join(set_clauses)} "  # noqa: S608 — col names are whitelisted
         f"WHERE id = ${idx} RETURNING id, org_id, name, code, address, latitude, longitude, "
         f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
-        f"opening_hours, created_at, updated_at, legacy_restaurant_id"
+        f"opening_hours, created_at, updated_at"
     )
 
     pool = await _get_pool()
@@ -2150,7 +2171,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
 
     Accepted extra fields: code, address, latitude, longitude,
     whatsapp_number, wa_phone_id, wa_access_token, active,
-    opening_hours, timezone, legacy_restaurant_id.
+    opening_hours, timezone.
 
     Returns the created row as a dict.
     """
@@ -2159,7 +2180,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
     _ALLOWED_CREATE_FIELDS = {
         "code", "address", "latitude", "longitude",
         "whatsapp_number", "wa_phone_id", "wa_access_token",
-        "active", "opening_hours", "timezone", "legacy_restaurant_id",
+        "active", "opening_hours", "timezone",
     }
 
     extra = {k: v for k, v in fields.items() if k in _ALLOWED_CREATE_FIELDS}
@@ -2184,7 +2205,7 @@ async def db_create_location(org_id: int, name: str, **fields) -> dict:
         f"VALUES ({', '.join(placeholders)}) "
         f"RETURNING id, org_id, name, code, address, latitude, longitude, "
         f"whatsapp_number, wa_phone_id, wa_access_token, active, timezone, "
-        f"opening_hours, created_at, updated_at, legacy_restaurant_id"
+        f"opening_hours, created_at, updated_at"
     )
 
     pool = await _get_pool()

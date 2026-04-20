@@ -180,8 +180,9 @@ async def db_save_table_order(order: dict):
         await conn.execute("""
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
-                 base_order_id, sub_number, station, branch_id, org_id)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                 base_order_id, sub_number, station, branch_id, org_id,
+                 channel, waiter_staff_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 status=EXCLUDED.status,
@@ -198,7 +199,9 @@ async def db_save_table_order(order: dict):
             order.get('sub_number', 1),
             order.get('station', 'all'),
             order.get('branch_id'),
-            rid)
+            rid,
+            order.get('channel'),
+            order.get('waiter_staff_id'))
 
 
 async def db_get_base_order_status(base_order_id: str) -> str | None:
@@ -520,11 +523,13 @@ async def db_create_table_session(
     table_name: str,
     org_id: int | None = None,
     location_id: int | None = None,
+    assigned_staff_id: str | None = None,
 ) -> dict:
     """# Requires active tenant_scope() or bypass_tenant_scope().
 
     org_id is required by schema (NOT NULL). If not passed, resolved from
     restaurant_tables.org_id. location_id is also persisted when available.
+    assigned_staff_id optionally records which mesero opened/owns the table.
     """
     async with tenant_connection() as conn:
         if org_id is None or location_id is None:
@@ -541,9 +546,12 @@ async def db_create_table_session(
         if org_id is None:
             raise ValueError(f"Cannot resolve org_id for table {table_id}")
         row = await conn.fetchrow(
-            "INSERT INTO table_sessions (phone, bot_number, table_id, table_name, org_id, location_id, status, last_activity) "
-            "VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW()) RETURNING *",
+            "INSERT INTO table_sessions "
+            "(phone, bot_number, table_id, table_name, org_id, location_id, "
+            "assigned_staff_id, status, last_activity) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', NOW()) RETURNING *",
             phone, bot_number, table_id, table_name, org_id, location_id,
+            assigned_staff_id,
         )
         return _serialize(dict(row))
 
@@ -1447,6 +1455,51 @@ async def db_reopen_session(session_id: int) -> None:
             "UPDATE table_sessions SET closed_at = NULL, closed_by = NULL, closed_by_username = NULL WHERE id = $1",
             session_id,
         )
+
+
+async def db_get_recent_table_orders_by_phone(
+    org_id: int,
+    phone: str,
+    limit: int = 5,
+) -> list[dict]:
+    """Return the most recent table (salon) orders for a phone number.
+
+    Runs under the already-active tenant_scope set by the call site.
+    Returns a list of dicts:
+        {"id", "total": float, "created_at": str | None, "items_summary": str, "source": "table"}
+    """
+    import json as _json  # noqa: PLC0415
+
+    results: list[dict] = []
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, total, created_at, items
+               FROM table_orders
+               WHERE phone = $1
+                 AND org_id = $2
+               ORDER BY created_at DESC
+               LIMIT $3""",
+            phone, org_id, limit,
+        )
+    for r in rows:
+        items_raw = r["items"]
+        if isinstance(items_raw, str):
+            try:
+                items_raw = _json.loads(items_raw)
+            except Exception:
+                items_raw = []
+        items_list = items_raw if isinstance(items_raw, list) else []
+        summary = " · ".join(i.get("name", "item") for i in items_list[:3])
+        if len(items_list) > 3:
+            summary += f" +{len(items_list) - 3}"
+        results.append({
+            "id": f"#{str(r['id'])[-6:].upper()}",
+            "total": float(to_decimal(r["total"])),  # JSON boundary
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "items_summary": summary,
+            "source": "table",
+        })
+    return results
 
 
 async def db_session_alert_waiter(session_id: int, message: str) -> bool:

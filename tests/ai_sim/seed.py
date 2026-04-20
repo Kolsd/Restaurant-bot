@@ -116,7 +116,7 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
             json.dumps(SIM_FEATURES),
             "mesio-test-sim",
         )
-        # Post-0038: no is_primary column, no legacy_restaurant_id concern.
+        # Post-0041: no is_primary column, legacy_restaurant_id column dropped.
         loc_id = await conn.fetchval(
             """
             INSERT INTO locations (

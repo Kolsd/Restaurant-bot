@@ -289,8 +289,8 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
 
                 # Wave-2: if branch lacks credentials, fall back to the org's primary location.
                 if (not rest_phone_id or not rest_token) and rest.get("org_id"):
-                    from app.repositories.restaurant_repo import db_get_primary_location  # noqa: PLC0415
-                    primary = await db_get_primary_location(rest["org_id"])
+                    from app.repositories.restaurant_repo import db_get_default_location  # noqa: PLC0415
+                    primary = await db_get_default_location(rest["org_id"])
                     parent = (
                         await db.db_get_restaurant_by_id(primary["id"])
                         if primary and primary.get("id") and primary.get("id") != rest.get("location_id")

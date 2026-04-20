@@ -682,35 +682,53 @@ async def db_calculate_tips_by_attendance(
         if not pct_config:
             return {"entries": [], "total_tips": 0, "unallocated": 0, "pct_config": {}}
 
-        # Resolve restaurant scope (branch or matrix + branches)
-        if branch_id:
-            rest_ids = [branch_id]
-        else:
-            branches = await conn.fetch(
-                "SELECT id FROM locations WHERE org_id = (SELECT org_id FROM locations WHERE id = $1)",
-                restaurant_id,
-            )
-            rest_ids = [r["id"] for r in branches]
+        # Resolve org_id from restaurant_id (= location_id in Wave-2).
+        # Staff and shifts use org_id (organizations.id) as their tenant key —
+        # never the location_id. branch_id (if given) is a location_id used only
+        # to narrow WHICH checks are counted; all org staff on shift at the time
+        # of each check still participate in the distribution.
+        loc_row = await conn.fetchrow(
+            "SELECT org_id FROM locations WHERE id = $1", restaurant_id
+        )
+        # Fall back to treating restaurant_id as org_id for orgs where
+        # location_id == org_id (legacy test data and primary-location trick).
+        org_id: int = loc_row["org_id"] if loc_row else restaurant_id
 
-        # Fetch all paid checks in period with tip_amount > 0
+        # Fetch all paid checks in period with tip_amount > 0, optionally scoped
+        # to a specific branch (location_id in table_orders.branch_id).
         ps = _ensure_datetime(period_start)
         pe = _ensure_datetime(period_end)
-        checks = await conn.fetch(
-            """SELECT tc.id, tc.tip_amount, tc.paid_at
-               FROM table_checks tc
-               JOIN table_orders to2 ON to2.id = tc.base_order_id
-               WHERE tc.paid_at >= $1::timestamptz
-                 AND tc.paid_at < $2::timestamptz
-                 AND tc.tip_amount > 0
-                 AND tc.status = 'invoiced'
-                 AND COALESCE(to2.branch_id, $3) = ANY($4::int[])""",
-            ps, pe, restaurant_id, rest_ids,
-        )
+        if branch_id:
+            checks = await conn.fetch(
+                """SELECT tc.id, tc.tip_amount, tc.paid_at
+                   FROM table_checks tc
+                   JOIN table_orders to2 ON to2.id = tc.base_order_id
+                   WHERE tc.paid_at >= $1::timestamptz
+                     AND tc.paid_at < $2::timestamptz
+                     AND tc.tip_amount > 0
+                     AND tc.status = 'invoiced'
+                     AND to2.org_id = $3
+                     AND to2.branch_id = $4""",
+                ps, pe, org_id, branch_id,
+            )
+        else:
+            checks = await conn.fetch(
+                """SELECT tc.id, tc.tip_amount, tc.paid_at
+                   FROM table_checks tc
+                   JOIN table_orders to2 ON to2.id = tc.base_order_id
+                   WHERE tc.paid_at >= $1::timestamptz
+                     AND tc.paid_at < $2::timestamptz
+                     AND tc.tip_amount > 0
+                     AND tc.status = 'invoiced'
+                     AND to2.org_id = $3""",
+                ps, pe, org_id,
+            )
 
         if not checks:
             return {"entries": [], "total_tips": 0, "unallocated": 0, "pct_config": pct_config}
 
-        # For each check, find staff on shift at paid_at
+        # For each check, find staff on shift at paid_at.
+        # Staff shifts are always scoped by org_id (not by location/branch).
         totals: dict[str, dict] = {}  # staff_id -> {name, role, tickets, amount}
         total_tips = ZERO
         unallocated = ZERO
@@ -728,11 +746,11 @@ async def db_calculate_tips_by_attendance(
                 """SELECT ss.staff_id::text, s.name, s.role
                    FROM staff_shifts ss
                    JOIN staff s ON s.id = ss.staff_id
-                   WHERE ss.org_id = ANY($1::int[])
+                   WHERE ss.org_id = $1
                      AND ss.clock_in <= $2
                      AND (ss.clock_out IS NULL OR ss.clock_out >= $2)
                      AND s.role = ANY($3::text[])""",
-                rest_ids, paid_at, list(pct_config.keys()),
+                org_id, paid_at, list(pct_config.keys()),
             )
 
             if not on_shift:

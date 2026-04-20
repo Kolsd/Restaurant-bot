@@ -91,7 +91,6 @@ def _make_location_row(
         "opening_hours": json.dumps({}),
         "created_at": None,
         "updated_at": None,
-        "legacy_restaurant_id": None,
     }
 
 
@@ -224,12 +223,13 @@ async def test_db_get_org_locations_returns_primary_first():
     assert locs[1]["is_primary"] is False
 
 
-# ── Test: db_get_primary_location returns the primary ────────────────────────
+# ── Test: db_get_default_location returns the deterministic default ──────────
 
 
-async def test_db_get_primary_location_invariant():
-    """db_get_primary_location returns the single is_primary=True Location
-    for an Org; returns None when no primary exists."""
+async def test_db_get_default_location_invariant():
+    """db_get_default_location returns the lowest-id Location for an Org
+    (ORDER BY id ASC LIMIT 1); returns None when no location exists.
+    Post-Wave-2: there is no 'primary' — all locations are peers."""
     primary_row = _FakeRecord(_make_location_row(loc_id=10, is_primary=True))
 
     conn_with = _make_conn()
@@ -237,13 +237,12 @@ async def test_db_get_primary_location_invariant():
     pool_with = _make_pool(conn_with)
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool_with)):
-        from app.repositories.restaurant_repo import db_get_primary_location
+        from app.repositories.restaurant_repo import db_get_default_location
 
-        result = await db_get_primary_location(1)
+        result = await db_get_default_location(1)
 
     assert result is not None
     assert result["id"] == 10
-    assert result["is_primary"] is True
 
     # Now test None case
     conn_none = _make_conn()
@@ -251,7 +250,7 @@ async def test_db_get_primary_location_invariant():
     pool_none = _make_pool(conn_none)
 
     with patch("app.services.database.get_pool", AsyncMock(return_value=pool_none)):
-        result_none = await db_get_primary_location(99)
+        result_none = await db_get_default_location(99)
 
     assert result_none is None
 

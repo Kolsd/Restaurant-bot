@@ -342,7 +342,8 @@ from app.repositories.restaurant_repo import (
     db_get_org_by_id,
     db_get_org_by_phone,
     db_get_org_locations,
-    db_get_primary_location,
+    db_get_default_location,
+    db_get_primary_location,  # Deprecated alias — use db_get_default_location
     db_get_location_by_id,
     db_resolve_location_by_gps,
     db_update_organization,

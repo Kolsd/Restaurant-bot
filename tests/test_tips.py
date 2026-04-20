@@ -660,28 +660,21 @@ async def test_check_outside_period_ignored(db_conn):
 
 # ── Test 9: Branch scope — branch_id filter ──────────────────────────────────
 
-@pytest.mark.skip(
-    reason=(
-        "Wave-2 branch_id filter: db_calculate_tips_by_attendance builds "
-        "rest_ids from location.id values then queries ss.org_id = ANY(rest_ids). "
-        "In production this works because legacy data has org_id == location.id "
-        "for the primary location (both equal old restaurant_id). For peer "
-        "branch locations, org_id (organizations.id FK) != location_id, so "
-        "the on_shift query finds no staff → unallocated. This is a known "
-        "org_id/location_id conflation bug in the prod function; the test "
-        "cannot be made to pass without modifying production code."
-    )
-)
 @pytest.mark.asyncio
 async def test_branch_id_filter(db_conn):
     """
     Two locations (branches) under the same org.
     Each has a mesero, a shift, and a check.
 
-    When calling with branch_id=branch_a_id, only the check for branch_a is
-    counted; the mesero from branch_b gets nothing.
+    When calling with branch_id=branch_a_id:
+      - Only checks for branch_a are counted (30 000 total, not 100 000).
+      - Staff on-shift lookup uses org_id, so BOTH meseros (from both branches)
+        share the branch_a tips equally (15 000 each).
+      - Mesero Branch B still appears in the result — they were on shift at the
+        org when the branch_a check was paid.
 
-    Wave-2: branches are peer locations under the same org_id.
+    Wave-2 fix: staff/shifts are scoped by org_id (not location_id), so
+    branch_id only filters WHICH checks are included, not which staff participate.
     """
     # Create org with tip config
     org_id = await db_conn.fetchval(
@@ -754,8 +747,10 @@ async def test_branch_id_filter(db_conn):
                 org_id, PERIOD_START, PERIOD_END, branch_id=branch_a_id
             )
 
+    # Only branch_a checks counted (30 000, not 100 000)
     assert result["total_tips"] == 30_000
     assert result["unallocated"] == 0
     by_name = {e["name"]: e["total_tips"] for e in result["entries"]}
-    assert by_name.get("Mesero Branch A") == 30_000
-    assert "Mesero Branch B" not in by_name
+    # Both meseros are on shift at org level, so they split the branch_a tips equally.
+    assert by_name.get("Mesero Branch A") == 15_000
+    assert by_name.get("Mesero Branch B") == 15_000
