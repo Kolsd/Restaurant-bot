@@ -45,6 +45,20 @@ def _default_period(period_start: str | None, period_end: str | None) -> tuple[s
     return period_start, period_end
 
 
+def _prev_period(period_start: str, period_end: str) -> tuple[str, str]:
+    """Return the previous period of equal duration immediately before period_start.
+
+    Example: period 2026-04-11 → 2026-04-17 (7 days)
+             previous → 2026-04-04 → 2026-04-10 (7 days, same duration)
+    """
+    ps = date.fromisoformat(period_start)
+    pe = date.fromisoformat(period_end)
+    duration = pe - ps  # timedelta
+    prev_end = ps - timedelta(days=1)
+    prev_start = prev_end - duration
+    return str(prev_start), str(prev_end)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Sales by channel
 # ─────────────────────────────────────────────────────────────────────────────
