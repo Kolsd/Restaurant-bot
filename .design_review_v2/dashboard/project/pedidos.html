@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Pedidos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  /* Live monitor cells */
+  .kds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; padding: 14px 18px 18px; }
+  .kds-card { background: #fff; border: 0.5px solid var(--border); border-radius: 9px; padding: 12px 14px; position: relative; transition: border-color .15s; }
+  .kds-card:hover { border-color: var(--border-strong); }
+  .kds-card.cocina { border-left: 2px solid var(--warning); }
+  .kds-card.ruta { border-left: 2px solid var(--info); }
+  .kds-card.listo { border-left: 2px solid var(--brand); }
+  .kds-card.factura { border-left: 2px solid var(--purple); }
+  .kds-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .kds-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+  .kds-name { font-size: 13px; font-weight: 600; line-height: 1.25; }
+  .kds-sub { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+  .kds-items { font-size: 12px; color: var(--text-2); line-height: 1.5; margin: 8px 0; padding: 8px 0; border-top: 0.5px solid var(--border); border-bottom: 0.5px solid var(--border); }
+  .kds-item { display: flex; justify-content: space-between; gap: 8px; }
+  .kds-item span:first-child { color: var(--text-2); }
+  .kds-item .mono { color: var(--text-3); font-size: 11.5px; }
+  .kds-foot { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+  .kds-time { font-family: var(--font-mono); color: var(--text-3); font-size: 11.5px; }
+  .kds-price { font-family: var(--font-display); font-weight: 600; font-size: 15px; font-variant-numeric: tabular-nums; }
+
+  .hist-row { display: grid; grid-template-columns: 60px 80px 1fr 140px 140px 110px 90px; gap: 12px; align-items: center; padding: 10px 18px; border-bottom: 0.5px solid var(--border); font-size: 13px; cursor: pointer; transition: background .1s; }
+  .hist-row:hover { background: #fafaf8; }
+  .hist-row:last-child { border-bottom: none; }
+  .hist-head { background: #fafaf8; font-size: 11.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+  .hist-head:hover { background: #fafaf8; cursor: default; }
+
+  .filter-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: 12px; border-radius: 6px; background: #fff; border: 0.5px solid var(--border); color: var(--text-2); cursor: pointer; }
+  .filter-chip:hover { border-color: var(--border-strong); }
+  .filter-chip.active { background: var(--text); color: #fff; border-color: var(--text); }
+
+  .channel-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; font-size: 11px; font-weight: 500; border-radius: 4px; }
+  .channel-pill.wa { background: #E1F5EE; color: var(--brand-dark); }
+  .channel-pill.pos { background: #FEF3C7; color: #92400E; }
+  .channel-pill.dom { background: #DBEAFE; color: #1E40AF; }
+  .channel-pill.qr { background: #EDE9FE; color: #5B21B6; }
+</style>
+</head>
+<body data-active="pedidos">
+
+<div class="app">
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="dashboard.html" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Pedidos</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+          <input placeholder="Buscar #ID, cliente, mesa…">
+          <span class="kbd">⌘K</span>
+        </div>
+        <button class="icon-btn" title="Notificaciones"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 10V7a4 4 0 018 0v3l1.5 1.5v.5h-11V11L4 10zM6.5 13.5a1.5 1.5 0 003 0"/></svg></button>
+        <div class="row" style="gap:6px; padding:2px 8px 2px 4px; border-left: 0.5px solid var(--border); margin-left: 4px;">
+          <span class="dot live"></span>
+          <span style="font-size:11.5px;color:var(--text-3);">Bot 24/7</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Pedidos</div>
+          <div class="page-sub">Monitorea cocina, domicilios y salón en vivo. Cambia a histórico para auditar y exportar.</div>
+        </div>
+        <div class="row">
+          <div class="seg">
+            <button class="seg-btn active" data-tab="rt" onclick="switchTab('rt')">⚡ Tiempo real</button>
+            <button class="seg-btn" data-tab="hist" onclick="switchTab('hist')">📚 Histórico</button>
+          </div>
+          <button class="btn"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10l5 4 5-4M8 2v12"/></svg>Exportar CSV</button>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: TIEMPO REAL ═══ -->
+      <div id="tab-rt">
+
+        <!-- Monitor Domicilios -->
+        <div class="card flush" style="border-top: 2px solid var(--info); margin-bottom: 16px;">
+          <div class="card-head">
+            <div class="row">
+              <span class="dot live"></span>
+              <div>
+                <div class="card-title">🛵 Monitor Domicilios · Bot</div>
+                <div class="card-sub">Pedidos capturados por WhatsApp</div>
+              </div>
+            </div>
+            <div class="row">
+              <span class="badge">Hoy</span>
+              <button class="btn sm ghost">↻</button>
+            </div>
+          </div>
+          <div class="metrics-row" style="border: none; border-radius: 0; border-bottom: 0.5px solid var(--border);">
+            <div class="metric"><div class="metric-label">Atendidos hoy</div><div class="metric-value">47</div><div class="metric-sub metric-delta up">▲ 12% vs ayer</div></div>
+            <div class="metric"><div class="metric-label">En cocina</div><div class="metric-value" style="color: var(--warning-text);">6</div><div class="metric-sub">Promedio 14 min</div></div>
+            <div class="metric"><div class="metric-label">En entrega</div><div class="metric-value" style="color: var(--info);">4</div><div class="metric-sub">2 domiciliarios activos</div></div>
+            <div class="metric"><div class="metric-label">Entregados</div><div class="metric-value" style="color: var(--brand);">37</div><div class="metric-sub">$1.84M facturado</div></div>
+          </div>
+          <div class="kds-grid">
+            <div class="kds-card cocina">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">#3421</div>
+                  <div class="kds-name">Ana María L.</div>
+                  <div class="kds-sub">Usaquén · Cl 118 #15-22</div>
+                </div>
+                <span class="badge warn">Cocina</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Bandeja paisa</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Jugo de mora</span><span class="mono">×1</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">⏱ 8 min</span>
+                <span class="kds-price">$42.500</span>
+              </div>
+            </div>
+            <div class="kds-card cocina">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">#3419</div>
+                  <div class="kds-name">Carlos R.</div>
+                  <div class="kds-sub">Chapinero · Cra 13 #67-40</div>
+                </div>
+                <span class="badge warn">Cocina</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Ajiaco santafereño</span><span class="mono">×2</span></div>
+                <div class="kds-item"><span>Club Colombia</span><span class="mono">×2</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">⏱ 14 min</span>
+                <span class="kds-price">$78.000</span>
+              </div>
+            </div>
+            <div class="kds-card ruta">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">#3416</div>
+                  <div class="kds-name">Paola M.</div>
+                  <div class="kds-sub">Quinta Camacho · 2.1km</div>
+                </div>
+                <span class="badge info">En ruta</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Corrientazo del día</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Limonada hierbabuena</span><span class="mono">×1</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">🛵 Carlos · 4'</span>
+                <span class="kds-price">$34.800</span>
+              </div>
+            </div>
+            <div class="kds-card ruta">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">#3415</div>
+                  <div class="kds-name">Roberto S.</div>
+                  <div class="kds-sub">La Candelaria · 4.8km</div>
+                </div>
+                <span class="badge info">En ruta</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Posta negra</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Arroz con coco</span><span class="mono">×1</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">🛵 Diego · 9'</span>
+                <span class="kds-price">$52.200</span>
+              </div>
+            </div>
+            <div class="kds-card listo">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">#3414</div>
+                  <div class="kds-name">Sofía R.</div>
+                  <div class="kds-sub">Para recoger · 1:30 PM</div>
+                </div>
+                <span class="badge success">Listo</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Bandeja paisa</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Jugo de mora</span><span class="mono">×1</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">✓ Esperando cliente</span>
+                <span class="kds-price">$34.800</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Monitor Salón -->
+        <div class="card flush" style="border-top: 2px solid var(--brand); margin-bottom: 16px;">
+          <div class="card-head">
+            <div class="row">
+              <span class="dot live"></span>
+              <div>
+                <div class="card-title">🪑 Monitor Salón · POS</div>
+                <div class="card-sub">Mesas activas con tickets abiertos</div>
+              </div>
+            </div>
+            <a href="floorplan.html" class="btn sm">Ver mapa de mesas →</a>
+          </div>
+          <div class="metrics-row" style="border: none; border-radius: 0; border-bottom: 0.5px solid var(--border);">
+            <div class="metric"><div class="metric-label">Mesas ocupadas</div><div class="metric-value">9 / 18</div><div class="metric-sub">50% aforo</div></div>
+            <div class="metric"><div class="metric-label">Tickets abiertos</div><div class="metric-value">7</div><div class="metric-sub">2 facturando</div></div>
+            <div class="metric"><div class="metric-label">Ticket promedio</div><div class="metric-value">$68.4k</div><div class="metric-sub metric-delta up">▲ 6.2%</div></div>
+            <div class="metric"><div class="metric-label">Rotación · hoy</div><div class="metric-value">2.3×</div><div class="metric-sub">Meta 2.5×</div></div>
+          </div>
+          <div class="kds-grid">
+            <div class="kds-card factura">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">Mesa 3 · 6 pax</div>
+                  <div class="kds-name">Mesero: Andrés P.</div>
+                  <div class="kds-sub">Abierto hace 1h 24'</div>
+                </div>
+                <span class="badge purple">Facturando</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Bandeja paisa</span><span class="mono">×2</span></div>
+                <div class="kds-item"><span>Ajiaco</span><span class="mono">×3</span></div>
+                <div class="kds-item"><span>Bebidas</span><span class="mono">×6</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">Propina 10% sugerida</span>
+                <span class="kds-price">$284.600</span>
+              </div>
+            </div>
+            <div class="kds-card">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">Mesa 12 · 4 pax</div>
+                  <div class="kds-name">Mesero: María J.</div>
+                  <div class="kds-sub">Abierto hace 32'</div>
+                </div>
+                <span class="badge">Consumiendo</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Ajiaco santafereño</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Corrientazo del día</span><span class="mono">×2</span></div>
+                <div class="kds-item"><span>Limonada hierbabuena</span><span class="mono">×1</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">⏱ Plato principal</span>
+                <span class="kds-price">$148.500</span>
+              </div>
+            </div>
+            <div class="kds-card">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">Mesa 7 · 2 pax</div>
+                  <div class="kds-name">Mesero: Andrés P.</div>
+                  <div class="kds-sub">Abierto hace 18'</div>
+                </div>
+                <span class="badge">Servido</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Posta negra</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Arroz con coco</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Club Colombia</span><span class="mono">×2</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">⏱ Hace 12'</span>
+                <span class="kds-price">$92.100</span>
+              </div>
+            </div>
+            <div class="kds-card cocina">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">Mesa 15 · 3 pax</div>
+                  <div class="kds-name">QR · Autoservicio</div>
+                  <div class="kds-sub">Pedido hace 4'</div>
+                </div>
+                <span class="badge warn">Cocina</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Bandeja paisa</span><span class="mono">×1</span></div>
+                <div class="kds-item"><span>Ajiaco</span><span class="mono">×2</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">⏱ 4 min</span>
+                <span class="kds-price">$96.000</span>
+              </div>
+            </div>
+            <div class="kds-card factura">
+              <div class="kds-top">
+                <div>
+                  <div class="kds-id">Mesa 9 · 2 pax</div>
+                  <div class="kds-name">Mesero: María J.</div>
+                  <div class="kds-sub">Abierto hace 58'</div>
+                </div>
+                <span class="badge purple">Facturando</span>
+              </div>
+              <div class="kds-items">
+                <div class="kds-item"><span>Corrientazo del día</span><span class="mono">×2</span></div>
+                <div class="kds-item"><span>Postre del día</span><span class="mono">×2</span></div>
+                <div class="kds-item"><span>Bebidas</span><span class="mono">×3</span></div>
+              </div>
+              <div class="kds-foot">
+                <span class="kds-time">Pago dividido</span>
+                <span class="kds-price">$74.200</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: HISTÓRICO ═══ -->
+      <div id="tab-hist" style="display:none;">
+        <div class="card flush">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Historial universal</div>
+              <div class="card-sub">Domicilios, salón, QR y WhatsApp — todos los pedidos procesados</div>
+            </div>
+            <div class="row">
+              <button class="filter-chip active">Todos</button>
+              <button class="filter-chip">WhatsApp</button>
+              <button class="filter-chip">Salón</button>
+              <button class="filter-chip">Domicilio</button>
+              <button class="filter-chip">QR</button>
+            </div>
+          </div>
+          <div style="padding: 10px 18px; border-bottom: 0.5px solid var(--border); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 12px; color: var(--text-3);">Período:</span>
+            <div class="seg">
+              <button class="seg-btn">Hoy</button>
+              <button class="seg-btn active">7 días</button>
+              <button class="seg-btn">Mes</button>
+              <button class="seg-btn">Personalizado</button>
+            </div>
+            <span style="margin-left: auto; font-size: 12px; color: var(--text-3);">1.284 pedidos · $12.4M</span>
+          </div>
+
+          <div class="hist-row hist-head">
+            <div>#</div>
+            <div>Canal</div>
+            <div>Cliente / mesa</div>
+            <div>Productos</div>
+            <div>Fecha</div>
+            <div style="text-align:right;">Total</div>
+            <div>Estado</div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3421</div>
+            <div><span class="channel-pill wa">WhatsApp</span></div>
+            <div>
+              <div style="font-weight: 500;">Ana María L.</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">+57 300 412 8867</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">Bandeja paisa + Jugo mora</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 13:24</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$42.500</div>
+            <div><span class="badge success">Pagado</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3420</div>
+            <div><span class="channel-pill pos">POS</span></div>
+            <div>
+              <div style="font-weight: 500;">Mesa 3 · 6 pax</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Mesero Andrés P.</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">6 platos · 4 bebidas</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 13:18</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$284.600</div>
+            <div><span class="badge warn">Pendiente</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3419</div>
+            <div><span class="channel-pill dom">Domicilio</span></div>
+            <div>
+              <div style="font-weight: 500;">Paola M.</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Quinta Camacho · 2.1km</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">Corrientazo + Limonada</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 13:02</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$34.800</div>
+            <div><span class="badge info">En ruta</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3418</div>
+            <div><span class="channel-pill qr">QR</span></div>
+            <div>
+              <div style="font-weight: 500;">Mesa 15 · 3 pax</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Autoservicio</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">Bandeja paisa + 2× Ajiaco</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 12:48</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$96.000</div>
+            <div><span class="badge success">Pagado</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3417</div>
+            <div><span class="channel-pill pos">POS</span></div>
+            <div>
+              <div style="font-weight: 500;">Mesa 7 · 2 pax</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Mesero Andrés P.</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">Posta negra + Arroz coco</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 12:35</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$92.100</div>
+            <div><span class="badge success">Pagado</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3416</div>
+            <div><span class="channel-pill wa">WhatsApp</span></div>
+            <div>
+              <div style="font-weight: 500;">Carlos R.</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">+57 311 235 6781</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">2× Ajiaco + 2× Club Colombia</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 12:18</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$78.000</div>
+            <div><span class="badge success">Pagado</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3415</div>
+            <div><span class="channel-pill dom">Domicilio</span></div>
+            <div>
+              <div style="font-weight: 500;">Roberto S.</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">La Candelaria · 4.8km</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">Posta negra + Arroz coco</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 12:02</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$52.200</div>
+            <div><span class="badge success">Entregado</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3414</div>
+            <div><span class="channel-pill pos">POS</span></div>
+            <div>
+              <div style="font-weight: 500;">Mesa 1 · 4 pax</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Mesero María J.</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">4 platos fuertes + bebidas</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 11:48</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$168.400</div>
+            <div><span class="badge success">Pagado</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3413</div>
+            <div><span class="channel-pill wa">WhatsApp</span></div>
+            <div>
+              <div style="font-weight: 500;">Juliana V.</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">+57 318 772 2901</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">Para recoger · Bandeja paisa</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 11:30</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$34.800</div>
+            <div><span class="badge success">Recogido</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3412</div>
+            <div><span class="channel-pill pos">POS</span></div>
+            <div>
+              <div style="font-weight: 500;">Mesa 5 · 2 pax</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Mesero Andrés P.</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">Cortesía por error cocina</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 11:04</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$0</div>
+            <div><span class="badge">Cortesía</span></div>
+          </div>
+
+          <div class="hist-row">
+            <div class="mono" style="color: var(--text-3);">3411</div>
+            <div><span class="channel-pill dom">Domicilio</span></div>
+            <div>
+              <div style="font-weight: 500;">Martín O.</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Chicó · 3.8km</div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-2);">3× Corrientazo + bebidas</div>
+            <div style="font-size: 12px; color: var(--text-3);">Hoy 10:42</div>
+            <div class="mono" style="text-align:right; font-weight: 600;">$87.900</div>
+            <div><span class="badge danger">Disputa</span></div>
+          </div>
+
+          <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-3);">
+            <span>Mostrando 11 de 1.284 pedidos</span>
+            <div class="row">
+              <button class="btn sm ghost">← Anteriores</button>
+              <button class="btn sm">Siguientes →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script src="sidebar.js"></script>
+<script>
+  function switchTab(tab) {
+    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    document.getElementById('tab-rt').style.display = tab === 'rt' ? '' : 'none';
+    document.getElementById('tab-hist').style.display = tab === 'hist' ? '' : 'none';
+  }
+</script>
+</body>
+</html>

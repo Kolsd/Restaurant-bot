@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Staff HQ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .sb-brand { cursor: pointer; }
+  .page { max-width: none; }
+  .metrics-row { grid-template-columns: repeat(5, 1fr); }
+  .mini-spark { height: 24px; display:flex; align-items:end; gap:2px; margin-top: 6px; }
+  .mini-spark span { flex:1; background: var(--brand); border-radius:1px; opacity:0.7; }
+  .ppl-tbl td { vertical-align: middle; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #1D9E75, #0F6E56); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; }
+  .av-row { display:flex; align-items:center; gap:10px; }
+  .av-meta { line-height:1.2; }
+  .av-name { font-weight:500; font-size:13px; }
+  .av-role { font-size:11px; color: var(--text-3); }
+
+  .shift-grid { display:grid; grid-template-columns: 170px repeat(14, 1fr); gap: 2px; font-size: 11px; }
+  .shift-grid .hdr { padding: 6px 4px; text-align:center; color: var(--text-3); font-weight:600; font-size: 10.5px; }
+  .shift-grid .nm { padding: 8px 10px; font-size: 12px; font-weight:500; display:flex; align-items:center; gap:8px; background: #fdfdf9; border-radius: 6px; }
+  .shift-grid .cell { background: #fafaf8; border-radius: 5px; height: 32px; position:relative; border: 0.5px solid transparent; }
+  .shift-grid .cell.off { background: #f0f0e8; }
+  .shift-grid .block { position:absolute; inset: 2px; border-radius: 4px; background: var(--brand); color: #fff; display:flex; align-items:center; justify-content:center; font-size: 10px; font-weight: 600; }
+  .shift-grid .block.am { background: rgba(29,158,117,0.85); }
+  .shift-grid .block.pm { background: rgba(96,165,250,0.85); }
+  .shift-grid .block.closing { background: rgba(167,139,250,0.85); }
+  .shift-grid .block.absent { background: #FCA5A5; color: #991B1B; }
+
+  .tip-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+  .tip-row:last-child { border-bottom: none; }
+  .tip-bar { height: 6px; background: #f0f0e8; border-radius: 3px; overflow: hidden; width: 140px; }
+  .tip-bar-fill { height: 100%; background: var(--brand); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-brand"><div class="mark">M</div><div><div class="sb-brand-name">Mesio</div><div class="sb-brand-sub">La Candelaria</div></div></div>
+    <div class="sb-switcher"><div class="mark sm">C</div><div class="grow"><div class="sb-switcher-name">La Candelaria</div><div class="sb-switcher-sub">Sucursal activa · 3 equipos</div></div><div class="chev">⌄</div></div>
+
+    <div class="sb-group"><div class="sb-group-label">Operación</div>
+      <a class="sb-item" href="dashboard.html"><span class="sb-icon">◻</span>Resumen</a>
+      <a class="sb-item" href="#">📦 Pedidos <span class="badge">12</span></a>
+      <a class="sb-item" href="floorplan.html">🪑 Salón</a>
+      <a class="sb-item" href="#">🍽️ Menú</a>
+    </div>
+    <div class="sb-group"><div class="sb-group-label">Equipo</div>
+      <a class="sb-item active" href="staff-hq.html">👥 Staff HQ</a>
+      <a class="sb-item">💰 Nómina</a>
+      <a class="sb-item">🧑‍🍳 Roles y permisos</a>
+      <a class="sb-item">📊 Desempeño</a>
+    </div>
+    <div class="sb-group"><div class="sb-group-label">Admin</div>
+      <a class="sb-item" href="billing.html">🏷️ Facturación</a>
+      <a class="sb-item" href="settings.html">⚙️ Configuración</a>
+    </div>
+    <div class="sb-bottom"><div class="sb-user"><div class="sb-avatar">VC</div><div><div class="sb-user-name">Valentina C.</div><div class="sb-user-role">Admin · La Candelaria</div></div></div></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <span class="topbar-crumb">Equipo<span class="sep">›</span></span>
+      <span class="topbar-title">Staff HQ</span>
+      <div class="topbar-right">
+        <div class="search" style="min-width:300px;"><span style="color:var(--text-4);">⌕</span><input placeholder="Buscar miembro, rol, turno…"><span class="kbd">⌘K</span></div>
+        <button class="icon-btn">🔔</button>
+        <button class="btn brand">+ Invitar miembro</button>
+      </div>
+    </header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Tu equipo hoy</h1>
+          <p class="page-sub">14 activos, 2 con licencia, 1 ausente sin justificar. Turno nocturno abre a las 17:00.</p>
+        </div>
+        <div class="row">
+          <div class="seg"><button class="seg-btn active">Hoy</button><button class="seg-btn">Semana</button><button class="seg-btn">Mes</button></div>
+          <button class="btn">↓ Exportar</button>
+          <button class="btn">Ver nómina →</button>
+        </div>
+      </div>
+
+      <div class="metrics-row" style="margin-bottom: 18px;">
+        <div class="metric"><div class="metric-label">Total equipo</div><div class="metric-value">17</div><div class="metric-sub">14 activos · 2 lic · 1 baja</div></div>
+        <div class="metric"><div class="metric-label">En turno ahora</div><div class="metric-value">9</div><div class="metric-sub"><span class="dot live"></span>clock-in vía huella</div></div>
+        <div class="metric"><div class="metric-label">Horas esta semana</div><div class="metric-value">412</div><div class="metric-sub"><span class="metric-delta up">↑ 4%</span>vs sem pasada</div></div>
+        <div class="metric"><div class="metric-label">Propinas a repartir</div><div class="metric-value" style="color:var(--brand);">$284k</div><div class="metric-sub">corte jueves · pool mixto</div></div>
+        <div class="metric"><div class="metric-label">Costo laboral</div><div class="metric-value">22.8%</div><div class="metric-sub"><span class="metric-delta down">↓ 1.2pp</span>meta 24%</div></div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 2.2fr 1fr; gap:16px; margin-bottom:16px;">
+        <div class="card flush">
+          <div class="card-head">
+            <div><div class="card-title">Horario de la semana</div><div class="card-sub">Lun 14 abr – Dom 20 abr · 3 turnos por día</div></div>
+            <div class="row">
+              <div class="seg"><button class="seg-btn active">Semana</button><button class="seg-btn">Día</button></div>
+              <button class="btn sm">↻ Auto-asignar</button>
+              <button class="btn sm primary">+ Turno</button>
+            </div>
+          </div>
+          <div style="padding: 14px 18px;">
+            <div class="shift-grid">
+              <div></div>
+              <div class="hdr">L14</div><div class="hdr">M15</div><div class="hdr">M16</div><div class="hdr">J17</div><div class="hdr">V18</div><div class="hdr">S19</div><div class="hdr">D20</div>
+              <div class="hdr">L21</div><div class="hdr">M22</div><div class="hdr">M23</div><div class="hdr">J24</div><div class="hdr">V25</div><div class="hdr">S26</div><div class="hdr">D27</div>
+
+              <div class="nm"><span class="avatar" style="background:linear-gradient(135deg,#F59E0B,#D97706);">VC</span>Valentina C.</div>
+              <div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell off"></div>
+              <div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell off"></div>
+
+              <div class="nm"><span class="avatar" style="background:linear-gradient(135deg,#A78BFA,#7C3AED);">DR</span>Diego Restrepo</div>
+              <div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell off"></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div>
+              <div class="cell"><div class="block pm">PM</div></div><div class="cell off"></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div>
+
+              <div class="nm"><span class="avatar" style="background:linear-gradient(135deg,#60A5FA,#3B82F6);">AM</span>Ana María R.</div>
+              <div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div>
+              <div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div>
+
+              <div class="nm"><span class="avatar" style="background:linear-gradient(135deg,#F87171,#DC2626);">JP</span>Juan Pérez</div>
+              <div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block absent">✕</div></div><div class="cell off"></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell off"></div>
+              <div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell off"></div><div class="cell off"></div><div class="cell"><div class="block pm">PM</div></div><div class="cell"><div class="block pm">PM</div></div><div class="cell off"></div>
+
+              <div class="nm"><span class="avatar" style="background:linear-gradient(135deg,#34D399,#10B981);">LG</span>Laura Gómez</div>
+              <div class="cell off"></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block am">AM</div></div>
+              <div class="cell off"></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell"><div class="block am">AM</div></div><div class="cell off"></div><div class="cell"><div class="block am">AM</div></div>
+
+              <div class="nm"><span class="avatar" style="background:linear-gradient(135deg,#FB923C,#EA580C);">CM</span>Carlos Muñoz</div>
+              <div class="cell"><div class="block closing">CIE</div></div><div class="cell off"></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell off"></div>
+              <div class="cell"><div class="block closing">CIE</div></div><div class="cell off"></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell"><div class="block closing">CIE</div></div><div class="cell off"></div>
+
+              <div class="nm"><span class="avatar">+11</span>Mostrar todos</div>
+              <div class="cell off" style="grid-column: span 14;"></div>
+            </div>
+
+            <div style="display:flex; gap:20px; margin-top: 14px; font-size:11.5px; color: var(--text-3);">
+              <span><span style="display:inline-block;width:10px;height:10px;background:rgba(29,158,117,0.85);border-radius:3px;vertical-align:middle;margin-right:4px;"></span>AM 6:00-14:00</span>
+              <span><span style="display:inline-block;width:10px;height:10px;background:rgba(96,165,250,0.85);border-radius:3px;vertical-align:middle;margin-right:4px;"></span>PM 14:00-22:00</span>
+              <span><span style="display:inline-block;width:10px;height:10px;background:rgba(167,139,250,0.85);border-radius:3px;vertical-align:middle;margin-right:4px;"></span>Cierre 18:00-02:00</span>
+              <span><span style="display:inline-block;width:10px;height:10px;background:#FCA5A5;border-radius:3px;vertical-align:middle;margin-right:4px;"></span>Ausencia</span>
+              <span style="margin-left:auto; color: var(--brand);">Auto-ajustado con IA <span class="ai-spark"></span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card flush">
+          <div class="card-head"><div><div class="card-title">Reparto de propinas</div><div class="card-sub">Corte jueves · $284.000 pool</div></div><button class="btn sm">Reglas</button></div>
+          <div class="card-body">
+            <div class="tip-row">
+              <div class="av-row"><div class="avatar">VC</div><div class="av-meta"><div class="av-name">Valentina C.</div><div class="av-role">Mesera sr · 32h</div></div></div>
+              <div class="tip-bar"><div class="tip-bar-fill" style="width:92%"></div></div>
+              <div class="mono" style="font-weight:600;">$62.400</div>
+              <div class="badge success">22%</div>
+            </div>
+            <div class="tip-row">
+              <div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#A78BFA,#7C3AED);">DR</div><div class="av-meta"><div class="av-name">Diego R.</div><div class="av-role">Mesero · 28h</div></div></div>
+              <div class="tip-bar"><div class="tip-bar-fill" style="width:78%"></div></div>
+              <div class="mono" style="font-weight:600;">$48.200</div>
+              <div class="badge success">17%</div>
+            </div>
+            <div class="tip-row">
+              <div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#60A5FA,#3B82F6);">AM</div><div class="av-meta"><div class="av-name">Ana María R.</div><div class="av-role">Cocinera · 36h</div></div></div>
+              <div class="tip-bar"><div class="tip-bar-fill" style="width:70%"></div></div>
+              <div class="mono" style="font-weight:600;">$42.800</div>
+              <div class="badge">15%</div>
+            </div>
+            <div class="tip-row">
+              <div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#F87171,#DC2626);">JP</div><div class="av-meta"><div class="av-name">Juan Pérez</div><div class="av-role">Mesero · 24h</div></div></div>
+              <div class="tip-bar"><div class="tip-bar-fill" style="width:60%"></div></div>
+              <div class="mono" style="font-weight:600;">$36.900</div>
+              <div class="badge">13%</div>
+            </div>
+            <div class="tip-row">
+              <div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#34D399,#10B981);">LG</div><div class="av-meta"><div class="av-name">Laura G.</div><div class="av-role">Barra · 22h</div></div></div>
+              <div class="tip-bar"><div class="tip-bar-fill" style="width:52%"></div></div>
+              <div class="mono" style="font-weight:600;">$31.400</div>
+              <div class="badge">11%</div>
+            </div>
+
+            <div style="margin-top:14px; padding: 12px; background: #fafaf8; border-radius: 9px; font-size: 12px; color: var(--text-2);">
+              <span class="ai-spark"></span> <strong>Sugerencia:</strong> Valentina cubrió 3 cierres extra. Considera un bono de $15k para mantener la moral del turno nocturno.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card flush">
+        <div class="card-head">
+          <div><div class="card-title">Miembros del equipo</div><div class="card-sub">17 total · filtrado por: todos los roles</div></div>
+          <div class="row">
+            <div class="seg"><button class="seg-btn active">Todos</button><button class="seg-btn">Meseros</button><button class="seg-btn">Cocina</button><button class="seg-btn">Barra</button><button class="seg-btn">Admin</button></div>
+            <button class="btn sm">↓ Exportar</button>
+          </div>
+        </div>
+        <table class="tbl ppl-tbl">
+          <thead><tr><th>Miembro</th><th>Rol</th><th>Estado</th><th>Esta semana</th><th>Ventas / propinas</th><th>Clock-in</th><th>Desempeño</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td><div class="av-row"><div class="avatar">VC</div><div class="av-meta"><div class="av-name">Valentina Cárdenas</div><div class="av-role">valentina@candelaria.co</div></div></div></td>
+              <td>Mesera sr · Admin</td>
+              <td><span class="badge success"><span class="dot live"></span>En turno</span></td>
+              <td class="mono">32 h</td>
+              <td class="mono">$862k · <span style="color:var(--brand);">$86k</span></td>
+              <td><span class="badge">🔑 Huella</span></td>
+              <td><div class="mini-spark"><span style="height:60%"></span><span style="height:80%"></span><span style="height:65%"></span><span style="height:90%"></span><span style="height:75%"></span><span style="height:85%"></span><span style="height:95%"></span></div></td>
+              <td><button class="icon-btn">⋯</button></td>
+            </tr>
+            <tr>
+              <td><div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#A78BFA,#7C3AED);">DR</div><div class="av-meta"><div class="av-name">Diego Restrepo</div><div class="av-role">diego@candelaria.co</div></div></div></td>
+              <td>Mesero</td>
+              <td><span class="badge success"><span class="dot live"></span>En turno</span></td>
+              <td class="mono">28 h</td>
+              <td class="mono">$724k · <span style="color:var(--brand);">$72k</span></td>
+              <td><span class="badge">🔑 Huella</span></td>
+              <td><div class="mini-spark"><span style="height:50%"></span><span style="height:65%"></span><span style="height:70%"></span><span style="height:60%"></span><span style="height:75%"></span><span style="height:80%"></span><span style="height:72%"></span></div></td>
+              <td><button class="icon-btn">⋯</button></td>
+            </tr>
+            <tr>
+              <td><div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#60A5FA,#3B82F6);">AM</div><div class="av-meta"><div class="av-name">Ana María Rodríguez</div><div class="av-role">ana@candelaria.co</div></div></div></td>
+              <td>Cocinera · Jefa</td>
+              <td><span class="badge success"><span class="dot live"></span>En turno</span></td>
+              <td class="mono">36 h</td>
+              <td class="mono">— · <span style="color:var(--brand);">$42k</span></td>
+              <td><span class="badge brand">😊 Face ID</span></td>
+              <td><div class="mini-spark"><span style="height:70%"></span><span style="height:85%"></span><span style="height:80%"></span><span style="height:92%"></span><span style="height:78%"></span><span style="height:88%"></span><span style="height:82%"></span></div></td>
+              <td><button class="icon-btn">⋯</button></td>
+            </tr>
+            <tr>
+              <td><div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#F87171,#DC2626);">JP</div><div class="av-meta"><div class="av-name">Juan Pérez</div><div class="av-role">juan@candelaria.co</div></div></div></td>
+              <td>Mesero</td>
+              <td><span class="badge warn">⏸ Llegó tarde 18min</span></td>
+              <td class="mono">24 h</td>
+              <td class="mono">$512k · <span style="color:var(--brand);">$48k</span></td>
+              <td><span class="badge">🔑 Huella</span></td>
+              <td><div class="mini-spark"><span style="height:65%"></span><span style="height:40%"></span><span style="height:55%"></span><span style="height:30%"></span><span style="height:50%"></span><span style="height:45%"></span><span style="height:35%"></span></div></td>
+              <td><button class="icon-btn">⋯</button></td>
+            </tr>
+            <tr>
+              <td><div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#34D399,#10B981);">LG</div><div class="av-meta"><div class="av-name">Laura Gómez</div><div class="av-role">laura@candelaria.co</div></div></div></td>
+              <td>Bartender</td>
+              <td><span class="badge">Sale en 2h</span></td>
+              <td class="mono">22 h</td>
+              <td class="mono">$384k · <span style="color:var(--brand);">$36k</span></td>
+              <td><span class="badge">🔑 Huella</span></td>
+              <td><div class="mini-spark"><span style="height:50%"></span><span style="height:62%"></span><span style="height:68%"></span><span style="height:72%"></span><span style="height:65%"></span><span style="height:74%"></span><span style="height:70%"></span></div></td>
+              <td><button class="icon-btn">⋯</button></td>
+            </tr>
+            <tr>
+              <td><div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#FB923C,#EA580C);">CM</div><div class="av-meta"><div class="av-name">Carlos Muñoz</div><div class="av-role">carlos@candelaria.co</div></div></div></td>
+              <td>Cocinero junior</td>
+              <td><span class="badge">Entra 17:00</span></td>
+              <td class="mono">30 h</td>
+              <td class="mono">— · <span style="color:var(--brand);">$28k</span></td>
+              <td><span class="badge">🔑 Huella</span></td>
+              <td><div class="mini-spark"><span style="height:55%"></span><span style="height:60%"></span><span style="height:58%"></span><span style="height:65%"></span><span style="height:70%"></span><span style="height:68%"></span><span style="height:72%"></span></div></td>
+              <td><button class="icon-btn">⋯</button></td>
+            </tr>
+            <tr>
+              <td><div class="av-row"><div class="avatar" style="background:linear-gradient(135deg,#9CA3AF,#6B7280);">RM</div><div class="av-meta"><div class="av-name">Ricardo Martínez</div><div class="av-role">ricardo@candelaria.co</div></div></div></td>
+              <td>Domiciliario</td>
+              <td><span class="badge danger">✕ Ausente s/ justificar</span></td>
+              <td class="mono" style="color:var(--text-3);">18 h</td>
+              <td class="mono">$142k · <span style="color:var(--brand);">$18k</span></td>
+              <td><span class="badge">🔑 Huella</span></td>
+              <td><div class="mini-spark"><span style="height:40%"></span><span style="height:30%"></span><span style="height:45%"></span><span style="height:20%"></span><span style="height:25%"></span><span style="height:15%"></span><span style="height:5%"></span></div></td>
+              <td><button class="icon-btn">⋯</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
