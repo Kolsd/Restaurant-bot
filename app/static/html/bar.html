@@ -3,277 +3,94 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesio — Bar</title>
+<title>Mesio — Bar v2</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="stylesheet" href="/static/css/tokens.css">
-<style>
-* { box-sizing:border-box; margin:0; padding:0; }
-body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#0A0C14; color:#fff; min-height:100vh; }
-
-/* ── BOARD ── */
-.main { padding:1.5rem; }
-.board { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
-@media(max-width:900px) and (min-width:601px){ .board{grid-template-columns:1fr 1fr;} }
-@media(max-width:900px){ .board{grid-template-columns:1fr;} }
-@media(max-width:600px){ .board{grid-template-columns:1fr;} }
-@media(max-width:600px){
-  .main { padding:1rem; }
-  .btn { padding:12px; font-size:14px; }
-}
-
-.col-header { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin-bottom:.75rem; padding:.5rem .75rem; border-radius:6px; display:flex; align-items:center; gap:8px; }
-.col-recibido    .col-header { color:#FAC775; background:rgba(250,199,117,.08); }
-.col-preparacion .col-header { color:#378ADD; background:rgba(55,138,221,.08); }
-.col-listo       .col-header { color:#1D9E75; background:rgba(29,158,117,.08); }
-.badge { background:#1D9E75; color:#000; font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; margin-left:auto; }
-
-/* ── TARJETAS ── */
-.order-card { background:#111526; border:1px solid #1E2340; border-radius:12px; padding:1rem; margin-bottom:.75rem; transition:border-color .2s; }
-.order-card:hover { border-color:#2A2F50; }
-.order-card.recibido       { border-left:3px solid #FAC775; }
-.order-card.en_preparacion { border-left:3px solid #378ADD; }
-.order-card.listo          { border-left:3px solid #1D9E75; }
-
-.sub-tag { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:600; padding:2px 8px; border-radius:8px; margin-bottom:6px; }
-.sub-tag.first { background:rgba(29,158,117,.12); color:#1D9E75; }
-.sub-tag.add   { background:rgba(250,199,117,.12); color:#FAC775; }
-
-.order-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:.5rem; }
-.order-table { font-size:15px; font-weight:700; color:#fff; }
-.order-id { font-size:10px; color:#888; margin-top:2px; }
-
-.elapsed { font-size:10px; padding:2px 6px; border-radius:8px; font-weight:500; flex-shrink:0; }
-.elapsed.ok   { background:rgba(29,158,117,.15); color:#1D9E75; }
-.elapsed.warn { background:rgba(250,199,117,.15); color:#FAC775; }
-.elapsed.late { background:rgba(226,75,74,.15); color:#E24B4A; }
-
-.order-items { margin-bottom:.75rem; }
-.order-item { font-size:13px; color:#ccc; padding:3px 0; display:flex; gap:6px; }
-.order-item-qty { color:#378ADD; font-weight:600; flex-shrink:0; }
-.order-notes { font-size:11px; color:#999; background:#0A0C14; border-radius:6px; padding:5px 8px; margin-bottom:.75rem; font-style:italic; }
-
-.btn { width:100%; padding:8px; border:none; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; transition:all .15s; }
-.btn:active { transform:scale(.97); }
-.btn-prep { background:rgba(55,138,221,.2); color:#378ADD; border:1px solid rgba(55,138,221,.3); }
-.btn-prep:hover { background:rgba(55,138,221,.35); }
-.btn-listo { background:rgba(29,158,117,.2); color:#1D9E75; border:1px solid rgba(29,158,117,.3); }
-.btn-listo:hover { background:rgba(29,158,117,.35); }
-.listo-badge { width:100%; padding:8px; border-radius:8px; font-size:12px; font-weight:600; text-align:center; background:rgba(29,158,117,.08); color:#1D9E75; border:1px solid rgba(29,158,117,.2); }
-
-.empty { text-align:center; padding:2rem; color:#444; font-size:13px; }
-.notification { position:fixed; top:1rem; right:1rem; background:#1D9E75; color:#000; padding:12px 20px; border-radius:10px; font-size:13px; font-weight:600; transform:translateY(-100px); transition:transform .3s; z-index:100; max-width:300px; }
-.notification.show { transform:translateY(0); }
-.btn-print { background:rgba(255,255,255,.04); color:#888; border:1px solid #1E2340; margin-bottom:6px; }
-</style>
-<link rel="stylesheet" href="/static/css/mesio-role.css">
+<link rel="stylesheet" href="/static/css/pages/bar.css">
 </head>
 <body>
 
-  <header class="m-topbar">
-    <a href="/staff-hq" class="m-logo">
-      <div class="m-logo-mark">M</div>
-      <span class="m-logo-title">Mesio</span>
-    </a>
-    <span class="m-page-label">🍹 Bar</span>
-    <span class="m-role-chip">Bar</span>
-    <div id="dynamic-role-nav"></div>
-    <div class="m-topbar-right">
-      <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
-      <span class="m-topbar-clock" id="header-clock">--:--</span>
-      <button class="m-btn-logout" onclick="doStaffLogout()">Salir</button>
+<div class="bar-layout">
+
+  <!-- ── Topbar ── -->
+  <header class="bar-top">
+    <div class="bar-brand">
+      <div class="bar-mark">M</div>
+      <span>Bar</span>
+    </div>
+    <div class="bar-sep"></div>
+    <div class="bar-station">Estación <strong id="bar-station-name">Barra principal</strong></div>
+    <div class="bar-pill"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--b-purple);margin-right:4px;animation:blink 2s infinite;"></span>En línea</div>
+    <div class="bar-top-right">
+      <div class="bar-kstat">
+        <div class="bar-kstat-l">En cola</div>
+        <div class="bar-kstat-v" id="bar-stat-queue">—</div>
+      </div>
+      <div class="bar-kstat">
+        <div class="bar-kstat-l">Prom.</div>
+        <div class="bar-kstat-v" id="bar-stat-avg">—:—</div>
+      </div>
+      <div class="bar-clock" id="bar-clock">--:--</div>
     </div>
   </header>
 
-<div class="main">
-  <div class="board">
-    <div class="col-recibido">
-      <div class="col-header">🍸 Recibidos <span class="badge" id="cnt-recibido">0</span></div>
-      <div id="col-recibido"></div>
+  <!-- ── Main queue ── -->
+  <main class="bar-main">
+    <div class="queue-head">
+      <h2>Cola de preparación</h2>
+      <div class="queue-sub" id="bar-queue-sub">Cargando…</div>
     </div>
-    <div class="col-preparacion">
-      <div class="col-header">🧪 Preparando <span class="badge" id="cnt-preparacion">0</span></div>
-      <div id="col-preparacion"></div>
+    <div class="queue-grid" id="bar-queue">
+      <div class="bar-empty">Cargando bebidas…</div>
     </div>
-    <div class="col-listo">
-      <div class="col-header">✅ Listos para servir <span class="badge" id="cnt-listo">0</span></div>
-      <div id="col-listo"></div>
-    </div>
-  </div>
-</div>
+  </main>
 
-<div class="notification" id="notif" role="alert" aria-live="polite"></div>
+  <!-- ── Right sidebar ── -->
+  <aside class="bar-side">
 
-<script src="/static/js/roles.js"></script>
+    <!-- Inventario en vivo -->
+    <section>
+      <div class="side-section-title">Inventario crítico</div>
+      <div id="bar-inv-list">
+        <div style="font-size:12px;color:var(--b-text-3);">Cargando…</div>
+      </div>
+    </section>
+
+    <!-- En tap (placeholder — backend no tiene keg tracking aún) -->
+    <section>
+      <div class="side-section-title">En tap</div>
+      <div class="tap-card">
+        <div class="tap-label">Próximamente</div>
+        <div class="tap-name">Seguimiento de barriles</div>
+        <div class="tap-soon">(funcionalidad en desarrollo)</div>
+      </div>
+    </section>
+
+    <!-- Top del turno -->
+    <section>
+      <div class="side-section-title">Top bebidas del turno</div>
+      <div id="bar-pop-list">
+        <div style="font-size:12px;color:var(--b-text-3);">Cargando…</div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ── Footer hint bar ── -->
+  <footer class="bar-foot" style="grid-column:1/-1;">
+    <span class="hint">
+      <kbd>1</kbd>…<kbd>7</kbd> seleccionar ·
+      <kbd>↵</kbd> marcar listo ·
+      <kbd>T</kbd> +2 min
+    </span>
+    <div style="margin-left:auto;" class="m-live-status online">
+      <div class="dot"></div><span class="label">En vivo</span>
+    </div>
+  </footer>
+
+</div><!-- /.bar-layout -->
+
 <script src="/static/js/mesio-utils.js"></script>
-<script>
-const token = localStorage.getItem('rb_token');
-if (!token) window.location.href = '/login';
-const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
-
-function clock() {
-  const el = document.getElementById('header-clock');
-  if (el) el.textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-}
-clock(); setInterval(clock, 1000);
-
-let notifTimer = null;
-function notify(msg) {
-  const n = document.getElementById('notif');
-  n.textContent = msg;
-  n.classList.add('show');
-  if (notifTimer) clearTimeout(notifTimer);
-  notifTimer = setTimeout(() => n.classList.remove('show'), 3500);
-}
-
-function elapsed(createdAt) {
-  const iso  = createdAt.endsWith('Z') ? createdAt : createdAt + 'Z';
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  const min  = Math.max(0, Math.floor(diff / 60));
-  const sec  = Math.max(0, diff % 60);
-  const cls  = min < 3 ? 'ok' : min < 8 ? 'warn' : 'late';
-  return `<span class="elapsed ${cls}">${min}m ${sec}s</span>`;
-}
-
-async function setStatus(orderId, status) {
-  try {
-    await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST', headers: hdr, body: JSON.stringify({status})
-    });
-    if (status === 'listo')          notify('✅ Listo para servir — avisa al mesero');
-    if (status === 'en_preparacion') notify('🧪 Preparando...');
-    loadOrders();
-  } catch(e) { mesioToast('Error al actualizar estado', 'error'); }
-}
-
-function renderCard(o) {
-  _ordersMap[o.id] = o;
-  const items  = Array.isArray(o.items) ? o.items : [];
-  const subNum = o.sub_number || 1;
-  const isAdd  = o.base_order_id && subNum > 1;
-
-  const subTag = isAdd
-    ? `<div class="sub-tag add">➕ Adicional #${subNum}</div>`
-    : `<div class="sub-tag first">🆕 Pedido inicial</div>`;
-
-  const itemsHtml = items.length
-    ? items.map(i => `<div class="order-item"><span class="order-item-qty">${i.quantity || i.qty || 1}×</span><span>${i.name || ''}</span></div>`).join('')
-    : '<div class="order-item" style="color:#333;">Sin ítems</div>';
-
-  const notesHtml = o.notes ? `<div class="order-notes">📝 ${o.notes}</div>` : '';
-
-  let actionHtml = '';
-  if (o.status === 'recibido') {
-    actionHtml = `<button class="btn btn-prep" onclick="setStatus('${o.id}','en_preparacion')">🧪 Preparando</button>`;
-  } else if (o.status === 'en_preparacion') {
-    actionHtml = `<button class="btn btn-listo" onclick="setStatus('${o.id}','listo')">✅ Listo para servir</button>`;
-  } else {
-    actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
-  }
-
-  return `<div class="order-card ${o.status.replace('_','-')}" data-id="${o.id}">
-    ${subTag}
-    <div class="order-header">
-      <div><div class="order-table">${o.table_name}</div><div class="order-id">${o.id}</div></div>
-      ${elapsed(o.created_at)}
-    </div>
-    <div class="order-items">${itemsHtml}</div>
-    ${notesHtml}
-    <button class="btn btn-print" onclick="printComanda('${o.id}')">🖨️ Imprimir Comanda</button>
-    ${actionHtml}
-  </div>`;
-}
-
-const _ordersMap = {};
-
-function printComanda(orderId) {
-  const o = _ordersMap[orderId];
-  if (!o) return;
-  const items = Array.isArray(o.items) ? o.items : [];
-  const iso = (o.created_at || '').endsWith('Z') ? o.created_at : (o.created_at || '') + 'Z';
-  const dt = new Date(iso);
-  const timeStr = dt.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
-  const dateStr = dt.toLocaleDateString('es-CO');
-  const subNum = o.sub_number || 1;
-  const subLabel = (o.base_order_id && subNum > 1) ? `ADICIONAL #${subNum}` : 'PEDIDO INICIAL';
-  const itemsHtml = items.map(i =>
-    `<div class="item"><span class="qty">${i.quantity||i.qty||1}x</span> ${i.name||''}</div>`
-  ).join('');
-  const notesHtml = o.notes
-    ? `<div class="sep"></div><div class="notes">NOTAS: ${o.notes}</div>`
-    : '';
-  const win = window.open('', '_blank', 'width=340,height=560,toolbar=0,menubar=0');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>Comanda Bar ${o.table_name}</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
-@page{size:80mm auto;margin:0}
-.title{font-size:13pt;font-weight:bold;text-align:center;letter-spacing:2px}
-.sub{font-size:8pt;text-align:center;margin-bottom:2px}
-.sep{border-top:1px dashed #000;margin:5px 0}
-.label{font-size:8pt;color:#444;margin-top:3px}
-.mesa{font-size:15pt;font-weight:bold}
-.item{font-size:11pt;margin:3px 0}
-.qty{font-weight:bold;display:inline-block;width:22px}
-.notes{font-size:9pt;font-style:italic;margin-top:3px}
-.footer{text-align:center;font-size:8pt;margin-top:4px}
-</style></head><body>
-<div class="title">COMANDA BAR</div>
-<div class="sub">${subLabel}</div>
-<div class="sep"></div>
-<div class="label">MESA</div>
-<div class="mesa">${o.table_name}</div>
-<div class="label">Hora: ${timeStr} &nbsp;|&nbsp; ${dateStr}</div>
-<div class="sep"></div>
-<div class="label" style="font-weight:bold;margin-bottom:3px">BEBIDAS</div>
-${itemsHtml}
-${notesHtml}
-<div class="sep"></div>
-<div class="footer">— Mesio POS —</div>
-</body></html>`);
-  win.document.close();
-  win.focus();
-  win.onload = () => { win.print(); };
-}
-
-let prevIds = new Set();
-
-async function loadOrders() {
-  if (document.visibilityState === 'hidden') return;
-  try {
-    // Solo cargamos pedidos con station='bar' (o 'all' para compatibilidad)
-    const r = await fetch('/api/table-orders?station=bar', { headers: hdr });
-    if (!r.ok) { if (r.status === 401) window.location.href = '/login'; return; }
-    const { orders = [] } = await r.json();
-
-    const curIds = new Set(orders.map(o => o.id));
-    for (const id of curIds) {
-      if (!prevIds.has(id)) {
-        const o = orders.find(x => x.id === id);
-        if (o) notify(`🍸 Nueva bebida — ${o.table_name}`);
-      }
-    }
-    prevIds = curIds;
-
-    const groups = { recibido: [], en_preparacion: [], listo: [] };
-    orders.forEach(o => { if (groups[o.status]) groups[o.status].push(o); });
-
-    [['recibido', 'col-recibido', 'cnt-recibido'],
-     ['en_preparacion', 'col-preparacion', 'cnt-preparacion'],
-     ['listo', 'col-listo', 'cnt-listo']].forEach(([status, colId, cntId]) => {
-      const col = document.getElementById(colId);
-      const cnt = document.getElementById(cntId);
-      if (col) col.innerHTML = groups[status].length
-        ? groups[status].map(renderCard).join('')
-        : '<div class="empty">Sin pedidos de bar</div>';
-      if (cnt) cnt.textContent = groups[status].length;
-    });
-
-    mesioTrackFetch(true);
-  } catch(e) { mesioTrackFetch(false); }
-}
-
-loadOrders();
-setInterval(loadOrders, 5000);
-</script>
+<script src="/static/js/pages/bar.js" defer></script>
 </body>
 </html>
