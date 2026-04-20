@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesio — Panel de control</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/shared.css">
+  <link rel="stylesheet" href="/static/css/pages/dashboard.css">
+</head>
+<body>
+
+<!-- Offline banner -->
+<div id="offline-banner">
+  <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0;"></span>
+  Sin conexión — actualizando cuando vuelva la red…
+</div>
+
+<div class="app">
+  <!-- ── SIDEBAR ──────────────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar" role="navigation" aria-label="Menú principal">
+    <div class="sb-brand">
+      <div class="mark">M</div>
+      <div>
+        <div class="sb-brand-name">Mesio</div>
+        <div class="sb-brand-sub">Panel de control</div>
+      </div>
+    </div>
+
+    <div class="sb-switcher" id="sb-switcher">
+      <div id="sb-org-avatar" style="width:20px;height:20px;border-radius:5px;background:#e0e0d8;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#555;flex-shrink:0;"></div>
+      <div class="grow">
+        <div class="sb-switcher-name" id="sb-org-name">Cargando…</div>
+        <div class="sb-switcher-sub" id="sb-org-sub">Panel de control</div>
+      </div>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">Operaciones</div>
+      <a class="sb-item active" href="/dashboard" id="nav-resumen">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
+        Resumen
+      </a>
+      <a class="sb-item" href="/caja" id="nav-pedidos">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l5-3 5 3v6l-5 3-5-3V5z"/><path d="M3 5l5 3 5-3M8 8v6"/></svg>
+        Pedidos
+        <span class="badge" id="sb-live-orders-badge" style="display:none;"></span>
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#reservaciones" id="nav-reservaciones">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M5 3V1M11 3V1M2 6h12"/></svg>
+        Reservaciones
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#conversaciones" id="nav-conversaciones">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8c0-3 2.5-5.5 6-5.5S14 5 14 8s-2.5 5.5-6 5.5c-1 0-2-.2-2.8-.6L3 14l.6-2.2C2.6 11 2 9.5 2 8z"/></svg>
+        WhatsApp
+        <span class="dot live" style="margin-left:auto;"></span>
+      </a>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">Restaurante</div>
+      <a class="sb-item" href="/static/html/floorplan.html">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="1"/><path d="M2 6h12M6 2v12"/></svg>
+        Salón
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#menu">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M3 8c0-2.8 2.2-5 5-5"/></svg>
+        Menú
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#menu-engineering" id="nav-menu-engineering">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V8l3-4h6l3 4v5"/><path d="M2 13h12M5 13v-3h6v3"/></svg>
+        Menu Engineering
+      </a>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">Clientes</div>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#nps" id="nav-nps">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 1.5l1.8 4.2 4.5.4-3.4 3 1 4.4L8 11.2 4.1 13.5l1-4.4-3.4-3 4.5-.4z"/></svg>
+        NPS &amp; Reseñas
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#loyalty" id="nav-loyalty">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="12" height="9" rx="1"/><path d="M2 8h12M8 5V2M5 5v-.5a1 1 0 011-1h4a1 1 0 011 1V5"/></svg>
+        Fidelización
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#clientes" id="nav-clientes">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5.5" cy="5" r="2.5"/><path d="M1.5 13c0-2.2 1.8-4 4-4s4 1.8 4 4"/><circle cx="11.5" cy="6" r="2"/><path d="M9.5 13c0-1.6 1-3 2-3"/></svg>
+        Clientes en riesgo
+        <span class="badge" id="sb-risk-badge" style="display:none;background:var(--warning-light,#fef3c7);color:var(--warning-text,#92400e);"></span>
+      </a>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">Equipo</div>
+      <a class="sb-item" href="/static/html/staff-hq.html">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
+        Staff HQ
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#payroll" id="nav-payroll">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></svg>
+        Nómina
+      </a>
+      <a class="sb-item" href="/static/html/dashboard-legacy.html#equipo" id="nav-equipo">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V6l6-4 6 4v7"/><path d="M2 13h12M6 13V9h4v4"/></svg>
+        Sucursales
+      </a>
+    </div>
+
+    <div class="sb-bottom">
+      <a class="sb-item" href="/static/html/settings.html">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3"/></svg>
+        Configuración
+      </a>
+      <a class="sb-item" href="/static/html/billing.html">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12"/></svg>
+        Facturación
+      </a>
+      <div class="sb-user" id="sb-user" style="margin-top:8px;cursor:pointer;">
+        <div class="sb-avatar" id="sb-user-avatar" style="flex-shrink:0;"></div>
+        <div class="grow">
+          <div class="sb-user-name" id="sb-user-name">—</div>
+          <div class="sb-user-role" id="sb-user-role"></div>
+        </div>
+        <span style="color:var(--text-4);font-size:11px;">⌄</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ─────────────────────────────────────────────────────────── -->
+  <main class="main" role="main">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="row" style="gap:6px;">
+        <span class="topbar-crumb">Mesio</span>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Resumen</span>
+      </div>
+      <div class="topbar-right">
+        <div class="row" style="gap:6px;padding:2px 8px 2px 4px;border-left:0.5px solid var(--border);margin-left:4px;" id="bot-status-indicator">
+          <span class="dot live" id="conn-dot"></span>
+          <span style="font-size:11.5px;color:var(--text-3);" id="conn-text">Bot 24/7</span>
+        </div>
+        <button id="btn-logout" class="btn sm ghost" style="margin-left:8px;">Salir</button>
+      </div>
+    </div>
+
+    <!-- Page content -->
+    <div class="page">
+      <!-- Page header -->
+      <div class="page-head">
+        <div>
+          <div class="page-title" id="page-greeting">Buenos días</div>
+          <div class="page-sub" id="page-sub">Cargando datos del restaurante…</div>
+        </div>
+        <div class="row" style="gap:8px;">
+          <div class="period" id="period-control">
+            <button data-period="today">Hoy</button>
+            <button data-period="week" class="active">7 días</button>
+            <button data-period="month">Mes</button>
+            <button data-period="semester">Semestre</button>
+            <button data-period="year">Año</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI insight banner (hidden until data loads; hidden if feature disabled) -->
+      <div class="ai-card" id="ai-insight-banner" style="display:none;">
+        <div class="ai-card-head">
+          <span class="ai-spark"></span>
+          Mesio IA — lectura del día
+        </div>
+        <div class="ai-card-body" id="ai-insight-text"></div>
+      </div>
+
+      <!-- Metrics row -->
+      <div class="metrics-row" style="margin-bottom:16px;">
+        <div class="metric" id="metric-revenue">
+          <div class="metric-label">Ingresos</div>
+          <div class="metric-value" id="m-revenue">—</div>
+          <div class="sprk-wrap">
+            <div class="metric-sub metric-delta" id="m-revenue-delta"></div>
+            <div class="spark" id="m-revenue-spark"></div>
+          </div>
+        </div>
+        <div class="metric" id="metric-orders">
+          <div class="metric-label">Pedidos</div>
+          <div class="metric-value" id="m-orders">—</div>
+          <div class="sprk-wrap">
+            <div class="metric-sub metric-delta" id="m-orders-delta"></div>
+            <div class="spark" id="m-orders-spark"></div>
+          </div>
+        </div>
+        <div class="metric" id="metric-ticket">
+          <div class="metric-label">Ticket promedio</div>
+          <div class="metric-value" id="m-ticket">—</div>
+          <div class="sprk-wrap">
+            <div class="metric-sub metric-delta" id="m-ticket-delta"></div>
+            <div class="spark mute" id="m-ticket-spark"></div>
+          </div>
+        </div>
+        <div class="metric" id="metric-chats">
+          <div class="metric-label">Chats con IA</div>
+          <div class="metric-value" id="m-chats">—</div>
+          <div class="sprk-wrap">
+            <div class="metric-sub" style="color:var(--brand);">Respondidos al instante</div>
+            <div class="spark" id="m-chats-spark"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Revenue chart + Sales by channel -->
+      <div style="display:grid;grid-template-columns:1.8fr 1fr;gap:16px;margin-bottom:16px;" id="grid-chart-channels">
+        <!-- Revenue chart card -->
+        <div class="card flush" id="card-revenue-chart">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Ingresos por día</div>
+              <div class="card-sub" id="chart-period-sub">Últimos 7 días · sombreado = semana anterior</div>
+            </div>
+            <div class="row">
+              <span class="badge brand">Ventas</span>
+              <span class="badge">Comparativa</span>
+            </div>
+          </div>
+          <div style="padding:20px 24px 24px;">
+            <div class="chart" id="revenue-chart-bars">
+              <div class="chart-grid"><div></div><div></div><div></div><div></div></div>
+              <!-- JS fills bar pairs here -->
+            </div>
+            <div class="chart-xlabels" id="revenue-chart-labels"></div>
+          </div>
+        </div>
+
+        <!-- Ventas por canal -->
+        <div class="card flush" id="card-channels">
+          <div class="card-head">
+            <div class="card-title">Ventas por canal</div>
+          </div>
+          <div style="padding:18px;" id="channels-list">
+            <!-- Skeletons -->
+            <div class="skel" style="height:56px;margin-bottom:12px;border-radius:8px;"></div>
+            <div class="skel" style="height:56px;margin-bottom:12px;border-radius:8px;"></div>
+            <div class="skel" style="height:56px;border-radius:8px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live orders + Payment status donut -->
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-bottom:16px;" id="grid-live-payments">
+        <!-- Live orders -->
+        <div class="card flush" id="card-live-orders">
+          <div class="card-head">
+            <div class="row">
+              <span class="dot live"></span>
+              <div class="card-title">Pedidos en vivo</div>
+              <span class="badge brand" id="live-count-badge">—</span>
+            </div>
+            <a href="/caja" class="btn sm ghost">Ver todos →</a>
+          </div>
+          <div class="live-list" id="live-orders-list">
+            <div class="skel" style="height:68px;margin:12px 18px;border-radius:8px;"></div>
+            <div class="skel" style="height:68px;margin:0 18px 12px;border-radius:8px;"></div>
+            <div class="skel" style="height:68px;margin:0 18px 12px;border-radius:8px;"></div>
+          </div>
+        </div>
+
+        <!-- Payment status donut -->
+        <div class="card flush" id="card-payment-status">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Estado de pagos · hoy</div>
+              <div class="card-sub">Pagados vs pendientes</div>
+            </div>
+          </div>
+          <div style="padding:24px;display:flex;gap:20px;align-items:center;">
+            <div class="donut" id="donut-wrap">
+              <svg width="130" height="130" id="donut-svg">
+                <circle cx="65" cy="65" r="52" stroke="#f0f0e8" stroke-width="16" fill="none"/>
+                <circle id="donut-arc" cx="65" cy="65" r="52" stroke="var(--brand)" stroke-width="16" fill="none"
+                        stroke-dasharray="326.7" stroke-dashoffset="326.7" stroke-linecap="butt"/>
+              </svg>
+              <div class="donut-center">
+                <div class="donut-value" id="donut-pct">—</div>
+                <div class="donut-label">Pagados</div>
+              </div>
+            </div>
+            <div style="flex:1;" id="payment-legend">
+              <div class="skel" style="height:22px;margin-bottom:8px;border-radius:4px;"></div>
+              <div class="skel" style="height:22px;margin-bottom:8px;border-radius:4px;"></div>
+              <div class="skel" style="height:22px;border-radius:4px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top dishes + Critical inventory -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" id="grid-dishes-inventory">
+        <!-- Top dishes -->
+        <div class="card flush" id="card-top-dishes">
+          <div class="card-head">
+            <div class="card-title">Top platos · 7 días</div>
+            <a href="/static/html/dashboard-legacy.html#menu-engineering" class="btn sm ghost">Menu Engineering →</a>
+          </div>
+          <table class="tbl" id="top-dishes-table">
+            <thead>
+              <tr><th>#</th><th>Plato</th><th class="num">Vendidos</th><th class="num">Margen</th></tr>
+            </thead>
+            <tbody id="top-dishes-body">
+              <tr><td colspan="4"><div class="skel" style="height:40px;border-radius:4px;margin:8px;"></div></td></tr>
+              <tr><td colspan="4"><div class="skel" style="height:40px;border-radius:4px;margin:8px;"></div></td></tr>
+              <tr><td colspan="4"><div class="skel" style="height:40px;border-radius:4px;margin:8px;"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Critical inventory -->
+        <div class="card flush" id="card-inventory">
+          <div class="card-head">
+            <div class="card-title">Inventario crítico</div>
+            <span class="badge warn" id="inventory-alerts-badge" style="display:none;"></span>
+          </div>
+          <table class="tbl" id="inventory-table">
+            <thead>
+              <tr><th>Ingrediente</th><th class="num">Stock</th><th>Afecta</th></tr>
+            </thead>
+            <tbody id="inventory-body">
+              <tr><td colspan="3"><div class="skel" style="height:40px;border-radius:4px;margin:8px;"></div></td></tr>
+              <tr><td colspan="3"><div class="skel" style="height:40px;border-radius:4px;margin:8px;"></div></td></tr>
+              <tr><td colspan="3"><div class="skel" style="height:40px;border-radius:4px;margin:8px;"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /page -->
+  </main>
+</div><!-- /app -->
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/dashboard.js"></script>
+</body>
+</html>
