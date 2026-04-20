@@ -6,7 +6,11 @@ from zoneinfo import ZoneInfo
 from app.services import database as db
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 from app.repositories import reviews_repo as rr, conversations_repo
+from app.repositories import stats_repo
 from app.services.tenant_context import tenant_scope
+from app.services.logging import get_logger
+
+_log = get_logger(__name__)
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -485,3 +489,339 @@ async def get_no_show_rate(
         "no_shows": no_shows,
         "no_show_rate_pct": rate,
     }
+
+
+# ── DASHBOARD ANALYTICS — TIER 2 ─────────────────────────────────────────────
+
+
+@router.get("/api/stats/by-channel")
+async def get_sales_by_channel(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+    compare:      bool       = Query(False),
+):
+    """Sales breakdown by channel (WhatsApp Bot, POS, QR, Delivery, etc.).
+
+    Aggregates both `orders` (delivery/pickup) and `table_orders` (salon).
+    Period defaults to the last 7 days if not supplied.
+
+    If compare=true, also returns `previous` period data and `deltas` dict.
+    """
+    restaurant = await get_current_restaurant(request)
+    ps, pe = stats_repo._default_period(period_start, period_end)
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    org_id = restaurant["id"]
+    loc_id = bid if bid is not None else (
+        restaurant.get("location_id") if branch_id and branch_id not in ("all", "matriz") else None
+    )
+
+    with tenant_scope(org_id):
+        current = await stats_repo.db_sales_by_channel(
+            org_id=org_id,
+            period_start=ps,
+            period_end=pe,
+            location_id=loc_id if branch_id else None,
+        )
+        if not compare:
+            return current
+
+        prev_ps, prev_pe = stats_repo._prev_period(ps, pe)
+        previous = await stats_repo.db_sales_by_channel(
+            org_id=org_id,
+            period_start=prev_ps,
+            period_end=prev_pe,
+            location_id=loc_id if branch_id else None,
+        )
+
+    # compute deltas
+    curr_total = current.get("total", 0)
+    prev_total = previous.get("total", 0)
+    curr_count = current.get("total_count", 0)
+    prev_count = previous.get("total_count", 0)
+
+    def _pct_delta(curr, prev):
+        if not prev:
+            return None
+        return round((curr - prev) / prev * 100, 1)
+
+    return {
+        **current,
+        "previous": previous,
+        "deltas": {
+            "total_pct":       _pct_delta(curr_total, prev_total),
+            "total_count_pct": _pct_delta(curr_count, prev_count),
+        },
+    }
+
+
+@router.get("/api/stats/top-dishes")
+async def get_top_dishes(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+    limit:        int        = Query(10, ge=1, le=50),
+    compare:      bool       = Query(False),
+):
+    """Top N dishes by revenue with food cost and margin % for the period.
+
+    Joins JSONB items arrays from both orders and table_orders, enriches with
+    recipe-based food costs and current menu metadata.
+
+    If compare=true, also returns `previous` period data and `deltas` dict.
+    """
+    restaurant = await get_current_restaurant(request)
+    ps, pe = stats_repo._default_period(period_start, period_end)
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        current = await stats_repo.db_top_dishes(
+            org_id=org_id,
+            period_start=ps,
+            period_end=pe,
+            limit=limit,
+            location_id=bid,
+        )
+        if not compare:
+            return current
+
+        prev_ps, prev_pe = stats_repo._prev_period(ps, pe)
+        previous = await stats_repo.db_top_dishes(
+            org_id=org_id,
+            period_start=prev_ps,
+            period_end=prev_pe,
+            limit=limit,
+            location_id=bid,
+        )
+
+    # deltas: compare top-1 revenue if available
+    curr_top_rev = current["dishes"][0]["revenue"] if current.get("dishes") else 0
+    prev_top_rev = previous["dishes"][0]["revenue"] if previous.get("dishes") else 0
+
+    def _pct_delta(curr, prev):
+        if not prev:
+            return None
+        return round((curr - prev) / prev * 100, 1)
+
+    return {
+        **current,
+        "previous": previous,
+        "deltas": {
+            "top_dish_revenue_pct": _pct_delta(curr_top_rev, prev_top_rev),
+        },
+    }
+
+
+@router.get("/api/stats/inventory-critical")
+async def get_inventory_critical(
+    request: Request,
+    ok_limit: int = Query(3, ge=0, le=20),
+):
+    """Low-stock ingredients with the dishes they affect.
+
+    Returns `alerts` (critical + warning items) and `ok` (a small sample of
+    healthy items for visual reference in the dashboard card).
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_inventory_critical(
+            org_id=org_id,
+            ok_limit=ok_limit,
+        )
+
+
+@router.get("/api/stats/live-orders")
+async def get_live_orders(
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Unified live feed of active orders: delivery + table, sorted newest-first.
+
+    Intended for dashboard polling (lightweight — does not include full item lists).
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_live_orders(
+            org_id=org_id,
+            limit=limit,
+        )
+
+
+# ── DASHBOARD ANALYTICS — TIER 3 ─────────────────────────────────────────────
+
+
+@router.get("/api/stats/payment-status")
+async def get_payment_status(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+    compare:      bool       = Query(False),
+):
+    """Payment status donut: paid / pending / disputed / courtesy buckets.
+
+    Aggregates both orders (delivery/pickup) and table_checks (salon).
+    Period defaults to last 7 days when not supplied.
+
+    If compare=true, also returns `previous` period data and `deltas` dict.
+    """
+    restaurant = await get_current_restaurant(request)
+    ps, pe = stats_repo._default_period(period_start, period_end)
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+    org_id = restaurant["id"]
+    loc_id = bid if bid is not None else (
+        restaurant.get("location_id") if branch_id and branch_id not in ("all", "matriz") else None
+    )
+
+    with tenant_scope(org_id):
+        current = await stats_repo.db_payment_status(
+            org_id=org_id,
+            period_start=ps,
+            period_end=pe,
+            location_id=loc_id if branch_id else None,
+        )
+        if not compare:
+            return current
+
+        prev_ps, prev_pe = stats_repo._prev_period(ps, pe)
+        previous = await stats_repo.db_payment_status(
+            org_id=org_id,
+            period_start=prev_ps,
+            period_end=prev_pe,
+            location_id=loc_id if branch_id else None,
+        )
+
+    curr_total = current.get("total_count", 0)
+    prev_total = previous.get("total_count", 0)
+
+    # Compute paid-count delta
+    def _bucket_count(data, key):
+        for b in data.get("buckets", []):
+            if b["key"] == key:
+                return b["count"]
+        return 0
+
+    curr_paid = _bucket_count(current, "paid")
+    prev_paid = _bucket_count(previous, "paid")
+
+    def _pct_delta(curr, prev):
+        if not prev:
+            return None
+        return round((curr - prev) / prev * 100, 1)
+
+    return {
+        **current,
+        "previous": previous,
+        "deltas": {
+            "total_count_pct": _pct_delta(curr_total, prev_total),
+            "paid_count_pct":  _pct_delta(curr_paid, prev_paid),
+        },
+    }
+
+
+@router.get("/api/stats/customers-at-risk")
+async def get_customers_at_risk(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Frequent customers who haven't ordered in >= 21 days.
+
+    Returns count + customer list with last_seen, days_since, total_spent.
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_customers_at_risk(org_id=org_id, limit=limit)
+
+
+@router.get("/api/stats/staff-performance")
+async def get_staff_performance(
+    request: Request,
+    staff_id: str = Query(..., description="Staff UUID"),
+    weeks: int = Query(7, ge=1, le=26),
+):
+    """Weekly sales sparkline for a single staff member (table_orders only).
+
+    Returns a week series of sales_total + tickets_count.
+    Returns empty weeks array if staff not found or has no activity.
+    Note: delivery orders have no staff author column; salon only.
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_staff_performance(
+            org_id=org_id,
+            staff_id=staff_id,
+            weeks=weeks,
+        )
+
+
+@router.get("/api/stats/tips-pool")
+async def get_tips_pool(
+    request: Request,
+    period_start: str | None = Query(None),
+    period_end:   str | None = Query(None),
+    branch_id:    str | None = Query(None),
+):
+    """Tip pool summary for a period (default: current week).
+
+    Wraps db_calculate_tips_by_attendance and returns pool_total, top-5
+    entries_preview, and unallocated amount.
+    """
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    location_id = restaurant.get("location_id") or restaurant["id"]
+    bid = int(branch_id) if branch_id and branch_id.isdigit() else None
+
+    with tenant_scope(org_id):
+        return await stats_repo.db_tips_pool(
+            org_id=org_id,
+            location_id=location_id,
+            period_start=period_start,
+            period_end=period_end,
+            branch_id=bid,
+        )
+
+
+# ── DASHBOARD ANALYTICS — TIER 4a ────────────────────────────────────────────
+
+
+@router.get("/api/stats/daily-insight")
+async def get_daily_insight(request: Request):
+    """LLM-generated daily commentary for the dashboard banner.
+
+    Feature-flagged via restaurants.features.ai_daily_insight (JSONB).
+    If disabled, returns {"enabled": false, "reason": "feature_disabled"} (200 OK).
+    If enabled, checks Redis cache (key: mesio:ai_insight:{org_id}:{YYYY-MM-DD}).
+      Cache hit  → cached JSON (24h TTL).
+      Cache miss → gather signals, call Haiku, cache 24h, return.
+    Missing ANTHROPIC_API_KEY or Anthropic error → signals-only payload (no crash).
+    """
+    from app.services.ai_insights import generate_daily_insight  # noqa: PLC0415
+
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    location_id = restaurant.get("location_id") or org_id
+
+    # Feature gate: read ai_daily_insight from features JSONB
+    features = restaurant.get("features", {})
+    if isinstance(features, str):
+        try:
+            features = json.loads(features)
+        except Exception:
+            features = {}
+
+    if not features.get("ai_daily_insight"):
+        return {"enabled": False, "reason": "feature_disabled"}
+
+    with tenant_scope(org_id):
+        return await generate_daily_insight(org_id=org_id, location_id=location_id)

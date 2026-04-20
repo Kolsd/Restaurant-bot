@@ -47,8 +47,11 @@ except ImportError:
     pass  # python-dotenv is in requirements.txt but fail gracefully if missing
 
 
-def _validate_env() -> bool:
-    """Validate required environment variables. Returns True if OK to continue."""
+def _validate_env(smoke: bool = False) -> bool:
+    """Validate required environment variables. Returns True if OK to continue.
+
+    In smoke mode, ANTHROPIC_API_KEY is not required (no LLM calls are made).
+    """
     ok = True
 
     database_url = os.environ.get("DATABASE_URL", "").strip()
@@ -82,11 +85,17 @@ def _validate_env() -> bool:
                     print("Aborted.")
                     sys.exit(1)
 
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not anthropic_key:
-        print("ERROR: ANTHROPIC_API_KEY environment variable is not set.")
-        print("       The simulation requires real Anthropic API calls.")
-        ok = False
+    if smoke:
+        # Smoke mode does not call Anthropic — skip key validation.
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not anthropic_key:
+            print("INFO: ANTHROPIC_API_KEY not set — OK for --smoke (no LLM calls).")
+    else:
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not anthropic_key:
+            print("ERROR: ANTHROPIC_API_KEY environment variable is not set.")
+            print("       The simulation requires real Anthropic API calls.")
+            ok = False
 
     redis_url = os.environ.get("REDIS_URL", "").strip()
     if redis_url:
@@ -194,6 +203,171 @@ def _run_alembic() -> bool:
     except FileNotFoundError:
         print("ERROR: alembic not found. Install it with: pip install alembic")
         return False
+
+
+async def _smoke_async() -> int:
+    """Smoke-test the simulation plumbing WITHOUT calling Anthropic.
+
+    Validates:
+      Step A — DB connectivity + seed (organizations + locations schema)
+      Step B — tenant_scope wrapping (resolve org_id, enter scope, no agent.chat)
+      Step C — snapshot_db_state runs cleanly against seeded data
+      Step D — truncate_test_data cleans up without permission errors
+      Step E — post-truncate snapshot returns empty volatile tables
+
+    Returns 0 if all steps pass, 1 otherwise.
+    """
+    import asyncpg
+    from tests.ai_sim.seed import (
+        seed_restaurant,
+        truncate_test_data,
+        reset_state_store_fallbacks,
+        SIM_BOT_NUMBER,
+    )
+    from tests.ai_sim.assertions import snapshot_db_state
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope
+    from app.services.database import _normalize_phone as _norm
+
+    all_passed = True
+
+    def _step(name: str, ok: bool, detail: str = "") -> None:
+        nonlocal all_passed
+        status = "PASS" if ok else "FAIL"
+        suffix = f" — {detail}" if detail else ""
+        print(f"  [{status}] {name}{suffix}")
+        if not ok:
+            all_passed = False
+
+    print("\n=== AI Sim Smoke Test ===\n")
+
+    database_url = os.environ.get("DATABASE_URL", "")
+    try:
+        pool = await asyncpg.create_pool(
+            database_url,
+            min_size=1,
+            max_size=5,
+            command_timeout=60,
+        )
+    except Exception as exc:
+        print(f"  [FAIL] DB connectivity — {exc}")
+        print(f"\n=== SMOKE RESULT: FAIL ===\n")
+        return 1
+
+    try:
+        # ── Step A: Seed ──────────────────────────────────────────────────────
+        try:
+            async with pool.acquire() as conn:
+                seed_info = await seed_restaurant(conn)
+            _step(
+                "A: seed_restaurant",
+                True,
+                f"org_id={seed_info['restaurant_id']} bot={seed_info['bot_number']}",
+            )
+        except Exception as exc:
+            _step("A: seed_restaurant", False, str(exc))
+
+        # ── Step B: tenant_scope plumbing ─────────────────────────────────────
+        # Mirrors the production pattern in inbox_worker._handle_meta_whatsapp.
+        # Resolves org_id from bot_number (requires bypass for cross-tenant lookup),
+        # then enters tenant_scope(org_id) — no agent.chat() call.
+        try:
+            normalized_bot = _norm(SIM_BOT_NUMBER)
+            async with pool.acquire() as conn:
+                with bypass_tenant_scope("ai_sim_smoke_resolve_org"):
+                    org_id = await conn.fetchval(
+                        "SELECT id FROM organizations WHERE whatsapp_number = $1",
+                        normalized_bot,
+                    )
+            if org_id is None:
+                _step("B: tenant_scope resolution", False, "org_id is None — seed may have failed")
+            else:
+                # Enter scope and run a simple tenant-gated query to confirm RLS fires
+                async with pool.acquire() as conn:
+                    with tenant_scope(org_id):
+                        # Verify we can query a tenant-scoped table without TenantNotSetError
+                        # and that org_isolation policy allows seeing our own rows.
+                        row_count = await conn.fetchval(
+                            "SELECT COUNT(*) FROM subscription_usage WHERE org_id = $1",
+                            org_id,
+                        )
+                _step(
+                    "B: tenant_scope resolution",
+                    True,
+                    f"org_id={org_id} subscription_usage rows={row_count}",
+                )
+        except Exception as exc:
+            _step("B: tenant_scope resolution", False, str(exc))
+
+        # ── Step C: snapshot_db_state ─────────────────────────────────────────
+        try:
+            normalized_user = _norm("+573000000001")
+            async with pool.acquire() as conn:
+                snap = await snapshot_db_state(
+                    conn,
+                    bot_number=normalized_bot,
+                    user_phone=normalized_user,
+                )
+            _step(
+                "C: snapshot_db_state",
+                True,
+                (
+                    f"table_orders={len(snap.table_orders)} "
+                    f"orders={len(snap.orders)} "
+                    f"carts={len(snap.carts)} "
+                    f"subscription_usage={snap.subscription_usage}"
+                ),
+            )
+        except Exception as exc:
+            _step("C: snapshot_db_state", False, str(exc))
+
+        # ── Step D: truncate_test_data ────────────────────────────────────────
+        try:
+            reset_state_store_fallbacks()
+            async with pool.acquire() as conn:
+                await truncate_test_data(conn)
+            _step("D: truncate_test_data", True, "volatile tables cleaned")
+        except Exception as exc:
+            _step("D: truncate_test_data", False, str(exc))
+
+        # ── Step E: post-truncate snapshot should show empty volatile tables ──
+        try:
+            async with pool.acquire() as conn:
+                snap2 = await snapshot_db_state(
+                    conn,
+                    bot_number=normalized_bot,
+                    user_phone=normalized_user,
+                )
+            # conversations, orders, table_orders, carts must be empty
+            volatile_empty = (
+                len(snap2.table_orders) == 0
+                and len(snap2.orders) == 0
+                and len(snap2.carts) == 0
+                and len(snap2.conversations) == 0
+            )
+            _step(
+                "E: post-truncate snapshot empty",
+                volatile_empty,
+                (
+                    f"table_orders={len(snap2.table_orders)} "
+                    f"orders={len(snap2.orders)} "
+                    f"carts={len(snap2.carts)} "
+                    f"conversations={len(snap2.conversations)}"
+                ),
+            )
+        except Exception as exc:
+            _step("E: post-truncate snapshot empty", False, str(exc))
+
+    finally:
+        await pool.close()
+
+    result_label = "PASS" if all_passed else "FAIL"
+    print(f"\n=== SMOKE RESULT: {result_label} ===\n")
+    if all_passed:
+        print("Plumbing verified. Ready for a full E2E run (requires ANTHROPIC_API_KEY budget).")
+    else:
+        print("One or more smoke steps failed. Fix before running full E2E.")
+    print()
+    return 0 if all_passed else 1
 
 
 async def _main_async(args: argparse.Namespace) -> int:
@@ -324,9 +498,19 @@ def main() -> None:
         prog="run_ai_sim.py",
         description=(
             "Mesio AI Simulation Test Suite — real end-to-end bot testing.\n"
-            "Requires: DATABASE_URL (test/sim DB), ANTHROPIC_API_KEY."
+            "Requires: DATABASE_URL (test/sim DB), ANTHROPIC_API_KEY.\n\n"
+            "Use --smoke to validate plumbing only (no Anthropic calls, no LLM spend)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help=(
+            "Smoke-test DB plumbing without calling Anthropic: "
+            "seed → tenant_scope → snapshot → truncate → verify clean. "
+            "ANTHROPIC_API_KEY not required."
+        ),
     )
     parser.add_argument(
         "--only",
@@ -355,6 +539,16 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # ── Smoke mode: validate plumbing only, no LLM spend ─────────────────────
+    if args.smoke:
+        if not _validate_env(smoke=True):
+            sys.exit(1)
+        if not args.no_alembic:
+            if not _run_alembic():
+                sys.exit(1)
+        exit_code = asyncio.run(_smoke_async())
+        sys.exit(exit_code)
 
     # ── Validate environment ──────────────────────────────────────────────────
     if not _validate_env():

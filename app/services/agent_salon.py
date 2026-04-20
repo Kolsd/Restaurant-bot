@@ -699,6 +699,7 @@ async def execute_salon_action(
                 "station":       station,
                 "branch_id":     branch_id_val,
                 "org_id":        org_id_val,
+                "channel":       "whatsapp_bot",
             }
 
         _is_duplicate_order = False

@@ -194,6 +194,7 @@ async def commit_order_transaction(
     conversation_id: str,
     cart: dict[str, Any],
     order_payload: dict[str, Any],
+    channel: str | None = None,
 ) -> None:
     """
     Atomically commits a delivery/pickup order:
@@ -207,6 +208,8 @@ async def commit_order_transaction(
         conversation_id: Phone / conversation identifier (used for cart delete).
         cart:           Full cart dict (contains 'items' and 'bot_number').
         order_payload:  Order dict — same shape expected by db_save_order.
+        channel:        Optional attribution channel (whatsapp_bot, pos, qr_pickup, web, manual).
+                        If provided, stored on the orders row. Legacy rows leave this NULL.
 
     Raises:
         InsufficientStockError: one ingredient is out of stock; transaction rolled back.
@@ -261,8 +264,8 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, org_id)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)""",
+                                base_order_id, sub_number, org_id, channel)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)""",
                         order_payload["id"],
                         order_payload["phone"],
                         json.dumps(order_payload["items"]),
@@ -280,6 +283,7 @@ async def commit_order_transaction(
                         base_order_id,
                         order_payload["sub_number"],
                         restaurant_id,
+                        channel,
                     )
                 else:
                     await conn.execute(
@@ -287,8 +291,8 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, org_id)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                                base_order_id, sub_number, org_id, channel)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
                            ON CONFLICT (id) DO UPDATE SET
                                items          = EXCLUDED.items,
                                subtotal       = EXCLUDED.subtotal,
@@ -320,6 +324,7 @@ async def commit_order_transaction(
                         None,
                         order_payload.get("sub_number", 1),
                         restaurant_id,
+                        channel,
                     )
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)
@@ -362,8 +367,8 @@ async def db_save_order(order: dict):
         await conn.execute("""
             INSERT INTO orders (id, phone, items, order_type, address, notes,
                 subtotal, delivery_fee, total, status, paid, payment_url, bot_number,
-                payment_method, base_order_id, sub_number, org_id)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                payment_method, base_order_id, sub_number, org_id, channel)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 subtotal=EXCLUDED.subtotal,
@@ -384,7 +389,8 @@ async def db_save_order(order: dict):
         order["status"], order["paid"], order.get("payment_url", ""),
         order.get("bot_number", ""), order.get("payment_method", ""),
         order.get("base_order_id"), order.get("sub_number", 1),
-        order.get("restaurant_id") or order.get("org_id"))
+        order.get("restaurant_id") or order.get("org_id"),
+        order.get("channel"))
 
 async def db_confirm_payment(order_id: str, transaction_id: str):
     """
@@ -543,3 +549,50 @@ async def record_wompi_event(
     # asyncpg returns "INSERT 0 N" — N=1 means row was inserted (first time).
     affected = int(result.split()[-1]) if result else 0
     return affected == 1
+
+
+# ── Caja customer helpers ────────────────────────────────────────────────────
+
+async def db_get_recent_orders_by_phone(
+    org_id: int,
+    phone: str,
+    limit: int = 5,
+) -> list[dict]:
+    """Return the most recent delivery/pickup orders for a phone number.
+
+    Runs under the already-active tenant_scope set by the call site.
+    Returns a list of dicts:
+        {"id", "total": float, "created_at": str | None, "items_summary": str, "source": "delivery"}
+    """
+    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+
+    results: list[dict] = []
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, total, created_at, items
+               FROM orders
+               WHERE phone = $1
+                 AND org_id = $2
+               ORDER BY created_at DESC
+               LIMIT $3""",
+            phone, org_id, limit,
+        )
+    for r in rows:
+        items_raw = r["items"]
+        if isinstance(items_raw, str):
+            try:
+                items_raw = json.loads(items_raw)
+            except Exception:
+                items_raw = []
+        items_list = items_raw if isinstance(items_raw, list) else []
+        summary = " · ".join(i.get("name", "item") for i in items_list[:3])
+        if len(items_list) > 3:
+            summary += f" +{len(items_list) - 3}"
+        results.append({
+            "id": f"#{str(r['id'])[-6:].upper()}",
+            "total": float(to_decimal(r["total"])),  # JSON boundary
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "items_summary": summary,
+            "source": "delivery",
+        })
+    return results

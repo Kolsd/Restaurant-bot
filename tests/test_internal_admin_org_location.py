@@ -58,7 +58,6 @@ async def test_create_org_also_creates_primary_location():
         "whatsapp_number": None, "wa_phone_id": None, "wa_access_token": None,
         "active": True, "is_primary": False, "timezone": "America/Bogota",
         "opening_hours": {}, "created_at": None, "updated_at": None,
-        "legacy_restaurant_id": None,
     }
     promoted_loc = dict(created_loc, is_primary=True)
 
@@ -99,7 +98,6 @@ async def test_promote_location_to_primary_demotes_existing():
         "longitude": None, "whatsapp_number": None, "wa_phone_id": None,
         "wa_access_token": None, "timezone": "America/Bogota",
         "opening_hours": {}, "created_at": None, "updated_at": None,
-        "legacy_restaurant_id": None,
     }
     after_promote = dict(existing_loc, is_primary=True)
 
@@ -151,7 +149,6 @@ async def test_cannot_delete_primary_location():
         "longitude": None, "whatsapp_number": None, "wa_phone_id": None,
         "wa_access_token": None, "timezone": "America/Bogota",
         "opening_hours": {}, "created_at": None, "updated_at": None,
-        "legacy_restaurant_id": None,
     }
 
     with patch.object(restaurant_repo, "db_get_location_by_id", AsyncMock(return_value=primary_loc)):

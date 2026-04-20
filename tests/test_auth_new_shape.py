@@ -75,7 +75,6 @@ _LOC_PRIMARY = _FakeRecord({
     "opening_hours": json.dumps({}),
     "created_at": None,
     "updated_at": None,
-    "legacy_restaurant_id": 1,
 })
 
 _LOC_SECONDARY = _FakeRecord({
@@ -95,7 +94,6 @@ _LOC_SECONDARY = _FakeRecord({
     "opening_hours": json.dumps({}),
     "created_at": None,
     "updated_at": None,
-    "legacy_restaurant_id": 20,
 })
 
 _MAPPING_ROW = _FakeRecord({"org_id": 1, "location_id": 10})  # kept for reference, no longer used by app code

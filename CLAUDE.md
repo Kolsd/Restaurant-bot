@@ -356,10 +356,16 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 
 1. Tras ~2 semanas de logs `session.legacy_lookup` en cero → crear migración que dropea `sessions.token` y eliminar el fallback en `sessions_repo.get_session`/`delete_session`.
 2. Setear `REDIS_URL` en Railway antes del deploy (sin él, el bot funciona pero pierde la garantía multi-worker — fallback in-process).
-3. Correr `alembic upgrade head` para aplicar hasta 0030 (RLS + FORCE).
-4. Migración `0012_b2b_sales_system.py` crea tablas huérfanas (`sales_inbox`, `sales_knowledge_base`, etc.) — `sales_agent.py` fue eliminado. Crear migración de cleanup cuando convenga.
-5. **Railway: setear `DATABASE_URL_ADMIN`** con la URL superuser, y `DATABASE_URL` apuntando al role `mesio_app` (non-superuser). Sin esto, RLS no enforce en prod.
-6. **Fase 2 + Fase 3 del roadmap de security** — ver `PHASE_2_3_PLAN.md` en raíz del repo. Top prioridad si hay tráfico real: 3.1 (precios por IA → Python) y 3.3 (webhook resilience bajo DB down).
+3. ~~Migración `0012_b2b_sales_system.py` crea tablas huérfanas~~ — **CERRADO**: las tablas `sales_inbox|sales_knowledge_base|sales_conversations|sales_escalations` ya fueron dropeadas por migración `0031_drop_orphan_sales_tables.py`. La nota era stale. Zero callers en `app/` verified 2026-04-19.
+4. **Railway: setear `DATABASE_URL_ADMIN`** con la URL superuser, y `DATABASE_URL` apuntando al role `mesio_app` (non-superuser). Sin esto, RLS no enforce en prod.
+5. **Fase 2 + Fase 3 del roadmap de security** — ver `PHASE_2_3_PLAN.md` en raíz del repo. Top prioridad si hay tráfico real: 3.1 (precios por IA → Python) y 3.3 (webhook resilience bajo DB down).
+6. **Push acumulado a Railway** — sprint Wave-2 cleanup + Tier 1 design-driven additions (migración 0039 agrega `channel`, `waiter_staff_id`, `assigned_staff_id`). Railway corre `alembic upgrade head` automático en cada deploy. Para prod: ejecutar `scripts/rehearsal_railway.py` antes (~30min de validación end-to-end).
+7. **`legacy_restaurant_id` columna** sigue en `locations` (vestige de 0034 backfill). Future migration 0041+ puede dropearla — verificar primero `grep -rn legacy_restaurant_id app/` en cero callers reales (hay ~9 SELECT callers en `restaurant_repo.py` que propagan el valor en dicts sin leerlo).
+8. **`run_ai_sim.py` E2E unvalidated** post-Wave-2 — refactorizado en Paso 1 + seed.py post-0038, pero nunca corrido E2E. Requiere `ANTHROPIC_API_KEY` + budget (~$2-5 por full run de 20 escenarios).
+9. **CSP `'unsafe-inline'` removal** — sprint anterior Punto 3 quedó parcial (solo `<script>`/`<style>` blocks de mesero/kitchen/caja extraídos). Faltan ~280 inline `onclick=` y `style=""` attrs en 18 HTML files. DEFERRED: el rediseño frontend (Tier 1+) reemplaza esos HTMLs; hacer la limpieza después de que el rediseño esté en prod.
+10. ~~**20 `bypass_tenant_scope` internos en `staff_repo.py`**~~ — **CERRADO 2026-04-19**: audit completado. Los "79 grep hits" se descomponen en 18 calls reales + 60 comentarios de documentación + 1 import. Los 18 calls son TODOS legítimos: WebAuthn kiosko público (sin JWT), auth pre-tenant-resolve (PIN login), staff self-service pre-scope (`_resolve_staff_from_token` pattern), y tablas sin RLS (`webauthn_credentials`, `staff_breaks` no tienen `org_id`). Zero downgrades posibles.
+11. ~~**`db_calculate_tips_by_attendance` per-sede filter limitation**~~ — **CERRADO 2026-04-19**: `test_tips::test_branch_id_filter` unskipped + passing. Función ahora resuelve `org_id` vía `SELECT org_id FROM locations WHERE id = $1`, filtra staff/shifts por `org_id`, filtra checks por `branch_id`. Semántica: staff de cualquier sede del org comparten los tips del branch filtrado (alineado con design UI que muestra tip pool org-level).
+12. ~~**`db_get_primary_location` rename**~~ — **CERRADO 2026-04-19**: renombrada a `db_get_default_location` con docstring que aclara post-Wave-2 peer-locations semantics. Alias deprecado conservado ~1-2 sprints por seguridad.
 
 ### Limitaciones conocidas (no críticas)
 
@@ -1179,18 +1185,32 @@ O usar `services/alerts.py` y agregar un check personalizado al scheduler.
 
 **Fecha aplicado a prod: 2026-04-18.** Esta sección documenta el estado post-migración y las lecciones aprendidas durante el despliegue (que costó ~8-10 horas de iteración reactiva que podrían haberse evitado).
 
-### Estado actual del schema (post-0037)
+### Estado actual del schema (post-0038, 2026-04-19)
 
 - **Tablas nuevas canónicas:** `organizations` (tenant) + `locations` (sede). Ver `ORG_LOCATION_MIGRATION_PLAN.md` §2 para el mapeo completo.
 - **`restaurants` es ahora una VIEW read-only** sobre `locations JOIN organizations`. Cada fila de la VIEW representa una Location con los datos de su Org injerados. `id` de la VIEW == `location_id`.
-- **`restaurants_deprecated`** — tabla real con los datos originales. No tocar. Se dropeará en migración 0038 (pendiente, ~2 semanas post-estabilización).
-- **`restaurant_id` column** — DROPEADA de las 33 tablas RLS (+ reservation_deposits + reservations + restaurant_tables). Solo existe en `restaurants_deprecated`.
-- **`org_id` + `location_id`** — las columnas canónicas. `org_id` es el tenant key (equivale al viejo `restaurant_id` de la Matriz). `location_id` es la sede operativa.
-- **RLS:** policy `tenant_isolation` (legacy por `restaurant_id`) **DROPPED**. Policy `org_isolation` (por `org_id`) activa en las 33 tablas + FORCE RLS.
-- **Triggers auto-populate:** DROPPED. App code debe setear `org_id` y `location_id` explícitamente en INSERTs.
-- **Migración head actual:** `0037_drop_legacy_rls`. Cadena: `0036 -> 0037b_recovery_cons -> 0037c_billing_conf -> 0037d_relax_location -> 0037_drop_legacy_rls`.
-- **billing_config** — migrado a `organizations.billing_config` (0037c) y expuesto en la VIEW `restaurants`.
-- **location_id nullable** en 18 tablas operativas (0037d): orders, table_orders, staff, staff_shifts, staff_schedules, staff_deduction_items, attendance_deductions, fiscal_invoices, fiscal_resolution, inventory, menu_availability, occupancy_snapshots, overtime_requests, table_sessions, time_slot_discounts, tip_distributions, waiter_alerts, webauthn_challenges. Cuando el código quede 100% Wave 2-ready, una migración futura puede re-enforce NOT NULL.
+- **VIEW post-0038**: NO incluye `parent_restaurant_id` (legacy emulation eliminada). NO incluye `is_primary` (columna dropeada). Sí incluye `subscription_status` y `subscription_plan` para callers que los necesitan.
+- **`restaurants_deprecated`** — ❌ **DROPPED en 0038**. Si necesitás los datos originales pre-Wave-2, restorá de backup pre-0038.
+- **`_migration_restaurant_to_location`** — ❌ **DROPPED en 0038** (mapping table retirada — el lookup que la usaba se eliminó en commit f2465bc).
+- **`locations.is_primary`** — ❌ **DROPPED en 0038**. Cada location es peer; no hay "primary". Para "default location" usar `ORDER BY id ASC LIMIT 1`.
+- **`parent_restaurant_id`** — ❌ **DROPPED en 0038**. Code que lee `restaurant.get("parent_restaurant_id")` ahora obtiene `None` (cae en branch "is matriz / is primary", correcto en modelo peer).
+- **`restaurant_id` column** — DROPEADA de las 33 tablas RLS en 0037.
+- **`org_id` + `location_id`** — las columnas canónicas. `org_id` es el tenant key. `location_id` es la sede operativa.
+- **RLS:** policy `org_isolation` (por `org_id`) activa en las 33 tablas + FORCE RLS. Policy legacy `tenant_isolation` DROPPED en 0037.
+- **Triggers auto-populate:** DROPPED en 0037. App code debe setear `org_id` y `location_id` explícitamente en INSERTs.
+- **Migración head actual:** `0038_drop_legacy_compat`. Cadena: `0036 → 0037b → 0037c → 0037d → 0037 → 0038`.
+- **billing_config** — en `organizations.billing_config` (0037c), expuesto en la VIEW.
+- **location_id nullable** en 18 tablas operativas (0037d): orders, table_orders, staff, staff_shifts, staff_schedules, staff_deduction_items, attendance_deductions, fiscal_invoices, fiscal_resolution, inventory, menu_availability, occupancy_snapshots, overtime_requests, table_sessions, time_slot_discounts, tip_distributions, waiter_alerts, webauthn_challenges.
+- **`legacy_restaurant_id` columna** sigue en `locations` — helper de 0034 backfill. Future migration 0039 puede dropearla cuando convenga (verificar zero callers primero).
+
+### Forward guards contra reintroducción de symbols obsoletos
+
+Dos tests AST-walking que fallan CI si alguien reintroduce los símbolos dropeados en SQL strings dentro de `app/`:
+
+- **`tests/test_no_parent_restaurant_id_sql.py`** — bloquea `WHERE/JOIN/SELECT parent_restaurant_id` en cualquier `.py` del app code. Permitidos: nombres de parámetros, comments, `NULL::int AS parent_restaurant_id` (alias literal).
+- **`tests/test_no_is_primary_sql.py`** — bloquea `WHERE/ORDER BY/INSERT is_primary` en SQL string content. Permitidos: nombres de parámetros, dict accessors, comments.
+
+Si necesitás re-introducir alguno de estos symbols, **revertir los guards es señal de que estás haciendo algo mal** — el modelo Wave-2 nativo no los soporta.
 
 ### Patrón obligatorio post-Wave-2 para SQL nuevo
 

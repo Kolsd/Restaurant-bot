@@ -42,6 +42,48 @@ _STATUS_ROLE_MAP: dict[str, set[str]] = {
 # WA notification rate-limiting moved to Redis via state_store (multi-worker safe).
 # Keys: notif_wa:{bot_number}:{phone}:{kind}  max 1 per 5 min per worker pool.
 
+async def _get_active_session_for_table(table_id: str, org_id: int) -> dict | None:
+    """Return the active table_session row for a table_id (tenant-scoped).
+
+    Requires caller to be inside tenant_scope(org_id) already.
+    Returns None if no active session exists.
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT assigned_staff_id
+               FROM table_sessions
+               WHERE table_id = $1 AND org_id = $2 AND status = 'active'
+               ORDER BY started_at DESC LIMIT 1""",
+            table_id, org_id,
+        )
+    return dict(row) if row else None
+
+
+async def _resolve_mesero(staff_id: str | None, org_id: int) -> dict | None:
+    """Resolve staff name from staff_id UUID (GLOBAL lookup, no tenant scope needed).
+
+    Returns {"name": "...", "first_name": "..."} or None if not found.
+    """
+    if not staff_id:
+        return None
+    try:
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT name FROM staff WHERE id = $1::uuid AND org_id = $2",
+                str(staff_id), org_id,
+            )
+        if not row:
+            return None
+        full_name: str = row["name"] or ""
+        first_name = full_name.split()[0] if full_name else full_name
+        return {"name": full_name, "first_name": first_name}
+    except Exception:
+        log.warning("tables.resolve_mesero_error", staff_id=staff_id)
+        return None
+
+
 async def get_table_wa_number(table: dict) -> str:
     """Resolve the WhatsApp number to use for a wa.me link from a table dict.
 
@@ -308,6 +350,23 @@ async def public_menu_context(table_id: str):
         try: features = _json.loads(features)
         except Exception: features = {}
 
+    # ── Table context: active session + assigned mesero ────────────────────
+    table_context = None
+    rid = restaurant.get("id")
+    if rid:
+        try:
+            with tenant_scope(rid):
+                session_row = await _get_active_session_for_table(table_id, rid)
+            if session_row:
+                mesero_info = await _resolve_mesero(session_row.get("assigned_staff_id"), rid)
+                table_context = {
+                    "table_name": table["name"],
+                    "assigned_mesero": mesero_info,
+                }
+        except Exception:
+            from app.services.logging import get_logger as _gl
+            _gl(__name__).warning("public_menu_context.table_context_error", table_id=table_id)
+
     return {
         "table_name": table["name"],
         "wa_url": wa_url,
@@ -318,6 +377,7 @@ async def public_menu_context(table_id: str):
         "catalog_v2_enabled": bool(features.get("catalog_v2_enabled", True)),
         "bot_visual_menu": bool(features.get("bot_visual_menu", False)),
         "bot_number": wa_number,
+        "table_context": table_context,
     }
 
 def build_qr_html(menu_url: str, table_name: str, width: int = 300) -> str:
@@ -912,19 +972,24 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
             final_base_id = order_id
             sub_num = 1
 
+        # Resolve waiter_staff_id from the authenticated user if available.
+        _waiter_staff_id = user.get("staff_id") or None
+
         order = {
-            "id":            order_id,
-            "table_id":      body.table_id,
-            "table_name":    body.table_name,
-            "phone":         phone,
-            "items":         body.items,
-            "status":        "recibido",
-            "notes":         body.notes,
-            "total":         float(total_d),  # JSON boundary
-            "base_order_id": final_base_id,
-            "sub_number":    sub_num,
-            "station":       body.station,
-            "branch_id":     branch_id
+            "id":              order_id,
+            "table_id":        body.table_id,
+            "table_name":      body.table_name,
+            "phone":           phone,
+            "items":           body.items,
+            "status":          "recibido",
+            "notes":           body.notes,
+            "total":           float(total_d),  # JSON boundary
+            "base_order_id":   final_base_id,
+            "sub_number":      sub_num,
+            "station":         body.station,
+            "branch_id":       branch_id,
+            "channel":         "pos",
+            "waiter_staff_id": _waiter_staff_id,
         }
 
         await db.db_save_table_order(order)
@@ -1353,6 +1418,8 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
         "sub_number": 1,
         "station": "all",
         "branch_id": branch_id,
+        "channel": "pos",
+        "waiter_staff_id": user.get("staff_id") or None,
     }
     with tenant_scope(restaurant["id"]):
         await db.db_save_table_order(order)
@@ -1435,3 +1502,115 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
         "total": float(total_d),
         "fiscal_invoice_id": fiscal_invoice_id,
     }
+
+
+# ── CAJA: Customer lookup ─────────────────────────────────────────────────────
+
+@router.get("/api/caja/customer/{phone}")
+async def get_caja_customer(
+    phone: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+) -> dict:
+    """Return customer profile + loyalty balance + recent orders for the caja UI.
+
+    Auth: Bearer token of admin/owner/gerente (get_current_restaurant_scoped).
+    Tenant-scoped: all repo calls run under tenant_scope(org_id) set by the dep.
+
+    Returns:
+        {
+            "phone": str,
+            "name": str | None,
+            "is_known": bool,
+            "stats": {"total_orders", "total_spent", "last_seen", "first_seen"} | {},
+            "loyalty": {"points": int, "tier": null} | null,
+            "recent_orders": [{"id", "total", "created_at", "items_summary"}]
+        }
+
+    If the phone is unknown, is_known=false with empty stats and empty recent_orders.
+    If the loyalty module is disabled or has no record, loyalty=null.
+    """
+    from app.repositories import customer_profiles_repo as cp_repo  # noqa: PLC0415
+    from app.repositories import loyalty_repo  # noqa: PLC0415
+    from app.services.money import quantize_money, to_decimal  # noqa: PLC0415
+
+    # Normalise phone: strip leading +, spaces, and URL-encode artifacts.
+    # Keep the original version for display but normalise for DB lookup.
+    clean_phone = urllib.parse.unquote(phone).strip()
+
+    # Resolve the real org_id.
+    # restaurant["id"] == location_id (restaurants VIEW id column) — DO NOT use it as org_id.
+    # db_get_restaurant_by_id populates org_id on the dict; use it directly when present.
+    # For any call site that provides a restaurant dict without org_id, fall back to a
+    # single-query lookup via the location_id.
+    if restaurant.get("org_id"):
+        org_id: int = int(restaurant["org_id"])
+    else:
+        from app.repositories.restaurant_repo import db_resolve_org_id_from_location  # noqa: PLC0415
+        org_id_resolved = await db_resolve_org_id_from_location(int(restaurant["id"]))
+        if org_id_resolved is None:
+            return {"phone": clean_phone, "name": None, "is_known": False,
+                    "stats": {}, "loyalty": None, "recent_orders": []}
+        org_id = org_id_resolved  # explicit org_id resolved from location — DO NOT use restaurant["id"]
+
+    # ── Customer profile ──────────────────────────────────────────────────────
+    profile = await cp_repo.get_profile(org_id, clean_phone)
+
+    if profile is None:
+        return {
+            "phone": clean_phone,
+            "name": None,
+            "is_known": False,
+            "stats": {},
+            "loyalty": None,
+            "recent_orders": [],
+        }
+
+    # ── Loyalty balance (best-effort — module may be disabled) ───────────────
+    loyalty_data: dict | None = None
+    try:
+        lb = await loyalty_repo.db_get_loyalty_balance(org_id, clean_phone)
+        if lb is not None:
+            loyalty_data = {
+                "points": lb.get("puntos_actuales", 0),
+                "tier": None,
+            }
+    except Exception:
+        log.exception("caja_customer.loyalty_lookup_failed", phone=clean_phone, org_id=org_id)
+
+    # ── Recent orders (last 5 from orders + table_orders, by phone) ──────────
+    recent_orders: list[dict] = await _get_recent_orders_for_phone(org_id, clean_phone, limit=5)
+
+    return {
+        "phone": clean_phone,
+        "name": profile.get("display_name"),
+        "is_known": True,
+        "stats": {
+            "total_orders": profile.get("total_orders") or 0,
+            "total_spent": float(quantize_money(to_decimal(profile.get("total_spent") or 0))),  # JSON boundary
+            "last_seen": profile.get("last_seen").isoformat() if profile.get("last_seen") else None,
+            "first_seen": profile.get("first_seen").isoformat() if profile.get("first_seen") else None,
+        },
+        "loyalty": loyalty_data,
+        "recent_orders": recent_orders,
+    }
+
+
+async def _get_recent_orders_for_phone(org_id: int, phone: str, limit: int = 5) -> list[dict]:
+    """Orchestrate recent delivery + table orders for a phone; sort and cap.
+
+    SQL lives in the repos (orders_repo / tables_repo). This is a pure orchestrator.
+    Runs under the already-active tenant_scope set by get_current_restaurant_scoped.
+    """
+    from app.repositories.orders_repo import db_get_recent_orders_by_phone  # noqa: PLC0415
+    from app.repositories.tables_repo import db_get_recent_table_orders_by_phone  # noqa: PLC0415
+
+    try:
+        delivery = await db_get_recent_orders_by_phone(org_id, phone, limit)
+        table = await db_get_recent_table_orders_by_phone(org_id, phone, limit)
+    except Exception:
+        log.exception("caja_customer.recent_orders_failed", phone=phone, org_id=org_id)
+        return []
+
+    combined = delivery + table
+    combined.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return combined[:limit]

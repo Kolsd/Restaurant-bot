@@ -21,3 +21,4 @@ alembic/versions/*.pyc
 
 # AI sim reports (real E2E test runs — generated at runtime)
 tests/ai_sim/reports/
+.design_review/
