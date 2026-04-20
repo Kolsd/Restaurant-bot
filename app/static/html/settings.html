@@ -2,449 +2,450 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mesio — Configuración</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="stylesheet" href="/static/css/tokens.css">
-<link rel="stylesheet" href="/static/css/dashboard.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; margin: 0; padding: 2rem; color: #111; }
-  .container { max-width: 700px; margin: 0 auto; }
-  .header { display: flex; align-items: center; gap: 16px; margin-bottom: 2rem; }
-  .back-btn { background: #fff; border: 1px solid #e0e0d8; border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; color: #555; text-decoration: none; }
-  h1 { font-size: 22px; font-weight: 700; margin: 0; }
-  .card { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 14px; padding: 1.5rem; margin-bottom: 1.25rem; }
-  .card-title { font-size: 15px; font-weight: 600; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 8px; }
-  label { font-size: 12px; color: #888; display: block; margin-bottom: 4px; font-weight: 500; }
-  input[type=text], input[type=url], input[type=number], select {
-    width: 100%; padding: 9px 12px; border: 1px solid #e0e0d8; border-radius: 8px; font-size: 13px; outline: none; box-sizing: border-box; background: #fff;
-  }
-  input:focus { border-color: #1D9E75; }
-  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 0.5px solid #f0f0e8; }
-  .toggle-row:last-child { border-bottom: none; }
-  .toggle-label { font-size: 13px; color: #333; font-weight: 500; }
-  .toggle-sub { font-size: 11px; color: #888; margin-top: 2px; }
-  .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
-  .toggle-switch input { opacity: 0; width: 0; height: 0; }
-  .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; border-radius: 24px; transition: .3s; }
-  .toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
-  input:checked + .toggle-slider { background-color: #1D9E75; }
-  input:checked + .toggle-slider:before { transform: translateX(20px); }
-  .payment-chip { display: inline-flex; align-items: center; gap: 6px; background: #E1F5EE; color: #0F6E56; border-radius: 20px; padding: 5px 12px; font-size: 13px; font-weight: 500; margin: 4px; }
-  .payment-chip button { background: none; border: none; cursor: pointer; color: #0F6E56; font-size: 14px; padding: 0; line-height: 1; }
-  .chips-container { display: flex; flex-wrap: wrap; gap: 0; margin-bottom: 12px; min-height: 36px; padding: 8px; border: 1px solid #e0e0d8; border-radius: 8px; background: #fafaf8; }
-  .add-payment-row { display: flex; gap: 8px; }
-  .btn-save { background: #1D9E75; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 8px; }
-  .btn-save:hover { background: #0F6E56; }
-  .feedback { text-align: center; font-size: 13px; padding: 10px; border-radius: 8px; margin-top: 10px; display: none; }
-  .feedback.ok { background: #E1F5EE; color: #0F6E56; }
-  .feedback.err { background: #FDE8E8; color: #C0392B; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-</style>
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/settings.css">
 </head>
 <body>
-<div class="container">
-  <nav aria-label="Breadcrumb" style="margin-bottom:16px;font-size:13px;">
-    <a href="/dashboard" style="color:#1D9E75;text-decoration:none;">← Volver al Dashboard</a>
-  </nav>
-  <div class="header">
-    <a href="/dashboard" class="back-btn" aria-label="Volver al Dashboard">← Volver al Dashboard</a>
-    <h1>⚙️ Configuración del restaurante</h1>
-  </div>
+<div class="app">
 
-  <div class="card">
-    <div class="card-title">💳 Métodos de pago aceptados</div>
-    <p style="font-size:12px;color:#888;margin-bottom:1rem;">El bot informará estos métodos al cliente durante el flujo de domicilio/recoger.</p>
-    <div class="chips-container" id="payment-chips"></div>
-    <div class="add-payment-row">
-      <input type="text" id="new-payment" placeholder="Ej: Nequi, Daviplata, Efectivo..." onkeydown="if(event.key==='Enter'){event.preventDefault();addPayment();}">
-      <button onclick="addPayment()" style="background:#1D9E75;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap;font-weight:500;">+ Agregar</button>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
-      <button onclick="addPreset('Nequi')" class="back-btn" style="font-size:12px;">Nequi</button>
-      <button onclick="addPreset('Daviplata')" class="back-btn" style="font-size:12px;">Daviplata</button>
-      <button onclick="addPreset('Bancolombia')" class="back-btn" style="font-size:12px;">Bancolombia</button>
-      <button onclick="addPreset('Wompi')" class="back-btn" style="font-size:12px;">Wompi</button>
-      <button onclick="addPreset('Efectivo')" class="back-btn" style="font-size:12px;">Efectivo</button>
-      <button onclick="addPreset('Tarjeta')" class="back-btn" style="font-size:12px;">Tarjeta</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">🔧 Módulos del bot</div>
-    <div class="toggle-row">
-      <div><div class="toggle-label">Bot activo</div><div class="toggle-sub">El bot responde mensajes de WhatsApp automáticamente</div></div>
-      <label class="toggle-switch" title="Activa o desactiva el bot de WhatsApp por completo"><input type="checkbox" id="toggle-bot" checked><span class="toggle-slider"></span></label>
-    </div>
-    <div class="toggle-row">
-      <div><div class="toggle-label">Domicilios</div><div class="toggle-sub">Permitir pedidos a domicilio por WhatsApp</div></div>
-      <label class="toggle-switch" title="Habilita el flujo de pedidos a domicilio en el bot"><input type="checkbox" id="toggle-domicilio" checked><span class="toggle-slider"></span></label>
-    </div>
-    <div class="toggle-row">
-      <div><div class="toggle-label">Pedidos para recoger</div><div class="toggle-sub">Permitir pedidos para recoger por WhatsApp</div></div>
-      <label class="toggle-switch" title="Habilita el flujo de pedidos para recoger en el bot"><input type="checkbox" id="toggle-recoger" checked><span class="toggle-slider"></span></label>
-    </div>
-    <div class="toggle-row">
-      <div><div class="toggle-label">Upselling automático</div><div class="toggle-sub">El bot sugiere productos adicionales al confirmar un pedido</div></div>
-      <label class="toggle-switch" title="El bot ofrecerá complementos o productos relacionados durante el pedido"><input type="checkbox" id="toggle-upsell" checked><span class="toggle-slider"></span></label>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title">💰 Precios y costos</div>
-    <div class="grid2">
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="mark">M</div>
       <div>
-        <label>Costo de domicilio ($)</label>
-        <input type="number" id="delivery-fee" placeholder="0" min="0" step="500">
-      </div>
-      <div>
-        <label>Pedido mínimo ($)</label>
-        <input type="number" id="min-order" placeholder="0" min="0" step="1000">
+        <div class="sb-brand-name">Mesio</div>
+        <div class="sb-brand-sub js-rest-name">Mi Restaurante</div>
       </div>
     </div>
-    <div style="margin-top:12px;">
-      <label>Cobertura de domicilio (km)</label>
-      <input type="number" id="delivery-radius" placeholder="5" min="1" max="50" step="1">
-    </div>
-  </div>
 
-  <div class="card">
-    <div class="card-title">📍 Ubicación de la sucursal</div>
-    <p style="font-size:12px;color:#888;margin-bottom:1rem;">Dirección y coordenadas GPS del local. Se usan para enrutar pedidos de domicilio a la sucursal más cercana.</p>
-    
-    <div style="margin-bottom:1.5rem;">
-      <label>Dirección</label>
-      <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;">
-        <input type="text" id="set-address" placeholder="Ej: Calle 93 #15-32, Bogotá" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();validateSettingsAddress();}">
-        <button onclick="validateSettingsAddress()" type="button" style="background:#185FA5;color:#fff;border:none;padding:9px 16px;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap;font-weight:500;">📍 Buscar en mapa</button>
+    <div class="sb-switcher">
+      <div class="mark sm">R</div>
+      <div class="grow">
+        <div class="sb-switcher-name js-rest-name">Mi Restaurante</div>
+        <div class="sb-switcher-sub">Sede activa</div>
       </div>
-      
-      <div style="font-size:12px;color:#888;margin-bottom:6px;">Haz clic en el mapa para ajustar la ubicación exacta:</div>
-      <div id="settings-map" style="height: 250px; width: 100%; border-radius: 8px; border: 1px solid #e0e0d8; z-index: 1;"></div>
-      
-      <input type="hidden" id="branch-lat" value="">
-      <input type="hidden" id="branch-lon" value="">
+      <div class="chev">⌄</div>
     </div>
-  </div>
 
-  <div class="card">
-    <div class="card-title">📍 Google Maps (reseñas NPS)</div>
-    <label>Enlace de tu negocio en Google Maps (para clientes satisfechos)</label>
-    <input type="url" id="maps-url" placeholder="https://g.page/r/...">
-  </div>
+    <div class="sb-group">
+      <div class="sb-group-label">Operación</div>
+      <a class="sb-item" href="/dashboard">◻ Resumen</a>
+      <a class="sb-item" href="/floorplan">🪑 Salón</a>
+      <a class="sb-item" href="/caja">💳 Caja / POS</a>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-label">Equipo</div>
+      <a class="sb-item" href="/equipo">👥 Mi equipo</a>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-label">Admin</div>
+      <a class="sb-item" href="/billing">🏷️ Facturación</a>
+      <a class="sb-item active" href="/settings">⚙️ Configuración</a>
+    </div>
 
-  <div class="card">
-    <div class="card-title">🌐 Regionalización</div>
-    <div class="grid2">
-      <div>
-        <label>Zona horaria</label>
-        <select id="config-timezone">
-          <option value="America/Bogota">América/Bogotá (COT)</option>
-          <option value="America/Mexico_City">América/Ciudad de México (CST)</option>
-          <option value="America/Lima">América/Lima (PET)</option>
-          <option value="America/Santiago">América/Santiago (CLT)</option>
-          <option value="America/Buenos_Aires">América/Buenos Aires (ART)</option>
-          <option value="America/Caracas">América/Caracas (VET)</option>
-          <option value="America/New_York">América/Nueva York (EST)</option>
-          <option value="UTC">UTC</option>
-        </select>
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar" id="sbAvatar">??</div>
+        <div>
+          <div class="sb-user-name" id="sbUserName">Admin</div>
+          <div class="sb-user-role">Owner</div>
+        </div>
       </div>
-      <div>
-        <label>Moneda</label>
-        <select id="config-currency">
-          <option value="COP">COP — Peso colombiano</option>
-          <option value="MXN">MXN — Peso mexicano</option>
-          <option value="PEN">PEN — Sol peruano</option>
-          <option value="CLP">CLP — Peso chileno</option>
-          <option value="ARS">ARS — Peso argentino</option>
-          <option value="VES">VES — Bolívar venezolano</option>
-          <option value="USD">USD — Dólar</option>
-          <option value="EUR">EUR — Euro</option>
-        </select>
-      </div>
+      <button class="sb-item" id="logoutBtn" style="margin-top:4px;">↩ Cerrar sesión</button>
     </div>
-    <div style="margin-top:12px;">
-      <label>Formato regional (locale)</label>
-      <select id="config-locale">
-        <option value="es-CO">es-CO (Colombia)</option>
-        <option value="es-MX">es-MX (México)</option>
-        <option value="es-PE">es-PE (Perú)</option>
-        <option value="es-CL">es-CL (Chile)</option>
-        <option value="es-AR">es-AR (Argentina)</option>
-        <option value="es-VE">es-VE (Venezuela)</option>
-        <option value="es-ES">es-ES (España)</option>
-        <option value="en-US">en-US (English)</option>
-      </select>
-    </div>
-  </div>
+  </aside>
 
-  <button class="btn-save" onclick="saveSettings()">💾 Guardar configuración</button>
-  <div class="feedback" id="feedback"></div>
-</div>
+  <!-- ── Main ──────────────────────────────────────────────────── -->
+  <main class="main">
+    <header class="topbar">
+      <span class="topbar-crumb">Admin<span class="sep">›</span></span>
+      <span class="topbar-title">Configuración</span>
+      <div class="topbar-right">
+        <span id="saveStatus" class="text-mute"></span>
+        <button class="btn brand js-save-btn" id="saveBtnTop">Guardar cambios</button>
+      </div>
+    </header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Configuración</h1>
+          <p class="page-sub">Todo lo que Mesio necesita saber sobre tu restaurante. Los cambios se aplican al instante en todos los dispositivos.</p>
+        </div>
+        <button class="btn brand js-save-btn">Guardar cambios</button>
+      </div>
+
+      <div class="set-layout">
+
+        <!-- ── Sidenav ───────────────────────────────────────── -->
+        <nav class="set-nav" aria-label="Secciones de configuración">
+          <div class="set-nav-sub">General</div>
+          <a class="set-nav-item active" href="#restaurante">🏠 Restaurante</a>
+          <a class="set-nav-item" href="#horarios">🕒 Horarios</a>
+          <div class="set-nav-sub">Operación</div>
+          <a class="set-nav-item" href="#pagos">💳 Pagos</a>
+          <a class="set-nav-item" href="#dian">📄 DIAN / Facturación</a>
+          <a class="set-nav-item" href="#notif">🔔 Notificaciones</a>
+          <div class="set-nav-sub">Plataforma</div>
+          <a class="set-nav-item" href="#integ">🔗 Integraciones</a>
+          <a class="set-nav-item danger" href="#peligro">⚠️ Zona peligrosa</a>
+        </nav>
+
+        <!-- ── Sections ──────────────────────────────────────── -->
+        <div>
+
+          <!-- Restaurante -->
+          <section id="restaurante" class="card set-sec">
+            <h2>Restaurante</h2>
+            <div class="s-sub">Información básica visible al cliente y en facturas DIAN.</div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Nombre comercial</div>
+                <div class="fg-hint">Aparece en recibos y WhatsApp.</div>
+              </div>
+              <div>
+                <input id="inputName" class="input" type="text" placeholder="Nombre del restaurante" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">NIT</div>
+                <div class="fg-hint">Usado para factura electrónica DIAN.</div>
+              </div>
+              <div>
+                <input id="inputNIT" class="input mono" type="text" placeholder="900.123.456-7" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Dirección</div>
+                <div class="fg-hint">Dirección física del local.</div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <input id="inputAddress" class="input" type="text" placeholder="Cra 5 #12-34" />
+                <input id="inputCity" class="input" type="text" placeholder="Ciudad" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Tipo de cocina</div>
+                <div class="fg-hint">Para búsqueda y recomendaciones IA.</div>
+              </div>
+              <div>
+                <input id="inputCuisine" class="input" type="text" placeholder="Ej: Tradicional colombiana, Italiana…" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Moneda</div>
+                <div class="fg-hint">Afecta todo el sistema.</div>
+              </div>
+              <div>
+                <select id="selCurrency" class="sel">
+                  <option value="COP">COP — Peso colombiano ($)</option>
+                  <option value="MXN">MXN — Peso mexicano</option>
+                  <option value="USD">USD — Dólar americano</option>
+                  <option value="CLP">CLP — Peso chileno</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <!-- Horarios -->
+          <section id="horarios" class="card set-sec">
+            <h2>Horarios de atención</h2>
+            <div class="s-sub">Define cuándo el restaurante acepta pedidos por WhatsApp, QR y delivery.</div>
+
+            <div class="hours-header">
+              <div>Día</div><div>Apertura</div><div>Cierre</div><div>Abierto</div>
+            </div>
+
+            <!-- Day 0 = Lunes … 6 = Domingo (generated by JS, shown statically here for SSR fallback) -->
+            <div class="hours-row" id="hours-row-0">
+              <div class="day-name">Lunes</div>
+              <input id="h-open-0" class="input mono" type="time" value="12:00" />
+              <input id="h-close-0" class="input mono" type="time" value="22:00" />
+              <button class="switch on" id="h-switch-0" data-toggleable data-day="0" aria-label="Lunes abierto"></button>
+            </div>
+            <div class="hours-row" id="hours-row-1">
+              <div class="day-name">Martes</div>
+              <input id="h-open-1" class="input mono" type="time" value="12:00" />
+              <input id="h-close-1" class="input mono" type="time" value="22:00" />
+              <button class="switch on" id="h-switch-1" data-toggleable data-day="1" aria-label="Martes abierto"></button>
+            </div>
+            <div class="hours-row" id="hours-row-2">
+              <div class="day-name">Miércoles</div>
+              <input id="h-open-2" class="input mono" type="time" value="12:00" />
+              <input id="h-close-2" class="input mono" type="time" value="22:00" />
+              <button class="switch on" id="h-switch-2" data-toggleable data-day="2" aria-label="Miércoles abierto"></button>
+            </div>
+            <div class="hours-row" id="hours-row-3">
+              <div class="day-name">Jueves</div>
+              <input id="h-open-3" class="input mono" type="time" value="12:00" />
+              <input id="h-close-3" class="input mono" type="time" value="23:00" />
+              <button class="switch on" id="h-switch-3" data-toggleable data-day="3" aria-label="Jueves abierto"></button>
+            </div>
+            <div class="hours-row" id="hours-row-4">
+              <div class="day-name">Viernes</div>
+              <input id="h-open-4" class="input mono" type="time" value="12:00" />
+              <input id="h-close-4" class="input mono" type="time" value="01:00" />
+              <button class="switch on" id="h-switch-4" data-toggleable data-day="4" aria-label="Viernes abierto"></button>
+            </div>
+            <div class="hours-row" id="hours-row-5">
+              <div class="day-name">Sábado</div>
+              <input id="h-open-5" class="input mono" type="time" value="11:00" />
+              <input id="h-close-5" class="input mono" type="time" value="01:00" />
+              <button class="switch on" id="h-switch-5" data-toggleable data-day="5" aria-label="Sábado abierto"></button>
+            </div>
+            <div class="hours-row" id="hours-row-6">
+              <div class="day-name">Domingo</div>
+              <input id="h-open-6" class="input mono" type="time" value="11:00" />
+              <input id="h-close-6" class="input mono" type="time" value="16:00" />
+              <button class="switch" id="h-switch-6" data-toggleable data-day="6" aria-label="Domingo abierto"></button>
+            </div>
+          </section>
+
+          <!-- Pagos -->
+          <section id="pagos" class="card set-sec">
+            <h2>Métodos de pago</h2>
+            <div class="s-sub">Los métodos activos aparecen en Caja, WhatsApp y QR de mesa.</div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#E1F5EE;">💵</div>
+              <div class="integ-info">
+                <div class="integ-name">Efectivo</div>
+                <div class="integ-desc">Conciliación al cierre de caja</div>
+              </div>
+              <button class="switch on" id="pay-sw-cash" data-toggleable aria-label="Efectivo activado"></button>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#DBEAFE;">💳</div>
+              <div class="integ-info">
+                <div class="integ-name">Datáfono Wompi</div>
+                <div class="integ-desc">Visa, MC, Amex · comisión 2.9% + $0</div>
+              </div>
+              <span class="badge success">Conectado</span>
+              <button class="switch on" id="pay-sw-wompi" data-toggleable aria-label="Wompi activado"></button>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#FECACA;">📱</div>
+              <div class="integ-info">
+                <div class="integ-name">Nequi</div>
+                <div class="integ-desc">QR dinámico por pedido · sin comisión</div>
+              </div>
+              <button class="switch" id="pay-sw-nequi" data-toggleable aria-label="Nequi activado"></button>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#FEF3C7;">🏦</div>
+              <div class="integ-info">
+                <div class="integ-name">Transferencia Bancolombia</div>
+                <div class="integ-desc">Conciliación manual por el admin</div>
+              </div>
+              <button class="switch" id="pay-sw-bancolombia" data-toggleable aria-label="Bancolombia activado"></button>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#EDE9FE;">💸</div>
+              <div class="integ-info">
+                <div class="integ-name">Bold</div>
+                <div class="integ-desc">Link de pago por WhatsApp</div>
+              </div>
+              <button class="btn sm">Conectar</button>
+              <button class="switch" id="pay-sw-bold" data-toggleable aria-label="Bold activado"></button>
+            </div>
+          </section>
+
+          <!-- DIAN -->
+          <section id="dian" class="card set-sec">
+            <h2>DIAN · Facturación electrónica</h2>
+            <div class="s-sub">Todos los pedidos generan factura electrónica en tiempo real.</div>
+
+            <div class="field-group">
+              <div><div class="fg-label">Proveedor tecnológico</div></div>
+              <div class="row">
+                <span class="badge success" id="dianProvider">— sin configurar —</span>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div><div class="fg-label">Rango de numeración</div></div>
+              <div>
+                <div class="mono" id="dianRange">—</div>
+                <div class="fg-hint">Configura en el módulo de Facturación.</div>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Generar factura automática</div>
+                <div class="fg-hint">Si está desactivado, solo se genera con botón "Facturar".</div>
+              </div>
+              <div>
+                <button class="switch on" id="dianAutoSwitch" data-toggleable aria-label="Factura automática"></button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Notificaciones -->
+          <section id="notif" class="card set-sec">
+            <h2>Notificaciones</h2>
+            <div class="s-sub">Qué alertas mandar y a quién. Los meseros solo ven alertas de sus mesas.</div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Llamada de mesa (QR)</div>
+                <div class="fg-hint">Cliente toca "Llamar mesero" en el QR.</div>
+              </div>
+              <div class="tog">
+                <button class="switch on" id="notif-sw-waiter_call" data-toggleable aria-label="Llamada de mesa"></button>
+                <span class="text-mute">push + sonido</span>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div><div class="fg-label">Pedido retrasado &gt; 15 min</div></div>
+              <div class="tog">
+                <button class="switch on" id="notif-sw-late_order" data-toggleable aria-label="Pedido retrasado"></button>
+                <span class="text-mute">admin + chef</span>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Stock crítico ingrediente</div>
+                <div class="fg-hint">Quedan &lt; 10% del par.</div>
+              </div>
+              <div class="tog">
+                <button class="switch on" id="notif-sw-low_stock" data-toggleable aria-label="Stock crítico"></button>
+                <span class="text-mute">admin</span>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div><div class="fg-label">NPS negativo (&lt; 7)</div></div>
+              <div class="tog">
+                <button class="switch on" id="notif-sw-nps_negative" data-toggleable aria-label="NPS negativo"></button>
+                <span class="text-mute">admin vía WhatsApp</span>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div><div class="fg-label">Reparto de propinas listo</div></div>
+              <div class="tog">
+                <button class="switch" id="notif-sw-tips_ready" data-toggleable aria-label="Propinas listas"></button>
+                <span class="text-mute">equipo completo</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Integraciones -->
+          <section id="integ" class="card set-sec">
+            <h2>Integraciones</h2>
+            <div class="s-sub">Conecta Mesio con tus otras herramientas.</div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#25D366;color:#fff;font-size:16px;">💬</div>
+              <div class="integ-info">
+                <div class="integ-name">WhatsApp Business API</div>
+                <div class="integ-desc">Meta · Gestiona pedidos, reservas y soporte</div>
+              </div>
+              <span class="badge success">Activa</span>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#06c;color:#fff;font-size:14px;font-weight:700;">R</div>
+              <div class="integ-info">
+                <div class="integ-name">Rappi</div>
+                <div class="integ-desc">Sincroniza menú y pedidos. Comisión 18%.</div>
+              </div>
+              <span class="badge">Próximamente</span>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#000;color:#0f0;font-weight:700;font-size:14px;">Q</div>
+              <div class="integ-info">
+                <div class="integ-name">Alegra Contabilidad</div>
+                <div class="integ-desc">Libros + DIAN + nómina</div>
+              </div>
+              <span class="badge">Próximamente</span>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#ffc107;font-size:18px;">⚡</div>
+              <div class="integ-info">
+                <div class="integ-name">Zapier</div>
+                <div class="integ-desc">Automatiza 4.000+ apps</div>
+              </div>
+              <span class="badge">Próximamente</span>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#5865F2;color:#fff;font-weight:700;font-size:14px;">G</div>
+              <div class="integ-info">
+                <div class="integ-name">Google Calendar</div>
+                <div class="integ-desc">Sincroniza reservas y turnos</div>
+              </div>
+              <span class="badge">Próximamente</span>
+            </div>
+          </section>
+
+          <!-- Zona peligrosa -->
+          <section id="peligro" class="card set-sec danger-zone">
+            <h2>Zona peligrosa</h2>
+            <div class="s-sub">Estas acciones son irreversibles. Solo el owner puede ejecutarlas.</div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Transferir propiedad</div>
+                <div class="fg-hint">Ceder el control total a otro usuario.</div>
+              </div>
+              <div>
+                <button class="btn" id="btnTransfer">Transferir</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Pausar restaurante</div>
+                <div class="fg-hint">Oculta el menú público y suspende pedidos WhatsApp.</div>
+              </div>
+              <div>
+                <button class="btn" id="btnPause">Pausar</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Eliminar restaurante</div>
+                <div class="fg-hint">Borra todo: menú, pedidos, clientes, nómina. No se puede deshacer.</div>
+              </div>
+              <div>
+                <button class="btn" id="btnDelete" style="background:#FEE2E2;color:#991B1B;border-color:#FCA5A5;">
+                  Eliminar restaurante
+                </button>
+              </div>
+            </div>
+          </section>
+
+        </div><!-- /sections -->
+      </div><!-- /set-layout -->
+    </div><!-- /page -->
+  </main>
+</div><!-- /app -->
 
 <script src="/static/js/mesio-utils.js"></script>
-<script>
-  const token = localStorage.getItem('rb_token');
-  if (!token) window.location.href = '/login';
-  
-  // 🛡️ LA MAGIA DE LA URL: Leemos el ID directamente del link
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlBranchId = urlParams.get('branch_id');
-  
-  const headers = {
-    'Authorization': 'Bearer ' + token,
-    'Content-Type': 'application/json'
-  };
-  
-  // Si la URL trae un ID, se lo inyectamos al backend para que traiga esos datos
-  if (urlBranchId) {
-      headers['X-Branch-ID'] = urlBranchId;
-  }
-  
-  let paymentMethods = [];
-  let paymentInstructions = {}; 
-  let settingsMap = null;
-  let settingsMarker = null;
-  
-// ── LÓGICA DEL MAPA ──
-function initSettingsMap(lat, lon) {
-    // Validamos estrictamente los números para evitar NaN
-    let defaultLat = 4.6097;
-    let defaultLon = -74.0817;
-    let hasCoords = false;
-
-    if (lat !== null && lat !== undefined && !isNaN(parseFloat(lat))) {
-        defaultLat = parseFloat(lat);
-        hasCoords = true;
-    }
-    if (lon !== null && lon !== undefined && !isNaN(parseFloat(lon))) {
-        defaultLon = parseFloat(lon);
-        hasCoords = true; // Solo confirmamos si ambos son válidos idealmente, pero con uno basta para sobreescribir
-    }
-
-    const zoomLevel = hasCoords ? 16 : 12;
-
-    document.getElementById('branch-lat').value = defaultLat;
-    document.getElementById('branch-lon').value = defaultLon;
-
-    // Nos aseguramos de que el contenedor exista antes de hacer nada
-    const mapContainer = document.getElementById('settings-map');
-    if (!mapContainer) {
-        console.error("El contenedor 'settings-map' no existe en el DOM.");
-        return;
-    }
-
-    if (!settingsMap) {
-        settingsMap = L.map('settings-map').setView([defaultLat, defaultLon], zoomLevel);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
-        }).addTo(settingsMap);
-
-        settingsMarker = L.marker([defaultLat, defaultLon], { draggable: true }).addTo(settingsMap);
-
-        settingsMarker.on('dragend', function (e) {
-            updateSettingsPin(settingsMarker.getLatLng());
-        });
-
-        settingsMap.on('click', function(e) {
-            settingsMarker.setLatLng(e.latlng);
-            updateSettingsPin(e.latlng);
-        });
-    } else {
-        settingsMap.setView([defaultLat, defaultLon], zoomLevel);
-        settingsMarker.setLatLng([defaultLat, defaultLon]);
-    }
-
-    // Retraso para asegurar que el DOM haya pintado el contenedor completamente
-    setTimeout(() => {
-        if (settingsMap) {
-            settingsMap.invalidateSize();
-        }
-    }, 500);
-}
-
-async function updateSettingsPin(latlng) {
-    document.getElementById('branch-lat').value = latlng.lat;
-    document.getElementById('branch-lon').value = latlng.lng;
-    
-    try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}&addressdetails=1`);
-        if (res.ok) {
-            const data = await res.json();
-            if (data && data.address) {
-                const a = data.address;
-                const street = a.road || a.pedestrian || a.path || '';
-                const number = a.house_number || '';
-                const hood   = a.neighbourhood || a.suburb || '';
-                const city   = a.city || a.town || a.county || '';
-                
-                let cleanAddress = `${street} ${number}`.trim();
-                if (hood) cleanAddress += `, ${hood}`;
-                if (city) cleanAddress += `, ${city}`;
-                
-                document.getElementById('set-address').value = cleanAddress.replace(/^,|,$/g, '').trim() || data.display_name;
-            }
-        }
-    } catch (e) { console.error("Error reverse geocoding:", e); }
-}
-
-async function validateSettingsAddress() {
-    const addressInput = document.getElementById('set-address').value.trim();
-    if (!addressInput) { alert('Ingresa una dirección primero'); return; }
-    
-    const btn = document.querySelector('[onclick="validateSettingsAddress()"]');
-    const prev = btn.textContent;
-    btn.textContent = 'Buscando...'; btn.disabled = true;
-    
-    try {
-        const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressInput)}&limit=1`);
-        if (r.ok) {
-            const data = await r.json();
-            if (data && data.length > 0) {
-                const lat = parseFloat(data[0].lat);
-                const lon = parseFloat(data[0].lon);
-                
-                document.getElementById('branch-lat').value = lat;
-                document.getElementById('branch-lon').value = lon;
-                
-                if (settingsMap && settingsMarker) {
-                    const newPos = new L.LatLng(lat, lon);
-                    settingsMap.setView(newPos, 16);
-                    settingsMarker.setLatLng(newPos);
-                }
-            } else { alert('❌ No se encontró la dirección. Usa el clic en el mapa.'); }
-        }
-    } catch(e) { alert('❌ Error de red al buscar. Usa el clic en el mapa.'); } 
-    finally { btn.textContent = prev; btn.disabled = false; }
-}
-// ── FIN LÓGICA MAPA ──
-
-async function loadSettings() {
-  try {
-    const r = await fetch('/api/settings', { headers });
-    if (r.status === 401) { window.location.href = '/login'; return; }
-    const d = await r.json();
-    paymentMethods = d.payment_methods || [];
-    paymentInstructions = d.payment_instructions || {}; 
-    renderChips();
-    document.getElementById('toggle-bot').checked       = d.bot_active !== false;
-    document.getElementById('toggle-domicilio').checked = d.domicilio_active !== false;
-    document.getElementById('toggle-recoger').checked   = d.recoger_active !== false;
-    document.getElementById('toggle-upsell').checked    = d.upsell_active !== false;
-    document.getElementById('delivery-fee').value       = d.delivery_fee || 0;
-    document.getElementById('min-order').value          = d.min_order || 0;
-    document.getElementById('delivery-radius').value    = d.delivery_radius_km || 5;
-    document.getElementById('maps-url').value           = d.google_maps_url || '';
-    document.getElementById('config-timezone').value    = d.timezone || 'UTC';
-    document.getElementById('config-currency').value    = d.currency || 'USD';
-    document.getElementById('config-locale').value      = d.locale || 'en-US';
-    
-    // Cargar la dirección y el mapa
-    document.getElementById('set-address').value = d.address || '';
-    initSettingsMap(d.latitude, d.longitude);
-    
-  } catch(e) { console.error(e); }
-}
-
-function renderChips() {
-  const c = document.getElementById('payment-chips');
-  if (!paymentMethods.length) {
-    c.innerHTML = '<span style="font-size:12px;color:#aaa;padding:4px;">Sin métodos configurados</span>';
-    return;
-  }
-  
-  // 1. Dibujamos los chips (etiquetas)
-  let html = paymentMethods.map((m, i) =>
-    `<div class="payment-chip">${m}<button onclick="removePayment(${i})">×</button></div>`
-  ).join('');
-  
-  // 2. Dibujamos los campos para instrucciones de pago
-  html += `<div style="margin-top: 15px; border-top: 1px dashed #e0e0d8; padding-top: 10px;">
-            <div style="font-size:12px;color:#555;font-weight:600;margin-bottom:8px;">Instrucciones de pago (opcional, para Nequi/Transferencia)</div>`;
-            
-  paymentMethods.forEach(m => {
-      const val = paymentInstructions[m] || '';
-      html += `<div style="margin-bottom: 8px;">
-                 <label style="font-size:11px;color:#888;">Instrucciones para ${m}</label>
-                 <input type="text" placeholder="Ej: Transfiere a este Nequi: 3001234567" value="${val}" 
-                        oninput="paymentInstructions['${m}'] = this.value" 
-                        style="padding:6px 10px; font-size:12px;">
-               </div>`;
-  });
-  html += `</div>`;
-  
-  c.innerHTML = html;
-}
-
-function addPayment() {
-  const input = document.getElementById('new-payment');
-  const val = input.value.trim();
-  if (!val) return;
-  if (!paymentMethods.includes(val)) { paymentMethods.push(val); renderChips(); }
-  input.value = '';
-}
-
-function addPreset(name) {
-  if (!paymentMethods.includes(name)) { paymentMethods.push(name); renderChips(); }
-}
-
-function removePayment(index) {
-  paymentMethods.splice(index, 1);
-  renderChips();
-}
-
-async function saveSettings() {
-  const btn = document.querySelector('.btn-save');
-  btn.textContent = 'Guardando...'; btn.disabled = true;
-  try {
-    const body = {
-      address:           document.getElementById('set-address').value.trim(),
-      latitude:          document.getElementById('branch-lat').value ? parseFloat(document.getElementById('branch-lat').value) : null,
-      longitude:         document.getElementById('branch-lon').value ? parseFloat(document.getElementById('branch-lon').value) : null,
-      payment_methods:   paymentMethods,
-      payment_instructions: paymentInstructions,
-      bot_active:        document.getElementById('toggle-bot').checked,
-      domicilio_active:  document.getElementById('toggle-domicilio').checked,
-      recoger_active:    document.getElementById('toggle-recoger').checked,
-      upsell_active:     document.getElementById('toggle-upsell').checked,
-      delivery_fee:      parseInt(document.getElementById('delivery-fee').value) || 0,
-      min_order:         parseInt(document.getElementById('min-order').value) || 0,
-      delivery_radius_km: parseFloat(document.getElementById('delivery-radius').value) || 5,
-      google_maps_url:   document.getElementById('maps-url').value.trim(),
-      timezone:          document.getElementById('config-timezone').value,
-      currency:          document.getElementById('config-currency').value,
-      locale:            document.getElementById('config-locale').value
-    };
-    
-    const r = await fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify(body) });
-    const fb = document.getElementById('feedback');
-    
-    if (r.ok) {
-      fb.textContent = '✅ Configuración guardada correctamente.';
-      fb.className = 'feedback ok'; fb.style.display = 'block';
-    } else {
-      const e = await r.json();
-      fb.textContent = '❌ Error: ' + (e.detail || 'No se pudo guardar.');
-      fb.className = 'feedback err'; fb.style.display = 'block';
-    }
-    setTimeout(() => { fb.style.display = 'none'; }, 3500);
-  } catch(e) {
-    console.error(e);
-    const fb = document.getElementById('feedback');
-    fb.textContent = '❌ Error inesperado. Intenta de nuevo.';
-    fb.className = 'feedback err'; fb.style.display = 'block';
-    setTimeout(() => { fb.style.display = 'none'; }, 3500);
-  }
-  btn.textContent = '💾 Guardar configuración'; btn.disabled = false;
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    loadSettings();
-});
-
-</script>
+<script src="/static/js/pages/settings.js"></script>
 </body>
 </html>
