@@ -8,58 +8,50 @@
 <meta name="theme-color" content="#1D9E75">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/tokens.css">
-<link rel="stylesheet" href="/static/css/catalog-v2.css">
+<link rel="stylesheet" href="/static/css/pages/menu.css">
 </head>
 <body>
 
-<!-- Skip navigation -->
-<a href="#catalog-main" class="skip-link">Ir al menú</a>
+<div class="qr-phone" id="qr-phone">
 
-<!-- Live region for filter announcements -->
-<div id="filter-announcer" class="filter-announcer" aria-live="polite" aria-atomic="true"></div>
-
-<!-- Root mount point -->
-<div id="catalog-root">
-
-  <!-- RestaurantHeader -->
-  <header class="restaurant-header" id="catalog-header" aria-label="Información del restaurante">
-    <!-- Rendered by JS -->
+  <!-- Hero -->
+  <header class="qr-hero" id="qr-hero">
+    <div class="qr-hero-bar">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span class="mark-sm">M</span>Mesio
+      </div>
+      <div id="qr-hero-locale">🌐 ES · 🇨🇴</div>
+    </div>
+    <div class="qr-rest-name" id="qr-rest-name">Cargando…</div>
+    <div class="qr-rest-sub" id="qr-rest-sub"></div>
+    <div class="qr-mesa-tag" id="qr-mesa-tag" style="display:none;"></div>
   </header>
 
-  <!-- HeroCarousel (conditional: featuredDishes.length > 0) -->
-  <section id="catalog-hero" class="hero-carousel" aria-label="Platos destacados" style="display:none">
-    <!-- Rendered by JS -->
-  </section>
+  <!-- Category pills — sticky -->
+  <nav class="qr-categories" id="qr-categories" aria-label="Categorías del menú"></nav>
 
-  <!-- StickyNav -->
-  <nav id="catalog-nav" class="sticky-nav" aria-label="Navegación del menú">
-    <!-- Rendered by JS -->
-  </nav>
-
-  <!-- Error banner (hidden by default) -->
-  <div id="error-banner" class="error-banner" role="alert" aria-live="assertive" style="display:none">
-    <span id="error-message">No pudimos cargar el menú</span>
-    <button class="error-retry-btn" id="error-retry" type="button">Reintentar</button>
-  </div>
-
-  <!-- Main catalog content -->
-  <main id="catalog-main" tabindex="-1" aria-label="Menú del restaurante">
-    <!-- Rendered by JS: CategoryList → DishGrid → DishCard -->
+  <!-- Main menu content -->
+  <main id="qr-main" aria-label="Menú del restaurante">
+    <div class="qr-loading">
+      <div class="qr-spinner"></div>
+      <span>Cargando menú…</span>
+    </div>
   </main>
 
+</div><!-- /.qr-phone -->
+
+<!-- Sticky cart bar -->
+<div class="qr-cart" id="qr-cart" style="display:none;" role="button" tabindex="0" aria-label="Ver mi orden">
+  <div class="qr-cart-left">
+    <span class="qr-cart-count" id="qr-cart-count">0</span>
+    <span class="qr-cart-total" id="qr-cart-total">$0</span>
+  </div>
+  <div class="qr-cart-cta">Ver mi orden →</div>
 </div>
 
-<!-- CartFooter (sticky bottom, shown when cart has items) -->
-<footer id="catalog-footer" class="cart-footer" aria-label="Carrito de pedido" style="display:none">
-  <div class="cart-footer-inner">
-    <!-- Rendered by JS -->
-  </div>
-</footer>
-
-<!-- Scripts -->
 <script src="/static/js/mesio-utils.js"></script>
-<script src="/static/js/catalog-v2.js"></script>
+<script src="/static/js/pages/menu.js"></script>
 </body>
 </html>

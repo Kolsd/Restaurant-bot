@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Demo WhatsApp AI</title>
+<meta name="description" content="Mira cómo Mesio AI convierte WhatsApp en tu mejor vendedor. Demo en vivo.">
+<meta property="og:title" content="Mesio — Demo WhatsApp AI">
+<meta property="og:description" content="Cada mensaje se vuelve un pedido. Ve la magia en tiempo real.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;1,9..144,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/pages/demo-chat.css">
+</head>
+<body>
+
+<!-- ── Left: phone mockup ──────────────────────────────────────────── -->
+<section class="dc-stage">
+  <div class="dc-phone">
+    <div class="dc-notch"></div>
+
+    <!-- WhatsApp header -->
+    <div class="dc-wa-top">
+      <div class="dc-wa-av">M</div>
+      <div>
+        <div class="dc-wa-nm">La Candelaria · Mesio AI</div>
+        <div class="dc-wa-st">● en línea ahora</div>
+      </div>
+      <div class="dc-wa-icons">📹 📞 ⋮</div>
+    </div>
+
+    <!-- Chat body -->
+    <div class="dc-wa-body">
+      <div class="dc-date-chip">HOY</div>
+
+      <!-- Bot greeting -->
+      <div class="dc-bub them">
+        <div class="ctext">¡Hola Carolina! 👋 Soy Mesio, el asistente de <strong>La Candelaria</strong>. ¿Antojo de algo rico hoy? Puedo mostrarte el menú, pedir delivery o reservar mesa.</div>
+        <div class="t">18:42</div>
+      </div>
+
+      <!-- User message -->
+      <div class="dc-bub me">
+        <div class="ctext">hola, qué tienen hoy para almorzar? algo rápido</div>
+        <div class="t me">18:42</div>
+      </div>
+
+      <!-- Bot: product cards -->
+      <div class="dc-bub them">
+        <div class="ctext">Te cuento los <strong>más pedidos</strong> ahora mismo, listos en menos de 15 min 🔥</div>
+        <div class="prod">
+          <div class="prod-img">🍛</div>
+          <div>
+            <div class="prod-name">Bandeja paisa completa</div>
+            <div class="prod-desc">Arepa, frijoles, chicharrón, huevo, plátano</div>
+            <div class="prod-price">$38.500</div>
+          </div>
+        </div>
+        <div class="prod">
+          <div class="prod-img">🥘</div>
+          <div>
+            <div class="prod-name">Ajiaco santafereño</div>
+            <div class="prod-desc">Con arroz, aguacate, crema y alcaparras</div>
+            <div class="prod-price">$32.000</div>
+          </div>
+        </div>
+        <div class="quick">
+          <span class="chip">Ver todo el menú</span>
+          <span class="chip">Vegetariano</span>
+          <span class="chip">Para 2 personas</span>
+        </div>
+        <div class="t">18:42</div>
+      </div>
+
+      <!-- User order -->
+      <div class="dc-bub me">
+        <div class="ctext">Dame 2 pechugas y una limonada de coco, para llevar a Cra 13 #85-42 apto 302</div>
+        <div class="t me">18:43</div>
+      </div>
+
+      <!-- Bot: order summary + payment options -->
+      <div class="dc-bub them">
+        <div class="ctext">Listo, Carolina ✓ Tu pedido:</div>
+        <div class="dc-order-summary">
+          <div class="dc-order-row"><span>2× Pechuga a la plancha</span><span>$68.000</span></div>
+          <div class="dc-order-row"><span>1× Limonada de coco</span><span>$9.500</span></div>
+          <div class="dc-order-row"><span>Domicilio · Chapinero Alto</span><span>$8.500</span></div>
+          <div class="dc-order-total"><span>Total</span><span class="v">$86.000</span></div>
+        </div>
+        <div class="ctext" style="margin-top:8px;">¿Cómo quieres pagar?</div>
+        <div class="quick">
+          <span class="chip">💚 Nequi</span>
+          <span class="chip">💳 Tarjeta</span>
+          <span class="chip">💵 Efectivo</span>
+        </div>
+        <div class="t">18:43</div>
+      </div>
+
+      <!-- User: payment choice -->
+      <div class="dc-bub me">
+        <div class="ctext">nequi</div>
+        <div class="t me">18:44</div>
+      </div>
+
+      <!-- Bot: QR confirmation -->
+      <div class="dc-bub them">
+        <div class="ctext">Perfecto 🎯 Te envío el QR de Nequi por <strong>$86.000</strong>. Cuando confirmes el pago arrancamos en cocina. <em>ETA de entrega: 40-55 min.</em></div>
+        <div class="t">18:44</div>
+      </div>
+
+      <!-- User: QR mock -->
+      <div class="dc-bub me" style="padding:4px;">
+        <div class="dc-qr-mock">
+          <div class="dc-qr-label">NEQUI</div>
+        </div>
+        <div class="t me">pagado ✓ 18:45</div>
+      </div>
+    </div><!-- /.dc-wa-body -->
+
+    <!-- Decorative input bar -->
+    <div class="dc-wa-type">
+      <span style="font-size:18px;color:#999;">😊</span>
+      <div class="dc-wa-input">Escribe un mensaje…</div>
+      <span style="font-size:18px;color:#999;">📎</span>
+      <div class="dc-wa-send">🎤</div>
+    </div>
+  </div><!-- /.dc-phone -->
+</section>
+
+<!-- ── Right: backend panel ────────────────────────────────────────── -->
+<aside class="dc-side-panel">
+  <div>
+    <div class="dc-sp-kicker">✦ Mesio AI · atrás del chat</div>
+    <div class="dc-sp-title">Cada mensaje se vuelve un <em>pedido</em>.</div>
+    <div class="dc-sp-sub">Mientras Carolina chatea, la IA interpreta, factura con DIAN, avisa a cocina y asigna al domiciliario — sin intervención humana.</div>
+  </div>
+
+  <!-- Intent detection -->
+  <div class="dc-sp-card">
+    <div class="dc-sp-card-h"><span class="ai-spark">✦</span> Intención detectada</div>
+    <div class="dc-int-row"><span class="dc-int-k">intent</span><span class="dc-int-v">place_order</span></div>
+    <div class="dc-int-row"><span class="dc-int-k">confidence</span><span class="dc-int-v pos">0.97</span></div>
+    <div class="dc-int-row"><span class="dc-int-k">delivery_mode</span><span class="dc-int-v">home_delivery</span></div>
+    <div class="dc-int-row"><span class="dc-int-k">geocoded_addr</span><span class="dc-int-v" style="font-size:11.5px;">Cra 13 #85-42 ap 302</span></div>
+    <div class="dc-int-row"><span class="dc-int-k">in_delivery_zone</span><span class="dc-int-v pos">✓ Chapinero Alto</span></div>
+    <div class="dc-int-row"><span class="dc-int-k">estimated_eta</span><span class="dc-int-v">47 min</span></div>
+    <div class="dc-int-row"><span class="dc-int-k">customer_lifetime_value</span><span class="dc-int-v">$284k · 8 pedidos</span></div>
+  </div>
+
+  <!-- Order created -->
+  <div class="dc-sp-card">
+    <div class="dc-sp-card-h"><span class="ai-spark">✦</span> Pedido creado en Mesio</div>
+    <div class="dc-log"><span class="dc-log c">// auto-generado por AI · 18:43:17</span>
+POST /api/orders
+<span class="dc-log k">"order_id":</span> <span class="dc-log v">"#01251"</span>
+<span class="dc-log k">"channel":</span> <span class="dc-log v">"whatsapp"</span>
+<span class="dc-log k">"station":</span> <span class="dc-log v">"caliente"</span>
+<span class="dc-log k">"items":</span> [
+  { pechuga_plancha × 2 },
+  { limonada_coco × 1 }
+]
+<span class="dc-log k">"total":</span> <span class="dc-log v">86000</span>
+<span class="dc-log k">"payment":</span> <span class="dc-log v">"nequi_qr"</span>
+<span class="dc-log k">"dian_invoice":</span> <span class="dc-log v">"FE-01251"</span></div>
+  </div>
+
+  <!-- Routing log -->
+  <div class="dc-sp-card">
+    <div class="dc-sp-card-h">Ruteo automático</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+      <div class="dc-route-step">
+        <span class="dc-route-num">1</span>
+        <span>Ticket impreso en estación <strong>Caliente</strong></span>
+        <span class="dc-route-ts">+0.8s</span>
+      </div>
+      <div class="dc-route-step">
+        <span class="dc-route-num">2</span>
+        <span>Factura DIAN <strong>FE-01251</strong> emitida</span>
+        <span class="dc-route-ts">+1.4s</span>
+      </div>
+      <div class="dc-route-step">
+        <span class="dc-route-num">3</span>
+        <span>Domiciliario <strong>Andrés</strong> notificado (cola pos 3)</span>
+        <span class="dc-route-ts">+2.1s</span>
+      </div>
+      <div class="dc-route-step">
+        <span class="dc-route-num">4</span>
+        <span>Stock actualizado · pechuga <strong>-2</strong>, limón <strong>-1</strong></span>
+        <span class="dc-route-ts">+2.6s</span>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<script src="/static/js/mesio-utils.js"></script>
+</body>
+</html>

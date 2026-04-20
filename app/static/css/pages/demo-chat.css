@@ -1,0 +1,377 @@
+/* ══ Mesio — Demo Chat (redesign 2026) ═══════════════════════════════
+   Dark marketing page: phone mockup (left) + backend panel (right).
+   Loaded after: tokens.css → shared.css
+   ═══════════════════════════════════════════════════════════════════ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  background: #0a0c10;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  font-family: var(--font-body, 'Inter', system-ui, sans-serif);
+  color: #fff;
+  margin: 0;
+  padding: 0;
+}
+@media (max-width: 900px) {
+  body { grid-template-columns: 1fr; }
+  .dc-side-panel { display: none; }
+}
+
+/* ── Left stage ──────────────────────────────────────────────────── */
+.dc-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: radial-gradient(ellipse at 40% 50%, rgba(29, 158, 117, 0.12), transparent 60%), #0a0c10;
+  position: relative;
+  overflow: hidden;
+}
+.dc-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(#1F2230 1px, transparent 1px),
+    linear-gradient(90deg, #1F2230 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask: radial-gradient(ellipse at 50% 50%, #000 40%, transparent 80%);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ── Phone shell ─────────────────────────────────────────────────── */
+.dc-phone {
+  width: 380px;
+  height: 780px;
+  background: #ECE5DD;
+  border-radius: 42px;
+  border: 10px solid #1a1d26;
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+}
+
+.dc-notch {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 110px;
+  height: 28px;
+  background: #000;
+  border-radius: 16px;
+  z-index: 20;
+}
+
+/* ── WhatsApp header ─────────────────────────────────────────────── */
+.dc-wa-top {
+  background: #075E54;
+  color: #fff;
+  padding: 42px 14px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.dc-wa-av {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #1D9E75;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+}
+.dc-wa-nm { font-size: 14.5px; font-weight: 600; line-height: 1.2; }
+.dc-wa-st { font-size: 11px; opacity: 0.8; }
+.dc-wa-icons { margin-left: auto; font-size: 18px; display: flex; gap: 14px; }
+
+/* ── Chat body ───────────────────────────────────────────────────── */
+.dc-wa-body {
+  flex: 1;
+  background:
+    #ECE5DD
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60'><rect width='60' height='60' fill='%23ECE5DD'/><circle cx='15' cy='15' r='1' fill='%23D4CCBF'/><circle cx='45' cy='45' r='1' fill='%23D4CCBF'/></svg>");
+  padding: 14px 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dc-wa-body::-webkit-scrollbar { display: none; }
+
+/* Date chip */
+.dc-date-chip {
+  text-align: center;
+  align-self: center;
+  background: rgba(255, 255, 255, 0.8);
+  color: #667781;
+  font-size: 10.5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
+/* ── Bubbles ─────────────────────────────────────────────────────── */
+.dc-bub {
+  max-width: 78%;
+  padding: 7px 10px 5px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #111;
+  position: relative;
+  box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+}
+.dc-bub.them {
+  background: #fff;
+  align-self: flex-start;
+  border-top-left-radius: 2px;
+}
+.dc-bub.me {
+  background: #DCF8C6;
+  align-self: flex-end;
+  border-top-right-radius: 2px;
+}
+.dc-bub .t {
+  font-size: 10px;
+  color: #667781;
+  text-align: right;
+  margin-top: 2px;
+}
+.dc-bub .t.me::after { content: ' ✓✓'; color: #53BDEB; }
+
+/* Inline product card in bubble */
+.dc-bub .prod {
+  margin-top: 6px;
+  padding: 8px;
+  background: #F0F0F0;
+  border-radius: 6px;
+  display: flex;
+  gap: 8px;
+}
+.dc-bub .prod-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #1D9E75, #0F6E56);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.dc-bub .prod-name { font-size: 13px; font-weight: 600; line-height: 1.15; }
+.dc-bub .prod-desc { font-size: 11px; color: #667781; margin-top: 2px; line-height: 1.3; }
+.dc-bub .prod-price { font-size: 13px; font-weight: 700; color: #1D9E75; margin-top: 3px; }
+
+/* Quick reply chips inside bubble */
+.dc-bub .quick { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.dc-bub .chip {
+  padding: 4px 10px;
+  border-radius: 14px;
+  background: #f0f8ff;
+  color: #1F6FB3;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid rgba(31, 111, 179, 0.2);
+}
+
+/* Order summary inside bubble */
+.dc-order-summary {
+  background: #F6F6F6;
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.dc-order-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+}
+.dc-order-row:first-child { margin-top: 0; }
+.dc-order-total {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px dashed #ccc;
+  font-weight: 700;
+  font-size: 13px;
+}
+.dc-order-total .v { color: #1D9E75; }
+
+/* Nequi QR mockup */
+.dc-qr-mock {
+  width: 180px;
+  height: 180px;
+  background: repeating-conic-gradient(#000 0 0.5deg, transparent 0.5deg 1deg);
+  border-radius: 6px;
+  position: relative;
+}
+.dc-qr-label {
+  position: absolute;
+  inset: 40%;
+  background: #DCF8C6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #000;
+}
+
+/* ── Input bar (static/decorative) ──────────────────────────────── */
+.dc-wa-type {
+  background: #F0F0F0;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.dc-wa-input {
+  flex: 1;
+  background: #fff;
+  border-radius: 20px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: #999;
+}
+.dc-wa-send {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #1D9E75;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+/* ── Right side panel ────────────────────────────────────────────── */
+.dc-side-panel {
+  background: #0f131a;
+  border-left: 1px solid #1F2230;
+  padding: 40px 48px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.dc-sp-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #4ADE9E;
+}
+.dc-sp-title {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: -0.7px;
+  margin: 8px 0 6px;
+}
+.dc-sp-title em { color: #1D9E75; font-style: italic; }
+.dc-sp-sub {
+  font-size: 13.5px;
+  color: #B4BAC6;
+  line-height: 1.6;
+  max-width: 480px;
+}
+
+/* Info cards */
+.dc-sp-card {
+  background: #141820;
+  border: 1px solid #1F2230;
+  border-radius: 12px;
+  padding: 16px;
+}
+.dc-sp-card-h {
+  font-size: 11px;
+  color: #7C8393;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.dc-sp-card-h .ai-spark { color: #1D9E75; font-size: 12px; }
+
+/* Intent rows */
+.dc-int-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px dashed #1F2230;
+  font-size: 13px;
+}
+.dc-int-row:last-child { border-bottom: none; }
+.dc-int-k { color: #7C8393; }
+.dc-int-v {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  color: #ECEDEF;
+}
+.dc-int-v.pos { color: #4ADE9E; }
+
+/* Code log */
+.dc-log {
+  background: #0a0c10;
+  border: 1px solid #1F2230;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: #B4BAC6;
+  white-space: pre-wrap;
+  margin-top: 10px;
+}
+.dc-log .k { color: #4ADE9E; }
+.dc-log .v { color: #FBBF24; }
+.dc-log .c { color: #7C8393; }
+
+/* Routing steps */
+.dc-route-step {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.dc-route-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #1D9E75;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.dc-route-ts {
+  margin-left: auto;
+  color: #7C8393;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}

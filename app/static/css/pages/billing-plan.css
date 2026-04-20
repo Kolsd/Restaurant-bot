@@ -1,0 +1,289 @@
+/* ══ Mesio — Billing Plan Page (redesign 2026) ═══════════════════════
+   Admin subscription / plan / invoices page.
+   Loaded after: tokens.css → shared.css
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Plan hero ───────────────────────────────────────────────────── */
+.plan-hero {
+  background: linear-gradient(130deg, #11141a 0%, #0A0B0F 50%, #1a2320 100%);
+  color: #F5F6F8;
+  border-radius: 14px;
+  padding: 24px 28px;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.plan-hero::before {
+  content: '';
+  position: absolute;
+  top: -40%;
+  right: -10%;
+  width: 380px;
+  height: 380px;
+  background: radial-gradient(circle, rgba(29, 158, 117, 0.22), transparent 65%);
+  pointer-events: none;
+}
+.plan-hero-grid {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 2fr 1.2fr;
+  gap: 24px;
+  align-items: center;
+}
+@media (max-width: 640px) {
+  .plan-hero-grid { grid-template-columns: 1fr; }
+  .plan-price { text-align: left !important; margin-top: 12px; }
+}
+.plan-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #4ADE9E;
+}
+.plan-name {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 700;
+  font-size: 32px;
+  letter-spacing: -0.8px;
+  margin: 6px 0 4px;
+}
+.plan-desc {
+  font-size: 13.5px;
+  color: var(--text-on-dark-dim, #9CA3AF);
+  max-width: 440px;
+  line-height: 1.5;
+}
+.plan-price { text-align: right; }
+.plan-price .n {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 700;
+  font-size: 44px;
+  letter-spacing: -1.5px;
+  color: #F5F6F8;
+}
+.plan-price .u { font-size: 20px; }
+.plan-price .cycle {
+  font-size: 11.5px;
+  color: #7C8393;
+  margin-top: 8px;
+}
+
+/* ── Usage strip ─────────────────────────────────────────────────── */
+.plan-usage {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  margin-top: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.02);
+}
+@media (max-width: 640px) {
+  .plan-usage { grid-template-columns: repeat(2, 1fr); }
+}
+.pu {
+  padding: 14px 16px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+.pu:last-child { border-right: none; }
+@media (max-width: 640px) {
+  .pu:nth-child(2n) { border-right: none; }
+  .pu:nth-child(1), .pu:nth-child(2) { border-bottom: 1px solid rgba(255,255,255,0.06); }
+}
+.pu-label {
+  font-size: 11px;
+  color: rgba(156, 163, 175, 0.8);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.pu-val {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 600;
+  font-size: 22px;
+  color: #F5F6F8;
+  letter-spacing: -0.5px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.pu-val .dim {
+  font-size: 13px;
+  color: rgba(156, 163, 175, 0.7);
+  font-weight: 500;
+}
+.pu-sub { font-size: 11px; color: rgba(156, 163, 175, 0.6); margin-top: 3px; }
+.pu-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 7px;
+}
+.pu-bar-fill { height: 100%; background: #1D9E75; border-radius: 2px; }
+.pu-bar-fill.warn { background: #F59E0B; }
+
+/* ── Main layout below hero ──────────────────────────────────────── */
+.bp-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 860px) {
+  .bp-layout { grid-template-columns: 1fr; }
+}
+
+/* ── Invoice table mono numbers ──────────────────────────────────── */
+.invoice-num {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* ── Payment method card ─────────────────────────────────────────── */
+.pm-card {
+  padding: 14px;
+  background: linear-gradient(120deg, #1a1d26, #11141a);
+  color: #fff;
+  border-radius: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.pm-card-type {
+  font-size: 10.5px;
+  opacity: 0.7;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pm-card-num {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 16px;
+  letter-spacing: 2px;
+  margin-top: 14px;
+}
+.pm-card-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.pm-add-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background 0.12s;
+}
+.pm-add-btn:hover { background: #fafaf8; }
+
+.bp-next-charge {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ── Billing data ────────────────────────────────────────────────── */
+.billing-data {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.billing-data .muted { color: var(--text-3); }
+
+/* ── Plans grid ──────────────────────────────────────────────────── */
+.bp-section-title {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -0.3px;
+  margin: 28px 0 12px;
+}
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 860px) {
+  .plans-grid { grid-template-columns: 1fr; }
+}
+
+.plan-card {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  position: relative;
+}
+.plan-card.current {
+  border: 1.5px solid var(--brand);
+  background: rgba(29, 158, 117, 0.03);
+}
+.plan-card.current::before {
+  content: 'Plan actual';
+  position: absolute;
+  top: -10px;
+  left: 16px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 5px;
+  letter-spacing: 0.04em;
+}
+
+.pc-name {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.3px;
+}
+.pc-price {
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: -0.8px;
+  margin-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.pc-price .u {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.pc-list {
+  margin-top: 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.8;
+}
+.pc-list li::before {
+  content: '✓';
+  color: var(--brand);
+  font-weight: 700;
+  margin-right: 7px;
+}
+.pc-list li.off { color: var(--text-4); text-decoration: line-through; }
+.pc-list li.off::before { content: '—'; color: var(--text-4); text-decoration: none; }
+.pc-action {
+  width: 100%;
+  margin-top: 18px;
+}
