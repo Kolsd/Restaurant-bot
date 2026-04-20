@@ -1,243 +1,287 @@
-const token = localStorage.getItem('rb_token');
-if (!token) window.location.href = '/login';
-const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+/* ═══════════════════════════════════════════════════
+   Mesio — Kitchen KDS v2
+   Auto-refresh 15s · keyboard 1-7 select, Enter=listo, T=+2min, /=search
+   ═══════════════════════════════════════════════════ */
 
-function escHtml(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+// ── Auth guard ──────────────────────────────────────
+const _token = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
+if (!_token) { window.location.href = '/login'; }
+
+const _hdr = { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
+
+// ── State ───────────────────────────────────────────
+let _tickets = [];          // current displayed tickets
+let _selectedIdx = -1;      // keyboard-selected ticket index (0-based)
+let _station = 'all';       // station filter
+let _localPlusMins = {};    // ticketId → extra minutes added locally
+
+// ── Clock ───────────────────────────────────────────
+(function _initClock() {
+  function _tc() {
+    const el = document.getElementById('kds-clock');
+    if (el) el.textContent = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  }
+  _tc(); setInterval(_tc, 10000);
+})();
+
+// ── Stats display ────────────────────────────────────
+function _updateStats(orders) {
+  const now = Date.now();
+  const pending = orders.filter(o => o.status !== 'listo' && o.status !== 'entregado');
+  let totalMs = 0, count = 0, delayed = 0;
+  pending.forEach(o => {
+    const ms = now - new Date(o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z').getTime();
+    const mins = ms / 60000;
+    totalMs += ms; count++;
+    if (mins > 12) delayed++;
+  });
+  const avgMins = count > 0 ? Math.floor(totalMs / count / 60000) : 0;
+  const avgSecs = count > 0 ? Math.floor((totalMs / count / 1000) % 60) : 0;
+
+  const avgEl = document.getElementById('kds-avg');
+  const queueEl = document.getElementById('kds-queue');
+  const delayEl = document.getElementById('kds-delayed');
+  if (avgEl) {
+    avgEl.textContent = `${String(avgMins).padStart(2,'0')}:${String(avgSecs).padStart(2,'0')}`;
+    avgEl.className = 'k-stat-val ' + (avgMins < 10 ? 'ok' : 'warn');
+  }
+  if (queueEl) queueEl.textContent = pending.length;
+  if (delayEl) {
+    delayEl.textContent = delayed;
+    delayEl.className = 'k-stat-val ' + (delayed > 0 ? 'warn' : 'ok');
+  }
 }
 
-function clock() {
-  const el = document.getElementById('header-clock');
-  if (el) el.textContent = new Date().toLocaleTimeString(navigator.language || 'default', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+// ── Elapsed time ─────────────────────────────────────
+function _elapsedMins(createdAt, localExtra) {
+  const iso = createdAt.endsWith('Z') ? createdAt : createdAt + 'Z';
+  const base = Math.floor((Date.now() - new Date(iso).getTime()) / 1000 / 60);
+  return base + (localExtra || 0);
 }
-clock(); setInterval(clock, 1000);
-
-let notifTimer = null;
-function notify(msg) {
-  const n = document.getElementById('notif');
-  n.textContent = msg;
-  n.classList.add('show');
-  if (notifTimer) clearTimeout(notifTimer);
-  notifTimer = setTimeout(() => n.classList.remove('show'), 3500);
+function _fmtTime(mins, secs) {
+  return `${String(mins).padStart(2,'0')}:${String(secs || 0).padStart(2,'0')}`;
 }
-
-function elapsed(createdAt) {
-  const iso  = createdAt.endsWith('Z') ? createdAt : createdAt + 'Z';
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  const min  = Math.max(0, Math.floor(diff / 60));
-  const sec  = Math.max(0, diff % 60);
-  const cls  = min < 5 ? 'ok' : min < 12 ? 'warn' : 'late';
-  return `<span class="elapsed ${cls}">${min}m ${sec}s</span>`;
+function _ticketClass(mins) {
+  if (mins >= 12) return 'd';   // delayed — red blink
+  if (mins >= 7)  return 'w';   // warning — amber
+  return '';
 }
 
-async function setStatus(orderId, status) {
-  try {
-    await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST', headers: hdr, body: JSON.stringify({status})
-    });
-    if (status === 'listo')          notify('✅ Listo para servir — avisa al mesero');
-    if (status === 'en_preparacion') notify('👨‍🍳 Preparando...');
-    loadOrders();
-  } catch(e) { mesioToast('Error al actualizar estado', 'error'); }
+// ── Source badge ─────────────────────────────────────
+function _srcBadge(order) {
+  if (order.is_delivery) {
+    const type = order.order_type === 'recoger' ? '🛍️ Para Recoger' : '🛵 Domicilio';
+    return `<span class="tag" style="background:#1a2033;color:#60A5FA;">${type}</span>`;
+  }
+  if (order.channel === 'whatsapp') return `<span class="tag src">📱 WhatsApp</span>`;
+  return '';
 }
 
-function renderCard(o) {
-  _ordersMap[o.id] = o;
-  const items   = Array.isArray(o.items) ? o.items : [];
-  const subNum  = o.sub_number || 1;
-  const isAdd   = o.base_order_id && subNum > 1;
-  const isDel   = o.is_delivery || false;
+// ── Render ticket wall ────────────────────────────────
+function _renderWall(orders) {
+  _tickets = orders;
+  const wall = document.getElementById('kds-wall');
+  if (!wall) return;
 
-  const subTag = isDel
-    ? `<div class="sub-tag add">🛵 Domicilio/Recoger</div>`
-    : isAdd
-      ? `<div class="sub-tag add">➕ Adicional #${subNum}</div>`
-      : `<div class="sub-tag first">🆕 Pedido inicial</div>`;
-
-  const itemsHtml = items.length
-    ? items.map(i => `<div class="order-item"><span class="order-item-qty">${escHtml(String(i.quantity || i.qty || 1))}×</span><span>${escHtml(i.name || '')}</span></div>`).join('')
-    : '<div class="order-item" style="color:#555;">Sin items</div>';
-
-  const notesHtml = o.notes ? `<div class="order-notes">📝 ${escHtml(o.notes)}</div>` : '';
-
-  // IDs are server-generated UUIDs — safe for attribute interpolation but still escaped defensively
-  const safeId  = escHtml(o.id);
-  const safeOid = escHtml(o.original_id || o.id);
-
-  const isPickup = o.order_type === 'recoger';
-
-  let actionHtml = '';
-  if (isDel) {
-    if (o.status === 'recibido') {
-      actionHtml = `<button class="btn btn-prep" onclick="setDeliveryStatus('${safeOid}','en_preparacion')">👨‍🍳 En preparación</button>`;
-    } else if (o.status === 'en_preparacion') {
-      actionHtml = isPickup
-        ? `<button class="btn btn-listo" onclick="setDeliveryStatus('${safeOid}','listo')">🛍️ Listo para recoger</button>`
-        : `<button class="btn btn-listo" onclick="setDeliveryStatus('${safeOid}','listo')">✅ Listo para domiciliario</button>`;
-    } else {
-      actionHtml = `<div class="listo-badge">📦 Esperando domiciliario</div>`;
-    }
-  } else {
-    if (o.status === 'recibido') {
-      actionHtml = `<button class="btn btn-prep" onclick="setStatus('${safeId}','en_preparacion')">👨‍🍳 En preparación</button>`;
-    } else if (o.status === 'en_preparacion') {
-      actionHtml = `<button class="btn btn-listo" onclick="setStatus('${safeId}','listo')">✅ Listo para servir</button>`;
-    } else {
-      actionHtml = `<div class="listo-badge">🛎️ Esperando al mesero</div>`;
-    }
+  if (!orders.length) {
+    wall.innerHTML = '<div style="padding:60px;text-align:center;color:#7C8393;font-size:14px;">Sin órdenes activas</div>';
+    return;
   }
 
-  return `<div class="order-card ${escHtml(o.status.replace('_','-'))}" data-id="${safeId}">
-    ${subTag}
-    <div class="order-header">
-      <div><div class="order-table">${escHtml(o.table_name)}</div><div class="order-id">${safeId}</div></div>
-      ${elapsed(o.created_at)}
-    </div>
-    <div class="order-items">${itemsHtml}</div>
-    ${notesHtml}
-    <button class="btn btn-print" onclick="printComanda('${safeId}')">🖨️ Imprimir Comanda</button>
-    ${actionHtml}
-  </div>`;
+  wall.innerHTML = orders.map((o, idx) => {
+    const extra = _localPlusMins[o.id] || 0;
+    const iso = o.created_at.endsWith('Z') ? o.created_at : o.created_at + 'Z';
+    const totalSecs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000) + extra * 60;
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    const cls = _ticketClass(mins);
+    const isDone = o.status === 'listo';
+    const isSelected = idx === _selectedIdx;
+
+    const items = Array.isArray(o.items) ? o.items : [];
+    const itemsHtml = items.map(item => {
+      const el = document.createElement('div');
+      el.textContent = item.name || '';
+      const safeName = el.innerHTML;
+      const qEl = document.createElement('div');
+      qEl.textContent = String(item.quantity || item.qty || 1);
+      const safeQty = qEl.innerHTML;
+      const modHtml = item.notes ? `<div class="tkt-mods">${_escHtmlSafe(item.notes)}</div>` : '';
+      return `<div class="tkt-item" data-done="0"><div class="tkt-qty">${safeQty}</div><div><div class="tkt-dish">${safeName}</div>${modHtml}</div><div class="tkt-check"></div></div>`;
+    }).join('');
+
+    const tableName = (() => { const e = document.createElement('div'); e.textContent = o.table_name || o.table_id || '#'; return e.innerHTML; })();
+    const tblCls = o.is_delivery ? 'DOM' : tableName;
+    const metaPax = o.guests ? `<span class="tag">Mesa · ${o.guests}p</span>` : `<span class="tag">Mesa</span>`;
+    const srcBadge = _srcBadge(o);
+    const hotBadge = mins >= 12 ? `<span class="tag hot">🔥 Retrasado</span>` : '';
+
+    const doneStyle = isDone ? 'opacity:0.55;' : '';
+    const selectedStyle = isSelected ? 'box-shadow:0 0 0 2px var(--brand);' : '';
+
+    return `<article class="tkt ${cls} ${isDone ? 'done' : ''}" data-id="${_esc(o.id)}" data-idx="${idx}" style="${doneStyle}${selectedStyle}">
+      <div class="tkt-head">
+        <div class="tkt-table"><span class="n">${tblCls}</span><span class="sub">#${_esc(String(o.id).slice(0,6))}</span></div>
+        <div class="tkt-time">${_fmtTime(mins, secs)}</div>
+      </div>
+      <div class="tkt-meta">${metaPax}${hotBadge}${srcBadge}</div>
+      <div class="tkt-body">${itemsHtml}</div>
+      <div class="tkt-foot">
+        <button class="tkt-btn tkt-plus2" data-id="${_esc(o.id)}">+ 2 min</button>
+        <button class="tkt-btn ready tkt-listo" data-id="${_esc(o.id)}">Listo ${isSelected ? '↵' : ''}</button>
+      </div>
+    </article>`;
+  }).join('');
+
+  // Bind item toggle (local visual state)
+  wall.querySelectorAll('.tkt-item').forEach(el => {
+    el.addEventListener('click', () => {
+      el.classList.toggle('done');
+    });
+  });
+
+  // Bind +2min
+  wall.querySelectorAll('.tkt-plus2').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      _localPlusMins[id] = (_localPlusMins[id] || 0) + 2;
+      mesioToast('+2 minutos (local)', 'warning', 1500);
+      // TODO: backend endpoint for server-side timer extension
+    });
+  });
+
+  // Bind listo
+  wall.querySelectorAll('.tkt-listo').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      markListo(btn.dataset.id);
+    });
+  });
+
+  // Update tab counts
+  _updateTabCounts(orders);
 }
 
-async function setDeliveryStatus(orderId, status) {
+function _escHtmlSafe(s) {
+  const el = document.createElement('div');
+  el.textContent = String(s == null ? '' : s);
+  return el.innerHTML;
+}
+function _esc(s) { return _escHtmlSafe(s); }
+
+// ── Tab counts ───────────────────────────────────────
+function _updateTabCounts(orders) {
+  const active   = orders.filter(o => o.status === 'recibido' || o.status === 'en_preparacion');
+  const delayed  = active.filter(o => _elapsedMins(o.created_at, _localPlusMins[o.id]) >= 12);
+  const done     = orders.filter(o => o.status === 'listo');
+
+  const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+  setCount('kds-count-active',  active.length);
+  setCount('kds-count-delayed', delayed.length);
+  setCount('kds-count-done',    done.length);
+}
+
+// ── Station filter ────────────────────────────────────
+function setStation(station) {
+  _station = station;
+  document.querySelectorAll('.k-tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.station === station);
+  });
+  loadOrders();
+}
+
+// ── Mark listo ────────────────────────────────────────
+async function markListo(orderId) {
   try {
-    // Usamos la nueva ruta de la cocina
-    await fetch(`/api/kitchen/delivery-orders/${orderId}/status`, {
-      method: 'PATCH', headers: hdr, body: JSON.stringify({ status })
+    const res = await fetch(`/api/table-orders/${orderId}/status`, {
+      method: 'POST', headers: _hdr, body: JSON.stringify({ status: 'listo' })
     });
-    if (status === 'listo') notify('📦 Listo para domiciliario');
-    if (status === 'en_preparacion') notify('👨‍🍳 Preparando domicilio...');
+    mesioTrackFetch(res.ok);
+    if (!res.ok) throw new Error('status ' + res.status);
+    mesioToast('✅ Listo para servir', 'success', 2000);
     loadOrders();
-  } catch(e) { mesioToast('Error al actualizar estado', 'error'); }
+  } catch (err) {
+    mesioToast('Error al marcar listo', 'error');
+  }
 }
 
-const _ordersMap = {};
-
-function printComanda(orderId) {
-  const o = _ordersMap[orderId];
-  if (!o) return;
-  const items = Array.isArray(o.items) ? o.items : [];
-  const iso = (o.created_at || '').endsWith('Z') ? o.created_at : (o.created_at || '') + 'Z';
-  const dt = new Date(iso);
-  const timeStr = dt.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
-  const dateStr = dt.toLocaleDateString('es-CO');
-  const subNum = o.sub_number || 1;
-  const subLabel = (o.base_order_id && subNum > 1) ? `ADICIONAL #${subNum}` : 'PEDIDO INICIAL';
-  const itemsHtml = items.map(i =>
-    `<div class="item"><span class="qty">${escHtml(String(i.quantity||i.qty||1))}x</span> ${escHtml(i.name||'')}</div>`
-  ).join('');
-  const notesHtml = o.notes
-    ? `<div class="sep"></div><div class="notes">NOTAS: ${escHtml(o.notes)}</div>`
-    : '';
-  const win = window.open('', '_blank', 'width=340,height=560,toolbar=0,menubar=0');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>Comanda ${escHtml(o.table_name)}</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',Courier,monospace;width:72mm;padding:4mm;font-size:10pt;color:#000;background:#fff}
-@page{size:80mm auto;margin:0}
-.title{font-size:13pt;font-weight:bold;text-align:center;letter-spacing:2px}
-.sub{font-size:8pt;text-align:center;margin-bottom:2px}
-.sep{border-top:1px dashed #000;margin:5px 0}
-.label{font-size:8pt;color:#444;margin-top:3px}
-.mesa{font-size:15pt;font-weight:bold}
-.item{font-size:11pt;margin:3px 0}
-.qty{font-weight:bold;display:inline-block;width:22px}
-.notes{font-size:9pt;font-style:italic;margin-top:3px}
-.footer{text-align:center;font-size:8pt;margin-top:4px}
-</style></head><body>
-<div class="title">COMANDA</div>
-<div class="sub">${subLabel}</div>
-<div class="sep"></div>
-<div class="label">MESA</div>
-<div class="mesa">${escHtml(o.table_name)}</div>
-<div class="label">Hora: ${timeStr} &nbsp;|&nbsp; ${dateStr}</div>
-<div class="sep"></div>
-<div class="label" style="font-weight:bold;margin-bottom:3px">ITEMS</div>
-${itemsHtml}
-${notesHtml}
-<div class="sep"></div>
-<div class="footer">— Mesio POS —</div>
-</body></html>`);
-  win.document.close();
-  win.focus();
-  win.onload = () => { win.print(); };
-}
-
-let prevIds = new Set();
-
+// ── Load orders ───────────────────────────────────────
 async function loadOrders() {
-  if (document.visibilityState === 'hidden') return;
   try {
-    const r1 = await fetch('/api/table-orders?station=kitchen', { headers: hdr });
-    if (!r1.ok) { if (r1.status === 401) window.location.href = '/login'; return; }
-    const { orders: tableOrders = [] } = await r1.json();
+    const res = await fetch('/api/kitchen/orders', { headers: _hdr });
+    mesioTrackFetch(res.ok);
+    if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error('status'); }
+    const data = await res.json();
+    let orders = data.orders || data || [];
 
-    const r2 = await fetch('/api/kitchen/delivery-orders', { headers: hdr });
-    const { orders: deliveryOrders = [] } = r2.ok ? await r2.json() : { orders: [] };
-
-    const normalizedDelivery = deliveryOrders
-      .filter(o => !['en_camino', 'en_puerta', 'entregado', 'cancelado'].includes(o.status))
-      .filter(o => !(o.order_type === 'recoger' && o.status === 'listo')) // listo pickups → caja
-      .map(o => ({
-        id: o.id,
-        order_type: o.order_type,
-        table_name: o.order_type === 'domicilio'
-          ? `🛵 Domicilio — ${(o.phone || '').slice(-4)}`
-          : `🛍️ Recoger — ${(o.phone || '').slice(-4)}`,
-        items: Array.isArray(o.items) ? o.items : [],
-        notes: (o.notes || '') + (o.payment_method ? ` | Pago: ${o.payment_method}` : '') + (o.address ? ` | 📍 ${o.address}` : ''),
-        status: mapDeliveryStatus(o.status),
-        created_at: o.created_at,
-        sub_number: 1,
-        base_order_id: null,
-        is_delivery: true,
-        original_id: o.id,
-      }));
-
-    const orders = [...tableOrders, ...normalizedDelivery.filter(o => o.status !== null)];
-
-    const curIds = new Set(orders.map(o => o.id));
-    for (const id of curIds) {
-      if (!prevIds.has(id)) {
-        const o = orders.find(x => x.id === id);
-        if (o) notify(`🔔 Nuevo pedido — ${o.table_name}`);
-      }
+    // Filter by active station
+    if (_station === 'delayed') {
+      orders = orders.filter(o => _elapsedMins(o.created_at, _localPlusMins[o.id]) >= 12);
+    } else if (_station === 'done') {
+      orders = orders.filter(o => o.status === 'listo');
+    } else {
+      orders = orders.filter(o => o.status !== 'entregado');
     }
-    prevIds = curIds;
 
-    const groups = { recibido: [], en_preparacion: [], listo: [] };
-    orders.forEach(o => { if (groups[o.status]) groups[o.status].push(o); });
+    _updateStats(orders);
+    _renderWall(orders);
+  } catch (err) {
+    mesioTrackFetch(false);
+  }
+}
 
-    [['recibido', 'col-recibido', 'cnt-recibido'],
-     ['en_preparacion', 'col-preparacion', 'cnt-preparacion'],
-     ['listo', 'col-listo', 'cnt-listo']].forEach(([status, colId, cntId]) => {
-      const col = document.getElementById(colId);
-      const cnt = document.getElementById(cntId);
-      if (col) col.innerHTML = groups[status].length
-        ? groups[status].map(renderCard).join('')
-        : '<div class="empty">Sin pedidos</div>';
-      if (cnt) cnt.textContent = groups[status].length;
+// ── Keyboard shortcuts ────────────────────────────────
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+
+  if (e.key === '/') {
+    e.preventDefault();
+    const si = document.getElementById('kds-search');
+    if (si) si.focus();
+    return;
+  }
+  const num = parseInt(e.key, 10);
+  if (num >= 1 && num <= 7) {
+    _selectedIdx = Math.min(num - 1, _tickets.length - 1);
+    _renderWall(_tickets);
+    return;
+  }
+  if (e.key === 'Enter' && _selectedIdx >= 0 && _tickets[_selectedIdx]) {
+    markListo(_tickets[_selectedIdx].id);
+    return;
+  }
+  if ((e.key === 't' || e.key === 'T') && _selectedIdx >= 0 && _tickets[_selectedIdx]) {
+    const id = _tickets[_selectedIdx].id;
+    _localPlusMins[id] = (_localPlusMins[id] || 0) + 2;
+    mesioToast('+2 minutos (local)', 'warning', 1500);
+    // TODO: server-side timer extension
+    return;
+  }
+});
+
+// ── Search filter ─────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const si = document.getElementById('kds-search');
+  if (si) {
+    si.addEventListener('input', () => {
+      const q = si.value.toLowerCase();
+      document.querySelectorAll('.tkt').forEach(tkt => {
+        const text = tkt.textContent.toLowerCase();
+        tkt.style.display = (!q || text.includes(q)) ? '' : 'none';
+      });
     });
+    si.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { si.value = ''; si.blur(); loadOrders(); }
+    });
+  }
 
-    mesioTrackFetch(true);
-  } catch(e) { mesioTrackFetch(false); }
-}
+  // Station tab buttons
+  document.querySelectorAll('.k-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => setStation(btn.dataset.station || 'all'));
+  });
 
-function mapDeliveryStatus(s) {
-  if (s === 'confirmado') return 'recibido';
-  if (s === 'en_preparacion') return 'en_preparacion';
-  if (s === 'listo') return 'listo';
-  // en_camino / en_puerta / entregado: ya salieron de cocina — no deben aparecer
-  return null;
-}
-
-loadOrders();
-setInterval(loadOrders, 5000);
-
-function doLogout() { doStaffLogout(); }
+  loadOrders();
+  mesioInterval(loadOrders, 15000);
+});

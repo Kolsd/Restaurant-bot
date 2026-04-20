@@ -153,7 +153,8 @@ def test_ruta_bar_devuelve_html(client):
     # Verificar que es el KDS del bar y no otro HTML
     body = response.text
     assert "Bar" in body
-    assert "station=bar" in body
+    # Post-redesign: station=bar fetch moved from inline script to external bar.js
+    assert "/static/js/pages/bar.js" in body
     assert "Mesio" in body
 
 
