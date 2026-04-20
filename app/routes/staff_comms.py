@@ -17,15 +17,17 @@ Staff self-service routes (JWT staff:<uuid>):
   GET    /api/staff/self/announcements         active announcements
   GET    /api/staff/self/tasks                 active tasks + completed_by_me
   POST   /api/staff/self/tasks/{id}/complete   mark complete
+  GET    /api/staff/self/tips                  tips today + this week (Sprint Y)
+  GET    /api/staff/self/upcoming-shifts       next N scheduled shifts (Sprint Y)
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.repositories import staff_comms_repo
+from app.repositories import staff_comms_repo, staff_repo
 from app.routes.deps import get_current_restaurant_scoped, get_current_user_scoped
 from app.services.logging import get_logger
 
@@ -270,3 +272,113 @@ async def self_complete_task(
         raise HTTPException(status_code=404, detail="Tarea no encontrada o no pertenece a tu organización.")
 
     return {"completion": completion}
+
+
+# ── Staff self-service: Tips ─────────────────────────────────────────────────
+
+@router.get("/self/tips", status_code=200)
+async def self_tips(
+    user: dict = Depends(get_current_user_scoped),
+):
+    """Return this staff member's tip totals for today and this week.
+
+    Reuses db_calculate_tips_by_attendance filtered to this staff's entries.
+    The tip_distribution feature config must be set in features.tip_distribution
+    for the org; if not configured, both totals return zero.
+
+    Response shape:
+      {
+        "today":       float,   # COP amount accumulated today
+        "today_count": int,     # number of table checks today
+        "week":        float,   # COP amount accumulated this week (Mon–now)
+        "week_count":  int,     # number of table checks this week
+        "currency":    str      # always "COP" for now (TODO: multi-currency)
+      }
+    """
+    org_id = user.get("restaurant_id")
+    username: str = user.get("username", "")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo determinar la organización.")
+    if not username.startswith("staff:"):
+        raise HTTPException(status_code=403, detail="Solo el staff puede consultar sus propinas.")
+    staff_id = username.split(":", 1)[1]
+
+    now = datetime.now(tz=timezone.utc)
+
+    # Period: today 00:00 UTC → now
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_str = today_start.isoformat()
+    now_str = now.isoformat()
+
+    # Period: Monday 00:00 UTC → now (day 0 = Monday in Python weekday())
+    days_since_monday = now.weekday()
+    monday_start = (now - timedelta(days=days_since_monday)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    monday_start_str = monday_start.isoformat()
+
+    today_data = await staff_repo.db_calculate_tips_for_staff(
+        org_id=int(org_id),
+        staff_id=staff_id,
+        period_start=today_start_str,
+        period_end=now_str,
+    )
+    week_data = await staff_repo.db_calculate_tips_for_staff(
+        org_id=int(org_id),
+        staff_id=staff_id,
+        period_start=monday_start_str,
+        period_end=now_str,
+    )
+
+    return {
+        "today":       today_data["amount"],
+        "today_count": today_data["count"],
+        "week":        week_data["amount"],
+        "week_count":  week_data["count"],
+        "currency":    "COP",
+    }
+
+
+# ── Staff self-service: Upcoming shifts ──────────────────────────────────────
+
+@router.get("/self/upcoming-shifts", status_code=200)
+async def self_upcoming_shifts(
+    user: dict = Depends(get_current_user_scoped),
+    limit: int = Query(default=3, ge=1, le=10),
+):
+    """Return the next N calendar occurrences of this staff member's weekly schedule.
+
+    Generates upcoming shift dates by projecting the weekly schedule pattern
+    (staff_schedules rows) over the next 28 days.  The result is sorted by date
+    ascending and capped at `limit` (default 3).
+
+    Response shape:
+      {
+        "shifts": [
+          {
+            "date":           "2026-04-21",
+            "day_of_week":    0,            # 0=Mon … 6=Sun
+            "start_time":     "14:00",
+            "end_time":       "22:00",
+            "duration_hours": 8.0
+          },
+          ...
+        ]
+      }
+
+    Timezone: defaults to America/Bogota (TODO: read from locations.timezone once
+    multi-tz support is wired end-to-end — tracked as a known limitation).
+    """
+    username: str = user.get("username", "")
+    if not username.startswith("staff:"):
+        raise HTTPException(status_code=403, detail="Solo el staff puede consultar sus turnos.")
+    staff_id = username.split(":", 1)[1]
+
+    # TODO (multi-tz): resolve locations.timezone for this staff member's org
+    # and pass it here instead of hardcoding.  Tracked in CLAUDE.md limitations.
+    shifts = await staff_repo.db_get_staff_upcoming_shifts(
+        staff_id=staff_id,
+        limit=limit,
+        timezone_name="America/Bogota",
+    )
+    return {"shifts": shifts}

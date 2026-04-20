@@ -2013,3 +2013,125 @@ async def db_has_staff(restaurant_id: int) -> bool:
             restaurant_id,
         )
     return bool(exists)
+
+
+# ── Self-service: tips for a specific staff member ────────────────────────────
+
+async def db_calculate_tips_for_staff(
+    org_id: int,
+    staff_id: str,
+    period_start: str,
+    period_end: str,
+) -> dict:
+    """Return tip totals for a single staff member over a given period.
+
+    Piggybacks on db_calculate_tips_by_attendance and extracts only the entry
+    that matches staff_id.  Returns a dict with:
+      - amount:  float  (COP amount, zero-decimal)
+      - count:   int    (number of table checks this staff member participated in)
+
+    # Cross-tenant self-service lookup — the caller MUST enter tenant_scope(org_id)
+    # before calling this function (handled by get_current_user_scoped in the route).
+    """
+    result = await db_calculate_tips_by_attendance(
+        restaurant_id=org_id,
+        period_start=period_start,
+        period_end=period_end,
+    )
+    for entry in result.get("entries", []):
+        if str(entry.get("staff_id")) == str(staff_id):
+            return {
+                "amount": float(entry["total_tips"]),
+                "count": int(entry.get("tickets_contributed", 0)),
+            }
+    return {"amount": 0.0, "count": 0}
+
+
+# ── Self-service: upcoming scheduled shifts ───────────────────────────────────
+
+async def db_get_staff_upcoming_shifts(
+    staff_id: str,
+    limit: int = 3,
+    timezone_name: str = "America/Bogota",
+) -> list[dict]:
+    """Return the next N calendar occurrences of this staff member's weekly schedule.
+
+    Algorithm:
+      1. Fetch all active staff_schedules rows for staff_id (day_of_week 0-6).
+      2. Scan the next 28 days from today; for each date whose day_of_week
+         appears in the schedule, add an occurrence.
+      3. Sort by date ASC and cap at `limit`.
+
+    Timezone: uses the provided timezone_name to determine "today".  Defaults
+    to "America/Bogota" as a safe fallback for COP restaurants until multi-tz
+    support is wired end-to-end.
+
+    # Cross-tenant self-service lookup — uses bypass_tenant_scope internally.
+    """
+    from datetime import date as _date  # noqa: PLC0415
+
+    # Caller MUST have entered tenant_scope(org_id) before calling — RLS on
+    # staff_schedules enforces org_id = current_setting('app.org_id').
+    # staff_id alone is the key, but RLS guarantees cross-tenant safety.
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT day_of_week, start_time, end_time "
+            "FROM staff_schedules "
+            "WHERE staff_id=$1::uuid AND active=true "
+            "ORDER BY day_of_week ASC",
+            staff_id,
+        )
+
+    if not rows:
+        return []
+
+    # Build a lookup: day_of_week (0=Mon…6=Sun) → (start_time, end_time)
+    # Staff may have multiple rows per day (unlikely but safe to handle).
+    schedule_by_dow: dict[int, list[dict]] = {}
+    for r in rows:
+        dow = r["day_of_week"]
+        schedule_by_dow.setdefault(dow, []).append({
+            "start_time": str(r["start_time"])[:5],  # "HH:MM"
+            "end_time":   str(r["end_time"])[:5],
+        })
+
+    # Determine "today" in the given timezone.
+    try:
+        import zoneinfo  # Python 3.9+  # noqa: PLC0415
+        tz = zoneinfo.ZoneInfo(timezone_name)
+        today = datetime.now(tz).date()
+    except Exception:
+        today = datetime.utcnow().date()
+
+    occurrences: list[dict] = []
+    scan_days = 28  # look ahead window — enough to cover 4 full weeks
+
+    for offset in range(scan_days):
+        candidate = today + timedelta(days=offset)
+        # Python weekday(): 0=Mon … 6=Sun — matches staff_schedules convention.
+        dow = candidate.weekday()
+        if dow not in schedule_by_dow:
+            continue
+        for slot in schedule_by_dow[dow]:
+            start = slot["start_time"]
+            end   = slot["end_time"]
+            # Compute duration in hours (handle overnight if end < start).
+            sh, sm = int(start[:2]), int(start[3:5])
+            eh, em = int(end[:2]),   int(end[3:5])
+            total_min = (eh * 60 + em) - (sh * 60 + sm)
+            if total_min <= 0:
+                total_min += 24 * 60  # overnight shift
+            duration_hours = round(total_min / 60, 1)
+            occurrences.append({
+                "date":           candidate.isoformat(),
+                "day_of_week":    dow,
+                "start_time":     start,
+                "end_time":       end,
+                "duration_hours": duration_hours,
+            })
+        if len(occurrences) >= limit:
+            break
+
+    # Sort by date then start_time, cap at limit.
+    occurrences.sort(key=lambda x: (x["date"], x["start_time"]))
+    return occurrences[:limit]

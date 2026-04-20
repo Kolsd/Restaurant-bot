@@ -4,26 +4,26 @@
    ═══════════════════════════════════════════════════════════════
 
    Backend endpoints wired:
-     GET  /api/staff/self/profile         → loadProfile()
-     POST /api/staff/self/clock-in        → doClockAction('clock-in')
-     POST /api/staff/self/clock-out       → doClockAction('clock-out')
-     POST /api/staff/self/break-start     → doClockAction('break-start')
-     POST /api/staff/self/break-end       → doClockAction('break-end')
-     GET  /api/staff/self/timecard        → loadTimecardPreview()
-     GET  /api/staff/schedules            → loadUpcomingShifts() [upcoming]
-     GET  /api/staff/webauthn/credentials → loadBiometricStatus()
-     POST /api/staff/webauthn/register-options   → startBioRegistration()
-     POST /api/staff/webauthn/register-complete  → startBioRegistration()
+     GET  /api/staff/self/profile              → loadProfile()
+     POST /api/staff/self/clock-in             → doClockAction('clock-in')
+     POST /api/staff/self/clock-out            → doClockAction('clock-out')
+     POST /api/staff/self/break-start          → doClockAction('break-start')
+     POST /api/staff/self/break-end            → doClockAction('break-end')
+     GET  /api/staff/self/timecard             → loadTimecardPreview()
+     GET  /api/staff/webauthn/credentials      → loadBiometricStatus()
+     POST /api/staff/webauthn/register-options → startBioRegistration()
+     POST /api/staff/webauthn/register-complete→ startBioRegistration()
 
    Wired in this file:
-     GET  /api/staff/self/announcements   → scLoadAnnouncements()
-     GET  /api/staff/self/tasks           → scLoadTasks()
-     POST /api/staff/self/tasks/{id}/complete → scCompleteTask()
+     GET  /api/staff/self/announcements        → scLoadAnnouncements()
+     GET  /api/staff/self/tasks                → scLoadTasks()
+     POST /api/staff/self/tasks/{id}/complete  → scCompleteTask()
+     GET  /api/staff/self/tips                 → scLoadTips()    (Sprint Y)
+     GET  /api/staff/self/upcoming-shifts      → scLoadUpcomingShifts() (Sprint Y)
 
    TODO (backend endpoints not yet implemented):
-     GET  /api/staff/self/tips            → tips accumulated today/week
-     POST /api/staff/self/shift-swap      → shift swap request
-     GET  /api/staff/self/performance     → NPS + tip performance stats
+     POST /api/staff/self/shift-swap           → shift swap request
+     GET  /api/staff/self/performance          → NPS + tip performance stats
 */
 
 'use strict';
@@ -386,20 +386,171 @@ function scRenderTCPreview(data) {
 }
 
 /* ── Upcoming shifts ────────────────────────────────────────────── */
+
+const SC_DAY_ABBR = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
 async function scLoadUpcomingShifts() {
-  // Uses GET /api/staff/schedules and renders next 3 upcoming days
-  // TODO: endpoint /api/staff/self/upcoming-shifts doesn't exist yet
-  // Falls back to static placeholder content
+  const container = document.getElementById('sc-shifts-container');
+  if (!container || !SC_TOKEN) return;
+
+  try {
+    const res = await fetch('/api/staff/self/upcoming-shifts?limit=3', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _scRenderUpcomingShifts(container, data.shifts || []);
+  } catch(_) {
+    // Non-critical — leave container with minimal fallback.
+    container.innerHTML = '';
+    const fallback = document.createElement('div');
+    fallback.style.cssText = 'padding:14px;font-size:12px;color:var(--sc-text-3);';
+    fallback.textContent = 'Sin turnos programados.';
+    container.appendChild(fallback);
+  }
 }
 
-/* ── Tips (TODO) ────────────────────────────────────────────────── */
+function _scRenderUpcomingShifts(container, shifts) {
+  container.innerHTML = '';
+
+  if (!shifts.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding:14px;font-size:12px;color:var(--sc-text-3);';
+    empty.textContent = 'Sin turnos programados.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const todayStr    = scIsoDate(new Date());
+  const tomorrowStr = scIsoDate(new Date(Date.now() + 86400000));
+
+  shifts.forEach(shift => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--sc-border,#E5E7EB);';
+
+    // Left: date badge
+    const dateObj = new Date(shift.date + 'T12:00:00');
+    const dayNum  = dateObj.getDate();
+    const dayAbbr = SC_DAY_ABBR[shift.day_of_week] || '';
+
+    // Determine badge label: Hoy / Mañana / date
+    let badgeLabel;
+    if (shift.date === todayStr)    { badgeLabel = 'Hoy'; }
+    else if (shift.date === tomorrowStr) { badgeLabel = 'Mañana'; }
+    else { badgeLabel = dayAbbr + ' ' + dayNum; }
+
+    const badge = document.createElement('div');
+    badge.style.cssText = 'min-width:42px;text-align:center;';
+    const badgeTop = document.createElement('div');
+    badgeTop.style.cssText = 'font-family:var(--font-display,inherit);font-weight:700;font-size:18px;line-height:1;color:var(--sc-brand,#1D9E75);';
+    badgeTop.textContent = String(dayNum);
+    const badgeBot = document.createElement('div');
+    badgeBot.style.cssText = 'font-size:10px;color:var(--sc-text-3,#9CA3AF);text-transform:uppercase;letter-spacing:.04em;';
+    badgeBot.textContent = shift.date === todayStr ? 'Hoy' : (shift.date === tomorrowStr ? 'Mañ' : dayAbbr);
+    badge.appendChild(badgeTop);
+    badge.appendChild(badgeBot);
+
+    // Right: hours + duration
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;';
+    const timeEl = document.createElement('div');
+    timeEl.style.cssText = 'font-weight:600;font-size:13px;';
+    const durationEl = document.createElement('span');
+    durationEl.style.cssText = 'color:var(--sc-text-3,#9CA3AF);font-size:11px;font-weight:400;margin-left:6px;';
+    durationEl.textContent = '· ' + shift.duration_hours + 'h';
+    timeEl.textContent = shift.start_time + ' – ' + shift.end_time;
+    timeEl.appendChild(durationEl);
+
+    const badgeRow = document.createElement('div');
+    if (shift.date === todayStr || shift.date === tomorrowStr) {
+      badgeRow.style.cssText = 'display:inline-block;margin-top:3px;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:600;background:rgba(29,158,117,.12);color:var(--sc-brand,#1D9E75);';
+      badgeRow.textContent = badgeLabel;
+    }
+
+    info.appendChild(timeEl);
+    if (badgeRow.textContent) info.appendChild(badgeRow);
+
+    row.appendChild(badge);
+    row.appendChild(info);
+    container.appendChild(row);
+  });
+}
+
+/* ── Tips ───────────────────────────────────────────────────────── */
+
+function _scFmtCOP(n) {
+  // Format a number as COP using mesioFmt if available, fallback to locale.
+  if (typeof mesioFmt === 'function') return mesioFmt(n);
+  return '$' + Math.round(n).toLocaleString('es-CO');
+}
+
 async function scLoadTips() {
-  // TODO: GET /api/staff/self/tips is not yet implemented
-  // Renders "(próximamente)" placeholder
-  const tipEl = document.getElementById('sc-tip-amount');
-  if (tipEl) tipEl.textContent = '—';
-  const tipSub = document.getElementById('sc-tip-sub');
-  if (tipSub) tipSub.textContent = 'Datos próximamente';
+  if (!SC_TOKEN) return;
+
+  try {
+    const res = await fetch('/api/staff/self/tips', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _scRenderTips(data);
+  } catch(_) {
+    // Non-critical — leave DOM in zero state.
+    const tipEl = document.getElementById('sc-tip-amount');
+    if (tipEl) tipEl.textContent = '—';
+    const tipSub = document.getElementById('sc-tip-sub');
+    if (tipSub) tipSub.textContent = 'Sin datos disponibles';
+    const kTipEl = document.getElementById('sc-k-tip-amount');
+    if (kTipEl) kTipEl.textContent = '—';
+    const kTipSub = document.getElementById('sc-k-tip-sub');
+    if (kTipSub) kTipSub.textContent = 'Sin datos disponibles';
+  }
+}
+
+function _scRenderTips(data) {
+  const todayAmt   = data.today       || 0;
+  const todayCount = data.today_count || 0;
+  const weekAmt    = data.week        || 0;
+  const weekCount  = data.week_count  || 0;
+
+  // Mobile: main tip amount widget
+  const tipAmountEl = document.getElementById('sc-tip-amount');
+  if (tipAmountEl) tipAmountEl.textContent = _scFmtCOP(todayAmt);
+
+  const tipSubEl = document.getElementById('sc-tip-sub');
+  if (tipSubEl) {
+    if (todayAmt === 0 && weekAmt === 0) {
+      tipSubEl.textContent = 'Sin propinas este turno';
+    } else {
+      tipSubEl.textContent = todayCount + (todayCount === 1 ? ' mesa hoy' : ' mesas hoy');
+    }
+  }
+
+  // Mobile grid: mesas + pct indicator (use week data in sub-cells if available)
+  const mesasEl = document.getElementById('sc-tip-mesas');
+  if (mesasEl) mesasEl.textContent = todayCount > 0 ? String(todayCount) : '—';
+
+  const ventasEl = document.getElementById('sc-tip-ventas');
+  if (ventasEl) ventasEl.textContent = weekAmt > 0 ? _scFmtCOP(weekAmt) : '—';
+
+  const pctEl = document.getElementById('sc-tip-pct');
+  if (pctEl) {
+    // Show week count as a context figure rather than leaving it blank
+    pctEl.textContent = weekCount > 0 ? String(weekCount) + ' sem' : '—';
+  }
+
+  // Kiosco panel: tip amount
+  const kTipEl = document.getElementById('sc-k-tip-amount');
+  if (kTipEl) kTipEl.textContent = _scFmtCOP(todayAmt);
+
+  const kTipSubEl = document.getElementById('sc-k-tip-sub');
+  if (kTipSubEl) {
+    if (todayAmt === 0 && weekAmt === 0) {
+      kTipSubEl.textContent = 'Sin propinas este turno';
+    } else {
+      kTipSubEl.textContent = todayCount + (todayCount === 1 ? ' mesa · Semana: ' : ' mesas · Semana: ') + _scFmtCOP(weekAmt);
+    }
+  }
 }
 
 /* ── WebAuthn / Biometrics ─────────────────────────────────────── */
@@ -926,15 +1077,20 @@ scScaleMobile();
 scLoadProfile();
 scLoadTimecardPreview();
 scLoadTips();
+scLoadUpcomingShifts();
 scLoadBiometricStatus();
 scLoadAnnouncements();
 scLoadTasks();
 
-// Auto-refresh announcements and tasks every 60 seconds.
+// Auto-refresh every 60 seconds (tips + upcoming shifts added in Sprint Y).
 if (typeof mesioInterval === 'function') {
-  mesioInterval(scLoadAnnouncements, 60000);
-  mesioInterval(scLoadTasks, 60000);
+  mesioInterval(scLoadAnnouncements,    60000);
+  mesioInterval(scLoadTasks,            60000);
+  mesioInterval(scLoadTips,             60000);
+  mesioInterval(scLoadUpcomingShifts,   60000);
 } else {
-  setInterval(scLoadAnnouncements, 60000);
-  setInterval(scLoadTasks, 60000);
+  setInterval(scLoadAnnouncements,    60000);
+  setInterval(scLoadTasks,            60000);
+  setInterval(scLoadTips,             60000);
+  setInterval(scLoadUpcomingShifts,   60000);
 }
