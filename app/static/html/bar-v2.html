@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Bar v2</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/pages/bar.css">
+</head>
+<body>
+
+<div class="bar-layout">
+
+  <!-- ── Topbar ── -->
+  <header class="bar-top">
+    <div class="bar-brand">
+      <div class="bar-mark">M</div>
+      <span>Bar</span>
+    </div>
+    <div class="bar-sep"></div>
+    <div class="bar-station">Estación <strong id="bar-station-name">Barra principal</strong></div>
+    <div class="bar-pill"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--b-purple);margin-right:4px;animation:blink 2s infinite;"></span>En línea</div>
+    <div class="bar-top-right">
+      <div class="bar-kstat">
+        <div class="bar-kstat-l">En cola</div>
+        <div class="bar-kstat-v" id="bar-stat-queue">—</div>
+      </div>
+      <div class="bar-kstat">
+        <div class="bar-kstat-l">Prom.</div>
+        <div class="bar-kstat-v" id="bar-stat-avg">—:—</div>
+      </div>
+      <div class="bar-clock" id="bar-clock">--:--</div>
+    </div>
+  </header>
+
+  <!-- ── Main queue ── -->
+  <main class="bar-main">
+    <div class="queue-head">
+      <h2>Cola de preparación</h2>
+      <div class="queue-sub" id="bar-queue-sub">Cargando…</div>
+    </div>
+    <div class="queue-grid" id="bar-queue">
+      <div class="bar-empty">Cargando bebidas…</div>
+    </div>
+  </main>
+
+  <!-- ── Right sidebar ── -->
+  <aside class="bar-side">
+
+    <!-- Inventario en vivo -->
+    <section>
+      <div class="side-section-title">Inventario crítico</div>
+      <div id="bar-inv-list">
+        <div style="font-size:12px;color:var(--b-text-3);">Cargando…</div>
+      </div>
+    </section>
+
+    <!-- En tap (placeholder — backend no tiene keg tracking aún) -->
+    <section>
+      <div class="side-section-title">En tap</div>
+      <div class="tap-card">
+        <div class="tap-label">Próximamente</div>
+        <div class="tap-name">Seguimiento de barriles</div>
+        <div class="tap-soon">(funcionalidad en desarrollo)</div>
+      </div>
+    </section>
+
+    <!-- Top del turno -->
+    <section>
+      <div class="side-section-title">Top bebidas del turno</div>
+      <div id="bar-pop-list">
+        <div style="font-size:12px;color:var(--b-text-3);">Cargando…</div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ── Footer hint bar ── -->
+  <footer class="bar-foot" style="grid-column:1/-1;">
+    <span class="hint">
+      <kbd>1</kbd>…<kbd>7</kbd> seleccionar ·
+      <kbd>↵</kbd> marcar listo ·
+      <kbd>T</kbd> +2 min
+    </span>
+    <div style="margin-left:auto;" class="m-live-status online">
+      <div class="dot"></div><span class="label">En vivo</span>
+    </div>
+  </footer>
+
+</div><!-- /.bar-layout -->
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/bar-v2.js" defer></script>
+</body>
+</html>

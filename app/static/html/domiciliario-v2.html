@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mesio — Domiciliario v2</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/pages/domiciliario.css">
+</head>
+<body>
+
+<!-- Desktop: centred phone frame. Mobile: full-screen via CSS. -->
+<div class="phone-wrap">
+  <div class="phone-frame">
+
+    <!-- iOS-style notch -->
+    <div class="notch" aria-hidden="true"></div>
+
+    <!-- Status bar (desktop only) -->
+    <div class="phone-status" aria-hidden="true">
+      <span id="dom-time">9:41</span>
+      <span>● ● ●</span>
+    </div>
+
+    <!-- ── Light inner screen ── -->
+    <div class="phone-screen">
+
+      <!-- Hero gradient -->
+      <div class="dom-hero">
+        <div class="hero-label" id="dom-turno-label">Turno activo</div>
+        <div class="hero-title" id="dom-staff-name">Hola 👋</div>
+        <div class="hero-stats">
+          <div><strong id="dom-stat-delivered">—</strong>entregadas</div>
+          <div><strong id="dom-stat-pending">—</strong>pendientes</div>
+          <div><strong id="dom-stat-tips">—</strong>propinas</div>
+        </div>
+      </div>
+
+      <!-- ── Hoy tab content ── -->
+      <div class="tab-pane active" data-pane="hoy">
+
+        <!-- Active delivery card -->
+        <div id="dom-active-card">
+          <div class="dom-no-active">Cargando entregas…</div>
+        </div>
+
+        <!-- Order items -->
+        <div class="dom-section" id="dom-order-section" style="display:none;">
+          <h4>Pedido</h4>
+          <div id="dom-order-items"></div>
+          <div id="dom-order-total"></div>
+        </div>
+
+        <!-- Customer -->
+        <div class="dom-section" id="dom-customer-section" style="display:none;">
+          <h4>Cliente</h4>
+          <div id="dom-customer-card"></div>
+        </div>
+
+        <!-- Up-next -->
+        <div id="dom-upnext"></div>
+
+      </div><!-- /.tab-pane hoy -->
+
+      <!-- ── Mapa tab (placeholder) ── -->
+      <div class="tab-pane" data-pane="mapa">
+        <div style="padding:40px 20px;text-align:center;color:var(--text-3);">
+          <div style="font-size:32px;margin-bottom:12px;">🗺️</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);">Vista de mapa</div>
+          <div style="font-size:12px;margin-top:6px;">Usa Waze desde la tarjeta de entrega activa.</div>
+        </div>
+      </div>
+
+      <!-- ── Historial tab ── -->
+      <div class="tab-pane" data-pane="historial">
+        <div style="padding:14px 14px 6px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-3);">Completados hoy</div>
+        </div>
+        <div id="dom-hist-list">
+          <div class="dom-list-empty">Cargando…</div>
+        </div>
+      </div>
+
+      <!-- ── Perfil tab ── -->
+      <div class="tab-pane" data-pane="perfil">
+        <div style="padding:24px 20px;">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">
+            <div style="width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,#1D9E75,#0F6E56);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:700;" id="perfil-av">?</div>
+            <div>
+              <div style="font-weight:700;font-size:16px;color:var(--text);" id="perfil-name">Cargando…</div>
+              <div style="font-size:12px;color:var(--text-3);">Domiciliario</div>
+            </div>
+          </div>
+          <button class="m-btn m-btn--ghost" style="width:100%;justify-content:center;" id="perfil-logout">
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Bottom tab bar ── -->
+      <nav class="dom-tabs" role="tablist" aria-label="Navegación principal">
+        <button class="dom-tab active" data-tab="hoy" role="tab" aria-selected="true" aria-label="Hoy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M5 11l7-7 7 7v9a2 2 0 01-2 2h-3v-6h-4v6H7a2 2 0 01-2-2z"/>
+          </svg>
+          Hoy
+        </button>
+        <button class="dom-tab" data-tab="mapa" role="tab" aria-selected="false" aria-label="Mapa">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6z"/><path d="M9 3v15M15 6v15"/>
+          </svg>
+          Mapa
+        </button>
+        <button class="dom-tab" data-tab="historial" role="tab" aria-selected="false" aria-label="Historial">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 10h8M8 14h5"/>
+          </svg>
+          Historial
+        </button>
+        <button class="dom-tab" data-tab="perfil" role="tab" aria-selected="false" aria-label="Perfil">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>
+          </svg>
+          Perfil
+        </button>
+      </nav>
+
+    </div><!-- /.phone-screen -->
+
+  </div><!-- /.phone-frame -->
+</div><!-- /.phone-wrap -->
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/domiciliario-v2.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Status bar clock
+  function _stClock() {
+    const el = document.getElementById('dom-time');
+    if (el) el.textContent = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  }
+  _stClock(); setInterval(_stClock, 30000);
+
+  // Perfil tab populate
+  const pn = document.getElementById('perfil-name');
+  const pav = document.getElementById('perfil-av');
+  const name = localStorage.getItem('rb_staff_name') || localStorage.getItem('rb_name') || 'Domiciliario';
+  if (pn) pn.textContent = name;
+  if (pav) pav.textContent = name.split(' ').map(p => p[0]).join('').slice(0,2).toUpperCase();
+
+  // Turno label with elapsed time
+  const shiftStart = localStorage.getItem('rb_shift_start');
+  if (shiftStart) {
+    const mins = Math.floor((Date.now() - new Date(shiftStart).getTime()) / 60000);
+    const hrs = Math.floor(mins / 60);
+    const lbl = document.getElementById('dom-turno-label');
+    if (lbl) lbl.textContent = `Turno activo · ${hrs}h ${mins % 60}m`;
+  }
+
+  // Show order + customer sections once active card renders
+  const obs = new MutationObserver(() => {
+    const hasActive = document.querySelector('.active-badge');
+    const orderSec = document.getElementById('dom-order-section');
+    const custSec  = document.getElementById('dom-customer-section');
+    if (orderSec) orderSec.style.display = hasActive ? '' : 'none';
+    if (custSec)  custSec.style.display  = hasActive ? '' : 'none';
+  });
+  const activeCard = document.getElementById('dom-active-card');
+  if (activeCard) obs.observe(activeCard, { childList: true, subtree: true });
+
+  // Logout
+  document.getElementById('perfil-logout')?.addEventListener('click', () => mesioLogout());
+});
+</script>
+</body>
+</html>

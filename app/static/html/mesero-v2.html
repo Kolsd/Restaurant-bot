@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Mesero v2</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/mesero-v2.css">
+</head>
+<body>
+
+<div class="mesero-layout">
+
+  <!-- ── Dark side rail ── -->
+  <aside class="m-rail">
+    <!-- Logo -->
+    <a href="/staff-hq" class="m-rail-link" title="Hub">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/>
+        <rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/>
+      </svg>
+    </a>
+    <div class="m-rail-sep"></div>
+    <!-- Mesas (active) -->
+    <a href="/mesero" class="m-rail-link active" title="Mesas">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/>
+        <rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/>
+      </svg>
+    </a>
+    <!-- Caja -->
+    <a href="/caja" class="m-rail-link" title="Caja">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="3" y="4" width="14" height="12" rx="1"/><path d="M3 8h14"/>
+      </svg>
+    </a>
+    <!-- Cocina -->
+    <a href="/kitchen" class="m-rail-link" title="Cocina">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M4 3v6a6 6 0 0012 0V3M4 6h12M10 15v3"/>
+      </svg>
+    </a>
+    <!-- Comandas / Notes -->
+    <a href="#" class="m-rail-link" title="Comandas">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="4" y="3" width="12" height="14" rx="1"/><path d="M7 7h6M7 10h6M7 13h4"/>
+      </svg>
+    </a>
+
+    <div class="m-rail-bottom">
+      <div class="m-rail-avatar" id="rail-avatar">VC</div>
+      <button class="m-rail-link" title="Salir" style="color:#6B7280;" id="rail-logout">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M13 4H4v12h9M8 10h10M14 7l4 3-4 3"/>
+        </svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Main content area ── -->
+  <section class="m-area">
+
+    <!-- Page header -->
+    <div class="m-head">
+      <div class="m-head-info">
+        <h1>Salón</h1>
+        <div class="m-head-sub" id="mesero-sub">Cargando estado del turno…</div>
+      </div>
+      <!-- Zone filter tabs -->
+      <div class="m-zone-tabs" role="tablist">
+        <button class="m-zone-btn active" data-zone="all" role="tab" aria-selected="true">Todas</button>
+        <button class="m-zone-btn" data-zone="terraza" role="tab" aria-selected="false">Terraza</button>
+        <button class="m-zone-btn" data-zone="salon" role="tab" aria-selected="false">Salón</button>
+        <button class="m-zone-btn" data-zone="privado" role="tab" aria-selected="false">Privado</button>
+        <button class="m-zone-btn" data-zone="barra" role="tab" aria-selected="false">Barra</button>
+      </div>
+    </div>
+
+    <!-- Legend row -->
+    <div class="m-legend" role="note" aria-label="Leyenda de estados">
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-libre-bg);border-color:var(--fp-libre);"></span>Libre
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-sentados-bg);border-color:var(--fp-sentados);"></span>Sentados
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-ocupada-bg);border-color:var(--fp-ocupada);"></span>Comiendo
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-factura-bg);border-color:var(--fp-factura);"></span>Facturando
+      </div>
+      <div class="m-lg">
+        <span class="m-lg-dot" style="background:var(--fp-reservada-bg);border-color:var(--fp-reservada);"></span>Reservada
+      </div>
+      <div class="m-live-row">
+        <div class="m-live-dot"></div>
+        <span style="font-size:11px;color:var(--text-3);">Sync en vivo</span>
+      </div>
+    </div>
+
+    <!-- Alert banner (hidden by default) -->
+    <div class="m-alert-banner hidden" id="mesero-alert-banner" role="alert" aria-live="polite">
+      <!-- Populated by JS -->
+    </div>
+
+    <!-- Table grid -->
+    <div class="m-floor" id="mesero-floor" role="list" aria-label="Mesas del salón">
+      <div style="padding:40px;text-align:center;color:var(--text-3);grid-column:1/-1;">Cargando mesas…</div>
+    </div>
+
+    <!-- Bottom action bar -->
+    <div class="m-action-bar" role="complementary" aria-label="Métricas del turno">
+      <div class="m-act-metric">
+        <div class="m-act-label">Mis ventas</div>
+        <div class="m-act-val" id="m-stat-ventas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Propinas hoy</div>
+        <div class="m-act-val" id="m-stat-propinas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Mesas atendidas</div>
+        <div class="m-act-val" id="m-stat-mesas">—</div>
+      </div>
+      <div class="m-act-metric">
+        <div class="m-act-label">Ticket promedio</div>
+        <div class="m-act-val" id="m-stat-ticket">—</div>
+      </div>
+    </div>
+
+  </section><!-- /.m-area -->
+
+</div><!-- /.mesero-layout -->
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/mesero-v2.js" defer></script>
+<script>
+  // Populate rail avatar initials from localStorage
+  document.addEventListener('DOMContentLoaded', () => {
+    const av = document.getElementById('rail-avatar');
+    if (av) {
+      const name = localStorage.getItem('rb_staff_name') || localStorage.getItem('rb_name') || '';
+      if (name) av.textContent = name.split(' ').map(p => p[0]).join('').slice(0,2).toUpperCase();
+    }
+    document.getElementById('rail-logout')?.addEventListener('click', () => mesioLogout());
+  });
+</script>
+</body>
+</html>

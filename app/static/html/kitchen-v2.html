@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesio — Cocina v2</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/pages/kitchen.css">
+</head>
+<body>
+<style>
+/* v2 overrides / extensions */
+:root {
+  --k-surface: #141820; --k-surface-2: #1a1f29; --k-border: #262c3a;
+  --k-border-strong: #343b4d; --k-text: #ECEDEF; --k-text-2: #B4BAC6; --k-text-3: #7C8393;
+}
+body { background: #0a0c10; color: var(--k-text); overflow: hidden; height: 100vh; font-family: var(--font-body); }
+.kds { display: grid; grid-template-rows: 52px 1fr 40px; height: 100vh; }
+
+/* Topbar */
+.k-top { background: #0f131a; border-bottom: 1px solid var(--k-border); display: flex; align-items: center; padding: 0 20px; gap: 14px; }
+.k-brand { display: flex; align-items: center; gap: 8px; }
+.k-mark { width: 28px; height: 28px; background: var(--brand); border-radius: 7px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:13px; }
+.k-brand-name { font-weight:700; font-size:14px; }
+.k-sep { width:1px; height:18px; background:var(--k-border); }
+.k-station { font-size:13px; color:var(--k-text-2); }
+.k-station strong { color:var(--k-text); }
+.k-pill { font-size:11px; font-weight:600; padding:3px 8px; border-radius:999px; background:rgba(29,158,117,0.14); color:#4ADE9E; border:1px solid rgba(29,158,117,0.25); }
+
+.k-tabs { display:flex; gap:2px; background:#1a1f29; border-radius:7px; padding:2px; margin-left:8px; }
+.k-tabs button { padding:5px 12px; border-radius:5px; border:none; background:transparent; color:var(--k-text-3); font-size:12px; font-weight:500; font-family:inherit; cursor:pointer; }
+.k-tabs button.active { background:#2a3040; color:var(--k-text); }
+.k-tabs button .count { color:var(--k-text-3); margin-left:5px; font-size:11px; }
+.k-tabs button.active .count { color:#4ADE9E; }
+
+.k-top-right { margin-left:auto; display:flex; align-items:center; gap:14px; font-size:12px; color:var(--k-text-2); }
+.k-stat { display:flex; flex-direction:column; line-height:1.1; text-align:right; }
+.k-stat-label { font-size:10px; color:var(--k-text-3); text-transform:uppercase; letter-spacing:0.06em; font-weight:600; }
+.k-stat-val { font-family:var(--font-display); font-weight:600; font-size:15px; font-variant-numeric:tabular-nums; margin-top:1px; }
+.k-stat-val.ok { color:#4ADE9E; } .k-stat-val.warn { color:#FBBF24; }
+.k-clock { font-family:var(--font-mono); font-size:13px; background:#1a1f29; padding:5px 10px; border-radius:7px; }
+
+/* Search row */
+.k-search-row { position:absolute; top:52px; left:0; right:0; z-index:10; padding:8px 16px; background:#0f131a; border-bottom:1px solid var(--k-border); display:none; }
+.k-search-row.open { display:flex; }
+.k-search-input { flex:1; background:#1a1f29; border:1px solid var(--k-border); border-radius:7px; padding:8px 14px; color:var(--k-text); font-family:inherit; font-size:13px; outline:none; }
+.k-search-input:focus { border-color:#343b4d; }
+
+/* Ticket wall */
+.k-wall { overflow-x:auto; overflow-y:hidden; padding:14px; display:grid; grid-auto-flow:column; grid-auto-columns:310px; gap:12px; background:radial-gradient(ellipse at top,#12161f,#0a0c10 70%); align-items:start; }
+.k-wall::-webkit-scrollbar { height:8px; }
+.k-wall::-webkit-scrollbar-thumb { background:#262c3a; border-radius:4px; }
+
+/* Ticket */
+.tkt { background:var(--k-surface); border:1px solid var(--k-border); border-radius:12px; display:flex; flex-direction:column; overflow:hidden; max-height:calc(100vh - 120px); position:relative; }
+.tkt::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--brand); }
+.tkt.w::before { background:#FBBF24; }
+.tkt.d::before { background:#F87171; animation:blink 1s ease-in-out infinite; }
+.tkt.done::before { background:#7C8393; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.tkt-head { padding:12px 16px 10px; display:flex; align-items:baseline; justify-content:space-between; border-bottom:1px solid var(--k-border); }
+.tkt-table { font-family:var(--font-display); font-weight:700; font-size:24px; letter-spacing:-1px; line-height:1; }
+.tkt-table .n { color:var(--k-text); }
+.tkt-table .sub { font-family:var(--font-body); font-size:11px; font-weight:500; color:var(--k-text-3); letter-spacing:0; margin-left:8px; }
+.tkt-time { font-family:var(--font-mono); font-size:20px; font-weight:500; font-variant-numeric:tabular-nums; }
+.tkt.w .tkt-time { color:#FBBF24; } .tkt.d .tkt-time { color:#F87171; }
+
+.tkt-meta { padding:7px 16px; display:flex; align-items:center; gap:8px; font-size:11px; color:var(--k-text-3); border-bottom:1px solid var(--k-border); flex-wrap:wrap; }
+.tag { padding:2px 7px; border-radius:4px; background:#1F2430; color:var(--k-text-2); font-size:11px; font-weight:500; }
+.tag.hot { background:#2A1810; color:#FB923C; }
+.tag.src { background:rgba(37,211,102,0.12); color:#4ADE9E; }
+
+.tkt-body { padding:6px 0; overflow-y:auto; flex:1; }
+.tkt-body::-webkit-scrollbar { width:4px; }
+.tkt-body::-webkit-scrollbar-thumb { background:#262c3a; border-radius:2px; }
+.tkt-item { padding:8px 16px; border-bottom:1px dashed #1f2430; display:flex; gap:10px; cursor:pointer; transition:background 0.1s; }
+.tkt-item:hover { background:#181d27; }
+.tkt-item:last-child { border-bottom:none; }
+.tkt-qty { font-family:var(--font-display); font-weight:700; font-size:17px; color:#4ADE9E; min-width:24px; line-height:1.15; }
+.tkt-item.done .tkt-qty { color:var(--k-text-3); }
+.tkt-dish { flex:1; font-size:13.5px; font-weight:500; line-height:1.3; }
+.tkt-item.done .tkt-dish { text-decoration:line-through; color:var(--k-text-3); }
+.tkt-mods { font-size:11px; color:var(--k-text-3); margin-top:2px; }
+.tkt-check { width:20px; height:20px; border-radius:5px; border:1.5px solid var(--k-border-strong); flex-shrink:0; display:flex; align-items:center; justify-content:center; margin-top:1px; }
+.tkt-item.done .tkt-check { background:var(--brand); border-color:var(--brand); }
+.tkt-item.done .tkt-check::after { content:'✓'; color:#fff; font-size:12px; font-weight:700; }
+
+.tkt-foot { padding:9px 12px; border-top:1px solid var(--k-border); display:flex; gap:8px; background:#11151c; }
+.tkt-btn { flex:1; padding:9px; border-radius:7px; border:1px solid var(--k-border-strong); background:var(--k-surface-2); color:var(--k-text); font-size:12px; font-weight:600; font-family:inherit; cursor:pointer; }
+.tkt-btn:hover { background:#252b38; }
+.tkt-btn.ready { background:var(--brand); border-color:var(--brand); color:#fff; }
+.tkt-btn.ready:hover { background:var(--brand-dark); }
+
+/* Bottom bar */
+.k-bar { background:#0f131a; border-top:1px solid var(--k-border); display:flex; align-items:center; padding:0 20px; gap:14px; font-size:11px; color:var(--k-text-2); }
+.k-bar .hint { font-family:var(--font-mono); color:var(--k-text-3); font-size:10.5px; }
+.k-bar .hint kbd { background:#1a1f29; border:1px solid var(--k-border); border-radius:4px; padding:1px 5px; margin:0 2px; color:var(--k-text-2); font-family:var(--font-mono); font-size:10px; }
+/* live dot */
+.dot.live { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--brand); animation:pulse-live 2s infinite; margin-right:4px; }
+@keyframes pulse-live { 0%,100%{opacity:1} 50%{opacity:0.3} }
+</style>
+
+<div class="kds">
+  <!-- Topbar -->
+  <header class="k-top">
+    <div class="k-brand">
+      <div class="k-mark">M</div>
+      <div class="k-brand-name">Kitchen</div>
+    </div>
+    <div class="k-sep"></div>
+    <div class="k-station">Estación <strong id="kds-station-name">Todas</strong></div>
+    <div class="k-pill"><span class="dot live"></span>En línea</div>
+
+    <div class="k-tabs">
+      <button class="active" data-station="all">Activos <span class="count" id="kds-count-active">0</span></button>
+      <button data-station="delayed">Retrasados <span class="count" id="kds-count-delayed">0</span></button>
+      <button data-station="done">Listos <span class="count" id="kds-count-done">0</span></button>
+    </div>
+
+    <div class="k-top-right">
+      <div class="k-stat">
+        <div class="k-stat-label">T. promedio</div>
+        <div class="k-stat-val ok" id="kds-avg">—:—</div>
+      </div>
+      <div class="k-stat">
+        <div class="k-stat-label">En cola</div>
+        <div class="k-stat-val" id="kds-queue">0</div>
+      </div>
+      <div class="k-stat">
+        <div class="k-stat-label">Retrasados</div>
+        <div class="k-stat-val ok" id="kds-delayed">0</div>
+      </div>
+      <div class="k-clock" id="kds-clock">--:--</div>
+    </div>
+  </header>
+
+  <!-- Search bar (hidden, revealed by /) -->
+  <div class="k-search-row" id="kds-search-row">
+    <input class="k-search-input" id="kds-search" placeholder="Buscar mesa, plato…" autocomplete="off">
+  </div>
+
+  <!-- Ticket wall -->
+  <section class="k-wall" id="kds-wall">
+    <div style="padding:60px;text-align:center;color:#7C8393;font-size:14px;">Cargando…</div>
+  </section>
+
+  <!-- Bottom hint bar -->
+  <footer class="k-bar">
+    <div class="hint">
+      <kbd>1</kbd>…<kbd>7</kbd> seleccionar ·
+      <kbd>↵</kbd> marcar listo ·
+      <kbd>T</kbd> +2 min ·
+      <kbd>/</kbd> buscar
+    </div>
+    <div style="margin-left:auto;" class="m-live-status online">
+      <div class="dot"></div><span class="label">En vivo</span>
+    </div>
+  </footer>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/kitchen-v2.js" defer></script>
+</body>
+</html>
