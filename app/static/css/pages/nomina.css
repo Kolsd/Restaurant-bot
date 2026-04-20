@@ -1,0 +1,14 @@
+/* ── Nómina page ─────────────────────────────────────────────────── */
+.pay-row { display: grid; grid-template-columns: 40px 1.2fr 110px 110px 120px 110px 110px 90px; gap: 12px; padding: 11px 18px; border-bottom: 0.5px solid var(--border); align-items: center; font-size: 13px; }
+.pay-row.head { background: #fafaf8; font-size: 11.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+.pay-row:hover:not(.head) { background: #fafaf8; }
+.avatar-sm { width: 30px; height: 30px; border-radius: 50%; background: #f0f0e8; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--text-2); }
+
+.tip-bar { height: 8px; background: #f0f0e8; border-radius: 3px; overflow: hidden; margin-top: 6px; }
+.tip-bar > div { height: 100%; background: var(--brand); border-radius: 3px; }
+
+.period-card { background: linear-gradient(135deg, #1a2e1f 0%, #0F2F23 100%); color: #fff; border-radius: 12px; padding: 20px 24px; position: relative; overflow: hidden; }
+.period-card::before { content: ''; position: absolute; top: -40px; right: -40px; width: 160px; height: 160px; background: radial-gradient(circle, rgba(29,158,117,0.25), transparent 70%); }
+.period-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; font-weight: 500; }
+.period-big { font-family: var(--font-display); font-weight: 600; font-size: 44px; letter-spacing: -1.5px; line-height: 1; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.period-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 20px; padding-top: 16px; border-top: 0.5px solid rgba(255,255,255,0.15); }

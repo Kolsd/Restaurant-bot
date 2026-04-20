@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Fidelización</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/fidelizacion.css">
+</head>
+<body data-active="fidelizacion">
+
+<div class="app">
+  <aside class="sidebar" data-active="fidelizacion"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="/dashboard" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Fidelización</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+          <input id="search-input" placeholder="Buscar cliente&hellip;" aria-label="Buscar cliente">
+        </div>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Fidelización</div>
+          <div class="page-sub">Programa de puntos, niveles y campañas automáticas por WhatsApp. Mesio IA segmenta y personaliza cada mensaje.</div>
+        </div>
+        <div class="row">
+          <button class="btn" id="btn-configure">Configurar programa</button>
+          <button class="btn primary" id="btn-new-campaign">+ Nueva campaña</button>
+        </div>
+      </div>
+
+      <!-- Tiers -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;">
+        <div class="tier-card bronze">
+          <div class="tier-lbl">Bronce</div>
+          <div class="tier-val">1.842</div>
+          <div class="tier-sub">clientes &middot; 0&ndash;20 pts</div>
+          <div class="tier-info">+5% en todas las compras &middot; bienvenida 500 pts</div>
+        </div>
+        <div class="tier-card silver">
+          <div class="tier-lbl">Plata</div>
+          <div class="tier-val">612</div>
+          <div class="tier-sub">clientes &middot; 21&ndash;80 pts</div>
+          <div class="tier-info">+8% + bebida gratis aniversario</div>
+        </div>
+        <div class="tier-card gold">
+          <div class="tier-lbl">Oro</div>
+          <div class="tier-val">214</div>
+          <div class="tier-sub">clientes &middot; 81&ndash;200 pts</div>
+          <div class="tier-info">+12% + postre mensual + reserva VIP</div>
+        </div>
+        <div class="tier-card platinum">
+          <div class="tier-lbl">Platino</div>
+          <div class="tier-val">48</div>
+          <div class="tier-sub">clientes &middot; 200+ pts</div>
+          <div class="tier-info">+15% + mesa preferencial + invitación a catas</div>
+        </div>
+      </div>
+
+      <!-- Headline stats -->
+      <div class="metrics-row" style="margin-bottom: 16px;">
+        <div class="metric">
+          <div class="metric-label">Clientes activos</div>
+          <div class="metric-value">2.716</div>
+          <div class="metric-sub metric-delta up">&#9650; 14% mes a mes</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Frecuencia promedio</div>
+          <div class="metric-value">2.4&times;</div>
+          <div class="metric-sub">visitas / mes</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Ticket medio miembros</div>
+          <div class="metric-value">$86k</div>
+          <div class="metric-sub metric-delta up">&#9650; 24% vs no-miembros</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">ROI programa</div>
+          <div class="metric-value brand">4.8&times;</div>
+          <div class="metric-sub">por cada $1 invertido</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Puntos canjeados</div>
+          <div class="metric-value">68%</div>
+          <div class="metric-sub">del total acumulado</div>
+        </div>
+      </div>
+
+      <!-- Segmentos IA + funnel -->
+      <div class="g-2" style="margin-bottom: 16px;">
+        <div class="card flush">
+          <div class="card-head">
+            <div>
+              <div class="card-title"><span class="ai-spark"></span> Segmentos &middot; Mesio IA</div>
+              <div class="card-sub">Clustering automático por comportamiento reciente</div>
+            </div>
+            <button class="btn sm ghost" id="btn-view-all-segments">Ver todos</button>
+          </div>
+          <div style="padding: 14px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="seg-card" data-segment="vip-active">
+              <div class="seg-card-top">
+                <div class="seg-card-icon" style="background: #F0FAF5; color: var(--brand);">&#128142;</div>
+                <span class="badge success">Alto valor</span>
+              </div>
+              <div style="font-size: 13px; font-weight: 600; margin-top: 8px;">VIPs activos</div>
+              <div style="font-size: 11.5px; color: var(--text-3); margin-top: 3px;">Gastan &gt;$200k/mes, frecuencia &ge;4&times;</div>
+              <div style="margin-top: 8px; display: flex; justify-content: space-between;">
+                <span class="mono" style="font-weight: 600;">142 pers.</span>
+                <span style="font-size: 11.5px; color: var(--text-3);">$38M/mes</span>
+              </div>
+            </div>
+            <div class="seg-card" data-segment="vip-dormant">
+              <div class="seg-card-top">
+                <div class="seg-card-icon" style="background: #FFF8E6; color: var(--warning-text);">&#9888;&#65039;</div>
+                <span class="badge warn">Riesgo</span>
+              </div>
+              <div style="font-size: 13px; font-weight: 600; margin-top: 8px;">VIPs dormidos</div>
+              <div style="font-size: 11.5px; color: var(--text-3); margin-top: 3px;">Fueron VIP hace 60+ días, sin visita reciente</div>
+              <div style="margin-top: 8px; display: flex; justify-content: space-between;">
+                <span class="mono" style="font-weight: 600;">28 pers.</span>
+                <span style="font-size: 11.5px; color: var(--text-3);">$7.4M pot.</span>
+              </div>
+            </div>
+            <div class="seg-card" data-segment="new-month">
+              <div class="seg-card-top">
+                <div class="seg-card-icon" style="background: #DBEAFE; color: #1E40AF;">&#127807;</div>
+                <span class="badge info">Crecer</span>
+              </div>
+              <div style="font-size: 13px; font-weight: 600; margin-top: 8px;">Nuevos del mes</div>
+              <div style="font-size: 11.5px; color: var(--text-3); margin-top: 3px;">Primera visita &le;30d, aún no segunda</div>
+              <div style="margin-top: 8px; display: flex; justify-content: space-between;">
+                <span class="mono" style="font-weight: 600;">284 pers.</span>
+                <span style="font-size: 11.5px; color: var(--text-3);">Conv. 42%</span>
+              </div>
+            </div>
+            <div class="seg-card" data-segment="birthdays">
+              <div class="seg-card-top">
+                <div class="seg-card-icon" style="background: #F3E8FF; color: #6B21A8;">&#127874;</div>
+                <span class="badge purple">Ocasión</span>
+              </div>
+              <div style="font-size: 13px; font-weight: 600; margin-top: 8px;">Cumpleaños del mes</div>
+              <div style="font-size: 11.5px; color: var(--text-3); margin-top: 3px;">Postre gratis + 500 pts &middot; automático</div>
+              <div style="margin-top: 8px; display: flex; justify-content: space-between;">
+                <span class="mono" style="font-weight: 600;">186 pers.</span>
+                <span style="font-size: 11.5px; color: var(--text-3);">Conv. 68%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row" style="margin-bottom: 4px;">
+            <div>
+              <div style="font-size: 13px; font-weight: 600;">Funnel de conversión &mdash; 30 días</div>
+              <div style="font-size: 11.5px; color: var(--text-3); margin-top: 2px;">De primera visita a miembro oro</div>
+            </div>
+          </div>
+          <div style="margin-top: 14px;">
+            <div class="funnel-step">
+              <div>
+                <div class="funnel-label">Primera visita</div>
+                <div class="funnel-sub">Registro vía WhatsApp</div>
+              </div>
+              <div class="funnel-track"><div class="funnel-fill" style="width: 100%;">Entraron al programa</div></div>
+              <div class="funnel-num">1.284</div>
+              <div class="funnel-pct">100%</div>
+            </div>
+            <div class="funnel-step">
+              <div>
+                <div class="funnel-label">Segunda visita</div>
+                <div class="funnel-sub">&le;30 días después</div>
+              </div>
+              <div class="funnel-track"><div class="funnel-fill" style="width: 62%;">62%</div></div>
+              <div class="funnel-num">796</div>
+              <div class="funnel-pct">62%</div>
+            </div>
+            <div class="funnel-step">
+              <div>
+                <div class="funnel-label">Suben a Plata</div>
+                <div class="funnel-sub">&ge;21 puntos</div>
+              </div>
+              <div class="funnel-track"><div class="funnel-fill" style="width: 32%;">32%</div></div>
+              <div class="funnel-num">411</div>
+              <div class="funnel-pct">32%</div>
+            </div>
+            <div class="funnel-step">
+              <div>
+                <div class="funnel-label">Suben a Oro</div>
+                <div class="funnel-sub">&ge;81 puntos</div>
+              </div>
+              <div class="funnel-track"><div class="funnel-fill" style="width: 11%;">11%</div></div>
+              <div class="funnel-num">142</div>
+              <div class="funnel-pct">11%</div>
+            </div>
+            <div class="funnel-step">
+              <div>
+                <div class="funnel-label">Suben a Platino</div>
+                <div class="funnel-sub">&ge;200 puntos</div>
+              </div>
+              <div class="funnel-track"><div class="funnel-fill" style="width: 2.8%;">3%</div></div>
+              <div class="funnel-num">36</div>
+              <div class="funnel-pct">2.8%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active campaigns -->
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Campañas automáticas</div>
+            <div class="card-sub">Mesio IA dispara mensajes cuando se cumplen condiciones. WhatsApp Business API.</div>
+          </div>
+          <div class="row">
+            <div class="seg">
+              <button class="seg-btn active" data-camp-filter="active">Activas</button>
+              <button class="seg-btn" data-camp-filter="paused">Pausadas</button>
+              <button class="seg-btn" data-camp-filter="draft">Borradores</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="camp-row head">
+          <div>Campaña</div>
+          <div>Segmento</div>
+          <div class="num">Enviados &middot; 7d</div>
+          <div class="num">Conversión</div>
+          <div class="num">Revenue</div>
+          <div>Estado</div>
+        </div>
+
+        <div class="camp-row" data-camp-status="active">
+          <div>
+            <div style="font-weight: 500;">&#127874; Cumpleaños &mdash; postre gratis</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">Dispara D-3 &middot; incluye código QR canjeable</div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-2);">Cumpleaños del mes</div>
+          <div class="num mono" style="font-weight: 500;">48</div>
+          <div class="num brand">68.8%</div>
+          <div class="num mono" style="font-weight: 500;">$2.84M</div>
+          <div>
+            <label class="toggle" aria-label="Activar campaña cumpleaños">
+              <input type="checkbox" checked class="toggle-input" data-campaign="birthday">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="camp-row" data-camp-status="active">
+          <div>
+            <div style="font-weight: 500;">&#127807; Segunda visita &mdash; 2&times;1 en limonada</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">D+7 tras primera visita &middot; vigencia 14d</div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-2);">Nuevos del mes</div>
+          <div class="num mono" style="font-weight: 500;">284</div>
+          <div class="num brand">42.2%</div>
+          <div class="num mono" style="font-weight: 500;">$8.42M</div>
+          <div><span class="badge success">Activa</span></div>
+        </div>
+
+        <div class="camp-row" data-camp-status="active">
+          <div>
+            <div style="font-weight: 500;">&#128142; VIP dormido &mdash; reactivación</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">Sin visita 45+d &middot; entrante gratis + reserva personal</div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-2);">VIPs dormidos</div>
+          <div class="num mono" style="font-weight: 500;">28</div>
+          <div class="num brand">53.6%</div>
+          <div class="num mono" style="font-weight: 500;">$3.91M</div>
+          <div><span class="badge success">Activa</span></div>
+        </div>
+
+        <div class="camp-row" data-camp-status="active">
+          <div>
+            <div style="font-weight: 500;">&#11088; Review incentive &mdash; 200 pts por reseña</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">D+1 post-visita &middot; link directo Google</div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-2);">Todos los miembros</div>
+          <div class="num mono" style="font-weight: 500;">612</div>
+          <div class="num warning">18.4%</div>
+          <div class="num mono" style="font-weight: 500;">&mdash;</div>
+          <div><span class="badge success">Activa</span></div>
+        </div>
+
+        <div class="camp-row" data-camp-status="active">
+          <div>
+            <div style="font-weight: 500;">&#127869;&#65039; Menú del día &mdash; aviso almuerzo</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">L-V 11:30am &middot; solo a quienes optaron in</div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-2);">Corporativos cercanos</div>
+          <div class="num mono" style="font-weight: 500;">418</div>
+          <div class="num brand">24.8%</div>
+          <div class="num mono" style="font-weight: 500;">$5.12M</div>
+          <div><span class="badge success">Activa</span></div>
+        </div>
+
+        <div class="camp-row" data-camp-status="active">
+          <div>
+            <div style="font-weight: 500;">&#128106; Domingo familiar &mdash; postre a niños</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">Clientes con &ge;2 visitas en fin de semana con menor</div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-2);">Familias frecuentes</div>
+          <div class="num mono" style="font-weight: 500;">94</div>
+          <div class="num brand">61.7%</div>
+          <div class="num mono" style="font-weight: 500;">$4.26M</div>
+          <div><span class="badge success">Activa</span></div>
+        </div>
+
+        <div class="camp-row" style="border-bottom: none;" data-camp-status="active">
+          <div>
+            <div style="font-weight: 500;">&#127942; Desafío 5 visitas &mdash; bandeja paisa gratis</div>
+            <div style="font-size: 11.5px; color: var(--text-3);">Al completar 5 visitas en 30d &middot; máximo 1 por año</div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-2);">Clientes recurrentes</div>
+          <div class="num mono" style="font-weight: 500;">64</div>
+          <div class="num brand">78.1%</div>
+          <div class="num mono" style="font-weight: 500;">$2.14M</div>
+          <div><span class="badge success">Activa</span></div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
+<script src="/static/js/pages/fidelizacion.js"></script>
+</body>
+</html>

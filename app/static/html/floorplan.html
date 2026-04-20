@@ -9,55 +9,11 @@
 <link rel="stylesheet" href="/static/css/shared.css">
 <link rel="stylesheet" href="/static/css/pages/floorplan.css">
 </head>
-<body>
+<body data-active="salon">
 <div class="app">
 
-  <!-- ── Sidebar ──────────────────────────────────────────────── -->
-  <aside class="sidebar">
-    <div class="sb-brand">
-      <div class="mark">M</div>
-      <div>
-        <div class="sb-brand-name">Mesio</div>
-        <div class="sb-brand-sub">Mi Restaurante</div>
-      </div>
-    </div>
-
-    <div class="sb-switcher">
-      <div class="mark sm">R</div>
-      <div class="grow">
-        <div class="sb-switcher-name">Mi Restaurante</div>
-        <div class="sb-switcher-sub" id="tableCount">— mesas</div>
-      </div>
-      <div class="chev">⌄</div>
-    </div>
-
-    <div class="sb-group">
-      <div class="sb-group-label">Operación</div>
-      <a class="sb-item" href="/dashboard">◻ Resumen</a>
-      <a class="sb-item active" href="/floorplan">🪑 Salón</a>
-      <a class="sb-item" href="/caja">💳 Caja / POS</a>
-    </div>
-    <div class="sb-group">
-      <div class="sb-group-label">Equipo</div>
-      <a class="sb-item" href="/equipo">👥 Mi equipo</a>
-    </div>
-    <div class="sb-group">
-      <div class="sb-group-label">Admin</div>
-      <a class="sb-item" href="/billing">🏷️ Facturación</a>
-      <a class="sb-item" href="/settings">⚙️ Configuración</a>
-    </div>
-
-    <div class="sb-bottom">
-      <div class="sb-user">
-        <div class="sb-avatar">VC</div>
-        <div>
-          <div class="sb-user-name">Admin</div>
-          <div class="sb-user-role">Owner</div>
-        </div>
-      </div>
-      <button class="sb-item" id="logoutBtn" style="margin-top:4px;">↩ Cerrar sesión</button>
-    </div>
-  </aside>
+  <!-- ── Sidebar (shared component — sidebar.js) ───────────────── -->
+  <aside class="sidebar" role="navigation" aria-label="Menú principal"></aside>
 
   <!-- ── Main (canvas) ──────────────────────────────────────── -->
   <main class="main">
@@ -165,6 +121,7 @@
 </div><!-- /app -->
 
 <script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
 <script src="/static/js/pages/floorplan.js"></script>
 </body>
 </html>

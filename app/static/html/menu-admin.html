@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Menú e inventario</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/menu-admin.css">
+</head>
+<body data-active="menu">
+
+<div class="app">
+  <aside class="sidebar" data-active="menu"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="/dashboard" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Menú</span>
+      </div>
+      <div class="topbar-right">
+        <div class="search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+          <input placeholder="Buscar plato o ingrediente…" aria-label="Buscar menú">
+        </div>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Menú e inventario</div>
+          <div class="page-sub">Activa o desactiva platos en vivo, controla stock y calcula el food cost real de cada receta.</div>
+        </div>
+        <div class="row">
+          <div class="seg">
+            <button class="seg-btn active" data-tab="disp">🍽️ Disponibilidad</button>
+            <button class="seg-btn" data-tab="inv">📦 Inventario</button>
+            <button class="seg-btn" data-tab="esc">🧪 Escandallos</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- DISPONIBILIDAD -->
+      <div id="tab-disp">
+        <div class="row" style="margin-bottom: 14px; gap: 10px;">
+          <span style="font-size: 12px; color: var(--text-3);">Mostrando:</span>
+          <div class="seg">
+            <button class="seg-btn active">Todos</button>
+            <button class="seg-btn">Disponibles</button>
+            <button class="seg-btn">No disponibles</button>
+          </div>
+          <span style="margin-left: auto; font-size: 12px; color: var(--text-3);">42 / 48 disponibles · 6 pausados</span>
+          <button class="btn"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>Editar carta</button>
+          <button class="btn primary">🔄 Sincronizar sucursales</button>
+        </div>
+
+        <!-- Sopas -->
+        <div class="card flush" style="margin-bottom: 14px;">
+          <div class="cat-head">
+            <span class="cat-title">🍲 Sopas</span>
+            <span class="cat-count">4 / 5 disponibles</span>
+            <span class="cat-arrow open">▾</span>
+          </div>
+          <div class="dish-grid">
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#1D9E75,#0F6E56);">A</div>
+              <div>
+                <div class="dish-name">Ajiaco santafereño</div>
+                <div class="dish-meta">$28.000 · 312 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Ajiaco"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#3B82F6,#1D4ED8);">S</div>
+              <div>
+                <div class="dish-name">Sancocho trifásico</div>
+                <div class="dish-meta">$26.000 · 148 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Sancocho"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish off">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#F59E0B,#B45309);">M</div>
+              <div>
+                <div class="dish-name">Mute santandereano</div>
+                <div class="dish-meta">$24.000 · sin stock carne</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Mute"><input type="checkbox"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#EC4899,#BE185D);">C</div>
+              <div>
+                <div class="dish-name">Crema de auyama</div>
+                <div class="dish-meta">$18.000 · 62 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Crema"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#8B5CF6,#7C3AED);">C</div>
+              <div>
+                <div class="dish-name">Consomé de pollo</div>
+                <div class="dish-meta">$14.000 · 44 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Consomé"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fuertes -->
+        <div class="card flush" style="margin-bottom: 14px;">
+          <div class="cat-head">
+            <span class="cat-title">🥩 Platos fuertes</span>
+            <span class="cat-count">14 / 16 disponibles</span>
+            <span class="cat-arrow open">▾</span>
+          </div>
+          <div class="dish-grid">
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#1D9E75,#0F6E56);">B</div>
+              <div>
+                <div class="dish-name">Bandeja paisa</div>
+                <div class="dish-meta">$34.000 · 286 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Bandeja"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#F59E0B,#B45309);">C</div>
+              <div>
+                <div class="dish-name">Corrientazo del día</div>
+                <div class="dish-meta">$22.000 · 241 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Corrientazo"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#EF4444,#DC2626);">P</div>
+              <div>
+                <div class="dish-name">Posta negra</div>
+                <div class="dish-meta">$38.000 · 187 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Posta"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish off">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#8B5CF6,#7C3AED);">L</div>
+              <div>
+                <div class="dish-name">Lechona tolimense</div>
+                <div class="dish-meta">$32.000 · solo domingos</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Lechona"><input type="checkbox"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#06B6D4,#0E7490);">A</div>
+              <div>
+                <div class="dish-name">Arroz con coco y langostinos</div>
+                <div class="dish-meta">$44.000 · 76 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Arroz"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bebidas -->
+        <div class="card flush">
+          <div class="cat-head">
+            <span class="cat-title">🥤 Bebidas</span>
+            <span class="cat-count">12 / 14 disponibles</span>
+            <span class="cat-arrow open">▾</span>
+          </div>
+          <div class="dish-grid">
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#84CC16,#4D7C0F);">L</div>
+              <div>
+                <div class="dish-name">Limonada de hierbabuena</div>
+                <div class="dish-meta">$8.500 · 412 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Limonada"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#8B5CF6,#7C3AED);">J</div>
+              <div>
+                <div class="dish-name">Jugo de mora en leche</div>
+                <div class="dish-meta">$7.500 · 268 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Jugo"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+            <div class="dish">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#EF4444,#DC2626);">C</div>
+              <div>
+                <div class="dish-name">Club Colombia</div>
+                <div class="dish-meta">$7.000 · 187 vend. 7d</div>
+              </div>
+              <label class="toggle" aria-label="Disponibilidad Club Colombia"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INVENTARIO -->
+      <div id="tab-inv" style="display:none;">
+        <div class="alert-strip">
+          <span style="font-size: 18px; line-height: 1;">⚠️</span>
+          <div style="flex: 1;">
+            <div style="font-size: 13px; font-weight: 600; color: var(--warning-text);">3 productos requieren atención inmediata</div>
+            <div style="font-size: 12px; color: var(--text-2); margin-top: 3px;">Papa criolla agotada · Carne de cerdo en mínimo · Hierbabuena bajo umbral</div>
+          </div>
+          <button class="btn sm">Ordenar compra</button>
+        </div>
+
+        <div class="row" style="margin-bottom: 14px; gap: 10px;">
+          <span style="font-size: 12px; color: var(--text-3);">Categoría:</span>
+          <div class="seg">
+            <button class="seg-btn active">Todo</button>
+            <button class="seg-btn">Verduras</button>
+            <button class="seg-btn">Proteínas</button>
+            <button class="seg-btn">Secos</button>
+            <button class="seg-btn">Bebidas</button>
+          </div>
+          <span style="margin-left: auto; font-size: 12px; color: var(--text-3);">64 productos · $14.2M valor stock</span>
+          <button class="btn primary">+ Agregar producto</button>
+        </div>
+
+        <div class="card flush">
+          <div class="inv-row head">
+            <div>Producto</div>
+            <div style="text-align:right;">Stock actual</div>
+            <div style="text-align:right;">Mínimo</div>
+            <div>Afecta platos</div>
+            <div>Estado</div>
+            <div style="text-align:right;">Acciones</div>
+          </div>
+          <div class="inv-row">
+            <div>
+              <div style="font-weight: 500;">Papa criolla</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Verduras · proveedor Agrocol</div>
+            </div>
+            <div style="text-align:right;"><div class="stock-num" style="color: var(--danger);">1.2 kg</div></div>
+            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">8 kg</div></div>
+            <div><span class="chip-tag">Ajiaco</span></div>
+            <div><span class="badge danger">Agotado</span></div>
+            <div style="text-align:right; display: flex; gap: 4px; justify-content: flex-end;">
+              <button class="btn sm ghost">Repone</button>
+            </div>
+          </div>
+          <div class="inv-row">
+            <div>
+              <div style="font-weight: 500;">Carne de cerdo</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Proteínas · proveedor Cárnicos del Valle</div>
+            </div>
+            <div style="text-align:right;"><div class="stock-num" style="color: var(--warning-text);">4.8 kg</div></div>
+            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">5 kg</div></div>
+            <div><span class="chip-tag">Bandeja paisa</span> <span class="chip-tag">Chicharrón</span></div>
+            <div><span class="badge warn">Stock bajo</span></div>
+            <div style="text-align:right;"><button class="btn sm ghost">Repone</button></div>
+          </div>
+          <div class="inv-row">
+            <div>
+              <div style="font-weight: 500;">Hierbabuena</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Aromáticas · proveedor Herbal</div>
+            </div>
+            <div style="text-align:right;"><div class="stock-num" style="color: var(--warning-text);">120 gr</div></div>
+            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">200 gr</div></div>
+            <div><span class="chip-tag">Limonada hierbabuena</span></div>
+            <div><span class="badge warn">Stock bajo</span></div>
+            <div style="text-align:right;"><button class="btn sm ghost">Repone</button></div>
+          </div>
+          <div class="inv-row">
+            <div>
+              <div style="font-weight: 500;">Arroz blanco</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Secos · proveedor Diana</div>
+            </div>
+            <div style="text-align:right;"><div class="stock-num">18 kg</div></div>
+            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">10 kg</div></div>
+            <div><span class="chip-tag">Bandeja paisa</span> <span class="chip-tag">Corrientazo</span></div>
+            <div><span class="badge success">OK</span></div>
+            <div style="text-align:right;"><button class="btn sm ghost">Editar</button></div>
+          </div>
+          <div class="inv-row" style="border-bottom: none;">
+            <div>
+              <div style="font-weight: 500;">Aguacate Hass</div>
+              <div style="font-size: 11.5px; color: var(--text-3);">Verduras · Mercamio</div>
+            </div>
+            <div style="text-align:right;"><div class="stock-num">42 un</div></div>
+            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">20 un</div></div>
+            <div><span class="chip-tag">Bandeja paisa</span></div>
+            <div><span class="badge success">OK</span></div>
+            <div style="text-align:right;"><button class="btn sm ghost">Editar</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ESCANDALLOS -->
+      <div id="tab-esc" style="display:none;">
+        <div class="row" style="margin-bottom: 14px;">
+          <div>
+            <div style="font-size: 15px; font-weight: 600;">Escandallos &amp; food cost</div>
+            <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Define ingredientes por plato y el sistema calcula el costo real en tiempo real.</div>
+          </div>
+          <button class="btn primary" style="margin-left: auto;">+ Nuevo escandallo</button>
+        </div>
+
+        <div class="g-2">
+          <div class="card">
+            <div class="row" style="margin-bottom: 10px;">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#1D9E75,#0F6E56);">A</div>
+              <div>
+                <div style="font-size: 14px; font-weight: 600;">Ajiaco santafereño</div>
+                <div style="font-size: 11.5px; color: var(--text-3);">Precio venta $28.000 · 4 ingredientes</div>
+              </div>
+              <button class="btn sm ghost" style="margin-left: auto;">Editar</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; margin: 12px 0; padding-top: 12px; border-top: 0.5px dashed var(--border);">
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Pollo criollo</span><span class="mono">180g · $2.340</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Papa criolla</span><span class="mono">120g · $680</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Mazorca</span><span class="mono">1 un · $420</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Guascas + crema</span><span class="mono">— · $1.180</span></div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-top: 12px; border-top: 0.5px dashed var(--border);">
+              <div><div style="font-size: 10.5px; color: var(--text-3);">Food cost</div><div class="mono" style="font-weight: 600;">$4.620</div></div>
+              <div><div style="font-size: 10.5px; color: var(--text-3);">% sobre venta</div><div class="mono" style="font-weight: 600; color: var(--brand);">16.5%</div></div>
+              <div><div style="font-size: 10.5px; color: var(--text-3);">Margen bruto</div><div class="mono" style="font-weight: 600;">$23.380</div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="row" style="margin-bottom: 10px;">
+              <div class="dish-thumb" style="background: linear-gradient(135deg,#F59E0B,#B45309);">B</div>
+              <div>
+                <div style="font-size: 14px; font-weight: 600;">Bandeja paisa</div>
+                <div style="font-size: 11.5px; color: var(--text-3);">Precio venta $34.000 · 7 ingredientes</div>
+              </div>
+              <button class="btn sm ghost" style="margin-left: auto;">Editar</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; margin: 12px 0; padding-top: 12px; border-top: 0.5px dashed var(--border);">
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Frijol cargamanto</span><span class="mono">180g · $1.120</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Arroz blanco</span><span class="mono">150g · $540</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Carne molida</span><span class="mono">120g · $2.680</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Chicharrón</span><span class="mono">80g · $2.100</span></div>
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Chorizo + morcilla</span><span class="mono">2 un · $1.860</span></div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-top: 12px; border-top: 0.5px dashed var(--border);">
+              <div><div style="font-size: 10.5px; color: var(--text-3);">Food cost</div><div class="mono" style="font-weight: 600;">$9.720</div></div>
+              <div><div style="font-size: 10.5px; color: var(--text-3);">% sobre venta</div><div class="mono" style="font-weight: 600; color: var(--warning-text);">28.6%</div></div>
+              <div><div style="font-size: 10.5px; color: var(--text-3);">Margen bruto</div><div class="mono" style="font-weight: 600;">$24.280</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
+<script src="/static/js/pages/menu-admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Menu Engineering</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/menu-engineering.css">
+</head>
+<body data-active="menu-eng">
+
+<div class="app">
+  <aside class="sidebar" data-active="menu-eng"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="row" style="gap: 6px;">
+        <a href="/dashboard" style="text-decoration:none;color:inherit;" class="topbar-crumb">Mesio</a>
+        <span class="sep topbar-crumb">/</span>
+        <span class="topbar-title">Menu Engineering</span>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" aria-label="Notificaciones"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 10V7a4 4 0 018 0v3l1.5 1.5v.5h-11V11L4 10zM6.5 13.5a1.5 1.5 0 003 0"/></svg></button>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <div class="page-title">Menu Engineering</div>
+          <div class="page-sub">Clasifica tu carta por popularidad &times; margen. Mesio IA te dice qué platos promover, cuáles optimizar y cuáles retirar.</div>
+        </div>
+        <div class="row">
+          <div class="seg">
+            <button class="seg-btn" data-days="7">7 días</button>
+            <button class="seg-btn active" data-days="30">30 días</button>
+            <button class="seg-btn" data-days="90">90 días</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI banner -->
+      <div class="ai-banner" style="margin-bottom: 16px;">
+        <div class="ai-banner-label"><span class="ai-spark"></span> Mesio IA — diagnóstico del mes</div>
+        <div class="ai-banner-body" id="ai-diagnosis">
+          Tu <strong>Ajiaco santafereño</strong> y <strong>Posta negra</strong> son tus dos grandes <strong class="brand-text">estrellas</strong> — alta venta y alto margen. La <strong>Cazuela de mariscos</strong> tiene margen excelente pero baja popularidad: considera moverla a destacados en el menú digital o hacer combo. La <strong>Crema de auyama</strong> y <strong>Mute santandereano</strong> son <strong class="muted-text">perros</strong> — evalúa retirarlos o rediseñarlos.
+        </div>
+      </div>
+
+      <!-- Stats strip -->
+      <div class="metrics-row" style="margin-bottom: 16px;">
+        <div class="metric">
+          <div class="metric-label">Platos analizados</div>
+          <div class="metric-value" id="stat-total">48</div>
+          <div class="metric-sub">30 días · 8.4k eventos</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">&#11088; Stars</div>
+          <div class="metric-value brand" id="stat-stars">12</div>
+          <div class="metric-sub">25% de la carta</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">&#129513; Puzzles</div>
+          <div class="metric-value warning" id="stat-puzzles">9</div>
+          <div class="metric-sub">18.8%</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">&#128052; Plowhorses</div>
+          <div class="metric-value blue" id="stat-plowhorses">15</div>
+          <div class="metric-sub">31.3%</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">&#128054; Dogs</div>
+          <div class="metric-value muted" id="stat-dogs">12</div>
+          <div class="metric-sub">25%</div>
+        </div>
+      </div>
+
+      <!-- Matrix scatter -->
+      <div class="card" style="margin-bottom: 16px;">
+        <div class="row" style="margin-bottom: 8px;">
+          <div>
+            <div style="font-size: 13px; font-weight: 600;">Matriz popularidad &times; margen</div>
+            <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Tamaño del círculo = volumen de ventas. Hover para detalle.</div>
+          </div>
+          <div class="legend-row" style="margin-left: auto;">
+            <span><span class="dot" style="background: var(--brand);"></span>Stars</span>
+            <span><span class="dot" style="background: var(--warning);"></span>Puzzles</span>
+            <span><span class="dot" style="background: #378ADD;"></span>Plowhorses</span>
+            <span><span class="dot" style="background: var(--text-3);"></span>Dogs</span>
+          </div>
+        </div>
+        <div class="matrix-wrap">
+          <div class="matrix-y">&#8593; Margen bruto</div>
+          <div class="matrix">
+            <div class="matrix-grid">
+              <!-- Top-left: Puzzles -->
+              <div class="quad">
+                <div class="quad-label warning-text">&#129513; Puzzles</div>
+                <div class="quad-desc">Alto margen &middot; baja rotación. Darles visibilidad.</div>
+                <div class="quad-count">9</div>
+              </div>
+              <!-- Top-right: Stars -->
+              <div class="quad">
+                <div class="quad-label brand-text">&#11088; Stars</div>
+                <div class="quad-desc">Alto margen + alta rotación. Proteger y promover.</div>
+                <div class="quad-count">12</div>
+              </div>
+              <!-- Bottom-left: Dogs -->
+              <div class="quad">
+                <div class="quad-label muted-text">&#128054; Dogs</div>
+                <div class="quad-desc">Baja rotación + bajo margen. Candidatos a retirar.</div>
+                <div class="quad-count">12</div>
+              </div>
+              <!-- Bottom-right: Plowhorses -->
+              <div class="quad">
+                <div class="quad-label blue-text">&#128052; Plowhorses</div>
+                <div class="quad-desc">Alta rotación &middot; margen bajo. Subir precio o reformular.</div>
+                <div class="quad-count">15</div>
+              </div>
+            </div>
+
+            <!-- Stars (top-right) -->
+            <div class="bubble stars" style="top: 8%; left: 78%; width: 68px; height: 68px; font-size: 10.5px;" title="Ajiaco santafereño — 312 uds">Ajiaco<br>312</div>
+            <div class="bubble stars" style="top: 14%; left: 88%; width: 54px; height: 54px;" title="Posta negra — 187 uds">Posta<br>187</div>
+            <div class="bubble stars" style="top: 20%; left: 70%; width: 48px; height: 48px;" title="Limonada — 412 uds">Limonada<br>412</div>
+            <div class="bubble stars" style="top: 28%; left: 82%; width: 42px; height: 42px;" title="Arroz coco">Arroz<br>coco</div>
+            <div class="bubble stars" style="top: 35%; left: 76%; width: 38px; height: 38px;" title="Chorizo">Chorizo</div>
+
+            <!-- Puzzles (top-left) -->
+            <div class="bubble puzzles" style="top: 10%; left: 16%; width: 54px; height: 54px;" title="Cazuela de mariscos">Cazuela<br>marisc.</div>
+            <div class="bubble puzzles" style="top: 18%; left: 32%; width: 40px; height: 40px;" title="Salmón grillé">Salmón</div>
+            <div class="bubble puzzles" style="top: 28%; left: 22%; width: 36px; height: 36px;" title="Lomo de cerdo">Lomo<br>cerdo</div>
+            <div class="bubble puzzles" style="top: 36%; left: 42%; width: 34px; height: 34px;" title="Tartar">Tartar</div>
+
+            <!-- Plowhorses (bottom-right) -->
+            <div class="bubble plowhorses" style="top: 62%; left: 78%; width: 60px; height: 60px;" title="Corrientazo — 241 uds">Corriente<br>241</div>
+            <div class="bubble plowhorses" style="top: 70%; left: 84%; width: 46px; height: 46px;" title="Bandeja paisa — 286 uds">Bandeja<br>286</div>
+            <div class="bubble plowhorses" style="top: 78%; left: 72%; width: 42px; height: 42px;" title="Jugo de mora">Jugo<br>mora</div>
+            <div class="bubble plowhorses" style="top: 58%; left: 66%; width: 38px; height: 38px;" title="Empanada">Empanada</div>
+            <div class="bubble plowhorses" style="top: 72%; left: 60%; width: 34px; height: 34px;" title="Club colombiano">Club col.</div>
+
+            <!-- Dogs (bottom-left) -->
+            <div class="bubble dogs" style="top: 70%; left: 28%; width: 32px; height: 32px;" title="Mute santandereano">Mute</div>
+            <div class="bubble dogs" style="top: 78%; left: 16%; width: 28px; height: 28px;" title="Crema de auyama">Crema<br>auy.</div>
+            <div class="bubble dogs" style="top: 65%; left: 12%; width: 30px; height: 30px;" title="Ensalada César">Ensalada<br>César</div>
+            <div class="bubble dogs" style="top: 84%; left: 34%; width: 26px; height: 26px;" title="Consomé">Consomé</div>
+          </div>
+          <div class="matrix-x">Popularidad (unidades vendidas) &#8594;</div>
+        </div>
+      </div>
+
+      <!-- Detail table -->
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Detalle por plato</div>
+            <div class="card-sub">Ordenado por clasificación y volumen</div>
+          </div>
+          <div class="row">
+            <div class="seg">
+              <button class="seg-btn active" data-filter="all">Todos</button>
+              <button class="seg-btn" data-filter="stars">&#11088; Stars</button>
+              <button class="seg-btn" data-filter="puzzles">&#129513; Puzzles</button>
+              <button class="seg-btn" data-filter="plowhorses">&#128052; Plowhorses</button>
+              <button class="seg-btn" data-filter="dogs">&#128054; Dogs</button>
+            </div>
+            <button class="btn sm ghost" id="btn-export">Exportar</button>
+          </div>
+        </div>
+        <table class="me-tbl" id="me-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Plato</th>
+              <th>Clasificación</th>
+              <th class="num active" data-sort="units">Unidades &#8595;</th>
+              <th class="num" data-sort="conversion">Conversión</th>
+              <th class="num" data-sort="margin">Margen</th>
+              <th class="num" data-sort="revenue">Revenue</th>
+              <th>Recomendación IA</th>
+            </tr>
+          </thead>
+          <tbody id="me-tbody">
+            <tr data-quad="stars">
+              <td class="muted mono">01</td>
+              <td>
+                <div style="font-weight: 500;">Limonada hierbabuena</div>
+                <div style="font-size: 11px; color: var(--text-3);">Bebidas &middot; $8.500</div>
+              </td>
+              <td><span class="quad-badge stars">&#11088; Star</span></td>
+              <td class="num">1.648</td>
+              <td class="num brand-text">86.8%</td>
+              <td class="num"><span class="badge success">76%</span></td>
+              <td class="num">$14.0M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Proteger. Destacar como signature.</td>
+            </tr>
+            <tr data-quad="stars">
+              <td class="muted mono">02</td>
+              <td>
+                <div style="font-weight: 500;">Ajiaco santafereño</div>
+                <div style="font-size: 11px; color: var(--text-3);">Sopas &middot; $28.000</div>
+              </td>
+              <td><span class="quad-badge stars">&#11088; Star</span></td>
+              <td class="num">1.248</td>
+              <td class="num brand-text">72.4%</td>
+              <td class="num"><span class="badge success">62%</span></td>
+              <td class="num">$34.9M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Subir stock papa criolla — stockout 3&times; este mes.</td>
+            </tr>
+            <tr data-quad="plowhorses">
+              <td class="muted mono">03</td>
+              <td>
+                <div style="font-weight: 500;">Bandeja paisa</div>
+                <div style="font-size: 11px; color: var(--text-3);">Fuertes &middot; $34.000</div>
+              </td>
+              <td><span class="quad-badge plowhorses">&#128052; Plowhorse</span></td>
+              <td class="num">1.144</td>
+              <td class="num brand-text">68.2%</td>
+              <td class="num"><span class="badge">44%</span></td>
+              <td class="num">$38.9M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Subir $2.000 o bajar 10g carne &middot; mismo margen con &minus;8% porción.</td>
+            </tr>
+            <tr data-quad="plowhorses">
+              <td class="muted mono">04</td>
+              <td>
+                <div style="font-weight: 500;">Corrientazo del día</div>
+                <div style="font-size: 11px; color: var(--text-3);">Fuertes &middot; $22.000</div>
+              </td>
+              <td><span class="quad-badge plowhorses">&#128052; Plowhorse</span></td>
+              <td class="num">964</td>
+              <td class="num brand-text">74.0%</td>
+              <td class="num"><span class="badge">44%</span></td>
+              <td class="num">$21.2M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Promo bebida incluida +$4.000 &middot; margen total sube a 52%.</td>
+            </tr>
+            <tr data-quad="stars">
+              <td class="muted mono">05</td>
+              <td>
+                <div style="font-weight: 500;">Posta negra</div>
+                <div style="font-size: 11px; color: var(--text-3);">Fuertes &middot; $38.000</div>
+              </td>
+              <td><span class="quad-badge stars">&#11088; Star</span></td>
+              <td class="num">748</td>
+              <td class="num brand-text">71.5%</td>
+              <td class="num"><span class="badge success">64%</span></td>
+              <td class="num">$28.4M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Destacar en carta como "especialidad".</td>
+            </tr>
+            <tr data-quad="puzzles">
+              <td class="muted mono">06</td>
+              <td>
+                <div style="font-weight: 500;">Cazuela de mariscos</div>
+                <div style="font-size: 11px; color: var(--text-3);">Fuertes &middot; $52.000</div>
+              </td>
+              <td><span class="quad-badge puzzles">&#129513; Puzzle</span></td>
+              <td class="num">376</td>
+              <td class="num warning-text">42.8%</td>
+              <td class="num"><span class="badge success">58%</span></td>
+              <td class="num">$19.5M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Destacar con foto en menú digital. Probar combo con arroz coco.</td>
+            </tr>
+            <tr data-quad="stars">
+              <td class="muted mono">07</td>
+              <td>
+                <div style="font-weight: 500;">Arroz coco langostinos</div>
+                <div style="font-size: 11px; color: var(--text-3);">Fuertes &middot; $44.000</div>
+              </td>
+              <td><span class="quad-badge stars">&#11088; Star</span></td>
+              <td class="num">304</td>
+              <td class="num brand-text">62.2%</td>
+              <td class="num"><span class="badge success">56%</span></td>
+              <td class="num">$13.3M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Mantener.</td>
+            </tr>
+            <tr data-quad="plowhorses">
+              <td class="muted mono">08</td>
+              <td>
+                <div style="font-weight: 500;">Sancocho trifásico</div>
+                <div style="font-size: 11px; color: var(--text-3);">Sopas &middot; $26.000</div>
+              </td>
+              <td><span class="quad-badge plowhorses">&#128052; Plowhorse</span></td>
+              <td class="num">592</td>
+              <td class="num brand-text">64.0%</td>
+              <td class="num"><span class="badge">46%</span></td>
+              <td class="num">$15.4M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Ajustar porción carne. Subir $1.500.</td>
+            </tr>
+            <tr data-quad="puzzles">
+              <td class="muted mono">09</td>
+              <td>
+                <div style="font-weight: 500;">Salmón grillé</div>
+                <div style="font-size: 11px; color: var(--text-3);">Fuertes &middot; $48.000</div>
+              </td>
+              <td><span class="quad-badge puzzles">&#129513; Puzzle</span></td>
+              <td class="num">184</td>
+              <td class="num warning-text">38.2%</td>
+              <td class="num"><span class="badge success">62%</span></td>
+              <td class="num">$8.8M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Dar protagonismo en maridaje del fin de semana.</td>
+            </tr>
+            <tr data-quad="dogs">
+              <td class="muted mono">10</td>
+              <td>
+                <div style="font-weight: 500;">Mute santandereano</div>
+                <div style="font-size: 11px; color: var(--text-3);">Sopas &middot; $24.000</div>
+              </td>
+              <td><span class="quad-badge dogs">&#128054; Dog</span></td>
+              <td class="num">94</td>
+              <td class="num danger-text">22.4%</td>
+              <td class="num"><span class="badge">38%</span></td>
+              <td class="num">$2.2M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Candidato a retirar. Ocupa espacio mental en la carta.</td>
+            </tr>
+            <tr data-quad="dogs">
+              <td class="muted mono">11</td>
+              <td>
+                <div style="font-weight: 500;">Crema de auyama</div>
+                <div style="font-size: 11px; color: var(--text-3);">Sopas &middot; $18.000</div>
+              </td>
+              <td><span class="quad-badge dogs">&#128054; Dog</span></td>
+              <td class="num">62</td>
+              <td class="num danger-text">18.4%</td>
+              <td class="num"><span class="badge">41%</span></td>
+              <td class="num">$1.1M</td>
+              <td style="font-size: 12px; color: var(--text-2);">Retirar o transformar en entrada.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/sidebar.js"></script>
+<script src="/static/js/pages/menu-engineering.js"></script>
+</body>
+</html>
