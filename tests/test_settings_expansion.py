@@ -293,3 +293,211 @@ def test_post_settings_returns_complete_shape(monkeypatch):
         assert key in data, f"Missing key: {key}"
     assert data["nit"] == "800000001-2"
     assert data["city"] == "Cali"
+
+
+# ── POST /api/settings/pause ──────────────────────────────────────────────────
+
+
+def _pause_auth_patches(monkeypatch, role: str = "owner", features: dict | None = None):
+    """Patch auth for pause endpoint tests."""
+    feats = {
+        "bot_active": True,
+        "payment_methods": ["efectivo"],
+        "timezone": "America/Bogota",
+        "currency": "COP",
+        "locale": "es-CO",
+    }
+    if features:
+        feats.update(features)
+
+    restaurant = {
+        "id": RESTAURANT_ID,
+        "org_id": RESTAURANT_ID,
+        "location_id": RESTAURANT_ID,
+        "name": "El Fogón",
+        "whatsapp_number": "573001234567",
+        "address": "Calle 10",
+        "features": feats,
+    }
+    user = {
+        "username": "owner_test",
+        "restaurant_name": "El Fogón",
+        "branch_id": RESTAURANT_ID,
+        "role": role,
+        "password_hash": "$2b$12$placeholder",
+    }
+
+    from app.services import database as db
+
+    monkeypatch.setattr("app.routes.deps.verify_token",
+                        AsyncMock(return_value="owner_test"))
+    monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=user))
+    monkeypatch.setattr(db, "db_get_restaurant_by_id",
+                        AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_check_module",
+                        AsyncMock(return_value=False))
+    return restaurant
+
+
+def test_pause_sets_bot_active_false(monkeypatch):
+    """POST /api/settings/pause with paused=true sets bot_active=false in features."""
+    _pause_auth_patches(monkeypatch)
+
+    from app.repositories import restaurant_repo
+
+    paused_features = {
+        "bot_active": False,
+        "paused_at": "2026-04-20T12:00:00Z",
+        "paused_by": "owner_test",
+    }
+    paused_restaurant = {
+        "id": RESTAURANT_ID,
+        "org_id": RESTAURANT_ID,
+        "location_id": RESTAURANT_ID,
+        "name": "El Fogón",
+        "whatsapp_number": "573001234567",
+        "address": "Calle 10",
+        "features": paused_features,
+    }
+
+    from app.services import database as db
+    db.db_get_restaurant_by_id = AsyncMock(side_effect=[
+        _pause_auth_patches.__wrapped__(monkeypatch) if hasattr(_pause_auth_patches, "__wrapped__") else paused_restaurant,
+        paused_restaurant,
+    ])
+
+    merge_mock = AsyncMock(return_value=paused_features)
+    monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/settings/pause",
+        json={"paused": True},
+        headers={"Authorization": "Bearer faketoken"},
+    )
+    assert resp.status_code == 200, resp.text
+    merge_mock.assert_awaited_once()
+    patch_arg = merge_mock.call_args[0][1]
+    assert patch_arg["bot_active"] is False
+
+
+def test_unpause_sets_bot_active_true(monkeypatch):
+    """POST /api/settings/pause with paused=false sets bot_active=true."""
+    _pause_auth_patches(monkeypatch, features={"bot_active": False, "paused_at": "2026-04-20T10:00:00Z"})
+
+    from app.repositories import restaurant_repo
+    from app.services import database as db
+
+    active_features = {"bot_active": True, "paused_at": None, "paused_by": None}
+    active_restaurant = {
+        "id": RESTAURANT_ID,
+        "org_id": RESTAURANT_ID,
+        "location_id": RESTAURANT_ID,
+        "name": "El Fogón",
+        "whatsapp_number": "573001234567",
+        "address": "Calle 10",
+        "features": active_features,
+    }
+    db.db_get_restaurant_by_id = AsyncMock(return_value=active_restaurant)
+
+    merge_mock = AsyncMock(return_value=active_features)
+    monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/settings/pause",
+        json={"paused": False},
+        headers={"Authorization": "Bearer faketoken"},
+    )
+    assert resp.status_code == 200, resp.text
+    patch_arg = merge_mock.call_args[0][1]
+    assert patch_arg["bot_active"] is True
+    assert patch_arg["paused_at"] is None
+    assert patch_arg["paused_by"] is None
+
+
+def test_pause_stores_timestamp_and_user(monkeypatch):
+    """POST /api/settings/pause with paused=true stores paused_at and paused_by."""
+    _pause_auth_patches(monkeypatch)
+
+    from app.repositories import restaurant_repo
+    from app.services import database as db
+
+    paused_features = {"bot_active": False, "paused_at": "2026-04-20T12:00:00Z", "paused_by": "owner_test"}
+    paused_restaurant = {
+        "id": RESTAURANT_ID,
+        "org_id": RESTAURANT_ID,
+        "location_id": RESTAURANT_ID,
+        "name": "El Fogón",
+        "whatsapp_number": "573001234567",
+        "address": "Calle 10",
+        "features": paused_features,
+    }
+    db.db_get_restaurant_by_id = AsyncMock(return_value=paused_restaurant)
+
+    merge_mock = AsyncMock(return_value=paused_features)
+    monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/settings/pause",
+        json={"paused": True},
+        headers={"Authorization": "Bearer faketoken"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["paused"] is True
+    assert "paused_at" in data
+    assert "paused_by" in data
+
+    patch_arg = merge_mock.call_args[0][1]
+    assert "paused_at" in patch_arg
+    assert patch_arg["paused_by"] == "owner_test"
+
+
+def test_pause_tenant_isolation(monkeypatch):
+    """POST /api/settings/pause only affects the authenticated restaurant's org."""
+    _pause_auth_patches(monkeypatch)
+
+    from app.repositories import restaurant_repo
+    from app.services import database as db
+
+    paused_restaurant = {
+        "id": RESTAURANT_ID,
+        "org_id": RESTAURANT_ID,
+        "location_id": RESTAURANT_ID,
+        "name": "El Fogón",
+        "whatsapp_number": "573001234567",
+        "address": "Calle 10",
+        "features": {"bot_active": False, "paused_at": "2026-04-20T12:00:00Z"},
+    }
+    db.db_get_restaurant_by_id = AsyncMock(return_value=paused_restaurant)
+
+    merge_mock = AsyncMock(return_value=paused_restaurant["features"])
+    monkeypatch.setattr(restaurant_repo, "db_merge_restaurant_features", merge_mock)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/settings/pause",
+        json={"paused": True},
+        headers={"Authorization": "Bearer faketoken"},
+    )
+    assert resp.status_code == 200
+
+    # Verify db_merge_restaurant_features was called with this restaurant's ID
+    call_args = merge_mock.call_args[0]
+    assert call_args[0] == RESTAURANT_ID
+
+
+def test_pause_requires_owner_or_admin(monkeypatch):
+    """POST /api/settings/pause returns 403 for gerente role."""
+    _pause_auth_patches(monkeypatch, role="gerente")
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/settings/pause",
+        json={"paused": True},
+        headers={"Authorization": "Bearer faketoken"},
+    )
+    assert resp.status_code == 403
+    assert "admin" in resp.json()["detail"].lower() or "owner" in resp.json()["detail"].lower()

@@ -270,10 +270,123 @@
     }
   }
 
+  // ── Nueva reserva modal ───────────────────────────────────────────
+
+  function _buildModalHtml() {
+    var tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    var minDate = isoDate(tomorrow);
+    return '<div id="newResModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="newResTitle">' +
+      '<div class="modal-card" style="max-width:420px;">' +
+        '<div class="modal-header"><h3 id="newResTitle">Nueva reserva</h3>' +
+          '<button id="newResClose" class="btn icon ghost" aria-label="Cerrar">&times;</button></div>' +
+        '<div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">' +
+          '<label>Nombre del cliente *<input id="nrName" class="inp" type="text" autocomplete="off"></label>' +
+          '<label>Teléfono<input id="nrPhone" class="inp" type="tel" autocomplete="off"></label>' +
+          '<label>Personas (1-20) *<input id="nrPax" class="inp" type="number" min="1" max="20" value="2"></label>' +
+          '<label>Fecha *<input id="nrDate" class="inp" type="date" min="' + minDate + '"></label>' +
+          '<label>Hora *<input id="nrTime" class="inp" type="time" value="19:00"></label>' +
+          '<label>Notas<textarea id="nrNotes" class="inp" rows="2"></textarea></label>' +
+        '</div>' +
+        '<div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;">' +
+          '<button id="newResCancel" class="btn ghost">Cancelar</button>' +
+          '<button id="newResSubmit" class="btn primary">Crear reserva</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   function openNewReservationModal() {
-    // TODO: POST /api/reservations does not exist yet — flagged as pending
-    if (typeof mesioToast === 'function') {
-      mesioToast('Creación de reservas via formulario — endpoint pendiente', 'info');
+    var existing = document.getElementById('newResModal');
+    if (existing) existing.remove();
+
+    document.body.insertAdjacentHTML('beforeend', _buildModalHtml());
+
+    var modal = document.getElementById('newResModal');
+    var closeModal = function () { modal.remove(); };
+
+    document.getElementById('newResClose').addEventListener('click', closeModal);
+    document.getElementById('newResCancel').addEventListener('click', closeModal);
+
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeModal();
+    });
+
+    document.getElementById('newResSubmit').addEventListener('click', submitNewReservation);
+  }
+
+  async function submitNewReservation() {
+    var nameEl    = document.getElementById('nrName');
+    var phoneEl   = document.getElementById('nrPhone');
+    var paxEl     = document.getElementById('nrPax');
+    var dateEl    = document.getElementById('nrDate');
+    var timeEl    = document.getElementById('nrTime');
+    var notesEl   = document.getElementById('nrNotes');
+    var submitBtn = document.getElementById('newResSubmit');
+
+    var name = nameEl ? nameEl.value.trim() : '';
+    var phone = phoneEl ? phoneEl.value.trim() : '';
+    var pax = paxEl ? parseInt(paxEl.value, 10) : 0;
+    var date = dateEl ? dateEl.value : '';
+    var time = timeEl ? timeEl.value : '';
+    var notes = notesEl ? notesEl.value.trim() : '';
+
+    if (!name) {
+      if (typeof mesioToast === 'function') mesioToast('El nombre es obligatorio', 'warning');
+      if (nameEl) nameEl.focus();
+      return;
+    }
+    if (!pax || pax < 1 || pax > 20) {
+      if (typeof mesioToast === 'function') mesioToast('Número de personas debe ser entre 1 y 20', 'warning');
+      if (paxEl) paxEl.focus();
+      return;
+    }
+    if (!date) {
+      if (typeof mesioToast === 'function') mesioToast('La fecha es obligatoria', 'warning');
+      if (dateEl) dateEl.focus();
+      return;
+    }
+    if (!time) {
+      if (typeof mesioToast === 'function') mesioToast('La hora es obligatoria', 'warning');
+      if (timeEl) timeEl.focus();
+      return;
+    }
+
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creando…'; }
+
+    try {
+      var headers = Object.assign({ 'Content-Type': 'application/json' },
+        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
+      var res = await fetch('/api/reservations', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          customer_name: name,
+          customer_phone: phone || null,
+          party_size: pax,
+          date: date,
+          time: time,
+          notes: notes || null,
+          source: 'manual'
+        })
+      });
+
+      if (res.status === 400 || res.status === 422) {
+        var err = await res.json().catch(function () { return {}; });
+        if (typeof mesioToast === 'function') mesioToast(err.detail || 'Datos inválidos', 'warning');
+        return;
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      if (typeof mesioToast === 'function') mesioToast('Reserva creada', 'success');
+      var modal = document.getElementById('newResModal');
+      if (modal) modal.remove();
+      loadReservations();
+    } catch (e) {
+      console.error('reservaciones: create error', e);
+      if (typeof mesioToast === 'function') mesioToast('Error al crear la reserva', 'error');
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Crear reserva'; }
     }
   }
 

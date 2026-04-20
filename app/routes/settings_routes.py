@@ -167,6 +167,79 @@ async def save_settings(request: Request):
     return _build_settings_response(updated, final_features)
 
 
+# ── PAUSE / RESUME ───────────────────────────────────────────────────
+
+
+class _PauseBody(BaseModel):
+    paused: bool
+
+
+@router.post("/api/settings/pause")
+async def pause_restaurant(body: _PauseBody, request: Request):
+    """Pause or resume the restaurant's WhatsApp bot and operations.
+
+    Sets features.bot_active = false + paused_at / paused_by when paused=true.
+    Clears those keys when paused=false.
+
+    Auth: owner or admin only (gerente is excluded — restaurant-level config).
+    """
+    user = await get_current_user(request)
+    role = (user.get("role") or "").lower()
+    allowed_roles = {"owner", "admin"}
+    # role field may be a comma-separated list when staff has multiple roles
+    user_roles = {r.strip() for r in role.split(",") if r.strip()}
+    if not (user_roles & allowed_roles):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner o admin pueden pausar/reanudar el restaurante",
+        )
+
+    branch_id = user.get("branch_id")
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and role in ("owner", "admin"):
+        branch_id = int(branch_header)
+
+    restaurant = await db.db_get_restaurant_by_id(branch_id)
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+
+    restaurant_id = restaurant["id"]
+
+    if body.paused:
+        now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        patch = {
+            "bot_active": False,
+            "paused_at": now_iso,
+            "paused_by": user.get("username") or "",
+        }
+    else:
+        # Unpause: re-activate and clear pause metadata
+        patch = {
+            "bot_active": True,
+            "paused_at": None,
+            "paused_by": None,
+        }
+
+    with tenant_scope(restaurant_id):
+        await restaurant_repo.db_merge_restaurant_features(restaurant_id, patch)
+
+    log.info(
+        "settings.pause" if body.paused else "settings.unpause",
+        restaurant_id=restaurant_id,
+        paused_by=user.get("username"),
+    )
+
+    # Re-fetch to return authoritative state
+    updated = await db.db_get_restaurant_by_id(restaurant_id)
+    features = _parse_features(updated or {})
+
+    return {
+        "paused": not features.get("bot_active", True),
+        "paused_at": features.get("paused_at"),
+        "paused_by": features.get("paused_by"),
+    }
+
+
 # ── WEEKLY REPORTS ────────────────────────────────────────────────────
 
 _PHONE_RE = re.compile(r"^\+?\d{10,15}$")

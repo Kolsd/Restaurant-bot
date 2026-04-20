@@ -393,3 +393,46 @@ async def db_mark_confirmation_sent(reservation_id: int) -> None:
             "UPDATE reservations SET confirmation_sent=TRUE WHERE id=$1",
             reservation_id,
         )
+
+
+async def db_create_reservation(
+    customer_name: str,
+    date_str: str,
+    time_str: str,
+    party_size: int,
+    customer_phone: str | None = None,
+    notes: str | None = None,
+    table_id: int | None = None,
+    source: str = "manual",
+    bot_number: str = "",
+) -> dict:
+    """Insert a new reservation row and return the full dict.
+
+    Requires active tenant_scope() — org_id is read from the GUC.
+    Status defaults to 'pending'.
+    """
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO reservations
+                (name, "date", "time", guests, phone, notes, table_id,
+                 source, bot_number, status,
+                 org_id, created_at)
+            VALUES
+                ($1, $2, $3, $4, $5, $6, $7,
+                 $8, $9, 'pending',
+                 NULLIF(current_setting('app.org_id', true), '')::bigint,
+                 NOW())
+            RETURNING *
+            """,
+            customer_name,
+            date_str,
+            time_str,
+            party_size,
+            customer_phone or "",
+            notes or "",
+            table_id,
+            source,
+            bot_number,
+        )
+        return _serialize(dict(row))

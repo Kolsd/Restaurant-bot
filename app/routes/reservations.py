@@ -2,14 +2,64 @@
 Reservations API router.
 Provides CRUD + status management + availability + stats for restaurant reservations.
 """
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
+from typing import Optional
 
 from app.routes.deps import require_auth, get_current_restaurant_scoped, require_module
 from app.services import database as db
 from app.services.logging import get_logger
+from app.repositories import reservations_repo
 
 log = get_logger(__name__)
+
+
+class CreateReservationBody(BaseModel):
+    customer_name: str
+    customer_phone: Optional[str] = None
+    party_size: int
+    date: str        # YYYY-MM-DD
+    time: str        # HH:MM
+    notes: Optional[str] = None
+    table_id: Optional[int] = None
+    source: str = "manual"
+
+    @field_validator("customer_name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("customer_name cannot be empty")
+        return v.strip()
+
+    @field_validator("party_size")
+    @classmethod
+    def party_size_range(cls, v: int) -> int:
+        if v < 1 or v > 20:
+            raise ValueError("party_size must be between 1 and 20")
+        return v
+
+    @field_validator("date")
+    @classmethod
+    def date_format(cls, v: str) -> str:
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("date must be in YYYY-MM-DD format")
+        return v
+
+    @field_validator("time")
+    @classmethod
+    def time_format(cls, v: str) -> str:
+        # Accept HH:MM or HH:MM:SS
+        for fmt in ("%H:%M", "%H:%M:%S"):
+            try:
+                datetime.strptime(v, fmt)
+                return v[:5]  # normalise to HH:MM
+            except ValueError:
+                continue
+        raise ValueError("time must be in HH:MM format")
 
 router = APIRouter(
     prefix="/api/reservations",
@@ -19,6 +69,64 @@ router = APIRouter(
         Depends(require_module("module_reservations")),
     ],
 )
+
+# ── CREATE RESERVATION ───────────────────────────────────────────────────────
+
+
+@router.post("", status_code=201)
+async def create_reservation(
+    body: CreateReservationBody,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Create a new reservation. Status defaults to 'pending'."""
+    # Validate that the reservation datetime is in the future
+    try:
+        reservation_dt = datetime.strptime(
+            f"{body.date} {body.time}", "%Y-%m-%d %H:%M"
+        ).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot parse reservation date/time",
+        )
+
+    now_utc = datetime.now(tz=timezone.utc)
+    if reservation_dt <= now_utc:
+        raise HTTPException(
+            status_code=400,
+            detail="Reservation date/time must be in the future",
+        )
+
+    bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number") or ""
+
+    try:
+        reservation = await reservations_repo.db_create_reservation(
+            customer_name=body.customer_name,
+            date_str=body.date,
+            time_str=body.time,
+            party_size=body.party_size,
+            customer_phone=body.customer_phone,
+            notes=body.notes,
+            table_id=body.table_id,
+            source=body.source,
+            bot_number=bot_number,
+        )
+    except Exception:
+        log.exception(
+            "reservations.create_error",
+            customer_name=body.customer_name,
+            date=body.date,
+            time=body.time,
+        )
+        raise
+
+    log.info(
+        "reservations.created",
+        reservation_id=reservation.get("id"),
+        party_size=body.party_size,
+    )
+    return reservation
+
 
 # ── STATIC ROUTES (must come before /{reservation_id}) ──────────────────────
 

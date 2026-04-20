@@ -230,12 +230,57 @@ async function handleTransfer() {
 }
 
 async function handlePause() {
-  var ok = await mesioConfirm(
-    '¿Pausar el restaurante? Esto ocultará el menú público y suspenderá pedidos WhatsApp.',
-    { confirmText: 'Pausar', danger: true }
-  );
-  if (!ok) return;
-  mesioToast('Endpoint pendiente. Contacta soporte.', 'warn');
+  var currentlyPaused = _restaurant && _restaurant.features && _restaurant.features.bot_active === false;
+
+  if (currentlyPaused) {
+    // Unpause
+    var ok = await mesioConfirm(
+      '¿Reanudar la operación del restaurante? El bot volverá a responder clientes.',
+      { confirmText: 'Reanudar' }
+    );
+    if (!ok) return;
+    await _doPauseRequest(false);
+  } else {
+    // Pause
+    var ok = await mesioConfirm(
+      '¿Pausar operación del restaurante? El bot dejará de responder y el dashboard mostrará aviso. Podés reanudar en cualquier momento.',
+      { confirmText: 'Pausar', danger: true }
+    );
+    if (!ok) return;
+    await _doPauseRequest(true);
+  }
+}
+
+async function _doPauseRequest(paused) {
+  var btn = document.getElementById('btnPause');
+  if (btn) { btn.disabled = true; }
+  try {
+    var res = await fetch('/api/settings/pause', {
+      method: 'POST',
+      headers: mesioHeaders(),
+      body: JSON.stringify({ paused: paused })
+    });
+    if (!res.ok) {
+      var err = await res.json().catch(function () { return {}; });
+      throw new Error(err.detail || 'HTTP ' + res.status);
+    }
+    var data = await res.json();
+    mesioToast(paused ? 'Restaurante pausado' : 'Restaurante reanudado', paused ? 'warn' : 'success');
+    // Reload settings to reflect new state
+    await loadSettings();
+    _updatePauseButton();
+  } catch (e) {
+    mesioToast('Error: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+function _updatePauseButton() {
+  var btn = document.getElementById('btnPause');
+  if (!btn) return;
+  var currentlyPaused = _restaurant && _restaurant.features && _restaurant.features.bot_active === false;
+  btn.textContent = currentlyPaused ? 'Reanudar restaurante' : 'Pausar restaurante';
 }
 
 async function handleDelete() {
@@ -319,5 +364,5 @@ document.addEventListener('DOMContentLoaded', function () {
   bindNavLinks();
   bindLogout();
   initScrollSpy();
-  loadSettings();
+  loadSettings().then(function () { _updatePauseButton(); });
 });
