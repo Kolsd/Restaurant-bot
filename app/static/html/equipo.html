@@ -185,9 +185,104 @@
         </table>
       </div>
 
+      <!-- ── Anuncios del equipo ───────────────────────────────── -->
+      <div class="card flush" style="margin-top:16px;">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Anuncios del equipo</div>
+            <div class="card-sub" id="annCountSub">Cargando…</div>
+          </div>
+          <button class="btn sm brand" id="btnNewAnnouncement">+ Publicar anuncio</button>
+        </div>
+        <div id="annList" style="padding:0 18px 14px;">
+          <div style="font-size:13px;color:var(--text-4);padding:16px 0;">Cargando anuncios…</div>
+        </div>
+      </div>
+
+      <!-- ── Tareas del turno ─────────────────────────────────── -->
+      <div class="card flush" style="margin-top:16px;margin-bottom:24px;">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Tareas del turno</div>
+            <div class="card-sub" id="taskCountSub">Cargando…</div>
+          </div>
+          <button class="btn sm brand" id="btnNewTask">+ Crear tarea</button>
+        </div>
+        <div id="taskList" style="padding:0 18px 14px;">
+          <div style="font-size:13px;color:var(--text-4);padding:16px 0;">Cargando tareas…</div>
+        </div>
+      </div>
+
     </div><!-- /page -->
   </main>
 </div><!-- /app -->
+
+<!-- ── Announcement modal ─────────────────────────────────────── -->
+<div class="m-modal-overlay" id="annModal" role="dialog" aria-modal="true" aria-labelledby="annModalTitle">
+  <div class="m-modal-box" id="annModalBox">
+    <h3 id="annModalTitle">Publicar anuncio</h3>
+
+    <div class="form-field">
+      <label for="annTitle">Título</label>
+      <input id="annTitle" class="form-input" type="text" placeholder="Cambio de horario, recordatorio, etc." maxlength="200" />
+    </div>
+
+    <div class="form-field">
+      <label for="annBody">Mensaje</label>
+      <textarea id="annBody" class="form-input" rows="4" placeholder="Escribe el anuncio para tu equipo…" style="resize:vertical;"></textarea>
+    </div>
+
+    <div class="form-field">
+      <label for="annExpires">Expira el (opcional)</label>
+      <input id="annExpires" class="form-input" type="date" />
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="annModalCancel">Cancelar</button>
+      <button class="btn brand" id="annModalSubmit">Publicar</button>
+    </div>
+    <button class="icon-btn" id="annModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<!-- ── Task modal ─────────────────────────────────────────────── -->
+<div class="m-modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+  <div class="m-modal-box" id="taskModalBox">
+    <h3 id="taskModalTitle">Crear tarea</h3>
+
+    <div class="form-field">
+      <label for="taskTitle">Título</label>
+      <input id="taskTitle" class="form-input" type="text" placeholder="Ej: Revisar inventario de bebidas" maxlength="200" />
+    </div>
+
+    <div class="form-field">
+      <label for="taskDesc">Descripción (opcional)</label>
+      <textarea id="taskDesc" class="form-input" rows="3" placeholder="Detalles adicionales…" style="resize:vertical;"></textarea>
+    </div>
+
+    <div class="form-field">
+      <label for="taskDue">Fecha límite (opcional)</label>
+      <input id="taskDue" class="form-input" type="date" />
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="taskModalCancel">Cancelar</button>
+      <button class="btn brand" id="taskModalSubmit">Crear tarea</button>
+    </div>
+    <button class="icon-btn" id="taskModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<!-- ── Completions modal ───────────────────────────────────────── -->
+<div class="m-modal-overlay" id="completionsModal" role="dialog" aria-modal="true" aria-labelledby="completionsModalTitle">
+  <div class="m-modal-box" id="completionsModalBox">
+    <h3 id="completionsModalTitle">Completado por</h3>
+    <div id="completionsList" style="margin-top:12px;min-height:60px;"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+      <button class="btn" id="completionsModalClose">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── Invite modal ───────────────────────────────────────────── -->
 <div class="m-modal-overlay" id="inviteModal" role="dialog" aria-modal="true" aria-labelledby="inviteModalTitle">
@@ -229,5 +324,6 @@
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/pages/sidebar.js"></script>
 <script src="/static/js/pages/equipo.js"></script>
+<script src="/static/js/pages/equipo-comms.js"></script>
 </body>
 </html>

@@ -15,11 +15,14 @@
      POST /api/staff/webauthn/register-options   → startBioRegistration()
      POST /api/staff/webauthn/register-complete  → startBioRegistration()
 
+   Wired in this file:
+     GET  /api/staff/self/announcements   → scLoadAnnouncements()
+     GET  /api/staff/self/tasks           → scLoadTasks()
+     POST /api/staff/self/tasks/{id}/complete → scCompleteTask()
+
    TODO (backend endpoints not yet implemented):
      GET  /api/staff/self/tips            → tips accumulated today/week
      POST /api/staff/self/shift-swap      → shift swap request
-     GET  /api/staff/announcements        → manager announcements
-     GET  /api/staff/self/tasks           → shift checklist tasks
      GET  /api/staff/self/performance     → NPS + tip performance stats
 */
 
@@ -621,13 +624,152 @@ function scOpenSwap(shiftId) {
 function scCloseSwap()  { const m = document.getElementById('sc-swap-modal');   if (m) m.classList.remove('open'); }
 function scCloseSwapM() { const m = document.getElementById('sc-swap-modal-m'); if (m) m.classList.remove('open'); }
 
+/* ── Announcements ──────────────────────────────────────────────── */
+async function scLoadAnnouncements() {
+  const mobileEl = document.getElementById('sc-annc-container');
+  // No kiosko equivalent container in current HTML — mobile only.
+
+  if (!SC_TOKEN) return;
+  try {
+    const res = await fetch('/api/staff/self/announcements', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const items = data.announcements || [];
+    _scRenderAnnouncements(mobileEl, items);
+  } catch(_) {
+    // Non-critical — leave placeholder text in place.
+  }
+}
+
+function _scRenderAnnouncements(container, items) {
+  if (!container) return;
+  container.innerHTML = '';
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size:12px;color:var(--sc-text-3);padding:4px 0;';
+    empty.textContent = '(no hay anuncios)';
+    container.appendChild(empty);
+    return;
+  }
+  items.forEach(ann => {
+    const card = document.createElement('div');
+    card.style.cssText = 'margin-bottom:8px;';
+
+    const av = document.createElement('div');
+    av.className = 'sc-annc-av';
+    av.textContent = '📢';
+
+    const body = document.createElement('div');
+    body.className = 'sc-annc-body';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-weight:600;font-size:13px;';
+    titleEl.textContent = ann.title;
+
+    const bodyEl = document.createElement('div');
+    bodyEl.style.cssText = 'font-size:12px;color:var(--sc-text-3);margin-top:2px;white-space:pre-wrap;';
+    bodyEl.textContent = ann.body;
+
+    body.appendChild(titleEl);
+    body.appendChild(bodyEl);
+
+    card.style.cssText = 'display:flex;align-items:flex-start;gap:8px;';
+    card.appendChild(av);
+    card.appendChild(body);
+    container.appendChild(card);
+  });
+}
+
 /* ── Task checklist ─────────────────────────────────────────────── */
-function scToggleTask(el) {
-  const row = el.closest('.sc-task-row');
-  if (!row) return;
-  row.classList.toggle('done');
-  el.classList.toggle('done');
-  // TODO: POST /api/staff/self/tasks/{id}/complete (not yet implemented)
+async function scLoadTasks() {
+  const mobileEl = document.getElementById('sc-tasks-container');
+  const kioscoEl = document.getElementById('sc-k-tasks');
+  const countEl  = document.getElementById('sc-task-count');
+
+  if (!SC_TOKEN) return;
+  try {
+    const res = await fetch('/api/staff/self/tasks', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const tasks = data.tasks || [];
+
+    const done  = tasks.filter(t => t.completed_by_me).length;
+    const total = tasks.length;
+    if (countEl) countEl.textContent = total ? done + '/' + total + ' completadas' : '';
+
+    _scRenderTasks(mobileEl, tasks);
+    _scRenderTasks(kioscoEl, tasks, true);
+  } catch(_) {
+    // Non-critical — leave placeholder.
+  }
+}
+
+function _scRenderTasks(container, tasks, compact) {
+  if (!container) return;
+  container.innerHTML = '';
+  if (!tasks.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding:10px 14px;font-size:12px;color:var(--sc-text-3);';
+    empty.textContent = '(no hay tareas pendientes)';
+    container.appendChild(empty);
+    return;
+  }
+  tasks.forEach(task => {
+    const row = document.createElement('div');
+    row.className = 'sc-task-row' + (task.completed_by_me ? ' done' : '');
+
+    const cb = document.createElement('div');
+    cb.className = 'sc-task-cb' + (task.completed_by_me ? ' done' : '');
+    cb.setAttribute('role', 'checkbox');
+    cb.setAttribute('aria-checked', task.completed_by_me ? 'true' : 'false');
+    cb.setAttribute('tabindex', '0');
+    if (!task.completed_by_me) {
+      cb.addEventListener('click', () => scCompleteTask(task.id, cb, row));
+      cb.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') scCompleteTask(task.id, cb, row); });
+    }
+
+    const label = document.createElement('div');
+    label.className = 'sc-task-label';
+    label.textContent = task.title;
+    if (task.completed_by_me) label.style.textDecoration = 'line-through';
+
+    row.appendChild(cb);
+    row.appendChild(label);
+    container.appendChild(row);
+  });
+}
+
+async function scCompleteTask(taskId, cbEl, rowEl) {
+  if (!SC_TOKEN) return;
+  // Optimistic UI
+  cbEl.classList.add('done');
+  rowEl.classList.add('done');
+  cbEl.setAttribute('aria-checked', 'true');
+  const labelEl = rowEl.querySelector('.sc-task-label');
+  if (labelEl) labelEl.style.textDecoration = 'line-through';
+
+  try {
+    const res = await fetch('/api/staff/self/tasks/' + taskId + '/complete', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    scShowToast('¡Tarea completada!');
+    // Refresh counts
+    scLoadTasks();
+  } catch(_) {
+    // Revert optimistic update on failure
+    cbEl.classList.remove('done');
+    rowEl.classList.remove('done');
+    cbEl.setAttribute('aria-checked', 'false');
+    if (labelEl) labelEl.style.textDecoration = '';
+    scShowToast('Error al guardar. Intenta de nuevo.', true);
+  }
 }
 
 /* ── Toast ──────────────────────────────────────────────────────── */
@@ -785,3 +927,14 @@ scLoadProfile();
 scLoadTimecardPreview();
 scLoadTips();
 scLoadBiometricStatus();
+scLoadAnnouncements();
+scLoadTasks();
+
+// Auto-refresh announcements and tasks every 60 seconds.
+if (typeof mesioInterval === 'function') {
+  mesioInterval(scLoadAnnouncements, 60000);
+  mesioInterval(scLoadTasks, 60000);
+} else {
+  setInterval(scLoadAnnouncements, 60000);
+  setInterval(scLoadTasks, 60000);
+}
