@@ -156,6 +156,16 @@ async def settings_page():
     p = STATIC / "html" / "settings.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Settings no disponible</h1>")
 
+@router.get("/floorplan", response_class=HTMLResponse)
+async def floorplan_page():
+    p = STATIC / "html" / "floorplan.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Floorplan no disponible</h1>", status_code=404)
+
+@router.get("/equipo", response_class=HTMLResponse)
+async def equipo_page():
+    p = STATIC / "html" / "equipo.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Equipo no disponible</h1>", status_code=404)
+
 
 # ── PUBLIC APIs ───────────────────────────────────────────────────────
 

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Mi equipo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/equipo.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="mark">M</div>
+      <div>
+        <div class="sb-brand-name">Mesio</div>
+        <div class="sb-brand-sub">Mi Restaurante</div>
+      </div>
+    </div>
+
+    <div class="sb-switcher">
+      <div class="mark sm">R</div>
+      <div class="grow">
+        <div class="sb-switcher-name">Mi Restaurante</div>
+        <div class="sb-switcher-sub">Sede activa · equipo</div>
+      </div>
+      <div class="chev">⌄</div>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">Operación</div>
+      <a class="sb-item" href="/dashboard">◻ Resumen</a>
+      <a class="sb-item" href="/floorplan">🪑 Salón</a>
+      <a class="sb-item" href="/caja">💳 Caja / POS</a>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-label">Equipo</div>
+      <a class="sb-item active" href="/equipo">👥 Mi equipo</a>
+      <a class="sb-item" href="/dashboard#payroll">💰 Nómina</a>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-label">Admin</div>
+      <a class="sb-item" href="/billing">🏷️ Facturación</a>
+      <a class="sb-item" href="/settings">⚙️ Configuración</a>
+    </div>
+
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">VC</div>
+        <div>
+          <div class="sb-user-name">Admin</div>
+          <div class="sb-user-role">Owner · Mi Restaurante</div>
+        </div>
+      </div>
+      <button class="sb-item" id="logoutBtn" style="margin-top:4px;">↩ Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <!-- ── Main ──────────────────────────────────────────────────── -->
+  <main class="main">
+    <header class="topbar">
+      <span class="topbar-crumb">Equipo<span class="sep">›</span></span>
+      <span class="topbar-title">Mi equipo</span>
+      <div class="topbar-right">
+        <div class="search" style="min-width:280px;">
+          <span style="color:var(--text-4);">⌕</span>
+          <input id="searchInput" placeholder="Buscar miembro, rol, turno…" aria-label="Buscar miembro">
+          <span class="kbd">⌘K</span>
+        </div>
+        <button class="btn brand" id="inviteBtn">+ Invitar miembro</button>
+      </div>
+    </header>
+
+    <div class="page">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">Tu equipo hoy</h1>
+          <p class="page-sub" id="teamSub">Cargando datos del equipo…</p>
+        </div>
+        <div class="row">
+          <div class="seg">
+            <button class="seg-btn active">Hoy</button>
+            <button class="seg-btn">Semana</button>
+            <button class="seg-btn">Mes</button>
+          </div>
+          <button class="btn">↓ Exportar</button>
+          <a class="btn" href="/dashboard#payroll">Ver nómina →</a>
+        </div>
+      </div>
+
+      <!-- ── Metrics row (5 cols) ──────────────────────────────── -->
+      <div class="metrics-row" style="margin-bottom:18px;">
+        <div class="metric">
+          <div class="metric-label">Total equipo</div>
+          <div class="metric-value" id="metricTotalVal">—</div>
+          <div class="metric-sub" id="metricTotalSub"></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">En turno ahora</div>
+          <div class="metric-value" id="metricOnShiftVal">—</div>
+          <div class="metric-sub" id="metricOnShiftSub">
+            <span class="dot live"></span> clock-in activo
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Horas esta semana</div>
+          <div class="metric-value" id="metricHorasVal">—</div>
+          <div class="metric-sub" id="metricHorasSub">turno planificado</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Propinas a repartir</div>
+          <div class="metric-value" id="metricTipsVal" style="color:var(--brand);">—</div>
+          <div class="metric-sub" id="metricTipsSub">pool disponible</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Costo laboral</div>
+          <div class="metric-value" id="metricCostoVal">—</div>
+          <div class="metric-sub" id="metricCostoSub">próximamente</div>
+        </div>
+      </div>
+
+      <!-- ── Two-column: shift grid + tips ────────────────────── -->
+      <div style="display:grid;grid-template-columns:2.2fr 1fr;gap:16px;margin-bottom:16px;">
+
+        <!-- Shift grid card -->
+        <div class="card flush">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Horario de la semana</div>
+              <div class="card-sub" id="shiftWeekLabel">Cargando…</div>
+            </div>
+            <div class="row">
+              <div class="seg">
+                <button class="seg-btn active">Semana</button>
+                <button class="seg-btn">Día</button>
+              </div>
+              <button class="btn sm">+ Turno</button>
+            </div>
+          </div>
+          <div style="padding:14px 18px;overflow-x:auto;">
+            <div class="shift-grid" id="shiftGrid">
+              <!-- Injected by equipo.js -->
+            </div>
+            <div class="shift-legend">
+              <span>
+                <span class="swatch" style="background:rgba(29,158,117,0.85);"></span>AM 6:00-14:00
+              </span>
+              <span>
+                <span class="swatch" style="background:rgba(96,165,250,0.85);"></span>PM 14:00-22:00
+              </span>
+              <span>
+                <span class="swatch" style="background:rgba(167,139,250,0.85);"></span>Cierre 18:00-02:00
+              </span>
+              <span>
+                <span class="swatch" style="background:#FCA5A5;"></span>Ausencia
+              </span>
+              <span style="margin-left:auto;color:var(--brand);">
+                Auto-ajustado con IA <span class="ai-spark"></span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tip distribution card -->
+        <div class="card flush">
+          <div class="card-head">
+            <div>
+              <div class="card-title">Reparto de propinas</div>
+              <div class="card-sub" id="tipPoolLabel">Cargando…</div>
+            </div>
+            <button class="btn sm" id="tipsRulesBtn">Reglas</button>
+          </div>
+          <div class="card-body">
+            <div id="tipsContainer">
+              <!-- Injected by equipo.js -->
+              <div style="font-size:13px;color:var(--text-4);padding:16px 0;">Cargando propinas…</div>
+            </div>
+            <div class="ai-suggestion" id="aiSuggestion" style="display:none;">
+              <span class="ai-spark"></span>
+              <strong>Sugerencia:</strong>
+              <span class="ai-note"></span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /two-column -->
+
+      <!-- ── Members table ─────────────────────────────────────── -->
+      <div class="card flush">
+        <div class="card-head">
+          <div>
+            <div class="card-title">Miembros del equipo</div>
+            <div class="card-sub" id="memberCount">Cargando…</div>
+          </div>
+          <div class="row">
+            <div class="seg">
+              <button class="seg-btn active" data-role="all">Todos</button>
+              <button class="seg-btn" data-role="mesero">Meseros</button>
+              <button class="seg-btn" data-role="cocina">Cocina</button>
+              <button class="seg-btn" data-role="bar">Barra</button>
+              <button class="seg-btn" data-role="admin">Admin</button>
+            </div>
+            <button class="btn sm">↓ Exportar</button>
+          </div>
+        </div>
+        <table class="tbl ppl-tbl">
+          <thead>
+            <tr>
+              <th>Miembro</th>
+              <th>Rol</th>
+              <th>Estado</th>
+              <th>Esta semana</th>
+              <th>Ventas / propinas</th>
+              <th>Clock-in</th>
+              <th>Desempeño</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="membersTbody">
+            <tr>
+              <td colspan="8" style="text-align:center;color:var(--text-4);padding:32px;">
+                Cargando miembros…
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div><!-- /page -->
+  </main>
+</div><!-- /app -->
+
+<!-- ── Invite modal ───────────────────────────────────────────── -->
+<div class="m-modal-overlay" id="inviteModal" role="dialog" aria-modal="true" aria-labelledby="inviteModalTitle">
+  <div class="m-modal-box" id="inviteModalBox">
+    <h3 id="inviteModalTitle">Invitar nuevo miembro</h3>
+
+    <div class="form-field">
+      <label for="inviteName">Nombre completo</label>
+      <input id="inviteName" class="form-input" type="text" placeholder="Ana García" />
+    </div>
+
+    <div class="form-field">
+      <label for="inviteRole">Rol</label>
+      <select id="inviteRole" class="form-input">
+        <option value="mesero">Mesero/a</option>
+        <option value="cocina">Cocina</option>
+        <option value="bar">Bartender</option>
+        <option value="caja">Caja</option>
+        <option value="domiciliario">Domiciliario</option>
+        <option value="gerente">Gerente</option>
+        <option value="admin">Admin</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+
+    <div class="form-field">
+      <label for="inviteDoc">Número de documento (opcional)</label>
+      <input id="inviteDoc" class="form-input" type="text" placeholder="CC 1234567890" />
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="inviteModalCancel">Cancelar</button>
+      <button class="btn brand" id="inviteModalSubmit">Crear miembro</button>
+    </div>
+    <button class="icon-btn" id="inviteModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/equipo.js"></script>
+</body>
+</html>

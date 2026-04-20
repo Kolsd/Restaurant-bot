@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mesio — Mapa de mesas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/shared.css">
+<link rel="stylesheet" href="/static/css/pages/floorplan.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="mark">M</div>
+      <div>
+        <div class="sb-brand-name">Mesio</div>
+        <div class="sb-brand-sub">Mi Restaurante</div>
+      </div>
+    </div>
+
+    <div class="sb-switcher">
+      <div class="mark sm">R</div>
+      <div class="grow">
+        <div class="sb-switcher-name">Mi Restaurante</div>
+        <div class="sb-switcher-sub" id="tableCount">— mesas</div>
+      </div>
+      <div class="chev">⌄</div>
+    </div>
+
+    <div class="sb-group">
+      <div class="sb-group-label">Operación</div>
+      <a class="sb-item" href="/dashboard">◻ Resumen</a>
+      <a class="sb-item active" href="/floorplan">🪑 Salón</a>
+      <a class="sb-item" href="/caja">💳 Caja / POS</a>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-label">Equipo</div>
+      <a class="sb-item" href="/equipo">👥 Mi equipo</a>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-label">Admin</div>
+      <a class="sb-item" href="/billing">🏷️ Facturación</a>
+      <a class="sb-item" href="/settings">⚙️ Configuración</a>
+    </div>
+
+    <div class="sb-bottom">
+      <div class="sb-user">
+        <div class="sb-avatar">VC</div>
+        <div>
+          <div class="sb-user-name">Admin</div>
+          <div class="sb-user-role">Owner</div>
+        </div>
+      </div>
+      <button class="sb-item" id="logoutBtn" style="margin-top:4px;">↩ Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <!-- ── Main (canvas) ──────────────────────────────────────── -->
+  <main class="main">
+    <header class="topbar">
+      <span class="topbar-crumb">Operación<span class="sep">›</span></span>
+      <span class="topbar-title">Mapa de mesas</span>
+      <div class="topbar-right">
+        <div class="seg">
+          <button class="seg-btn active" data-zone="all">Todas</button>
+          <button class="seg-btn" data-zone="terraza">Terraza</button>
+          <button class="seg-btn" data-zone="salón">Salón</button>
+          <button class="seg-btn" data-zone="privado">Privado</button>
+        </div>
+        <span class="fp-refresh-badge" id="refreshBadge">—</span>
+        <button class="btn" id="syncBtn">↻ Sync</button>
+        <!-- TODO: Edit layout — requires PATCH /api/floor-plan (v2) -->
+        <button class="btn" title="Modo edición — próximamente">Editar layout</button>
+        <button class="btn brand" id="newReservaBtn">+ Reserva</button>
+      </div>
+    </header>
+
+    <!-- Canvas -->
+    <div class="canvas" id="fpCanvas">
+
+      <!-- Zone labels (static chrome) -->
+      <div class="zone-label" style="top:18px;left:20px;">Terraza</div>
+      <div class="zone-label" style="top:18px;left:48%;">Salón principal</div>
+      <div class="zone-label" style="top:18px;right:30px;">Privado</div>
+
+      <!-- Structural walls -->
+      <div class="fp-wall" style="top:58px;left:42%;width:3px;height:calc(100% - 80px);"></div>
+      <div class="fp-wall" style="top:58px;right:22%;width:3px;height:calc(100% - 80px);"></div>
+      <div class="fp-door" style="top:280px;left:calc(42% - 18px);"></div>
+
+      <!-- Bar counter -->
+      <div class="bar-counter" style="bottom:40px;left:48%;width:220px;height:36px;">BARRA · 6 plazas</div>
+
+      <!-- Legend -->
+      <div class="fp-legend">
+        <span>
+          <span class="leg-swatch" style="background:var(--fp-libre-bg);border:1.5px solid var(--fp-libre);"></span>Libre
+        </span>
+        <span>
+          <span class="leg-swatch" style="background:var(--fp-sentados-bg);border:1.5px solid var(--fp-sentados);"></span>Sentados
+        </span>
+        <span>
+          <span class="leg-swatch" style="background:var(--fp-ocupada-bg);border:1.5px solid var(--fp-ocupada);"></span>Comiendo
+        </span>
+        <span>
+          <span class="leg-swatch" style="background:var(--fp-factura-bg);border:1.5px solid var(--fp-factura);"></span>Facturando
+        </span>
+        <span>
+          <span class="leg-swatch" style="background:var(--fp-reservada-bg);border:1.5px solid var(--fp-reservada);"></span>Reservada
+        </span>
+      </div>
+
+      <!-- Dynamic table tiles are injected here by floorplan.js -->
+    </div>
+  </main>
+
+  <!-- ── Right detail panel ─────────────────────────────────── -->
+  <aside class="detail">
+
+    <!-- Empty state (shown when no table is selected) -->
+    <div class="d-empty" id="detailEmpty">
+      <div style="font-size:32px;">🪑</div>
+      <div>Selecciona una mesa para ver sus detalles</div>
+    </div>
+
+    <!-- Table detail (hidden until a table is clicked) -->
+    <div id="detailPanel" class="hidden">
+      <div class="d-head">
+        <div class="d-num" id="dNum">M—</div>
+        <div>
+          <div class="d-state" id="dState">Libre</div>
+        </div>
+        <button class="icon-btn" id="btnClosePanel" style="margin-left:auto;" aria-label="Cerrar panel">✕</button>
+      </div>
+
+      <div class="d-meta" id="dMeta"></div>
+
+      <div class="d-actions">
+        <button class="btn" id="btnTicket">📇 Ver ticket</button>
+        <button class="btn" id="btnInvoice">🧾 Facturar</button>
+        <button class="btn" id="btnAddItem">+ Ítem</button>
+        <button class="btn" id="btnMove">↔ Mover mesa</button>
+      </div>
+
+      <div class="d-sec">
+        <div class="d-sec-h">Orden actual</div>
+        <div id="dOrders"></div>
+        <div class="d-total" id="dTotalRow">
+          <div>Subtotal</div>
+          <div class="v" id="dTotal">—</div>
+        </div>
+      </div>
+
+      <div class="d-sec">
+        <div class="d-sec-h">Timeline</div>
+        <div id="dTimeline"></div>
+      </div>
+    </div>
+  </aside>
+
+</div><!-- /app -->
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/floorplan.js"></script>
+</body>
+</html>
