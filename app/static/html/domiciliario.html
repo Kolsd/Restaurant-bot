@@ -1,333 +1,177 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mesio — Domiciliario</title>
-  <link rel="stylesheet" href="/static/css/tokens.css">
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-        body { background: #f0f2f5; color: #333; padding-bottom: 70px; }
-        
-        /* Contenedor principal */
-        .container { padding: 15px; }
-
-        /* Tarjetas de Pedido */
-        .order-card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #eee; }
-        .order-header { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; }
-        .order-id { font-weight: bold; font-size: 16px; color: #555; }
-        
-        /* Etiquetas de Pago */
-        .badge { padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 14px; }
-        .badge.pagado { background: #E1F5EE; color: #1D9E75; }
-        .badge.cobrar { background: #ffebee; color: #c62828; font-size: 16px; border: 2px solid #c62828; }
-
-        .address { font-size: 18px; font-weight: bold; margin: 10px 0; color: #111; }
-        .notes { font-size: 14px; color: #666; background: #fff9c4; padding: 8px; border-radius: 6px; margin-bottom: 15px; }
-        
-        /* Botones de Acción Gigantes */
-        .action-btns { display: flex; gap: 10px; margin-bottom: 15px; }
-        .btn { flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 16px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; text-decoration: none; }
-        .btn-waze { background: #e3f2fd; color: #1565c0; }
-        .btn-wa { background: #e8f5e9; color: #2e7d32; }
-        
-        .btn-main { width: 100%; padding: 16px; font-size: 18px; color: white; border-radius: 10px; margin-top: 10px; }
-        .btn-start { background: var(--brand, #1D9E75); }
-        .btn-deliver { background: #1D9E75; }
-
-        /* Navegación Inferior (Tabs móviles) */
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; display: flex; border-top: 1px solid #ddd; padding-bottom: env(safe-area-inset-bottom); z-index: 100; box-shadow: 0 -2px 10px rgba(0,0,0,0.05); }
-        .nav-item { flex: 1; text-align: center; padding: 15px 0; font-size: 14px; color: #666; font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent; }
-        .nav-item.active { color: #1D9E75; border-bottom: 3px solid #1D9E75; background: #f9fbf9; }
-
-        /* Esconder secciones no activas */
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-    </style>
-  <link rel="stylesheet" href="/static/css/mesio-role.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mesio — Domiciliario v2</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/pages/domiciliario.css">
 </head>
 <body>
 
-  <header class="m-topbar">
-    <a href="/staff-hq" class="m-logo">
-      <div class="m-logo-mark">M</div>
-      <span class="m-logo-title">Mesio</span>
-    </a>
-    <span class="m-page-label">🛵 Domiciliario</span>
-    <span class="m-role-chip">Domiciliario</span>
-    <div id="dynamic-role-nav"></div>
-    <div class="m-topbar-right">
-      <div class="m-live"><div class="m-live-dot"></div>En vivo</div>
-      <span class="m-topbar-clock" id="header-clock">--:--</span>
-      <button class="m-btn-logout" onclick="doStaffLogout()">Salir</button>
-    </div>
-  </header>
+<!-- Desktop: centred phone frame. Mobile: full-screen via CSS. -->
+<div class="phone-wrap">
+  <div class="phone-frame">
 
-    <div class="container">
-        <div id="tab-recoger" class="tab-content active">
-            <h3 style="margin-bottom: 15px; color: #555;">Esperando en Cocina 🧑‍🍳</h3>
-            <div id="list-recoger" role="status" aria-live="polite">Cargando...</div>
-        </div>
+    <!-- iOS-style notch -->
+    <div class="notch" aria-hidden="true"></div>
 
-        <div id="tab-ruta" class="tab-content">
-            <h3 style="margin-bottom: 15px; color: #555;">En mi maleta 🛵</h3>
-            <div id="list-ruta" role="status" aria-live="polite">Cargando...</div>
-        </div>
-
-        <div id="tab-entregados" class="tab-content">
-            <h3 style="margin-bottom: 15px; color: #555;">Completados hoy ✅</h3>
-            <div id="list-entregados" role="status" aria-live="polite">Cargando...</div>
-        </div>
+    <!-- Status bar (desktop only) -->
+    <div class="phone-status" aria-hidden="true">
+      <span id="dom-time">9:41</span>
+      <span>● ● ●</span>
     </div>
 
-    <div class="bottom-nav">
-        <div class="nav-item active" onclick="switchTab('recoger', this)">📦 Por Recoger</div>
-        <div class="nav-item" onclick="switchTab('ruta', this)">🛵 En Ruta</div>
-        <div class="nav-item" onclick="switchTab('entregados', this)">✅ Entregados</div>
-    </div>
+    <!-- ── Light inner screen ── -->
+    <div class="phone-screen">
 
-    <script src="/static/js/roles.js"></script>
-    <script src="/static/js/mesio-utils.js"></script>
-    <script>
-// --- 1. Autenticación, Permisos y Localización ---
-const token = localStorage.getItem('rb_token');
-        const rawRole = localStorage.getItem('rb_role') || '';
-        const roles = rawRole.toLowerCase().split(',');
+      <!-- Hero gradient -->
+      <div class="dom-hero">
+        <div class="hero-label" id="dom-turno-label">Turno activo</div>
+        <div class="hero-title" id="dom-staff-name">Hola 👋</div>
+        <div class="hero-stats">
+          <div><strong id="dom-stat-delivered">—</strong>entregadas</div>
+          <div><strong id="dom-stat-pending">—</strong>pendientes</div>
+          <div><strong id="dom-stat-tips">—</strong>propinas</div>
+        </div>
+      </div>
 
-        const _restData = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-        const _locale = _restData.locale || 'en-US';
-        const _currency = _restData.currency || 'USD';
+      <!-- ── Hoy tab content ── -->
+      <div class="tab-pane active" data-pane="hoy">
 
-        // Formateador Universal
-        const fmt = (amount) => {
-            return new Intl.NumberFormat(_locale, {
-                style: 'currency',
-                currency: _currency,
-                minimumFractionDigits: ['COP', 'CLP', 'PYG', 'JPY'].includes(_currency) ? 0 : 2
-            }).format(Number(amount));
-        };
+        <!-- Active delivery card -->
+        <div id="dom-active-card">
+          <div class="dom-no-active">Cargando entregas…</div>
+        </div>
 
-        if (!token) { window.location.href = '/login'; }
+        <!-- Order items -->
+        <div class="dom-section" id="dom-order-section" style="display:none;">
+          <h4>Pedido</h4>
+          <div id="dom-order-items"></div>
+          <div id="dom-order-total"></div>
+        </div>
 
-        const headers = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
-        
-        // --- 2. Lógica de Pestañas ---
-        function switchTab(tabId, element) {
-            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            element.classList.add('active');
-            document.getElementById('tab-' + tabId).classList.add('active');
-            fetchOrders();
-        }
+        <!-- Customer -->
+        <div class="dom-section" id="dom-customer-section" style="display:none;">
+          <h4>Cliente</h4>
+          <div id="dom-customer-card"></div>
+        </div>
 
-        // --- 3. Cargar Pedidos ---
-        let _loadingTimer = null;
-        async function fetchOrders() {
-            if (_loadingTimer) clearTimeout(_loadingTimer);
-            _loadingTimer = setTimeout(() => {
-                mesioToast('Error al cargar pedidos', 'error');
-            }, 15000);
-            try {
-                const res = await fetch('/api/delivery/orders', { headers });
-                clearTimeout(_loadingTimer);
-                if (!res.ok) {
-                    if(res.status === 401) logout();
-                    return;
-                }
-                const data = await res.json();
-                renderOrders(data.orders || []);
-            } catch (err) {
-                clearTimeout(_loadingTimer);
-                mesioToast('Error al cargar pedidos', 'error');
-            }
-        }
+        <!-- Up-next -->
+        <div id="dom-upnext"></div>
 
-        function getWazeLink(address) {
-            if (!address) return `https://waze.com/ul?q=`;
-            // Google Maps URL with coordinates: ?q=lat,lon
-            const mapsMatch = address.match(/[?&]q=([-\d.]+),([-\d.]+)/);
-            if (mapsMatch) return `https://waze.com/ul?ll=${mapsMatch[1]},${mapsMatch[2]}&navigate=yes`;
-            // lat:X lon:Y format (from WhatsApp GPS share)
-            const latMatch = address.match(/lat:([-\d.]+)/);
-            const lonMatch = address.match(/lon:([-\d.]+)/);
-            if (latMatch && lonMatch) return `https://waze.com/ul?ll=${latMatch[1]},${lonMatch[1]}&navigate=yes`;
-            // Default: text address search
-            return `https://waze.com/ul?q=${encodeURIComponent(address)}`;
-        }
+      </div><!-- /.tab-pane hoy -->
 
-        function renderOrders(orders) {
-            const listRecoger = document.getElementById('list-recoger');
-            const listRuta = document.getElementById('list-ruta');
-            const listEntregados = document.getElementById('list-entregados');
+      <!-- ── Mapa tab (placeholder) ── -->
+      <div class="tab-pane" data-pane="mapa">
+        <div style="padding:40px 20px;text-align:center;color:var(--text-3);">
+          <div style="font-size:32px;margin-bottom:12px;">🗺️</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);">Vista de mapa</div>
+          <div style="font-size:12px;margin-top:6px;">Usa Waze desde la tarjeta de entrega activa.</div>
+        </div>
+      </div>
 
-            listRecoger.innerHTML = ''; listRuta.innerHTML = ''; listEntregados.innerHTML = '';
+      <!-- ── Historial tab ── -->
+      <div class="tab-pane" data-pane="historial">
+        <div style="padding:14px 14px 6px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-3);">Completados hoy</div>
+        </div>
+        <div id="dom-hist-list">
+          <div class="dom-list-empty">Cargando…</div>
+        </div>
+      </div>
 
-            let recogerCount = 0, rutaCount = 0, entregadoCount = 0;
+      <!-- ── Perfil tab ── -->
+      <div class="tab-pane" data-pane="perfil">
+        <div style="padding:24px 20px;">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">
+            <div style="width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,#1D9E75,#0F6E56);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:700;" id="perfil-av">?</div>
+            <div>
+              <div style="font-weight:700;font-size:16px;color:var(--text);" id="perfil-name">Cargando…</div>
+              <div style="font-size:12px;color:var(--text-3);">Domiciliario</div>
+            </div>
+          </div>
+          <button class="m-btn m-btn--ghost" style="width:100%;justify-content:center;" id="perfil-logout">
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
 
-            const grupos = {};
-            orders.forEach(order => {
-                const groupId = order.base_order_id || order.id;
-                
-                if (!grupos[groupId]) {
-                    grupos[groupId] = {
-                        principal: null,
-                        subOrdenes: [],
-                        todasListas: true,
-                        itemsPendientes: []
-                    };
-                }
+      <!-- ── Bottom tab bar ── -->
+      <nav class="dom-tabs" role="tablist" aria-label="Navegación principal">
+        <button class="dom-tab active" data-tab="hoy" role="tab" aria-selected="true" aria-label="Hoy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M5 11l7-7 7 7v9a2 2 0 01-2 2h-3v-6h-4v6H7a2 2 0 01-2-2z"/>
+          </svg>
+          Hoy
+        </button>
+        <button class="dom-tab" data-tab="mapa" role="tab" aria-selected="false" aria-label="Mapa">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6z"/><path d="M9 3v15M15 6v15"/>
+          </svg>
+          Mapa
+        </button>
+        <button class="dom-tab" data-tab="historial" role="tab" aria-selected="false" aria-label="Historial">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 10h8M8 14h5"/>
+          </svg>
+          Historial
+        </button>
+        <button class="dom-tab" data-tab="perfil" role="tab" aria-selected="false" aria-label="Perfil">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>
+          </svg>
+          Perfil
+        </button>
+      </nav>
 
-                if (order.id === groupId) {
-                    grupos[groupId].principal = order;
-                } else {
-                    grupos[groupId].subOrdenes.push(order);
-                }
+    </div><!-- /.phone-screen -->
 
-                // Si cualquier parte del pedido NO está lista (ej. confirmado o en_preparacion)
-                if (order.status !== 'listo' && order.status !== 'en_camino' && order.status !== 'en_puerta' && order.status !== 'entregado') {
-                    grupos[groupId].todasListas = false;
-                    
-                    // Extraer los nombres de los items que faltan para mostrarlos en la alerta
-                    let nombres = "";
-                    try {
-                        const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-                        nombres = items.map(i => `${i.quantity || i.qty || 1}x ${i.name}`).join(', ');
-                    } catch(e) {}
-                    if (nombres) grupos[groupId].itemsPendientes.push(nombres);
-                }
-            });
+  </div><!-- /.phone-frame -->
+</div><!-- /.phone-wrap -->
 
-            // 2. Renderizar las tarjetas agrupadas
-            Object.values(grupos).forEach(grupo => {
-                // Usamos la principal para pintar la tarjeta. Si no está, usamos la primera suborden.
-                const mainOrder = grupo.principal || grupo.subOrdenes[0];
-                if (!mainOrder) return;
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/pages/domiciliario-v2.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Status bar clock
+  function _stClock() {
+    const el = document.getElementById('dom-time');
+    if (el) el.textContent = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  }
+  _stClock(); setInterval(_stClock, 30000);
 
-                const isPaid = mainOrder.paid;
-                // Calculamos el total sumando la principal y las subórdenes
-                const totalGrupo = (grupo.principal ? grupo.principal.total : 0) + 
-                                   grupo.subOrdenes.reduce((sum, sub) => sum + sub.total, 0);
+  // Perfil tab populate
+  const pn = document.getElementById('perfil-name');
+  const pav = document.getElementById('perfil-av');
+  const name = localStorage.getItem('rb_staff_name') || localStorage.getItem('rb_name') || 'Domiciliario';
+  if (pn) pn.textContent = name;
+  if (pav) pav.textContent = name.split(' ').map(p => p[0]).join('').slice(0,2).toUpperCase();
 
-                const paymentBadge = isPaid
-                    ? `<span class="badge pagado">✅ PAGADO</span>`
-                    : `<span class="badge cobrar">💰 COBRAR: ${fmt(totalGrupo)}</span>`;
+  // Turno label with elapsed time
+  const shiftStart = localStorage.getItem('rb_shift_start');
+  if (shiftStart) {
+    const mins = Math.floor((Date.now() - new Date(shiftStart).getTime()) / 60000);
+    const hrs = Math.floor(mins / 60);
+    const lbl = document.getElementById('dom-turno-label');
+    if (lbl) lbl.textContent = `Turno activo · ${hrs}h ${mins % 60}m`;
+  }
 
-                const cleanPhone = mainOrder.phone.replace(/\D/g, '');
-                const wazeLink = getWazeLink(mainOrder.address);
-                const waLink = `https://wa.me/${cleanPhone}`;
-                const isDelivered = mainOrder.status === 'entregado';
+  // Show order + customer sections once active card renders
+  const obs = new MutationObserver(() => {
+    const hasActive = document.querySelector('.active-badge');
+    const orderSec = document.getElementById('dom-order-section');
+    const custSec  = document.getElementById('dom-customer-section');
+    if (orderSec) orderSec.style.display = hasActive ? '' : 'none';
+    if (custSec)  custSec.style.display  = hasActive ? '' : 'none';
+  });
+  const activeCard = document.getElementById('dom-active-card');
+  if (activeCard) obs.observe(activeCard, { childList: true, subtree: true });
 
-                let cardHtml = `
-                    <div class="order-card">
-                        <div class="order-header">
-                            <span class="order-id">#${mainOrder.id.slice(0,6)}</span>
-                            ${paymentBadge}
-                        </div>
-                        <div class="address">📍 ${mainOrder.address || 'Sin dirección'}</div>
-                        ${mainOrder.notes ? `<div class="notes">📝 <b>Nota:</b> ${mainOrder.notes}</div>` : ''}
-
-                        ${!isDelivered ? `
-                        <div class="action-btns">
-                            <a href="${wazeLink}" target="_blank" class="btn btn-waze">🗺️ Waze</a>
-                            <a href="${waLink}" target="_blank" class="btn btn-wa">💬 Llama/WA</a>
-                        </div>` : ''}
-                `;
-
-                // 3. Lógica para mostrar la alerta o los botones de despacho
-                // Si la orden principal (o alguna suborden) apenas se va a despachar:
-                if (mainOrder.status === 'listo' || mainOrder.status === 'confirmado' || mainOrder.status === 'en_preparacion') {
-                    if (!grupo.todasListas) {
-                        // 🚨 ALERTA: Faltan cosas en cocina
-                        cardHtml += `
-                            <div style="background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin: 10px 0; border: 1px solid #ffeeba;">
-                                <strong style="display: flex; align-items: center; gap: 5px;">
-                                    ⏳ FALTAN ADICIONES EN COCINA
-                                </strong>
-                                <div style="margin-top: 5px; font-size: 0.9em;">
-                                    Pendiente: ${grupo.itemsPendientes.join(' | ')}
-                                </div>
-                            </div>
-                            <button class="btn btn-main" disabled style="background:#ccc; cursor:not-allowed;">Esperando a cocina...</button>
-                        `;
-                    } else {
-                        // Todo el grupo está 'listo'
-                        cardHtml += `<button class="btn btn-main btn-start" onclick="updateStatus('${mainOrder.id}', 'en_camino')">🚀 Iniciar Ruta</button>`;
-                    }
-                    cardHtml += `</div>`;
-                    listRecoger.innerHTML += cardHtml;
-                    recogerCount++;
-                } 
-                else if (mainOrder.status === 'en_camino') {
-                    cardHtml += `<button class="btn btn-main btn-start" onclick="updateStatus('${mainOrder.id}', 'en_puerta')" style="background:#f57c00;">📍 Estoy en la puerta</button></div>`;
-                    listRuta.innerHTML += cardHtml;
-                    rutaCount++;
-                }
-                else if (mainOrder.status === 'en_puerta') {
-                    cardHtml += `<button class="btn btn-main btn-deliver" onclick="updateStatus('${mainOrder.id}', 'entregado')">✅ Marcar Entregado</button></div>`;
-                    listRuta.innerHTML += cardHtml;
-                    rutaCount++;
-                }
-                else if (mainOrder.status === 'entregado') {
-                    cardHtml += `<p style="text-align:center; color:#1D9E75; font-weight:bold; padding:12px 0;">Entregado correctamente ✅</p></div>`;
-                    listEntregados.innerHTML += cardHtml;
-                    entregadoCount++;
-                }
-            });
-
-            if(recogerCount === 0) listRecoger.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">No hay pedidos por recoger</p>';
-            if(rutaCount === 0) listRuta.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">No llevas pedidos en ruta</p>';
-            if(entregadoCount === 0) listEntregados.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">No has entregado pedidos aún</p>';
-        }
-
-        // --- 4. Actualizar Estado ---
-        async function updateStatus(orderId, newStatus) {
-            // Animación de carga en el botón
-            try {
-                const res = await fetch(`/api/delivery/orders/${orderId}/status`, {
-                    method: 'PATCH',
-                    headers: headers,
-                    body: JSON.stringify({ status: newStatus })
-                });
-                if (res.ok) {
-                    fetchOrders(); // Recarga las listas para mover la tarjeta de pestaña
-                } else {
-                    alert('Error al actualizar el pedido');
-                }
-            } catch (err) {
-                alert('Error de conexión');
-            }
-        }
-
-    // --- 5. Polling Optimizado (Check Updates) ---
-    let currentOrdersHash = null;
-
-async function checkUpdates() {
-    try {
-        const res = await fetch('/api/delivery/check-updates', { headers });
-        if (res.ok) {
-            const data = await res.json();
-            // Si el hash que llega es diferente al que tenemos guardado, hubo un cambio
-            if (data.hash !== currentOrdersHash) {
-                currentOrdersHash = data.hash;
-                fetchOrders(); // Solo aquí descargamos la data pesada y redibujamos
-            }
-        }
-    } catch (err) {
-        // Si falla en silencio (pérdida de red del domiciliario), no hacemos nada
-    }
-}
-
-// --- Iniciar ---
-checkUpdates(); // Llama la primera vez
-// Ahora podemos revisar cada 5 segundos sin saturar la base de datos!
-setInterval(checkUpdates, 5000);
-
-// Topbar clock
-(function(){
-  function _tc(){ const n=new Date(); document.getElementById('header-clock').textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0'); }
-  _tc(); setInterval(_tc, 10000);
-})();
-
+  // Logout
+  document.getElementById('perfil-logout')?.addEventListener('click', () => mesioLogout());
+});
 </script>
 </body>
 </html>
