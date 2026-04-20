@@ -23,7 +23,9 @@
 
    TODO (backend endpoints not yet implemented):
      POST /api/staff/self/shift-swap           → shift swap request
-     GET  /api/staff/self/performance          → NPS + tip performance stats
+
+   Wired in Sprint Z:
+     GET  /api/staff/self/performance          → scLoadPerformance()
 */
 
 'use strict';
@@ -553,6 +555,69 @@ function _scRenderTips(data) {
   }
 }
 
+/* ── Performance ────────────────────────────────────────────────── */
+
+async function scLoadPerformance() {
+  const container = document.getElementById('sc-perf-container');
+  if (!container || !SC_TOKEN) return;
+
+  try {
+    const res = await fetch('/api/staff/self/performance?days=30', {
+      headers: { 'Authorization': 'Bearer ' + SC_TOKEN }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _scRenderPerformance(container, data);
+  } catch(_) {
+    // Non-critical — leave existing placeholder values in place.
+  }
+}
+
+function _scRenderPerformance(container, data) {
+  const m = (data && data.metrics) ? data.metrics : {};
+
+  // Update the sub-header period label
+  const subEl = container.querySelector('.sc-perf-sub');
+  if (subEl) {
+    subEl.textContent = 'Últimos ' + (data.period_days || 30) + ' días';
+  }
+
+  // Locate the three stat rows by their label text and update the value span.
+  const rows = container.querySelectorAll('.sc-perf-row');
+  rows.forEach(row => {
+    const labelEl = row.querySelector('.l');
+    const valueEl = row.querySelector('.v');
+    if (!labelEl || !valueEl) return;
+
+    const label = labelEl.textContent.trim();
+
+    if (label === 'Propinas promedio / turno') {
+      const amt = m.avg_tip_per_shift != null ? m.avg_tip_per_shift : 0;
+      valueEl.textContent = _scFmtCOP(amt);
+
+    } else if (label === 'NPS de tus mesas') {
+      // TODO: nps_average is always null until nps_responses.table_session_id
+      // migration lands.  Show "—" with muted hint.
+      if (m.nps_average != null) {
+        valueEl.textContent = Number(m.nps_average).toFixed(1);
+      } else {
+        valueEl.textContent = '';
+        const dash = document.createElement('span');
+        dash.textContent = '—';
+        const hint = document.createElement('span');
+        hint.style.cssText = 'font-size:10px;color:var(--sc-text-3);font-weight:400;margin-left:4px;';
+        hint.textContent = 'Sin reseñas en el período';
+        valueEl.appendChild(dash);
+        valueEl.appendChild(hint);
+      }
+
+    } else if (label === 'Ticket promedio') {
+      const amt = m.avg_ticket != null ? m.avg_ticket : 0;
+      valueEl.textContent = amt > 0 ? _scFmtCOP(amt) : '—';
+    }
+  });
+}
+
 /* ── WebAuthn / Biometrics ─────────────────────────────────────── */
 const SC_WEBAUTHN_OK = !!window.PublicKeyCredential;
 
@@ -1078,19 +1143,23 @@ scLoadProfile();
 scLoadTimecardPreview();
 scLoadTips();
 scLoadUpcomingShifts();
+scLoadPerformance();
 scLoadBiometricStatus();
 scLoadAnnouncements();
 scLoadTasks();
 
-// Auto-refresh every 60 seconds (tips + upcoming shifts added in Sprint Y).
+// Auto-refresh every 60 seconds (tips + upcoming shifts added in Sprint Y;
+// performance added in Sprint Z — refreshed once per minute like tips).
 if (typeof mesioInterval === 'function') {
   mesioInterval(scLoadAnnouncements,    60000);
   mesioInterval(scLoadTasks,            60000);
   mesioInterval(scLoadTips,             60000);
   mesioInterval(scLoadUpcomingShifts,   60000);
+  mesioInterval(scLoadPerformance,      60000);
 } else {
   setInterval(scLoadAnnouncements,    60000);
   setInterval(scLoadTasks,            60000);
   setInterval(scLoadTips,             60000);
   setInterval(scLoadUpcomingShifts,   60000);
+  setInterval(scLoadPerformance,      60000);
 }

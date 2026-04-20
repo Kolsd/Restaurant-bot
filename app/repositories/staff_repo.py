@@ -2047,6 +2047,118 @@ async def db_calculate_tips_for_staff(
     return {"amount": 0.0, "count": 0}
 
 
+# ── Self-service: performance aggregate ──────────────────────────────────────
+
+async def db_get_staff_performance(
+    org_id: int,
+    staff_id: str,
+    days: int = 30,
+) -> dict:
+    """Aggregate performance metrics for a single staff member over the last N days.
+
+    Returns:
+      {
+        "period_days":  int,
+        "metrics": {
+          "tables_served":      int,
+          "avg_ticket":         int,    # COP zero-decimal  # JSON boundary
+          "tips_total":         float,  # COP zero-decimal  # JSON boundary
+          "avg_tip_per_shift":  float,  # COP zero-decimal  # JSON boundary
+          "nps_average":        null,   # TODO: nps_responses has no link to
+                                       #   table_sessions.assigned_staff_id —
+                                       #   no session_id FK exists on the table.
+                                       #   Return null until a future migration
+                                       #   adds nps_responses.table_session_id.
+          "nps_response_count": 0,
+        }
+      }
+
+    Caller MUST have entered tenant_scope(org_id) — RLS filters by org_id automatically.
+    No bypass_tenant_scope needed: all queried tables (table_sessions, table_orders,
+    staff_shifts) are tenant-scoped and the caller is authenticated staff.
+    """
+    from datetime import datetime, timedelta, timezone  # noqa: PLC0415
+
+    now_utc = datetime.now(timezone.utc)
+    period_start_tz  = now_utc - timedelta(days=days)   # tz-aware (for staff_shifts TIMESTAMPTZ)
+    # table_sessions.started_at is TIMESTAMP (no TZ) — asyncpg requires naive datetime.
+    period_start_naive = period_start_tz.replace(tzinfo=None)
+
+    # ── tables served + avg ticket ────────────────────────────────────────────
+    # Count distinct sessions where this staff member was the assigned_staff_id.
+    # For avg_ticket: average the total column of table_orders that belong to
+    # sessions this staff served (matching by table_id + time window).
+    # table_orders.total is a NUMERIC column (Decimal-safe via asyncpg).
+    # NOTE: table_orders has no direct session_id FK — joined by table_id + time.
+    sessions_sql = """
+        SELECT
+            COUNT(DISTINCT ts.id)::int                        AS tables_served,
+            COALESCE(AVG(tor.total), 0)::numeric(12,0)::int   AS avg_ticket
+        FROM table_sessions ts
+        LEFT JOIN table_orders tor
+               ON tor.table_id = ts.table_id
+              AND tor.created_at >= ts.started_at
+              AND tor.created_at <= COALESCE(ts.closed_at, NOW())
+              AND tor.org_id = $3
+        WHERE ts.assigned_staff_id = $1::uuid
+          AND ts.started_at >= $2
+          AND ts.org_id = $3
+    """
+
+    # ── shift count (for avg_tip_per_shift denominator) ───────────────────────
+    shifts_sql = """
+        SELECT COUNT(*)::int AS shift_count
+        FROM staff_shifts
+        WHERE staff_id = $1::uuid
+          AND clock_in >= $2
+          AND org_id   = $3
+    """
+
+    async with tenant_connection() as conn:
+        sess_row  = await conn.fetchrow(sessions_sql, staff_id, period_start_naive, org_id)
+        shift_row = await conn.fetchrow(shifts_sql,   staff_id, period_start_tz,    org_id)
+
+    tables_served = int(sess_row["tables_served"]) if sess_row else 0
+    avg_ticket    = int(sess_row["avg_ticket"])    if sess_row else 0
+    shift_count   = int(shift_row["shift_count"])  if shift_row else 0
+
+    # ── tips (reuse existing function) ───────────────────────────────────────
+    tips_data = await db_calculate_tips_for_staff(
+        org_id=org_id,
+        staff_id=staff_id,
+        period_start=period_start_tz.isoformat(),
+        period_end=now_utc.isoformat(),
+    )
+    tips_total = tips_data["amount"]  # already float at JSON boundary
+
+    avg_tip_per_shift = (
+        round(tips_total / shift_count, 2) if shift_count > 0 else 0.0
+    )
+
+    # ── NPS: not queryable today — no session_id FK on nps_responses ─────────
+    # TODO: once a future migration adds nps_responses.table_session_id (FK into
+    # table_sessions), join here:
+    #   SELECT AVG(nr.score)::numeric(4,2), COUNT(*)
+    #   FROM nps_responses nr
+    #   JOIN table_sessions ts ON ts.id = nr.table_session_id
+    #   WHERE ts.assigned_staff_id = $1::uuid AND nr.created_at >= $2
+    # Until then, return null to signal "data not available".
+    nps_average        = None
+    nps_response_count = 0
+
+    return {
+        "period_days": days,
+        "metrics": {
+            "tables_served":     tables_served,
+            "avg_ticket":        avg_ticket,       # JSON boundary: int
+            "tips_total":        tips_total,        # JSON boundary: float
+            "avg_tip_per_shift": avg_tip_per_shift, # JSON boundary: float
+            "nps_average":       nps_average,
+            "nps_response_count": nps_response_count,
+        },
+    }
+
+
 # ── Self-service: upcoming scheduled shifts ───────────────────────────────────
 
 async def db_get_staff_upcoming_shifts(

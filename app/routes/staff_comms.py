@@ -19,6 +19,7 @@ Staff self-service routes (JWT staff:<uuid>):
   POST   /api/staff/self/tasks/{id}/complete   mark complete
   GET    /api/staff/self/tips                  tips today + this week (Sprint Y)
   GET    /api/staff/self/upcoming-shifts       next N scheduled shifts (Sprint Y)
+  GET    /api/staff/self/performance           aggregate metrics last N days (Sprint Z)
 """
 from __future__ import annotations
 
@@ -337,6 +338,51 @@ async def self_tips(
         "week_count":  week_data["count"],
         "currency":    "COP",
     }
+
+
+# ── Staff self-service: Performance ─────────────────────────────────────────
+
+@router.get("/self/performance", status_code=200)
+async def self_performance(
+    days: int = Query(default=30, ge=1, le=180),
+    user: dict = Depends(get_current_user_scoped),
+):
+    """Return aggregate performance metrics for the authenticated staff member.
+
+    Query param:
+      days (int, 1–180, default 30) — look-back window.
+
+    Response shape:
+      {
+        "period_days": 30,
+        "metrics": {
+          "tables_served":      int,
+          "avg_ticket":         int,    // COP zero-decimal
+          "tips_total":         float,
+          "avg_tip_per_shift":  float,
+          "nps_average":        null,   // always null until future migration
+          "nps_response_count": 0
+        }
+      }
+
+    NPS per-staff is not queryable today: nps_responses has no link to
+    table_sessions.assigned_staff_id (no session_id FK).  Returns null until
+    a future migration adds nps_responses.table_session_id.
+    """
+    username: str = user.get("username", "")
+    if not username.startswith("staff:"):
+        raise HTTPException(status_code=403, detail="Solo el staff puede consultar su rendimiento.")
+    staff_id = username.split(":", 1)[1]
+
+    org_id = user.get("restaurant_id")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo determinar la organización.")
+
+    return await staff_repo.db_get_staff_performance(
+        org_id=int(org_id),
+        staff_id=staff_id,
+        days=days,
+    )
 
 
 # ── Staff self-service: Upcoming shifts ──────────────────────────────────────
