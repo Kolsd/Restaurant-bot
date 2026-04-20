@@ -91,10 +91,10 @@
       margin-top: 4px;
     }
 
-    /* ── Role hint tabs (visual only — Admin / Mesero / Cocina) ── */
+    /* ── Role hint tabs (visual only — Administrativo / Staff) ── */
     .roles {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 6px;
       margin: 22px 0 20px;
       padding: 4px;
@@ -542,9 +542,8 @@
 
         <!-- Role hints (visual only — decorative) -->
         <div class="roles" aria-hidden="true">
-          <div class="role-hint active">Admin<small>Panel principal</small></div>
-          <div class="role-hint">Mesero<small>con huella</small></div>
-          <div class="role-hint">Cocina<small>con PIN</small></div>
+          <div class="role-hint active">Administrativo<small>Correo + contraseña</small></div>
+          <div class="role-hint">Staff<small>Usuario + PIN</small></div>
         </div>
 
         <div id="error-msg" class="login-error" role="alert" aria-live="polite"></div>
