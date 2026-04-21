@@ -1,23 +1,21 @@
-"""Performance indexes: 7 composite indexes for hot query paths.
+"""Performance indexes: 6 composite indexes for hot query paths.
 
 INDEX RATIONALE:
   1. ix_orders_org_created           — dashboard "orders today/this week" queries
                                        filter by org_id + date range.
   2. ix_table_orders_org_created     — KDS + kitchen views scan active table orders
                                        for an org ordered by recency.
-  3. ix_table_orders_session         — partial index: table_sessions JOIN only needs
-                                       rows where session is set (non-null).
-  4. ix_staff_shifts_staff_clock     — timecard queries: "all shifts for staff X
+  3. ix_staff_shifts_staff_clock     — timecard queries: "all shifts for staff X
                                        in date range" hits this composite.
-  5. ix_conversations_bot_phone      — inbox_worker._handle_meta_whatsapp looks up
+  4. ix_conversations_bot_phone      — inbox_worker._handle_meta_whatsapp looks up
                                        conversation by (bot_number, phone). Existing
                                        idx_convs_updated covers (bot_number, updated_at)
                                        but not the phone lookup.
-  6. ix_webhook_inbox_claim          — the claim-then-ack fetch query:
+  5. ix_webhook_inbox_claim          — the claim-then-ack fetch query:
                                        WHERE processed_at IS NULL
                                        ORDER BY next_attempt_at, id
                                        Partial index eliminates processed rows.
-  7. ix_nps_responses_org_created    — NPS dashboard analytics scan by org + date.
+  6. ix_nps_responses_org_created    — NPS dashboard analytics scan by org + date.
 
 Revision ID: 0048_performance_indexes
 Revises: 0047_swap_status_check
@@ -48,12 +46,6 @@ _INDEXES = [
         "CREATE INDEX IF NOT EXISTS ix_table_orders_org_created "
         "ON table_orders (org_id, created_at DESC)",
         "DROP INDEX IF EXISTS ix_table_orders_org_created",
-    ),
-    (
-        "ix_table_orders_session",
-        "CREATE INDEX IF NOT EXISTS ix_table_orders_session "
-        "ON table_orders (table_session_id) WHERE table_session_id IS NOT NULL",
-        "DROP INDEX IF EXISTS ix_table_orders_session",
     ),
     (
         "ix_staff_shifts_staff_clock",
@@ -87,7 +79,7 @@ def upgrade() -> None:
         logger.info("0048 upgrade: creating index %s", name)
         op.execute(create_sql)
 
-    logger.info("0048 upgrade: all 7 performance indexes created")
+    logger.info("0048 upgrade: all 6 performance indexes created")
 
 
 def downgrade() -> None:
@@ -95,4 +87,4 @@ def downgrade() -> None:
         logger.info("0048 downgrade: dropping index %s", name)
         op.execute(drop_sql)
 
-    logger.info("0048 downgrade: all 7 performance indexes dropped")
+    logger.info("0048 downgrade: all 6 performance indexes dropped")
