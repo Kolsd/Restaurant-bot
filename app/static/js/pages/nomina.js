@@ -52,7 +52,7 @@
   if (exportBtn) {
     exportBtn.addEventListener('click', function () {
       if (typeof mesioToast === 'function') {
-        mesioToast('Exportación PDF próximamente disponible', 'info');
+        mesioToast('Disponible en la próxima versión', 'info');
       }
     });
   }
@@ -123,7 +123,7 @@
       const tips = emp.tips || emp.tips_total || 0;
       const deductions = emp.deductions || emp.total_deductions || 0;
       const overtime = emp.overtime_pay || emp.extra || 0;
-      const net = emp.net_salary || emp.total || (base + tips - deductions + overtime);
+      const net = emp.net_salary ?? emp.total ?? null;
       const initials = avatarInitials(name);
 
       return '<div class="pay-row" style="cursor:pointer;">' +
@@ -137,7 +137,7 @@
         '<div class="num brand">+' + fmt(tips) + '</div>' +
         '<div class="num danger">' + (deductions ? '-' + fmt(deductions) : '$0') + '</div>' +
         '<div class="num">' + (overtime ? fmt(overtime) : '$0') + '</div>' +
-        '<div class="num" style="font-weight:600;">' + fmt(net) + '</div>' +
+        '<div class="num" style="font-weight:600;">' + (net !== null ? fmt(net) : '—') + '</div>' +
         '<div><span class="badge success">OK</span></div>' +
         '</div>';
     }).join('');
@@ -157,15 +157,43 @@
   }
 
   function renderTipsSummary(data) {
-    // Update the tip bar values if data present
-    if (!data || !data.by_role) return;
-    const byRole = data.by_role;
-    // Visual update: just update the total label
-    const totalEl = document.querySelector('.period-total');
-    if (totalEl && data.total_net) {
-      const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
-      // Don't override — the period total is salaries not just tips
+    const container = document.getElementById('tips-bars-container');
+    const totalLabel = document.getElementById('tips-total-label');
+    if (!container) return;
+
+    const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+
+    if (!data || !data.entries || !data.entries.length) {
+      container.innerHTML = '<div style="padding:6px 0;color:var(--text-3);font-size:13px;">Sin propinas en este período</div>';
+      if (totalLabel) totalLabel.textContent = fmt(0);
+      return;
     }
+
+    if (totalLabel) totalLabel.textContent = fmt(data.total_tips || 0);
+
+    const byRole = {};
+    data.entries.forEach(function (e) {
+      if (!e.role) return;
+      byRole[e.role] = (byRole[e.role] || 0) + (e.total_tips || 0);
+    });
+
+    const totalTips = data.total_tips || 1;
+    const roleColors = { mesero: 'var(--brand)', cocina: 'var(--warning)', bar: '#378ADD' };
+    const roleLabels = { mesero: 'Meseros', cocina: 'Cocina', bar: 'Bar' };
+
+    const bars = Object.keys(byRole).map(function (role) {
+      const amount = byRole[role];
+      const pct = Math.round((amount / totalTips) * 100);
+      const color = roleColors[role] || 'var(--brand)';
+      const label = roleLabels[role] || _escHtml(role.charAt(0).toUpperCase() + role.slice(1));
+      return '<div style="flex:1;min-width:120px;">' +
+        '<div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px;">' + label + '</div>' +
+        '<div class="tip-bar"><div class="tip-fill" style="width:' + pct + '%;background:' + color + ';" title="' + pct + '%"></div></div>' +
+        '<div style="font-size:12px;font-weight:600;margin-top:4px;">' + pct + '% &middot; ' + fmt(amount) + '</div>' +
+        '</div>';
+    });
+
+    container.innerHTML = bars.length ? bars.join('') : '<div style="padding:6px 0;color:var(--text-3);font-size:13px;">Sin propinas en este período</div>';
   }
 
   async function loadPayroll(period) {
@@ -186,13 +214,19 @@
   async function processPayroll() {
     const confirmed = typeof mesioConfirm === 'function'
       ? await mesioConfirm('¿Procesar pagos de nómina ' + currentPeriod + '?', { confirmText: 'Procesar', danger: false })
-      : window.confirm('¿Procesar pagos?');
+      : await mesioConfirm('¿Procesar pagos?');
     if (!confirmed) return;
     try {
       const headers = Object.assign({ 'Content-Type': 'application/json' },
         typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
       const { periodStart, periodEnd } = periodDates(currentPeriod);
-      const body = { period_start: periodStart, period_end: periodEnd, snapshot: {} };
+      const payrollBody = document.getElementById('payroll-body');
+      const employeeRows = payrollBody ? Array.from(payrollBody.querySelectorAll('.pay-row')).map(function(row) {
+        const nameEl = row.querySelector('[style*="font-weight:500"]') || row.querySelector('[style*="font-weight: 500"]');
+        const roleEl = row.querySelector('.pay-role');
+        return { name: nameEl ? nameEl.textContent : '', role: roleEl ? roleEl.textContent : '' };
+      }) : [];
+      const body = { period_start: periodStart, period_end: periodEnd, snapshot: { employees: employeeRows } };
       const res = await fetch('/api/staff/payroll/runs', { method: 'POST', headers, body: JSON.stringify(body) });
       if (res.ok) {
         if (typeof mesioToast === 'function') mesioToast('Nómina procesada exitosamente', 'success');

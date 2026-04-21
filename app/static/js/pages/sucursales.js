@@ -14,13 +14,72 @@
     });
   });
 
-  // Add branch button
-  const addBtn = document.getElementById('btn-add-branch');
-  if (addBtn) {
-    addBtn.addEventListener('click', function () {
-      if (typeof mesioToast === 'function') {
-        mesioToast('Alta de nueva sucursal próximamente disponible', 'info');
+  // Add branch modal
+  function openAddBranchModal() {
+    var modal = document.getElementById('addBranchModal');
+    if (modal) { modal.classList.add('open'); }
+  }
+
+  function closeAddBranchModal() {
+    var modal = document.getElementById('addBranchModal');
+    if (modal) {
+      modal.classList.remove('open');
+      var nameEl = document.getElementById('branchName');
+      var addrEl = document.getElementById('branchAddress');
+      var waEl = document.getElementById('branchWhatsapp');
+      if (nameEl) nameEl.value = '';
+      if (addrEl) addrEl.value = '';
+      if (waEl) waEl.value = '';
+    }
+  }
+
+  async function submitAddBranch() {
+    var nameEl = document.getElementById('branchName');
+    var addrEl = document.getElementById('branchAddress');
+    var waEl = document.getElementById('branchWhatsapp');
+    if (!nameEl || !nameEl.value.trim()) { mesioToast('Nombre requerido', 'warn'); return; }
+    if (!addrEl || !addrEl.value.trim()) { mesioToast('Dirección requerida', 'warn'); return; }
+
+    var payload = {
+      name: nameEl.value.trim(),
+      address: addrEl.value.trim(),
+      whatsapp_number: waEl ? waEl.value.trim() : ''
+    };
+
+    try {
+      var res = await fetch('/api/team/branches', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        throw new Error(err.detail || 'HTTP ' + res.status);
       }
+      mesioToast('Sucursal creada correctamente', 'success');
+      closeAddBranchModal();
+      loadLocations();
+    } catch (e) {
+      mesioToast('Error: ' + e.message, 'error');
+    }
+  }
+
+  var addBtn = document.getElementById('btn-add-branch');
+  if (addBtn) { addBtn.addEventListener('click', openAddBranchModal); }
+
+  var cancelBtn = document.getElementById('addBranchModalCancel');
+  if (cancelBtn) { cancelBtn.addEventListener('click', closeAddBranchModal); }
+
+  var closeBtn = document.getElementById('addBranchModalClose');
+  if (closeBtn) { closeBtn.addEventListener('click', closeAddBranchModal); }
+
+  var submitBtn = document.getElementById('addBranchModalSubmit');
+  if (submitBtn) { submitBtn.addEventListener('click', submitAddBranch); }
+
+  var overlay = document.getElementById('addBranchModal');
+  if (overlay) {
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeAddBranchModal();
     });
   }
 
@@ -29,7 +88,7 @@
   if (exportBtn) {
     exportBtn.addEventListener('click', function () {
       if (typeof mesioToast === 'function') {
-        mesioToast('Exportación próximamente disponible', 'info');
+        mesioToast('Disponible en la próxima versión', 'info');
       }
     });
   }
@@ -128,6 +187,7 @@
   }
 
   async function loadLocations(period) {
+    if (period) { console.info('sucursales: period filter is a v2 hook — backend does not support it yet', period); }
     try {
       const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
       const res = await fetch('/api/team/branches', { headers });
@@ -141,5 +201,5 @@
     }
   }
 
-  loadLocations('7 días');
+  loadLocations();
 })();

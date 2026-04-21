@@ -52,7 +52,7 @@
   if (exportBtn) {
     exportBtn.addEventListener('click', function () {
       if (typeof mesioToast === 'function') {
-        mesioToast('Exportación próximamente disponible', 'info');
+        mesioToast('Disponible en la próxima versión', 'info');
       }
     });
   }

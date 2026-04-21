@@ -226,7 +226,7 @@ async function handleTransfer() {
     { confirmText: 'Transferir', danger: true }
   );
   if (!ok) return;
-  mesioToast('Endpoint pendiente. Contacta soporte.', 'warn');
+  mesioToast('Disponible en la próxima versión', 'info');
 }
 
 async function handlePause() {
@@ -289,7 +289,7 @@ async function handleDelete() {
     { confirmText: 'Eliminar', cancelText: 'Cancelar', danger: true }
   );
   if (!ok) return;
-  mesioToast('Endpoint pendiente. Contacta soporte.', 'error');
+  mesioToast('Disponible en la próxima versión', 'info');
 }
 
 // ── Sidenav scroll spy ────────────────────────────────────────────

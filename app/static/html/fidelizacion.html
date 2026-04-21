@@ -34,8 +34,8 @@
           <div class="page-sub">Programa de puntos, niveles y campañas automáticas por WhatsApp. Mesio IA segmenta y personaliza cada mensaje.</div>
         </div>
         <div class="row">
-          <button class="btn" id="btn-configure">Configurar programa</button>
-          <button class="btn primary" id="btn-new-campaign">+ Nueva campaña</button>
+          <button class="btn" id="btn-configure">Configurar programa <span class="badge muted">v2</span></button>
+          <button class="btn primary" id="btn-new-campaign">+ Nueva campaña <span class="badge muted">v2</span></button>
         </div>
       </div>
 
@@ -43,25 +43,25 @@
       <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;">
         <div class="tier-card bronze">
           <div class="tier-lbl">Bronce</div>
-          <div class="tier-val">1.842</div>
+          <div class="tier-val" id="tier-bronce-count">&mdash;</div>
           <div class="tier-sub">clientes &middot; 0&ndash;20 pts</div>
           <div class="tier-info">+5% en todas las compras &middot; bienvenida 500 pts</div>
         </div>
         <div class="tier-card silver">
           <div class="tier-lbl">Plata</div>
-          <div class="tier-val">612</div>
+          <div class="tier-val" id="tier-plata-count">&mdash;</div>
           <div class="tier-sub">clientes &middot; 21&ndash;80 pts</div>
           <div class="tier-info">+8% + bebida gratis aniversario</div>
         </div>
         <div class="tier-card gold">
           <div class="tier-lbl">Oro</div>
-          <div class="tier-val">214</div>
+          <div class="tier-val" id="tier-oro-count">&mdash;</div>
           <div class="tier-sub">clientes &middot; 81&ndash;200 pts</div>
           <div class="tier-info">+12% + postre mensual + reserva VIP</div>
         </div>
         <div class="tier-card platinum">
           <div class="tier-lbl">Platino</div>
-          <div class="tier-val">48</div>
+          <div class="tier-val" id="tier-platino-count">&mdash;</div>
           <div class="tier-sub">clientes &middot; 200+ pts</div>
           <div class="tier-info">+15% + mesa preferencial + invitación a catas</div>
         </div>
@@ -104,7 +104,7 @@
               <div class="card-title"><span class="ai-spark"></span> Segmentos &middot; Mesio IA</div>
               <div class="card-sub">Clustering automático por comportamiento reciente</div>
             </div>
-            <button class="btn sm ghost" id="btn-view-all-segments">Ver todos</button>
+            <button class="btn sm ghost" id="btn-view-all-segments">Ver todos <span class="badge muted">v2</span></button>
           </div>
           <div style="padding: 14px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
             <div class="seg-card" data-segment="vip-active">

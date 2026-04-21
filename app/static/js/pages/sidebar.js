@@ -189,5 +189,34 @@
         avatarEl.textContent = restaurant.email.slice(0, 2).toUpperCase();
       }
     }
+
+    // Role-based and feature-flag filtering
+    const role = localStorage.getItem('rb_role') || restaurant.role || 'owner';
+    const features = restaurant.features || {};
+    const operationalRoles = ['caja', 'mesero', 'cocina', 'bar', 'domiciliario'];
+
+    function hide(key) {
+      const el = sb.querySelector('[data-key="' + key + '"]');
+      if (el) el.style.display = 'none';
+    }
+
+    // Always hide the WhatsApp nav item (no standalone page)
+    hide('whatsapp');
+
+    if (operationalRoles.includes(role)) {
+      // Operational staff: hide all admin sections, keep only staff-hq link
+      const adminKeys = ['resumen', 'pedidos', 'reservaciones', 'salon', 'menu', 'menu-eng',
+        'nps', 'fidelizacion', 'riesgo', 'staff', 'nomina', 'sucursales', 'settings', 'billing'];
+      adminKeys.forEach(function(k) { hide(k); });
+    } else if (role === 'gerente') {
+      hide('billing');
+      const locations = restaurant.locations || [];
+      if (locations.length <= 1) hide('sucursales');
+    }
+    // owner / admin: show everything (already rendered)
+
+    // Feature-flag gating
+    if (features.module_loyalty === false) hide('fidelizacion');
+    if (features.module_reservations === false) hide('reservaciones');
   });
 })();

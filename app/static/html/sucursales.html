@@ -166,7 +166,7 @@
             <div class="card-title">Comparativo de indicadores</div>
             <div class="card-sub">KPIs normalizados &middot; últimos 7 días</div>
           </div>
-          <button class="btn sm ghost" id="btn-export-cmp">Exportar</button>
+          <button class="btn sm ghost" id="btn-export-cmp">Exportar <span class="badge muted">v2</span></button>
         </div>
         <div class="cmp-row head">
           <div>Indicador</div>
@@ -282,6 +282,34 @@
 
     </div>
   </main>
+</div>
+
+<!-- ── Add branch modal ─────────────────────────────────────────── -->
+<div class="m-modal-overlay" id="addBranchModal" role="dialog" aria-modal="true" aria-labelledby="addBranchModalTitle">
+  <div class="m-modal-box" id="addBranchModalBox">
+    <h3 id="addBranchModalTitle">Nueva sucursal</h3>
+
+    <div class="form-field">
+      <label for="branchName">Nombre de la sucursal</label>
+      <input id="branchName" class="form-input" type="text" placeholder="Ej. Chapinero" />
+    </div>
+
+    <div class="form-field">
+      <label for="branchAddress">Dirección</label>
+      <input id="branchAddress" class="form-input" type="text" placeholder="Cra 13 #63-20" />
+    </div>
+
+    <div class="form-field">
+      <label for="branchWhatsapp">Número WhatsApp (opcional)</label>
+      <input id="branchWhatsapp" class="form-input" type="text" placeholder="57300..." />
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="addBranchModalCancel">Cancelar</button>
+      <button class="btn brand" id="addBranchModalSubmit">Crear sucursal</button>
+    </div>
+    <button class="icon-btn" id="addBranchModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">&#x2715;</button>
+  </div>
 </div>
 
 <script src="/static/js/mesio-utils.js"></script>

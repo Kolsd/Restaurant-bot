@@ -81,7 +81,8 @@
   async function loadNPS(days) {
     try {
       const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/nps/stats', { headers });
+      const d = parseInt(days, 10) || 30;
+      const res = await fetch('/api/nps/stats?days=' + d, { headers });
       if (!res.ok) { return; }
       const data = await res.json();
       renderNPSStats(data);

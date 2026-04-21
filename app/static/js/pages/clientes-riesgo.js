@@ -18,7 +18,7 @@
   if (bulkBtn) {
     bulkBtn.addEventListener('click', function () {
       if (typeof mesioToast === 'function') {
-        mesioToast('Campaña masiva IA — próximamente disponible', 'info');
+        mesioToast('Disponible en la próxima versión', 'info');
       }
     });
   }
@@ -28,7 +28,7 @@
   if (exportBtn) {
     exportBtn.addEventListener('click', function () {
       if (typeof mesioToast === 'function') {
-        mesioToast('Exportación próximamente disponible', 'info');
+        mesioToast('Disponible en la próxima versión', 'info');
       }
     });
   }
@@ -38,7 +38,7 @@
   if (bulkOfferBtn) {
     bulkOfferBtn.addEventListener('click', function () {
       if (typeof mesioToast === 'function') {
-        mesioToast('Enviando oferta a clientes de riesgo medio…', 'info', 2500);
+        mesioToast('Disponible en la próxima versión', 'info');
       }
     });
   }
@@ -122,8 +122,23 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         const name = btn.dataset.name;
+        const phone = btn.dataset.phone;
+        if (!phone) {
+          if (typeof mesioToast === 'function') mesioToast('Sin número disponible para ' + name, 'warn');
+          return;
+        }
+        const digits = phone.replace(/\D/g, '');
+        const restaurantRaw = localStorage.getItem('rb_restaurant');
+        let restaurantName = 'nuestro restaurante';
+        try {
+          const r = JSON.parse(restaurantRaw);
+          restaurantName = (r && r.name) ? r.name : restaurantName;
+        } catch (_) {}
+        const msg = 'Hola ' + name + ', te extrañamos en ' + restaurantName + '! Tenemos novedades en el menú que seguro te van a gustar. ¿Quieres que te enviemos la carta?';
+        const url = 'https://wa.me/' + digits + '?text=' + encodeURIComponent(msg);
+        window.open(url, '_blank');
         if (typeof mesioToast === 'function') {
-          mesioToast('Iniciando contacto con ' + name + '…', 'info', 2000);
+          mesioToast('Abriendo WhatsApp con ' + name + '…', 'success', 2500);
         }
       });
     });

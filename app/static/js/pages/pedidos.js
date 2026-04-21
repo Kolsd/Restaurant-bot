@@ -45,6 +45,8 @@
     });
   }
 
+  let _allOrders = [];
+
   // Period filter (seg buttons in history)
   document.querySelectorAll('#tab-hist .seg-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -52,7 +54,7 @@
       btn.classList.add('active');
       const periodMap = { 'Hoy': '1d', '7 días': '7d', 'Mes': '30d' };
       const period = periodMap[btn.textContent.trim()] || '7d';
-      loadHistoryOrders(period);
+      renderHistoryOrders(filterByPeriod(_allOrders, period));
     });
   });
 
@@ -65,8 +67,8 @@
   }
 
   // Export CSV button
-  const exportBtn = document.querySelector('.page-head .btn:not(.primary)');
-  if (exportBtn && exportBtn.textContent.includes('Exportar')) {
+  const exportBtn = document.getElementById('btn-export-csv');
+  if (exportBtn) {
     exportBtn.addEventListener('click', exportCSV);
   }
 
@@ -192,15 +194,24 @@
     body.setAttribute('data-loaded', 'true');
   }
 
+  function filterByPeriod(orders, period) {
+    const now = new Date();
+    const days = period === '1d' ? 1 : period === '30d' ? 30 : 7;
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
+    return orders.filter(function (o) {
+      if (!o.created_at) return true;
+      return new Date(o.created_at) >= cutoff;
+    });
+  }
+
   async function loadHistoryOrders(period) {
     try {
       const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const params = new URLSearchParams({ period: period || '7d' });
-      const res = await fetch('/api/orders?' + params.toString(), { headers });
+      const res = await fetch('/api/orders', { headers });
       if (!res.ok) { return; }
       const data = await res.json();
-      const orders = data.orders || data;
-      renderHistoryOrders(Array.isArray(orders) ? orders : []);
+      _allOrders = Array.isArray(data.orders || data) ? (data.orders || data) : [];
+      renderHistoryOrders(filterByPeriod(_allOrders, period || '7d'));
     } catch (e) {
       console.error('pedidos: history error', e);
     }
@@ -208,7 +219,7 @@
 
   function exportCSV() {
     if (typeof mesioToast === 'function') {
-      mesioToast('Exportación próximamente disponible', 'info');
+      mesioToast('Disponible en la próxima versión', 'info');
     }
   }
 

@@ -375,6 +375,7 @@ body {
 .badge.info { background: var(--info-light); color: var(--info-text); }
 .badge.brand { background: var(--brand-light); color: var(--brand-dark); }
 .badge.purple { background: var(--purple-light); color: var(--purple-text); }
+.badge.muted { background: #f0f0e8; color: var(--text-3); font-size: 10.5px; padding: 1px 6px; vertical-align: middle; }
 
 .dot {
   width: 7px; height: 7px;

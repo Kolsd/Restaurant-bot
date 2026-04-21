@@ -170,7 +170,8 @@
   async function loadReservations() {
     try {
       const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/reservations?date=' + isoDate(currentDate), { headers });
+      const d = isoDate(currentDate);
+      const res = await fetch('/api/reservations?date_from=' + d + '&date_to=' + d, { headers });
       if (!res.ok) {
         console.error('reservaciones: fetch failed', res.status);
         return;

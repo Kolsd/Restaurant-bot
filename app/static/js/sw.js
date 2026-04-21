@@ -10,7 +10,7 @@
  * Cache busting: increment CACHE_VERSION on every deploy that changes static assets.
  */
 
-const CACHE_VERSION  = 'v25';  // ← S5 Wave 1: mesio-utils.js Org/Location helpers
+const CACHE_VERSION  = 'v26';
 const CACHE_NAME     = `mesio-shell-${CACHE_VERSION}`;
 
 const SHELL_ASSETS = [
@@ -18,14 +18,20 @@ const SHELL_ASSETS = [
   '/login',
   '/settings',
   '/static/css/tokens.css',
-  '/static/css/dashboard.css',
-  '/static/js/dashboard-core.js',
-  '/static/js/dashboard-components.js',
-  '/static/js/dashboard-features.js',
-  '/static/js/dashboard-floorplan.js',
-  '/static/js/dashboard-nps-inventory.js',
+  '/static/css/shared.css',
   '/static/js/mesio-utils.js',
   '/static/js/offline-sync.js',
+  '/static/js/pages/sidebar.js',
+  '/static/js/pages/dashboard.js',
+  '/static/js/pages/menu-admin.js',
+  '/static/js/pages/nomina.js',
+  '/static/js/pages/equipo.js',
+  '/static/js/pages/reservaciones.js',
+  '/static/js/pages/nps.js',
+  '/static/js/pages/fidelizacion.js',
+  '/static/js/pages/sucursales.js',
+  '/static/js/pages/settings.js',
+  '/static/js/pages/billing.js',
   '/static/img/logo.png',
 ];
 
