@@ -1,13 +1,11 @@
 /* ═══════════════════════════════════════════════════
    Mesio — Domiciliario v2 (mobile-first, dark)
-   Auto-refresh via hash check every 5s
+   Auto-refresh via hash check every 10s
    ═══════════════════════════════════════════════════ */
 
 // ── Auth guard ──────────────────────────────────────
 const _token = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
 if (!_token) { window.location.href = '/login'; }
-
-const _hdr = { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
 
 // ── State ───────────────────────────────────────────
 let _activeTab = 'hoy';
@@ -21,7 +19,12 @@ function _esc(s) {
   return el.innerHTML;
 }
 
-// ── Waze link builder (preserved from domiciliario.html) ──
+// ── Navigation link builders ─────────────────────────
+function _mapsLink(lat, lng, address) {
+  const dest = (lat != null && lng != null) ? `${lat},${lng}` : encodeURIComponent(address || '');
+  return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+}
+
 function _wazeLink(address) {
   if (!address) return 'https://waze.com/ul?q=';
   const mapsMatch = address.match(/[?&]q=([-\d.]+),([-\d.]+)/);
@@ -56,7 +59,6 @@ function _renderHero(orders) {
   const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   setEl('dom-stat-delivered', done.length);
   setEl('dom-stat-pending', pending.length);
-  // Tips come from a separate endpoint — leave as is if not available
 }
 
 // ── Render active delivery ────────────────────────────
@@ -70,18 +72,15 @@ function _renderActive(orders) {
     return;
   }
 
-  // Customer name initials for avatar
   const nameParts = (inRoute.customer_name || inRoute.phone || 'C').split(' ');
   const initials = nameParts.map(p => p.charAt(0).toUpperCase()).slice(0, 2).join('');
   const cleanPhone = (inRoute.phone || '').replace(/\D/g, '');
-  const waLink = cleanPhone ? `https://wa.me/${cleanPhone}` : '#';
+  const mapsUrl = _mapsLink(inRoute.lat, inRoute.lng, inRoute.address);
   const wazeUrl = _wazeLink(inRoute.address);
 
-  // Delivery status steps
   const isPickup = inRoute.status === 'en_camino';
   const isAtDoor = inRoute.status === 'en_puerta';
 
-  // Elapsed minutes since dispatch
   let etaText = '';
   if (inRoute.dispatched_at) {
     const iso = inRoute.dispatched_at.endsWith('Z') ? inRoute.dispatched_at : inRoute.dispatched_at + 'Z';
@@ -96,8 +95,6 @@ function _renderActive(orders) {
   const notesEl = document.createElement('div');
   notesEl.textContent = inRoute.notes || '';
   const safeNotes = notesEl.innerHTML;
-
-  const ctaBtnLabel = isAtDoor ? '✅ Marcar Entregado' : '🗺️ Navegar con Waze';
 
   activeEl.innerHTML = `
     <div class="active-badge"><span class="dot"></span>Entrega en curso · #${_esc(String(inRoute.id).slice(0,6))}</div>
@@ -123,31 +120,27 @@ function _renderActive(orders) {
     </div>
 
     <div class="cta-row">
-      <button class="cta-btn outline dom-call-btn" data-phone="${_esc(cleanPhone)}" aria-label="Llamar">📞</button>
-      <button class="cta-btn dom-nav-btn" data-waze="${_esc(wazeUrl)}" data-id="${_esc(String(inRoute.id))}" data-status="${isAtDoor ? 'entregado' : 'en_puerta'}">
-        ${ctaBtnLabel}
-      </button>
+      <a class="cta-btn outline" href="tel:+${_esc(cleanPhone)}" aria-label="Llamar">📞</a>
+      ${isAtDoor
+        ? `<button class="cta-btn dom-action-btn" data-action="entregado" data-id="${_esc(String(inRoute.id))}">✅ Marcar Entregado</button>`
+        : `<a class="cta-btn dom-maps-btn" href="${_esc(mapsUrl)}" target="_blank" rel="noopener">🗺️ Maps</a>
+           <a class="cta-btn outline dom-waze-btn" href="${_esc(wazeUrl)}" target="_blank" rel="noopener" data-id="${_esc(String(inRoute.id))}">Waze</a>`
+      }
     </div>`;
 
-  // Bind CTA
-  activeEl.querySelector('.dom-call-btn')?.addEventListener('click', () => {
-    const ph = activeEl.querySelector('.dom-call-btn').dataset.phone;
-    if (ph) window.open(`tel:+${ph}`);
-  });
-
-  activeEl.querySelector('.dom-nav-btn')?.addEventListener('click', async (e) => {
+  activeEl.querySelector('.dom-action-btn')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
-    const newStatus = btn.dataset.status;
+    const action = btn.dataset.action;
     const orderId = btn.dataset.id;
-    if (newStatus === 'en_puerta') {
-      // Open waze
-      window.open(btn.dataset.waze, '_blank');
-      // Also update status
-      await updateStatus(orderId, 'en_puerta');
-    } else if (newStatus === 'entregado') {
+    if (action === 'entregado') {
       const ok = await mesioConfirm('¿Confirmar entrega al cliente?', { confirmText: 'Sí, entregado', danger: false });
       if (ok) await updateStatus(orderId, 'entregado');
     }
+  });
+
+  activeEl.querySelector('.dom-waze-btn')?.addEventListener('click', async (e) => {
+    const orderId = e.currentTarget.dataset.id;
+    if (orderId) await updateStatus(orderId, 'en_puerta');
   });
 }
 
@@ -155,7 +148,6 @@ function _renderActive(orders) {
 function _renderOrderItems(order) {
   const itemsEl = document.getElementById('dom-order-items');
   const totalEl = document.getElementById('dom-order-total');
-  const payMethod = document.getElementById('dom-pay-method');
   if (!itemsEl) return;
 
   const inRoute = order;
@@ -253,7 +245,7 @@ function _renderHistorial(orders) {
 async function updateStatus(orderId, status) {
   try {
     const res = await fetch(`/api/delivery/orders/${orderId}/status`, {
-      method: 'PATCH', headers: _hdr,
+      method: 'PATCH', headers: mesioHeaders(),
       body: JSON.stringify({ status })
     });
     if (res.ok) { await fetchOrders(); }
@@ -264,7 +256,7 @@ async function updateStatus(orderId, status) {
 // ── Fetch orders ──────────────────────────────────────
 async function fetchOrders() {
   try {
-    const res = await fetch('/api/delivery/orders', { headers: _hdr });
+    const res = await fetch('/api/delivery/orders', { headers: mesioHeaders() });
     mesioTrackFetch(res.ok);
     if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; } return; }
     const data = await res.json();
@@ -286,7 +278,7 @@ function _render() {
 // ── Hash check for efficient polling ─────────────────
 async function checkUpdates() {
   try {
-    const res = await fetch('/api/delivery/check-updates', { headers: _hdr });
+    const res = await fetch('/api/delivery/check-updates', { headers: mesioHeaders() });
     if (!res.ok) return;
     const data = await res.json();
     if (data.hash !== _currentHash) {
@@ -298,11 +290,10 @@ async function checkUpdates() {
 
 // ── Boot ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // Tab buttons
   document.querySelectorAll('.dom-tab').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
   fetchOrders();
-  setInterval(checkUpdates, 5000);
+  mesioInterval(checkUpdates, 10000);
 });

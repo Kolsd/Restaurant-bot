@@ -7,8 +7,6 @@
 const _token = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
 if (!_token) { window.location.href = '/login'; }
 
-const _hdr = { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
-
 // ── State ───────────────────────────────────────────
 let _tickets = [];
 let _selectedIdx = -1;
@@ -20,7 +18,7 @@ let _localPlusMins = {};
     const el = document.getElementById('bar-clock');
     if (el) el.textContent = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
   }
-  _tc(); setInterval(_tc, 10000);
+  _tc(); mesioInterval(_tc, 10000);
 })();
 
 // ── XSS safe text ───────────────────────────────────
@@ -121,7 +119,6 @@ function _renderQueue(orders) {
       e.stopPropagation();
       _localPlusMins[btn.dataset.id] = (_localPlusMins[btn.dataset.id] || 0) + 2;
       mesioToast('+2 min (local)', 'warning', 1500);
-      // TODO: server-side timer extension
     });
   });
 
@@ -137,9 +134,8 @@ function _renderQueue(orders) {
 // ── Mark listo ────────────────────────────────────────
 async function markListo(orderId) {
   try {
-    // Bar orders come from table_orders — use same KDS endpoint
     const res = await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST', headers: _hdr, body: JSON.stringify({ status: 'listo' })
+      method: 'POST', headers: mesioHeaders(), body: JSON.stringify({ status: 'listo' })
     });
     mesioTrackFetch(res.ok);
     if (!res.ok) throw new Error('status ' + res.status);
@@ -153,16 +149,12 @@ async function markListo(orderId) {
 // ── Load orders (bar filter) ─────────────────────────
 async function loadOrders() {
   try {
-    const res = await fetch('/api/table-orders', { headers: _hdr });
+    const res = await fetch('/api/table-orders?station=bar', { headers: mesioHeaders() });
     mesioTrackFetch(res.ok);
     if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error('status'); }
     const data = await res.json();
     let orders = data.orders || data || [];
 
-    // Keep only bar-relevant orders: filter by category 'bebidas' or channel.
-    // The backend doesn't yet expose per-station category filtering, so we show
-    // all active non-delivered orders — staff can visually identify drinks.
-    // TODO: add `?station=bar` query param when backend supports it.
     orders = orders.filter(o => o.status !== 'entregado');
 
     _updateStats(orders);
@@ -176,7 +168,7 @@ async function loadOrders() {
 // ── Load inventory sidebar ────────────────────────────
 async function loadInventory() {
   try {
-    const res = await fetch('/api/stats/inventory-critical', { headers: _hdr });
+    const res = await fetch('/api/stats/inventory-critical', { headers: mesioHeaders() });
     if (!res.ok) return;
     const data = await res.json();
     const items = data.items || data || [];

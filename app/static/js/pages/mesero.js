@@ -7,7 +7,7 @@
 const _token = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
 if (!_token) { window.location.href = '/login'; }
 
-const _hdr = { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
+const _hdr = mesioHeaders;
 const _staffId = localStorage.getItem('rb_staff_id') || null;
 
 // ── State ───────────────────────────────────────────
@@ -50,11 +50,11 @@ function _applyZoneFilter() {
 
 // ── Status → CSS class + label ───────────────────────
 function _tableState(t) {
-  if (t.has_waiter_alert) return { cls: 'alert', label: '🙋 Llamó al mesero' };
-  if (!t.session_active) return { cls: '',       label: 'Libre' };
+  if (t.has_waiter_alert ?? false) return { cls: 'alert', label: '🙋 Llamó al mesero' };
+  if (!(t.session_active ?? false)) return { cls: '', label: 'Libre' };
   const orders = t.pending_orders || [];
-  const anyListo = orders.some(o => o.status === 'listo');
-  const anyBill  = t.has_open_check || false;
+  const anyListo = orders.some(s => s === 'listo');
+  const anyBill  = t.has_open_check ?? false;
   if (anyBill)   return { cls: 'fac',  label: 'Facturando' };
   if (anyListo)  return { cls: 'occ',  label: 'Comiendo' };
   if (orders.length) return { cls: 'sent', label: 'Esperando' };
@@ -79,7 +79,8 @@ function _renderTables(tables) {
     const zone  = t.zone || '';
     const total = t.current_total != null ? mesioFmt(t.current_total) : '';
     const sinceStr = t.session_started_at ? _elapsed(t.session_started_at) : '';
-    const alertLabel = t.has_waiter_alert ? `<div class="m-tbl-alert">⚠️ Atención</div>` : '';
+    const alertLabel = (t.has_waiter_alert ?? false) ? '<div class="m-tbl-alert">Atenci\u00f3n</div>' : '';
+    const checkBadge = (t.has_open_check ?? false) ? '<div class="m-tbl-check-badge">Cobrando</div>' : '';
     const capBadge = cap ? `<div class="m-tbl-cap ${cls === 'alert' ? 'alert' : ''}">${cls === 'alert' ? '🙋' : cap + 'p'}</div>` : '';
 
     return `<div class="m-tbl ${cls}" data-id="${_esc(String(t.id))}" data-zone="${_esc(zone)}">
@@ -90,6 +91,7 @@ function _renderTables(tables) {
         ${total ? `<div class="m-tbl-total">${total}</div>` : ''}
         ${sinceStr ? `<div class="m-tbl-time">${sinceStr}</div>` : ''}
         ${alertLabel}
+        ${checkBadge}
       </div>
     </div>`;
   }).join('');
@@ -109,15 +111,14 @@ function _renderTables(tables) {
 
 // ── Open table → navigate to caja with table pre-loaded ──
 function openTable(t) {
-  // Navigate to caja page; the table_id is passed via sessionStorage
   sessionStorage.setItem('caja_open_table', JSON.stringify({ id: t.id, name: t.name || t.table_name }));
-  window.location.href = '/caja';
+  window.location.href = `/caja?tableId=${encodeURIComponent(t.id)}`;
 }
 
 // ── Waiter alerts banner ─────────────────────────────
 async function _loadAlerts() {
   try {
-    const res = await fetch('/api/waiter-alerts?resolved=false', { headers: _hdr });
+    const res = await fetch('/api/waiter-alerts?resolved=false', { headers: _hdr() });
     if (!res.ok) return;
     const data = await res.json();
     const alerts = data.alerts || data || [];
@@ -144,12 +145,72 @@ async function _loadAlerts() {
 }
 
 function _showAllAlerts(alerts) {
-  const msg = alerts.map(a => {
-    const el = document.createElement('div');
-    el.textContent = `${a.table_name || `Mesa ${a.table_id}`}: ${a.alert_type || ''}`;
-    return el.textContent;
-  }).join('\n');
-  mesioToast('Alertas: ' + msg, 'warning', 5000);
+  const existing = document.getElementById('mesero-alerts-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'mesero-alerts-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Alertas de mesero');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:280px;max-width:380px;width:90%;';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 16px;font-size:16px;color:var(--text-1,#fff);';
+  title.textContent = `${alerts.length} alerta${alerts.length > 1 ? 's' : ''} activa${alerts.length > 1 ? 's' : ''}`;
+  card.appendChild(title);
+
+  const list = document.createElement('ul');
+  list.style.cssText = 'list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:8px;';
+  alerts.forEach(a => {
+    const li = document.createElement('li');
+    li.style.cssText = 'background:var(--surface-3,#252d40);border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center;';
+    const badge = document.createElement('span');
+    badge.style.cssText = 'font-size:11px;font-weight:600;color:var(--warn,#f59e0b);white-space:nowrap;';
+    badge.textContent = a.table_name || `Mesa ${a.table_id}`;
+    const type = document.createElement('span');
+    type.style.cssText = 'font-size:12px;color:var(--text-2,#94a3b8);';
+    type.textContent = a.alert_type || '';
+    li.appendChild(badge);
+    li.appendChild(type);
+    list.appendChild(li);
+  });
+  card.appendChild(list);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'm-btn m-btn--sm';
+  closeBtn.style.cssText = 'width:100%;';
+  closeBtn.textContent = 'Cerrar';
+  closeBtn.addEventListener('click', () => modal.remove());
+  card.appendChild(closeBtn);
+
+  modal.appendChild(card);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+  closeBtn.focus();
+}
+
+// ── Request help alert for a table ───────────────────
+async function _callAlert(tableId, tableName) {
+  try {
+    const restaurant = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+    const botNumber = restaurant.whatsapp_number || '';
+    const res = await fetch('/api/waiter-alerts/admin-call', {
+      method: 'POST',
+      headers: _hdr(),
+      body: JSON.stringify({ table_name: tableName, bot_number: botNumber, alert_type: 'help' })
+    });
+    if (res.ok) {
+      mesioToast('Alerta enviada', 'success', 2000);
+    } else {
+      mesioToast('No se pudo enviar la alerta', 'error');
+    }
+  } catch (_) {
+    mesioToast('Error de conexi\u00f3n', 'error');
+  }
 }
 
 // ── Bottom action bar ─────────────────────────────────
@@ -157,7 +218,7 @@ async function _updateActionBar() {
   if (!_staffId) return;
   try {
     // Staff performance for this week
-    const res = await fetch(`/api/stats/staff-performance?staff_id=${encodeURIComponent(_staffId)}&weeks=1`, { headers: _hdr });
+    const res = await fetch(`/api/stats/staff-performance?staff_id=${encodeURIComponent(_staffId)}&weeks=1`, { headers: _hdr() });
     if (!res.ok) return;
     const data = await res.json();
 
@@ -168,7 +229,7 @@ async function _updateActionBar() {
   } catch (_) { /* non-critical */ }
 
   try {
-    const res2 = await fetch('/api/stats/tips-pool', { headers: _hdr });
+    const res2 = await fetch('/api/stats/tips-pool', { headers: _hdr() });
     if (!res2.ok) return;
     const data2 = await res2.json();
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -179,7 +240,7 @@ async function _updateActionBar() {
 // ── Load tables ───────────────────────────────────────
 async function loadTables() {
   try {
-    const res = await fetch('/api/pos/tables-status', { headers: _hdr });
+    const res = await fetch('/api/pos/tables-status', { headers: _hdr() });
     mesioTrackFetch(res.ok);
     if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error(); }
     const data = await res.json();

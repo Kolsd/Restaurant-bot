@@ -10,9 +10,11 @@
      POST /api/staff/self/break-start          → doClockAction('break-start')
      POST /api/staff/self/break-end            → doClockAction('break-end')
      GET  /api/staff/self/timecard             → loadTimecardPreview()
-     GET  /api/staff/webauthn/credentials      → loadBiometricStatus()
-     POST /api/staff/webauthn/register-options → startBioRegistration()
-     POST /api/staff/webauthn/register-complete→ startBioRegistration()
+     GET  /api/staff/webauthn/credentials       → scLoadBiometricStatus()
+     POST /api/staff/webauthn/register-options  → scStartBioRegistration()
+     POST /api/staff/webauthn/register-complete → scStartBioRegistration()
+     POST /api/staff/webauthn/auth-options      → scWebAuthnAuth() [public, kiosco]
+     POST /api/staff/webauthn/auth-complete     → scWebAuthnAuth() [public, kiosco]
 
    Wired in this file:
      GET  /api/staff/self/announcements        → scLoadAnnouncements()
@@ -65,6 +67,7 @@ async function scLoadProfile() {
     scRenderButtons(_profile);
     scRenderStations(_profile);
     scRenderKioscoIdent(_profile);
+    if (_scKioscoMode && _currentLayout !== 'kiosco') _scKioscoEnter();
   } catch(e) {
     // silently fail — UI stays in loading state
   }
@@ -631,6 +634,82 @@ function _scRenderPerformance(container, data) {
   });
 }
 
+/* ── Auth flow: WebAuthn gate ──────────────────────────────────── */
+
+function _scFpState(modalId, state) {
+  const modal   = document.getElementById(modalId);
+  if (!modal) return;
+  const wrap    = modal.querySelector('.sc-fp-wrap');
+  const circle  = modal.querySelector('.sc-fp-circle');
+  const label   = modal.querySelector('.sc-fp-label');
+  const sub     = modal.querySelector('.sc-fp-sub');
+  const confirm = modal.querySelector('.sc-modal-act:not(.ghost)');
+  const usePin  = modal.querySelector('.sc-modal-act.ghost');
+
+  if (!wrap) return;
+
+  wrap.classList.remove('sc-fp-state-waiting', 'sc-fp-state-success', 'sc-fp-state-error');
+
+  if (state === 'waiting') {
+    wrap.classList.add('sc-fp-state-waiting');
+    if (label) label.textContent = 'Esperando huella…';
+    if (sub)   sub.textContent   = 'Acerca tu dedo o usa Face ID';
+    if (circle) {
+      circle.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M8 2C5 2 3 4 3 7v3M8 2c3 0 5 2 5 5v3"/><path d="M5 7c0-2 1-3 3-3s3 1 3 3v4"/><path d="M8 7v5M6.5 10v2M9.5 10v2"/></svg>';
+    }
+    if (confirm) confirm.style.display = 'none';
+    if (usePin)  usePin.style.display  = '';
+  } else if (state === 'success') {
+    wrap.classList.add('sc-fp-state-success');
+    if (label) label.textContent = 'Autenticado';
+    if (sub)   sub.textContent   = '';
+    if (circle) {
+      circle.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8l4 4 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    }
+    if (confirm) confirm.style.display = 'none';
+    if (usePin)  usePin.style.display  = 'none';
+  } else if (state === 'error') {
+    wrap.classList.add('sc-fp-state-error');
+    if (label) label.textContent = 'Error de autenticación';
+    if (sub)   sub.textContent   = 'Intenta de nuevo o usa PIN';
+    if (circle) {
+      circle.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    }
+    if (confirm) confirm.style.display = 'none';
+    if (usePin)  usePin.style.display  = '';
+  } else {
+    if (label) label.textContent = 'Esperando huella…';
+    if (sub)   sub.textContent   = 'También Face ID disponible';
+    if (circle) {
+      circle.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M8 2C5 2 3 4 3 7v3M8 2c3 0 5 2 5 5v3"/><path d="M5 7c0-2 1-3 3-3s3 1 3 3v4"/><path d="M8 7v5M6.5 10v2M9.5 10v2"/></svg>';
+    }
+    if (confirm) confirm.style.display = 'none';
+    if (usePin)  usePin.style.display  = '';
+  }
+}
+
+async function _scStartAuthFlow(action) {
+  if (!SC_WEBAUTHN_OK) {
+    scShowToast('Este dispositivo no soporta biometría. Registra una credencial desde un dispositivo compatible.', true);
+    scCloseAuth();
+    scCloseAuthM();
+    return;
+  }
+  if (_bioCredentials.length === 0) {
+    scShowToast('No tienes huella registrada. Registra tu biometría primero.', true);
+    scCloseAuth();
+    scCloseAuthM();
+    return;
+  }
+  const modalId = _currentLayout === 'kiosco' ? 'sc-auth-modal' : 'sc-auth-modal-m';
+  _scFpState(modalId, 'waiting');
+  try {
+    await scWebAuthnAuth(action);
+  } catch(_) {
+    _scFpState(modalId, 'error');
+  }
+}
+
 /* ── WebAuthn / Biometrics ─────────────────────────────────────── */
 const SC_WEBAUTHN_OK = !!window.PublicKeyCredential;
 
@@ -715,59 +794,63 @@ async function scStartBioRegistration() {
 }
 
 async function scWebAuthnAuth(action) {
-  // Used by kiosco biometric clock-in/out
-  if (!SC_WEBAUTHN_OK) {
-    // fallback to PIN
-    scShowPinPad();
-    return;
-  }
-  try {
-    const optRes = await fetch('/api/staff/webauthn/auth-options', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ restaurant_id: SC_REST.id, action: action })
-    });
-    const opts = await optRes.json();
-    if (!optRes.ok) throw new Error(opts.detail || 'Error al obtener opciones');
+  const webAuthnAction = (action === 'break-start' || action === 'break-end') ? 'break' : action.replace('-', '_');
 
-    const cred = await navigator.credentials.get({
-      publicKey: {
-        challenge:  _b64uToBuffer(opts.challenge),
-        rpId:       opts.rpId,
-        timeout:    60000,
-        userVerification: 'required'
-      }
-    });
+  const optRes = await fetch('/api/staff/webauthn/auth-options', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ restaurant_id: SC_REST.id, action: webAuthnAction })
+  });
+  const opts = await optRes.json();
+  if (!optRes.ok) throw new Error(opts.detail || 'Error al obtener opciones de autenticación');
 
-    const completeRes = await fetch('/api/staff/webauthn/auth-complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action:        action,
-        credential_id: _bufferToB64u(cred.rawId),
-        id:            _bufferToB64u(cred.rawId),
-        response: {
-          authenticatorData: _bufferToB64u(cred.response.authenticatorData),
-          clientDataJSON:    _bufferToB64u(cred.response.clientDataJSON),
-          signature:         _bufferToB64u(cred.response.signature),
-          userHandle:        cred.response.userHandle ? _bufferToB64u(cred.response.userHandle) : null
-        },
-        type: 'public-key'
-      })
-    });
-    const result = await completeRes.json();
-    if (!completeRes.ok) throw new Error(result.detail || 'Auth fallida');
+  const allowCreds = (opts.allowCredentials || []).map(c => ({
+    type: c.type || 'public-key',
+    id:   _b64uToBuffer(c.id),
+    transports: c.transports || []
+  }));
 
-    scCloseAuth();
-    scCloseAuthM();
-    scShowToast('✅ Autenticación exitosa');
-    await _dispatchClockAction(action);
-  } catch(e) {
-    if (e.name === 'NotAllowedError') {
-      scShowToast('Autenticación cancelada', true);
-    } else {
-      scShowPinPad(); // fallback to PIN
+  const cred = await navigator.credentials.get({
+    publicKey: {
+      challenge:        _b64uToBuffer(opts.challenge),
+      rpId:             opts.rpId,
+      allowCredentials: allowCreds,
+      timeout:          60000,
+      userVerification: 'required'
     }
+  });
+
+  const completeRes = await fetch('/api/staff/webauthn/auth-complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action:             webAuthnAction,
+      credential_id:      _bufferToB64u(cred.rawId),
+      authenticator_data: _bufferToB64u(cred.response.authenticatorData),
+      client_data_json:   _bufferToB64u(cred.response.clientDataJSON),
+      signature:          _bufferToB64u(cred.response.signature),
+      user_handle:        cred.response.userHandle ? _bufferToB64u(cred.response.userHandle) : null
+    })
+  });
+  const result = await completeRes.json();
+  if (!completeRes.ok) throw new Error(result.detail || 'Verificación biométrica fallida');
+
+  const modalId = _currentLayout === 'kiosco' ? 'sc-auth-modal' : 'sc-auth-modal-m';
+  _scFpState(modalId, 'success');
+
+  const staffName = result.staff_name ? _escHtml(result.staff_name) : '';
+  const actionLabel = { clock_in: 'Entrada', clock_out: 'Salida', break: 'Break' }[webAuthnAction] || 'Acción';
+  scShowToast((staffName ? staffName + ' — ' : '') + actionLabel + ' registrado');
+
+  await new Promise(r => setTimeout(r, 900));
+
+  scCloseAuth();
+  scCloseAuthM();
+
+  if (_scKioscoMode) {
+    _scKioscoHandleAuthSuccess(action, result);
+  } else {
+    await _dispatchClockAction(action);
   }
 }
 
@@ -797,6 +880,10 @@ function scOpenAuth(action) {
     const modalEl = document.getElementById('sc-auth-modal-m');
     if (modalEl) modalEl.classList.add('open');
   }
+
+  const modalId = _currentLayout === 'kiosco' ? 'sc-auth-modal' : 'sc-auth-modal-m';
+  _scFpState(modalId, 'idle');
+  setTimeout(() => { _scStartAuthFlow(action); }, 200);
 }
 
 function scCloseAuth()  { const m = document.getElementById('sc-auth-modal');   if (m) m.classList.remove('open'); }
@@ -820,8 +907,7 @@ function scPinPress(d) {
     setTimeout(async () => {
       scClosePin();
       scPinReset();
-      // PIN auth is handled server-side via clock-in/out endpoint accepting pin
-      if (_pendingAction) await _dispatchClockAction(_pendingAction);
+      scShowToast('PIN no soportado aún — registra tu huella biométrica para fichar.', true);
     }, 200);
   }
 }
@@ -833,9 +919,52 @@ function scRenderPin() {
   });
 }
 
-function scFakeAuthSuccess() {
-  scCloseAuth(); scCloseAuthM();
-  if (_pendingAction) _dispatchClockAction(_pendingAction);
+/* ── Kiosco mode ────────────────────────────────────────────────── */
+const _scKioscoMode = new URLSearchParams(window.location.search).get('kiosco') === '1';
+
+let _scKioscoIdleTimer = null;
+
+function _scKioscoEnter() {
+  const stageK = document.getElementById('sc-stage-kiosco');
+  const stageM = document.getElementById('sc-stage-mobile');
+  if (stageK) stageK.classList.add('active');
+  if (stageM) stageM.classList.remove('active');
+  _currentLayout = 'kiosco';
+  document.body.classList.add('sc-kiosco-mode');
+  _scKioscoResetIdle();
+}
+
+function _scKioscoResetIdle() {
+  clearTimeout(_scKioscoIdleTimer);
+  _scKioscoIdleTimer = setTimeout(() => {
+    scCloseAuth();
+    scCloseAuthM();
+    scLoadProfile();
+  }, 120000);
+}
+
+function _scKioscoHandleAuthSuccess(action, result) {
+  const overlay = document.getElementById('sc-kiosco-success-overlay');
+  if (overlay) {
+    const nameEl = overlay.querySelector('.sc-ks-name');
+    const actEl  = overlay.querySelector('.sc-ks-action');
+    const staffName = result && result.staff_name ? result.staff_name : '';
+    if (nameEl) nameEl.textContent = staffName;
+    const actionLabels = { 'clock-in': 'Entrada registrada', 'clock_in': 'Entrada registrada', 'clock-out': 'Salida registrada', 'clock_out': 'Salida registrada', 'break-start': 'Break iniciado', 'break-end': 'Break terminado', 'break': 'Break registrado' };
+    if (actEl) actEl.textContent = actionLabels[action] || 'Fichaje registrado';
+    overlay.classList.add('visible');
+    setTimeout(() => {
+      overlay.classList.remove('visible');
+      _pendingAction = null;
+      scLoadProfile();
+      _scKioscoResetIdle();
+    }, 3000);
+  } else {
+    scShowToast('Fichaje registrado');
+    _pendingAction = null;
+    scLoadProfile();
+    _scKioscoResetIdle();
+  }
 }
 
 /* ── Shift swap modal ───────────────────────────────────────────── */

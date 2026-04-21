@@ -345,10 +345,10 @@
             <div class="sc-modal-title" id="sc-auth-title">Confirmar acción</div>
             <button class="sc-modal-close" id="sc-auth-modal-close" aria-label="Cerrar">&times;</button>
           </div>
-          <div class="sc-modal-sub">Acerca tu dedo al sensor o usa tu PIN.</div>
+          <div class="sc-modal-sub">Confirma con tu huella o Face ID.</div>
 
           <div class="sc-fp-wrap" id="sc-auth-fp">
-            <div class="sc-fp-circle">
+            <div class="sc-fp-circle" aria-hidden="true">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
                 <path d="M8 2C5 2 3 4 3 7v3M8 2c3 0 5 2 5 5v3"/>
                 <path d="M5 7c0-2 1-3 3-3s3 1 3 3v4"/>
@@ -360,7 +360,7 @@
           </div>
 
           <button class="sc-modal-act ghost" id="sc-auth-use-pin">Usar PIN en su lugar</button>
-          <button class="sc-modal-act" style="margin-top:6px;background:var(--sc-brand);" id="sc-auth-confirm">Confirmar</button>
+          <button class="sc-modal-act" style="margin-top:6px;background:var(--sc-brand);display:none;" id="sc-auth-confirm" aria-label="Iniciar autenticación biométrica">Verificar huella</button>
         </div>
       </div>
 
@@ -429,9 +429,9 @@
       <div class="sc-modal-title" id="sc-auth-title-m">Confirmar acción</div>
       <button class="sc-modal-close" id="sc-auth-modal-m-close" aria-label="Cerrar">&times;</button>
     </div>
-    <div class="sc-modal-sub">Confirma con tu huella, Face ID o PIN.</div>
+    <div class="sc-modal-sub">Confirma con tu huella o Face ID.</div>
     <div class="sc-fp-wrap">
-      <div class="sc-fp-circle">
+      <div class="sc-fp-circle" aria-hidden="true">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
           <path d="M8 2C5 2 3 4 3 7v3M8 2c3 0 5 2 5 5v3"/>
           <path d="M5 7c0-2 1-3 3-3s3 1 3 3v4"/>
@@ -442,9 +442,34 @@
       <div class="sc-fp-sub">También Face ID disponible</div>
     </div>
     <button class="sc-modal-act ghost" id="sc-auth-m-use-pin">Usar PIN</button>
-    <button class="sc-modal-act" style="margin-top:6px;background:var(--sc-brand);" id="sc-auth-m-confirm">Confirmar</button>
+    <button class="sc-modal-act" style="margin-top:6px;background:var(--sc-brand);display:none;" id="sc-auth-m-confirm" aria-label="Iniciar autenticación biométrica">Verificar huella</button>
   </div>
 </div>
+
+<!-- KIOSCO SUCCESS OVERLAY -->
+<div id="sc-kiosco-success-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+  <div style="width:72px;height:72px;border-radius:50%;background:var(--brand,#1D9E75);display:flex;align-items:center;justify-content:center;">
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+  </div>
+  <div class="sc-ks-name" style="font-size:22px;font-weight:700;color:#fff;text-align:center;"></div>
+  <div class="sc-ks-action" style="font-size:15px;color:rgba(255,255,255,.7);text-align:center;"></div>
+</div>
+
+<style>
+.sc-fp-wrap { transition: background .2s; border-radius: 12px; padding: 16px 0; }
+.sc-fp-state-waiting .sc-fp-circle { animation: sc-fp-pulse 1.4s ease-in-out infinite; }
+.sc-fp-state-success .sc-fp-circle { color: var(--brand, #1D9E75); }
+.sc-fp-state-error   .sc-fp-circle { color: #EF4444; }
+@keyframes sc-fp-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .55; transform: scale(1.08); }
+}
+#sc-kiosco-success-overlay.visible { display: flex !important; animation: sc-ks-in .25s ease; }
+@keyframes sc-ks-in {
+  from { opacity: 0; transform: scale(.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+</style>
 
 <!-- SWAP MODAL (mobile — fixed position) -->
 <div class="sc-modal-backdrop sc-modal-backdrop fixed-pos" id="sc-swap-modal-m">
@@ -542,15 +567,13 @@
   document.getElementById('sc-auth-modal-close').addEventListener('click', scCloseAuth);
   document.getElementById('sc-auth-use-pin').addEventListener('click', scShowPinPad);
   document.getElementById('sc-auth-confirm').addEventListener('click', function() {
-    scCloseAuth();
-    if (_pendingAction) _dispatchClockAction(_pendingAction);
+    if (_pendingAction) _scStartAuthFlow(_pendingAction);
   });
 
   document.getElementById('sc-auth-modal-m-close').addEventListener('click', scCloseAuthM);
   document.getElementById('sc-auth-m-use-pin').addEventListener('click', scShowPinPad);
   document.getElementById('sc-auth-m-confirm').addEventListener('click', function() {
-    scCloseAuthM();
-    if (_pendingAction) _dispatchClockAction(_pendingAction);
+    if (_pendingAction) _scStartAuthFlow(_pendingAction);
   });
 
   /* ── PIN modal ── */

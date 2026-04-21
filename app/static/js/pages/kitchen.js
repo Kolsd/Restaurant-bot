@@ -7,8 +7,6 @@
 const _token = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
 if (!_token) { window.location.href = '/login'; }
 
-const _hdr = { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
-
 // ── State ───────────────────────────────────────────
 let _tickets = [];          // current displayed tickets
 let _selectedIdx = -1;      // keyboard-selected ticket index (0-based)
@@ -21,7 +19,7 @@ let _localPlusMins = {};    // ticketId → extra minutes added locally
     const el = document.getElementById('kds-clock');
     if (el) el.textContent = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
   }
-  _tc(); setInterval(_tc, 10000);
+  _tc(); mesioInterval(_tc, 10000);
 })();
 
 // ── Stats display ────────────────────────────────────
@@ -147,7 +145,6 @@ function _renderWall(orders) {
       const id = btn.dataset.id;
       _localPlusMins[id] = (_localPlusMins[id] || 0) + 2;
       mesioToast('+2 minutos (local)', 'warning', 1500);
-      // TODO: backend endpoint for server-side timer extension
     });
   });
 
@@ -195,7 +192,7 @@ function setStation(station) {
 async function markListo(orderId) {
   try {
     const res = await fetch(`/api/table-orders/${orderId}/status`, {
-      method: 'POST', headers: _hdr, body: JSON.stringify({ status: 'listo' })
+      method: 'POST', headers: mesioHeaders(), body: JSON.stringify({ status: 'listo' })
     });
     mesioTrackFetch(res.ok);
     if (!res.ok) throw new Error('status ' + res.status);
@@ -209,7 +206,7 @@ async function markListo(orderId) {
 // ── Load orders ───────────────────────────────────────
 async function loadOrders() {
   try {
-    const res = await fetch('/api/table-orders', { headers: _hdr });
+    const res = await fetch('/api/table-orders?station=kitchen', { headers: mesioHeaders() });
     mesioTrackFetch(res.ok);
     if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error('status'); }
     const data = await res.json();
@@ -256,7 +253,6 @@ document.addEventListener('keydown', e => {
     const id = _tickets[_selectedIdx].id;
     _localPlusMins[id] = (_localPlusMins[id] || 0) + 2;
     mesioToast('+2 minutos (local)', 'warning', 1500);
-    // TODO: server-side timer extension
     return;
   }
 });
