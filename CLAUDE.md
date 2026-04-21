@@ -144,7 +144,12 @@ Restaurant-bot/
 │   ├── 0039_channel_and_attribution.py # Tier 1 design-driven: orders.channel + table_orders.{channel, waiter_staff_id} + table_sessions.assigned_staff_id + indexes
 │   ├── 0041_drop_legacy_restaurant_id.py # Dropped locations.legacy_restaurant_id (9 callers audited — zero readers)
 │   ├── 0042_staff_comms.py          # Sprint C — staff_announcements, staff_tasks, staff_task_completions + RLS org_isolation
-│   └── 0043_shift_swap_requests.py  # Sprint W — shift_swap_requests + status state machine + RLS
+│   ├── 0043_shift_swap_requests.py  # Sprint W — shift_swap_requests + status state machine + RLS
+│   ├── 0044_webauthn_credentials_rls.py      # Pre-launch hardening — webauthn_credentials.org_id + RLS (closes cross-tenant lookup)
+│   ├── 0045_policy_naming_consistency.py     # Pre-launch hardening — tenant_isolation_org → org_isolation on 4 tables
+│   ├── 0046_money_precision_numeric.py       # Pre-launch hardening — orders/table_orders money columns INTEGER → NUMERIC(14,2)
+│   ├── 0047_shift_swap_status_check.py       # Pre-launch hardening — CHECK constraint on shift_swap_requests.status
+│   └── 0048_performance_indexes.py            # Pre-launch hardening — 7 composite indexes CONCURRENTLY (dashboard hot paths)
 ```
 
 ## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
@@ -340,6 +345,9 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 8. **Shift swap v2** (Sprint W v2) — same-location coworker filter, push notifications on incoming swap, `staff_schedules` weekly pattern swap (v1 solo toca `staff_shifts`).
 9. **Settings danger zone: transfer + delete** — solo `pause` shipped (Sprint X). Transfer de ownership requiere flujo legal; delete requiere política de retención.
 10. **Admin↔Staff comms v2** (Sprint C v2) — role-specific targeting (solo cocina, solo meseros), location-specific targeting (per-sede), push fanout.
+11. **Backend gaps flagged en pre-launch sprint (2026-04-20)** — `POST /api/table-orders/{id}/checks/single/pay` (caja usa pero no existe — workaround: crear check antes de pagar monto completo); `POST /api/staff/self/verify-pin` (PIN path en staff-clock bloqueado, WebAuthn es único); `?table_id=` param en `/api/table-orders` no soportado; `orders.py:266` usa `pool.acquire()` legacy en Wompi path (Rule #14 parece cumplirse vía scope post-load — double-check followup).
+12. **Homoglyph/unicode bypass** en `_INJECTION_RE` — defense-in-depth vía system prompt mitiga. Manual pentest pendiente.
+13. **Exports CSV/PDF** en 6 pages (pedidos, nomina, menu-engineering, clientes-riesgo, sucursales, + billing log) — badgeados como v2. Backend PDF/CSV generation pendiente.
 
 **Closed — historial ~2026-04-18/20** (conservados como referencia de diseño):
 - Migración `0012_b2b_sales_system.py` tablas huérfanas → dropeadas por 0031
@@ -352,6 +360,21 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 - Admin↔Staff comms (announcements + tasks) → shipped en Sprint C (migración 0042)
 - Staff self-service tips/upcoming/performance → shipped en Sprints Y+Z
 - Shift swap (v1) → shipped en Sprint W (migración 0043)
+
+**Pre-launch hardening sprint (2026-04-20)** — 6-lead departmental audit + 8-wave execution (commits 39c631c → f5fcf8f):
+- Migraciones 0044-0048 (RLS gap webauthn_credentials, policy naming consistency, NUMERIC money precision, CHECK constraint shift_swap status, 7 índices compuestos)
+- Wave-2 debris cleanup: `parent_restaurant_id`/`restaurant_id` lecturas muertas en ~12 sitios (team IDOR, table ownership, order status, inventory, reservations, reviews, staff self-profile KeyError)
+- RLS bypass en 8 repos (`db_get_nps_*`, `db_get_dashboard_*`, `db_delete_staff_by_id`, etc.) migrados con patrón correcto
+- Auth gaps cerrados: `POST /api/chat` (free LLM), `/api/table-sessions/*` (IDOR), Cloudinary upload signing, `/api/media/{id}` org_id comparison
+- Bot runtime: raw pool.acquire en `agent_external.py` (3 sitios) → tenant_connection (pickup/delivery ya NO devuelven 0 rows), orphan reservation fix (deposit link preflight antes del insert), confirmation guard extendido a delivery+pickup, `module_reservations` code-level gate, cart preservation on bar failures
+- `staff_payroll.py` eliminado (duplicate + crashing endpoint)
+- Caja rebuild completo (~1,175 LOC): pay flow + split checks + tip cap + proof validation + chats tab
+- Staff clock bio/PIN wiring (cerro vulnerabilidad "anyone clocks as anyone"), kiosco mode via `?kiosco=1`
+- Mesero enrichment: 5 nuevos fields en `/api/pos/tables-status`, station filter en kitchen/bar
+- Cross-sucursal leak cerrado (X-Branch-ID header en caja/kitchen/bar/mesero/domiciliario)
+- Frontend: CSP `connect-src` sin Anthropic, menu-admin image upload wired, billing.html split + XSS fix, sidebar role filtering, sw.js precache modernizado
+- PIN login enumeration oracle unificado (siempre 401), tip-distribution exige 100% exacto
+- Tests: 1065 passed / 0 failed / 105 skipped (baseline intacto)
 
 ### Limitaciones conocidas (no críticas)
 
@@ -416,7 +439,7 @@ Ver "Pendientes de calendario" arriba — puntos 5-10 son features v2 / schema e
 `conversations`, `carts`, `staff`, `fiscal_invoices`, `inventory`, `dish_recipes`,
 `webhook_inbox`, `sessions` (con `token_hash`)
 
-### RLS (Row-Level Security) activo en 37 tablas (Fase 1 v11.0 + Sprints C/W)
+### RLS (Row-Level Security) activo en 38 tablas (Fase 1 v11.0 + Sprints C/W + pre-launch 0044)
 `attendance_deductions`, `billing_log`, `carts`, `contract_templates`, `conversations`,
 `customer_profiles`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
 `loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
