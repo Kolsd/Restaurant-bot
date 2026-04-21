@@ -1281,6 +1281,14 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 if res["success"]:
                     log.info("cart.item_added", dish=res['dish']['name'], qty=qty, phone=_ofuscar_phone(phone))
                 else:
+                    err_msg = str(res.get("error", ""))
+                    # Rule #5: lock contention → neutral message, bail IMMEDIATELY.
+                    # Do NOT dispatch delivery/pickup/order while another request
+                    # holds the cart lock. "siendo procesado" is the unique signal
+                    # from orders.add_to_cart when cart_lock_acquire returns None.
+                    if "siendo procesado" in err_msg:
+                        log.warning("cart.lock_contention_in_agent", phone=_ofuscar_phone(phone), dish=name)
+                        return err_msg
                     cart_errors.append(name)
                     log.warning("cart.item_not_found", name=name, phone=_ofuscar_phone(phone))
 
