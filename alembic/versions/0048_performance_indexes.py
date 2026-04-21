@@ -102,9 +102,6 @@ _INDEXES = [
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    bind.execution_options(isolation_level="AUTOCOMMIT")
-
     for name, create_sql, _drop_sql in _INDEXES:
         logger.info("0048 upgrade: creating index %s", name)
         op.execute(create_sql)
@@ -113,9 +110,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    bind.execution_options(isolation_level="AUTOCOMMIT")
-
     for name, _create_sql, drop_sql in reversed(_INDEXES):
         logger.info("0048 downgrade: dropping index %s", name)
         op.execute(drop_sql)
