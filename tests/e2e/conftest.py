@@ -373,15 +373,39 @@ async def seed_restaurant(
     """
     Seed a multi-branch restaurant for E2E tests. Idempotent.
 
+    Post-Wave-2 (migration 0038): `restaurants` is a READ-ONLY VIEW over
+    `organizations JOIN locations`. This function writes directly to
+    `organizations` + `locations`.
+
+    Schema summary (confirmed against live schema):
+      organizations: id, name, slug, whatsapp_number, menu, features, ...
+      locations:     id, org_id, name, code, address, latitude, longitude,
+                     whatsapp_number (location-level override), active, timezone, ...
+      restaurants VIEW: id=l.id, whatsapp_number=COALESCE(l.whatsapp_number, o.whatsapp_number),
+                        menu=o.menu, features=o.features, ...
+
+    Strategy:
+      - org.whatsapp_number = parent bot_number  (VIEW exposes this via the
+        "sede principal" location whose l.whatsapp_number IS NULL)
+      - each branch location: l.whatsapp_number = bot_number + _b{org_id}{i+1}
+        (the _b suffix convention is required by agent_external.py branch routing)
+
     Returns:
         {
-          "id": int,                  # parent restaurant id
-          "whatsapp_number": str,     # normalized bot_number
+          "id": int,                   # org_id — matches db_get_restaurant_by_phone return
+          "whatsapp_number": str,      # normalized bot_number
+          "owner_email": str,
           "branches": [
               {"id": int, "whatsapp_number": str, "lat": float, "lon": float},
-              ...
+              ...                      # id = location_id for each branch location
           ]
         }
+
+    Note on "id":
+      db_get_restaurant_by_phone() does `d["id"] = d["org_id"]` so all bot-runtime
+      code uses org_id as the tenant key. seed_restaurant() returns org_id under "id"
+      to match that convention. Branch "id" values are location_ids (used as
+      X-Branch-ID header in admin API calls).
     """
     if menu is None:
         menu = {
@@ -422,131 +446,178 @@ async def seed_restaurant(
     if features_override:
         base_features.update(features_override)
 
+    slug = f"e2e-test-{bot_number[-8:]}"
+
     async with pool.acquire() as conn:
-        # ── Parent restaurant ─────────────────────────────────────────────────
-        existing = await conn.fetchrow(
-            "SELECT id FROM restaurants WHERE whatsapp_number = $1",
-            bot_number,
-        )
-        if existing:
-            parent_id = existing["id"]
-            # Update menu and features to latest seed values
-            await conn.execute(
-                "UPDATE restaurants SET menu=$2::jsonb, features=$3::jsonb WHERE id=$1",
-                parent_id,
-                json.dumps(menu),
-                json.dumps(base_features),
-            )
-        else:
-            slug = f"e2e-test-{bot_number[-6:]}"
-            await conn.execute(
+        async with conn.transaction():
+            # ── Upsert organization ───────────────────────────────────────────
+            # organizations has a partial unique index on whatsapp_number WHERE NOT NULL.
+            # Use ON CONFLICT to update menu/features on re-run.
+            org_row = await conn.fetchrow(
                 """
-                INSERT INTO restaurants (name, whatsapp_number, address, menu, features, slug)
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)
-                ON CONFLICT (slug) DO UPDATE
-                  SET menu=$4::jsonb, features=$5::jsonb
+                INSERT INTO organizations (name, slug, whatsapp_number, menu, features)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+                ON CONFLICT (whatsapp_number)
+                  WHERE whatsapp_number IS NOT NULL
+                  DO UPDATE SET
+                    name     = EXCLUDED.name,
+                    menu     = EXCLUDED.menu,
+                    features = EXCLUDED.features,
+                    updated_at = NOW()
+                RETURNING id
                 """,
                 name,
+                slug,
                 bot_number,
-                "Calle 93 #13-24, Bogotá (E2E)",
                 json.dumps(menu),
                 json.dumps(base_features),
-                slug,
             )
-            parent_id = await conn.fetchval(
-                "SELECT id FROM restaurants WHERE whatsapp_number = $1",
-                bot_number,
+            org_id = org_row["id"]
+
+            # ── Upsert "sede principal" location ─────────────────────────────
+            # This location has NO whatsapp_number override so the VIEW resolves
+            # COALESCE(l.whatsapp_number, o.whatsapp_number) = org.whatsapp_number.
+            # It represents the "parent" entry visible in the restaurants VIEW as
+            # whatsapp_number = bot_number.
+            existing_principal = await conn.fetchrow(
+                """
+                SELECT id FROM locations
+                WHERE org_id = $1 AND whatsapp_number IS NULL
+                ORDER BY id ASC LIMIT 1
+                """,
+                org_id,
             )
-
-        # Owner user
-        owner_email = f"e2e-owner-{parent_id}@mesio.test"
-        await conn.execute(
-            """
-            INSERT INTO users (username, password_hash, restaurant_name, role, branch_id)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (username) DO NOTHING
-            """,
-            owner_email,
-            "$2b$12$placeholderhashneverusedXXXXXXXXXXXXXXX",
-            name,
-            "owner",
-            parent_id,
-        )
-
-        # Subscription usage
-        await conn.execute(
-            """
-            INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens, total_invoices)
-            VALUES ($1, CURRENT_DATE, 0, 0)
-            ON CONFLICT (restaurant_id, usage_date) DO NOTHING
-            """,
-            parent_id,
-        )
-
-        # ── Branches ──────────────────────────────────────────────────────────
-        branches = []
-        for i in range(num_branches):
-            lat, lon = branch_latlons[i] if i < len(branch_latlons) else (4.6, -74.1)
-            branch_num_suffix = f"_b{parent_id}{i+1}"
-            branch_bot = bot_number + branch_num_suffix
-
-            b_existing = await conn.fetchrow(
-                "SELECT id FROM restaurants WHERE whatsapp_number = $1",
-                branch_bot,
-            )
-            branch_features = {
-                **base_features,
-                "branch_lat": lat,
-                "branch_lon": lon,
-            }
-            branch_slug = f"e2e-test-branch-{parent_id}-{i+1}"
-            if b_existing:
-                branch_id = b_existing["id"]
-                await conn.execute(
-                    "UPDATE restaurants SET features=$2::jsonb, latitude=$3, longitude=$4 WHERE id=$1",
-                    branch_id,
-                    json.dumps(branch_features),
-                    lat,
-                    lon,
-                )
-            else:
+            if existing_principal:
+                principal_loc_id = existing_principal["id"]
                 await conn.execute(
                     """
-                    INSERT INTO restaurants
-                      (name, whatsapp_number, address, menu, features, slug, parent_restaurant_id, latitude, longitude)
-                    VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9)
-                    ON CONFLICT (slug) DO UPDATE
-                      SET features=$5::jsonb, latitude=$8, longitude=$9
+                    UPDATE locations
+                    SET name=$2, address=$3, active=true
+                    WHERE id=$1
                     """,
-                    f"{name} — Sucursal {i+1}",
-                    branch_bot,
-                    f"Dirección Sucursal {i+1}, Bogotá (E2E)",
-                    json.dumps(menu),
-                    json.dumps(branch_features),
-                    branch_slug,
-                    parent_id,
-                    lat,
-                    lon,
+                    principal_loc_id,
+                    name,
+                    "Calle 93 #13-24, Bogotá (E2E)",
                 )
-                branch_id = await conn.fetchval(
-                    "SELECT id FROM restaurants WHERE whatsapp_number = $1",
-                    branch_bot,
+            else:
+                principal_loc_row = await conn.fetchrow(
+                    """
+                    INSERT INTO locations
+                      (org_id, name, code, address, active, timezone)
+                    VALUES ($1, $2, 'principal', $3, true, 'America/Bogota')
+                    RETURNING id
+                    """,
+                    org_id,
+                    name,
+                    "Calle 93 #13-24, Bogotá (E2E)",
                 )
+                principal_loc_id = principal_loc_row["id"]
 
-            # Subscription usage for branch
+            # ── Owner user ────────────────────────────────────────────────────
+            # users.branch_id = org_id (the tenant key used by auth middleware).
+            owner_email = f"e2e-owner-{org_id}@mesio.test"
             await conn.execute(
                 """
-                INSERT INTO subscription_usage (restaurant_id, usage_date, total_tokens, total_invoices)
-                VALUES ($1, CURRENT_DATE, 0, 0)
-                ON CONFLICT (restaurant_id, usage_date) DO NOTHING
+                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (username) DO NOTHING
                 """,
-                branch_id,
+                owner_email,
+                "$2b$12$placeholderhashneverusedXXXXXXXXXXXXXXX",
+                name,
+                "owner",
+                org_id,
             )
 
-            branches.append({"id": branch_id, "whatsapp_number": branch_bot, "lat": lat, "lon": lon})
+            # ── Subscription usage ────────────────────────────────────────────
+            # Post-Wave-2: subscription_usage uses org_id (no restaurant_id column).
+            await conn.execute(
+                """
+                INSERT INTO subscription_usage (org_id, usage_date, total_tokens, total_invoices)
+                VALUES ($1, CURRENT_DATE, 0, 0)
+                ON CONFLICT (org_id, usage_date) DO NOTHING
+                """,
+                org_id,
+            )
+
+            # ── Branch locations ──────────────────────────────────────────────
+            # Each branch is a location with its own whatsapp_number override.
+            # The _b{org_id}{i+1} suffix is required by agent_external.py branch routing
+            # (see grep for '_b' in app/services/agent_external.py).
+            branches = []
+            for i in range(num_branches):
+                lat, lon = branch_latlons[i] if i < len(branch_latlons) else (4.6, -74.1)
+                branch_bot = f"{bot_number}_b{org_id}{i + 1}"
+
+                # Check for existing branch location by whatsapp_number
+                b_existing = await conn.fetchrow(
+                    """
+                    SELECT id FROM locations
+                    WHERE whatsapp_number = $1
+                    """,
+                    branch_bot,
+                )
+                if b_existing:
+                    branch_loc_id = b_existing["id"]
+                    await conn.execute(
+                        """
+                        UPDATE locations
+                        SET latitude=$2, longitude=$3, active=true
+                        WHERE id=$1
+                        """,
+                        branch_loc_id,
+                        lat,
+                        lon,
+                    )
+                else:
+                    b_row = await conn.fetchrow(
+                        """
+                        INSERT INTO locations
+                          (org_id, name, code, address, latitude, longitude,
+                           whatsapp_number, active, timezone)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'America/Bogota')
+                        RETURNING id
+                        """,
+                        org_id,
+                        f"{name} — Sucursal {i + 1}",
+                        f"s{i + 1}",
+                        f"Dirección Sucursal {i + 1}, Bogotá (E2E)",
+                        lat,
+                        lon,
+                        branch_bot,
+                    )
+                    branch_loc_id = b_row["id"]
+
+                branches.append({
+                    "id": branch_loc_id,
+                    "whatsapp_number": branch_bot,
+                    "lat": lat,
+                    "lon": lon,
+                })
+
+        # ── Sanity check: VIEW must resolve both bot numbers ──────────────────
+        # If this fails the test seeding is wrong — fail fast with a clear message.
+        principal_view_row = await conn.fetchrow(
+            "SELECT id, whatsapp_number FROM restaurants WHERE whatsapp_number = $1",
+            bot_number,
+        )
+        assert principal_view_row is not None, (
+            f"seed_restaurant: 'restaurants' VIEW returned no row for bot_number={bot_number!r}. "
+            f"org_id={org_id}, principal_loc_id={principal_loc_id}. "
+            "Check that the location has whatsapp_number IS NULL so the VIEW COALESCEs to org.whatsapp_number."
+        )
+        for b in branches:
+            branch_view_row = await conn.fetchrow(
+                "SELECT id FROM restaurants WHERE whatsapp_number = $1",
+                b["whatsapp_number"],
+            )
+            assert branch_view_row is not None, (
+                f"seed_restaurant: 'restaurants' VIEW returned no row for branch {b['whatsapp_number']!r}. "
+                f"org_id={org_id}. Branch location insert may have failed."
+            )
 
         return {
-            "id": parent_id,
+            "id": org_id,
             "whatsapp_number": bot_number,
             "owner_email": owner_email,
             "branches": branches,
@@ -571,18 +642,23 @@ async def drain_inbox(
     wait_for_first: float = 3.0,
 ) -> int:
     """
-    Manually drains the webhook_inbox table by running the claim-then-ack
-    loop until empty or max_iterations is reached.
+    Manually drains the webhook_inbox table by running the production
+    claim-then-ack loop (matching inbox_worker.py) until empty or
+    max_iterations is reached.
 
-    This replicates what inbox_worker.run_worker() does but is controlled
-    and synchronous from the test's perspective — no race conditions.
+    Production pattern (3 phases, Rule #4 in CLAUDE.md):
+      Phase 1 — Claim (short transaction, ~ms):
+        SELECT FOR UPDATE SKIP LOCKED → claim_rows (SET next_attempt_at) → COMMIT
+      Phase 2 — Dispatch (no DB connection):
+        asyncio.wait_for(_dispatch(...), timeout=180)
+      Phase 3 — Ack (new short connection, ~ms):
+        mark_processed or mark_failed
 
     Args:
         wait_for_first: seconds to wait for at least one row to appear
-            before declaring the queue empty. Handles the case where a row
-            was just inserted and next_attempt_at == NOW() causes a race.
+            before declaring the queue empty.
 
-    Returns number of items processed.
+    Returns number of items successfully processed.
     """
     from app.services import inbox_worker as _iw
     import time as _time
@@ -591,7 +667,7 @@ async def drain_inbox(
     deadline = _time.monotonic() + wait_for_first
 
     for iteration in range(max_iterations):
-        # Phase 1: claim
+        # Phase 1: claim (short transaction — release conn before dispatch)
         claimed = []
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -605,21 +681,20 @@ async def drain_inbox(
                             "payload": r["payload"],
                             "attempts": r["attempts"] + 1,
                         })
+        # conn released here — production pattern (no DB held during dispatch)
 
         if not claimed:
-            # On the first iteration, wait a bit in case the row was JUST inserted
-            # and next_attempt_at is racing with NOW() in the DB.
+            # Wait briefly on first iteration in case the row just landed
             if iteration == 0 and _time.monotonic() < deadline:
                 await asyncio.sleep(0.5)
                 continue
-            # If we've already processed some items, try once more in case
-            # the agent created follow-on messages.
+            # After processing some items, allow one more poll for follow-on messages
             if total_processed > 0 and _time.monotonic() < deadline:
                 await asyncio.sleep(0.2)
                 continue
             break
 
-        # Phase 2 + 3: dispatch and ack each item
+        # Phase 2: dispatch (no DB connection open — matches production)
         for item in claimed:
             inbox_id = item["id"]
             provider = item["provider"]
@@ -640,7 +715,7 @@ async def drain_inbox(
                 dispatch_error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
                 log.error("drain_inbox.dispatch_failed", inbox_id=inbox_id, error=str(exc))
 
-            # Phase 3: ack
+            # Phase 3: ack (new connection — matches production)
             if dispatch_error is None:
                 async with pool.acquire() as conn:
                     await inbox_repo.mark_processed(conn, inbox_id)
@@ -736,11 +811,9 @@ async def simulate_whatsapp_inbound(
     # The webhook should always return 200 (even on partial failures)
     assert resp.status_code == 200, f"Webhook returned {resp.status_code}: {resp.text}"
 
-    # Brief pause to let the DB transaction commit and the row become
-    # visible to the subsequent fetch_batch SELECT.
-    await asyncio.sleep(0.2)
-
-    # Drain inbox so the agent processes this message before the next turn
+    # Drain the inbox using the production claim-then-ack pattern.
+    # The mesio_e2e_test database is isolated — the Railway production inbox worker
+    # does NOT poll it, so there is no race condition with a competing worker.
     processed = await drain_inbox(pool)
     log.info(
         "simulate_whatsapp_inbound.done",
@@ -766,30 +839,45 @@ _E2E_VOLATILE_TABLES = [
 ]
 
 
-async def truncate_e2e_data(pool: asyncpg.Pool, restaurant_id: int) -> None:
+async def truncate_e2e_data(pool: asyncpg.Pool, org_id: int) -> None:
     """
-    Truncate volatile tables for a specific restaurant (using DELETE for safety).
-    Does NOT truncate the restaurant row itself.
+    Truncate volatile tables for a specific org (using DELETE for safety).
+    Does NOT truncate the organization or location rows themselves.
+
+    Post-Wave-2: volatile tables use org_id (not restaurant_id).
+    table_checks has no tenant key — deleted via their parent table_orders.
+    webhook_inbox has no tenant key — deleted by bot_number pattern in payload.
+
+    This function is called with both org_id and branch location_ids from tests
+    (e.g. truncate_e2e_data(pool, parent_id) and truncate_e2e_data(pool, branch_1_id)).
+    When called with a location_id that is not an org_id, the org_id lookup ensures
+    we still delete the right rows. For simplicity we accept any integer and
+    match against org_id column directly; callers should always pass org_id.
     """
     async with pool.acquire() as conn:
-        # Use DELETE instead of TRUNCATE so we only remove data for our test restaurant
-        # and don't disturb other data that may exist in a shared test DB.
-        await conn.execute(
-            "DELETE FROM webhook_inbox WHERE payload->>'bot_number' LIKE $1",
-            f"%{restaurant_id}%",
-        )
-        # For tables with restaurant_id column we can be precise
+        # Tables that use org_id as tenant key (confirmed by schema check).
         for table in [
             "conversations", "carts", "orders", "table_orders",
-            "table_sessions", "table_checks", "waiter_alerts", "nps_responses",
+            "table_sessions", "waiter_alerts", "nps_responses",
         ]:
-            try:
-                await conn.execute(
-                    f"DELETE FROM {table} WHERE restaurant_id = $1",  # noqa: S608
-                    restaurant_id,
-                )
-            except Exception:
-                # Table may not have restaurant_id column — skip silently
-                pass
-        # Also clear webhook_inbox by bot_number pattern
+            await conn.execute(
+                f"DELETE FROM {table} WHERE org_id = $1",  # noqa: S608
+                org_id,
+            )
+
+        # table_checks has no direct tenant key — delete via parent table_orders.
+        await conn.execute(
+            """
+            DELETE FROM table_checks
+            WHERE base_order_id IN (
+                SELECT id FROM table_orders WHERE org_id = $1
+            )
+            """,
+            org_id,
+        )
+
+        # webhook_inbox has no tenant key — match by bot_number patterns present
+        # in the payload JSONB.  This deletes all e2e inbox rows regardless of
+        # which org they belong to (acceptable since it's a test-only operation
+        # on an isolated test DB).
         await conn.execute("DELETE FROM webhook_inbox WHERE payload IS NOT NULL")

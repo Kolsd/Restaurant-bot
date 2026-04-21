@@ -128,7 +128,7 @@ async def test_delivery_full_lifecycle(
 
     Then:
       - Assert order in DB: order_type="domicilio", status="pendiente",
-        total>=15000, address populated, restaurant_id in (branch_1_id, parent_id)
+        total>=15000, address populated, org_id==parent_id
       - Admin PATCH (orders_routes): pendiente -> confirmado (Matriz admin, branch order)
       - Assert GET /api/kitchen/delivery-orders returns the order
       - Admin PATCH (kitchen): confirmado -> en_preparacion
@@ -298,8 +298,8 @@ async def test_delivery_full_lifecycle(
             async with pool.acquire() as conn:
                 order_row = await conn.fetchrow(
                     """
-                    SELECT id, phone, order_type, status, total, restaurant_id,
-                           bot_number, address
+                    SELECT id, phone, order_type, status, total, org_id,
+                           location_id, bot_number, address
                     FROM orders
                     WHERE phone = $1
                       AND order_type = 'domicilio'
@@ -327,7 +327,8 @@ async def test_delivery_full_lifecycle(
         order_type=order_row["order_type"],
         status=order_row["status"],
         total=order_row["total"],
-        restaurant_id=order_row["restaurant_id"],
+        org_id=order_row["org_id"],
+        location_id=order_row["location_id"],
         address=order_row["address"],
     )
 
@@ -348,10 +349,10 @@ async def test_delivery_full_lifecycle(
         f"Expected order total >= 15000, got {order_total}"
     )
 
-    # Verify restaurant_id is branch_1 or parent (GPS/geocode routing may assign either)
-    assert order_row["restaurant_id"] in (branch_1_id, parent_id), (
-        f"Order restaurant_id={order_row['restaurant_id']} is neither branch_1 "
-        f"({branch_1_id}) nor parent ({parent_id})"
+    # Verify org_id == parent_id (the org tenant key, written as org_id on orders).
+    # location_id is nullable in orders (orders_repo does not set it at commit time).
+    assert order_row["org_id"] == parent_id, (
+        f"Order org_id={order_row['org_id']} does not match parent_id={parent_id}"
     )
 
     # Verify address was captured (agent_external.py stores it in create_order)
@@ -359,8 +360,8 @@ async def test_delivery_full_lifecycle(
         "Order has no address. agent_external.py requires a non-empty address for delivery."
     )
 
-    # Resolve tenant scope for admin API calls
-    scope_rid = order_row["restaurant_id"]
+    # Resolve tenant scope for admin API calls (org_id is the tenant key post-Wave-2)
+    scope_rid = order_row["org_id"]
 
     # ── Admin: PATCH pendiente -> confirmado via /api/delivery/orders endpoint ──
     # This endpoint (orders_routes.py) supports Matriz admin owning branch orders.
@@ -525,7 +526,7 @@ async def test_delivery_full_lifecycle(
         "e2e.delivery.test_passed",
         order_id=order_id,
         order_total=str(order_total),
-        restaurant_id=scope_rid,
+        org_id=scope_rid,
         total_wa_messages=len(wa_capture.messages),
         customer_wa_messages=len(all_customer_texts),
     )

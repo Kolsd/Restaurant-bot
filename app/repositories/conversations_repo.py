@@ -356,20 +356,28 @@ async def db_check_rate_limit(phone: str, window_seconds: int, max_messages: int
 # ── RESTAURANT WA_PHONE_ID AUTO-PERSIST ───────────────────────────────
 
 async def db_update_restaurant_phone_id(restaurant_id: int, wa_phone_id: str) -> None:
-    """Persist a discovered wa_phone_id back to the restaurant row. Non-critical."""
+    """Persist a discovered wa_phone_id back to the organization row. Non-critical.
+
+    Post-Wave-2: `restaurants` is a READ-ONLY VIEW. Write to `organizations` instead.
+    `restaurant_id` passed here is org_id (db_get_restaurant_by_phone sets d["id"] = org_id).
+    """
     async with _tenant_connection() as conn:
         await conn.execute(
-            "UPDATE restaurants SET wa_phone_id=$1 WHERE id=$2",
+            "UPDATE organizations SET wa_phone_id=$1 WHERE id=$2",
             wa_phone_id, restaurant_id,
         )
 
 
 async def db_update_restaurant_features(restaurant_id: int, features: dict) -> None:
-    """Overwrite the features JSONB column for a restaurant row."""
+    """Overwrite the features JSONB column for a restaurant row.
+
+    Post-Wave-2: `restaurants` is a READ-ONLY VIEW. Write to `organizations` instead.
+    `restaurant_id` is org_id.
+    """
     import json as _json
     async with _tenant_connection() as conn:
         await conn.execute(
-            "UPDATE restaurants SET features = $1::jsonb WHERE id = $2",
+            "UPDATE organizations SET features = $1::jsonb WHERE id = $2",
             _json.dumps(features), restaurant_id,
         )
 

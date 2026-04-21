@@ -250,7 +250,8 @@ async def test_pickup_multi_branch_gps_full_lifecycle(
             async with pool.acquire() as conn:
                 order_row = await conn.fetchrow(
                     """
-                    SELECT id, phone, order_type, status, total, restaurant_id, bot_number
+                    SELECT id, phone, order_type, status, total, org_id,
+                           location_id, bot_number
                     FROM orders
                     WHERE phone = $1
                       AND order_type = 'recoger'
@@ -276,7 +277,8 @@ async def test_pickup_multi_branch_gps_full_lifecycle(
         order_type=order_row["order_type"],
         status=order_row["status"],
         total=order_row["total"],
-        restaurant_id=order_row["restaurant_id"],
+        org_id=order_row["org_id"],
+        location_id=order_row["location_id"],
     )
 
     # Verify order_type
@@ -284,10 +286,10 @@ async def test_pickup_multi_branch_gps_full_lifecycle(
         f"Expected order_type='recoger', got '{order_row['order_type']}'"
     )
 
-    # Verify restaurant_id is branch_1 or parent (GPS routing may assign branch or parent)
-    assert order_row["restaurant_id"] in (branch_1_id, parent_id), (
-        f"Order restaurant_id={order_row['restaurant_id']} is neither branch_1 "
-        f"({branch_1_id}) nor parent ({parent_id})"
+    # Verify org_id == parent_id (the org tenant key, written as org_id on orders).
+    # location_id is nullable in orders (orders_repo does not set it at commit time).
+    assert order_row["org_id"] == parent_id, (
+        f"Order org_id={order_row['org_id']} does not match parent_id={parent_id}"
     )
 
     # Verify total = 15000 (price of Empanaditas de Carne)
@@ -302,8 +304,8 @@ async def test_pickup_multi_branch_gps_full_lifecycle(
         f"Expected status='pendiente', got '{order_row['status']}'"
     )
 
-    # Resolve scope_rid for admin API calls
-    scope_rid = order_row["restaurant_id"]
+    # Resolve scope_rid for admin API calls (org_id is the tenant key post-Wave-2)
+    scope_rid = order_row["org_id"]
 
     # ── Admin: PATCH status to confirmado ─────────────────────────────────────
     log.info("e2e.patch_confirmado", order_id=order_id)

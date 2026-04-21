@@ -305,8 +305,8 @@ async def test_salon_qr_full_lifecycle(
             async with pool.acquire() as conn:
                 order_row = await conn.fetchrow(
                     """
-                    SELECT id, phone, table_id, status, total, items, restaurant_id,
-                           base_order_id
+                    SELECT id, phone, table_id, status, total, items, org_id,
+                           location_id, base_order_id
                     FROM table_orders
                     WHERE phone = $1
                       AND table_id = $2
@@ -336,7 +336,8 @@ async def test_salon_qr_full_lifecycle(
         base_order_id=base_order_id,
         status=order_row["status"],
         total=str(order_total),
-        restaurant_id=order_row["restaurant_id"],
+        org_id=order_row["org_id"],
+        location_id=order_row["location_id"],
     )
 
     # total should be 2 * 15000 = 30000 (two empanaditas)

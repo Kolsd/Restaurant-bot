@@ -129,13 +129,16 @@ async def db_auto_create_table(restaurant_id: int) -> dict:
         # 4. Insertar o reactivar si el ID ya existía en la base de datos
         # Wave-2: same shape as db_create_table — must populate org_id (from GUC)
         # and location_id (mirror of branch_id) explicitly. See db_create_table.
+        # branch_id column is INTEGER; location_id is BIGINT.
+        # Use separate parameters with explicit casts to avoid asyncpg AmbiguousParameterError
+        # when $4 appears in both an INTEGER and a BIGINT context.
         await conn.execute("""
             INSERT INTO restaurant_tables (id, number, name, branch_id, location_id, org_id, active)
-            VALUES ($1, $2, $3, $4, $4,
+            VALUES ($1, $2, $3, $4::integer, $5::bigint,
                     NULLIF(current_setting('app.org_id', true), '')::bigint,
                     TRUE)
             ON CONFLICT (id) DO UPDATE SET active=TRUE, name=EXCLUDED.name, number=EXCLUDED.number
-        """, table_id, new_number, table_name, branch_id)
+        """, table_id, new_number, table_name, branch_id, branch_id)
 
         return {
             "id": table_id,
