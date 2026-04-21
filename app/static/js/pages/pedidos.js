@@ -223,12 +223,97 @@
     }
   }
 
+  // ── Salon monitor (mesas activas) ──────────────────────────────
+
+  function renderSalonMonitor(tables) {
+    var grids = document.querySelectorAll('.kds-grid');
+    var salonGrid = grids[1]; // second kds-grid is the Salón monitor
+    if (!salonGrid) return;
+
+    // Populate metrics row for salon section (second metrics-row inside #tab-rt)
+    var metricsRows = document.querySelectorAll('#tab-rt .metrics-row');
+    var salonMetrics = metricsRows[1];
+
+    var activeTables = (tables || []).filter(function (t) {
+      return t.session_active || t.bot_active || (t.pending_orders && t.pending_orders.length);
+    });
+
+    if (salonMetrics) {
+      var vals = salonMetrics.querySelectorAll('.metric-value');
+      var openTickets = activeTables.filter(function (t) { return t.has_open_check; }).length;
+      var totalTicket = 0;
+      var ticketCount = 0;
+      activeTables.forEach(function (t) {
+        if (t.current_total) { totalTicket += +t.current_total; ticketCount++; }
+      });
+      var avgTicket = ticketCount > 0 ? totalTicket / ticketCount : 0;
+      var fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+      if (vals[0]) vals[0].textContent = activeTables.length;
+      if (vals[1]) vals[1].textContent = openTickets;
+      if (vals[2]) vals[2].textContent = fmt(avgTicket);
+      if (vals[3]) vals[3].textContent = '—';
+    }
+
+    if (!activeTables.length) {
+      salonGrid.innerHTML = '<div style="padding:24px;color:var(--text-3);font-size:13px;">(sin mesas activas)</div>';
+      salonGrid.setAttribute('data-loaded', 'true');
+      return;
+    }
+
+    var fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+
+    salonGrid.innerHTML = activeTables.map(function (t) {
+      var tableNum = t.table_number || t.name || t.id;
+      var pax = t.party_size || t.capacity || '';
+      var staffName = t.assigned_staff_name || '';
+      var startedAt = t.session_started_at;
+      var minutesOpen = '—';
+      if (startedAt) {
+        var mins = Math.floor((Date.now() - new Date(startedAt).getTime()) / 60000);
+        minutesOpen = mins < 60 ? mins + ' min' : Math.floor(mins / 60) + 'h ' + (mins % 60) + 'min';
+      }
+      var items = Array.isArray(t.items) ? t.items : [];
+      var itemsHtml = items.slice(0, 3).map(function (it) {
+        return '<div class="kds-item"><span>' + _escHtml(it.name || '') + '</span><span class="mono">×' + (it.qty || 1) + '</span></div>';
+      }).join('');
+      if (items.length > 3) {
+        itemsHtml += '<div class="kds-item" style="color:var(--text-3);">+' + (items.length - 3) + ' más</div>';
+      }
+      var total = t.current_total ? fmt(t.current_total) : '—';
+      return '<div class="kds-card">' +
+        '<div class="kds-top"><div>' +
+        '<div class="kds-id">Mesa ' + _escHtml(String(tableNum)) + (pax ? ' · ' + pax + ' pax' : '') + '</div>' +
+        (staffName ? '<div class="kds-name">Mesero: ' + _escHtml(staffName) + '</div>' : '') +
+        '<div class="kds-sub">Abierto hace ' + minutesOpen + '</div>' +
+        '</div></div>' +
+        (itemsHtml ? '<div class="kds-items">' + itemsHtml + '</div>' : '') +
+        '<div class="kds-foot"><span></span><span class="kds-price">' + total + '</span></div>' +
+        '</div>';
+    }).join('');
+
+    salonGrid.setAttribute('data-loaded', 'true');
+  }
+
+  async function loadSalonMonitor() {
+    try {
+      var headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+      var res = await fetch('/api/pos/tables-status', { headers: headers });
+      if (!res.ok) { return; }
+      var data = await res.json();
+      var tables = data.tables || data;
+      renderSalonMonitor(Array.isArray(tables) ? tables : []);
+    } catch (e) {
+      console.error('pedidos: salon monitor error', e);
+    }
+  }
+
   // Initial load
   loadLiveOrders();
+  loadSalonMonitor();
   loadHistoryOrders('7d');
 
   // Auto-refresh live section every 30s
   if (typeof mesioInterval === 'function') {
-    mesioInterval(loadLiveOrders, 30000);
+    mesioInterval(function () { loadLiveOrders(); loadSalonMonitor(); }, 30000);
   }
 })();

@@ -1015,7 +1015,7 @@ function closeSidebar() {
 }
 async function doLogout() {
   if(ADMIN_KEY) {
-    try { await fetch('/api/admin/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + ADMIN_KEY } }); }
+    try { await fetch('/api/internal/admin/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + ADMIN_KEY } }); }
     catch(e) {}
   }
   sessionStorage.removeItem('mesio_admin_key');

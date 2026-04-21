@@ -1,10 +1,15 @@
 import os
 import json
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from app.services import database as db
-from app.routes.deps import require_auth, get_current_restaurant, get_current_user
+from app.routes.deps import (
+    require_auth,
+    get_current_restaurant,
+    get_current_user,
+    get_current_restaurant_scoped,
+)
 from app.repositories import reviews_repo as rr, conversations_repo
 from app.repositories import stats_repo
 from app.services.tenant_context import tenant_scope
@@ -841,3 +846,80 @@ async def get_daily_insight(request: Request):
 
     with tenant_scope(org_id):
         return await generate_daily_insight(org_id=org_id, location_id=location_id)
+
+
+# ── DASHBOARD ANALYTICS — TIER 5 (Churn + Branches) ─────────────────────────
+
+
+@router.get("/api/stats/churn-summary")
+async def get_churn_summary(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Churn risk aggregate for the clientes-riesgo page.
+
+    Bins customer_profiles by recency-based churn_score:
+      high   (score >= 0.80): dormant >= 56 days, ≥3 orders
+      medium (0.50–0.79):     dormant 35–55 days, ≥3 orders
+      watch  (0.30–0.49):     dormant 14–34 days, ≥2 orders
+
+    Returns:
+      high_count, medium_count, watch_count   — integer bin sizes
+      ltv_sum                                 — float, total_spent sum for high+medium
+      reactivated_count                       — int (0 until schema supports it)
+      medium_risk                             — list[dict], top 6 medium-bin customers,
+                                               each with: name, phone, churn_score,
+                                               days_since, total_visits
+    """
+    org_id = restaurant["id"]
+    return await stats_repo.db_churn_summary(org_id=org_id)
+
+
+@router.get("/api/stats/branches-consolidated")
+async def get_branches_consolidated(
+    request: Request,
+    days: int = Query(7, ge=1, le=365, description="Rolling window in days"),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Cross-location KPI roll-up for the sucursales page.
+
+    Query params:
+      days (int, default 7): rolling window for sales + ticket counts.
+
+    Returns:
+      period        — human-readable period label (e.g. "Últimos 7d")
+      total_sales   — float, sum of paid orders + table orders in window
+      total_tickets — int, count of orders in window
+      avg_nps       — float | null, last 30d NPS average
+      total_staff   — int, currently active staff count
+      growth_yoy    — float | null, % growth vs same 30d window last year
+    """
+    org_id = restaurant["id"]
+    return await stats_repo.db_branches_consolidated(org_id=org_id, days=days)
+
+
+@router.get("/api/stats/branches-comparison")
+async def get_branches_comparison(
+    request: Request,
+    days: int = Query(30, ge=1, le=365, description="Rolling window in days"),
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Per-location metric comparison matrix for the sucursales page.
+
+    Query params:
+      days (int, default 30): rolling window for sales / reservation metrics.
+
+    Returns:
+      locations — list of {id, name} for all locations in the org
+      rows      — list of comparison rows, each with:
+                    metric         — display label
+                    per_location   — list of float|null, one per location (same order as locations)
+                    avg            — float|null, average across non-null locations
+                    target         — float|null, benchmark target (null if not defined)
+                    top_location_id — int|null, id of the best-performing location
+                    vs_target_pct   — float|null, % vs target (null if no target or no data)
+
+    Metrics with null values: Rotación mesas/día, Food cost %, Costo nómina/ventas,
+    Rotación de personal, Crecimiento YoY — pending additional schema/telemetry.
+    """
+    org_id = restaurant["id"]
+    return await stats_repo.db_branches_comparison(org_id=org_id, days=days)

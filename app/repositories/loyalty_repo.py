@@ -294,6 +294,373 @@ async def db_count_loyalty_customers(org_id: int) -> int:
     return int(total or 0)
 
 
+async def db_get_loyalty_aggregates(org_id: int) -> dict:
+    """
+    Compute headline aggregate metrics for the loyalty dashboard.
+
+    Metrics:
+      total_customers       — COUNT(*) of loyalty_customers for this org.
+      avg_frequency         — average purchase ledger entries per member in
+                              last 30 days (each 'purchase' entry = one order).
+      avg_ticket_member     — AVG(orders.total) for orders from loyalty members.
+      avg_ticket_nonmember  — AVG(orders.total) for orders from non-members.
+      roi_multiple          — null for now (no campaign spend tracking yet).
+                              # TODO: calculate once loyalty_campaigns.revenue_numeric
+                              #        and a corresponding campaign_spend column are used.
+      redemption_pct        — SUM(abs(delta)) WHERE delta<0 / SUM(delta) WHERE delta>0
+                              × 100.  Returns 0.0 when no accruals exist.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        total_customers = await conn.fetchval(
+            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id = $1",
+            org_id,
+        ) or 0
+
+        # avg_frequency: mean purchase entries per member in last 30 days.
+        # One 'purchase' ledger entry represents one order event.
+        avg_freq_row = await conn.fetchrow(
+            """
+            SELECT
+                CASE WHEN COUNT(DISTINCT phone) = 0 THEN 0.0
+                     ELSE ROUND(COUNT(*)::numeric / COUNT(DISTINCT phone), 1)
+                END AS avg_frequency
+            FROM loyalty_ledger
+            WHERE org_id = $1
+              AND reason = 'purchase'
+              AND created_at >= NOW() - INTERVAL '30 days'
+            """,
+            org_id,
+        )
+        avg_frequency = float(avg_freq_row["avg_frequency"]) if avg_freq_row else 0.0
+
+        # avg ticket split: member vs non-member.
+        # Member phones are those in loyalty_customers for this org.
+        ticket_row = await conn.fetchrow(
+            """
+            SELECT
+                AVG(CASE WHEN lc.phone IS NOT NULL THEN o.total END)
+                    AS member_avg,
+                AVG(CASE WHEN lc.phone IS NULL THEN o.total END)
+                    AS nonmember_avg
+            FROM orders o
+            LEFT JOIN loyalty_customers lc
+                   ON lc.org_id = o.org_id
+                  AND lc.phone  = o.phone
+            WHERE o.org_id = $1
+              AND o.total IS NOT NULL
+              AND o.status NOT IN ('cancelled', 'pendiente')
+            """,
+            org_id,
+        )
+        avg_ticket_member = (
+            float(ticket_row["member_avg"])
+            if ticket_row and ticket_row["member_avg"] is not None
+            else None
+        )
+        avg_ticket_nonmember = (
+            float(ticket_row["nonmember_avg"])
+            if ticket_row and ticket_row["nonmember_avg"] is not None
+            else None
+        )
+
+        # redemption_pct
+        redemption_row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN delta > 0 THEN  delta  ELSE 0 END), 0) AS accrued,
+                COALESCE(SUM(CASE WHEN delta < 0 THEN -delta  ELSE 0 END), 0) AS redeemed
+            FROM loyalty_ledger
+            WHERE org_id = $1
+            """,
+            org_id,
+        )
+        accrued  = int(redemption_row["accrued"])  if redemption_row else 0
+        redeemed = int(redemption_row["redeemed"]) if redemption_row else 0
+        redemption_pct = round(redeemed / accrued * 100, 1) if accrued > 0 else 0.0
+
+    return {
+        "total_customers":      int(total_customers),
+        "avg_frequency":        avg_frequency,
+        "avg_ticket_member":    avg_ticket_member,      # float or None
+        "avg_ticket_nonmember": avg_ticket_nonmember,   # float or None
+        "roi_multiple":         None,                   # TODO: campaign spend tracking
+        "redemption_pct":       redemption_pct,
+    }
+
+
+async def db_get_loyalty_segments(org_id: int) -> list[dict]:
+    """
+    Compute the 4 IA-curated customer segments for the dashboard.
+
+    Segment definitions:
+      vip-active    — members with ≥4 purchase ledger entries in last 30d AND
+                      cumulative order spend ≥ 200 000 COP in the same window.
+                      potential_revenue = count × avg_ticket × 4 visits/month.
+      vip-dormant   — was vip-active in a 30d window ending >60d ago, but has
+                      zero orders in the last 30d.
+                      potential_revenue = count × avg_ticket × 2 (recovery).
+      new-month     — first-ever purchase entry within last 30d.
+                      potential_revenue = null (unknown lifetime value).
+      birthdays     — count=0 placeholder.
+                      # TODO: ADD COLUMN birthday_month SMALLINT NULL to
+                      #        loyalty_customers, then query:
+                      #        WHERE org_id=$1 AND birthday_month =
+                      #              EXTRACT(MONTH FROM NOW())::int
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        # ── VIP active ─────────────────────────────────────────────────────────
+        vip_active_row = await conn.fetchrow(
+            """
+            WITH purchase_freq AS (
+                SELECT phone
+                FROM loyalty_ledger
+                WHERE org_id = $1
+                  AND reason = 'purchase'
+                  AND created_at >= NOW() - INTERVAL '30 days'
+                GROUP BY phone
+                HAVING COUNT(*) >= 4
+            ),
+            high_spend AS (
+                SELECT o.phone
+                FROM orders o
+                INNER JOIN purchase_freq pf ON pf.phone = o.phone
+                WHERE o.org_id = $1
+                  AND o.created_at >= NOW() - INTERVAL '30 days'
+                  AND o.status NOT IN ('cancelled', 'pendiente')
+                GROUP BY o.phone
+                HAVING SUM(o.total) >= 200000
+            )
+            SELECT
+                COUNT(DISTINCT hs.phone)          AS cnt,
+                AVG(o.total)                      AS avg_ticket
+            FROM orders o
+            INNER JOIN high_spend hs ON hs.phone = o.phone
+            WHERE o.org_id = $1
+              AND o.created_at >= NOW() - INTERVAL '30 days'
+              AND o.status NOT IN ('cancelled', 'pendiente')
+            """,
+            org_id,
+        )
+        vip_active_count = int(vip_active_row["cnt"]) if vip_active_row else 0
+        vip_avg_ticket = (
+            float(vip_active_row["avg_ticket"])
+            if vip_active_row and vip_active_row["avg_ticket"]
+            else 0.0
+        )
+        # potential_revenue: 4 visits/month going forward
+        vip_active_rev = (
+            round(vip_active_count * vip_avg_ticket * 4, 2)
+            if vip_avg_ticket and vip_active_count
+            else None
+        )
+
+        # ── VIP dormant ────────────────────────────────────────────────────────
+        vip_dormant_row = await conn.fetchrow(
+            """
+            WITH was_vip AS (
+                SELECT phone
+                FROM loyalty_ledger
+                WHERE org_id = $1
+                  AND reason = 'purchase'
+                  AND created_at >= NOW() - INTERVAL '90 days'
+                  AND created_at <  NOW() - INTERVAL '60 days'
+                GROUP BY phone
+                HAVING COUNT(*) >= 4
+            ),
+            recent_buyers AS (
+                SELECT DISTINCT phone
+                FROM orders
+                WHERE org_id = $1
+                  AND created_at >= NOW() - INTERVAL '30 days'
+                  AND status NOT IN ('cancelled', 'pendiente')
+            )
+            SELECT COUNT(*) AS cnt
+            FROM was_vip wv
+            WHERE NOT EXISTS (
+                SELECT 1 FROM recent_buyers rb WHERE rb.phone = wv.phone
+            )
+            """,
+            org_id,
+        )
+        vip_dormant_count = int(vip_dormant_row["cnt"]) if vip_dormant_row else 0
+        # recovery scenario: 2 visits/month potential
+        vip_dormant_rev = (
+            round(vip_dormant_count * vip_avg_ticket * 2, 2)
+            if vip_avg_ticket and vip_dormant_count
+            else None
+        )
+
+        # ── New this month ─────────────────────────────────────────────────────
+        new_month_row = await conn.fetchrow(
+            """
+            WITH first_purchase AS (
+                SELECT phone, MIN(created_at) AS first_at
+                FROM loyalty_ledger
+                WHERE org_id = $1
+                  AND reason = 'purchase'
+                GROUP BY phone
+            )
+            SELECT COUNT(*) AS cnt
+            FROM first_purchase
+            WHERE first_at >= NOW() - INTERVAL '30 days'
+            """,
+            org_id,
+        )
+        new_month_count = int(new_month_row["cnt"]) if new_month_row else 0
+
+        # ── Birthdays ──────────────────────────────────────────────────────────
+        # TODO: ADD COLUMN birthday_month SMALLINT NULL to loyalty_customers
+        birthday_count = 0
+
+    return [
+        {
+            "id":                "vip-active",
+            "name":              "VIPs activos",
+            "description":       "Gastan >$200k/mes con frecuencia ≥4× en los últimos 30 días",
+            "count":             vip_active_count,
+            "potential_revenue": vip_active_rev,   # float or None  # JSON boundary
+            "tone":              "success",
+        },
+        {
+            "id":                "vip-dormant",
+            "name":              "VIPs dormidos",
+            "description":       "Fueron VIP hace 60+ días, sin visita reciente",
+            "count":             vip_dormant_count,
+            "potential_revenue": vip_dormant_rev,  # float or None  # JSON boundary
+            "tone":              "warn",
+        },
+        {
+            "id":                "new-month",
+            "name":              "Nuevos del mes",
+            "description":       "Primera visita en los últimos 30 días",
+            "count":             new_month_count,
+            "potential_revenue": None,
+            "tone":              "info",
+        },
+        {
+            "id":                "birthdays",
+            "name":              "Cumpleaños del mes",
+            "description":       "Postre gratis + 500 pts · automático",
+            "count":             birthday_count,
+            "potential_revenue": None,
+            "tone":              "purple",
+        },
+    ]
+
+
+async def db_get_loyalty_funnel(org_id: int) -> list[dict]:
+    """
+    Compute the 5-step conversion funnel for the loyalty dashboard.
+
+    Cohort: ALL loyalty members (registered customers in loyalty_customers).
+    Tier thresholds read from restaurants.features.loyalty_tiers or defaults.
+
+    Steps:
+      1. Primera visita  — total loyalty_customers rows.
+      2. Segunda visita  — customers with ≥2 'purchase' ledger entries.
+      3. Suben a Plata   — points_balance ≥ plata_min (default 21).
+      4. Suben a Oro     — points_balance ≥ oro_min (default 81).
+      5. Suben a Platino — points_balance ≥ platino_min (default 201).
+
+    All percentages are relative to step 1.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    import json as _json
+
+    async with tenant_connection() as conn:
+        feats_row = await conn.fetchrow(
+            "SELECT features FROM restaurants WHERE id = $1", org_id
+        )
+        feats: dict = {}
+        if feats_row and feats_row["features"]:
+            f = feats_row["features"]
+            if isinstance(f, str):
+                try:
+                    feats = _json.loads(f)
+                except Exception:
+                    feats = {}
+            elif isinstance(f, dict):
+                feats = f
+
+        tiers = feats.get("loyalty_tiers") or {}
+        plata_min   = int((tiers.get("plata")   or [21,   80])[0])
+        oro_min     = int((tiers.get("oro")     or [81,  200])[0])
+        platino_min = int((tiers.get("platino") or [201, 9999])[0])
+
+        step1 = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id = $1",
+            org_id,
+        ) or 0)
+
+        step2 = int(await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT phone
+                FROM loyalty_ledger
+                WHERE org_id = $1 AND reason = 'purchase'
+                GROUP BY phone
+                HAVING COUNT(*) >= 2
+            ) sub
+            """,
+            org_id,
+        ) or 0)
+
+        step3 = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id=$1 AND points_balance >= $2",
+            org_id, plata_min,
+        ) or 0)
+        step4 = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id=$1 AND points_balance >= $2",
+            org_id, oro_min,
+        ) or 0)
+        step5 = int(await conn.fetchval(
+            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id=$1 AND points_balance >= $2",
+            org_id, platino_min,
+        ) or 0)
+
+    def _pct(n: int) -> float:
+        return round(n / step1 * 100, 1) if step1 > 0 else 0.0
+
+    return [
+        {
+            "label":       "Primera visita",
+            "description": "Registro vía WhatsApp",
+            "count":       step1,
+            "pct":         100.0 if step1 > 0 else 0.0,
+        },
+        {
+            "label":       "Segunda visita",
+            "description": "≤30 días después",
+            "count":       step2,
+            "pct":         _pct(step2),
+        },
+        {
+            "label":       "Suben a Plata",
+            "description": f"≥{plata_min} puntos",
+            "count":       step3,
+            "pct":         _pct(step3),
+        },
+        {
+            "label":       "Suben a Oro",
+            "description": f"≥{oro_min} puntos",
+            "count":       step4,
+            "pct":         _pct(step4),
+        },
+        {
+            "label":       "Suben a Platino",
+            "description": f"≥{platino_min} puntos",
+            "count":       step5,
+            "pct":         _pct(step5),
+        },
+    ]
+
+
 async def db_get_phone_for_base_order(base_order_id: str) -> str | None:
     """
     Obtiene el teléfono del cliente asociado a un ticket de mesa.

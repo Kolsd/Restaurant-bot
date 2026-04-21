@@ -944,7 +944,7 @@ async function loadPickupOrders() {
   if (!el) return;
   el.innerHTML = '<div style="color:#6B7280;font-size:13px;">Cargando…</div>';
   try {
-    const res = await fetch('/delivery/orders', { headers: mesioHeaders() });
+    const res = await fetch('/api/delivery/orders', { headers: mesioHeaders() });
     if (!res.ok) { el.innerHTML = '<p style="color:#999;">Error al cargar.</p>'; return; }
     const data = await res.json();
     const orders = (data.orders || []).filter(o => o.order_type === 'recoger' || o.order_type === 'pickup');
@@ -982,7 +982,7 @@ async function loadDeliveryProposals() {
   if (!el) return;
   el.innerHTML = '<div style="color:#6B7280;font-size:13px;">Cargando…</div>';
   try {
-    const res = await fetch('/delivery/orders', { headers: mesioHeaders() });
+    const res = await fetch('/api/delivery/orders', { headers: mesioHeaders() });
     if (!res.ok) { el.innerHTML = '<p style="color:#999;">Error al cargar.</p>'; return; }
     const data = await res.json();
     const orders = (data.orders || []).filter(o => {
@@ -1042,7 +1042,7 @@ function _extractMediaId(url) {
 
 async function confirmDeliveryOrder(orderId, newStatus, containerEl, reloadFn) {
   try {
-    const res = await fetch(`/delivery/orders/${encodeURIComponent(orderId)}/status`, {
+    const res = await fetch(`/api/delivery/orders/${encodeURIComponent(orderId)}/status`, {
       method: 'PATCH', headers: mesioHeaders(), body: JSON.stringify({ status: newStatus }),
     });
     if (res.ok) { mesioToast('Estado actualizado', 'success'); reloadFn(); }

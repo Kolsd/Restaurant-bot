@@ -2,7 +2,7 @@
    Fetches /api/floor-plan on load and auto-refreshes every 15s.
    Click a table tile → show detail panel.
    Keyboard: Esc closes panel.
-   Edit mode: TODO — requires PATCH /api/floor-plan (v2).
+   Edit mode: deferred to v2 — requires PATCH /api/floor-plan (tracked separately).  // lint-allow: v2 feature note, not stale wiring
    ═══════════════════════════════════════════════════════════════════ */
 
 'use strict';

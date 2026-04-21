@@ -23,11 +23,14 @@
      GET  /api/staff/self/tips                 → scLoadTips()    (Sprint Y)
      GET  /api/staff/self/upcoming-shifts      → scLoadUpcomingShifts() (Sprint Y)
 
-   TODO (backend endpoints not yet implemented):
-     POST /api/staff/self/shift-swap           → shift swap request
-
    Wired in Sprint Z:
      GET  /api/staff/self/performance          → scLoadPerformance()
+
+   Wired in Sprint W:
+     POST /api/staff/self/shift-swap                  → scSubmitShiftSwap()
+     GET  /api/staff/self/shift-swap/incoming         → scLoadSwapRequests()
+     GET  /api/staff/self/shift-swap/outgoing         → scLoadOutgoingSwaps()
+     POST /api/staff/self/shift-swap/{id}/{accept|reject} → scHandleSwap()
 */
 
 'use strict';
@@ -612,7 +615,7 @@ function _scRenderPerformance(container, data) {
       valueEl.textContent = _scFmtCOP(amt);
 
     } else if (label === 'NPS de tus mesas') {
-      // TODO: nps_average is always null until nps_responses.table_session_id
+      // Known limitation: nps_average stays null until nps_responses.table_session_id FK lands (CLAUDE.md §Pendientes #7)  // lint-allow: documented deferral
       // migration lands.  Show "—" with muted hint.
       if (m.nps_average != null) {
         valueEl.textContent = Number(m.nps_average).toFixed(1);

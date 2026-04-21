@@ -196,6 +196,68 @@
     container.innerHTML = bars.length ? bars.join('') : '<div style="padding:6px 0;color:var(--text-3);font-size:13px;">Sin propinas en este período</div>';
   }
 
+  function renderPayrollSummary(employees, periodStart, periodEnd) {
+    const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+    const list = Array.isArray(employees) ? employees : [];
+
+    // Aggregate totals across all employees
+    let totalBase = 0, totalTips = 0, totalDeductions = 0, totalOvertime = 0, totalNet = 0;
+    list.forEach(function (emp) {
+      totalBase       += +(emp.base_salary        || emp.gross_salary      || 0);
+      totalTips       += +(emp.tips               || emp.tips_total        || emp.tip_earnings || 0);
+      totalDeductions += +(emp.deductions         || emp.total_deductions  || 0);
+      totalOvertime   += +(emp.overtime_pay       || emp.extra             || 0);
+      const net = emp.net_salary !== undefined ? emp.net_salary : (emp.total !== undefined ? emp.total : null);
+      if (net !== null && net !== undefined) totalNet += +net;
+    });
+
+    // Period card
+    const titleEl = document.getElementById('period-title');
+    const datesEl = document.getElementById('period-dates');
+    const totalEl = document.getElementById('period-total');
+    const subEl   = document.getElementById('period-sub');
+
+    if (titleEl) {
+      // Derive a human label from periodStart month
+      try {
+        var d = new Date(periodStart + 'T12:00:00');
+        var monthName = d.toLocaleString('es-CO', { month: 'long' });
+        // Is it first or second half?
+        var day = parseInt(periodStart.split('-')[2], 10);
+        titleEl.textContent = (day <= 15 ? 'Primera quincena · ' : 'Segunda quincena · ') +
+          monthName.charAt(0).toUpperCase() + monthName.slice(1);
+      } catch (e2) {
+        titleEl.textContent = 'Período';
+      }
+    }
+
+    if (datesEl && periodStart && periodEnd) {
+      try {
+        var ds = new Date(periodStart + 'T12:00:00');
+        var de = new Date(periodEnd   + 'T12:00:00');
+        var fmtDate = function (d) {
+          return d.getDate() + ' ' + d.toLocaleString('es-CO', { month: 'short' });
+        };
+        datesEl.textContent = fmtDate(ds) + ' — ' + fmtDate(de);
+      } catch (e3) {
+        datesEl.textContent = periodStart + ' — ' + periodEnd;
+      }
+    }
+
+    if (totalEl) totalEl.textContent = fmt(totalNet);
+    if (subEl)   subEl.textContent   = list.length + ' empleado' + (list.length === 1 ? '' : 's') + ' · borrador';
+
+    // Summary metrics
+    var setMetric = function (id, val) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = val;
+    };
+    setMetric('summary-base',        fmt(totalBase));
+    setMetric('summary-tips',        fmt(totalTips));
+    setMetric('summary-deductions',  list.length ? '-' + fmt(totalDeductions) : fmt(0));
+    setMetric('summary-overtime',    fmt(totalOvertime));
+  }
+
   async function loadPayroll(period) {
     try {
       const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
@@ -205,7 +267,9 @@
       if (!res.ok) { return; }
       const data = await res.json();
       const employees = data.employees || data.payroll || data;
-      renderPayroll(Array.isArray(employees) ? employees : []);
+      const empList = Array.isArray(employees) ? employees : [];
+      renderPayroll(empList);
+      renderPayrollSummary(empList, periodStart, periodEnd);
     } catch (e) {
       console.error('nomina: payroll error', e);
     }

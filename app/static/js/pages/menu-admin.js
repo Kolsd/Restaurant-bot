@@ -286,6 +286,21 @@
       }
     }
 
+    // Populate inv-summary regardless of whether items array is empty
+    var summaryEl = document.getElementById('inv-summary');
+    if (summaryEl) {
+      var fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+      var list = Array.isArray(items) ? items : [];
+      var totalValue = 0;
+      list.forEach(function (item) {
+        var stock = +(item.stock || item.quantity || item.current_stock || 0);
+        var cost  = +(item.cost_per_unit || item.unit_cost || 0);
+        totalValue += stock * cost;
+      });
+      summaryEl.textContent = list.length + ' producto' + (list.length === 1 ? '' : 's') +
+        ' · ' + fmt(totalValue) + ' valor stock';
+    }
+
     if (!items || !items.length) {
       body.innerHTML = '<div style="padding:18px;color:var(--text-3);">(sin inventario)</div>';
       body.setAttribute('data-loaded', 'true');

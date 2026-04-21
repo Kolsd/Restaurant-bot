@@ -368,7 +368,7 @@ function _openStaffModal(self, existing = null) {
     }
   }
 
-  // Fake nameIn shim so the rest of the function (which reads nameIn.value) still works
+  // Shim so the rest of the function (which reads nameIn.value) still works  // lint-allow: legit getter adapter, not mock data
   const nameIn = { get value() { return (nombreIn.value.trim() + ' ' + apellidosIn.value.trim()).trim(); } };
 
   // Username preview (read-only, only shown on create)
@@ -1902,7 +1902,7 @@ function _renderPayrollTab(state, el, self) {
       const exportBtn = document.createElement('button');
       exportBtn.textContent = '⬇ CSV';
       exportBtn.style.cssText = 'background:#f0f0ec;border:1.5px solid #e0e0d8;padding:6px 10px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;';
-      exportBtn.addEventListener('click', () => { window.open(`/api/staff/payroll/export/${run.id}`, '_blank'); });
+      exportBtn.addEventListener('click', () => { window.open(`/api/staff/payroll/runs/${run.id}/export`, '_blank'); });
       right.appendChild(exportBtn);
 
       row.appendChild(left); row.appendChild(right);

@@ -866,6 +866,26 @@ async def list_payroll_runs(
     return {"runs": runs}
 
 
+@router.put("/payroll/runs/{run_id}/approve", dependencies=_MODULE_DEPS)
+async def approve_payroll_run(
+    run_id: str,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Mark a draft payroll run as approved.
+
+    Repo `db_approve_payroll_run` returns the updated row or None when the
+    run doesn't exist, belongs to another org, or is already approved.
+    """
+    org_id = restaurant["id"]
+    run = await db.db_approve_payroll_run(run_id, org_id)
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail="Corrida de nómina no encontrada o ya aprobada.",
+        )
+    return {"run": run}
+
+
 @router.get("/payroll/runs/{run_id}/export", dependencies=_MODULE_DEPS)
 async def export_payroll_run(
     run_id: str,

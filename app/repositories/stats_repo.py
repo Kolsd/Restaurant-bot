@@ -892,3 +892,477 @@ async def db_tips_pool(
         "unallocated":     unallocated,
         "my_pool":         my_pool,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. Churn summary  (GET /api/stats/churn-summary)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def db_churn_summary(org_id: int) -> dict:
+    """Aggregate churn risk buckets for the clientes-riesgo page.
+
+    Bins customers by churn_score derived from recency (days_since_last_order):
+      high   — score >= 0.80  (dormant >= 56 days for ≥3-order customers)
+      medium — 0.50 <= score < 0.80  (dormant 21–55 days, ≥3 orders)
+      watch  — 0.30 <= score < 0.50  (dormant 14–20 days, ≥2 orders)
+
+    Score formula:  min(1.0, days_since / 70.0)  — linear ramp, caps at 1.0.
+    Threshold mapping:
+      days >= 56  → score ≥ 0.80  → high
+      days >= 35  → score ≥ 0.50  → medium
+      days >= 21  → score ≥ 0.30  → watch (≥2 orders threshold to include newer customers)
+
+    ltv_sum: sum of total_spent for high + medium bins. DB NUMERIC → Decimal → float.
+    reactivated_count: customers who were dormant (>21d) but have a recent order in
+        last 30 days.
+        # TODO: customer_profiles.last_seen is updated on every order; there is no
+        # "previously_dormant" flag in the current schema.  Counting customers whose
+        # last_seen is in the last 30 days AND who had been dormant before requires
+        # order-level history which customer_profiles does not expose.  Returning 0
+        # until a dedicated "reactivation_events" table or a second latest_order_date
+        # column is added.
+
+    medium_risk: top 6 from the medium bin, ordered by churn_score DESC.
+    """
+    from datetime import date as _date, timedelta as _td  # noqa: PLC0415
+
+    async with _tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                phone,
+                COALESCE(display_name, phone)                              AS name,
+                total_orders,
+                total_spent,
+                EXTRACT(DAY FROM NOW() - last_seen)::INT                   AS days_since,
+                last_seen
+            FROM customer_profiles
+            WHERE org_id       = $1
+              AND total_orders >= 2
+              AND last_seen    <  NOW() - INTERVAL '14 days'
+            ORDER BY last_seen ASC
+            """,
+            org_id,
+        )
+
+    high_count = 0
+    medium_count = 0
+    watch_count = 0
+    ltv_high_medium = Decimal("0")
+    medium_risk_rows: list[dict] = []
+
+    for r in rows:
+        days = int(r["days_since"] or 0)
+        score = min(1.0, days / 70.0)
+        total_orders = int(r["total_orders"] or 0)
+
+        # Enforce minimum order thresholds per bin
+        if score >= 0.80 and total_orders >= 3:
+            high_count += 1
+            ltv_high_medium += to_decimal(r["total_spent"])
+        elif score >= 0.50 and total_orders >= 3:
+            medium_count += 1
+            ltv_high_medium += to_decimal(r["total_spent"])
+            medium_risk_rows.append({
+                "name":         r["name"],
+                "phone":        r["phone"],
+                "churn_score":  round(score, 4),
+                "days_since":   days,
+                "total_visits": total_orders,
+            })
+        elif score >= 0.30 and total_orders >= 2:
+            watch_count += 1
+
+    # Sort medium bin by score DESC, take top 6
+    medium_risk_rows.sort(key=lambda x: -x["churn_score"])
+    medium_risk_top6 = medium_risk_rows[:6]
+
+    return {
+        "high_count":       high_count,
+        "medium_count":     medium_count,
+        "watch_count":      watch_count,
+        "ltv_sum":          float(quantize_money(ltv_high_medium)),  # JSON boundary
+        "reactivated_count": 0,  # TODO: requires order-history or reactivation_events table
+        "medium_risk":      medium_risk_top6,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Branches consolidated  (GET /api/stats/branches-consolidated)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def db_branches_consolidated(org_id: int, days: int = 7) -> dict:
+    """Cross-location KPI roll-up for the sucursales page.
+
+    All queries are org-scoped via RLS (org_id GUC) — no explicit WHERE needed,
+    but we include the positional parameter for clarity and defence-in-depth.
+
+    Computes:
+      total_sales   — SUM(orders.total WHERE paid=TRUE) + SUM(table_orders.total)
+                      for the last `days` days.
+      total_tickets — COUNT of rows from both tables in the same window.
+      avg_nps       — AVG(score) from nps_responses in last 30 days. null if no data.
+      total_staff   — COUNT(*) from staff WHERE active = true.
+      growth_yoy    — (sales last 30d) / (sales in same 30d window 1 year ago).
+                      null if the prior-year window has zero sales.
+    """
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td  # noqa: PLC0415
+
+    days = max(1, min(365, days))
+    now = _dt.now(_tz.utc)
+    window_start = now - _td(days=days)
+
+    # 30-day window for NPS and YoY calculations
+    month_start = now - _td(days=30)
+    yoy_current_start = now - _td(days=30)
+    yoy_current_end   = now
+    yoy_prior_start   = now - _td(days=395)  # 365+30 days back
+    yoy_prior_end     = now - _td(days=365)  # 365 days back
+
+    async with _tenant_connection() as conn:
+        # ── sales + tickets from delivery/pickup orders ─────────────────────
+        order_row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(total), 0)::numeric  AS sales,
+                COUNT(*)::int                      AS tickets
+            FROM orders
+            WHERE paid = TRUE
+              AND created_at >= $1
+              AND created_at <  $2
+              AND org_id = $3
+            """,
+            window_start, now, org_id,
+        )
+
+        # ── sales + tickets from table orders ────────────────────────────────
+        table_row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(total), 0)::numeric  AS sales,
+                COUNT(*)::int                      AS tickets
+            FROM table_orders
+            WHERE status NOT IN ('cancelado')
+              AND created_at >= $1
+              AND created_at <  $2
+              AND org_id = $3
+            """,
+            window_start, now, org_id,
+        )
+
+        # ── NPS average (last 30 days) ────────────────────────────────────────
+        nps_row = await conn.fetchrow(
+            """
+            SELECT AVG(score)::numeric AS avg_nps
+            FROM nps_responses
+            WHERE org_id = $1
+              AND created_at >= $2
+            """,
+            org_id, month_start,
+        )
+
+        # ── Active staff count ────────────────────────────────────────────────
+        staff_count = await conn.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM staff
+            WHERE org_id = $1
+              AND active  = TRUE
+            """,
+            org_id,
+        )
+
+        # ── YoY growth: sales current 30d vs same 30d window last year ───────
+        yoy_current_row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(o.total), 0)::numeric +
+                COALESCE((SELECT SUM(t.total)
+                          FROM table_orders t
+                          WHERE t.status NOT IN ('cancelado')
+                            AND t.created_at >= $1
+                            AND t.created_at <  $2
+                            AND t.org_id = $3), 0)::numeric AS sales_now
+            FROM orders o
+            WHERE o.paid = TRUE
+              AND o.created_at >= $1
+              AND o.created_at <  $2
+              AND o.org_id = $3
+            """,
+            yoy_current_start, yoy_current_end, org_id,
+        )
+
+        yoy_prior_row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(o.total), 0)::numeric +
+                COALESCE((SELECT SUM(t.total)
+                          FROM table_orders t
+                          WHERE t.status NOT IN ('cancelado')
+                            AND t.created_at >= $1
+                            AND t.created_at <  $2
+                            AND t.org_id = $3), 0)::numeric AS sales_prev
+            FROM orders o
+            WHERE o.paid = TRUE
+              AND o.created_at >= $1
+              AND o.created_at <  $2
+              AND o.org_id = $3
+            """,
+            yoy_prior_start, yoy_prior_end, org_id,
+        )
+
+    total_sales = (
+        to_decimal(order_row["sales"]) + to_decimal(table_row["sales"])
+    )
+    total_tickets = int(order_row["tickets"]) + int(table_row["tickets"])
+
+    avg_nps_val = nps_row["avg_nps"] if nps_row else None
+    avg_nps = round(float(avg_nps_val), 1) if avg_nps_val is not None else None
+
+    sales_now  = to_decimal(yoy_current_row["sales_now"])  if yoy_current_row  else Decimal("0")
+    sales_prev = to_decimal(yoy_prior_row["sales_prev"])   if yoy_prior_row    else Decimal("0")
+
+    growth_yoy: float | None = None
+    if sales_prev > 0:
+        growth_yoy = round(float((sales_now - sales_prev) / sales_prev * 100), 1)
+
+    period_label = f"Últimos {days}d"
+
+    return {
+        "period":         period_label,
+        "total_sales":    float(quantize_money(total_sales)),    # JSON boundary
+        "total_tickets":  total_tickets,
+        "avg_nps":        avg_nps,
+        "total_staff":    int(staff_count or 0),
+        "growth_yoy":     growth_yoy,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Branches comparison  (GET /api/stats/branches-comparison)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
+    """Per-location metric comparison matrix for the sucursales page.
+
+    Fetches all locations for the org, then computes a set of metrics per location.
+    Metrics without a clean data source return null with a TODO comment.
+
+    Supported metrics (with real queries):
+      Ventas diarias promedio  — total_sales / days per location
+      Ticket promedio          — avg order total per location
+      NPS                      — avg score from nps_responses per location (last 30d)
+      Tasa de reserva confirmada — confirmed / total reservations
+      No-show rate             — no_show / total reservations
+
+    Metrics returning null (pending data sources):
+      Rotación mesas / día     — TODO: requires table_sessions with open/close timestamps
+      Food cost %              — TODO: requires recipe cost telemetry (dish_recipes.cost_pct or similar)
+      Costo nómina / ventas    — TODO: requires payroll_runs linked to sales period
+      Rotación de personal (12m) — TODO: requires staff.termination_date or departure_events table
+      Crecimiento YoY          — TODO: computed at org level in branches_consolidated; per-location
+                                       requires historical order data with location_id (available
+                                       but not yet back-filled uniformly for all orgs)
+    """
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td  # noqa: PLC0415
+
+    days = max(1, min(365, days))
+    now = _dt.now(_tz.utc)
+    window_start = now - _td(days=days)
+    nps_start    = now - _td(days=30)
+
+    async with _tenant_connection() as conn:
+        # ── Fetch all locations for this org ──────────────────────────────────
+        location_rows = await conn.fetch(
+            """
+            SELECT id, name
+            FROM locations
+            WHERE org_id = $1
+            ORDER BY id ASC
+            """,
+            org_id,
+        )
+
+        if not location_rows:
+            return {"locations": [], "rows": []}
+
+        location_ids = [r["id"] for r in location_rows]
+        locations = [{"id": r["id"], "name": r["name"]} for r in location_rows]
+
+        # ── Sales per location (orders + table_orders) ────────────────────────
+        order_sales = await conn.fetch(
+            """
+            SELECT
+                location_id,
+                COALESCE(SUM(total), 0)::numeric  AS sales,
+                COUNT(*)::int                      AS tickets
+            FROM orders
+            WHERE paid = TRUE
+              AND created_at >= $1
+              AND org_id = $2
+            GROUP BY location_id
+            """,
+            window_start, org_id,
+        )
+
+        table_sales = await conn.fetch(
+            """
+            SELECT
+                location_id,
+                COALESCE(SUM(total), 0)::numeric  AS sales,
+                COUNT(*)::int                      AS tickets
+            FROM table_orders
+            WHERE status NOT IN ('cancelado')
+              AND created_at >= $1
+              AND org_id = $2
+            GROUP BY location_id
+            """,
+            window_start, org_id,
+        )
+
+        # ── NPS per location (last 30d) ───────────────────────────────────────
+        nps_rows = await conn.fetch(
+            """
+            SELECT
+                location_id,
+                AVG(score)::numeric AS avg_score
+            FROM nps_responses
+            WHERE org_id = $1
+              AND created_at >= $2
+            GROUP BY location_id
+            """,
+            org_id, nps_start,
+        )
+
+        # ── Reservation stats per location ────────────────────────────────────
+        res_rows = await conn.fetch(
+            """
+            SELECT
+                branch_id                                     AS location_id,
+                COUNT(*)::int                                 AS total_res,
+                COUNT(*) FILTER (WHERE status = 'confirmed')::int AS confirmed_res,
+                COUNT(*) FILTER (WHERE no_show = TRUE)::int       AS no_shows
+            FROM reservations
+            WHERE org_id = $1
+              AND created_at >= $2
+            GROUP BY branch_id
+            """,
+            org_id, window_start,
+        )
+
+    # ── Build per-location lookup maps ────────────────────────────────────────
+    order_by_loc: dict[int, dict] = {}
+    for r in order_sales:
+        lid = r["location_id"]
+        if lid is None:
+            continue
+        d = order_by_loc.setdefault(lid, {"sales": Decimal("0"), "tickets": 0})
+        d["sales"]   += to_decimal(r["sales"])
+        d["tickets"] += int(r["tickets"])
+
+    for r in table_sales:
+        lid = r["location_id"]
+        if lid is None:
+            continue
+        d = order_by_loc.setdefault(lid, {"sales": Decimal("0"), "tickets": 0})
+        d["sales"]   += to_decimal(r["sales"])
+        d["tickets"] += int(r["tickets"])
+
+    nps_by_loc: dict[int, float | None] = {}
+    for r in nps_rows:
+        lid = r["location_id"]
+        if lid is None:
+            continue
+        nps_by_loc[lid] = round(float(r["avg_score"]), 1) if r["avg_score"] is not None else None
+
+    res_by_loc: dict[int, dict] = {}
+    for r in res_rows:
+        lid = r["location_id"]
+        if lid is None:
+            continue
+        res_by_loc[lid] = {
+            "total":     int(r["total_res"]),
+            "confirmed": int(r["confirmed_res"]),
+            "no_shows":  int(r["no_shows"]),
+        }
+
+    # ── Per-location metric arrays ────────────────────────────────────────────
+    daily_avg_per_loc: list[float | None]  = []
+    avg_ticket_per_loc: list[float | None] = []
+    nps_per_loc: list[float | None]        = []
+    conf_rate_per_loc: list[float | None]  = []
+    noshow_rate_per_loc: list[float | None]= []
+
+    for loc in locations:
+        lid = loc["id"]
+        od  = order_by_loc.get(lid, {"sales": Decimal("0"), "tickets": 0})
+        sales   = od["sales"]
+        tickets = od["tickets"]
+
+        daily_avg_per_loc.append(
+            float(quantize_money(sales / days)) if days > 0 else None  # JSON boundary
+        )
+        avg_ticket_per_loc.append(
+            float(quantize_money(sales / tickets)) if tickets > 0 else None  # JSON boundary
+        )
+        nps_per_loc.append(nps_by_loc.get(lid))
+
+        rd = res_by_loc.get(lid)
+        if rd and rd["total"] > 0:
+            conf_rate_per_loc.append(round(rd["confirmed"] / rd["total"] * 100, 1))
+            noshow_rate_per_loc.append(round(rd["no_shows"] / rd["total"] * 100, 1))
+        else:
+            conf_rate_per_loc.append(None)
+            noshow_rate_per_loc.append(None)
+
+    def _build_row(metric: str, per_location: list, target: float | None = None) -> dict:
+        """Build a comparison row, computing avg and top_location_id."""
+        non_null = [v for v in per_location if v is not None]
+        avg = round(sum(non_null) / len(non_null), 1) if non_null else None
+
+        top_idx = None
+        if non_null:
+            top_val = max(non_null)
+            for i, v in enumerate(per_location):
+                if v == top_val:
+                    top_idx = i
+                    break
+
+        top_location_id = locations[top_idx]["id"] if top_idx is not None else None
+
+        vs_target_pct: float | None = None
+        if avg is not None and target and target > 0:
+            vs_target_pct = round((avg - target) / target * 100, 1)
+
+        return {
+            "metric":          metric,
+            "per_location":    per_location,
+            "avg":             avg,
+            "target":          target,
+            "top_location_id": top_location_id,
+            "vs_target_pct":   vs_target_pct,
+        }
+
+    comparison_rows = [
+        _build_row("Ventas diarias promedio",       daily_avg_per_loc),
+        _build_row("Ticket promedio",                avg_ticket_per_loc),
+        # TODO: Rotación mesas / día — requires table_sessions open/close timestamps per location
+        _build_row("Rotación mesas / día",           [None] * len(locations)),
+        _build_row("NPS",                            nps_per_loc),
+        # TODO: Food cost % — requires dish_recipes cost telemetry (cost_per_unit in inventory)
+        _build_row("Food cost %",                    [None] * len(locations)),
+        # TODO: Costo nómina / ventas — requires payroll_runs joined to a period matching sales window
+        _build_row("Costo nómina / ventas",          [None] * len(locations)),
+        _build_row("Tasa de reserva confirmada",     conf_rate_per_loc),
+        _build_row("No-show rate",                   noshow_rate_per_loc),
+        # TODO: Rotación de personal (12m) — requires staff.termination_date or departure events
+        _build_row("Rotación de personal (12m)",     [None] * len(locations)),
+        # TODO: Crecimiento YoY per-location — available in orders.location_id but needs
+        #       uniform backfill validation per org before exposing as a reliable metric
+        _build_row("Crecimiento YoY",                [None] * len(locations)),
+    ]
+
+    return {
+        "locations": locations,
+        "rows":      comparison_rows,
+    }

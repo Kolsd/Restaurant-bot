@@ -202,4 +202,136 @@
   }
 
   loadLocations();
+
+  // ── Consolidated KPIs ────────────────────────────────────────────
+
+  async function loadConsolidated(days) {
+    days = days || 7;
+    try {
+      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+      const res = await fetch('/api/stats/branches-consolidated?days=' + days, { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+      const setEl = function (id, val) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val != null ? val : '—';
+      };
+
+      setEl('consolidated-sales',   data.total_sales   != null ? fmt(data.total_sales) : '—');
+      setEl('consolidated-tickets', data.total_tickets != null ? data.total_tickets    : '—');
+      setEl('consolidated-nps',     data.avg_nps       != null ? data.avg_nps          : '—');
+      setEl('consolidated-staff',   data.total_staff   != null ? data.total_staff      : '—');
+      setEl('consolidated-growth',  data.growth_yoy    != null ? data.growth_yoy + '%' : '—');
+      setEl('consolidated-label',   data.period        || ('Últimos ' + days + 'd'));
+    } catch (e) {
+      console.error('sucursales: consolidated error', e);
+    }
+  }
+
+  // ── Comparison table ─────────────────────────────────────────────
+
+  async function loadComparison(days) {
+    days = days || 30;
+    try {
+      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+      const res = await fetch('/api/stats/branches-comparison?days=' + days, { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const locations = data.locations || [];
+      const rows = data.rows || [];
+      if (!locations.length || !rows.length) return;
+
+      const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+
+      // Render header row with location names
+      const thead = document.getElementById('cmp-head');
+      if (thead) {
+        let headerHtml = '<tr><th style="text-align:left;">Métrica</th>';
+        locations.forEach(function (loc) {
+          headerHtml += '<th>' + _escHtml(loc.name || ('Sede ' + loc.id)) + '</th>';
+        });
+        headerHtml += '<th>Promedio</th></tr>';
+        thead.innerHTML = headerHtml;
+      }
+
+      // Render body rows
+      const tbody = document.getElementById('cmp-body');
+      if (!tbody) return;
+
+      const isMoney = function (metric) {
+        return metric.toLowerCase().includes('ventas') || metric.toLowerCase().includes('ticket') || metric.toLowerCase().includes('nómina');
+      };
+      const isPct = function (metric) {
+        return metric.toLowerCase().includes('%') || metric.toLowerCase().includes('rate') || metric.toLowerCase().includes('tasa') || metric.toLowerCase().includes('crecimiento') || metric.toLowerCase().includes('rotación');
+      };
+
+      const formatVal = function (val, metric) {
+        if (val == null) return '<span style="color:var(--text-4);">—</span>';
+        if (isMoney(metric)) return fmt(Math.round(val));
+        if (isPct(metric)) return val + '%';
+        return String(Math.round(val * 10) / 10);
+      };
+
+      tbody.innerHTML = rows.map(function (row) {
+        const isTop = row.per_location && row.top_location_id != null;
+        let cells = '<td style="font-weight:500;">' + _escHtml(row.metric) + '</td>';
+
+        (row.per_location || []).forEach(function (val, i) {
+          const locId = locations[i] && locations[i].id;
+          const highlight = isTop && locId === row.top_location_id && val != null;
+          cells += '<td style="' + (highlight ? 'color:var(--brand);font-weight:600;' : '') + '">' +
+            formatVal(val, row.metric) + '</td>';
+        });
+
+        cells += '<td style="color:var(--text-2);">' + formatVal(row.avg, row.metric) + '</td>';
+        return '<tr>' + cells + '</tr>';
+      }).join('');
+    } catch (e) {
+      console.error('sucursales: comparison error', e);
+    }
+  }
+
+  // ── AI Benchmark ─────────────────────────────────────────────────
+
+  async function loadBenchmark() {
+    const aiEl = document.getElementById('ai-benchmark');
+    if (!aiEl) return;
+    try {
+      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+
+      // Gather the consolidated numbers first for the AI prompt
+      const consRes = await fetch('/api/stats/branches-consolidated?days=30', { headers });
+      if (!consRes.ok) return;
+      const consData = await consRes.json();
+
+      const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+      const salesTxt = consData.total_sales   != null ? fmt(consData.total_sales) : 'N/A';
+      const npsTxt   = consData.avg_nps       != null ? String(consData.avg_nps)  : 'N/A';
+      const growthTxt = consData.growth_yoy   != null ? consData.growth_yoy + '%' : 'N/A';
+
+      const aiRes = await fetch('/api/ai/proxy', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, headers),
+        body: JSON.stringify({
+          prompt: 'Análisis ejecutivo conciso (2 frases) para el dueño de un restaurante multi-sede. ' +
+            'Ventas totales 30 días: ' + salesTxt + '. NPS promedio: ' + npsTxt + '. ' +
+            'Crecimiento YoY: ' + growthTxt + '. ' +
+            consData.total_staff + ' empleados activos. Sé directo y accionable.',
+          max_tokens: 130
+        })
+      });
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        const text = (aiData.content || aiData.response || aiData.text || '').trim();
+        if (text) aiEl.textContent = text; // textContent — untrusted LLM output
+      }
+    } catch (_) { /* AI benchmark is best-effort */ }
+  }
+
+  loadConsolidated(7);
+  loadComparison(30);
+  loadBenchmark();
 })();

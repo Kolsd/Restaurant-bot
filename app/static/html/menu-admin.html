@@ -214,7 +214,7 @@
             <button class="seg-btn">Secos</button>
             <button class="seg-btn">Bebidas</button>
           </div>
-          <span style="margin-left: auto; font-size: 12px; color: var(--text-3);">64 productos · $14.2M valor stock</span>
+          <span id="inv-summary" style="margin-left: auto; font-size: 12px; color: var(--text-3);">&nbsp;</span>
           <button class="btn primary">+ Agregar producto</button>
         </div>
 
@@ -227,62 +227,8 @@
             <div>Estado</div>
             <div style="text-align:right;">Acciones</div>
           </div>
-          <div class="inv-row">
-            <div>
-              <div style="font-weight: 500;">Papa criolla</div>
-              <div style="font-size: 11.5px; color: var(--text-3);">Verduras · proveedor Agrocol</div>
-            </div>
-            <div style="text-align:right;"><div class="stock-num" style="color: var(--danger);">1.2 kg</div></div>
-            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">8 kg</div></div>
-            <div><span class="chip-tag">Ajiaco</span></div>
-            <div><span class="badge danger">Agotado</span></div>
-            <div style="text-align:right; display: flex; gap: 4px; justify-content: flex-end;">
-              <button class="btn sm ghost">Repone</button>
-            </div>
-          </div>
-          <div class="inv-row">
-            <div>
-              <div style="font-weight: 500;">Carne de cerdo</div>
-              <div style="font-size: 11.5px; color: var(--text-3);">Proteínas · proveedor Cárnicos del Valle</div>
-            </div>
-            <div style="text-align:right;"><div class="stock-num" style="color: var(--warning-text);">4.8 kg</div></div>
-            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">5 kg</div></div>
-            <div><span class="chip-tag">Bandeja paisa</span> <span class="chip-tag">Chicharrón</span></div>
-            <div><span class="badge warn">Stock bajo</span></div>
-            <div style="text-align:right;"><button class="btn sm ghost">Repone</button></div>
-          </div>
-          <div class="inv-row">
-            <div>
-              <div style="font-weight: 500;">Hierbabuena</div>
-              <div style="font-size: 11.5px; color: var(--text-3);">Aromáticas · proveedor Herbal</div>
-            </div>
-            <div style="text-align:right;"><div class="stock-num" style="color: var(--warning-text);">120 gr</div></div>
-            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">200 gr</div></div>
-            <div><span class="chip-tag">Limonada hierbabuena</span></div>
-            <div><span class="badge warn">Stock bajo</span></div>
-            <div style="text-align:right;"><button class="btn sm ghost">Repone</button></div>
-          </div>
-          <div class="inv-row">
-            <div>
-              <div style="font-weight: 500;">Arroz blanco</div>
-              <div style="font-size: 11.5px; color: var(--text-3);">Secos · proveedor Diana</div>
-            </div>
-            <div style="text-align:right;"><div class="stock-num">18 kg</div></div>
-            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">10 kg</div></div>
-            <div><span class="chip-tag">Bandeja paisa</span> <span class="chip-tag">Corrientazo</span></div>
-            <div><span class="badge success">OK</span></div>
-            <div style="text-align:right;"><button class="btn sm ghost">Editar</button></div>
-          </div>
-          <div class="inv-row" style="border-bottom: none;">
-            <div>
-              <div style="font-weight: 500;">Aguacate Hass</div>
-              <div style="font-size: 11.5px; color: var(--text-3);">Verduras · Mercamio</div>
-            </div>
-            <div style="text-align:right;"><div class="stock-num">42 un</div></div>
-            <div style="text-align:right;"><div style="font-size: 11.5px; color: var(--text-3);">20 un</div></div>
-            <div><span class="chip-tag">Bandeja paisa</span></div>
-            <div><span class="badge success">OK</span></div>
-            <div style="text-align:right;"><button class="btn sm ghost">Editar</button></div>
+          <div id="inv-body">
+            <div style="padding:18px;color:var(--text-3);font-size:13px;">Cargando inventario&hellip;</div>
           </div>
         </div>
       </div>

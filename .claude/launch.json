@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["app.main:app", "--reload", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "inbox-worker",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["scripts/run_inbox_worker.py"],
+      "port": 0
+    }
+  ]
+}

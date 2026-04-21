@@ -224,9 +224,58 @@
       renderStats(grouped);
       renderBubbles(grouped);
       renderTable(allDishes);
+      loadAIDiagnosis(grouped);
 
     } catch (e) {
       console.error('menu-engineering: error', e);
+    }
+  }
+
+  // ── AI diagnosis banner ───────────────────────────────────────────
+  // Called once per page load. Result is cached — no re-call on auto-refresh.
+  var _aiDiagnosisDone = false;
+
+  async function loadAIDiagnosis(grouped) {
+    if (_aiDiagnosisDone) return;
+    var el = document.getElementById('ai-diagnosis');
+    if (!el) return;
+
+    var stars      = grouped.star      || [];
+    var puzzles    = grouped.puzzle    || [];
+    var plowhorses = grouped.plowhorse || [];
+    var dogs       = grouped.dog       || [];
+
+    // Skip if there's nothing to diagnose
+    if (!stars.length && !puzzles.length && !plowhorses.length && !dogs.length) {
+      el.textContent = 'Sin datos suficientes para diagnóstico.';
+      return;
+    }
+
+    var nameList = function (arr) { return arr.slice(0, 3).map(function (d) { return d.name || d.dish_name || ''; }).join(', '); };
+    var prompt = 'Tipo: menu_diagnosis\n' +
+      'Stars (' + stars.length + '): ' + nameList(stars) + '\n' +
+      'Puzzles (' + puzzles.length + '): ' + nameList(puzzles) + '\n' +
+      'Plowhorses (' + plowhorses.length + '): ' + nameList(plowhorses) + '\n' +
+      'Dogs (' + dogs.length + '): ' + nameList(dogs) + '\n' +
+      'Genera un diagnóstico de 2-3 oraciones identificando qué proteger, qué hacer más visible, y qué considerar retirar. Sé específico con nombres de platos. Máx 300 caracteres.';
+
+    try {
+      var headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+      headers['Content-Type'] = 'application/json';
+      var res = await fetch('/api/ai/proxy', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ prompt: prompt, max_tokens: 200 })
+      });
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+      var data = await res.json();
+      var text = (data.response || data.text || data.content || '').trim();
+      // textContent is mandatory — LLM output is untrusted
+      el.textContent = text || 'Diagnóstico no disponible por ahora.';
+      _aiDiagnosisDone = true;
+    } catch (e) {
+      el.textContent = 'Diagnóstico no disponible por ahora.';
+      _aiDiagnosisDone = true;
     }
   }
 

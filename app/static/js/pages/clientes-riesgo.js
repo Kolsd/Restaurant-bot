@@ -160,8 +160,109 @@
 
   loadAtRiskCustomers();
 
+  // ── Churn Summary ────────────────────────────────────────────────
+
+  function renderMediumRiskGrid(mediumRisk) {
+    const grid = document.getElementById('medium-risk-grid');
+    if (!grid) return;
+
+    if (!mediumRisk || !mediumRisk.length) {
+      grid.innerHTML = '<div style="padding:16px;color:var(--text-3);">(sin clientes en riesgo medio)</div>';
+      return;
+    }
+
+    const paletteBg = ['#FDE8CE', '#DBEAFE', '#EDE9FE', '#DCFCE7', '#FEE2E2', '#F3E8FF'];
+    const paletteFg = ['#BA7517', '#1E40AF', '#5B21B6', '#166534', '#991B1B', '#7E22CE'];
+
+    grid.innerHTML = mediumRisk.slice(0, 6).map(function (c, idx) {
+      const name = c.name || c.phone || 'Cliente';
+      const phone = c.phone || '';
+      const scorePct = Math.round((c.churn_score || 0) * 100);
+      const daysSince = c.days_since != null ? c.days_since : '—';
+      const visits = c.total_visits != null ? c.total_visits : '—';
+      const initials = name.split(/\s+/).map(function (w) { return w[0] || ''; }).slice(0, 2).join('').toUpperCase() || '?';
+      const bg = paletteBg[idx % paletteBg.length];
+      const fg = paletteFg[idx % paletteFg.length];
+
+      return '<div style="background:var(--surface-2);border-radius:var(--radius-md);padding:14px 16px;display:flex;flex-direction:column;gap:8px;">' +
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+        '<div style="width:38px;height:38px;border-radius:50%;background:' + bg + ';color:' + fg + ';display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">' +
+        _escHtml(initials) +
+        '</div>' +
+        '<div style="min-width:0;">' +
+        '<div style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _escHtml(name) + '</div>' +
+        '<div style="font-size:11.5px;color:var(--text-3);">' + _escHtml(phone) + '</div>' +
+        '</div>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-2);">' +
+        '<span>Hace <strong>' + _escHtml(String(daysSince)) + 'd</strong></span>' +
+        '<span><strong>' + _escHtml(String(visits)) + '</strong> visitas</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<div style="flex:1;background:var(--surface-3);border-radius:4px;height:6px;overflow:hidden;">' +
+        '<div style="width:' + scorePct + '%;height:100%;background:#F59E0B;border-radius:4px;"></div>' +
+        '</div>' +
+        '<span class="score-pill md" style="font-size:11px;">' + scorePct + '%</span>' +
+        '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  async function loadChurnSummary() {
+    try {
+      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+      const res = await fetch('/api/stats/churn-summary', { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+
+      const setEl = function (id, val) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val;
+      };
+
+      setEl('risk-high-count',    data.high_count   != null ? data.high_count   : '—');
+      setEl('risk-medium-count',  data.medium_count != null ? data.medium_count : '—');
+      setEl('risk-watch-count',   data.watch_count  != null ? data.watch_count  : '—');
+      setEl('risk-ltv-sum',       data.ltv_sum      != null ? fmt(data.ltv_sum) : '—');
+      setEl('risk-reactivated',   data.reactivated_count != null ? data.reactivated_count : '—');
+
+      renderMediumRiskGrid(data.medium_risk || []);
+
+      // AI risk summary (best-effort, untrusted LLM output via textContent)
+      const aiEl = document.getElementById('risk-ai-summary');
+      if (aiEl && data.high_count != null) {
+        try {
+          const aiRes = await fetch('/api/ai/proxy', {
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, headers),
+            body: JSON.stringify({
+              prompt: 'Resumí en 2 frases breves el perfil de riesgo de retención de este restaurante: ' +
+                data.high_count + ' clientes en riesgo alto, ' +
+                data.medium_count + ' en riesgo medio, ' +
+                data.watch_count + ' en vigilancia. LTV en riesgo: ' +
+                fmt(data.ltv_sum) + '. Sé conciso y accionable.',
+              max_tokens: 120
+            })
+          });
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            const text = (aiData.content || aiData.response || aiData.text || '').trim();
+            if (text) aiEl.textContent = text; // textContent — LLM output is untrusted
+          }
+        } catch (_) { /* AI summary is best-effort */ }
+      }
+    } catch (e) {
+      console.error('clientes-riesgo: churn-summary error', e);
+    }
+  }
+
+  loadChurnSummary();
+
   // Auto-refresh every 30s
   if (typeof mesioInterval === 'function') {
     mesioInterval(loadAtRiskCustomers, 30000);
+    mesioInterval(loadChurnSummary, 60000);
   }
 })();
