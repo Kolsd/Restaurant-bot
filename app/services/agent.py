@@ -1064,12 +1064,11 @@ async def _validate_tool_call(
     # IMPORTANT: this runs BEFORE the dedup guard so a call that returns
     # "awaiting_confirmation" does not burn the dedup counter — otherwise the
     # follow-up call after the user confirms would be blocked as a duplicate.
-    if tool_name == "place_order" and table_context:
+    if tool_name in ("place_order", "create_delivery_order", "create_pickup_order"):
         _ss = session_state or {}
         _has_prior_order = _ss.get("has_order", False)
-        if not _has_prior_order:
-            # Include the current user message — it's not yet in full_history
-            # (gets appended after this turn completes), but the LLM already saw it.
+        _is_salon_reorder = tool_name == "place_order" and table_context and _has_prior_order
+        if not _is_salon_reorder:
             _hist = list(full_history or [])
             if user_message:
                 _hist.append({"role": "user", "content": user_message})
@@ -1080,8 +1079,8 @@ async def _validate_tool_call(
                     for i in items
                 ) if items else "tu pedido"
                 log.info(
-                    "guard.place_order_awaiting_confirmation",
-                    phone=_ofuscar_phone(phone), items=items_label
+                    "guard.order_awaiting_confirmation",
+                    tool=tool_name, phone=_ofuscar_phone(phone), items=items_label
                 )
                 return None, f"¿Confirmas tu pedido de {items_label}? 😊", {}
 
@@ -1347,6 +1346,14 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
 
         # ── Reserve (shared, both flows) — with availability check ───────
         elif action == "reserve":
+            _res_feats = restaurant_obj.get("features", {}) if restaurant_obj else {}
+            if isinstance(_res_feats, str):
+                try:
+                    _res_feats = json.loads(_res_feats)
+                except Exception:
+                    _res_feats = {}
+            if _res_feats.get("module_reservations") is False:
+                return "Lo siento, este restaurante no acepta reservas en este momento. ¿Querés pedir a domicilio o para recoger?"
             rv = parsed.get("reservation", {})
             if rv.get("name") and rv.get("date") and rv.get("time"):
                 try:
@@ -1373,6 +1380,22 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                             _raw_feats = {}
                     features = _raw_feats if isinstance(_raw_feats, dict) else {}
                     auto_confirm = features.get("reservation_auto_confirm", False)
+                    needs_deposit = bool(features.get("reservation_deposits"))
+                    deposit_amount = None
+                    payment_url = None
+                    if needs_deposit:
+                        deposit_amount_raw = features.get("reservation_deposit_amount", 50000)
+                        deposit_amount = to_decimal(deposit_amount_raw)
+                        currency = features.get("currency", "COP")
+                        try:
+                            from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
+                            _placeholder_id = -1
+                            payment_url = await generate_deposit_link(_placeholder_id, deposit_amount, currency)
+                        except Exception:
+                            log.exception("reservation.deposit_link_preflight_failed",
+                                          phone=phone, bot_number=bot_number)
+                            reply += "\n\nNo pudimos generar el link de pago. Por favor intenta de nuevo."
+                            return reply
                     reservation = await db.db_add_reservation(
                         rv["name"], rv["date"], rv["time"],
                         guests, phone, bot_number, rv.get("notes", "")
@@ -1384,14 +1407,32 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     except Exception:
                         log.exception("reservation.table_assignment_failed",
                                       id=reservation["id"], table_id=table["id"])
-                        # Don't leave orphan reservation
                         try:
                             await db.db_cancel_reservation(reservation["id"], reason="table_assignment_failed")
                         except Exception:
                             log.exception("reservation.cleanup_failed", id=reservation["id"])
                         reply += "\n\nHubo un problema asignando la mesa. Por favor intenta de nuevo."
                         return reply
-                    if auto_confirm:
+                    if needs_deposit and payment_url is not None:
+                        from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
+                        try:
+                            payment_url = await generate_deposit_link(reservation["id"], deposit_amount, currency)
+                        except Exception:
+                            log.exception("reservation.deposit_link_final_failed",
+                                          id=reservation["id"])
+                            try:
+                                await db.db_cancel_reservation(reservation["id"], reason="deposit_link_failed")
+                            except Exception:
+                                log.exception("reservation.cleanup_failed", id=reservation["id"])
+                            reply += "\n\nNo pudimos generar el link de pago. Por favor intenta de nuevo."
+                            return reply
+                        log.info("reservation.created_pending",
+                                 id=reservation["id"], table=table["id"],
+                                 phone=phone, bot_number=bot_number)
+                        reply += f"\n\nPara confirmar tu reserva, necesitamos un depósito de ${int(deposit_amount):,}. Paga aquí: {payment_url}"
+                        log.info("reservation.deposit_link_sent",
+                                 id=reservation["id"], amount=str(deposit_amount))
+                    elif auto_confirm:
                         await db.db_confirm_reservation(reservation["id"])
                         log.info("reservation.auto_confirmed",
                                  id=reservation["id"], table=table["id"],
@@ -1400,16 +1441,6 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         log.info("reservation.created_pending",
                                  id=reservation["id"], table=table["id"],
                                  phone=phone, bot_number=bot_number)
-                        # Check if deposit is required
-                        if features.get("reservation_deposits"):
-                            deposit_amount_raw = features.get("reservation_deposit_amount", 50000)
-                            deposit_amount = to_decimal(deposit_amount_raw)
-                            currency = features.get("currency", "COP")
-                            from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
-                            payment_url = await generate_deposit_link(reservation["id"], deposit_amount, currency)
-                            reply += f"\n\nPara confirmar tu reserva, necesitamos un depósito de ${int(deposit_amount):,}. Paga aquí: {payment_url}"
-                            log.info("reservation.deposit_link_sent",
-                                     id=reservation["id"], amount=str(deposit_amount))
 
         # ── End session (shared, both flows) ──────────────────────────────
         elif action == "end_session":

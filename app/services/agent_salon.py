@@ -731,7 +731,6 @@ async def execute_salon_action(
                             )
                     except Exception:
                         log.exception("table_order_cancel_failed_after_bar_save_error", order_id=order_id)
-                    await orders.clear_cart(phone, bot_number)
                     return "Hubo un problema al registrar tu pedido. Por favor pide ayuda al mesero."
                 bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
                 log.info("bar_order_created", order_id=bar_oid, summary=bar_summary)
@@ -873,7 +872,6 @@ async def execute_salon_action(
                                 )
                         except Exception:
                             log.exception("table_order_cancel_failed_after_bar_save_error", order_id=order_id)
-                        await orders.clear_cart(phone, bot_number)
                         return "Hubo un problema al registrar tu pedido. Por favor pide ayuda al mesero."
                     bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
                     log.info("bar_order_created", order_id=bar_oid, summary=bar_summary)

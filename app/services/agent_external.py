@@ -249,8 +249,8 @@ async def execute_external_action(
                             # Geocoded but no branch in range — accept text address, continue
                             log.info("delivery_routing_geocode_no_branch", address=address, phone=phone)
                         else:
-                            pool = await db.get_pool()
-                            async with pool.acquire() as conn:
+                            from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+                            async with tenant_connection() as conn:
                                 abs_nearest = await conn.fetchrow('''
                                     SELECT r.name, r.address,
                                            (6371 * acos(cos(radians($1)) * cos(radians(r.latitude::float)) * cos(radians(r.longitude::float) - radians($2)) + sin(radians($1)) * sin(radians(r.latitude::float)))) AS distance_km
@@ -336,8 +336,8 @@ async def execute_external_action(
             # Check if restaurant has branches at all
             branches_list: list = []
             try:
-                _pool = await db.get_pool()
-                async with _pool.acquire() as _conn:
+                from app.services.tenant_db import tenant_connection as _tc  # noqa: PLC0415
+                async with _tc() as _conn:
                     branches_list = await _conn.fetch(
                         """
                         SELECT r.id, r.name, r.address, r.whatsapp_number
@@ -367,8 +367,8 @@ async def execute_external_action(
                     log.exception("pickup_gps_routing_failed", phone=phone, bot_number=bot_number)
             elif parsed.get("branch_id"):
                 try:
-                    _pool = await db.get_pool()
-                    async with _pool.acquire() as _conn:
+                    from app.services.tenant_db import tenant_connection as _tc2  # noqa: PLC0415
+                    async with _tc2() as _conn:
                         branch_row = await _conn.fetchrow(
                             """
                             SELECT r.id, r.name, r.whatsapp_number
