@@ -60,12 +60,9 @@ def run_migrations_online() -> None:
     """Run migrations using a live synchronous connection."""
     connectable = create_engine(_database_url, poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            transaction_per_migration=True,
-        )
-        context.run_migrations()
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
 
 
 if context.is_offline_mode():
