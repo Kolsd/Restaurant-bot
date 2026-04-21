@@ -1105,6 +1105,64 @@ async def db_get_pending_orders_by_branch(branch_id: int) -> list:
     return [dict(r) for r in rows]
 
 
+async def db_get_tables_status_enrichment(branch_id: int) -> dict:
+    """Return per-table enrichment data for /api/pos/tables-status.
+
+    Returns a dict keyed by table_id with fields:
+      has_waiter_alert: bool
+      has_open_check:   bool
+      current_total:    float
+      session_active:   bool
+      session_started_at: str|None  (ISO 8601)
+
+    Single-pass query using LEFT JOINs to avoid N+1.
+    Requires active tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                rt.id                              AS table_id,
+                COUNT(DISTINCT wa.id) > 0          AS has_waiter_alert,
+                COUNT(DISTINCT tc.id) FILTER (
+                    WHERE tc.status = 'open'
+                ) > 0                              AS has_open_check,
+                COALESCE(SUM(tc.total) FILTER (
+                    WHERE tc.status = 'open'
+                ), 0)                              AS current_total,
+                COUNT(DISTINCT ts.id) FILTER (
+                    WHERE ts.status IN ('active', 'nps_pending')
+                ) > 0                              AS session_active,
+                MIN(ts.created_at) FILTER (
+                    WHERE ts.status IN ('active', 'nps_pending')
+                )                                  AS session_started_at
+            FROM restaurant_tables rt
+            LEFT JOIN waiter_alerts   wa ON wa.table_id = rt.id
+            LEFT JOIN table_sessions  ts ON ts.table_id = rt.id
+                                        AND ts.status IN ('active', 'nps_pending')
+            LEFT JOIN table_orders    tord ON tord.table_id = rt.id
+                                          AND tord.branch_id = $1
+                                          AND tord.status NOT IN ('factura_entregada', 'cancelado')
+            LEFT JOIN table_checks    tc  ON tc.base_order_id = tord.id
+                                        AND tc.status = 'open'
+            WHERE rt.branch_id = $1
+            GROUP BY rt.id
+            """,
+            branch_id,
+        )
+    result = {}
+    for r in rows:
+        started = r["session_started_at"]
+        result[r["table_id"]] = {
+            "has_waiter_alert":   bool(r["has_waiter_alert"]),
+            "has_open_check":     bool(r["has_open_check"]),
+            "current_total":      float(r["current_total"] or 0),
+            "session_active":     bool(r["session_active"]),
+            "session_started_at": started.isoformat() + "Z" if started else None,
+        }
+    return result
+
+
 async def db_dismiss_waiter_alert(alert_id: int) -> None:
     """Delete a waiter alert by id.
 

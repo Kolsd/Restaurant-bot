@@ -69,8 +69,9 @@ async def update_inventory_item(
 ):
     """Actualiza un producto del inventario"""
     existing = await db.db_get_inventory_item(item_id)
-    if not existing or existing.get("restaurant_id") != restaurant["id"]:
-        log.warning("inventory.update_idor_attempt", item_id=item_id, restaurant_id=restaurant["id"])
+    # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
+    if not existing or existing.get("org_id") != restaurant["id"]:
+        log.warning("inventory.update_idor_attempt", item_id=item_id, org_id=restaurant["id"])
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     item = await db.db_update_inventory_item(item_id, body.dict(exclude_none=True))
     if not item:
@@ -86,8 +87,9 @@ async def delete_inventory_item(
 ):
     """Elimina un producto del inventario"""
     existing = await db.db_get_inventory_item(item_id)
-    if not existing or existing.get("restaurant_id") != restaurant["id"]:
-        log.warning("inventory.delete_idor_attempt", item_id=item_id, restaurant_id=restaurant["id"])
+    # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
+    if not existing or existing.get("org_id") != restaurant["id"]:
+        log.warning("inventory.delete_idor_attempt", item_id=item_id, org_id=restaurant["id"])
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     await db.db_delete_inventory_item(item_id)
     return {"success": True}
@@ -119,8 +121,9 @@ async def get_stock_history(
 ):
     """Historial de movimientos de stock"""
     existing = await db.db_get_inventory_item(item_id)
-    if not existing or existing.get("restaurant_id") != restaurant["id"]:
-        log.warning("inventory.history_idor_attempt", item_id=item_id, restaurant_id=restaurant["id"])
+    # Wave-2: inventory rows carry org_id (restaurant_id dropped in 0038).
+    if not existing or existing.get("org_id") != restaurant["id"]:
+        log.warning("inventory.history_idor_attempt", item_id=item_id, org_id=restaurant["id"])
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     history = await db.db_get_inventory_history(item_id)
     return {"history": history}

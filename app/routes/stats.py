@@ -42,25 +42,32 @@ async def filter_conversations_for_branch(conversations: list, branch_id: int | 
     return [c for c in conversations if c.get("phone") in allowed_phones]
         
 async def _get_effective_bot_number(restaurant: dict) -> str:
-    """For branches: returns the parent's WhatsApp number (where messages are actually stored).
-    For parent restaurants: returns their own WhatsApp number."""
-    if restaurant.get("parent_restaurant_id"):
-        parent = await db.db_get_restaurant_by_id(restaurant["parent_restaurant_id"])
-        if parent and parent.get("whatsapp_number"):
-            return parent["whatsapp_number"]
+    """Wave-2: returns the restaurant's own WhatsApp number.
+
+    Pre-Wave-2 this resolved to the parent's number for branch restaurants
+    (parent_restaurant_id was used). That column was dropped in 0038; in the
+    Wave-2 model every location has its own whatsapp_number on the locations
+    row, so we always return the restaurant's own number.
+    """
     return restaurant.get("whatsapp_number", "")
 
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | str | None:
+    """Resolve the effective branch_id for stats filtering.
+
+    Wave-2: the legacy `parent_restaurant_id` column was dropped in migration 0038.
+    Non-admin users are now scoped to their own branch_id (their staff/user row).
+    Admins honour the X-Branch-ID header as before.
+    """
     branch_header = request.headers.get("X-Branch-ID")
     is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
-    
+
     if is_admin:
         if branch_header == "all": return "all"
         elif branch_header == "matriz": return None
         elif branch_header and branch_header.isdigit(): return int(branch_header)
         return None
-        
-    return user.get("branch_id") or (restaurant["id"] if restaurant.get("parent_restaurant_id") else None)
+
+    return user.get("branch_id")
 
 @router.get("/api/dashboard/sync")
 async def dashboard_sync(request: Request, period: str = Query("today")):
@@ -318,11 +325,9 @@ async def sync_menu_to_branches(request: Request):
     # Validaciones de seguridad
     if "owner" not in user.get("role", ""):
         raise HTTPException(status_code=403, detail="Solo el dueño puede sincronizar el menú.")
-        
-    if restaurant.get("parent_restaurant_id") is not None:
-        raise HTTPException(status_code=400, detail="Esta acción solo se puede realizar desde la Casa Matriz.")
-        
-    # Verificar que no se esté intentando sincronizar mientras se visualiza una sucursal específica
+
+    # Wave-2: parent_restaurant_id no longer exists. The X-Branch-ID guard below
+    # is sufficient — syncing from a specific branch view is still blocked.
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header != "matriz" and branch_header != "all":
         raise HTTPException(status_code=400, detail="Debes estar en la vista de la Casa Matriz para sincronizar.")
@@ -342,10 +347,8 @@ async def update_menu_structure(request: Request):
     
     if "owner" not in user.get("role", ""):
         raise HTTPException(status_code=403, detail="Solo el dueño puede editar el menú.")
-        
-    if restaurant.get("parent_restaurant_id") is not None:
-        raise HTTPException(status_code=400, detail="El menú solo se puede editar desde la Casa Matriz.")
-        
+
+    # Wave-2: parent_restaurant_id no longer exists. X-Branch-ID guard is sufficient.
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header != "matriz" and branch_header != "all":
         raise HTTPException(status_code=400, detail="Debes estar en la vista de la Casa Matriz para editar el menú.")
@@ -775,21 +778,34 @@ async def get_tips_pool(
     """Tip pool summary for a period (default: current week).
 
     Wraps db_calculate_tips_by_attendance and returns pool_total, top-5
-    entries_preview, and unallocated amount.
+    entries_preview, unallocated amount, and my_pool (when called by staff).
     """
     restaurant = await get_current_restaurant(request)
     org_id = restaurant["id"]
     location_id = restaurant.get("location_id") or restaurant["id"]
     bid = int(branch_id) if branch_id and branch_id.isdigit() else None
 
+    # Detect if caller is a staff member (JWT claim "staff:<uuid>")
+    caller_staff_id: str | None = None
+    try:
+        from app.routes.deps import get_current_user  # noqa: PLC0415
+        caller = await get_current_user(request)
+        username = caller.get("username") or caller.get("sub") or ""
+        if username.startswith("staff:"):
+            caller_staff_id = username[len("staff:"):]
+    except Exception:
+        pass  # admin callers without staff token — my_pool stays None
+
     with tenant_scope(org_id):
-        return await stats_repo.db_tips_pool(
+        result = await stats_repo.db_tips_pool(
             org_id=org_id,
             location_id=location_id,
             period_start=period_start,
             period_end=period_end,
             branch_id=bid,
+            caller_staff_id=caller_staff_id,
         )
+    return result
 
 
 # ── DASHBOARD ANALYTICS — TIER 4a ────────────────────────────────────────────

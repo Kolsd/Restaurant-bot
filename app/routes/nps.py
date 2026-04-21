@@ -17,15 +17,19 @@ class NPSResponse(BaseModel):
     comment: str = ""
 
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict):
+    """Wave-2: parent_restaurant_id dropped in 0038.  Non-admin users are
+    scoped to their own branch_id.  The previous fallback evaluated to None
+    for all orgs (parent_restaurant_id is always None post-0038), inadvertently
+    giving non-admins org-wide NPS visibility."""
     branch_header = request.headers.get("X-Branch-ID")
     is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
-    
+
     if is_admin:
         if branch_header == "all": return "all"
         elif branch_header == "matriz": return None
         elif branch_header and branch_header.isdigit(): return int(branch_header)
         return None
-    return user.get("branch_id") or (restaurant["id"] if restaurant.get("parent_restaurant_id") else None)
+    return user.get("branch_id")
     
 @router.post("/api/nps/response")
 async def save_nps_response(request: Request, body: NPSResponse):
@@ -36,13 +40,13 @@ async def save_nps_response(request: Request, body: NPSResponse):
     return {"success": True}
 
 @router.get("/api/nps/stats")
-async def get_nps_stats(request: Request, period: str = "month"):
+async def get_nps_stats(request: Request, period: str = "month", days: int = None):
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     branch_id = _resolve_branch_id(request, user, restaurant)
     raw_bot_num = restaurant.get("whatsapp_number", "")
     clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
-    return await db.db_get_nps_stats(clean_bot_num, period, branch_id=branch_id)
+    return await db.db_get_nps_stats(clean_bot_num, period, branch_id=branch_id, days=days)
     
 @router.get("/api/nps/responses")
 async def get_nps_responses(request: Request, period: str = "month", limit: int = 50):

@@ -208,25 +208,28 @@ async def create_table(request: Request):
     return {"success": True, "table_id": new_table["id"], "name": new_table["name"]}
 
 async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
-    """Verify the table belongs to this restaurant (or its branches).
+    """Verify the table belongs to this restaurant's org (Wave-2 semantics).
 
-    After migration 0018, branch_id is always NOT NULL and equals the owning
-    restaurant's id (parent or branch).
+    Wave-2: parent_restaurant_id column dropped in 0038.  Ownership is now
+    determined by org_id.  A table belongs to the caller's org when the
+    table's branch_id resolves to the same org_id as the caller's restaurant.
     """
     row = await tr.db_verify_table_in_restaurant(table_id, restaurant["id"])
     if not row:
         raise HTTPException(status_code=404, detail="Table not found")
-    rest_id = restaurant["id"]
+
+    org_id = restaurant["id"]  # post-Wave-2: restaurant["id"] == org_id
     table_branch_id = row["branch_id"]
 
-    # Direct ownership: table belongs to this restaurant
-    if table_branch_id == rest_id:
+    # Direct match: table's branch is within this org (most common path)
+    if table_branch_id == org_id:
         return
-    # Parent access: if current restaurant is the parent, allow branch tables
-    is_parent = restaurant.get("parent_restaurant_id") is None
-    if is_parent:
-        if await tr.db_verify_branch_is_child(table_branch_id, rest_id):
-            return
+
+    # Cross-location check: verify the table's branch belongs to the same org
+    branch_rest = await db.db_get_restaurant_by_id(table_branch_id)
+    if branch_rest and branch_rest.get("org_id") == org_id:
+        return
+
     raise HTTPException(status_code=403, detail="Table does not belong to this restaurant")
 
 
@@ -452,7 +455,7 @@ async def dismiss_waiter_alert(request: Request, alert_id: int):
         with bypass_tenant_scope("dismiss_waiter_alert: global kitchen alert dismiss"):
             await tr.db_dismiss_waiter_alert(alert_id)
     except Exception:
-        pass
+        log.warning("tables.dismiss_waiter_alert_failed", alert_id=alert_id)
     return {"success": True}
 
 # ── ELIMINAR CONVERSACIONES (MANUAL) ─────────────────────────────────
@@ -585,7 +588,11 @@ async def update_delivery_order_status(request: Request, order_id: str):
                 try:
                     await adapter.create_invoice(order_for_billing, config)
                 except Exception:
-                    pass
+                    log.exception(
+                        "tables.billing_auto_invoice_failed",
+                        order_id=order_id,
+                        provider=provider,
+                    )
 
     return {"success": True}
 
@@ -910,6 +917,7 @@ async def get_tables_status(request: Request):
     with tenant_scope(org_id):
         tables = await db.db_get_tables(branch_id=location_id)
         pending_orders = await tr.db_get_pending_orders_by_branch(location_id)
+        enrichment = await tr.db_get_tables_status_enrichment(location_id)
 
     # db_get_active_session_table_ids uses bypass internally (cross-tenant)
     session_map = await tr.db_get_active_session_table_ids()
@@ -919,12 +927,19 @@ async def get_tables_status(request: Request):
         if o['table_id'] not in order_map:
             order_map[o['table_id']] = []
         order_map[o['table_id']].append(o['status'])
-        
+
     for t in tables:
         tid = t['id']
         t['bot_active'] = tid in session_map
         t['pending_orders'] = order_map.get(tid, [])
-        
+        # Enrichment fields for the mesero / POS frontend
+        enc = enrichment.get(tid, {})
+        t['has_waiter_alert']   = enc.get('has_waiter_alert',   False)
+        t['has_open_check']     = enc.get('has_open_check',     False)
+        t['current_total']      = enc.get('current_total',      0.0)
+        t['session_active']     = enc.get('session_active',     False)
+        t['session_started_at'] = enc.get('session_started_at', None)
+
     return {"tables": tables}
 
 @router.patch("/api/table-orders/{base_order_id}/adjust")
@@ -1250,13 +1265,26 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             )
 
         if hasattr(loyalty_svc, "accrue_on_check"):
-            asyncio.create_task(loyalty_svc.accrue_on_check(
-                restaurant_id=restaurant["id"],
-                bot_number=restaurant.get("whatsapp_number", ""),
-                base_order_id=base_order_id,
-                check_id=check_id,
-                total_cop=float(to_decimal(check["total"]) + to_decimal(body.service_charge)),
-            ))
+            _loyalty_org_id = restaurant["id"]
+            _loyalty_bot    = restaurant.get("whatsapp_number", "")
+            _loyalty_boid   = base_order_id
+            _loyalty_cid    = check_id
+            _loyalty_total  = float(to_decimal(check["total"]) + to_decimal(body.service_charge))
+
+            async def _accrue_with_scope(
+                rid=_loyalty_org_id, bn=_loyalty_bot,
+                boid=_loyalty_boid, cid=_loyalty_cid, total=_loyalty_total,
+            ):
+                with tenant_scope(rid):
+                    await loyalty_svc.accrue_on_check(
+                        restaurant_id=rid,
+                        bot_number=bn,
+                        base_order_id=boid,
+                        check_id=cid,
+                        total_cop=total,
+                    )
+
+            asyncio.create_task(_accrue_with_scope())
         else:
             log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
 

@@ -40,6 +40,21 @@ async def db_verify_review_ownership(nps_id: int, bot_number: str) -> bool:
     return row is not None
 
 
+async def db_verify_review_ownership_by_org(nps_id: int) -> bool:
+    """Return True if the NPS response exists within the current tenant scope.
+
+    Wave-2: RLS scopes the query to the caller's org_id — no need to pass
+    org_id explicitly.  This replaces the bot_number check for multi-location
+    orgs where branch reviews have a different bot_number than the matriz.
+    """
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM nps_responses WHERE id = $1",
+            nps_id,
+        )
+    return row is not None
+
+
 async def db_get_public_reviews(bot_number: str, limit: int = 50) -> list[dict]:
     """Return public reviews for a restaurant ordered by most recent."""
     async with _tenant_connection() as conn:
@@ -56,6 +71,64 @@ async def db_get_public_reviews(bot_number: str, limit: int = 50) -> list[dict]:
             limit,
         )
     return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_public_reviews_by_org(limit: int = 50) -> list[dict]:
+    """Return public reviews for the current tenant org (all locations).
+
+    Wave-2: RLS scopes the query to the caller's org_id — reviews from all
+    sedes of the org are visible to any admin of that org.
+    """
+    async with _tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, phone, score, comment, feedback, is_public,
+                   customer_name, owner_reply, owner_reply_at, created_at
+            FROM nps_responses
+            WHERE is_public = TRUE
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return [_serialize(dict(r)) for r in rows]
+
+
+async def db_get_review_summary_by_org() -> dict:
+    """Aggregate review stats across all locations of the current tenant org.
+
+    Wave-2: replaces the bot_number-filtered db_get_review_summary for the
+    dashboard reviews page so that the matriz admin sees all-org stats.
+    """
+    async with _tenant_connection() as conn:
+        summary_row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*)::int AS total_reviews,
+                COALESCE(AVG(score), 0)::float AS avg_score
+            FROM nps_responses
+            WHERE is_public = TRUE
+            """,
+        )
+        dist_rows = await conn.fetch(
+            """
+            SELECT score, COUNT(*)::int AS cnt
+            FROM nps_responses
+            WHERE is_public = TRUE
+            GROUP BY score
+            ORDER BY score
+            """,
+        )
+
+    distribution = {str(i): 0 for i in range(1, 6)}
+    for r in dist_rows:
+        distribution[str(r["score"])] = r["cnt"]
+
+    return {
+        "total_reviews": summary_row["total_reviews"] if summary_row else 0,
+        "avg_score": round(summary_row["avg_score"], 2) if summary_row else 0.0,
+        "score_distribution": distribution,
+    }
 
 
 async def db_set_review_public(

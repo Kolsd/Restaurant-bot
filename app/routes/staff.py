@@ -176,10 +176,10 @@ async def _check_pin_rate_limit(request: Request, restaurant_id: int, name: str)
 async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
     await _check_pin_rate_limit(request, body.restaurant_id, body.name)
     member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)
-    if not member:
-        raise HTTPException(status_code=404, detail="Empleado no encontrado.")
-    if not _pwd_ctx.verify(body.pin, member["pin"]):
-        raise HTTPException(status_code=401, detail="PIN incorrecto.")
+    # Use a constant-time response regardless of whether the employee was found
+    # or the PIN was wrong — prevents username enumeration oracle.
+    if not member or not _pwd_ctx.verify(body.pin, member["pin"]):
+        raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
     token = await sessions_repo.create_session(f"staff:{member['id']}")
 
@@ -388,11 +388,19 @@ async def update_tip_distribution(
     body: TipDistributionConfig,
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
-    """Update the tip distribution % config for all roles."""
-    total = sum(body.config.values())
-    if abs(total - 100.0) > 0.01 and total > 0:
-        if total > 100.0:
-            raise HTTPException(status_code=400, detail=f"Los porcentajes suman {total:.1f}%, no pueden superar 100%")
+    """Update the tip distribution % config for all roles.
+
+    The percentages must sum to exactly 100.0 (± 0.01 tolerance).
+    Partial allocations (e.g. 50%) are not accepted — all tips must be
+    assigned to avoid silent unallocated balances.
+    """
+    if body.config:
+        total = sum(body.config.values())
+        if abs(total - 100.0) > 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Los porcentajes deben sumar exactamente 100% (actualmente suman {total:.1f}%)",
+            )
     await staff_repo.db_update_tip_distribution(restaurant["id"], body.config)
     return {"success": True, "config": body.config}
 
@@ -463,7 +471,8 @@ async def self_profile(request: Request):
     """Retorna el perfil completo del operativo autenticado, incluyendo estado de turno y break."""
     member = await _resolve_staff_from_token(request)
     staff_id = member["id"]
-    restaurant_id = member["restaurant_id"]
+    # Wave-2: db_get_staff_profile returns org_id (restaurant_id dropped in 0038).
+    restaurant_id = member.get("org_id") or member.get("restaurant_id")
 
     shift_row, break_row = await staff_repo.db_get_staff_open_shift_and_break(staff_id)
 
@@ -488,7 +497,8 @@ async def self_timecard(request: Request, week_start: str = None, week_end: str 
     """Retorna el timecard semanal personal del operativo autenticado."""
     member = await _resolve_staff_from_token(request)
     staff_id = member["id"]
-    restaurant_id = member["restaurant_id"]
+    # Wave-2: db_get_staff_profile returns org_id (restaurant_id dropped in 0038).
+    restaurant_id = member.get("org_id") or member.get("restaurant_id")
 
     from datetime import date, timedelta
     today = date.today()

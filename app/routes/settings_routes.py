@@ -595,7 +595,7 @@ async def get_dashboard_orders(request: Request, period: str = "today", custom_s
                 if isinstance(parsed_items, list):
                     mesa_groups[base_id]["items"].extend(parsed_items)
             except Exception:
-                pass
+                log.warning("dashboard.table_order_items_parse_failed", base_id=base_id)
 
             row_status = r.get("status") or ""
             if row_status in ["factura_generada", "factura_entregada", "cerrar_mesa"]:
@@ -624,17 +624,24 @@ async def update_order_status(order_id: str, request: Request):
         raise HTTPException(status_code=400, detail="status requerido")
 
     # Pre-resolve the order's tenant before entering scope for the update.
+    # Wave-2: restaurant_id column dropped in 0038; use org_id instead.
     with bypass_tenant_scope("settings_update_order_status: pre-resolve order tenant"):
         order = await db.db_get_order(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
-    order_rid = order.get("restaurant_id")
-    user_rid = user.get("branch_id") or user.get("restaurant_id")
-    if order_rid and user_rid and int(order_rid) != int(user_rid):
+    order_org_id = order.get("org_id")
+    user_location_id = user.get("branch_id") or user.get("restaurant_id")
+    if user_location_id:
+        user_rest = await db.db_get_restaurant_by_id(user_location_id)
+        user_org_id = (user_rest or {}).get("org_id") or user_location_id
+    else:
+        user_org_id = None
+
+    if order_org_id and user_org_id and int(order_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
 
-    scope_rid = int(order_rid) if order_rid else int(user_rid) if user_rid else None
+    scope_rid = int(order_org_id) if order_org_id else int(user_org_id) if user_org_id else None
     if not scope_rid:
         raise HTTPException(status_code=500, detail="No se pudo resolver tenant de la orden")
 
@@ -692,7 +699,7 @@ async def get_dashboard_reservations(request: Request, period: str = "today", cu
                 "phone": r["phone"], "notes": r["notes"]
             })
     except Exception:
-        pass
+        log.exception("dashboard.reservations_load_failed", bot_number=bot_number)
 
     return {"reservations": reservations}
 
@@ -739,30 +746,99 @@ async def get_dashboard_menu(request: Request):
     return {"menu": menu}
 
 
+async def _verify_session_ownership_and_scope(session_id: int, restaurant: dict) -> dict:
+    """Load a table_session, verify it belongs to the caller's org, return the row.
+
+    Wave-2: loads the session inside bypass_tenant_scope (ID-based lookup with
+    unknown org), then verifies org_id ownership before doing any mutation.
+    Returns the session dict on success; raises 404 if not found or cross-org.
+    """
+    with bypass_tenant_scope("session_ownership_check: load session by ID for ownership verification"):
+        session_row, _history = await tr.db_get_session_with_history(session_id)
+    if not session_row:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    caller_org_id = restaurant.get("org_id") or restaurant.get("id")
+    session_org_id = session_row.get("org_id")
+
+    if session_org_id is None or caller_org_id is None:
+        log.warning(
+            "settings.session_missing_org_id",
+            session_id=session_id,
+            session_org_id=session_org_id,
+            caller_org_id=caller_org_id,
+        )
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    if int(session_org_id) != int(caller_org_id):
+        log.warning(
+            "settings.session_idor_attempt",
+            session_id=session_id,
+            session_org_id=session_org_id,
+            caller_org_id=caller_org_id,
+        )
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    return session_row
+
+
 @router.get("/api/table-sessions/{session_id}/history")
-async def get_session_history(request: Request, session_id: int):
-    await require_auth(request)
+async def get_session_history(
+    request: Request,
+    session_id: int,
+    restaurant: dict = Depends(get_current_restaurant),
+):
     with bypass_tenant_scope("get_session_history: session lookup by ID, tenant unknown"):
         session, history = await tr.db_get_session_with_history(session_id)
     if not session:
         raise HTTPException(404, "Sesión no encontrada")
+
+    caller_org_id = restaurant.get("org_id") or restaurant.get("id")
+    session_org_id = session.get("org_id")
+    if session_org_id is None or caller_org_id is None:
+        log.warning(
+            "settings.session_history_missing_org_id",
+            session_id=session_id,
+            session_org_id=session_org_id,
+            caller_org_id=caller_org_id,
+        )
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    if int(session_org_id) != int(caller_org_id):
+        log.warning(
+            "settings.session_history_idor",
+            session_id=session_id,
+            session_org_id=session_org_id,
+            caller_org_id=caller_org_id,
+        )
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
     if session.get("started_at"): session["started_at"] = session["started_at"].isoformat()
     if session.get("closed_at"): session["closed_at"] = session["closed_at"].isoformat()
     return {"session": session, "history": history}
 
 
 @router.post("/api/table-sessions/{session_id}/reopen")
-async def reopen_session(request: Request, session_id: int):
-    await require_auth(request)
-    with bypass_tenant_scope("reopen_session: session update by ID, tenant unknown"):
+async def reopen_session(
+    request: Request,
+    session_id: int,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    await _verify_session_ownership_and_scope(session_id, restaurant)
+    with bypass_tenant_scope("reopen_session: session update by ID after ownership verified"):
         await tr.db_reopen_session(session_id)
     return {"success": True}
 
 
 @router.post("/api/table-sessions/{session_id}/alert-waiter")
-async def session_alert_waiter(request: Request, session_id: int):
+async def session_alert_waiter(
+    request: Request,
+    session_id: int,
+    restaurant: dict = Depends(get_current_restaurant),
+):
     body = await request.json()
-    with bypass_tenant_scope("session_alert_waiter: alert insert by session ID, tenant unknown"):
+    await _verify_session_ownership_and_scope(session_id, restaurant)
+    with bypass_tenant_scope("session_alert_waiter: alert insert after ownership verified"):
         await tr.db_session_alert_waiter(session_id, body.get("message", "Alerta de dashboard"))
     return {"success": True}
 

@@ -392,6 +392,7 @@ class TestWaiterFlows:
 
     def test_view_table_with_active_session(self, client, monkeypatch):
         """GET /api/pos/tables-status returns tables with bot_active flag."""
+        from app.repositories import tables_repo as tr_repo  # noqa: PLC0415
         patch_auth(monkeypatch, role="owner")
         table_row = {"id": "table-1", "name": "Mesa 1", "number": 1, "active": True}
         monkeypatch.setattr(db, "db_get_tables", AsyncMock(return_value=[table_row]))
@@ -402,12 +403,15 @@ class TestWaiterFlows:
             "name": "Test", "parent_restaurant_id": None, "features": {}
         }))
 
-        session_row = make_row({"table_id": "table-1"})
+        session_row = make_row({"table_id": "table-1", "session_started_at": None,
+                                "has_waiter_alert": False, "has_open_check": False,
+                                "current_total": 0, "session_active": True})
         order_row = make_row({"table_id": "table-1", "status": "recibido"})
         conn = AsyncMock()
-        # Call order: db_get_pending_orders_by_branch (orders) first, then
-        # db_get_active_session_table_ids (sessions) — matches route execution order.
-        conn.fetch = AsyncMock(side_effect=[[order_row], [session_row]])
+        # Call order: db_get_pending_orders_by_branch (orders), then
+        # db_get_tables_status_enrichment (enrichment), then
+        # db_get_active_session_table_ids (sessions).
+        conn.fetch = AsyncMock(side_effect=[[order_row], [session_row], [session_row]])
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
 
         resp = client.get(
@@ -967,6 +971,11 @@ class TestBotWhatsAppFlows:
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=None)
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
+
+        # Bug 11: /api/chat now requires admin auth — bypass for unit tests
+        import app.routes.deps as _deps_mod  # noqa: PLC0415
+        monkeypatch.setattr(_deps_mod, "require_auth", AsyncMock(return_value=None))
+
         return restaurant
 
     def test_bot_responds_to_hola(self, client, monkeypatch):
@@ -1032,6 +1041,10 @@ class TestBotWhatsAppFlows:
 
     def test_bot_unknown_restaurant_returns_empty(self, client, monkeypatch):
         """Bot with no restaurant associated returns empty response."""
+        # Bug 11: /api/chat now requires admin auth — bypass for this test
+        import app.routes.deps as _deps_mod  # noqa: PLC0415
+        monkeypatch.setattr(_deps_mod, "require_auth", AsyncMock(return_value=None))
+
         monkeypatch.setattr(db, "db_get_restaurant_by_bot_number", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.agent.state_store.nps_get", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.agent.state_store.checkout_get", AsyncMock(return_value=None))
@@ -1257,6 +1270,7 @@ class TestEndToEndTableFlow:
 
     def test_table_session_open_marks_occupied(self, client, monkeypatch):
         """KDS shows session active after client connects via WhatsApp QR."""
+        from app.repositories import tables_repo as tr_repo  # noqa: PLC0415
         patch_auth(monkeypatch, role="owner")
         session_row = make_row({"table_id": "t-new"})
         order_row_empty = make_row({"table_id": "t-new", "status": "recibido"})
@@ -1272,6 +1286,10 @@ class TestEndToEndTableFlow:
         # Call order: db_get_pending_orders_by_branch first, db_get_active_session_table_ids second.
         conn.fetch = AsyncMock(side_effect=[[order_row_empty], [session_row]])
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
+        # Mock enrichment so it doesn't try a real DB connection
+        monkeypatch.setattr(
+            tr_repo, "db_get_tables_status_enrichment", AsyncMock(return_value={})
+        )
 
         resp = client.get(
             "/api/pos/tables-status",

@@ -246,7 +246,7 @@ def test_tips_pool_default_period_set(client, patched_auth, monkeypatch):
     """When no period params given, the repo must still be called with valid dates."""
     captured = {}
 
-    async def _mock(org_id, location_id, period_start, period_end, branch_id=None):
+    async def _mock(org_id, location_id, period_start, period_end, branch_id=None, caller_staff_id=None):
         captured["period_start"] = period_start
         captured["period_end"] = period_end
         return MOCK_TIPS_POOL

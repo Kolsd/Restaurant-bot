@@ -252,13 +252,30 @@ async def list_reservations(
 
 
 async def _verify_reservation_ownership(reservation_id: int, restaurant: dict) -> dict:
-    """Fetch reservation and verify it belongs to this restaurant. Raises 404 if not found, 403 if not owned."""
+    """Fetch reservation and verify it belongs to this restaurant's org.
+
+    Wave-2: bot_number comparison fails for branch reservations viewed by the
+    matriz admin (different whatsapp_number per sede).  Use org_id instead —
+    all locations of an org share the same org_id so any admin of the org can
+    manage reservations across all its sedes.
+    """
     reservation = await db.db_get_reservation_by_id(reservation_id)
     if not reservation:
         raise HTTPException(status_code=404, detail="Reservation not found")
-    bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number", "")
-    if reservation.get("bot_number") and reservation["bot_number"] != bot_number:
-        raise HTTPException(status_code=403, detail="Reservation does not belong to this restaurant")
+
+    # Prefer org_id comparison; fall back to bot_number for legacy rows without org_id.
+    caller_org_id = restaurant.get("org_id") or restaurant.get("id")
+    res_org_id = reservation.get("org_id")
+
+    if res_org_id is not None and caller_org_id is not None:
+        if int(res_org_id) != int(caller_org_id):
+            raise HTTPException(status_code=403, detail="Reservation does not belong to this restaurant")
+    else:
+        # Legacy fallback: bot_number check
+        bot_number = restaurant.get("whatsapp_number") or restaurant.get("bot_number", "")
+        if reservation.get("bot_number") and reservation["bot_number"] != bot_number:
+            raise HTTPException(status_code=403, detail="Reservation does not belong to this restaurant")
+
     return reservation
 
 

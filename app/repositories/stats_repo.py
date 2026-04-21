@@ -801,10 +801,19 @@ async def db_staff_performance(
             "tickets_count": 0,
         }))
 
+    # Aggregated rollup across the full period
+    tables_served = sum(w["tickets_count"] for w in week_series)
+    total_sales   = sum(w["sales_total"]   for w in week_series)
+    avg_ticket    = int(total_sales / tables_served) if tables_served else 0
+
     return {
-        "staff_id":   staff_id,
-        "staff_name": staff_name,
-        "weeks":      week_series,
+        "staff_id":     staff_id,
+        "staff_name":   staff_name,
+        "weeks":        week_series,
+        # Rollup fields for the performance card
+        "tables_served": tables_served,
+        "total_sales":   total_sales,
+        "avg_ticket":    avg_ticket,
     }
 
 
@@ -826,11 +835,13 @@ async def db_tips_pool(
     period_start: str | None,
     period_end: str | None,
     branch_id: int | None = None,
+    caller_staff_id: str | None = None,
 ) -> dict:
     """Summarise the tip pool for a period.
 
     Wraps staff_repo.db_calculate_tips_by_attendance.
-    Returns top-5 entries_preview, pool_total, entries_count, unallocated.
+    Returns top-5 entries_preview, pool_total, entries_count, unallocated,
+    and my_pool (tip amount for caller_staff_id, if provided).
     Default period: current week (Mon–Sun).
     """
     from app.repositories.staff_repo import db_calculate_tips_by_attendance  # noqa: PLC0415
@@ -863,10 +874,21 @@ async def db_tips_pool(
             "pct":        pct,
         })
 
+    # my_pool: tip allocation for the requesting staff member
+    my_pool: float | None = None
+    if caller_staff_id:
+        for e in entries:
+            if str(e.get("staff_id", "")) == str(caller_staff_id):
+                my_pool = float(e.get("total_tips", 0))
+                break
+        if my_pool is None:
+            my_pool = 0.0  # caller had no allocations this period
+
     return {
         "period":          {"start": period_start, "end": period_end},
         "pool_total":      total_tips,
         "entries_count":   len(entries),
         "entries_preview": preview,
         "unallocated":     unallocated,
+        "my_pool":         my_pool,
     }

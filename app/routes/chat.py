@@ -73,8 +73,11 @@ class ResetRequest(BaseModel):
 
 
 @router.post("/chat")
-async def chat_endpoint(request: ChatRequest):
-    result = await chat(request.phone, request.message, request.bot_number)
+async def chat_endpoint(request_body: ChatRequest, request: Request):
+    """Internal chat endpoint — requires admin auth (not exposed to end users)."""
+    from app.routes.deps import require_auth  # noqa: PLC0415
+    await require_auth(request)
+    result = await chat(request_body.phone, request_body.message, request_body.bot_number)
     if result is None: return {"success": True, "response": ""}
     return {"success": True, "response": result["message"]}
 
@@ -105,15 +108,15 @@ async def get_whatsapp_media(
     if not tenant_restaurant_id:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    # Verificar que el bot_number pertenece al tenant (o a una sucursal suya)
+    # Verificar que el bot_number pertenece al mismo org que el usuario autenticado.
+    # Wave-2: comparar org_id (parent_restaurant_id fue dropeado en 0038).
     from app.services.tenant_context import bypass_tenant_scope
     with bypass_tenant_scope("media_proxy_ownership_check"):
         tenant_rest = await db.db_get_restaurant_by_phone(bot)
-    if not tenant_rest:
+        user_rest = await db.db_get_restaurant_by_id(int(tenant_restaurant_id))
+    if not tenant_rest or not user_rest:
         raise HTTPException(status_code=403, detail="No autorizado")
-    rest_id = tenant_rest["id"]
-    parent_id = tenant_rest.get("parent_restaurant_id")
-    if rest_id != tenant_restaurant_id and parent_id != tenant_restaurant_id:
+    if tenant_rest.get("org_id") != user_rest.get("org_id"):
         raise HTTPException(status_code=403, detail="No autorizado")
 
     # ── Rate limit: 60 req/min por usuario ──────────────────────────────────────

@@ -215,14 +215,18 @@ async def team_invite(request: Request, body: TeamInviteRequest):
         raise HTTPException(status_code=400, detail="Sucursal requerida")
 
     # Verify the branch belongs to this owner's tenant (prevents cross-tenant invite)
-    my_restaurant_id = creator.get("branch_id") or creator.get("restaurant_id")
-    if branch_id != my_restaurant_id:
+    # Wave-2: compare org_id — parent_restaurant_id column was dropped in 0038.
+    my_location_id = creator.get("branch_id") or creator.get("restaurant_id")
+    if branch_id != my_location_id:
+        my_rest = await db.db_get_restaurant_by_id(my_location_id)
+        my_org_id = (my_rest or {}).get("org_id") or my_location_id
         branch_check = await db.db_get_restaurant_by_id(branch_id)
-        if not branch_check or branch_check.get("parent_restaurant_id") != my_restaurant_id:
+        if not branch_check or branch_check.get("org_id") != my_org_id:
             log.warning(
                 "team.invite_idor_attempt",
                 requested_branch_id=branch_id,
-                user_restaurant_id=my_restaurant_id,
+                user_location_id=my_location_id,
+                user_org_id=my_org_id,
             )
             raise HTTPException(status_code=403, detail="No autorizado para esta sucursal")
 
@@ -272,7 +276,27 @@ async def delete_user(user_id: str, request: Request):
         await restaurant_repo.db_delete_user_by_username(user_id)
         return {"success": True}
 
-    deleted = await restaurant_repo.db_delete_staff_by_id(user_id)
+    # Wave-2: verify staff cross-tenant ownership before deleting.
+    # Return 404 (not 403) to avoid info-leaking whether the ID exists.
+    from app.repositories import staff_repo as _sr
+    staff_row = await _sr.db_get_staff_profile(user_id)
+    if staff_row:
+        creator_location_id = creator.get("branch_id") or creator.get("restaurant_id")
+        my_rest = await db.db_get_restaurant_by_id(creator_location_id)
+        my_org_id = (my_rest or {}).get("org_id") or creator_location_id
+        if staff_row.get("org_id") != my_org_id:
+            log.warning(
+                "team.delete_user_idor_attempt",
+                user_id=user_id,
+                staff_org_id=staff_row.get("org_id"),
+                creator_org_id=my_org_id,
+            )
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        with tenant_scope(my_org_id):
+            deleted = await restaurant_repo.db_delete_staff_by_id(user_id)
+    else:
+        deleted = await restaurant_repo.db_delete_staff_by_id(user_id)
+
     if not deleted:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return {"success": True}

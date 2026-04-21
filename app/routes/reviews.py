@@ -38,23 +38,29 @@ async def list_reviews(
     limit: int = 50,
     restaurant=Depends(get_current_restaurant_scoped),
 ):
-    """Return public reviews for the authenticated restaurant."""
-    bot_number = restaurant["whatsapp_number"]
-    reviews = await rr.db_get_public_reviews(bot_number, limit=limit)
+    """Return public reviews for the authenticated restaurant's org.
+
+    Wave-2: uses org-scoped query so matriz admins see reviews from all sedes.
+    RLS (tenant_scope set by get_current_restaurant_scoped) enforces cross-tenant isolation.
+    """
+    reviews = await rr.db_get_public_reviews_by_org(limit=limit)
     return {"reviews": reviews}
 
 
 @router.get("/summary")
 async def get_review_summary(restaurant=Depends(get_current_restaurant_scoped)):
-    """Return aggregate review stats: total, avg score, distribution by score."""
-    bot_number = restaurant["whatsapp_number"]
-    summary = await rr.db_get_review_summary(bot_number)
+    """Return aggregate review stats for the full org (all locations)."""
+    summary = await rr.db_get_review_summary_by_org()
     return summary
 
 
-async def _verify_review_ownership(nps_id: int, bot_number: str) -> None:
-    """Verify the NPS response belongs to this restaurant's bot_number."""
-    exists = await rr.db_verify_review_ownership(nps_id, bot_number)
+async def _verify_review_ownership(nps_id: int) -> None:
+    """Verify the NPS response exists within the current tenant scope.
+
+    Wave-2: RLS ensures the nps_responses row is only visible if it belongs
+    to the caller's org — no bot_number filter needed.
+    """
+    exists = await rr.db_verify_review_ownership_by_org(nps_id)
     if not exists:
         raise HTTPException(status_code=404, detail="Review not found")
 
@@ -66,8 +72,7 @@ async def publish_review(
     restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Toggle public visibility for an NPS response and set display name."""
-    bot_number = restaurant["whatsapp_number"]
-    await _verify_review_ownership(nps_id, bot_number)
+    await _verify_review_ownership(nps_id)
     updated = await rr.db_set_review_public(
         nps_id,
         is_public=body.is_public,
@@ -85,8 +90,7 @@ async def reply_to_review(
     restaurant=Depends(get_current_restaurant_scoped),
 ):
     """Save owner reply to a review."""
-    bot_number = restaurant["whatsapp_number"]
-    await _verify_review_ownership(nps_id, bot_number)
+    await _verify_review_ownership(nps_id)
     updated = await rr.db_add_owner_reply(nps_id, body.reply.strip())
     if not updated:
         raise HTTPException(status_code=404, detail="Review not found")

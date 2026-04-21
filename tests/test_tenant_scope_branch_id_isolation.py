@@ -255,6 +255,8 @@ def test_pos_tables_status_passes_location_id_to_branch_query_and_org_id_to_scop
         patch("app.routes.tables.db.db_get_tables", db_get_tables_mock),
         patch("app.routes.tables.tr.db_get_pending_orders_by_branch", db_pending_mock),
         patch("app.routes.tables.tr.db_get_active_session_table_ids", AsyncMock(return_value=set())),
+        # Bug 17 enrichment: stub out so test doesn't need a real DB connection
+        patch("app.routes.tables.tr.db_get_tables_status_enrichment", AsyncMock(return_value={})),
     ]
     for p in patches:
         p.start()

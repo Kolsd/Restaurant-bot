@@ -306,42 +306,45 @@ async def db_get_restaurant_detail_stats(restaurant_id: int, wa: str) -> dict:
     """
     Return 30-day and today order counts, table orders, conversation count,
     user count, fiscal invoice counts for a given restaurant.
-    """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        orders_30d   = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS rev "
-            "FROM orders WHERE bot_number=$1 AND created_at >= NOW()-INTERVAL '30 days'",
-            wa,
-        )
-        orders_today = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM orders WHERE bot_number=$1 AND created_at >= CURRENT_DATE",
-            wa,
-        )
-        table_30d    = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM table_orders "
-            "WHERE created_at >= NOW()-INTERVAL '30 days' AND status NOT IN ('cancelado') "
-            "AND (SELECT whatsapp_number FROM restaurants WHERE id=table_orders.branch_id OR id=$1 LIMIT 1)=$1",
-            restaurant_id,
-        )
-        convs        = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE bot_number=$1", wa)
-        users_cnt    = await conn.fetchval("SELECT COUNT(*) FROM users WHERE branch_id=$1", restaurant_id)
 
-        has_invoices = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
-        if has_invoices:
-            invoices_30d = await conn.fetchrow(
-                "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_cents),0) AS total "
-                "FROM fiscal_invoices WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
+    Cross-tenant by design — called from internal/admin under bypass_tenant_scope.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    with bypass_tenant_scope("db_get_restaurant_detail_stats: superadmin cross-tenant stats"):
+        async with _tenant_connection() as conn:
+            orders_30d   = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS rev "
+                "FROM orders WHERE bot_number=$1 AND created_at >= NOW()-INTERVAL '30 days'",
+                wa,
+            )
+            orders_today = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM orders WHERE bot_number=$1 AND created_at >= CURRENT_DATE",
+                wa,
+            )
+            table_30d    = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM table_orders "
+                "WHERE created_at >= NOW()-INTERVAL '30 days' AND status NOT IN ('cancelado') "
+                "AND (SELECT whatsapp_number FROM restaurants WHERE id=table_orders.branch_id OR id=$1 LIMIT 1)=$1",
                 restaurant_id,
             )
-            invoices_all = await conn.fetchval(
-                "SELECT COUNT(*) FROM fiscal_invoices WHERE org_id=$1", restaurant_id
-            )
-        else:
-            invoices_30d = None
-            invoices_all = 0
+            convs        = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE bot_number=$1", wa)
+            users_cnt    = await conn.fetchval("SELECT COUNT(*) FROM users WHERE branch_id=$1", restaurant_id)
 
-        last_order = await conn.fetchval("SELECT MAX(created_at) FROM orders WHERE bot_number=$1", wa)
+            has_invoices = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
+            if has_invoices:
+                invoices_30d = await conn.fetchrow(
+                    "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_cents),0) AS total "
+                    "FROM fiscal_invoices WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
+                    restaurant_id,
+                )
+                invoices_all = await conn.fetchval(
+                    "SELECT COUNT(*) FROM fiscal_invoices WHERE org_id=$1", restaurant_id
+                )
+            else:
+                invoices_30d = None
+                invoices_all = 0
+
+            last_order = await conn.fetchval("SELECT MAX(created_at) FROM orders WHERE bot_number=$1", wa)
 
     return {
         "orders_30d":       int(orders_30d["cnt"])  if orders_30d else 0,
@@ -552,40 +555,44 @@ async def db_get_dashboard_orders(
     """
     Return (delivery_rows, table_rows) for the dashboard orders page.
     Both are raw dicts; post-processing happens in the route.
-    """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        # Delivery / pickup orders (orders table)
-        q_wa = "SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2"
-        p_wa: list = [start_date, end_date]
-        if bot_number:
-            if branch_id == "all":
-                q_wa += " AND bot_number LIKE $3"
-                p_wa.append(f"{bot_number}%")
-            else:
-                q_wa += " AND bot_number = $3"
-                p_wa.append(bot_number)
-        q_wa += " ORDER BY created_at DESC"
-        rows_wa = await conn.fetch(q_wa, *p_wa)
 
-        # Table orders (mesa)
-        if branch_id and branch_id != "all":
-            q_mesa = """
-                SELECT o.* FROM table_orders o
-                LEFT JOIN restaurant_tables t ON o.table_id = t.id
-                WHERE o.created_at >= $1 AND o.created_at < $2
-                AND t.branch_id = $3
-                ORDER BY o.created_at DESC
-            """
-            p_mesa = [start_date, end_date, branch_id]
-        else:
-            q_mesa = """
-                SELECT * FROM table_orders
-                WHERE created_at >= $1 AND created_at < $2
-                ORDER BY created_at DESC
-            """
-            p_mesa = [start_date, end_date]
-        rows_mesa = await conn.fetch(q_mesa, *p_mesa)
+    RLS active — caller must run inside tenant_scope() or bypass_tenant_scope().
+    Dashboard routes run inside bypass (no scoped dep wired yet).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    with bypass_tenant_scope("db_get_dashboard_orders: admin dashboard cross-tenant read"):
+        async with _tenant_connection() as conn:
+            # Delivery / pickup orders (orders table)
+            q_wa = "SELECT * FROM orders WHERE created_at >= $1 AND created_at < $2"
+            p_wa: list = [start_date, end_date]
+            if bot_number:
+                if branch_id == "all":
+                    q_wa += " AND bot_number LIKE $3"
+                    p_wa.append(f"{bot_number}%")
+                else:
+                    q_wa += " AND bot_number = $3"
+                    p_wa.append(bot_number)
+            q_wa += " ORDER BY created_at DESC"
+            rows_wa = await conn.fetch(q_wa, *p_wa)
+
+            # Table orders (mesa)
+            if branch_id and branch_id != "all":
+                q_mesa = """
+                    SELECT o.* FROM table_orders o
+                    LEFT JOIN restaurant_tables t ON o.table_id = t.id
+                    WHERE o.created_at >= $1 AND o.created_at < $2
+                    AND t.branch_id = $3
+                    ORDER BY o.created_at DESC
+                """
+                p_mesa = [start_date, end_date, branch_id]
+            else:
+                q_mesa = """
+                    SELECT * FROM table_orders
+                    WHERE created_at >= $1 AND created_at < $2
+                    ORDER BY created_at DESC
+                """
+                p_mesa = [start_date, end_date]
+            rows_mesa = await conn.fetch(q_mesa, *p_mesa)
 
     return ([dict(r) for r in rows_wa], [dict(r) for r in rows_mesa])
 
@@ -595,16 +602,20 @@ async def db_get_dashboard_reservations(
     end_date,
     bot_number: str | None,
 ) -> list[dict]:
-    """Return reservations for the dashboard in the given date window."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        query = "SELECT * FROM reservations WHERE created_at >= $1 AND created_at < $2"
-        params: list = [start_date, end_date]
-        if bot_number:
-            query += " AND bot_number = $3"
-            params.append(bot_number)
-        query += " ORDER BY date ASC, time ASC"
-        rows = await conn.fetch(query, *params)
+    """Return reservations for the dashboard in the given date window.
+
+    RLS active — runs under bypass (dashboard route has no scoped dep wired yet).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    with bypass_tenant_scope("db_get_dashboard_reservations: admin dashboard cross-tenant read"):
+        async with _tenant_connection() as conn:
+            query = "SELECT * FROM reservations WHERE created_at >= $1 AND created_at < $2"
+            params: list = [start_date, end_date]
+            if bot_number:
+                query += " AND bot_number = $3"
+                params.append(bot_number)
+            query += " ORDER BY date ASC, time ASC"
+            rows = await conn.fetch(query, *params)
     return [dict(r) for r in rows]
 
 
@@ -612,29 +623,33 @@ async def db_get_dashboard_conversations(
     branch_id,
     bot_number: str | None,
 ) -> list[dict]:
-    """Return conversations for the dashboard filtered by branch/bot_number."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        query = "SELECT * FROM conversations"
-        conditions: list[str] = []
-        params: list = []
-        idx = 1
+    """Return conversations for the dashboard filtered by branch/bot_number.
 
-        if branch_id == "all":
-            pass
-        elif branch_id:
-            conditions.append(f"branch_id = ${idx}")
-            params.append(branch_id)
-            idx += 1
-        elif bot_number:
-            conditions.append(f"bot_number = ${idx}")
-            params.append(bot_number)
-            idx += 1
+    RLS active — runs under bypass (dashboard route has no scoped dep wired yet).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    with bypass_tenant_scope("db_get_dashboard_conversations: admin dashboard cross-tenant read"):
+        async with _tenant_connection() as conn:
+            query = "SELECT * FROM conversations"
+            conditions: list[str] = []
+            params: list = []
+            idx = 1
 
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY updated_at DESC"
-        rows = await conn.fetch(query, *params)
+            if branch_id == "all":
+                pass
+            elif branch_id:
+                conditions.append(f"branch_id = ${idx}")
+                params.append(branch_id)
+                idx += 1
+            elif bot_number:
+                conditions.append(f"bot_number = ${idx}")
+                params.append(bot_number)
+                idx += 1
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+            query += " ORDER BY updated_at DESC"
+            rows = await conn.fetch(query, *params)
     return [dict(r) for r in rows]
 
 
@@ -743,13 +758,16 @@ async def db_set_branch_parent(
 ) -> None:
     """Link a newly created location to its org (branch creation flow).
 
-    parent_restaurant_id is a location id used to resolve the org_id.
+    The second arg is a location.id used to resolve the org_id for the new branch.
     The new location (looked up by whatsapp_number) is assigned to the same org.
     wa_phone_id and wa_access_token are branch-level overrides stored on locations.
+
+    Cross-tenant: resolves org_id from one location, then updates another.
+    Uses bypass_tenant_scope since this operates across location boundaries.
     """
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    with bypass_tenant_scope("db_set_branch_parent: link new location to org across tenant boundary"):
+        async with _tenant_connection() as conn:
             # Resolve the org_id from the parent location id
             org_id = await conn.fetchval(
                 "SELECT org_id FROM locations WHERE id = $1",
@@ -830,12 +848,17 @@ async def db_delete_user_by_username(username: str) -> None:
 
 
 async def db_delete_staff_by_id(staff_id: str) -> bool:
-    """Delete a staff row by UUID. Returns True if found and deleted."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        deleted = await conn.fetchval(
-            "DELETE FROM staff WHERE id=$1::uuid RETURNING id", staff_id
-        )
+    """Delete a staff row by UUID. Returns True if found and deleted.
+
+    Caller should run inside tenant_scope(org_id) for proper RLS enforcement.
+    Falls back to bypass for the legacy no-scope call path in team_routes.
+    """
+    from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
+    with bypass_tenant_scope_if_unset("db_delete_staff_by_id: tenant scope preferred; bypass for legacy call path"):
+        async with _tenant_connection() as conn:
+            deleted = await conn.fetchval(
+                "DELETE FROM staff WHERE id=$1::uuid RETURNING id", staff_id
+            )
     return deleted is not None
 
 
@@ -1415,70 +1438,81 @@ async def db_set_dish_availability(restaurant_id: int, dish_name: str, available
 
 # ── NPS analytics ─────────────────────────────────────────────────────────────
 
-async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: int | str = None) -> dict:
-    pool = await _get_pool()
+async def db_get_nps_stats(bot_number: str, period: str = "month", branch_id: int | str = None, days: int = None) -> dict:
+    """Return NPS aggregate stats. bot_number used as tenant discriminator.
+
+    RLS active — runs under bypass (nps.py route uses get_current_restaurant, not _scoped).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
     period_map = {"today": "1 day", "week": "7 days", "month": "30 days", "semester": "180 days", "year": "365 days"}
-    interval_str = period_map.get(period, "30 days")
+    if days is not None and days > 0:
+        interval_str = f"{int(days)} days"
+    else:
+        interval_str = period_map.get(period, "30 days")
 
-    async with pool.acquire() as conn:
-        conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
-        params = [bot_number]
+    with bypass_tenant_scope("db_get_nps_stats: NPS dashboard cross-tenant read via bot_number"):
+        async with _tenant_connection() as conn:
+            conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+            params = [bot_number]
 
-        # 🛡️ LA MAGIA DEL "ALL"
-        if branch_id == "all":
-            pass
-        elif branch_id is not None:
-            conditions.append("branch_id = $2")
-            params.append(branch_id)
+            if branch_id == "all":
+                pass
+            elif branch_id is not None:
+                conditions.append("branch_id = $2")
+                params.append(branch_id)
 
-        where_clause = " AND ".join(conditions)
-        query = f"""
-            SELECT COUNT(*) as total_responses, COALESCE(AVG(score), 0) as average_score,
-            COUNT(*) FILTER (WHERE score = 5) as promoters, COUNT(*) FILTER (WHERE score = 4) as passives,
-            COUNT(*) FILTER (WHERE score <= 3) as detractors
-            FROM nps_responses WHERE {where_clause}
-        """
-        row = await conn.fetchrow(query, *params)
+            where_clause = " AND ".join(conditions)
+            query = f"""
+                SELECT COUNT(*) as total_responses, COALESCE(AVG(score), 0) as average_score,
+                COUNT(*) FILTER (WHERE score = 5) as promoters, COUNT(*) FILTER (WHERE score = 4) as passives,
+                COUNT(*) FILTER (WHERE score <= 3) as detractors
+                FROM nps_responses WHERE {where_clause}
+            """
+            row = await conn.fetchrow(query, *params)
 
-        total = row["total_responses"]
-        nps_score = round(((row["promoters"] / total) - (row["detractors"] / total)) * 100) if total > 0 else 0
+            total = row["total_responses"]
+            nps_score = round(((row["promoters"] / total) - (row["detractors"] / total)) * 100) if total > 0 else 0
 
-        return {
-            "total_responses": total, "average_score": round(row["average_score"], 1),
-            "nps_score": nps_score, "promoters": row["promoters"], "passives": row["passives"], "detractors": row["detractors"]
-        }
+            return {
+                "total_responses": total, "average_score": round(row["average_score"], 1),
+                "nps_score": nps_score, "promoters": row["promoters"], "passives": row["passives"], "detractors": row["detractors"]
+            }
 
 
 async def db_get_nps_responses(bot_number: str, period: str = "month", limit: int = 50, branch_id: int | str = None) -> list:
-    pool = await _get_pool()
+    """Return paginated NPS responses. bot_number used as tenant discriminator.
+
+    RLS active — runs under bypass (nps.py route uses get_current_restaurant, not _scoped).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
     period_map = {"today": "1 day", "week": "7 days", "month": "30 days", "semester": "180 days", "year": "365 days"}
     interval_str = period_map.get(period, "30 days")
 
-    async with pool.acquire() as conn:
-        conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
-        params = [bot_number]
+    with bypass_tenant_scope("db_get_nps_responses: NPS dashboard cross-tenant read via bot_number"):
+        async with _tenant_connection() as conn:
+            conditions = ["bot_number = $1", f"created_at >= NOW() - INTERVAL '{interval_str}'"]
+            params = [bot_number]
 
-        # 🛡️ LA MAGIA DEL "ALL"
-        if branch_id == "all":
-            pass
-        elif branch_id is not None:
-            conditions.append("branch_id = $2")
-            params.append(branch_id)
+            if branch_id == "all":
+                pass
+            elif branch_id is not None:
+                conditions.append("branch_id = $2")
+                params.append(branch_id)
 
-        where_clause = " AND ".join(conditions)
-        limit_idx = len(params) + 1
-        params.append(limit)
+            where_clause = " AND ".join(conditions)
+            limit_idx = len(params) + 1
+            params.append(limit)
 
-        query = f"SELECT * FROM nps_responses WHERE {where_clause} ORDER BY created_at DESC LIMIT ${limit_idx}"
-        rows = await conn.fetch(query, *params)
+            query = f"SELECT * FROM nps_responses WHERE {where_clause} ORDER BY created_at DESC LIMIT ${limit_idx}"
+            rows = await conn.fetch(query, *params)
 
-        result = []
-        for r in rows:
-            d = dict(r)
-            if d.get("created_at"):
-                d["created_at"] = d["created_at"].isoformat() + "Z"
-            result.append(d)
-        return result
+            result = []
+            for r in rows:
+                d = dict(r)
+                if d.get("created_at"):
+                    d["created_at"] = d["created_at"].isoformat() + "Z"
+                result.append(d)
+            return result
 
 
 # ── Subscription usage ────────────────────────────────────────────────────────

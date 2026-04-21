@@ -36,15 +36,21 @@ RESTAURANT_OBJ = {"id": 42, "name": "Test Rest", "whatsapp_number": BOT_NUMBER}
 # Helper — run _validate_tool_call with a mocked find_dish / db_get_menu
 # ---------------------------------------------------------------------------
 
-async def _run_validate(tool_name: str, tool_input: dict, menu: dict = SAMPLE_MENU):
+async def _run_validate(tool_name: str, tool_input: dict, menu: dict = SAMPLE_MENU,
+                        confirmed: bool = True):
     """
     Execute _validate_tool_call for an order tool.
 
     Mocks:
       - app.services.orders.db.db_get_menu  → returns `menu`
       - state_store.rate_limit_check         → always True (dedup pass-through)
+
+    `confirmed=True` (default) injects a prior confirmation into full_history so
+    the confirmation guard passes.  Set confirmed=False to test the unconfirmed path.
     """
     from app.services.agent import _validate_tool_call
+
+    history = [{"role": "user", "content": "sí, confirmo"}] if confirmed else []
 
     with patch("app.services.orders.db") as mock_orders_db, \
          patch("app.services.agent.state_store") as mock_state_store:
@@ -62,7 +68,7 @@ async def _run_validate(tool_name: str, tool_input: dict, menu: dict = SAMPLE_ME
             phone=PHONE,
             features={},
             session_state={},
-            full_history=[],
+            full_history=history,
             restaurant_obj=RESTAURANT_OBJ,
         )
 
