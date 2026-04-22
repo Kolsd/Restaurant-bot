@@ -1,0 +1,457 @@
+
+/* ── EDITOR DE MENÚ (CARTA) ── */
+.menu-editor-cat-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e0e0d8;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.menu-editor-cat-header {
+  background: #f8f8f5;
+  border-bottom: 1px solid #e0e0d8;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.menu-editor-cat-input {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111;
+  border: 1px dashed transparent;
+  background: transparent;
+  padding: 4px 8px;
+  border-radius: 6px;
+  outline: none;
+  width: 80%;
+  transition: border 0.2s;
+}
+.menu-editor-cat-input:focus, .menu-editor-cat-input:hover {
+  border-color: #1D9E75;
+  background: #fff;
+}
+.btn-del-cat {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+.btn-del-cat:hover { opacity: 1; }
+.menu-editor-dishes {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.menu-editor-dish-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.dish-inputs {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 2fr 1fr 2fr;
+  gap: 8px;
+}
+.dish-inputs input {
+  padding: 8px 12px;
+  border: 1px solid #e0e0d8;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+.dish-inputs input:focus { border-color: #1D9E75; }
+.btn-del-dish {
+  background: #FDE8E8;
+  color: #C0392B;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  height: 35px;
+}
+.menu-editor-cat-footer {
+  padding: 10px 16px;
+  border-top: 1px dashed #e0e0d8;
+  background: #fafaf8;
+}
+.menu-editor-cat-footer button {
+  background: none;
+  border: none;
+  color: #185FA5;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════════
+   DISH EDITOR MODAL — Catálogo v2 (Fase 2)
+   Uses tokens.css variables throughout.
+═══════════════════════════════════════════════════ */
+
+/* ── Dish card in list (reorder handle + summary) ── */
+.dish-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--s-2) var(--s-3);
+  cursor: pointer;
+  transition: box-shadow var(--ease), border-color var(--ease);
+  user-select: none;
+}
+.dish-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-strong);
+}
+.dish-card.drag-over {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+.dish-card.dragging {
+  opacity: 0.5;
+  box-shadow: var(--shadow-lg);
+}
+.dish-drag-handle {
+  color: var(--text-4);
+  cursor: grab;
+  font-size: 16px;
+  padding: 4px 2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.dish-drag-handle:active { cursor: grabbing; }
+.dish-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+.dish-thumb-placeholder {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+.dish-card-info { flex: 1; min-width: 0; }
+.dish-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dish-card-price {
+  font-size: 12px;
+  color: var(--brand);
+  font-weight: 600;
+  margin-top: 2px;
+}
+.dish-card-badges {
+  display: flex;
+  gap: 4px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+.dish-card-inactive .dish-card-name { text-decoration: line-through; color: var(--text-4); }
+
+/* ── Dish Editor Modal overlay ── */
+.dish-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 4000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+}
+.dish-modal-overlay.open { display: flex; }
+
+/* ── Dish Editor Modal box ── */
+.dish-modal-box {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.22);
+  width: 100%;
+  max-width: 600px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dish-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  flex-shrink: 0;
+}
+.dish-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.dish-modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  transition: color var(--ease), background var(--ease);
+}
+.dish-modal-close:hover { color: var(--text); background: var(--bg); }
+
+.dish-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.dish-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border-top: 1px solid var(--border);
+  background: var(--surface-hover);
+  flex-shrink: 0;
+}
+
+/* ── Form field ── */
+.dish-field { display: flex; flex-direction: column; gap: var(--s-1); }
+.dish-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dish-field input,
+.dish-field textarea,
+.dish-field select {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  outline: none;
+  transition: border-color var(--ease);
+  width: 100%;
+  box-sizing: border-box;
+}
+.dish-field input:focus,
+.dish-field textarea:focus,
+.dish-field select:focus { border-color: var(--brand); }
+.dish-field textarea { resize: vertical; min-height: 72px; }
+
+.dish-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-4);
+}
+
+/* ── Image upload zone ── */
+.dish-image-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--ease), background var(--ease);
+  min-height: 120px;
+  position: relative;
+}
+.dish-image-zone:hover,
+.dish-image-zone.drag-over {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+.dish-image-zone.has-image {
+  border-style: solid;
+  padding: 0;
+  overflow: hidden;
+  min-height: 180px;
+}
+.dish-image-zone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+.dish-image-preview {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  display: block;
+}
+.dish-image-actions {
+  position: absolute;
+  bottom: var(--s-2);
+  right: var(--s-2);
+  display: flex;
+  gap: var(--s-1);
+}
+.dish-image-action-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background var(--ease);
+}
+.dish-image-action-btn--replace {
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+}
+.dish-image-action-btn--replace:hover { background: rgba(0,0,0,0.85); }
+.dish-image-action-btn--delete {
+  background: var(--danger);
+  color: #fff;
+}
+.dish-image-action-btn--delete:hover { background: #DC2626; }
+.dish-image-zone-hint {
+  font-size: 13px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.dish-image-zone-hint strong { color: var(--brand); }
+.dish-image-zone-sub {
+  font-size: 11px;
+  color: var(--text-4);
+  pointer-events: none;
+}
+.dish-image-uploading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  pointer-events: none;
+}
+.dish-image-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--brand-light);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: dish-spin 0.7s linear infinite;
+}
+@keyframes dish-spin { to { transform: rotate(360deg); } }
+.dish-upload-progress-text {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ── Multi-select chips ── */
+.dish-chips-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+.dish-chip {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ── Add dish button ── */
+.btn-add-dish {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: var(--s-3);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--ease), color var(--ease), background var(--ease);
+  margin-top: var(--s-2);
+}
+.btn-add-dish:hover {
+  border-color: var(--brand);
+  color: var(--brand-dark);
+  background: var(--brand-bg);
+}
+
+/* ── Chips: focus-visible ring (keyboard navigation) ── */
+.dish-chip:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+/* Allergen chips focus: warning ring */
+.dish-chip--allergen:focus-visible {
+  outline-color: var(--warning);
+}
+
+/* ── Dish card: focus ring when navigating by keyboard ── */
+.dish-card:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.dish-drag-handle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Featured star in card list ── */
+.dish-card .dish-featured-star {
+  color: var(--warning);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* ── Image zone: explicit focus ring ── */
+.dish-image-zone:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ── Responsive: fullscreen modal on mobile ── */
+@media (max-width: 600px) {
+  .dish-modal-overlay {
+    padding: 0;
+    align-items: flex-end;

@@ -7,11 +7,10 @@
 <link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/shared.css">
 <link rel="stylesheet" href="/static/css/pages/menu-admin.css">
-<!-- dashboard.css contains the menu-editor styles (.menu-editor-cat-*,
-     .dish-card, .dish-modal-overlay z-index:4000, btn-add-dish, etc.)
-     consumed by dashboard-features.js. Loaded AFTER menu-admin.css so any
-     page-specific overrides still win. -->
-<link rel="stylesheet" href="/static/css/dashboard.css">
+<!-- Menu editor styles (extracted from dashboard.css to avoid grid collisions
+     with menu-admin.css). Only .menu-editor-*, .dish-card*, .dish-modal-*,
+     .dish-field*, .dish-image-*, .btn-add-dish selectors — nothing else. -->
+<link rel="stylesheet" href="/static/css/menu-editor.css">
 </head>
 <body data-active="menu">
 
@@ -61,141 +60,8 @@
           <button class="btn primary">🔄 Sincronizar sucursales</button>
         </div>
 
-        <!-- Sopas -->
-        <div class="card flush" style="margin-bottom: 14px;">
-          <div class="cat-head">
-            <span class="cat-title">🍲 Sopas</span>
-            <span class="cat-count">4 / 5 disponibles</span>
-            <span class="cat-arrow open">▾</span>
-          </div>
-          <div class="dish-grid">
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#1D9E75,#0F6E56);">A</div>
-              <div>
-                <div class="dish-name">Ajiaco santafereño</div>
-                <div class="dish-meta">$28.000 · 312 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Ajiaco"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#3B82F6,#1D4ED8);">S</div>
-              <div>
-                <div class="dish-name">Sancocho trifásico</div>
-                <div class="dish-meta">$26.000 · 148 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Sancocho"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish off">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#F59E0B,#B45309);">M</div>
-              <div>
-                <div class="dish-name">Mute santandereano</div>
-                <div class="dish-meta">$24.000 · sin stock carne</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Mute"><input type="checkbox"><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#EC4899,#BE185D);">C</div>
-              <div>
-                <div class="dish-name">Crema de auyama</div>
-                <div class="dish-meta">$18.000 · 62 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Crema"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#8B5CF6,#7C3AED);">C</div>
-              <div>
-                <div class="dish-name">Consomé de pollo</div>
-                <div class="dish-meta">$14.000 · 44 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Consomé"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Fuertes -->
-        <div class="card flush" style="margin-bottom: 14px;">
-          <div class="cat-head">
-            <span class="cat-title">🥩 Platos fuertes</span>
-            <span class="cat-count">14 / 16 disponibles</span>
-            <span class="cat-arrow open">▾</span>
-          </div>
-          <div class="dish-grid">
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#1D9E75,#0F6E56);">B</div>
-              <div>
-                <div class="dish-name">Bandeja paisa</div>
-                <div class="dish-meta">$34.000 · 286 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Bandeja"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#F59E0B,#B45309);">C</div>
-              <div>
-                <div class="dish-name">Corrientazo del día</div>
-                <div class="dish-meta">$22.000 · 241 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Corrientazo"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#EF4444,#DC2626);">P</div>
-              <div>
-                <div class="dish-name">Posta negra</div>
-                <div class="dish-meta">$38.000 · 187 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Posta"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish off">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#8B5CF6,#7C3AED);">L</div>
-              <div>
-                <div class="dish-name">Lechona tolimense</div>
-                <div class="dish-meta">$32.000 · solo domingos</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Lechona"><input type="checkbox"><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#06B6D4,#0E7490);">A</div>
-              <div>
-                <div class="dish-name">Arroz con coco y langostinos</div>
-                <div class="dish-meta">$44.000 · 76 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Arroz"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Bebidas -->
-        <div class="card flush">
-          <div class="cat-head">
-            <span class="cat-title">🥤 Bebidas</span>
-            <span class="cat-count">12 / 14 disponibles</span>
-            <span class="cat-arrow open">▾</span>
-          </div>
-          <div class="dish-grid">
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#84CC16,#4D7C0F);">L</div>
-              <div>
-                <div class="dish-name">Limonada de hierbabuena</div>
-                <div class="dish-meta">$8.500 · 412 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Limonada"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#8B5CF6,#7C3AED);">J</div>
-              <div>
-                <div class="dish-name">Jugo de mora en leche</div>
-                <div class="dish-meta">$7.500 · 268 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Jugo"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-            <div class="dish">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#EF4444,#DC2626);">C</div>
-              <div>
-                <div class="dish-name">Club Colombia</div>
-                <div class="dish-meta">$7.000 · 187 vend. 7d</div>
-              </div>
-              <label class="toggle" aria-label="Disponibilidad Club Colombia"><input type="checkbox" checked><span class="toggle-slider"></span></label>
-            </div>
-          </div>
+        <div id="live-menu-container" data-loaded="false">
+          <div style="padding:24px;color:var(--text-3);font-size:13px;">Cargando platos…</div>
         </div>
       </div>
 
