@@ -7,6 +7,11 @@
 <link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/shared.css">
 <link rel="stylesheet" href="/static/css/pages/menu-admin.css">
+<!-- dashboard.css contains the menu-editor styles (.menu-editor-cat-*,
+     .dish-card, .dish-modal-overlay z-index:4000, btn-add-dish, etc.)
+     consumed by dashboard-features.js. Loaded AFTER menu-admin.css so any
+     page-specific overrides still win. -->
+<link rel="stylesheet" href="/static/css/dashboard.css">
 </head>
 <body data-active="menu">
 
