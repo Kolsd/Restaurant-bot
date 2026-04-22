@@ -590,6 +590,115 @@
     }
   }
 
+  // ── Editar carta — minimal JSON editor modal ──────────────────────
+  // Lightweight fallback while the full visual editor is not ported to this
+  // page. Loads the current menu JSON from /api/dashboard/menu, lets the
+  // admin edit it in a textarea, and saves back via /api/menu/update.
+  // Shape expected by the bot:
+  //   { "Categoria 1": [{"name": "Plato", "price": 15000, "active": true, "description": ""}], ... }
+  function openCartaEditor() {
+    var overlay = document.createElement('div');
+    overlay.id = 'carta-editor-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:24px;';
+
+    var panel = document.createElement('div');
+    panel.style.cssText = 'background:#fff;border-radius:14px;max-width:820px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);';
+
+    var header = document.createElement('div');
+    header.style.cssText = 'padding:16px 20px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;';
+    header.innerHTML = '<div><div style="font-size:16px;font-weight:600;">Editar carta (JSON)</div><div style="font-size:12px;color:#6b7280;margin-top:2px;">Estructura: <code>{ "Categoria": [ { "name":"Plato", "price":15000, "active":true, "description":"" } ] }</code></div></div>';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'btn';
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = 'font-size:22px;line-height:1;padding:4px 12px;';
+    closeBtn.onclick = function () { document.body.removeChild(overlay); };
+    header.appendChild(closeBtn);
+
+    var body = document.createElement('div');
+    body.style.cssText = 'flex:1;overflow:auto;padding:16px 20px;';
+    var textarea = document.createElement('textarea');
+    textarea.id = 'carta-editor-json';
+    textarea.style.cssText = 'width:100%;height:400px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;padding:12px;border:1px solid #ddd;border-radius:8px;resize:vertical;';
+    textarea.value = 'Cargando…';
+    body.appendChild(textarea);
+
+    var errBox = document.createElement('div');
+    errBox.id = 'carta-editor-err';
+    errBox.style.cssText = 'color:#b91c1c;font-size:13px;margin-top:8px;min-height:18px;';
+    body.appendChild(errBox);
+
+    var footer = document.createElement('div');
+    footer.style.cssText = 'padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn';
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.onclick = function () { document.body.removeChild(overlay); };
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn primary';
+    saveBtn.textContent = 'Guardar';
+    footer.appendChild(cancelBtn);
+    footer.appendChild(saveBtn);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    panel.appendChild(footer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    // Load current menu
+    (async function () {
+      try {
+        var r = await fetch('/api/dashboard/menu', { headers: mesioHeaders() });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var data = await r.json();
+        var menu = data.menu || {};
+        textarea.value = JSON.stringify(menu, null, 2);
+      } catch (e) {
+        textarea.value = '{}';
+        errBox.textContent = 'No se pudo cargar la carta actual: ' + e.message;
+      }
+    })();
+
+    saveBtn.onclick = async function () {
+      errBox.textContent = '';
+      var parsed;
+      try {
+        parsed = JSON.parse(textarea.value);
+      } catch (e) {
+        errBox.textContent = 'JSON inválido: ' + e.message;
+        return;
+      }
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+        errBox.textContent = 'La raíz debe ser un objeto con categorías como keys.';
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Guardando…';
+      try {
+        var res = await fetch('/api/menu/update', {
+          method: 'PUT',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+          body: JSON.stringify({ menu: parsed })
+        });
+        if (!res.ok) {
+          var err = await res.json().catch(function () { return {}; });
+          throw new Error(err.detail || 'HTTP ' + res.status);
+        }
+        document.body.removeChild(overlay);
+        if (typeof mesioToast === 'function') mesioToast('Carta guardada', 'success');
+        loadMenu();
+      } catch (e) {
+        errBox.textContent = 'Error al guardar: ' + e.message;
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Guardar';
+      }
+    };
+  }
+
+  var cartaBtn = document.getElementById('btn-edit-carta');
+  if (cartaBtn) cartaBtn.addEventListener('click', openCartaEditor);
+
   loadMenu();
   loadInventory();
 })();
