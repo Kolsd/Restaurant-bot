@@ -152,6 +152,14 @@ async def tenant_connection() -> AsyncGenerator[asyncpg.Connection, None]:
                 )
                 await conn.execute("SET LOCAL ROLE mesio_superadmin")
             else:
+                # Defense-in-depth: SET LOCAL ROLE mesio_app so RLS enforces
+                # regardless of the pool's connecting user. In production the pool
+                # already connects as mesio_app (non-superuser), so this is a no-op.
+                # In tests / admin shells where the pool connects as postgres
+                # (superuser, BYPASSRLS), without this line RLS silently returns
+                # all rows — the exact cross-tenant leak this layer must prevent.
+                await conn.execute("SET LOCAL ROLE mesio_app")
+
                 # Wave 2: only app.org_id is set. Relies on migration 0037 having
                 # dropped tenant_isolation (which read app.restaurant_id). Deploying
                 # this code BEFORE 0037 runs will cause RLS to filter on a NULL GUC

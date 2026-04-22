@@ -1332,18 +1332,16 @@ async def db_get_delivery_orders_for_caja() -> list:
     Return pending delivery/pickup orders for the kitchen/caja view (last 24h,
     excluding terminal statuses).
 
-    Cross-tenant kitchen display.
-    # Uses bypass_tenant_scope internally (global kitchen view).
+    # Requires active tenant_scope(org_id). RLS filters rows by org_id.
     """
-    with bypass_tenant_scope("kitchen: delivery orders for caja cross-tenant view"):
-        async with tenant_connection() as conn:
-            rows = await conn.fetch(
-                """SELECT * FROM orders
-                   WHERE order_type IN ('domicilio','recoger')
-                   AND created_at >= NOW() - INTERVAL '24 hours'
-                   AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
-                   ORDER BY created_at DESC"""
-            )
+    async with tenant_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT * FROM orders
+               WHERE order_type IN ('domicilio','recoger')
+               AND created_at >= NOW() - INTERVAL '24 hours'
+               AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
+               ORDER BY created_at DESC"""
+        )
     return [dict(r) for r in rows]
 
 

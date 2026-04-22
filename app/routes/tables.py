@@ -476,7 +476,12 @@ async def get_delivery_orders(request: Request):
     await require_auth(request)
     import json as _json
 
-    rows = await tr.db_get_delivery_orders_for_caja()
+    # Tenant-scope the read so RLS filters to the authenticated admin's org.
+    # Without this, db_get_delivery_orders_for_caja returned ALL tenants' orders.
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    with tenant_scope(org_id):
+        rows = await tr.db_get_delivery_orders_for_caja()
     orders = []
     for r in rows:
         items = r["items"]
@@ -515,12 +520,16 @@ async def update_delivery_order_status(request: Request, order_id: str):
     
     if new_status not in valid:
         raise HTTPException(status_code=400, detail="Estado inválido")
-        
-    with bypass_tenant_scope("update_delivery_order_status: delivery order by ID"):
+
+    # Tenant-scope the UPDATE so RLS rejects cross-tenant modifications.
+    # Without this, any authenticated admin could PATCH any tenant's order.
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    with tenant_scope(org_id):
         await tr.db_update_delivery_order_status(order_id, new_status)
 
     if new_status in ("confirmado", "en_camino", "entregado", "listo"):
-        with bypass_tenant_scope("update_delivery_order_status: contact lookup by order ID"):
+        with tenant_scope(org_id):
             row = await tr.db_get_delivery_order_contact(order_id)
             full = await tr.db_get_delivery_order_full(order_id) if new_status == "listo" else None
         if row:
