@@ -218,7 +218,11 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Default list disables non-bot features (loyalty, payroll/staff, biometric,
 # staff comms, dynamic discounts, reviews, marketing). To re-enable all, set
 # DISABLED_MODULES="" (empty). To disable more, add keys: "loyalty,staff,...".
-_DEFAULT_DISABLED = "loyalty,staff,staff_webauthn,staff_comms,discounts,reviews,marketing"
+# staff + staff_comms KEEP ON — dashboard "Equipo" page needs /api/staff/*
+# and /api/staff-comms/* endpoints to render. Payroll sub-routes live inside
+# staff router but are not called by the MVP bot user surface. webauthn stays
+# off per user scope (no biometric in MVP).
+_DEFAULT_DISABLED = "loyalty,staff_webauthn,discounts,reviews,marketing"
 _disabled_modules = {
     m.strip()
     for m in os.getenv("DISABLED_MODULES", _DEFAULT_DISABLED).split(",")

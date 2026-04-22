@@ -34,7 +34,12 @@ class ClearCartRequest(BaseModel):
 @router.get("/orders")
 async def list_orders(request: Request):
     await require_auth(request)
-    all_orders = await db.db_get_all_orders()
+    # Tenant-scope — db_get_all_orders uses _tenant_connection() which requires
+    # an active scope. Without this the route 500s with TenantNotSetError.
+    restaurant = await get_current_restaurant(request)
+    org_id = restaurant["id"]
+    with tenant_scope(org_id):
+        all_orders = await db.db_get_all_orders()
     paid = [o for o in all_orders if o["paid"]]
     total_revenue = sum(o["total"] for o in paid)
     return {

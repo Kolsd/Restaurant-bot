@@ -1153,7 +1153,7 @@ async def db_get_tables_status_enrichment(branch_id: int) -> dict:
                 COUNT(DISTINCT ts.id) FILTER (
                     WHERE ts.status IN ('active', 'nps_pending')
                 ) > 0                              AS session_active,
-                MIN(ts.created_at) FILTER (
+                MIN(ts.started_at) FILTER (
                     WHERE ts.status IN ('active', 'nps_pending')
                 )                                  AS session_started_at
             FROM restaurant_tables rt
