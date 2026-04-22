@@ -716,8 +716,19 @@ async def db_get_public_menu_data(normalized_bot_number: str) -> dict | None:
 
 # ── Team / Branch management ──────────────────────────────────────────────────
 
-async def db_get_branches(parent_restaurant_id: int) -> list[dict]:
-    """Return all child branches for a given parent restaurant.
+async def db_get_branches(org_id: int) -> list[dict]:
+    """Return all locations (peers) for a given org.
+
+    Post-Wave-2: caller passes org_id (the tenant key). Every location in the
+    org is returned — no "matriz" vs "sucursal" distinction (Wave-2 model:
+    all sedes are peers). The caller decides whether to exclude the current
+    location from the dropdown UI.
+
+    Historical implementation assumed the param was a location_id and did a
+    subquery (SELECT org_id FROM locations WHERE id=$1). That returned 0
+    rows whenever the caller passed an org_id that was not also a location
+    id — common for orgs created after Wave-2 where org_id and location_id
+    sequences diverged. Fixed by filtering on l.org_id directly.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -727,11 +738,10 @@ async def db_get_branches(parent_restaurant_id: int) -> list[dict]:
             SELECT r.*
             FROM restaurants r
             JOIN locations l ON l.id = r.id
-            WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $1)
-              AND l.id != $1
+            WHERE l.org_id = $1
             ORDER BY l.id ASC
             """,
-            parent_restaurant_id,
+            org_id,
         )
     return [_serialize(dict(r)) for r in rows]
 
