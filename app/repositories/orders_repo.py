@@ -195,6 +195,7 @@ async def commit_order_transaction(
     cart: dict[str, Any],
     order_payload: dict[str, Any],
     channel: str | None = None,
+    location_id: int | None = None,
 ) -> None:
     """
     Atomically commits a delivery/pickup order:
@@ -210,6 +211,10 @@ async def commit_order_transaction(
         order_payload:  Order dict — same shape expected by db_save_order.
         channel:        Optional attribution channel (whatsapp_bot, pos, qr_pickup, web, manual).
                         If provided, stored on the orders row. Legacy rows leave this NULL.
+        location_id:    Optional location_id (sede) resolved by GPS routing / branch selection.
+                        Stored for dashboard filtering by branch. NULL means location not yet
+                        resolved (pre-Wave-2 rows and orders from single-location tenants
+                        with no explicit branch routing also receive NULL).
 
     Raises:
         InsufficientStockError: one ingredient is out of stock; transaction rolled back.
@@ -264,8 +269,8 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, org_id, channel)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)""",
+                                base_order_id, sub_number, org_id, channel, location_id)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)""",
                         order_payload["id"],
                         order_payload["phone"],
                         json.dumps(order_payload["items"]),
@@ -284,6 +289,7 @@ async def commit_order_transaction(
                         order_payload["sub_number"],
                         restaurant_id,
                         channel,
+                        location_id,
                     )
                 else:
                     await conn.execute(
@@ -291,8 +297,8 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, org_id, channel)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+                                base_order_id, sub_number, org_id, channel, location_id)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                            ON CONFLICT (id) DO UPDATE SET
                                items          = EXCLUDED.items,
                                subtotal       = EXCLUDED.subtotal,
@@ -306,7 +312,8 @@ async def commit_order_transaction(
                                paid           = EXCLUDED.paid,
                                payment_url    = EXCLUDED.payment_url,
                                notes          = EXCLUDED.notes,
-                               payment_method = EXCLUDED.payment_method""",
+                               payment_method = EXCLUDED.payment_method,
+                               location_id    = COALESCE(orders.location_id, EXCLUDED.location_id)""",
                         order_payload["id"],
                         order_payload["phone"],
                         json.dumps(order_payload["items"]),
@@ -325,6 +332,7 @@ async def commit_order_transaction(
                         order_payload.get("sub_number", 1),
                         restaurant_id,
                         channel,
+                        location_id,
                     )
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)

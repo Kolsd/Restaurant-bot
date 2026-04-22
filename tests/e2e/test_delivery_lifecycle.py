@@ -350,7 +350,6 @@ async def test_delivery_full_lifecycle(
     )
 
     # Verify org_id == parent_id (the org tenant key, written as org_id on orders).
-    # location_id is nullable in orders (orders_repo does not set it at commit time).
     assert order_row["org_id"] == parent_id, (
         f"Order org_id={order_row['org_id']} does not match parent_id={parent_id}"
     )

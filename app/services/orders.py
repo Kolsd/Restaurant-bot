@@ -229,7 +229,7 @@ def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP
     redirect_url = f"{redirect_base}/api/payment/confirm"
     return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
 
-async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "", channel: str | None = "whatsapp_bot") -> dict:
+async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "", channel: str | None = "whatsapp_bot", location_id: int | None = None) -> dict:
     from app.repositories.orders_repo import commit_order_transaction, OrderCommitError, InsufficientStockError
 
     try:
@@ -326,6 +326,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                             cart=cart,
                             order_payload=order,
                             channel=channel,
+                            location_id=location_id,
                         )
                     except InsufficientStockError as exc:
                         return {"success": False, "error": f"Stock insuficiente para '{exc.sku}'"}
@@ -379,6 +380,7 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                     cart=cart,
                     order_payload=order,
                     channel=channel,
+                    location_id=location_id,
                 )
             except InsufficientStockError as exc:
                 return {"success": False, "error": f"Stock insuficiente para '{exc.sku}'"}

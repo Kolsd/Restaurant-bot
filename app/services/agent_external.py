@@ -429,7 +429,11 @@ async def execute_external_action(
 
     # ── Create order ──────────────────────────────────────────────────
     order_type = "domicilio" if action == "delivery" else "recoger"
-    res = await orders.create_order(phone, order_type, address, notes, effective_bot_number, payment_method)
+    _resolved_location_id = routing_context.get("location_id") or routing_context.get("branch_id")
+    res = await orders.create_order(
+        phone, order_type, address, notes, effective_bot_number, payment_method,
+        location_id=_resolved_location_id,
+    )
 
     if res.get("blocked_in_transit"):
         return "Tu pedido ya va en camino 🛵 No es posible agregar más items a ese pedido. Si deseas hacer un pedido nuevo, dímelo y te ayudo a iniciar uno desde cero."

@@ -531,7 +531,8 @@ async def update_delivery_order_status(request: Request, order_id: str):
     if new_status in ("confirmado", "en_camino", "entregado", "listo"):
         with tenant_scope(org_id):
             row = await tr.db_get_delivery_order_contact(order_id)
-            full = await tr.db_get_delivery_order_full(order_id) if new_status == "listo" else None
+            # entregado also needs the full row to fetch bot_number for trigger_nps.
+            full = await tr.db_get_delivery_order_full(order_id) if new_status in ("listo", "entregado") else None
         if row:
             phone = row["phone"]
             order_type = (full or {}).get("order_type", "domicilio")
@@ -552,6 +553,18 @@ async def update_delivery_order_status(request: Request, order_id: str):
                 except Exception:
                     db_phone_id = None
                 await send_wa_msg(phone, msg, db_phone_id)
+
+            # Parity with /api/delivery/orders PATCH: trigger NPS on entregado.
+            # Without this, kitchen-path "entregado" skips NPS entirely.
+            if new_status == "entregado":
+                try:
+                    restaurant = await get_current_restaurant(request)
+                    rest_name = (restaurant or {}).get("name", "")
+                    bot_number_for_nps = (full or {}).get("bot_number")
+                    if bot_number_for_nps:
+                        await trigger_nps(phone, bot_number_for_nps, rest_name)
+                except Exception:
+                    log.exception("kitchen.nps_trigger_failed", phone=phone, order_id=order_id)
 
     if new_status == "confirmado":
         with bypass_tenant_scope("update_delivery_order_status: full order for billing"):
