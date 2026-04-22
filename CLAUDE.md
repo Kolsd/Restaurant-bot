@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v11.0 (Multi-tenant RLS Blindaje — Fase 1 completa)
+# Mesio Restaurant Bot — v11.1 ("No-v2" sprint — loyalty campaigns + branch aggregates + churn summary shipped)
 
 ## Entorno y Comandos
 
@@ -149,7 +149,8 @@ Restaurant-bot/
 │   ├── 0045_policy_naming_consistency.py     # Pre-launch hardening — tenant_isolation_org → org_isolation on 4 tables
 │   ├── 0046_money_precision_numeric.py       # Pre-launch hardening — orders/table_orders money columns INTEGER → NUMERIC(14,2)
 │   ├── 0047_shift_swap_status_check.py       # Pre-launch hardening — CHECK constraint on shift_swap_requests.status
-│   └── 0048_performance_indexes.py            # Pre-launch hardening — 7 composite indexes CONCURRENTLY (dashboard hot paths)
+│   ├── 0048_performance_indexes.py            # Pre-launch hardening — 7 composite indexes CONCURRENTLY (dashboard hot paths)
+│   └── 0049_loyalty_campaigns.py              # "No-v2" sprint — loyalty_campaigns table + RLS org_isolation + state machine (draft/active/paused)
 ```
 
 ## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
@@ -376,6 +377,16 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 - PIN login enumeration oracle unificado (siempre 401), tip-distribution exige 100% exacto
 - Tests: 1065 passed / 0 failed / 105 skipped (baseline intacto)
 
+**"No-v2" sprint (2026-04-21)** — reemplazo total de placeholders `v2` + seed data fake por features reales:
+- 3 agents Sonnet en paralelo (worktrees) + 2 agents de fix de tests = 5 delegaciones
+- Frontend: 10 HTML admin limpios de nombres/montos hardcoded (María Rodríguez, $48.4M, 8 clientes, etc.) + 4 JS populan placeholders que antes nadie llenaba
+- Backend: 11 endpoints nuevos — 3 stats aggregates, 3 loyalty aggregates, 5 loyalty campaigns CRUD, 1 payroll approve
+- Migración 0049: `loyalty_campaigns` con RLS `org_isolation` + state machine draft/active/paused
+- Lint frontend extendido: 5 checks (MOCK/TODO/FETCH/HTML-SEED nombres/HTML-SEED dinero) + `// lint-allow` como supresión con razón obligatoria
+- Tests: +27 integration tests verídicos contra `TEST_DATABASE_URL` (baseline 1143 → 1170 passed / 1 pre-existing failure / 27 skipped)
+- Patrón de fixture integración documentado (function scope + `_fake_get_pool` async + `SET LOCAL ROLE mesio_app` + manual `tx.start/rollback`)
+- Bugs reales descubiertos durante el sprint (no solo polish): 4 backend-path mismatches en JS (`/delivery/orders` sin `/api` 3×, `/payroll/export/{id}` invertido, `approve` endpoint faltante, `/api/admin/logout` legacy)
+
 ### Limitaciones conocidas (no críticas)
 
 - `quantize_money` interno NO recibe `currency` en la mayoría de sitios → default 2 decimales. Solo el endpoint `pay_check` propaga `features.currency`. Para COP/CLP la columna NUMERIC del schema ya enforce la precisión final. Propagar `currency` a `db_calculate_payroll`, `db_calculate_tips_by_attendance`, etc. requeriría cambios de signature en repos — diferido.
@@ -439,19 +450,20 @@ Ver "Pendientes de calendario" arriba — puntos 5-10 son features v2 / schema e
 `conversations`, `carts`, `staff`, `fiscal_invoices`, `inventory`, `dish_recipes`,
 `webhook_inbox`, `sessions` (con `token_hash`)
 
-### RLS (Row-Level Security) activo en 38 tablas (Fase 1 v11.0 + Sprints C/W + pre-launch 0044)
+### RLS (Row-Level Security) activo en 39 tablas (Fase 1 v11.0 + Sprints C/W + pre-launch 0044 + "No-v2" 0049)
 `attendance_deductions`, `billing_log`, `carts`, `contract_templates`, `conversations`,
 `customer_profiles`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
-`loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
+`loyalty_campaigns`, `loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
 `menu_events`, `nps_responses`, `nps_waiting`, `occupancy_snapshots`, `orders`,
 `overtime_requests`, `payroll_runs`, `shift_swap_requests`, `staff`, `staff_announcements`,
 `staff_deduction_items`, `staff_schedules`, `staff_shifts`, `staff_task_completions`,
 `staff_tasks`, `subscription_usage`, `table_orders`, `table_sessions`, `time_slot_discounts`,
 `tip_distributions`, `waiter_alerts`, `webauthn_challenges`, `weekly_reports`
 
-Tablas nuevas agregadas por sprints de comms + swap:
+Tablas nuevas agregadas por sprints recientes:
 - `staff_announcements`, `staff_tasks`, `staff_task_completions` (0042 — Sprint C, admin↔staff messaging)
 - `shift_swap_requests` (0043 — Sprint W, coworker shift-swap + admin approval)
+- `loyalty_campaigns` (0049 — "No-v2" sprint, WhatsApp automation campaigns with state machine)
 
 Todas con policy `tenant_isolation` + `ENABLE + FORCE ROW LEVEL SECURITY`. Tablas explícitamente GLOBAL (sin RLS por diseño): `users`, `sessions`, `webhook_inbox`, `processed_wam_ids`, `prospects*`, `crm_templates`, `sales_*`.
 
@@ -694,7 +706,9 @@ currency_exponent(currency) -> int               # 0 o 2
 | `conversations_repo` | 20+ funciones | `conversations`, `carts`, NPS per-conv, processed_wam_ids, features |
 | `restaurant_repo` | 50+ funciones | `restaurants`, `users`, `orders`, `nps_responses`, `branches`, `subscription_usage` |
 | `fiscal_repo` | 8 funciones | `fiscal_invoices`, `fiscal_resolutions` |
-| `loyalty_repo` | 8 funciones | `loyalty_customers`, `loyalty_ledger` |
+| `loyalty_repo` | 11 funciones (8 originales + 3 agregadores: `db_get_loyalty_aggregates`, `db_get_loyalty_segments`, `db_get_loyalty_funnel`) | `loyalty_customers`, `loyalty_ledger`, JOIN a `orders` |
+| `loyalty_campaigns_repo` | 6 funciones CRUD + state machine (draft→active→paused) | `loyalty_campaigns` |
+| `stats_repo` | 10 funciones (7 originales + 3 agregadores: `db_churn_summary`, `db_branches_consolidated`, `db_branches_comparison`) | `customer_profiles`, `orders`, `table_orders`, `nps_responses`, `staff`, `locations`, `reservations` |
 | `crm_repo` | funciones CRM | `prospects`, `prospect_notes`, `crm_templates` |
 | `reservations_repo` | 14 funciones | `reservations`, disponibilidad, stats |
 | `discounts_repo` | 5 funciones | `time_slot_discounts` |
@@ -778,6 +792,8 @@ DELETE /api/staff/deductions/{item_id}
 GET    /api/staff/payroll/calculate     → ?period_start=&period_end=
 POST   /api/staff/payroll/runs          → body: {period_start, period_end, snapshot, ...}
 GET    /api/staff/payroll/runs
+PUT    /api/staff/payroll/runs/{id}/approve  → marks draft → approved (No-v2 sprint)
+GET    /api/staff/payroll/runs/{id}/export   → CSV download
 GET    /api/staff/payroll/overtime      → ?week_start=&status=
 PATCH  /api/staff/payroll/overtime/{id} → body: {status: approved|rejected, notes}
 GET    /api/staff/payroll/contracts
@@ -820,6 +836,147 @@ DELETE /api/menu/image
 Feature flags relacionados:
 - `bot_visual_menu` (opt-in, default false) — activa envío de fotos desde el bot (Fase 4)
 - `catalog_v2_enabled` (opt-out, default true) — kill-switch global del catálogo visual
+
+## "No-v2" Sprint — Shipped 2026-04-21
+
+Reemplazo completo de placeholders `v2` + seed data hardcoded por endpoints reales con UI cableada. Cero features ocultas detrás de badges muted. Los 3 agents Sonnet corrieron en paralelo en worktrees aislados; test fixes delegados a 2 agents adicionales después del merge.
+
+### Endpoints nuevos (todos RLS + tenant_scope + Decimal-safe)
+
+**Stats aggregates** (`app/routes/stats.py` + `app/repositories/stats_repo.py`):
+```
+GET /api/stats/churn-summary
+  Returns: {high_count, medium_count, watch_count, ltv_sum, reactivated_count, medium_risk[]}
+  Source: customer_profiles + days-since-last-order binning
+
+GET /api/stats/branches-consolidated?days=7
+  Returns: {period, total_sales, total_tickets, avg_nps, total_staff, growth_yoy}
+  Source: orders + table_orders + nps_responses + staff, windowed
+
+GET /api/stats/branches-comparison?days=30
+  Returns: {locations[], rows[{metric, per_location[], avg, target, top_location_id, vs_target_pct}]}
+  Source: locations + orders + table_orders + nps_responses + reservations (per location GROUP BY)
+```
+
+**Loyalty aggregates** (`app/routes/loyalty.py` + `app/repositories/loyalty_repo.py`):
+```
+GET /api/loyalty/aggregates
+  Returns: {total_customers, avg_frequency, avg_ticket_member, avg_ticket_nonmember,
+           roi_multiple, redemption_pct}
+
+GET /api/loyalty/segments
+  Returns: {segments: [{id, name, description, count, potential_revenue, tone}, …]}
+  4 segmentos: vip-active, vip-dormant, new-month, birthdays
+
+GET /api/loyalty/funnel
+  Returns: {steps: [{label, description, count, pct}, …]}
+  5 pasos: primera/segunda visita, subida a plata/oro/platino (tiers de features.loyalty_tiers)
+```
+
+**Loyalty campaigns CRUD** (`app/repositories/loyalty_campaigns_repo.py`):
+```
+GET    /api/loyalty/campaigns?status=active|paused|draft
+POST   /api/loyalty/campaigns           → body: {name, description, segment, trigger_type, message_template}
+PATCH  /api/loyalty/campaigns/{id}
+DELETE /api/loyalty/campaigns/{id}
+POST   /api/loyalty/campaigns/{id}/toggle  → body: {status: active|paused}
+```
+
+State machine `loyalty_campaigns.status`: `draft` → `active`, `active` ↔ `paused`. Transición inválida (ej. `draft` → `paused` directo) retorna 409.
+
+### Frontend — datos reales, cero placeholders eternos
+
+| Página admin | Qué se cableó | Endpoint que consume |
+|---|---|---|
+| `nomina.html` | Period card + 4 summary metrics (base/tips/deductions/overtime) | agrega del response existente de `/api/staff/payroll/calculate` |
+| `menu-admin.html` | `#inv-summary` ("N productos · $X valor stock") | agrega del response de `/api/inventory` |
+| `pedidos.html` | 2º KDS grid (Salón) + 2ª metrics-row (antes no wiring) | `/api/pos/tables-status` |
+| `menu-engineering.html` | `#ai-diagnosis` banner | `/api/ai/proxy` con prompt formateado desde analytics |
+| `clientes-riesgo.html` | 5 KPIs + grid medio + banner IA | `/api/stats/churn-summary` + `/api/ai/proxy` |
+| `fidelizacion.html` | 4 métricas + 4 seg-cards + funnel 5-step + tabla campañas (con CRUD) | 4 endpoints loyalty nuevos |
+| `sucursales.html` | 5 consolidados + comparativa multi-sede + banner IA | `/api/stats/branches-*` + `/api/ai/proxy` |
+
+### Lint frontend — `scripts/lint_frontend.py` + `tests/test_frontend_lint.py`
+
+Script auto-invocado como pytest test. Cinco checks:
+1. **MOCK** — keywords `mock|fake|dummy|lorem|ipsum` en JS (`demo-data.js` exento)
+2. **TODO** — marcadores `TODO|FIXME|XXX|HACK` en admin JS (fuerzan resolución explícita)
+3. **FETCH** — cada `fetch('/api/…')` contra rutas FastAPI registradas (segment-match soporta `{param}` + string concat `'/api/x/' + id`)
+4. **HTML-SEED (nombres)** — nombres españoles hardcoded en admin HTML (`María`, `Carlos`, etc.)
+5. **HTML-SEED (dinero)** — literales `$X.YM` / `$Nk` en contenido HTML admin
+
+Supresión con `// lint-allow: razón` (JS) o `<!-- lint-allow: razón -->` (HTML). PROHIBIDO suprimir sin razón.
+
+Correr: `python scripts/lint_frontend.py` o `pytest tests/test_frontend_lint.py`. CI debe fallar si hay regresión.
+
+### Patrón de tests integración contra `TEST_DATABASE_URL` (fixture correcto)
+
+Los agentes Sonnet escribieron fixtures rotas en la primera pasada. El patrón validado que funciona:
+
+```python
+@pytest.fixture                       # function-scoped — módulo/session da "Future attached to different loop"
+async def raw_pool():
+    pool = await asyncpg.create_pool(TEST_DB_URL, min_size=1, max_size=3)
+    try:
+        yield pool
+    finally:
+        await pool.close()
+
+@pytest.fixture
+async def db_conn(raw_pool, monkeypatch):
+    from app.services import database as db_module
+
+    async with raw_pool.acquire() as conn:
+        proxy = _ConnProxy(conn)
+        shim = _PoolShim(proxy)
+
+        # get_pool es async → el mock DEBE ser async def (no lambda: shim)
+        async def _fake_get_pool():
+            return shim
+        monkeypatch.setattr(db_module, "get_pool", _fake_get_pool)
+        # NO patchear app.services.tenant_db.get_pool — no existe como atributo (se importa lazy)
+
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            # CRÍTICO: sin esto, postgres (superuser) bypasea FORCE RLS y los tests
+            # de aislamiento cross-tenant "pasan" sin probar nada real.
+            await conn.execute("SET LOCAL ROLE mesio_app")
+            yield proxy
+        finally:
+            await tx.rollback()        # nunca "raise PostgresError" — pytest lo cuenta como error
+```
+
+Los 3 casos mínimos por endpoint (discipline de sprint):
+1. **Empty tenant** — nuevo org con 0 data devuelve ceros/arrays vacíos, NO 500
+2. **Aggregate correctness** — sembrar N órdenes por $Y, asserting el SUM == N·Y
+3. **Tenant isolation** — scope A ve data A, scope B ve data B, nunca cross-over
+
+Prohibidos en tests nuevos:
+- `assert response.status_code == 200` como única aserción
+- Mock del repo completo (eso prueba el handler, no el agregado)
+- Copiar shape del docstring sin verificar que SQL lo produce
+- `assert "key" in response.json()` sin checkear valor
+
+Reference files: `tests/test_loyalty_aggregates.py`, `tests/test_loyalty_campaigns.py`, `tests/test_stats_aggregates.py`.
+
+### Gotchas descubiertas durante el sprint (para la próxima vez)
+
+1. **Worktrees paralelos** a veces no crean worktree — algunos agents escriben directamente al main. Verificar `git worktree list` post-completion.
+2. **`loyalty_customers` vs `customer_profiles`**: columnas diferentes. `loyalty_customers` tiene `points_balance/total_earned/total_redeemed`; `customer_profiles` tiene `total_spent/total_orders`. Un agent las confundió en sus tests.
+3. **`orders.id` no tiene DEFAULT** — usar `gen_random_uuid()::text` en INSERTs de tests.
+4. **`orders.subtotal NUMERIC NOT NULL`** — obligatorio en INSERTs, no olvidar.
+5. **asyncpg + tz**: `orders.created_at` es `TIMESTAMP WITHOUT TIME ZONE`. Passing `datetime.now(timezone.utc)` como param rechaza con `InvalidParameterValue`. Usar `datetime.utcnow().replace(tzinfo=None)` o strip tzinfo en proxy.
+6. **Carrera en windows de tiempo**: un `INSERT orders (..., NOW())` puede caer fuera de la ventana `created_at < $upper_bound` si Python computó `$upper_bound` antes de que el INSERT committeara. Insertar con `NOW() - INTERVAL '2 minutes'` como margen.
+7. **`WITH CHECK` policy exige GUC seteado**: con `SET LOCAL ROLE mesio_app` activo, INSERT en tabla RLS-protegida sin haber setear `app.org_id` primero dispara `InsufficientPrivilegeError`. Llamar `_set_org_scope(conn, org_id)` antes de cada seed.
+
+### TODOs documentados (no ocultos, campos nullables)
+
+Agent 2 (stats_repo) dejó 6 métricas como `null` en `db_branches_comparison` porque las fuentes de data no existen todavía: food cost %, costo nómina/ventas, rotación personal 12m, rotación mesas/día, crecimiento YoY per-location, tasa de reserva confirmada per-location. Cuando se agreguen las fuentes, los endpoints ya están cableados.
+
+Agent 3 (loyalty_repo) dejó 2:
+- `roi_multiple` = null (falta tracking de campaign spend — campo opcional futuro)
+- `birthdays` segment count = 0 si el schema no tiene columna de cumpleaños (condicional)
 
 ## Reglas de Seguridad y Estilo
 
@@ -1080,13 +1237,15 @@ Wrapper Cloudinary. Funciones clave:
 - **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
 - **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`.
-  - **Con `TEST_DATABASE_URL` exportada** (post-Sprint-W baseline 2026-04-20): **1143 passed / 0 failed / 37 skipped en ~6-7min**. Los 37 skipped se reparten:
+  - **Con `TEST_DATABASE_URL` exportada** (post-"No-v2" baseline 2026-04-21): **1170 passed / 1 pre-existing failure / 27 skipped en ~9min**. El 1 failure es `test_decimal_coercion_float_inputs` (pre-dates este sprint — expects `int` but 0046 migration changed column to `NUMERIC(14,2)`). Los 27 skipped se reparten:
     - 17 tests de migración Wave-2 transicional (obsoletos post-0038, marcados skip con razón)
     - 4 tests de integración `test_staff_self_tips` (Sprint Y — fixture datetime/NOT NULL, flagged)
-    - ~16 integration tests adicionales que requieren extras del entorno
+    - ~6 integration tests adicionales que requieren extras del entorno
   - **Sin `TEST_DATABASE_URL`**: ~1000 passed / 0 failed / ~90+ skipped en ~15s (integration tests gatedos por URL son skipped).
-  - Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
+  - Cualquier failure nuevo (fuera del 1 pre-existente) es regresión real — no merguear hasta resolverla.
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
+- **Frontend Lint ("No-v2" sprint)**: Antes de mergear cualquier cambio que toque `app/static/js/**` o `app/static/html/**`, correr `python scripts/lint_frontend.py` — CI falla si encuentra mock/TODO/dead-fetch/seed-data. Supresión legítima via `// lint-allow: razón` (JS) o `<!-- lint-allow: razón -->` (HTML). PROHIBIDO suprimir sin razón explícita.
+- **Tests Verídicos**: Nuevos tests integration contra `TEST_DATABASE_URL` DEBEN probar correctness de agregados (seed data → assert valor exacto), tenant isolation (org A vs org B), y caso vacío (sin 500). Prohibidos: `assert status_code == 200` como única aserción, mock del repo completo, `assert "key" in data` sin checkear valor. Ver fixture de referencia en `tests/test_loyalty_aggregates.py` ("No-v2" sprint).
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.
 - **Roadmap Fase 2+3**: Antes de empezar trabajo de hardening adicional, LEER `PHASE_2_3_PLAN.md` en raíz del repo. Ahí está el plan priorizado, con deuda residual, tareas concretas, y sugerencias de delegación.
