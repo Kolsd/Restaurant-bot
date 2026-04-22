@@ -5,7 +5,7 @@
   const token = localStorage.getItem('rb_token');
   if (!token) { location.href = '/login'; return; }
 
-  // Tab switching
+  // ── Tab switching ─────────────────────────────────────────────────
   function switchTab(tab) {
     document.querySelectorAll('[data-tab]').forEach(function (b) {
       b.classList.toggle('active', b.dataset.tab === tab);
@@ -21,45 +21,234 @@
   });
 
   // ── Sync branches ─────────────────────────────────────────────────
-  document.querySelectorAll('.btn.primary').forEach(function (btn) {
-    if (btn.textContent.includes('Sincronizar')) {
-      btn.addEventListener('click', async function () {
-        const ok = await mesioConfirm('Sincronizar menú a todas las sucursales. Los cambios locales de cada sucursal se sobreescribirán.', { confirmText: 'Sincronizar', danger: false });
-        if (!ok) return;
-        btn.disabled = true;
-        try {
-          const res = await fetch('/api/menu/sync-branches', {
-            method: 'POST',
-            headers: mesioHeaders()
-          });
-          if (!res.ok) {
-            const err = await res.json().catch(function () { return {}; });
-            throw new Error(err.detail || 'HTTP ' + res.status);
-          }
-          mesioToast('Menú sincronizado a todas las sucursales', 'success');
-        } catch (e) {
-          mesioToast('Error al sincronizar: ' + e.message, 'error');
-        } finally {
-          btn.disabled = false;
+  var syncBtn = document.getElementById('btn-sync-branches');
+  if (syncBtn) {
+    syncBtn.addEventListener('click', async function () {
+      var ok = await mesioConfirm(
+        'Sincronizar menú a todas las sucursales. Los cambios locales de cada sucursal se sobreescribirán.',
+        { confirmText: 'Sincronizar', danger: false }
+      );
+      if (!ok) return;
+      syncBtn.disabled = true;
+      try {
+        var res = await fetch('/api/menu/sync-branches', {
+          method: 'POST',
+          headers: mesioHeaders()
+        });
+        if (!res.ok) {
+          var err = await res.json().catch(function () { return {}; });
+          throw new Error(err.detail || 'HTTP ' + res.status);
+        }
+        var data = await res.json();
+        var n = data.branches_updated != null ? data.branches_updated : 'todas las';
+        mesioToast('Menú sincronizado a ' + n + ' sucursales', 'success');
+      } catch (e) {
+        mesioToast('Error al sincronizar: ' + e.message, 'error');
+      } finally {
+        syncBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── Disponibilidad sub-filters ────────────────────────────────────
+  // State: 'all' | 'available' | 'unavailable'
+  var _menuFilter = 'all';
+  var _rawCategories = null; // last full category dict from loadMenu
+
+  var dispFilterBtns = document.querySelectorAll('#tab-disp .seg:first-of-type .seg-btn, #tab-disp .seg .seg-btn');
+  // Scope only to the filter row seg (not the top tab seg)
+  var dispFilterSeg = null;
+  (function () {
+    var rows = document.querySelectorAll('#tab-disp .row');
+    if (rows[0]) dispFilterSeg = rows[0].querySelector('.seg');
+  })();
+
+  if (dispFilterSeg) {
+    var filterBtns = dispFilterSeg.querySelectorAll('.seg-btn');
+    filterBtns.forEach(function (btn, idx) {
+      btn.addEventListener('click', function () {
+        filterBtns.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        _menuFilter = idx === 0 ? 'all' : idx === 1 ? 'available' : 'unavailable';
+        if (_rawCategories) renderMenu(_rawCategories);
+      });
+    });
+  }
+
+  function _applyMenuFilter(categories) {
+    if (_menuFilter === 'all') return categories;
+    var out = {};
+    Object.keys(categories).forEach(function (cat) {
+      var dishes = (categories[cat] || []).filter(function (d) {
+        var avail = d.available !== false;
+        return _menuFilter === 'available' ? avail : !avail;
+      });
+      if (dishes.length) out[cat] = dishes;
+    });
+    return out;
+  }
+
+  // ── Render menu ───────────────────────────────────────────────────
+
+  function initToggle(input) {
+    input.addEventListener('change', function () {
+      var dish = input.closest('.dish');
+      if (dish) dish.classList.toggle('off', !input.checked);
+      saveDishAvailability(input);
+    });
+  }
+
+  async function saveDishAvailability(input) {
+    var dish = input.closest('.dish');
+    if (!dish) return;
+    var name = dish.querySelector('.dish-name');
+    if (!name) return;
+    try {
+      var res = await fetch('/api/menu/availability', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+        body: JSON.stringify({ dish_name: name.textContent.trim(), available: input.checked })
+      });
+      if (!res.ok) throw new Error('status ' + res.status);
+    } catch (e) {
+      input.checked = !input.checked;
+      var dishEl = input.closest('.dish');
+      if (dishEl) dishEl.classList.toggle('off', !input.checked);
+      mesioToast('Error al guardar disponibilidad', 'error');
+    }
+  }
+
+  function _updateMenuCounter(categories) {
+    var el = document.getElementById('menu-counter');
+    if (!el) return;
+    if (!categories || !Object.keys(categories).length) {
+      el.textContent = '0 platos';
+      return;
+    }
+    var total = 0, avail = 0, paused = 0;
+    Object.values(categories).forEach(function (dishes) {
+      (dishes || []).forEach(function (d) {
+        total += 1;
+        if (d.active === false) { paused += 1; }
+        else if (d.available !== false) { avail += 1; }
+      });
+    });
+    el.textContent = avail + ' / ' + total + ' disponibles' + (paused ? ' · ' + paused + ' pausados' : '');
+  }
+
+  function renderMenu(categories) {
+    // Always update counter with the full (unfiltered) categories
+    _updateMenuCounter(categories);
+
+    var filtered = _applyMenuFilter(categories);
+    var container = document.getElementById('live-menu-container');
+    if (!container) return;
+
+    if (!filtered || !Object.keys(filtered).length) {
+      container.innerHTML = '<div style="padding:24px;color:var(--text-3);">' +
+        (_menuFilter === 'all' ? '(sin platos)' : 'No hay platos con ese filtro.') + '</div>';
+      container.setAttribute('data-loaded', 'true');
+      return;
+    }
+
+    container.innerHTML = Object.keys(filtered).map(function (cat) {
+      var dishes = filtered[cat];
+      var dishHtml = dishes.map(function (d) {
+        var available = d.available !== false;
+        var initials = (d.name || '?')[0].toUpperCase();
+        var price = mesioFmt(d.price || 0);
+        var thumbContent = d.image_url
+          ? '<img src="' + _escHtml(d.image_url) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">'
+          : _escHtml(initials);
+        return '<div class="dish ' + (available ? '' : 'off') + '" data-dish-name="' + _escHtml(d.name || '') + '">' +
+          '<div class="dish-thumb" style="background:linear-gradient(135deg,var(--brand),#0F6E56);position:relative;overflow:hidden;">' +
+          thumbContent +
+          '<button class="dish-img-btn" data-img-dish="' + _escHtml(d.name || '') + '" aria-label="Imagen" title="Gestionar imagen" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.45);border:none;border-radius:4px;padding:2px 4px;font-size:10px;cursor:pointer;color:#fff;line-height:1;">📷</button>' +
+          '</div>' +
+          '<div>' +
+          '<div class="dish-name">' + _escHtml(d.name || '') + '</div>' +
+          '<div class="dish-meta">' + price + '</div>' +
+          '</div>' +
+          '<label class="toggle" style="margin-left:auto;">' +
+          '<input type="checkbox"' + (available ? ' checked' : '') + '>' +
+          '<span></span></label>' +
+          '</div>';
+      }).join('');
+
+      return '<div class="card flush" style="margin-bottom:14px;">' +
+        '<div class="cat-head" style="padding:12px 16px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">' +
+        '<span>' + _escHtml(cat) + '</span>' +
+        '<span class="cat-arrow open">▾</span>' +
+        '</div>' +
+        '<div class="dish-grid">' + dishHtml + '</div>' +
+        '</div>';
+    }).join('');
+
+    container.querySelectorAll('.cat-head').forEach(function (head) {
+      head.addEventListener('click', function () {
+        var grid = head.closest('.card').querySelector('.dish-grid');
+        var arrow = head.querySelector('.cat-arrow');
+        if (grid) {
+          var hidden = grid.style.display === 'none';
+          grid.style.display = hidden ? '' : 'none';
+          if (arrow) arrow.classList.toggle('open', hidden);
         }
       });
+    });
+
+    container.querySelectorAll('.toggle input').forEach(initToggle);
+
+    container.querySelectorAll('.dish-img-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        openImageModal(btn.dataset.imgDish, categories);
+      });
+    });
+
+    container.setAttribute('data-loaded', 'true');
+  }
+
+  function buildCategoriesFromMenu(menuData) {
+    if (!menuData) return {};
+    if (Array.isArray(menuData)) return { 'Menú': menuData };
+    return menuData;
+  }
+
+  async function loadMenu() {
+    try {
+      var res = await fetch('/api/dashboard/menu', { headers: mesioHeaders() });
+      if (!res.ok) return;
+      var data = await res.json();
+      var menuRaw = data.menu || data.categories || data;
+      _rawCategories = buildCategoriesFromMenu(menuRaw);
+      renderMenu(_rawCategories);
+    } catch (e) {
+      console.error('menu-admin: load menu error', e);
     }
-  });
+  }
 
   // ── Inventory modal ────────────────────────────────────────────────
   var _invItems = [];
 
-  function openInvModal(item) {
+  function openInvModal(item, focusStock) {
     var modal = document.getElementById('invModal');
     if (!modal) return;
     document.getElementById('invModalId').value = item ? (item.id || '') : '';
     document.getElementById('invModalTitle').textContent = item ? 'Editar producto' : 'Nuevo producto';
     document.getElementById('invModalName').value = item ? (item.name || '') : '';
     document.getElementById('invModalUnit').value = item ? (item.unit || '') : '';
-    document.getElementById('invModalStock').value = item ? (item.stock != null ? item.stock : (item.current_stock != null ? item.current_stock : '')) : '';
-    document.getElementById('invModalMin').value = item ? (item.low_stock_threshold != null ? item.low_stock_threshold : (item.min_stock != null ? item.min_stock : '')) : '';
+    document.getElementById('invModalStock').value = item
+      ? (item.stock != null ? item.stock : (item.current_stock != null ? item.current_stock : ''))
+      : '';
+    document.getElementById('invModalMin').value = item
+      ? (item.low_stock_threshold != null ? item.low_stock_threshold : (item.min_stock != null ? item.min_stock : ''))
+      : '';
     document.getElementById('invModalCost').value = item ? (item.cost_per_unit != null ? item.cost_per_unit : '') : '';
     modal.style.display = 'flex';
+    if (focusStock) {
+      setTimeout(function () { document.getElementById('invModalStock').focus(); }, 60);
+    }
   }
 
   function closeInvModal() {
@@ -83,9 +272,7 @@
     try {
       var url = id ? '/api/inventory/' + id : '/api/inventory';
       var method = id ? 'PUT' : 'POST';
-      var body = id
-        ? { name: name, unit: unit, current_stock: stock, min_stock: min, cost_per_unit: cost }
-        : { name: name, unit: unit, current_stock: stock, min_stock: min, cost_per_unit: cost };
+      var body = { name: name, unit: unit, current_stock: stock, min_stock: min, cost_per_unit: cost };
       var res = await fetch(url, {
         method: method,
         headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
@@ -118,194 +305,66 @@
     });
   }
 
-  // Add inventory item
-  document.querySelectorAll('#tab-inv .btn.primary').forEach(function (btn) {
-    if (btn.textContent.includes('Agregar')) {
-      btn.addEventListener('click', function () { openInvModal(null); });
-    }
-  });
+  // + Agregar producto button
+  var addInvBtn = document.getElementById('btn-add-inventory');
+  if (addInvBtn) addInvBtn.addEventListener('click', function () { openInvModal(null); });
 
-  // ── Render menu ───────────────────────────────────────────────────
+  // ── Inventory category pills ──────────────────────────────────────
+  var _invCategoryFilter = 'all';
 
-  function initToggle(input) {
-    input.addEventListener('change', function () {
-      const dish = input.closest('.dish');
-      if (dish) dish.classList.toggle('off', !input.checked);
-      saveDishAvailability(input);
+  function _buildCategoryPills(items) {
+    var seg = document.querySelector('#tab-inv .seg');
+    if (!seg) return;
+
+    // Collect distinct categories from loaded data
+    var cats = [];
+    var seen = {};
+    (items || []).forEach(function (it) {
+      var c = (it.category || '').trim();
+      if (c && !seen[c]) { seen[c] = true; cats.push(c); }
     });
-  }
 
-  async function saveDishAvailability(input) {
-    const dish = input.closest('.dish');
-    if (!dish) return;
-    const name = dish.querySelector('.dish-name');
-    if (!name) return;
-    try {
-      const headers = Object.assign({ 'Content-Type': 'application/json' },
-        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
-      const res = await fetch('/api/menu/availability', {
-        method: 'POST', headers,
-        body: JSON.stringify({ dish_name: name.textContent.trim(), available: input.checked })
-      });
-      if (!res.ok) throw new Error('status ' + res.status);
-    } catch (e) {
-      // Revert optimistic update on error
-      input.checked = !input.checked;
-      const dishEl = input.closest('.dish');
-      if (dishEl) dishEl.classList.toggle('off', !input.checked);
-      if (typeof mesioToast === 'function') mesioToast('Error al guardar disponibilidad', 'error');
-    }
-  }
-
-  function _updateMenuCounter(categories) {
-    const el = document.getElementById('menu-counter');
-    if (!el) return;
-    if (!categories || !Object.keys(categories).length) {
-      el.textContent = '0 platos';
-      return;
-    }
-    let total = 0, avail = 0, paused = 0;
-    Object.values(categories).forEach(function (dishes) {
-      (dishes || []).forEach(function (d) {
-        total += 1;
-        if (d.active === false) { paused += 1; }
-        else if (d.available !== false) { avail += 1; }
-      });
-    });
-    el.textContent = avail + ' / ' + total + ' disponibles' + (paused ? ' · ' + paused + ' pausados' : '');
-  }
-
-  function renderMenu(categories) {
-    _updateMenuCounter(categories);
-    const tab = document.getElementById('tab-disp');
-    if (!tab) return;
-
-    // Find or create the live menu container
-    let container = document.getElementById('live-menu-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'live-menu-container';
-      // Insert after the filter row (first child)
-      const filterRow = tab.querySelector('.row');
-      if (filterRow && filterRow.parentNode) {
-        filterRow.parentNode.insertBefore(container, filterRow.nextSibling);
-      } else {
-        tab.appendChild(container);
-      }
-      // Remove old static category cards
-      tab.querySelectorAll('.card.flush').forEach(function (c) { c.remove(); });
-    }
-
-    if (!categories || !Object.keys(categories).length) {
-      container.innerHTML = '<div style="padding:24px;color:var(--text-3);">(sin platos)</div>';
-      container.setAttribute('data-loaded', 'true');
+    if (!cats.length) {
+      // No categories — hide the filter row entirely
+      var filterRow = seg.closest('.row');
+      if (filterRow) filterRow.style.display = 'none';
       return;
     }
 
-    container.innerHTML = Object.keys(categories).map(function (cat) {
-      const dishes = categories[cat];
-      const dishHtml = dishes.map(function (d) {
-        const available = d.available !== false;
-        const initials = (d.name || '?')[0].toUpperCase();
-        const price = typeof mesioFmt === 'function' ? mesioFmt(d.price || 0) : '$' + (d.price || 0);
-        const thumbContent = d.image_url
-          ? '<img src="' + _escHtml(d.image_url) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">'
-          : _escHtml(initials);
-        return '<div class="dish ' + (available ? '' : 'off') + '" data-dish-name="' + _escHtml(d.name || '') + '">' +
-          '<div class="dish-thumb" style="background:linear-gradient(135deg,var(--brand),#0F6E56);position:relative;overflow:hidden;">' +
-          thumbContent +
-          '<button class="dish-img-btn" data-img-dish="' + _escHtml(d.name || '') + '" aria-label="Imagen" title="Gestionar imagen" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.45);border:none;border-radius:4px;padding:2px 4px;font-size:10px;cursor:pointer;color:#fff;line-height:1;">📷</button>' +
-          '</div>' +
-          '<div>' +
-          '<div class="dish-name">' + _escHtml(d.name || '') + '</div>' +
-          '<div class="dish-meta">' + price + '</div>' +
-          '</div>' +
-          '<label class="toggle" style="margin-left:auto;">' +
-          '<input type="checkbox"' + (available ? ' checked' : '') + '>' +
-          '<span></span></label>' +
-          '</div>';
-      }).join('');
+    var filterRow = seg.closest('.row');
+    if (filterRow) filterRow.style.display = '';
 
-      return '<div class="card flush" style="margin-bottom:14px;">' +
-        '<div class="cat-head" style="padding:12px 16px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">' +
-        '<span>' + _escHtml(cat) + '</span>' +
-        '<span class="cat-arrow open">▾</span>' +
-        '</div>' +
-        '<div class="dish-grid">' + dishHtml + '</div>' +
-        '</div>';
-    }).join('');
+    // Rebuild pills: Todo + one per distinct category
+    var pillsHtml = '<button class="seg-btn' + (_invCategoryFilter === 'all' ? ' active' : '') + '" data-cat-pill="all">Todo</button>';
+    cats.forEach(function (c) {
+      pillsHtml += '<button class="seg-btn' + (_invCategoryFilter === c ? ' active' : '') + '" data-cat-pill="' + _escHtml(c) + '">' + _escHtml(c) + '</button>';
+    });
+    seg.innerHTML = pillsHtml;
 
-    // Re-bind category collapse
-    container.querySelectorAll('.cat-head').forEach(function (head) {
-      head.addEventListener('click', function () {
-        const grid = head.closest('.card').querySelector('.dish-grid');
-        const arrow = head.querySelector('.cat-arrow');
-        if (grid) {
-          const hidden = grid.style.display === 'none';
-          grid.style.display = hidden ? '' : 'none';
-          if (arrow) arrow.classList.toggle('open', hidden);
-        }
+    seg.querySelectorAll('[data-cat-pill]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        seg.querySelectorAll('[data-cat-pill]').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        _invCategoryFilter = btn.dataset.catPill;
+        renderInventory(_invItems);
       });
     });
-
-    // Bind toggles
-    container.querySelectorAll('.toggle input').forEach(initToggle);
-
-    // Bind image buttons
-    container.querySelectorAll('.dish-img-btn').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        e.preventDefault();
-        openImageModal(btn.dataset.imgDish, categories);
-      });
-    });
-
-    container.setAttribute('data-loaded', 'true');
-  }
-
-  function buildCategoriesFromMenu(menuData) {
-    // menuData may be a flat list or a dict keyed by category
-    if (!menuData) return {};
-    if (Array.isArray(menuData)) {
-      return { 'Menú': menuData };
-    }
-    // Already categorized dict
-    return menuData;
-  }
-
-  async function loadMenu() {
-    try {
-      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/dashboard/menu', { headers });
-      if (!res.ok) { return; }
-      const data = await res.json();
-      const menuRaw = data.menu || data.categories || data;
-      renderMenu(buildCategoriesFromMenu(menuRaw));
-    } catch (e) {
-      console.error('menu-admin: load menu error', e);
-    }
   }
 
   // ── Render inventory ──────────────────────────────────────────────
 
   function renderInventory(items) {
-    let body = document.getElementById('inv-body');
-    if (!body) {
-      const tab = document.getElementById('tab-inv');
-      if (!tab) return;
-      const existingRows = tab.querySelectorAll('.inv-row:not(.head)');
-      existingRows.forEach(function (r) { r.remove(); });
-      body = document.createElement('div');
-      body.id = 'inv-body';
-      const head = tab.querySelector('.inv-row.head');
-      if (head) {
-        head.parentNode.insertBefore(body, head.nextSibling);
-      } else {
-        tab.appendChild(body);
-      }
-    }
+    var body = document.getElementById('inv-body');
+    if (!body) return;
 
-    // Populate inv-alert-strip — show only items agotados or bajo-mínimo
+    // Filter by selected category
+    var filtered = (_invCategoryFilter === 'all')
+      ? items
+      : (items || []).filter(function (it) {
+          return (it.category || '').trim() === _invCategoryFilter;
+        });
+
+    // Inventory alert strip
     var alertEl = document.getElementById('inv-alert-strip');
     if (alertEl) {
       var listForAlert = Array.isArray(items) ? items : [];
@@ -314,7 +373,7 @@
         var low   = +(it.low_stock_threshold || it.min_stock || 0);
         return stock <= 0 || (low > 0 && stock <= low);
       });
-      if (critical.length === 0) {
+      if (!critical.length) {
         alertEl.style.display = 'none';
         alertEl.innerHTML = '';
       } else {
@@ -334,14 +393,33 @@
               ' requiere' + (critical.length === 1 ? '' : 'n') + ' atención inmediata' +
             '</div>' +
             '<div style="font-size:12px;color:var(--text-2);margin-top:3px;">' + names + extra + '</div>' +
-          '</div>';
+          '</div>' +
+          '<button class="btn sm ghost" id="btn-ordenar-compra" style="white-space:nowrap;">Ordenar compra</button>';
+
+        var ordenarBtn = document.getElementById('btn-ordenar-compra');
+        if (ordenarBtn) {
+          ordenarBtn.addEventListener('click', function () {
+            var lines = critical.map(function (it) {
+              var stock = +(it.stock || it.quantity || it.current_stock || 0);
+              return (it.name || it.sku || '') + ' — stock actual ' + stock + ' ' + (it.unit || 'u');
+            }).join('\n');
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(lines).then(function () {
+                mesioToast('Lista de compra copiada al portapapeles', 'success');
+              }).catch(function () {
+                window.print();
+              });
+            } else {
+              window.print();
+            }
+          });
+        }
       }
     }
 
-    // Populate inv-summary regardless of whether items array is empty
+    // inv-summary
     var summaryEl = document.getElementById('inv-summary');
     if (summaryEl) {
-      var fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
       var list = Array.isArray(items) ? items : [];
       var totalValue = 0;
       list.forEach(function (item) {
@@ -350,92 +428,92 @@
         totalValue += stock * cost;
       });
       summaryEl.textContent = list.length + ' producto' + (list.length === 1 ? '' : 's') +
-        ' · ' + fmt(totalValue) + ' valor stock';
+        ' · ' + mesioFmt(totalValue) + ' valor stock';
     }
 
-    if (!items || !items.length) {
-      body.innerHTML = '<div style="padding:18px;color:var(--text-3);">(sin inventario)</div>';
+    if (!filtered || !filtered.length) {
+      body.innerHTML = '<div style="padding:18px;color:var(--text-3);">' +
+        ((!items || !items.length) ? '(sin inventario)' : 'No hay productos en esta categoría.') + '</div>';
       body.setAttribute('data-loaded', 'true');
       return;
     }
 
-    body.innerHTML = items.map(function (item) {
-      const stock = item.stock || item.quantity || 0;
-      const low = item.low_stock_threshold || item.min_stock || 10;
-      const stockCls = stock <= 0 ? 'danger' : stock <= low ? 'warn' : '';
-      const unit = item.unit || 'u';
+    body.innerHTML = filtered.map(function (item) {
+      var stock = +(item.stock || item.quantity || item.current_stock || 0);
+      var low   = +(item.low_stock_threshold || item.min_stock || 0);
+      var stockCls = stock <= 0 ? 'danger' : (low > 0 && stock <= low) ? 'warn' : '';
+      var unit = item.unit || 'u';
+      var linked = Array.isArray(item.linked_dishes) ? item.linked_dishes : [];
+      var linkedText = linked.length ? linked.slice(0, 2).map(function (d) { return _escHtml(d); }).join(', ') + (linked.length > 2 ? ' +' + (linked.length - 2) : '') : '—';
+      var statusLabel = stock <= 0 ? '<span class="danger">Agotado</span>'
+        : (low > 0 && stock <= low) ? '<span class="warn">Bajo mínimo</span>'
+        : '<span class="brand">OK</span>';
       return '<div class="inv-row">' +
-        '<div style="font-weight:500;">' + _escHtml(item.name || item.sku || '') + '</div>' +
-        '<div style="font-size:12px;color:var(--text-3);">' + _escHtml(item.category || '') + '</div>' +
+        '<div>' +
+          '<div style="font-weight:500;">' + _escHtml(item.name || item.sku || '') + '</div>' +
+          '<div style="font-size:11px;color:var(--text-3);">' + _escHtml(item.category || '') + '</div>' +
+        '</div>' +
         '<div class="num"><span class="' + stockCls + '">' + stock + ' ' + _escHtml(unit) + '</span></div>' +
-        '<div><button class="btn sm ghost" data-inv-action="restock" data-id="' + (item.id || '') + '">Reponer</button> ' +
-        '<button class="btn sm ghost" data-inv-action="edit" data-id="' + (item.id || '') + '">Editar</button></div>' +
-        '</div>';
+        '<div class="num">' + (low > 0 ? low + ' ' + _escHtml(unit) : '—') + '</div>' +
+        '<div style="font-size:12px;color:var(--text-3);">' + linkedText + '</div>' +
+        '<div>' + statusLabel + '</div>' +
+        '<div style="text-align:right;">' +
+          '<button class="btn sm ghost" data-inv-action="restock" data-id="' + (item.id || '') + '">Reponer</button> ' +
+          '<button class="btn sm ghost" data-inv-action="edit" data-id="' + (item.id || '') + '">Editar</button>' +
+        '</div>' +
+      '</div>';
     }).join('');
 
     body.setAttribute('data-loaded', 'true');
+  }
 
-    body.querySelectorAll('[data-inv-action]').forEach(function (btn) {
-      btn.addEventListener('click', async function (e) {
-        e.stopPropagation();
-        var itemId = btn.dataset.id;
-        var action = btn.dataset.invAction;
-        var item = _invItems.find(function (it) { return String(it.id) === String(itemId); });
+  // Delegated listener on #inv-body for restock / edit / delete actions
+  var invBodyEl = document.getElementById('inv-body');
+  if (invBodyEl) {
+    invBodyEl.addEventListener('click', async function (e) {
+      var btn = e.target.closest('[data-inv-action]');
+      if (!btn) return;
+      e.stopPropagation();
+      var itemId = btn.dataset.id;
+      var action = btn.dataset.invAction;
+      var item = _invItems.find(function (it) { return String(it.id) === String(itemId); });
 
-        if (action === 'restock') {
-          var delta = window.prompt('Cantidad a reponer:');
-          if (delta === null) return;
-          delta = parseFloat(delta);
-          if (isNaN(delta) || delta <= 0) { mesioToast('Ingresa una cantidad positiva', 'warn'); return; }
-          try {
-            var res = await fetch('/api/inventory/' + itemId + '/adjust', {
-              method: 'POST',
-              headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
-              body: JSON.stringify({ quantity: delta, reason: 'restock manual' })
-            });
-            if (!res.ok) {
-              var err = await res.json().catch(function () { return {}; });
-              throw new Error(err.detail || 'HTTP ' + res.status);
-            }
-            mesioToast('Stock actualizado', 'success');
-            loadInventory();
-          } catch (e2) {
-            mesioToast('Error: ' + e2.message, 'error');
+      if (action === 'restock') {
+        // Open the inv modal prefilled, focused on stock field
+        openInvModal(item || { id: itemId }, true);
+
+      } else if (action === 'edit') {
+        openInvModal(item || { id: itemId }, false);
+
+      } else if (action === 'delete') {
+        var confirmed = await mesioConfirm('Eliminar este producto del inventario. Esta acción no se puede deshacer.', { confirmText: 'Eliminar', danger: true });
+        if (!confirmed) return;
+        try {
+          var res = await fetch('/api/inventory/' + itemId, {
+            method: 'DELETE',
+            headers: mesioHeaders()
+          });
+          if (!res.ok) {
+            var err = await res.json().catch(function () { return {}; });
+            throw new Error(err.detail || 'HTTP ' + res.status);
           }
-
-        } else if (action === 'edit') {
-          openInvModal(item || { id: itemId });
-
-        } else if (action === 'delete') {
-          var confirmed = await mesioConfirm('Eliminar este producto del inventario. Esta acción no se puede deshacer.', { confirmText: 'Eliminar', danger: true });
-          if (!confirmed) return;
-          try {
-            var res2 = await fetch('/api/inventory/' + itemId, {
-              method: 'DELETE',
-              headers: mesioHeaders()
-            });
-            if (!res2.ok) {
-              var err2 = await res2.json().catch(function () { return {}; });
-              throw new Error(err2.detail || 'HTTP ' + res2.status);
-            }
-            mesioToast('Producto eliminado', 'success');
-            loadInventory();
-          } catch (e3) {
-            mesioToast('Error: ' + e3.message, 'error');
-          }
+          mesioToast('Producto eliminado', 'success');
+          loadInventory();
+        } catch (e2) {
+          mesioToast('Error: ' + e2.message, 'error');
         }
-      });
+      }
     });
   }
 
   async function loadInventory() {
     try {
-      const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
-      const res = await fetch('/api/inventory', { headers });
+      var res = await fetch('/api/inventory', { headers: mesioHeaders() });
       if (!res.ok) { return; }
-      const data = await res.json();
-      const items = data.inventory || data.items || data;
+      var data = await res.json();
+      var items = data.inventory || data.items || data;
       _invItems = Array.isArray(items) ? items : [];
+      _buildCategoryPills(_invItems);
       renderInventory(_invItems);
     } catch (e) {
       console.error('menu-admin: inventory error', e);
@@ -608,9 +686,7 @@
 
   async function _handleImageDelete() {
     if (!_imgModalDish || !_imgModalDish.image_public_id) return;
-    var confirmed = typeof mesioConfirm === 'function'
-      ? await mesioConfirm('Eliminar la imagen de este plato.')
-      : confirm('Eliminar la imagen de este plato.');
+    var confirmed = await mesioConfirm('Eliminar la imagen de este plato.');
     if (!confirmed) return;
 
     try {
@@ -643,21 +719,13 @@
   }
 
   // ── Editar carta — full visual editor ─────────────────────────────
-  // Powered by dashboard-features.js (loaded before this script via the page).
-  // Wires our "Editar carta" button to:
-  //   1. Feed dashboard-features.js the auth headers it expects (_dashHeaders)
-  //   2. Fetch /api/dashboard/menu and populate MENU_ITEMS (same shape as
-  //      dashboard-features.js loadMenu() builds)
-  //   3. Call openMenuEditor() which renders the visual cards editor
   async function openCartaEditor() {
-    // dashboard-features.js reads window._dashHeaders for fetch auth.
-    window._dashHeaders = (typeof mesioHeaders === 'function') ? mesioHeaders() : {};
+    window._dashHeaders = mesioHeaders();
 
     try {
       var rMenu = await fetch('/api/dashboard/menu', { headers: window._dashHeaders });
       if (!rMenu.ok) throw new Error('HTTP ' + rMenu.status);
       var menu = (await rMenu.json()).menu || {};
-      // Populate MENU_ITEMS global defined in dashboard-features.js
       window.MENU_ITEMS = [];
       Object.entries(menu).forEach(function (entry) {
         var cat = entry[0], dishes = entry[1];
@@ -682,22 +750,23 @@
         });
       });
     } catch (e) {
-      if (typeof mesioToast === 'function') mesioToast('No se pudo cargar la carta: ' + e.message, 'error');
+      mesioToast('No se pudo cargar la carta: ' + e.message, 'error');
       return;
     }
 
     if (typeof openMenuEditor !== 'function') {
-      if (typeof mesioToast === 'function') mesioToast('Editor no disponible (dashboard-features.js no cargó)', 'error');
+      mesioToast('Editor no disponible (dashboard-features.js no cargó)', 'error');
       return;
     }
     openMenuEditor();
   }
 
-
   var cartaBtn = document.getElementById('btn-edit-carta');
   if (cartaBtn) cartaBtn.addEventListener('click', openCartaEditor);
 
   // ── Escandallos (recipes) ─────────────────────────────────────────
+  var _allInventoryForRecipes = []; // populated by loadInventory for the recipe modal select
+
   async function loadRecipes() {
     var container = document.getElementById('recipes-container');
     if (!container) return;
@@ -722,7 +791,6 @@
         '</div>';
       return;
     }
-    var fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
     var gradients = [
       'linear-gradient(135deg,#1D9E75,#0F6E56)',
       'linear-gradient(135deg,#F59E0B,#B45309)',
@@ -738,7 +806,6 @@
       var lines      = Array.isArray(rec.lines) ? rec.lines : (rec.ingredients || []);
       var pct        = salePrice > 0 ? (foodCost / salePrice) * 100 : 0;
       var margin     = Math.max(0, salePrice - foodCost);
-      var pctClass   = pct < 20 ? 'brand' : pct < 30 ? 'warn' : 'danger';
       var pctColor   = pct < 20 ? 'var(--brand)' : pct < 30 ? 'var(--warning-text)' : 'var(--danger)';
 
       var ingredientsHtml = lines.map(function (ln) {
@@ -746,7 +813,7 @@
         var qty   = ln.quantity != null ? ln.quantity : '—';
         var unit  = ln.unit || '';
         var cost  = ln.line_cost != null ? ln.line_cost : ln.cost;
-        var costStr = cost != null ? fmt(+cost) : '';
+        var costStr = cost != null ? mesioFmt(+cost) : '';
         return '<div style="display:flex;justify-content:space-between;font-size:12.5px;">' +
           '<span>' + _escHtml(iname) + '</span>' +
           '<span class="mono">' + _escHtml(String(qty)) + ' ' + _escHtml(unit) + (costStr ? ' · ' + costStr : '') + '</span>' +
@@ -758,7 +825,7 @@
           '<div class="dish-thumb" style="background:' + gradients[idx % gradients.length] + ';">' + _escHtml(initial) + '</div>' +
           '<div>' +
             '<div style="font-size:14px;font-weight:600;">' + _escHtml(name) + '</div>' +
-            '<div style="font-size:11.5px;color:var(--text-3);">Precio venta ' + fmt(salePrice) + ' · ' + lines.length + ' ingrediente' + (lines.length === 1 ? '' : 's') + '</div>' +
+            '<div style="font-size:11.5px;color:var(--text-3);">Precio venta ' + mesioFmt(salePrice) + ' · ' + lines.length + ' ingrediente' + (lines.length === 1 ? '' : 's') + '</div>' +
           '</div>' +
           '<button class="btn sm ghost" data-recipe-edit="' + _escHtml(name) + '" style="margin-left:auto;">Editar</button>' +
         '</div>' +
@@ -767,25 +834,215 @@
           : '<div style="padding:12px 0;color:var(--text-3);font-size:12px;font-style:italic;">Sin ingredientes registrados.</div>'
         ) +
         '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding-top:12px;border-top:0.5px dashed var(--border);">' +
-          '<div><div style="font-size:10.5px;color:var(--text-3);">Food cost</div><div class="mono" style="font-weight:600;">' + fmt(foodCost) + '</div></div>' +
+          '<div><div style="font-size:10.5px;color:var(--text-3);">Food cost</div><div class="mono" style="font-weight:600;">' + mesioFmt(foodCost) + '</div></div>' +
           '<div><div style="font-size:10.5px;color:var(--text-3);">% sobre venta</div><div class="mono" style="font-weight:600;color:' + pctColor + ';">' + pct.toFixed(1) + '%</div></div>' +
-          '<div><div style="font-size:10.5px;color:var(--text-3);">Margen bruto</div><div class="mono" style="font-weight:600;">' + fmt(margin) + '</div></div>' +
+          '<div><div style="font-size:10.5px;color:var(--text-3);">Margen bruto</div><div class="mono" style="font-weight:600;">' + mesioFmt(margin) + '</div></div>' +
         '</div>' +
       '</div>';
     }).join('');
-  }
 
-  // "+ Nuevo escandallo" + "Editar" wiring — TODO: open a dedicated modal.
-  // For now, surface a helpful toast so the button doesn't feel dead.
-  var newRecipeBtn = document.getElementById('btn-new-recipe');
-  if (newRecipeBtn) {
-    newRecipeBtn.addEventListener('click', function () {
-      if (typeof mesioToast === 'function') {
-        mesioToast('Editor de escandallos próximamente. Por ahora usa POST /api/inventory/recipes.', 'info', 4000);
-      }
+    // Delegated listener for "Editar" buttons on recipe cards
+    container.querySelectorAll('[data-recipe-edit]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openRecipeModal(btn.dataset.recipeEdit);
+      });
     });
   }
 
+  // ── Recipe modal ──────────────────────────────────────────────────
+
+  function _recipeModalClose() {
+    var m = document.getElementById('recipeModal');
+    if (m) m.style.display = 'none';
+  }
+
+  function _buildDishOptions(selectedDish) {
+    var select = document.getElementById('recipeModalDish');
+    if (!select) return;
+
+    // Build options from the loaded menu categories
+    var cats = _rawCategories || {};
+    var options = '<option value="">— Selecciona un plato —</option>';
+    Object.keys(cats).forEach(function (cat) {
+      (cats[cat] || []).forEach(function (d) {
+        var name = d.name || '';
+        var sel = name === selectedDish ? ' selected' : '';
+        options += '<option value="' + _escHtml(name) + '"' + sel + '>' + _escHtml(name) + '</option>';
+      });
+    });
+    select.innerHTML = options;
+  }
+
+  function _addRecipeLine(ingredientId, quantity) {
+    var linesEl = document.getElementById('recipeModalLines');
+    if (!linesEl) return;
+
+    var row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:1fr 100px 32px;gap:8px;align-items:center;';
+
+    // Ingredient selector
+    var sel = document.createElement('select');
+    sel.className = 'input';
+    sel.style.padding = '6px 8px';
+    var defOpt = document.createElement('option');
+    defOpt.value = '';
+    defOpt.textContent = '— Ingrediente —';
+    sel.appendChild(defOpt);
+    (_invItems.length ? _invItems : _allInventoryForRecipes).forEach(function (it) {
+      var opt = document.createElement('option');
+      opt.value = it.id || '';
+      opt.textContent = (it.name || it.sku || '') + (it.unit ? ' (' + it.unit + ')' : '');
+      if (ingredientId && String(it.id) === String(ingredientId)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    // Quantity input
+    var qty = document.createElement('input');
+    qty.className = 'input';
+    qty.type = 'number';
+    qty.min = '0';
+    qty.step = '0.001';
+    qty.placeholder = 'Cant.';
+    qty.style.padding = '6px 8px';
+    if (quantity != null) qty.value = quantity;
+
+    // Remove button
+    var rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.className = 'btn sm ghost';
+    rmBtn.textContent = '✕';
+    rmBtn.style.padding = '4px 8px';
+    rmBtn.addEventListener('click', function () { row.remove(); });
+
+    row.appendChild(sel);
+    row.appendChild(qty);
+    row.appendChild(rmBtn);
+    linesEl.appendChild(row);
+  }
+
+  async function openRecipeModal(dishName) {
+    // Ensure we have inventory loaded for the ingredient selects
+    if (!_invItems.length) {
+      try {
+        var r = await fetch('/api/inventory', { headers: mesioHeaders() });
+        if (r.ok) {
+          var d = await r.json();
+          var items = d.inventory || d.items || d;
+          _invItems = Array.isArray(items) ? items : [];
+        }
+      } catch (_) { /* leave _invItems as-is */ }
+    }
+
+    var modal = document.getElementById('recipeModal');
+    if (!modal) return;
+
+    document.getElementById('recipeModalTitle').textContent = dishName ? 'Editar escandallo' : 'Nuevo escandallo';
+    document.getElementById('recipeModalLines').innerHTML = '';
+
+    _buildDishOptions(dishName || '');
+
+    if (dishName) {
+      // Lock the dish selector when editing an existing recipe
+      var select = document.getElementById('recipeModalDish');
+      if (select) select.disabled = true;
+
+      try {
+        var res = await fetch('/api/inventory/recipes/' + encodeURIComponent(dishName), { headers: mesioHeaders() });
+        if (res.ok) {
+          var data = await res.json();
+          var lines = data.lines || [];
+          lines.forEach(function (ln) {
+            _addRecipeLine(ln.ingredient_id, ln.quantity);
+          });
+        }
+      } catch (e) {
+        mesioToast('Error al cargar el escandallo: ' + e.message, 'error');
+      }
+    } else {
+      var select2 = document.getElementById('recipeModalDish');
+      if (select2) select2.disabled = false;
+      // Start with one empty ingredient row
+      _addRecipeLine(null, null);
+    }
+
+    modal.style.display = 'flex';
+  }
+
+  async function saveRecipeModal() {
+    var dishSelect = document.getElementById('recipeModalDish');
+    var dishName = dishSelect ? dishSelect.value.trim() : '';
+    if (!dishName) { mesioToast('Selecciona un plato', 'warn'); return; }
+
+    var linesEl = document.getElementById('recipeModalLines');
+    var lineRows = linesEl ? linesEl.querySelectorAll('div') : [];
+    var lines = [];
+    var valid = true;
+
+    lineRows.forEach(function (row) {
+      var sel = row.querySelector('select');
+      var qty = row.querySelector('input[type="number"]');
+      if (!sel || !qty) return;
+      var ingId = parseInt(sel.value, 10);
+      var q = parseFloat(qty.value);
+      if (!ingId || isNaN(q) || q <= 0) { valid = false; return; }
+      lines.push({ ingredient_id: ingId, quantity: q });
+    });
+
+    if (!valid || !lines.length) {
+      mesioToast('Completa todos los ingredientes con cantidad mayor a 0', 'warn');
+      return;
+    }
+
+    var saveBtn = document.getElementById('recipeModalSave');
+    if (saveBtn) saveBtn.disabled = true;
+
+    try {
+      var res = await fetch('/api/inventory/recipes', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, mesioHeaders()),
+        body: JSON.stringify({ dish_name: dishName, lines: lines })
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function () { return {}; });
+        throw new Error(err.detail || 'HTTP ' + res.status);
+      }
+      mesioToast('Escandallo guardado', 'success');
+      _recipeModalClose();
+      loadRecipes();
+    } catch (e) {
+      mesioToast('Error: ' + e.message, 'error');
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
+  // Wire recipe modal buttons
+  var recipeModalClose = document.getElementById('recipeModalClose');
+  var recipeModalCancel = document.getElementById('recipeModalCancel');
+  var recipeModalSave = document.getElementById('recipeModalSave');
+  var recipeModalOverlay = document.getElementById('recipeModal');
+  var recipeModalAddLine = document.getElementById('recipeModalAddLine');
+
+  if (recipeModalClose) recipeModalClose.addEventListener('click', _recipeModalClose);
+  if (recipeModalCancel) recipeModalCancel.addEventListener('click', _recipeModalClose);
+  if (recipeModalSave) recipeModalSave.addEventListener('click', saveRecipeModal);
+  if (recipeModalOverlay) {
+    recipeModalOverlay.addEventListener('click', function (e) {
+      if (e.target === recipeModalOverlay) _recipeModalClose();
+    });
+  }
+  if (recipeModalAddLine) {
+    recipeModalAddLine.addEventListener('click', function () { _addRecipeLine(null, null); });
+  }
+
+  // "+ Nuevo escandallo" button
+  var newRecipeBtn = document.getElementById('btn-new-recipe');
+  if (newRecipeBtn) {
+    newRecipeBtn.addEventListener('click', function () { openRecipeModal(null); });
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────
   loadMenu();
   loadInventory();
   loadRecipes();

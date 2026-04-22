@@ -57,7 +57,7 @@
           </div>
           <span id="menu-counter" style="margin-left: auto; font-size: 12px; color: var(--text-3);">— / — disponibles</span>
           <button class="btn" id="btn-edit-carta"><svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>Editar carta</button>
-          <button class="btn primary">🔄 Sincronizar sucursales</button>
+          <button class="btn primary" id="btn-sync-branches">🔄 Sincronizar sucursales</button>
         </div>
 
         <div id="live-menu-container" data-loaded="false">
@@ -81,7 +81,7 @@
             <button class="seg-btn">Bebidas</button>
           </div>
           <span id="inv-summary" style="margin-left: auto; font-size: 12px; color: var(--text-3);">&nbsp;</span>
-          <button class="btn primary">+ Agregar producto</button>
+          <button class="btn primary" id="btn-add-inventory">+ Agregar producto</button>
         </div>
 
         <div class="card flush">
@@ -156,6 +156,37 @@
     <div class="modal-foot">
       <button class="btn ghost" id="invModalCancel">Cancelar</button>
       <button class="btn primary" id="invModalSave">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Recipe (escandallo) create/edit modal -->
+<div id="recipeModal" class="modal-overlay" style="display:none;align-items:center;justify-content:center;">
+  <div class="modal" style="width:520px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;">
+    <div class="modal-head">
+      <span id="recipeModalTitle">Nuevo escandallo</span>
+      <button class="modal-close" id="recipeModalClose" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;flex:1;">
+      <div>
+        <label class="form-label">Plato</label>
+        <select class="input" id="recipeModalDish">
+          <option value="">Cargando platos…</option>
+        </select>
+      </div>
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <label class="form-label" style="margin:0;">Ingredientes</label>
+          <button class="btn sm ghost" id="recipeModalAddLine" type="button">+ Ingrediente</button>
+        </div>
+        <div id="recipeModalLines" style="display:flex;flex-direction:column;gap:8px;">
+          <!-- lines injected by JS -->
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="recipeModalCancel">Cancelar</button>
+      <button class="btn primary" id="recipeModalSave">Guardar</button>
     </div>
   </div>
 </div>
