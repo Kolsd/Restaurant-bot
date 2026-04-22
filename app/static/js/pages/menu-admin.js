@@ -157,7 +157,26 @@
     }
   }
 
+  function _updateMenuCounter(categories) {
+    const el = document.getElementById('menu-counter');
+    if (!el) return;
+    if (!categories || !Object.keys(categories).length) {
+      el.textContent = '0 platos';
+      return;
+    }
+    let total = 0, avail = 0, paused = 0;
+    Object.values(categories).forEach(function (dishes) {
+      (dishes || []).forEach(function (d) {
+        total += 1;
+        if (d.active === false) { paused += 1; }
+        else if (d.available !== false) { avail += 1; }
+      });
+    });
+    el.textContent = avail + ' / ' + total + ' disponibles' + (paused ? ' · ' + paused + ' pausados' : '');
+  }
+
   function renderMenu(categories) {
+    _updateMenuCounter(categories);
     const tab = document.getElementById('tab-disp');
     if (!tab) return;
 
