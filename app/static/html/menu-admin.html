@@ -67,14 +67,9 @@
 
       <!-- INVENTARIO -->
       <div id="tab-inv" style="display:none;">
-        <div class="alert-strip">
-          <span style="font-size: 18px; line-height: 1;">⚠️</span>
-          <div style="flex: 1;">
-            <div style="font-size: 13px; font-weight: 600; color: var(--warning-text);">3 productos requieren atención inmediata</div>
-            <div style="font-size: 12px; color: var(--text-2); margin-top: 3px;">Papa criolla agotada · Carne de cerdo en mínimo · Hierbabuena bajo umbral</div>
-          </div>
-          <button class="btn sm">Ordenar compra</button>
-        </div>
+        <!-- Inventory alert strip — rendered dynamically by menu-admin.js
+             based on agotado / bajo-mínimo items. Hidden when inventory is clean. -->
+        <div id="inv-alert-strip" style="display:none;"></div>
 
         <div class="row" style="margin-bottom: 14px; gap: 10px;">
           <span style="font-size: 12px; color: var(--text-3);">Categoría:</span>
@@ -111,54 +106,12 @@
             <div style="font-size: 15px; font-weight: 600;">Escandallos &amp; food cost</div>
             <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Define ingredientes por plato y el sistema calcula el costo real en tiempo real.</div>
           </div>
-          <button class="btn primary" style="margin-left: auto;">+ Nuevo escandallo</button>
+          <button class="btn primary" id="btn-new-recipe" style="margin-left: auto;">+ Nuevo escandallo</button>
         </div>
 
-        <div class="g-2">
-          <div class="card">
-            <div class="row" style="margin-bottom: 10px;">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#1D9E75,#0F6E56);">A</div>
-              <div>
-                <div style="font-size: 14px; font-weight: 600;">Ajiaco santafereño</div>
-                <div style="font-size: 11.5px; color: var(--text-3);">Precio venta $28.000 · 4 ingredientes</div>
-              </div>
-              <button class="btn sm ghost" style="margin-left: auto;">Editar</button>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 6px; margin: 12px 0; padding-top: 12px; border-top: 0.5px dashed var(--border);">
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Pollo criollo</span><span class="mono">180g · $2.340</span></div>
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Papa criolla</span><span class="mono">120g · $680</span></div>
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Mazorca</span><span class="mono">1 un · $420</span></div>
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Guascas + crema</span><span class="mono">— · $1.180</span></div>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-top: 12px; border-top: 0.5px dashed var(--border);">
-              <div><div style="font-size: 10.5px; color: var(--text-3);">Food cost</div><div class="mono" style="font-weight: 600;">$4.620</div></div>
-              <div><div style="font-size: 10.5px; color: var(--text-3);">% sobre venta</div><div class="mono" style="font-weight: 600; color: var(--brand);">16.5%</div></div>
-              <div><div style="font-size: 10.5px; color: var(--text-3);">Margen bruto</div><div class="mono" style="font-weight: 600;">$23.380</div></div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="row" style="margin-bottom: 10px;">
-              <div class="dish-thumb" style="background: linear-gradient(135deg,#F59E0B,#B45309);">B</div>
-              <div>
-                <div style="font-size: 14px; font-weight: 600;">Bandeja paisa</div>
-                <div style="font-size: 11.5px; color: var(--text-3);">Precio venta $34.000 · 7 ingredientes</div>
-              </div>
-              <button class="btn sm ghost" style="margin-left: auto;">Editar</button>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 6px; margin: 12px 0; padding-top: 12px; border-top: 0.5px dashed var(--border);">
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Frijol cargamanto</span><span class="mono">180g · $1.120</span></div>
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Arroz blanco</span><span class="mono">150g · $540</span></div>
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Carne molida</span><span class="mono">120g · $2.680</span></div>
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Chicharrón</span><span class="mono">80g · $2.100</span></div>
-              <div style="display: flex; justify-content: space-between; font-size: 12.5px;"><span>Chorizo + morcilla</span><span class="mono">2 un · $1.860</span></div>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding-top: 12px; border-top: 0.5px dashed var(--border);">
-              <div><div style="font-size: 10.5px; color: var(--text-3);">Food cost</div><div class="mono" style="font-weight: 600;">$9.720</div></div>
-              <div><div style="font-size: 10.5px; color: var(--text-3);">% sobre venta</div><div class="mono" style="font-weight: 600; color: var(--warning-text);">28.6%</div></div>
-              <div><div style="font-size: 10.5px; color: var(--text-3);">Margen bruto</div><div class="mono" style="font-weight: 600;">$24.280</div></div>
-            </div>
-          </div>
+        <!-- Escandallos — rendered dynamically from /api/inventory/recipes -->
+        <div id="recipes-container" class="g-2">
+          <div style="padding:18px;color:var(--text-3);font-size:13px;">Cargando escandallos&hellip;</div>
         </div>
       </div>
 

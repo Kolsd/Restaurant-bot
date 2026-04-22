@@ -305,6 +305,39 @@
       }
     }
 
+    // Populate inv-alert-strip — show only items agotados or bajo-mínimo
+    var alertEl = document.getElementById('inv-alert-strip');
+    if (alertEl) {
+      var listForAlert = Array.isArray(items) ? items : [];
+      var critical = listForAlert.filter(function (it) {
+        var stock = +(it.stock || it.quantity || it.current_stock || 0);
+        var low   = +(it.low_stock_threshold || it.min_stock || 0);
+        return stock <= 0 || (low > 0 && stock <= low);
+      });
+      if (critical.length === 0) {
+        alertEl.style.display = 'none';
+        alertEl.innerHTML = '';
+      } else {
+        var names = critical.slice(0, 5).map(function (it) {
+          var stock = +(it.stock || it.quantity || it.current_stock || 0);
+          var tag = stock <= 0 ? 'agotado' : 'bajo mínimo';
+          return _escHtml(it.name || it.sku || '') + ' ' + tag;
+        }).join(' · ');
+        var extra = critical.length > 5 ? ' · +' + (critical.length - 5) + ' más' : '';
+        alertEl.style.display = '';
+        alertEl.className = 'alert-strip';
+        alertEl.innerHTML =
+          '<span style="font-size:18px;line-height:1;">⚠️</span>' +
+          '<div style="flex:1;">' +
+            '<div style="font-size:13px;font-weight:600;color:var(--warning-text);">' +
+              critical.length + ' producto' + (critical.length === 1 ? '' : 's') +
+              ' requiere' + (critical.length === 1 ? '' : 'n') + ' atención inmediata' +
+            '</div>' +
+            '<div style="font-size:12px;color:var(--text-2);margin-top:3px;">' + names + extra + '</div>' +
+          '</div>';
+      }
+    }
+
     // Populate inv-summary regardless of whether items array is empty
     var summaryEl = document.getElementById('inv-summary');
     if (summaryEl) {
@@ -664,6 +697,96 @@
   var cartaBtn = document.getElementById('btn-edit-carta');
   if (cartaBtn) cartaBtn.addEventListener('click', openCartaEditor);
 
+  // ── Escandallos (recipes) ─────────────────────────────────────────
+  async function loadRecipes() {
+    var container = document.getElementById('recipes-container');
+    if (!container) return;
+    try {
+      var r = await fetch('/api/inventory/recipes', { headers: mesioHeaders() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var recipes = (await r.json()).recipes || [];
+      renderRecipes(recipes);
+    } catch (e) {
+      container.innerHTML = '<div style="padding:18px;color:var(--text-3);font-size:13px;">Error al cargar escandallos: ' + _escHtml(e.message) + '</div>';
+    }
+  }
+
+  function renderRecipes(recipes) {
+    var container = document.getElementById('recipes-container');
+    if (!container) return;
+    if (!recipes || !recipes.length) {
+      container.innerHTML =
+        '<div style="grid-column:1/-1;padding:32px;text-align:center;color:var(--text-3);font-size:13px;">' +
+          'No hay escandallos definidos todavía.<br>' +
+          'Usa <strong>+ Nuevo escandallo</strong> para asociar ingredientes a cada plato y calcular food cost.' +
+        '</div>';
+      return;
+    }
+    var fmt = typeof mesioFmt === 'function' ? mesioFmt : function (n) { return '$' + n; };
+    var gradients = [
+      'linear-gradient(135deg,#1D9E75,#0F6E56)',
+      'linear-gradient(135deg,#F59E0B,#B45309)',
+      'linear-gradient(135deg,#3B82F6,#1E40AF)',
+      'linear-gradient(135deg,#EF4444,#991B1B)',
+      'linear-gradient(135deg,#8B5CF6,#5B21B6)',
+    ];
+    container.innerHTML = recipes.map(function (rec, idx) {
+      var name       = rec.dish_name || rec.name || '—';
+      var initial    = (name[0] || '?').toUpperCase();
+      var salePrice  = +(rec.sale_price || rec.price || 0);
+      var foodCost   = +(rec.food_cost || rec.cost || 0);
+      var lines      = Array.isArray(rec.lines) ? rec.lines : (rec.ingredients || []);
+      var pct        = salePrice > 0 ? (foodCost / salePrice) * 100 : 0;
+      var margin     = Math.max(0, salePrice - foodCost);
+      var pctClass   = pct < 20 ? 'brand' : pct < 30 ? 'warn' : 'danger';
+      var pctColor   = pct < 20 ? 'var(--brand)' : pct < 30 ? 'var(--warning-text)' : 'var(--danger)';
+
+      var ingredientsHtml = lines.map(function (ln) {
+        var iname = ln.ingredient_name || ln.name || ln.sku || '';
+        var qty   = ln.quantity != null ? ln.quantity : '—';
+        var unit  = ln.unit || '';
+        var cost  = ln.line_cost != null ? ln.line_cost : ln.cost;
+        var costStr = cost != null ? fmt(+cost) : '';
+        return '<div style="display:flex;justify-content:space-between;font-size:12.5px;">' +
+          '<span>' + _escHtml(iname) + '</span>' +
+          '<span class="mono">' + _escHtml(String(qty)) + ' ' + _escHtml(unit) + (costStr ? ' · ' + costStr : '') + '</span>' +
+        '</div>';
+      }).join('');
+
+      return '<div class="card">' +
+        '<div class="row" style="margin-bottom:10px;">' +
+          '<div class="dish-thumb" style="background:' + gradients[idx % gradients.length] + ';">' + _escHtml(initial) + '</div>' +
+          '<div>' +
+            '<div style="font-size:14px;font-weight:600;">' + _escHtml(name) + '</div>' +
+            '<div style="font-size:11.5px;color:var(--text-3);">Precio venta ' + fmt(salePrice) + ' · ' + lines.length + ' ingrediente' + (lines.length === 1 ? '' : 's') + '</div>' +
+          '</div>' +
+          '<button class="btn sm ghost" data-recipe-edit="' + _escHtml(name) + '" style="margin-left:auto;">Editar</button>' +
+        '</div>' +
+        (ingredientsHtml
+          ? '<div style="display:flex;flex-direction:column;gap:6px;margin:12px 0;padding-top:12px;border-top:0.5px dashed var(--border);">' + ingredientsHtml + '</div>'
+          : '<div style="padding:12px 0;color:var(--text-3);font-size:12px;font-style:italic;">Sin ingredientes registrados.</div>'
+        ) +
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding-top:12px;border-top:0.5px dashed var(--border);">' +
+          '<div><div style="font-size:10.5px;color:var(--text-3);">Food cost</div><div class="mono" style="font-weight:600;">' + fmt(foodCost) + '</div></div>' +
+          '<div><div style="font-size:10.5px;color:var(--text-3);">% sobre venta</div><div class="mono" style="font-weight:600;color:' + pctColor + ';">' + pct.toFixed(1) + '%</div></div>' +
+          '<div><div style="font-size:10.5px;color:var(--text-3);">Margen bruto</div><div class="mono" style="font-weight:600;">' + fmt(margin) + '</div></div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // "+ Nuevo escandallo" + "Editar" wiring — TODO: open a dedicated modal.
+  // For now, surface a helpful toast so the button doesn't feel dead.
+  var newRecipeBtn = document.getElementById('btn-new-recipe');
+  if (newRecipeBtn) {
+    newRecipeBtn.addEventListener('click', function () {
+      if (typeof mesioToast === 'function') {
+        mesioToast('Editor de escandallos próximamente. Por ahora usa POST /api/inventory/recipes.', 'info', 4000);
+      }
+    });
+  }
+
   loadMenu();
   loadInventory();
+  loadRecipes();
 })();
