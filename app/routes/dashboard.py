@@ -94,8 +94,15 @@ async def root_redirect():
 
 @router.get("/superadmin", response_class=HTMLResponse)
 async def superadmin_page():
-    p = STATIC / "html" / "superadmin.html"
-    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>")
+    # HTML moved to html/internal/ per Mesio-internal namespace separation.
+    p = STATIC / "html" / "internal" / "superadmin.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
+
+@router.get("/internal/superadmin", response_class=HTMLResponse)
+async def superadmin_internal_alias():
+    """Canonical URL for superadmin page — matches /api/internal/* namespace."""
+    p = STATIC / "html" / "internal" / "superadmin.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
 @router.get("/staff")
 async def staff_portal_redirect(request: Request):
@@ -114,7 +121,15 @@ async def caja_page():
 
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page():
-    return (STATIC / "html" / "crm.html").read_text(encoding="utf-8")
+    # HTML moved to html/internal/ per Mesio-internal namespace separation.
+    p = STATIC / "html" / "internal" / "crm.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
+
+@router.get("/internal/crm", response_class=HTMLResponse)
+async def crm_internal_alias():
+    """Canonical URL for CRM — matches /api/internal/* namespace."""
+    p = STATIC / "html" / "internal" / "crm.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
 @router.get("/demo-chat", response_class=HTMLResponse)
 async def demo_chat_bot_page():
