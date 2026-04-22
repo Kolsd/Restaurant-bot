@@ -213,6 +213,25 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# ── Feature gating (MVP scope: bot + operational flows) ──────────────────────
+# DISABLED_MODULES env var is a comma-separated list of module keys to skip.
+# Default list disables non-bot features (loyalty, payroll/staff, biometric,
+# staff comms, dynamic discounts, reviews, marketing). To re-enable all, set
+# DISABLED_MODULES="" (empty). To disable more, add keys: "loyalty,staff,...".
+_DEFAULT_DISABLED = "loyalty,staff,staff_webauthn,staff_comms,discounts,reviews,marketing"
+_disabled_modules = {
+    m.strip()
+    for m in os.getenv("DISABLED_MODULES", _DEFAULT_DISABLED).split(",")
+    if m.strip()
+}
+
+def _maybe_include(key: str, router, **kwargs) -> None:
+    if key in _disabled_modules:
+        _log.info("router.disabled", module=key)
+        return
+    app.include_router(router, **kwargs)
+
+# Always-on (bot + operational core)
 app.include_router(dashboard_router)
 app.include_router(auth_router)
 app.include_router(settings_router)
@@ -225,15 +244,17 @@ app.include_router(billing_router)
 app.include_router(nps.router)
 app.include_router(inventory.router)
 app.include_router(sync_router, prefix="/api")
-app.include_router(staff_router)
-app.include_router(staff_webauthn_router)
-app.include_router(staff_comms_router)
-app.include_router(loyalty_router)
 app.include_router(reservations_router)
-app.include_router(discounts_router)
-app.include_router(reviews_router)
 app.include_router(health_router)
-app.include_router(marketing_router)
+
+# Feature-gated (disabled by default for MVP bot scope)
+_maybe_include("staff", staff_router)
+_maybe_include("staff_webauthn", staff_webauthn_router)
+_maybe_include("staff_comms", staff_comms_router)
+_maybe_include("loyalty", loyalty_router)
+_maybe_include("discounts", discounts_router)
+_maybe_include("reviews", reviews_router)
+_maybe_include("marketing", marketing_router)
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 app.include_router(internal_crm_router)
 app.include_router(internal_admin_router)
