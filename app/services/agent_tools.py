@@ -293,6 +293,28 @@ _SEND_DISH_CARD = {
     },
 }
 
+_CANCEL_ORDER = {
+    "name": "cancel_order",
+    "description": (
+        "Cancel the customer's current pending delivery or pickup order. "
+        "Only callable when the customer's most recent order is in status 'pendiente' "
+        "(before the kitchen confirms it). "
+        "If the order is already confirmed or in a later state, this tool returns an error "
+        "message and the customer must contact the restaurant directly. "
+        "Do NOT use this for dine-in (table) orders — those require staff intervention."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Optional customer-provided reason for cancelling (free text)."
+            }
+        },
+        "required": []
+    }
+}
+
 _REMEMBER_CUSTOMER_PREFERENCE = {
     "name": "remember_customer_preference",
     "description": (
@@ -341,6 +363,7 @@ TOOLS_EXTERNAL: list[dict] = [
     _CREATE_DELIVERY_ORDER,
     _CREATE_PICKUP_ORDER,
     _CHANGE_PAYMENT_METHOD,
+    _CANCEL_ORDER,
     _MAKE_RESERVATION,
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
@@ -361,6 +384,7 @@ ALL_TOOLS: dict[str, dict] = {
         _CREATE_DELIVERY_ORDER,
         _CREATE_PICKUP_ORDER,
         _CHANGE_PAYMENT_METHOD,
+        _CANCEL_ORDER,
         _MAKE_RESERVATION,
         _END_SESSION,
         _REMEMBER_CUSTOMER_PREFERENCE,

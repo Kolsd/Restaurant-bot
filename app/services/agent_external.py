@@ -149,6 +149,49 @@ async def execute_external_action(
     """
     action = parsed.get("action", "")
 
+    # ── Customer self-cancellation ────────────────────────────────────────────
+    if action == "cancel":
+        reason = parsed.get("reason") or parsed.get("notes") or None
+        try:
+            from app.repositories.orders_repo import db_cancel_pending_order  # noqa: PLC0415
+            result = await db_cancel_pending_order(phone, bot_number, reason=reason)
+        except Exception:
+            log.exception("cancel_order.db_failed", phone=phone, bot_number=bot_number)
+            return (
+                "Lo sentimos, hubo un problema técnico al intentar cancelar tu pedido. "
+                "Por favor intenta de nuevo o comunícate directamente con el restaurante."
+            )
+
+        if result.get("not_found"):
+            return "No tienes pedidos activos para cancelar."
+
+        if result.get("too_late"):
+            log.info(
+                "cancel_order.too_late",
+                phone=phone,
+                status=result.get("status"),
+            )
+            return (
+                "Tu pedido ya fue confirmado por la cocina y está en preparación. "
+                "Para cancelar, comunícate directamente con el restaurante por teléfono."
+            )
+
+        if result.get("cancelled"):
+            log.info(
+                "cancel_order.success",
+                phone=phone,
+                order_id=result.get("order_id"),
+                reason=reason,
+            )
+            return "Tu pedido fue cancelado. ¡Esperamos verte pronto!"
+
+        # Unexpected result shape — fail safe
+        log.warning("cancel_order.unexpected_result", result=result, phone=phone)
+        return (
+            "Lo sentimos, no pudimos procesar la cancelación. "
+            "Comunícate directamente con el restaurante."
+        )
+
     if action == "change_payment":
         payment_method = parsed.get("payment_method", "")
         if not payment_method:

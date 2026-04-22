@@ -559,6 +559,62 @@ async def record_wompi_event(
     return affected == 1
 
 
+# ── Customer self-cancellation ───────────────────────────────────────────────
+
+async def db_cancel_pending_order(
+    phone: str,
+    bot_number: str,
+    reason: str | None = None,
+) -> dict | None:
+    """
+    Cancel the most recent active delivery/pickup order for a customer IF its
+    status is still 'pendiente' (before kitchen confirmation).
+
+    Returns a dict with keys:
+        "cancelled": True  — order was found and cancelled
+        "too_late":  True  — order exists but is past 'pendiente'; cannot cancel
+        "not_found": True  — no active order found for this customer
+
+    DB side effect: sets status='cancelado', cancelled_at=NOW(), cancelled_reason=$reason.
+    Wraps inside tenant_connection() — the caller must have an active tenant_scope.
+    """
+    async with _tenant_connection() as conn:
+        # Find the most recent non-terminal order for this customer
+        row = await conn.fetchrow(
+            """
+            SELECT id, status
+            FROM orders
+            WHERE phone      = $1
+              AND bot_number = $2
+              AND status NOT IN ('cancelado', 'entregado')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            phone, bot_number,
+        )
+
+    if row is None:
+        return {"not_found": True}
+
+    if row["status"] != "pendiente":
+        return {"too_late": True, "status": row["status"]}
+
+    # Status is 'pendiente' — cancel it
+    async with _tenant_connection() as conn:
+        await conn.execute(
+            """
+            UPDATE orders
+               SET status           = 'cancelado',
+                   cancelled_at     = NOW(),
+                   cancelled_reason = $2
+             WHERE id = $1
+            """,
+            row["id"], reason or None,
+        )
+
+    return {"cancelled": True, "order_id": row["id"]}
+
+
 # ── Caja customer helpers ────────────────────────────────────────────────────
 
 async def db_get_recent_orders_by_phone(

@@ -805,6 +805,7 @@ _TOOL_TO_ACTION = {
     "create_delivery_order": "delivery",
     "create_pickup_order": "pickup",
     "change_payment_method": "change_payment",
+    "cancel_order": "cancel",
     "make_reservation": "reserve",
     "end_session": "end_session",
     "remember_customer_preference": "remember",
@@ -835,6 +836,9 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
     if action == "change_payment":
         parsed["payment_method"] = tool_input.get("payment_method", "")
 
+    if action == "cancel":
+        parsed["reason"] = tool_input.get("reason", None)
+
     if action == "reserve":
         parsed["reservation"] = {
             "name": tool_input.get("name", ""),
@@ -862,7 +866,7 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
 # ── Pre-execution validation layer ───────────────────────────────────────────
 
 _SALON_ONLY_TOOLS = {"place_order", "request_bill", "call_waiter"}
-_EXTERNAL_ONLY_TOOLS = {"create_delivery_order", "create_pickup_order", "change_payment_method"}
+_EXTERNAL_ONLY_TOOLS = {"create_delivery_order", "create_pickup_order", "change_payment_method", "cancel_order"}
 
 
 def _make_order_fingerprint(items: list) -> str:
@@ -1168,6 +1172,16 @@ async def _validate_tool_call(
         tool_input = {**tool_input, "_resolved_dish": matched_dish}
 
     # 8. remember_customer_preference — validate key and rate-limit per conversation
+    # 9. cancel_order — validate tool_input is dict; reason is optional free text
+    if tool_name == "cancel_order":
+        if not isinstance(tool_input, dict):
+            log.warning("guard.cancel_order_input_not_dict", phone=_ofuscar_phone(phone), input_type=type(tool_input).__name__)
+            tool_input = {}
+        # Coerce reason to str or None — never keep arbitrary types
+        raw_reason = tool_input.get("reason")
+        if raw_reason is not None:
+            tool_input = {**tool_input, "reason": str(raw_reason)[:500]}
+
     if tool_name == "remember_customer_preference":
         from app.repositories.customer_profiles_repo import VALID_PREFERENCE_KEYS  # noqa: PLC0415
         key = str(tool_input.get("key", "")).strip()
@@ -1358,15 +1372,15 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 )
                 log.info("waiter_alert_no_table", alert_type=action, phone=_ofuscar_phone(phone))
 
-        # ── External actions (delivery, pickup, change_payment) ───────────
-        elif action in ("delivery", "pickup", "change_payment"):
+        # ── External actions (delivery, pickup, change_payment, cancel) ──
+        elif action in ("delivery", "pickup", "change_payment", "cancel"):
             result = await execute_external_action(
                 parsed, phone, bot_number, restaurant_obj,
                 routing_context or {}, reply,
                 location_id=location_id,
             )
             reply = result
-            if cart_errors:
+            if cart_errors and action != "cancel":
                 reply += f" (Nota: No pude agregar '{', '.join(cart_errors)}')"
 
         # ── Reserve (shared, both flows) — with availability check ───────
