@@ -315,6 +315,29 @@ _CANCEL_ORDER = {
     }
 }
 
+_CANCEL_RESERVATION = {
+    "name": "cancel_reservation",
+    "description": (
+        "Cancel the customer's upcoming reservation. "
+        "Only cancellable when the reservation status is 'pending' or 'confirmed' "
+        "AND the reservation date is today or in the future. "
+        "If the reservation is already in the past, or status is 'cancelled' / 'no_show', "
+        "do NOT call this tool — inform the customer there is nothing to cancel. "
+        "Do NOT auto-refund deposits; if a deposit was paid, inform the customer it will "
+        "be kept as credit and the restaurant will contact them."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Optional cancellation reason provided by the customer (free text, max 500 chars)."
+            }
+        },
+        "required": []
+    }
+}
+
 _REMEMBER_CUSTOMER_PREFERENCE = {
     "name": "remember_customer_preference",
     "description": (
@@ -353,6 +376,7 @@ TOOLS_SALON: list[dict] = [
     _REQUEST_BILL,
     _CALL_WAITER,
     _MAKE_RESERVATION,
+    _CANCEL_RESERVATION,
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
     _SEND_DISH_CARD,
@@ -365,6 +389,7 @@ TOOLS_EXTERNAL: list[dict] = [
     _CHANGE_PAYMENT_METHOD,
     _CANCEL_ORDER,
     _MAKE_RESERVATION,
+    _CANCEL_RESERVATION,
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
     _SEND_DISH_CARD,
@@ -386,6 +411,7 @@ ALL_TOOLS: dict[str, dict] = {
         _CHANGE_PAYMENT_METHOD,
         _CANCEL_ORDER,
         _MAKE_RESERVATION,
+        _CANCEL_RESERVATION,
         _END_SESSION,
         _REMEMBER_CUSTOMER_PREFERENCE,
         _SEND_DISH_CARD,

@@ -807,6 +807,7 @@ _TOOL_TO_ACTION = {
     "change_payment_method": "change_payment",
     "cancel_order": "cancel",
     "make_reservation": "reserve",
+    "cancel_reservation": "cancel_reservation",
     "end_session": "end_session",
     "remember_customer_preference": "remember",
     "send_dish_card": "send_dish_card",
@@ -838,6 +839,9 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
 
     if action == "cancel":
         parsed["reason"] = tool_input.get("reason", None)
+
+    if action == "cancel_reservation":
+        parsed["cancel_reason"] = tool_input.get("reason", "") or ""
 
     if action == "reserve":
         parsed["reservation"] = {
@@ -1481,6 +1485,49 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         log.info("reservation.created_pending",
                                  id=reservation["id"], table=table["id"],
                                  phone=phone, bot_number=bot_number)
+
+        # ── Cancel reservation (shared, both flows) ───────────────────────
+        elif action == "cancel_reservation":
+            cancel_reason = parsed.get("cancel_reason") or ""
+            # Find the customer's nearest upcoming reservation (pending or confirmed)
+            async with _tenant_conn() as _rc_conn:
+                _res_row = await _rc_conn.fetchrow(
+                    """SELECT id, status, "date", "time", deposit_paid
+                       FROM reservations
+                       WHERE phone=$1
+                         AND bot_number=$2
+                         AND status IN ('pending', 'confirmed')
+                         AND "date"::date >= CURRENT_DATE
+                       ORDER BY "date" ASC, "time" ASC
+                       LIMIT 1""",
+                    phone, bot_number,
+                )
+            if _res_row is None:
+                log.info("cancel_reservation.no_upcoming", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                reply = "No tienes reservas próximas para cancelar."
+            else:
+                _res_id = _res_row["id"]
+                _deposit_paid = bool(_res_row.get("deposit_paid"))
+                try:
+                    await db.db_cancel_reservation(_res_id, cancel_reason)
+                    log.info("cancel_reservation.cancelled",
+                             reservation_id=_res_id,
+                             phone=_ofuscar_phone(phone),
+                             bot_number=bot_number,
+                             deposit_paid=_deposit_paid)
+                    if _deposit_paid:
+                        reply = (
+                            "Tu reserva ha sido cancelada. "
+                            "El depósito quedará guardado como saldo a favor para una futura visita. "
+                            "El restaurante se comunicará para coordinar. ¡Hasta pronto!"
+                        )
+                    else:
+                        reply = "¡Listo! Tu reserva ha sido cancelada. Si cambias de opinión, con gusto te ayudamos a hacer una nueva. ¡Hasta pronto!"
+                except Exception:
+                    log.exception("cancel_reservation.db_failed",
+                                  reservation_id=_res_id,
+                                  phone=_ofuscar_phone(phone))
+                    reply = "Hubo un problema al cancelar tu reserva. Por favor contacta al restaurante directamente."
 
         # ── End session (shared, both flows) ──────────────────────────────
         elif action == "end_session":

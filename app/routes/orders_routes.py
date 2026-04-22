@@ -360,14 +360,10 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     else:
         log.warning("orders.delivery_notification_no_credentials", phone=phone, bot_number=bot_number, has_token=bool(token), has_phone_id=bool(phone_id))
 
-    # NPS dispara en entregado para ambos tipos de orden.
-    # trigger_nps sets Redis state; the next inbound message will handle the score.
-    if status == 'entregado' and bot_number:
-        try:
-            await trigger_nps(phone, bot_number, rest_name)
-            log.info("orders.nps_triggered_post_delivery", phone=phone)
-        except Exception as e:
-            log.error("orders.nps_trigger_failed", phone=phone, error=str(e))
+    # NPS is triggered by the caller (update_delivery_status) with await so that
+    # the state is committed to state_store BEFORE the PATCH response returns.
+    # send_delivery_notification must NOT call trigger_nps itself; it is kept here
+    # only as a no-op guard in case this function is called from other sites.
 
         if has_credentials:
             # Send interactive NPS message with "No calificar" button
@@ -458,7 +454,23 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
             detail="La orden ya tiene ese estado o fue modificada por otro usuario",
         )
 
-    # 3. Disparamos el mensaje de WhatsApp en SEGUNDO PLANO
+    # 3. For "entregado": trigger NPS synchronously (await) so state_store is
+    #    populated BEFORE the PATCH response returns.  This eliminates the race
+    #    where asyncio.create_task delays the nps_set past the customer's next
+    #    inbound message (which would cause _try_nps_active_flow to return None).
+    bot_number_for_nps = order.get("bot_number", "")
+    if req.status == "entregado" and bot_number_for_nps:
+        try:
+            # Resolve restaurant name for NPS prompt (best-effort; empty string is fine)
+            with bypass_tenant_scope("update_delivery_status: resolve restaurant name for NPS"):
+                _rest_for_nps = await db.db_get_restaurant_by_bot_number(bot_number_for_nps)
+            _rest_name_for_nps = (_rest_for_nps or {}).get("name", "")
+            await trigger_nps(order["phone"], bot_number_for_nps, _rest_name_for_nps)
+            log.info("orders.nps_triggered_post_delivery", phone=order["phone"])
+        except Exception as _nps_exc:
+            log.error("orders.nps_trigger_failed", phone=order["phone"], error=str(_nps_exc))
+
+    # 4. Disparamos el mensaje de WhatsApp en SEGUNDO PLANO
     order_type = order.get("order_type", "domicilio")
     notify_statuses = ['listo', 'en_camino', 'en_puerta', 'entregado']
     if req.status in notify_statuses:
