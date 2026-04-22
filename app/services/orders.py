@@ -229,7 +229,7 @@ def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP
     redirect_url = f"{redirect_base}/api/payment/confirm"
     return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
 
-async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "", channel: str | None = "whatsapp_bot", location_id: int | None = None) -> dict:
+async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "", channel: str | None = "whatsapp_bot", location_id: int | None = None, scheduled_pickup_at: str | None = None) -> dict:
     from app.repositories.orders_repo import commit_order_transaction, OrderCommitError, InsufficientStockError
 
     try:
@@ -299,24 +299,25 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                     order_id   = f"{base_id}-{sub_number}"
 
                     order = {
-                        "id":             order_id,
-                        "phone":          phone,
-                        "items":          cart["items"].copy(),
-                        "order_type":     order_type,
-                        "address":        address or base_order.get("address", ""),
-                        "notes":          notes or base_order.get("notes", ""),
-                        "subtotal":       subtotal,
-                        "delivery_fee":   ZERO,
-                        "total":          subtotal,
-                        "status":         "pendiente",
-                        "paid":           False,
-                        "created_at":     datetime.now(ZoneInfo(tz_str)).isoformat(),
-                        "bot_number":     bot_number,
-                        "payment_method": payment_method or base_order.get("payment_method", ""),
-                        "payment_url":    generate_wompi_payment_link(order_id, subtotal),
-                        "is_additional":  True,
-                        "base_order_id":  base_id,
-                        "sub_number":     sub_number,
+                        "id":                  order_id,
+                        "phone":               phone,
+                        "items":               cart["items"].copy(),
+                        "order_type":          order_type,
+                        "address":             address or base_order.get("address", ""),
+                        "notes":               notes or base_order.get("notes", ""),
+                        "subtotal":            subtotal,
+                        "delivery_fee":        ZERO,
+                        "total":               subtotal,
+                        "status":              "pendiente",
+                        "paid":                False,
+                        "created_at":          datetime.now(ZoneInfo(tz_str)).isoformat(),
+                        "bot_number":          bot_number,
+                        "payment_method":      payment_method or base_order.get("payment_method", ""),
+                        "payment_url":         generate_wompi_payment_link(order_id, subtotal),
+                        "is_additional":       True,
+                        "base_order_id":       base_id,
+                        "sub_number":          sub_number,
+                        "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
                     }
                     try:
                         await commit_order_transaction(
@@ -353,24 +354,25 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
 
             order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
             order = {
-                "id":             order_id,
-                "phone":          phone,
-                "items":          cart["items"].copy(),
-                "order_type":     order_type,
-                "address":        address or "",
-                "notes":          notes,
-                "subtotal":       subtotal,
-                "delivery_fee":   delivery_fee,
-                "total":          total,
-                "status":         "pendiente",
-                "paid":           False,
-                "created_at":     datetime.now(ZoneInfo(tz_str)).isoformat(),
-                "bot_number":     bot_number,
-                "payment_method": payment_method,
-                "payment_url":    generate_wompi_payment_link(order_id, total),
-                "is_additional":  False,
-                "base_order_id":  None,
-                "sub_number":     1,
+                "id":                  order_id,
+                "phone":               phone,
+                "items":               cart["items"].copy(),
+                "order_type":          order_type,
+                "address":             address or "",
+                "notes":               notes,
+                "subtotal":            subtotal,
+                "delivery_fee":        delivery_fee,
+                "total":               total,
+                "status":              "pendiente",
+                "paid":                False,
+                "created_at":          datetime.now(ZoneInfo(tz_str)).isoformat(),
+                "bot_number":          bot_number,
+                "payment_method":      payment_method,
+                "payment_url":         generate_wompi_payment_link(order_id, total),
+                "is_additional":       False,
+                "base_order_id":       None,
+                "sub_number":          1,
+                "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
             }
             try:
                 await commit_order_transaction(

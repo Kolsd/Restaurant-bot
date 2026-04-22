@@ -187,6 +187,15 @@ _CREATE_PICKUP_ORDER = {
                 "type": "integer",
                 "description": "ID of the branch where the customer will pick up. Defaults to 0 (nearest/default branch).",
                 "default": 0
+            },
+            "scheduled_pickup_at": {
+                "type": "string",
+                "description": (
+                    "Optional ISO 8601 datetime when the customer plans to pick up. "
+                    "Only include if the customer specifies a time "
+                    "(e.g. 'en 30 minutos' → now+30min, '7:30 pm' → today 19:30). "
+                    "Use Colombia timezone (UTC-5). Omit if no time was given."
+                )
             }
         },
         "required": ["items", "payment_method"]
@@ -315,6 +324,21 @@ _CANCEL_ORDER = {
     }
 }
 
+_NOTIFY_ARRIVAL = {
+    "name": "notify_arrival",
+    "description": (
+        "Customer reports they have arrived at the restaurant to pick up their order. "
+        "Only callable when the customer has a pickup order in status 'listo' OR 'en_preparacion'. "
+        "Fires a waiter_alert so staff can hand over the order. "
+        "If there is no active pickup order in those statuses, the tool returns an error message."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+}
+
 _CANCEL_RESERVATION = {
     "name": "cancel_reservation",
     "description": (
@@ -388,6 +412,7 @@ TOOLS_EXTERNAL: list[dict] = [
     _CREATE_PICKUP_ORDER,
     _CHANGE_PAYMENT_METHOD,
     _CANCEL_ORDER,
+    _NOTIFY_ARRIVAL,
     _MAKE_RESERVATION,
     _CANCEL_RESERVATION,
     _END_SESSION,
@@ -410,6 +435,7 @@ ALL_TOOLS: dict[str, dict] = {
         _CREATE_PICKUP_ORDER,
         _CHANGE_PAYMENT_METHOD,
         _CANCEL_ORDER,
+        _NOTIFY_ARRIVAL,
         _MAKE_RESERVATION,
         _CANCEL_RESERVATION,
         _END_SESSION,

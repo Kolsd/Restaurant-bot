@@ -263,14 +263,28 @@ async def commit_order_transaction(
                 #     a genuine id collision (which should not happen after the atomic
                 #     sub_number computation above) raises a unique-violation error that
                 #     the outer except block converts to OrderCommitError.
+                # Parse scheduled_pickup_at: accept ISO string or None
+                _spa_raw = order_payload.get("scheduled_pickup_at")
+                _scheduled_pickup_at = None
+                if _spa_raw:
+                    try:
+                        from datetime import datetime as _dt  # noqa: PLC0415
+                        _scheduled_pickup_at = _dt.fromisoformat(str(_spa_raw))
+                    except (ValueError, TypeError):
+                        _log.warning(
+                            "order_commit.invalid_scheduled_pickup_at",
+                            raw=str(_spa_raw)[:64],
+                        )
+
                 if base_order_id:
                     await conn.execute(
                         """INSERT INTO orders
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, org_id, channel, location_id)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)""",
+                                base_order_id, sub_number, org_id, channel, location_id,
+                                scheduled_pickup_at)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)""",
                         order_payload["id"],
                         order_payload["phone"],
                         json.dumps(order_payload["items"]),
@@ -290,6 +304,7 @@ async def commit_order_transaction(
                         restaurant_id,
                         channel,
                         location_id,
+                        _scheduled_pickup_at,
                     )
                 else:
                     await conn.execute(
@@ -297,23 +312,25 @@ async def commit_order_transaction(
                                (id, phone, items, order_type, address, notes,
                                 subtotal, delivery_fee, total, status, paid,
                                 payment_url, bot_number, payment_method,
-                                base_order_id, sub_number, org_id, channel, location_id)
-                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                                base_order_id, sub_number, org_id, channel, location_id,
+                                scheduled_pickup_at)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
                            ON CONFLICT (id) DO UPDATE SET
-                               items          = EXCLUDED.items,
-                               subtotal       = EXCLUDED.subtotal,
-                               total          = EXCLUDED.total,
-                               status         = CASE
+                               items               = EXCLUDED.items,
+                               subtotal            = EXCLUDED.subtotal,
+                               total               = EXCLUDED.total,
+                               status              = CASE
                                    WHEN orders.status IN (
                                        'en_preparacion','listo','en_camino','en_puerta','entregado'
                                    ) THEN orders.status
                                    ELSE EXCLUDED.status
                                END,
-                               paid           = EXCLUDED.paid,
-                               payment_url    = EXCLUDED.payment_url,
-                               notes          = EXCLUDED.notes,
-                               payment_method = EXCLUDED.payment_method,
-                               location_id    = COALESCE(orders.location_id, EXCLUDED.location_id)""",
+                               paid                = EXCLUDED.paid,
+                               payment_url         = EXCLUDED.payment_url,
+                               notes               = EXCLUDED.notes,
+                               payment_method      = EXCLUDED.payment_method,
+                               location_id         = COALESCE(orders.location_id, EXCLUDED.location_id),
+                               scheduled_pickup_at = COALESCE(orders.scheduled_pickup_at, EXCLUDED.scheduled_pickup_at)""",
                         order_payload["id"],
                         order_payload["phone"],
                         json.dumps(order_payload["items"]),
@@ -333,6 +350,7 @@ async def commit_order_transaction(
                         restaurant_id,
                         channel,
                         location_id,
+                        _scheduled_pickup_at,
                     )
 
                 # 2. Deduct inventory (raises InsufficientStockError on shortage)

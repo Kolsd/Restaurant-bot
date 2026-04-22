@@ -68,6 +68,8 @@ POST-ORDER RULES (after STEP 6 completes):
 - If the customer says "gracias", "ok", "listo", or any acknowledgement BEFORE sending the comprobante: reply with a brief warm acknowledgement ONLY — do NOT repeat the instruction to send the proof, as the system already sent it in STEP 6. Example: "¡Con gusto! En cuanto lo recibamos te avisamos. 😊" Respond with text only (no tool call).
 - NEVER invent a delivery status. Status updates come only from the restaurant's delivery system.
 
+PICKUP ARRIVAL RULE: If the customer says they have arrived at the restaurant to pick up their order (e.g. "ya llegué", "estoy aquí", "llegué al restaurante", "ya estoy afuera", "vine a recoger"), AND they previously placed a pickup order in this conversation, use the notify_arrival tool IMMEDIATELY. Do NOT respond with text about whether the order exists — just call the tool. The tool will handle any edge cases internally.
+
 PAYMENT METHOD CHANGE RULE: If the customer asks to change the payment method AFTER the order has already been confirmed (STEP 6 is done), use the change_payment_method tool with the new payment_method. Do NOT re-create the order. Confirm the change in your reply.
 
 =========================================
@@ -148,6 +150,62 @@ async def execute_external_action(
     routing_context["location_id"] is populated when a Location is resolved here.
     """
     action = parsed.get("action", "")
+
+    # ── Customer arrival notification (pickup orders) ─────────────────────────
+    if action == "notify_arrival":
+        try:
+            from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+            async with tenant_connection() as conn:
+                order_row = await conn.fetchrow(
+                    """
+                    SELECT id, order_type, status
+                    FROM orders
+                    WHERE phone = $1
+                      AND bot_number = $2
+                      AND order_type = 'recoger'
+                      AND status IN ('en_preparacion', 'listo')
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    phone, bot_number,
+                )
+        except Exception:
+            log.exception("notify_arrival.db_failed", phone=phone, bot_number=bot_number)
+            return (
+                "Lo sentimos, hubo un problema técnico al notificar tu llegada. "
+                "Por favor comunícate directamente con el restaurante."
+            )
+
+        if not order_row:
+            log.info("notify_arrival.no_active_pickup_order", phone=phone)
+            return "No tienes pedidos listos para recoger en este momento."
+
+        order_id = order_row["id"]
+        # Create waiter alert so staff see the notification on the POS/caja screen
+        try:
+            from app.services import database as _db  # noqa: PLC0415
+            await _db.db_create_waiter_alert(
+                alert_type="customer_arrived",
+                phone=phone,
+                bot_number=bot_number,
+                message=f"El cliente llegó a recoger el pedido #{order_id}.",
+                table_id="",
+                table_name="",
+            )
+            log.info(
+                "notify_arrival.alert_created",
+                order_id=order_id,
+                phone=phone,
+                bot_number=bot_number,
+            )
+        except Exception:
+            # Best-effort: alert failure must NOT block the customer-facing reply (Rule #17).
+            log.exception("notify_arrival.alert_failed", phone=phone, order_id=order_id)
+
+        return (
+            "¡Perfecto! Le avisamos al equipo que ya llegaste. "
+            "En un momento te entregan tu pedido 🙌"
+        )
 
     # ── Customer self-cancellation ────────────────────────────────────────────
     if action == "cancel":
@@ -473,9 +531,11 @@ async def execute_external_action(
     # ── Create order ──────────────────────────────────────────────────
     order_type = "domicilio" if action == "delivery" else "recoger"
     _resolved_location_id = routing_context.get("location_id") or routing_context.get("branch_id")
+    _scheduled_pickup_at = parsed.get("scheduled_pickup_at") if action == "pickup" else None
     res = await orders.create_order(
         phone, order_type, address, notes, effective_bot_number, payment_method,
         location_id=_resolved_location_id,
+        scheduled_pickup_at=_scheduled_pickup_at,
     )
 
     if res.get("blocked_in_transit"):

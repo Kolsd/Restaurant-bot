@@ -806,6 +806,7 @@ _TOOL_TO_ACTION = {
     "create_pickup_order": "pickup",
     "change_payment_method": "change_payment",
     "cancel_order": "cancel",
+    "notify_arrival": "notify_arrival",
     "make_reservation": "reserve",
     "cancel_reservation": "cancel_reservation",
     "end_session": "end_session",
@@ -833,6 +834,8 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
         parsed["address"] = tool_input.get("address", "")
         parsed["payment_method"] = tool_input.get("payment_method", "")
         parsed["branch_id"] = tool_input.get("branch_id", 0)
+        if action == "pickup":
+            parsed["scheduled_pickup_at"] = tool_input.get("scheduled_pickup_at", None)
 
     if action == "change_payment":
         parsed["payment_method"] = tool_input.get("payment_method", "")
@@ -870,7 +873,7 @@ def _tool_use_to_parsed(reply: str, tool_name: str | None, tool_input: dict) -> 
 # ── Pre-execution validation layer ───────────────────────────────────────────
 
 _SALON_ONLY_TOOLS = {"place_order", "request_bill", "call_waiter"}
-_EXTERNAL_ONLY_TOOLS = {"create_delivery_order", "create_pickup_order", "change_payment_method", "cancel_order"}
+_EXTERNAL_ONLY_TOOLS = {"create_delivery_order", "create_pickup_order", "change_payment_method", "cancel_order", "notify_arrival"}
 
 
 def _make_order_fingerprint(items: list) -> str:
@@ -1177,6 +1180,11 @@ async def _validate_tool_call(
 
     # 8. remember_customer_preference — validate key and rate-limit per conversation
     # 9. cancel_order — validate tool_input is dict; reason is optional free text
+    if tool_name == "notify_arrival":
+        if not isinstance(tool_input, dict):
+            log.warning("guard.notify_arrival_input_not_dict", phone=_ofuscar_phone(phone), input_type=type(tool_input).__name__)
+            tool_input = {}
+
     if tool_name == "cancel_order":
         if not isinstance(tool_input, dict):
             log.warning("guard.cancel_order_input_not_dict", phone=_ofuscar_phone(phone), input_type=type(tool_input).__name__)
@@ -1376,15 +1384,15 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                 )
                 log.info("waiter_alert_no_table", alert_type=action, phone=_ofuscar_phone(phone))
 
-        # ── External actions (delivery, pickup, change_payment, cancel) ──
-        elif action in ("delivery", "pickup", "change_payment", "cancel"):
+        # ── External actions (delivery, pickup, change_payment, cancel, notify_arrival) ──
+        elif action in ("delivery", "pickup", "change_payment", "cancel", "notify_arrival"):
             result = await execute_external_action(
                 parsed, phone, bot_number, restaurant_obj,
                 routing_context or {}, reply,
                 location_id=location_id,
             )
             reply = result
-            if cart_errors and action != "cancel":
+            if cart_errors and action not in ("cancel", "notify_arrival"):
                 reply += f" (Nota: No pude agregar '{', '.join(cart_errors)}')"
 
         # ── Reserve (shared, both flows) — with availability check ───────
