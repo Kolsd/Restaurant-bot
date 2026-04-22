@@ -336,8 +336,32 @@
   </div>
 </div>
 
+<!-- ─── Full menu editor modal ─────────────────────────────────── -->
+<!-- Powered by dashboard-features.js (openMenuEditor / renderMenuEditor / -->
+<!-- addMenuEditorCategory / saveMenuEditor / closeMenuEditor).            -->
+<div id="full-menu-editor" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;overflow-y:auto;">
+  <div style="background:#f9f9f5;max-width:960px;margin:32px auto;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 24px;background:#fff;border-bottom:1px solid #e0e0d8;">
+      <div>
+        <div style="font-size:18px;font-weight:700;">Editar carta</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px;">Categorías, platos, fotos y atributos (catálogo v2)</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" onclick="addMenuEditorCategory()">+ Categoría</button>
+        <button class="btn primary" id="btn-save-menu-editor" onclick="saveMenuEditor()">Guardar</button>
+        <button class="btn" onclick="closeMenuEditor()">Cerrar</button>
+      </div>
+    </div>
+    <div id="menu-editor-canvas" style="padding:20px;"></div>
+  </div>
+</div>
+
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/pages/sidebar.js"></script>
+<!-- dashboard-features.js provides the full visual menu editor. Load BEFORE -->
+<!-- page-specific menu-admin.js so its globals (MENU_ITEMS, openMenuEditor) -->
+<!-- are defined when menu-admin.js wires the button.                         -->
+<script src="/static/js/dashboard-features.js"></script>
 <script src="/static/js/pages/menu-admin.js"></script>
 </body>
 </html>
