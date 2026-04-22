@@ -519,6 +519,23 @@ async def db_get_active_session(phone: str, bot_number: str) -> dict | None:
         return _serialize(dict(row)) if row else None
 
 
+async def db_get_active_session_on_table_by_other_phone(table_id: str, phone: str) -> dict | None:
+    """Return an active session for `table_id` held by a phone OTHER than `phone`.
+
+    Rule #5 table cooldown: used to reject a second customer scanning the same
+    QR while the first customer's session is still active.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM table_sessions WHERE table_id=$1 AND phone<>$2 AND status='active' ORDER BY started_at DESC LIMIT 1",
+            table_id,
+            phone,
+        )
+        return _serialize(dict(row)) if row else None
+
+
 async def db_create_table_session(
     phone: str,
     bot_number: str,

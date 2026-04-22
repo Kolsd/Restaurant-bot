@@ -37,11 +37,29 @@ async def db_create_deposit(
 ) -> dict | None:
     """Insert a new deposit record and return the full row."""
     async with _tenant_connection() as conn:
+        # location_id is derived from the restaurant_table assigned to the reservation.
+        # app.location_id GUC is not set (only app.org_id is set by tenant_db.py),
+        # so we JOIN via reservations.table_id → restaurant_tables.branch_id.
+        # If no table has been assigned yet, falls back to the first active location
+        # for the org (ORDER BY id ASC LIMIT 1) — always deterministic.
         row = await conn.fetchrow(
             """
             INSERT INTO reservation_deposits
-                (reservation_id, amount, currency, status, payment_url)
-            VALUES ($1, $2, $3, 'pending', $4)
+                (reservation_id, amount, currency, status, payment_url,
+                 org_id, location_id)
+            VALUES ($1, $2, $3, 'pending', $4,
+                    NULLIF(current_setting('app.org_id', true), '')::bigint,
+                    COALESCE(
+                        (SELECT rt.branch_id
+                           FROM reservations r
+                           JOIN restaurant_tables rt ON rt.id = r.table_id
+                          WHERE r.id = $1
+                          LIMIT 1),
+                        (SELECT id FROM locations
+                          WHERE org_id = NULLIF(current_setting('app.org_id', true), '')::bigint
+                            AND active = TRUE
+                          ORDER BY id ASC LIMIT 1)
+                    ))
             RETURNING *
             """,
             reservation_id,
@@ -138,7 +156,7 @@ async def db_confirm_deposit_and_reservation(
             reservation_row = await conn.fetchrow(
                 """
                 UPDATE reservations
-                   SET status = 'confirmed', confirmed_at = NOW()
+                   SET status = 'confirmed', confirmed_at = NOW(), deposit_paid = TRUE
                  WHERE id = $1
                 RETURNING *
                 """,

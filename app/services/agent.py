@@ -162,6 +162,23 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 session = await db.db_get_active_session(phone, bot_number)
                 if session and session.get("table_id") != table["id"]:
                     await db.db_close_session(phone, bot_number, reason="scanned_new_table", closed_by_username="system")
+
+                # Rule #5 (cooldown): reject if this table already has an active
+                # session from a DIFFERENT phone. Prevents two customers from
+                # opening parallel sessions on the same table.
+                other_session = await db.db_get_active_session_on_table_by_other_phone(
+                    table["id"], phone
+                )
+                if other_session:
+                    log.warning(
+                        "table_cooldown.blocked",
+                        table_id=table["id"],
+                        incoming_phone=_ofuscar_phone(phone),
+                        holder_phone=_ofuscar_phone(other_session["phone"]),
+                    )
+                    table["cooldown_blocked"] = True
+                    return table
+
                 await db.db_create_table_session(phone, bot_number, table["id"], table["name"], org_id=table.get("org_id"), location_id=table.get("location_id"))
             table["is_new_session"] = True
             return table
@@ -1395,13 +1412,14 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         deposit_amount_raw = features.get("reservation_deposit_amount", 50000)
                         deposit_amount = to_decimal(deposit_amount_raw)
                         currency = features.get("currency", "COP")
-                        try:
-                            from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
-                            _placeholder_id = -1
-                            payment_url = await generate_deposit_link(_placeholder_id, deposit_amount, currency)
-                        except Exception:
-                            log.exception("reservation.deposit_link_preflight_failed",
-                                          phone=phone, bot_number=bot_number)
+                        # Preflight: validate Wompi secrets are configured without
+                        # doing a DB INSERT (the real deposit is created after the
+                        # reservation row exists, using the real reservation_id).
+                        import os as _os  # noqa: PLC0415
+                        if not _os.getenv("WOMPI_INTEGRITY_SECRET", ""):
+                            log.error("reservation.deposit_link_preflight_failed",
+                                      phone=phone, bot_number=bot_number,
+                                      reason="WOMPI_INTEGRITY_SECRET not configured")
                             reply += "\n\nNo pudimos generar el link de pago. Por favor intenta de nuevo."
                             return reply
                     reservation = await db.db_add_reservation(
@@ -1421,7 +1439,7 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                             log.exception("reservation.cleanup_failed", id=reservation["id"])
                         reply += "\n\nHubo un problema asignando la mesa. Por favor intenta de nuevo."
                         return reply
-                    if needs_deposit and payment_url is not None:
+                    if needs_deposit:
                         from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
                         try:
                             payment_url = await generate_deposit_link(reservation["id"], deposit_amount, currency)
@@ -2050,6 +2068,17 @@ async def chat(
     # the QR-based detection path at detect_table_context line 129 never fires
     # — production has been silently relying on the text-regex fallback.
     table_context = await detect_table_context(user_message, user_phone, bot_number)
+
+    # Rule #5 (table cooldown): another customer already has this table open.
+    # Reply with a neutral occupied message and do NOT open a parallel session,
+    # do NOT invoke the LLM.
+    if table_context and table_context.get("cooldown_blocked"):
+        return {"message": (
+            f"La mesa {table_context.get('name') or table_context.get('id')} "
+            "ya está en uso por otro cliente. Si crees que es un error, pídele "
+            "al mesero que te ayude."
+        )}
+
     session_state = await get_session_state(user_phone, bot_number)
 
     # 5. Active checkout flow — handle and return early when consumed
