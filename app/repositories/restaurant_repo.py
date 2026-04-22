@@ -1246,11 +1246,16 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
                 normalized.append(normalize_dish_shape(dish))
             menu_data[category] = normalized
 
+    # Post-Wave-2: callers pass org_id (restaurant["id"] is normalized to
+    # org_id in db_get_restaurant_by_phone). The historical subquery
+    # (SELECT org_id FROM locations WHERE id = $2) assumed $2 was a
+    # location_id and returned NULL for orgs whose id isn't also a location
+    # id — the UPDATE then affected 0 rows and the route 500'd.
     async with _tenant_connection() as conn:
         result = await conn.execute(
-            """UPDATE organizations SET menu = $1::jsonb
-               WHERE id = (SELECT org_id FROM locations WHERE id = $2)""",
-            json.dumps(menu_data, default=lambda o: float(o) if isinstance(o, Decimal) else str(o)), restaurant_id  # JSON boundary
+            """UPDATE organizations SET menu = $1::jsonb WHERE id = $2""",
+            json.dumps(menu_data, default=lambda o: float(o) if isinstance(o, Decimal) else str(o)),  # JSON boundary
+            restaurant_id,
         )
         return result == "UPDATE 1"
 
