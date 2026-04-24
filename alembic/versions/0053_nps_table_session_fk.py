@@ -10,7 +10,9 @@ Background:
     - assigned_staff_id on table_sessions is the waiter who owned the shift
 
 Schema change:
-  nps_responses.table_session_id UUID NULL REFERENCES table_sessions(id) ON DELETE SET NULL
+  nps_responses.table_session_id INTEGER NULL REFERENCES table_sessions(id) ON DELETE SET NULL
+
+  (table_sessions.id is SERIAL PRIMARY KEY — integer, NOT UUID. Do not change to UUID.)
 
 NULL semantics: old rows (pre-0053) have NULL; delivery/pickup NPS also NULL because
 there is no table_session. Only dine-in salon NPS will get populated.
@@ -34,7 +36,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
         ALTER TABLE nps_responses
-        ADD COLUMN IF NOT EXISTS table_session_id UUID NULL
+        ADD COLUMN IF NOT EXISTS table_session_id INTEGER NULL
     """)
 
     # FK constraint — CASCADE SET NULL so that deleting a session doesn't lose NPS data.
