@@ -398,8 +398,9 @@ function scRenderTCPreview(data) {
 const SC_DAY_ABBR = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
 async function scLoadUpcomingShifts() {
-  const container = document.getElementById('sc-shifts-container');
-  if (!container || !SC_TOKEN) return;
+  const mobileEl = document.getElementById('sc-shifts-container');
+  const kioscoEl = document.getElementById('sc-k-shifts');
+  if ((!mobileEl && !kioscoEl) || !SC_TOKEN) return;
 
   try {
     const res = await fetch('/api/staff/self/upcoming-shifts?limit=3', {
@@ -407,14 +408,18 @@ async function scLoadUpcomingShifts() {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    _scRenderUpcomingShifts(container, data.shifts || []);
+    const shifts = data.shifts || [];
+    if (mobileEl) _scRenderUpcomingShifts(mobileEl, shifts);
+    if (kioscoEl) _scRenderUpcomingShifts(kioscoEl, shifts);
   } catch(_) {
     // Non-critical — leave container with minimal fallback.
-    container.innerHTML = '';
-    const fallback = document.createElement('div');
-    fallback.style.cssText = 'padding:14px;font-size:12px;color:var(--sc-text-3);';
-    fallback.textContent = 'Sin turnos programados.';
-    container.appendChild(fallback);
+    [mobileEl, kioscoEl].filter(Boolean).forEach(el => {
+      el.innerHTML = '';
+      const fallback = document.createElement('div');
+      fallback.style.cssText = 'padding:14px;font-size:12px;color:var(--sc-text-3);';
+      fallback.textContent = 'Sin turnos programados.';
+      el.appendChild(fallback);
+    });
   }
 }
 
@@ -615,8 +620,8 @@ function _scRenderPerformance(container, data) {
       valueEl.textContent = _scFmtCOP(amt);
 
     } else if (label === 'NPS de tus mesas') {
-      // Known limitation: nps_average stays null until nps_responses.table_session_id FK lands (CLAUDE.md §Pendientes #7)  // lint-allow: documented deferral
-      // migration lands.  Show "—" with muted hint.
+      // Populated via nps_responses.table_session_id FK (migration 0053).
+      // null means the waiter simply had no attributable NPS in the window.
       if (m.nps_average != null) {
         valueEl.textContent = Number(m.nps_average).toFixed(1);
       } else {

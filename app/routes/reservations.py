@@ -336,6 +336,92 @@ async def update_reservation_status(
     return reservation
 
 
+class ConfirmDepositManualBody(BaseModel):
+    proof_media_id: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/{reservation_id}/confirm-deposit-manual")
+async def confirm_deposit_manual(
+    reservation_id: int,
+    body: ConfirmDepositManualBody,
+    request: Request,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """
+    Caja-initiated manual confirmation of a reservation deposit.
+
+    Mirror of the Wompi callback path for reservations (same flow used when
+    the customer paid via screenshot-based method: nequi, transferencia, etc.
+    and there is no automated callback to expect).
+
+    Calls db_confirm_deposit_and_reservation atomically so the deposit row and
+    the reservations row move together — eliminating the partial-state window
+    that would leave a paid deposit bound to a pending reservation.
+
+    Idempotent: returns 200 with `already_confirmed: true` if the deposit is
+    already paid (caja double-click safety).
+    """
+    from app.repositories import reservation_deposits_repo as deposits_repo
+    from datetime import datetime as _dt
+
+    # Ownership (shared helper — fails closed on cross-org access)
+    reservation = await _verify_reservation_ownership(reservation_id, restaurant)
+
+    if reservation.get("status") == "cancelled":
+        raise HTTPException(
+            status_code=409,
+            detail="La reserva está cancelada. Si el cliente pagó, se requiere reembolso manual.",
+        )
+
+    # Resolve the acting user for audit (request.state or direct token read —
+    # get_current_restaurant_scoped already validated the token, but didn't
+    # expose a user id. Use require_auth's session for the id if available.)
+    user_id = None
+    try:
+        session = getattr(request.state, "session", None)
+        if session:
+            user_id = session.get("user_id") or session.get("id")
+    except Exception:
+        user_id = None
+
+    manual_tx_id = f"manual:{user_id or 'caja'}:{_dt.utcnow().isoformat()}Z"
+
+    result = await deposits_repo.db_confirm_deposit_and_reservation(
+        reservation_id, manual_tx_id
+    )
+
+    if result is None:
+        # Either no pending deposit OR already paid. Distinguish by reloading.
+        reservation_fresh = await db.db_get_reservation_by_id(reservation_id)
+        if reservation_fresh and reservation_fresh.get("deposit_paid"):
+            return {
+                "success": True,
+                "already_confirmed": True,
+                "reservation_id": reservation_id,
+            }
+        raise HTTPException(
+            status_code=404,
+            detail="No hay depósito pendiente para esta reserva",
+        )
+
+    log.info(
+        "reservations.deposit_manual_confirmed",
+        reservation_id=reservation_id,
+        user_id=user_id,
+        proof_media_id=body.proof_media_id,
+        notes=(body.notes or "")[:200],
+        transaction_id=manual_tx_id,
+    )
+
+    return {
+        "success": True,
+        "reservation_id": reservation_id,
+        "deposit": result.get("deposit"),
+        "reservation": result.get("reservation"),
+    }
+
+
 @router.put("/{reservation_id}/assign-table")
 async def assign_table(
     request: Request,

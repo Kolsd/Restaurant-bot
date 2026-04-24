@@ -186,32 +186,56 @@ async def db_cleanup_old_conversations(days: int = 7, bot_number: str = None):
 
 async def db_save_nps_response(phone: str, bot_number: str, score: int, comment: str):
     async with _tenant_connection() as conn:
-        # 1. Inferimos el branch_id buscando la mesa donde acaba de comer el cliente
-        branch_id = await conn.fetchval("""
-            SELECT rt.branch_id FROM table_sessions ts
+        # 1. Resolve branch_id + table_session_id in ONE query. The session is the
+        #    customer's last dine-in sitting — gives us both the sede and the FK
+        #    used for per-mesero NPS aggregation (via table_sessions.assigned_staff_id).
+        #    NULLs are fine for delivery/pickup NPS (no session).
+        row = await conn.fetchrow("""
+            SELECT ts.id AS session_id, rt.branch_id AS branch_id
+            FROM table_sessions ts
             JOIN restaurant_tables rt ON ts.table_id = rt.id
             WHERE ts.phone = $1 ORDER BY ts.started_at DESC LIMIT 1
         """, phone)
+        session_id = row["session_id"] if row else None
+        branch_id  = row["branch_id"]  if row else None
 
-        # 2. Guardamos la calificación amarrada a esa sucursal
+        # 2. Guardamos la calificación amarrada a esa sucursal + sesión
         await conn.execute("""
-            INSERT INTO nps_responses (phone, bot_number, score, comment, branch_id, org_id, created_at)
-            VALUES ($1, $2, $3, $4, $5,
+            INSERT INTO nps_responses
+                (phone, bot_number, score, comment, branch_id, table_session_id, org_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6,
                     NULLIF(current_setting('app.org_id', true), '')::bigint,
                     NOW())
-        """, phone, bot_number, score, comment, branch_id)
+        """, phone, bot_number, score, comment, branch_id, session_id)
 
 
 async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
     """Save a preliminary NPS record when score is received but comment is still pending.
-    Returns the inserted row id so it can be updated later."""
+    Returns the inserted row id so it can be updated later.
+
+    Also captures table_session_id for per-waiter NPS aggregation — the session may
+    have closed between trigger_nps and the score arriving, but the last active one
+    is our best attribution hint.
+    """
     async with _tenant_connection() as conn:
+        # Capture the session + branch at score time (not at comment time) — the
+        # session is the customer's last sitting, which is what the NPS refers to.
+        attrib = await conn.fetchrow("""
+            SELECT ts.id AS session_id, rt.branch_id AS branch_id
+            FROM table_sessions ts
+            JOIN restaurant_tables rt ON ts.table_id = rt.id
+            WHERE ts.phone = $1 ORDER BY ts.started_at DESC LIMIT 1
+        """, phone)
+        session_id = attrib["session_id"] if attrib else None
+        branch_id  = attrib["branch_id"]  if attrib else None
+
         row = await conn.fetchrow(
-            """INSERT INTO nps_responses (phone, bot_number, score, comment, org_id)
-               VALUES ($1, $2, $3, '__pending__',
+            """INSERT INTO nps_responses
+                   (phone, bot_number, score, comment, branch_id, table_session_id, org_id)
+               VALUES ($1, $2, $3, '__pending__', $4, $5,
                        NULLIF(current_setting('app.org_id', true), '')::bigint)
                RETURNING id""",
-            phone, bot_number, score
+            phone, bot_number, score, branch_id, session_id
         )
         return row["id"] if row else 0
 

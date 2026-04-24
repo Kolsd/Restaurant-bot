@@ -81,8 +81,16 @@
   function actionsForStatus(res) {
     const id = res.id;
     const status = res.status || 'pending';
+    const depositAmount = Number(res.deposit_amount || 0);
+    const depositPaid   = !!res.deposit_paid;
     const parts = [];
-    if (status === 'pending') {
+    // Deposit awaiting manual confirmation (Wompi skipped / cliente paid via
+    // transferencia or screenshot). Priority button — shown above Confirmar
+    // because without deposit the reservation stays pending.
+    if (depositAmount > 0 && !depositPaid && status !== 'cancelled' && status !== 'completed') {
+      parts.push('<button class="btn sm primary" data-action="confirm-deposit" data-id="' + id + '">Validar depósito</button>');
+    }
+    if (status === 'pending' && !(depositAmount > 0 && !depositPaid)) {
       parts.push('<button class="btn sm primary" data-action="confirm" data-id="' + id + '">Confirmar</button>');
     }
     if (status !== 'cancelled' && status !== 'completed') {
@@ -144,6 +152,7 @@
         if (action === 'confirm') confirmReservation(id);
         else if (action === 'cancel') cancelReservation(id);
         else if (action === 'assign-table') assignTable(id);
+        else if (action === 'confirm-deposit') confirmDepositManual(id);
       });
     });
   }
@@ -200,6 +209,32 @@
     } catch (e) {
       console.error('reservaciones: confirm error', e);
       if (typeof mesioToast === 'function') mesioToast('Error al confirmar reserva', 'error');
+    }
+  }
+
+  async function confirmDepositManual(id) {
+    // Caja confirms the deposit was received via non-Wompi method (transferencia,
+    // nequi screenshot). Fires the same DB path the Wompi webhook uses — atomic
+    // deposit + reservation transition to confirmed.
+    const ok = typeof mesioConfirm === 'function'
+      ? await mesioConfirm('¿Confirmar que recibiste el depósito? Esto marca la reserva como confirmada.',
+          { confirmText: 'Confirmar depósito' })
+      : window.confirm('¿Confirmar que recibiste el depósito?');
+    if (!ok) return;
+    try {
+      const headers = Object.assign({ 'Content-Type': 'application/json' },
+        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
+      const res = await fetch('/api/reservations/' + id + '/confirm-deposit-manual', {
+        method: 'POST', headers, body: JSON.stringify({})
+      });
+      const json = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(json.detail || 'status ' + res.status);
+      const msg = json.already_confirmed ? 'Depósito ya estaba confirmado' : 'Depósito validado, reserva confirmada';
+      if (typeof mesioToast === 'function') mesioToast(msg, 'success');
+      loadReservations();
+    } catch (e) {
+      console.error('reservaciones: confirm-deposit error', e);
+      if (typeof mesioToast === 'function') mesioToast('Error al validar depósito: ' + e.message, 'error');
     }
   }
 

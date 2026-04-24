@@ -405,7 +405,12 @@ class TestWaiterFlows:
 
         session_row = make_row({"table_id": "table-1", "session_started_at": None,
                                 "has_waiter_alert": False, "has_open_check": False,
-                                "current_total": 0, "session_active": True})
+                                "current_total": 0, "session_active": True,
+                                # Enrichment fields added when the query was extended
+                                # to surface waiter attribution + order channel.
+                                "active_order_id": None, "channel": None,
+                                "waiter_staff_id": None, "assigned_staff_id": None,
+                                "waiter_name": None})
         order_row = make_row({"table_id": "table-1", "status": "recibido"})
         conn = AsyncMock()
         # Call order: db_get_pending_orders_by_branch (orders), then

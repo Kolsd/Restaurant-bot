@@ -420,6 +420,140 @@ async def get_delivery_orders(request: Request):
         )
     return {"orders": raw}
 
+class ValidateDeliveryBody(BaseModel):
+    """Body for manual proof validation from Caja.
+
+    `proof_media_id` is informational — caja staff has already inspected the
+    photo in the UI by the time they hit this endpoint; we only log it for
+    audit. `notes` attaches a free-text justification (optional).
+    """
+    proof_media_id: str | None = None
+    notes: str | None = None
+
+
+@router.post("/delivery/orders/{order_id}/validate")
+async def validate_delivery_order(order_id: str, body: ValidateDeliveryBody, request: Request):
+    """
+    Caja-initiated manual validation of a delivery/pickup order's payment proof.
+
+    Mirror of the Wompi callback path but triggered by a human operator. Used
+    when the customer paid via nequi / transferencia / daviplata and uploaded
+    a screenshot — the operator visually confirms the proof then clicks
+    "Validar" in the Comprobantes tab.
+
+    Idempotent: second call for an already-paid order returns the existing
+    confirmation. Loyalty accrual fires once (handled by db_confirm_payment
+    returning None on replay).
+    """
+    from datetime import datetime as _dt
+    user = await get_current_user(request)
+
+    # 1. Pre-resolve order (cross-tenant) to obtain its org_id.
+    with bypass_tenant_scope("validate_delivery_order: pre-resolve order tenant"):
+        order = await db.db_get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+    if order.get("paid"):
+        # Already validated — return current state instead of erroring. Caja may
+        # double-click; this must be safe.
+        return {
+            "success": True,
+            "already_paid": True,
+            "order_id": order_id,
+            "status": order.get("status"),
+        }
+
+    if order.get("status") in ("cancelado", "entregado"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"La orden está en estado '{order.get('status')}' y no se puede validar.",
+        )
+
+    # 2. Ownership check (org-level, same pattern as update_delivery_status).
+    order_rid = order.get("org_id") or order.get("restaurant_id")
+    user_rid = user.get("branch_id") or user.get("restaurant_id")
+    if order_rid and user_rid:
+        with bypass_tenant_scope("validate_delivery_order: resolve user org_id"):
+            user_rest = await db.db_get_restaurant_by_id(int(user_rid))
+        user_org_id = (user_rest or {}).get("org_id") or user_rid
+        order_org_id = int(order.get("org_id") or order_rid)
+        if int(user_org_id) != order_org_id:
+            raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
+
+    scope_rid = int(order_rid) if order_rid else None
+    if not scope_rid:
+        raise HTTPException(status_code=500, detail="No se pudo resolver tenant de la orden")
+
+    # 3. Mark paid + confirmed. Synthetic transaction_id lets us distinguish
+    #    manual validations from Wompi callbacks in audit logs and reports.
+    manual_tx_id = f"manual:{user.get('id', 'unknown')}:{_dt.utcnow().isoformat()}Z"
+
+    with tenant_scope(scope_rid):
+        result = await db.db_confirm_payment(order_id, manual_tx_id)
+
+    if result is None:
+        # Race: another worker / second click beat us to it. Still a success
+        # from caja's perspective.
+        log.info(
+            "orders.validate_delivery.noop",
+            order_id=order_id,
+            user_id=user.get("id"),
+            reason="already_paid_or_terminal",
+        )
+        return {
+            "success": True,
+            "already_paid": True,
+            "order_id": order_id,
+        }
+
+    log.info(
+        "orders.validate_delivery.confirmed",
+        order_id=order_id,
+        user_id=user.get("id"),
+        proof_media_id=body.proof_media_id,
+        notes=(body.notes or "")[:200],
+        transaction_id=manual_tx_id,
+    )
+
+    # 4. Loyalty accrual (best-effort, same pattern as Wompi webhook).
+    try:
+        phone = result.get("phone", "")
+        total = result.get("total", 0)
+        if scope_rid and phone:
+            async def _accrue_loyalty_manual():
+                try:
+                    with tenant_scope(scope_rid):
+                        await db_accrue_loyalty_points(
+                            restaurant_id=scope_rid,
+                            phone=phone,
+                            order_id=order_id,
+                            total_cop=to_decimal(total),
+                        )
+                except Exception:
+                    log.exception(
+                        "orders.validate_delivery.loyalty_failed",
+                        order_id=order_id,
+                    )
+            asyncio.create_task(_accrue_loyalty_manual())
+    except Exception:
+        log.exception("orders.validate_delivery.loyalty_schedule_failed", order_id=order_id)
+
+    # 5. Notify the customer asynchronously — same helper kitchen uses on status transitions.
+    bot_number = result.get("bot_number", "")
+    if bot_number:
+        asyncio.create_task(send_delivery_notification(
+            result.get("phone", ""), "confirmado", bot_number, result.get("order_type", "domicilio"),
+        ))
+
+    return {
+        "success": True,
+        "order_id": order_id,
+        "status": "confirmado",
+        "transaction_id": manual_tx_id,
+    }
+
+
 @router.patch("/delivery/orders/{order_id}/status")
 async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
     user = await get_current_user(request)

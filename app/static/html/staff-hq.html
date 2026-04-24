@@ -102,31 +102,26 @@
         </div>
       </div>
 
-      <!-- ANNOUNCEMENTS (placeholder — backend TODO) -->
+      <!-- ANNOUNCEMENTS — populated by scLoadAnnouncements() on mount -->
       <div class="sc-m-sect">Anuncios</div>
       <div class="sc-annc" id="sc-annc-container">
-        <div class="sc-annc-av">?</div>
-        <div class="sc-annc-body">
-          <div style="font-size:12px;color:var(--sc-text-3);">Sin anuncios del manager. <span style="font-style:italic;">(Próximamente)</span></div>
-        </div>
+        <div style="font-size:12px;color:var(--sc-text-3);padding:4px 0;">Cargando…</div>
       </div>
 
-      <!-- TASKS (placeholder — backend TODO) -->
+      <!-- TASKS — populated by scLoadTasks() on mount -->
       <div class="sc-m-sect">Checklist del turno <span id="sc-task-count" style="font-size:11px;color:var(--sc-text-3);font-weight:500;letter-spacing:0;text-transform:none;"></span></div>
       <div class="sc-m-card" id="sc-tasks-container">
-        <div class="sc-task-row">
-          <div style="padding:10px 14px;font-size:12px;color:var(--sc-text-3);">Sin tareas asignadas. <span style="font-style:italic;">(Próximamente)</span></div>
-        </div>
+        <div style="padding:10px 14px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
       </div>
 
       <!-- STATIONS -->
       <div class="sc-m-sect">Mis estaciones</div>
       <div class="sc-stations-m" id="sc-stations-m"></div>
 
-      <!-- UPCOMING SHIFTS -->
+      <!-- UPCOMING SHIFTS — populated by scLoadUpcomingShifts() on mount -->
       <div class="sc-m-sect">Próximos turnos <a href="#">Calendario ↗</a></div>
       <div class="sc-m-card" id="sc-shifts-container">
-        <div style="padding:14px;font-size:12px;color:var(--sc-text-3);">Cargando turnos... <span style="font-style:italic;">(Próximamente)</span></div>
+        <div style="padding:14px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
       </div>
 
       <!-- SWAP INCOMING (shown only when there are pending requests) -->

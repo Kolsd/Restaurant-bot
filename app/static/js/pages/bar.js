@@ -160,37 +160,77 @@ async function loadOrders() {
     _updateStats(orders);
     _renderQueue(orders);
     loadInventory();
+    renderPopularBeverages(orders);
   } catch (err) {
     mesioTrackFetch(false);
   }
 }
 
 // ── Load inventory sidebar ────────────────────────────
+// Reads /api/stats/inventory-critical — response shape is
+// {alerts:[{ingredient,unit,current_stock,min_stock,severity,affects_dishes}],
+//  ok:[...]}
 async function loadInventory() {
   try {
     const res = await fetch('/api/stats/inventory-critical', { headers: mesioHeaders() });
     if (!res.ok) return;
     const data = await res.json();
-    const items = data.items || data || [];
-    renderInventory(items);
+    renderInventory(data.alerts || []);
   } catch (_) { /* non-critical */ }
 }
 
-function renderInventory(items) {
+function renderInventory(alerts) {
   const el = document.getElementById('bar-inv-list');
   if (!el) return;
-  if (!items.length) { el.innerHTML = '<div style="font-size:12px;color:var(--b-text-3);">Stock OK</div>'; return; }
-  el.innerHTML = items.map(item => {
-    const pct = item.capacity > 0 ? Math.min(100, Math.round(item.stock / item.capacity * 100)) : 50;
-    const lvlCls = pct < 20 ? 'crit' : pct < 50 ? 'lo' : '';
+  if (!alerts.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--b-text-3);">Stock OK</div>';
+    return;
+  }
+  el.innerHTML = alerts.map(item => {
+    const cur = Number(item.current_stock ?? 0);
+    const min = Number(item.min_stock ?? 0);
+    const pct = min > 0 ? Math.min(100, Math.round((cur / min) * 100)) : 0;
+    // critical: <50% of min → red; warning: <100% → amber
+    const lvlCls = item.severity === 'critical' ? 'crit' : 'lo';
+    const qty = `${cur}${item.unit ? ' ' + item.unit : ''}`;
     return `<div class="inv-row">
       <div>
-        <div class="inv-name">${_esc(item.name || item.sku || '')}</div>
+        <div class="inv-name">${_esc(item.ingredient || '')}</div>
         <div class="inv-bar"><div class="inv-fill ${lvlCls}" style="width:${pct}%"></div></div>
       </div>
-      <div class="inv-qty">${_esc(String(item.stock ?? '—'))}</div>
+      <div class="inv-qty">${_esc(qty)}</div>
     </div>`;
   }).join('');
+}
+
+// ── Top beverages this shift (client-side aggregation from loaded orders) ──
+// No dedicated endpoint yet; we count line items from the orders currently
+// displayed. Good-enough approximation: bar is a narrow station, so "this
+// shift" ≈ "what's in the pending queue plus recently-ready".
+function renderPopularBeverages(orders) {
+  const el = document.getElementById('bar-pop-list');
+  if (!el) return;
+  const counts = new Map();
+  (orders || []).forEach(o => {
+    (o.items || []).forEach(it => {
+      const name = (it.name || it.dish || '').trim();
+      if (!name) return;
+      const qty = Number(it.qty || it.quantity || 1);
+      counts.set(name, (counts.get(name) || 0) + qty);
+    });
+  });
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  if (!top.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--b-text-3);">Sin pedidos aún este turno.</div>';
+    return;
+  }
+  el.innerHTML = top.map(([name, qty]) => `
+    <div class="inv-row">
+      <div class="inv-name">${_esc(name)}</div>
+      <div class="inv-qty">${qty}×</div>
+    </div>`).join('');
 }
 
 // ── Keyboard shortcuts ────────────────────────────────

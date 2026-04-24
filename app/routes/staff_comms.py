@@ -383,14 +383,14 @@ async def self_performance(
           "avg_ticket":         int,    // COP zero-decimal
           "tips_total":         float,
           "avg_tip_per_shift":  float,
-          "nps_average":        null,   // always null until future migration
-          "nps_response_count": 0
+          "nps_average":        float | null,  // null = no attributable NPS in window
+          "nps_response_count": int
         }
       }
 
-    NPS per-staff is not queryable today: nps_responses has no link to
-    table_sessions.assigned_staff_id (no session_id FK).  Returns null until
-    a future migration adds nps_responses.table_session_id.
+    NPS per-staff resolves through nps_responses.table_session_id → table_sessions
+    (migration 0053). Attribution counts rows where session.assigned_staff_id
+    matches OR where the session window overlaps a table_order by this waiter.
     """
     username: str = user.get("username", "")
     if not username.startswith("staff:"):

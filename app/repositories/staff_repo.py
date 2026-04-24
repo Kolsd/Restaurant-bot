@@ -237,6 +237,28 @@ async def db_get_staff_for_pin_login(restaurant_id: int, name: str) -> dict | No
     return d
 
 
+async def db_get_staff_pin_by_id(staff_id: str, restaurant_id: int) -> dict | None:
+    """Return a staff row (including pin hash) by id, scoped to org.
+
+    Used by POST /api/staff/self/verify-pin — kiosco already selected the staff
+    member from a list, so we fetch by id (safer than by name match) and verify
+    the pin hash. Returns None if not found within the given org.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text, org_id, name, username, role, roles, active, pin, photo_url "
+            "FROM staff WHERE id=$1::uuid AND org_id=$2 AND active=true",
+            staff_id, restaurant_id,
+        )
+    if not row:
+        return None
+    d = dict(row)
+    _normalize_roles(d)
+    return d
+
+
 async def db_get_staff_candidates_by_name(name: str) -> list:
     """Retorna todos los staff activos con ese nombre (multi-restaurante).
     El caller verifica el PIN contra cada candidato para resolver colisiones.
@@ -2064,12 +2086,10 @@ async def db_get_staff_performance(
           "avg_ticket":         int,    # COP zero-decimal  # JSON boundary
           "tips_total":         float,  # COP zero-decimal  # JSON boundary
           "avg_tip_per_shift":  float,  # COP zero-decimal  # JSON boundary
-          "nps_average":        null,   # TODO: nps_responses has no link to
-                                       #   table_sessions.assigned_staff_id —
-                                       #   no session_id FK exists on the table.
-                                       #   Return null until a future migration
-                                       #   adds nps_responses.table_session_id.
-          "nps_response_count": 0,
+          "nps_average":        float | null,   # Populated after migration 0053
+                                                # (nps_responses.table_session_id FK).
+                                                # null = no attributable responses in window.
+          "nps_response_count": int,
         }
       }
 
@@ -2135,16 +2155,47 @@ async def db_get_staff_performance(
         round(tips_total / shift_count, 2) if shift_count > 0 else 0.0
     )
 
-    # ── NPS: not queryable today — no session_id FK on nps_responses ─────────
-    # TODO: once a future migration adds nps_responses.table_session_id (FK into
-    # table_sessions), join here:
-    #   SELECT AVG(nr.score)::numeric(4,2), COUNT(*)
-    #   FROM nps_responses nr
-    #   JOIN table_sessions ts ON ts.id = nr.table_session_id
-    #   WHERE ts.assigned_staff_id = $1::uuid AND nr.created_at >= $2
-    # Until then, return null to signal "data not available".
-    nps_average        = None
-    nps_response_count = 0
+    # ── NPS per-mesero — unblocked by migration 0053 (table_session_id FK) ──────
+    # Attribution: NPS row → session → assigned_staff_id (primary path), OR the
+    # same session window overlaps a table_order authored by this waiter_staff_id
+    # (fallback for kiosco/POS flows where assigned_staff_id was never set).
+    # DISTINCT is implicit via EXISTS subqueries — a given NPS row counts once.
+    # Excludes rows still holding the '__pending__' sentinel comment.
+    nps_sql = """
+        SELECT AVG(n.score)::numeric(4,2) AS avg_score,
+               COUNT(*)::int               AS n_count
+        FROM nps_responses n
+        WHERE n.org_id = $3
+          AND n.created_at >= $2
+          AND n.comment <> '__pending__'
+          AND n.table_session_id IS NOT NULL
+          AND (
+            EXISTS (
+              SELECT 1 FROM table_sessions ts
+               WHERE ts.id = n.table_session_id
+                 AND ts.assigned_staff_id = $1::uuid
+            )
+            OR EXISTS (
+              SELECT 1
+                FROM table_sessions ts2
+                JOIN table_orders tord
+                  ON tord.table_id = ts2.table_id
+                 AND tord.created_at >= ts2.started_at
+                 AND tord.created_at <= COALESCE(ts2.closed_at, NOW())
+               WHERE ts2.id = n.table_session_id
+                 AND tord.waiter_staff_id = $1::uuid
+            )
+          )
+    """
+    async with tenant_connection() as conn:
+        nps_row = await conn.fetchrow(nps_sql, staff_id, period_start_naive, org_id)
+
+    nps_response_count = int(nps_row["n_count"]) if nps_row and nps_row["n_count"] else 0
+    nps_average = (
+        round(float(nps_row["avg_score"]), 1)
+        if nps_response_count > 0 and nps_row["avg_score"] is not None
+        else None
+    )
 
     return {
         "period_days": days,

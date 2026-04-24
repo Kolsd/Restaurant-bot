@@ -961,6 +961,11 @@ async def get_tables_status(request: Request):
         t['current_total']      = enc.get('current_total',      0.0)
         t['session_active']     = enc.get('session_active',     False)
         t['session_started_at'] = enc.get('session_started_at', None)
+        t['active_order_id']    = enc.get('active_order_id',    None)
+        t['channel']            = enc.get('channel',            None)
+        t['waiter_staff_id']    = enc.get('waiter_staff_id',    None)
+        t['assigned_staff_id']  = enc.get('assigned_staff_id',  None)
+        t['waiter_name']        = enc.get('waiter_name',        None)
 
     return {"tables": tables}
 
@@ -1170,6 +1175,95 @@ async def get_checks(request: Request, base_order_id: str):
     with bypass_tenant_scope("get_checks: checks lookup by order ID across branches"):
         checks = await db.db_get_checks(base_order_id)
     return {"checks": checks}
+
+@router.post("/api/table-orders/{base_order_id}/checks/single/pay")
+async def pay_check_single(request: Request, base_order_id: str, body: PayCheckBody):
+    """
+    Cobro de mesa completa en un solo check (sin split previo).
+
+    Crea atómicamente un check único con TODOS los ítems del ticket y lo cobra
+    reutilizando el flujo de pay_check (fiscal, lealtad, NPS, cambio, propina).
+
+    Caja llama acá cuando el usuario selecciona "Pagar mesa completa" sin haber
+    dividido la cuenta. El check_id real se devuelve en la respuesta para que
+    el frontend pueda referenciarlo después si es necesario.
+    """
+    user = await get_current_user(request)
+
+    # Fetch ticket — cross-branch bypass mirrors the pattern in create_checks.
+    with bypass_tenant_scope("pay_check_single: ticket lookup across branches"):
+        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+        if not ticket:
+            ticket = await db.db_get_order_ticket_data(base_order_id, None)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    # Ownership check: ticket must belong to this user's org
+    ticket_org_id = ticket.get("org_id")
+    user_branch_id = user.get("branch_id") or user.get("restaurant_id")
+    user_org_id = None
+    if user_branch_id:
+        with bypass_tenant_scope("pay_check_single: resolve user org_id from branch_id"):
+            user_rest = await db.db_get_restaurant_by_id(int(user_branch_id))
+        if user_rest:
+            user_org_id = user_rest.get("org_id")
+    if ticket_org_id is None or user_org_id is None or ticket_org_id != user_org_id:
+        raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu organización")
+
+    # Refuse if the order already has any non-cancelled check — caller should use /checks/{id}/pay
+    with bypass_tenant_scope("pay_check_single: existing checks guard"):
+        existing = await db.db_get_checks(base_order_id)
+    if any(c.get("status") != "cancelled" for c in (existing or [])):
+        raise HTTPException(
+            status_code=409,
+            detail="Esta mesa ya tiene checks abiertos o cobrados. Usá el endpoint de check específico.",
+        )
+
+    # Build a SINGLE check with ALL items, server-computed totals.
+    items_out = []
+    gross = Decimal("0")
+    for item in ticket.get("items", []):
+        name = item["name"]
+        qty = int(item.get("quantity", item.get("qty", 1)))
+        unit_price = to_decimal(item.get("price", 0))
+        items_out.append({
+            "name":       name,
+            "qty":        qty,
+            "unit_price": float(unit_price),                          # JSON boundary
+            "subtotal":   float(money_mul(unit_price, qty)),          # JSON boundary
+        })
+        gross += money_mul(unit_price, qty)
+
+    # For a single full-mesa check we treat the ticket's total as gross.
+    # Tax factor is 0 here — split checks can pass tax_pct on creation, but
+    # the single pay path uses whatever tax was already computed into the ticket.
+    total      = quantize_money(gross)
+    subtotal   = total
+    tax_amount = Decimal("0")
+
+    single_check_payload = [{
+        "check_number": 1,
+        "items":        items_out,
+        "subtotal":     float(subtotal),
+        "tax_amount":   float(tax_amount),
+        "total":        float(total),
+    }]
+
+    with bypass_tenant_scope("pay_check_single: create single check"):
+        created = await db.db_create_checks(base_order_id, single_check_payload)
+    if not created:
+        raise HTTPException(status_code=500, detail="No se pudo crear el check")
+
+    created_check = created[0] if isinstance(created, list) else created
+    check_id = str(created_check.get("id") or created_check.get("check_id"))
+    if not check_id:
+        raise HTTPException(status_code=500, detail="Check creado sin id — estado inconsistente")
+
+    # Delegate to the existing pay_check — it handles rate-limit, tenant_scope,
+    # fiscal invoice (gated by dian_active flag; currently OFF), loyalty accrual,
+    # NPS farewell, and change calculation in one coherent path.
+    return await pay_check(request, base_order_id, check_id, body)
+
 
 @router.post("/api/table-orders/{base_order_id}/checks/{check_id}/pay")
 async def pay_check(request: Request, base_order_id: str, check_id: str, body: PayCheckBody):

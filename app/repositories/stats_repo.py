@@ -782,6 +782,38 @@ async def db_staff_performance(
             _uuid, org_id, str(period_start),
         )
 
+        # NPS per-waiter — unblocked by migration 0053 (nps_responses.table_session_id FK).
+        # Attribution paths (either counts):
+        #   (a) table_sessions.assigned_staff_id explicitly set at session start
+        #   (b) any table_orders in the session window authored by this waiter_staff_id
+        # We OR them with DISTINCT to avoid double-counting a single NPS response.
+        nps_row = await conn.fetchrow(
+            """SELECT AVG(n.score)::numeric AS avg_score, COUNT(*)::int AS n_count
+               FROM nps_responses n
+               WHERE n.org_id = $2
+                 AND n.created_at >= $3::date
+                 AND n.comment <> '__pending__'
+                 AND n.table_session_id IS NOT NULL
+                 AND (
+                   EXISTS (
+                     SELECT 1 FROM table_sessions ts
+                      WHERE ts.id = n.table_session_id
+                        AND ts.assigned_staff_id = $1::uuid
+                   )
+                   OR EXISTS (
+                     SELECT 1
+                       FROM table_sessions ts2
+                       JOIN table_orders tord
+                         ON tord.table_id = ts2.table_id
+                        AND tord.created_at >= ts2.started_at
+                        AND tord.created_at <= COALESCE(ts2.ended_at, NOW())
+                      WHERE ts2.id = n.table_session_id
+                        AND tord.waiter_staff_id = $1::uuid
+                   )
+                 )""",
+            _uuid, org_id, str(period_start),
+        )
+
     # Build complete week series (fill gaps with 0)
     week_map: dict[str, dict] = {}
     for row in rows:
@@ -806,6 +838,13 @@ async def db_staff_performance(
     total_sales   = sum(w["sales_total"]   for w in week_series)
     avg_ticket    = int(total_sales / tables_served) if tables_served else 0
 
+    # NPS average: None if no attributable responses in the window — UI renders "—".
+    # Rounded to 1 decimal for display ("4.7") rather than the raw DB precision.
+    nps_avg = None
+    nps_count = int(nps_row["n_count"]) if nps_row and nps_row["n_count"] else 0
+    if nps_count > 0 and nps_row["avg_score"] is not None:
+        nps_avg = round(float(nps_row["avg_score"]), 1)
+
     return {
         "staff_id":     staff_id,
         "staff_name":   staff_name,
@@ -814,6 +853,8 @@ async def db_staff_performance(
         "tables_served": tables_served,
         "total_sales":   total_sales,
         "avg_ticket":    avg_ticket,
+        "nps_average":   nps_avg,
+        "nps_count":     nps_count,
     }
 
 

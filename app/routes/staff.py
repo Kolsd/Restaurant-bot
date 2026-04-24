@@ -72,6 +72,18 @@ class StaffPinLoginRequest(BaseModel):
     pin:  str = Field(..., min_length=4, max_length=100)
 
 
+class StaffVerifyPinRequest(BaseModel):
+    """Body for /self/verify-pin — kiosco PIN fallback when biometric unavailable.
+
+    Unlike pin-login which accepts `name`, this endpoint receives the staff_id
+    explicitly because the kiosco has already selected the staff from a list.
+    Using id avoids ambiguity when names collide within the same org.
+    """
+    restaurant_id: int
+    staff_id:      str = Field(..., min_length=1, max_length=64)
+    pin:           str = Field(..., min_length=4, max_length=100)
+
+
 def _staff_redirect(roles: list) -> str:
     """Return the best landing page URL for the given role set.
     Admins/managers go to /dashboard.
@@ -209,6 +221,52 @@ async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
             "features":         raw_features,
         }
     }
+
+@router.post("/self/verify-pin", status_code=200)
+async def staff_verify_pin(request: Request, body: StaffVerifyPinRequest):
+    """
+    PIN fallback for kiosco clock-in when biometric (WebAuthn) is unavailable.
+
+    Unlike /pin-login (which authenticates by name for the initial login flow),
+    this endpoint assumes the kiosco already knows which staff member is at the
+    terminal (selected from a list on the kiosco UI). It verifies the PIN and
+    returns a fresh session token that the client immediately uses to call the
+    clock-in / clock-out / break endpoints.
+
+    Same rate-limit + constant-time response as /pin-login to avoid
+    enumeration. Key includes the staff_id rather than the name.
+    """
+    # Reuse the same per-IP-per-target rate limit
+    await _check_pin_rate_limit(request, body.restaurant_id, body.staff_id)
+
+    # Bypass tenant here: we haven't authenticated the kiosco caller yet, and
+    # the org_id comes from the request body. Scoping via tenant_connection
+    # below enforces the filter.
+    from app.services.tenant_context import tenant_scope
+
+    with tenant_scope(body.restaurant_id):
+        member = await db.db_get_staff_pin_by_id(body.staff_id, body.restaurant_id)
+
+    # Constant-time: run verify even when member is None with a dummy hash so
+    # timing between "unknown staff_id" and "bad pin" is identical.
+    # The dummy hash is a valid bcrypt of a random string.
+    _DUMMY = "$2b$12$CGrQL8okZSh9O2uDzZqkMu3hZLUK8vYoU1O./GGLu4ZzHMN3CrH/G"
+    pin_hash = member["pin"] if member else _DUMMY
+    ok = _pwd_ctx.verify(body.pin, pin_hash)
+    if not member or not ok:
+        raise HTTPException(status_code=401, detail="Credenciales inválidas.")
+
+    token = await sessions_repo.create_session(f"staff:{member['id']}")
+    roles = member.get("roles") or [member.get("role", "mesero")]
+
+    return {
+        "token":        token,
+        "access_token": token,
+        "staff_id":     member["id"],
+        "roles":        roles,
+        "name":         member["name"],
+    }
+
 
 @router.put("/{staff_id}", dependencies=_MODULE_DEPS)
 async def update_staff(

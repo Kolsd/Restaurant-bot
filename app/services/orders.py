@@ -261,9 +261,12 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
             total = subtotal + delivery_fee
 
-            # Use a SINGLE connection for all transit/status reads to eliminate TOCTOU races
+            # Use a SINGLE connection for all transit/status reads to eliminate TOCTOU races.
+            # tenant_connection() applies SET LOCAL app.org_id — required so the SELECT on
+            # orders below cannot match rows from a different tenant that shares phone+bot_number.
+            from app.services.tenant_db import tenant_connection  # noqa: PLC0415
             pool = await db.get_pool()
-            async with pool.acquire() as conn:
+            async with tenant_connection() as conn:
                 base_order = await conn.fetchrow(
                     """SELECT id, address, notes, payment_method, status
                        FROM orders

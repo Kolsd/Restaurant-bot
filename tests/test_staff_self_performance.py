@@ -77,8 +77,9 @@ async def test_performance_zero_metrics():
     conn = _make_conn()
     # Both fetchrow calls return zero-count rows.
     conn.fetchrow = AsyncMock(side_effect=[
-        _make_row({"tables_served": 0, "avg_ticket": 0}),  # sessions query
-        _make_row({"shift_count": 0}),                      # shifts query
+        _make_row({"tables_served": 0, "avg_ticket": 0}),   # sessions query
+        _make_row({"shift_count": 0}),                       # shifts query
+        _make_row({"avg_score": None, "n_count": 0}),        # nps query (migration 0053)
     ])
     pool = _make_pool(conn)
 
@@ -114,6 +115,7 @@ async def test_performance_full_metrics():
     conn.fetchrow = AsyncMock(side_effect=[
         _make_row({"tables_served": 87, "avg_ticket": 62400}),
         _make_row({"shift_count": 30}),
+        _make_row({"avg_score": None, "n_count": 0}),
     ])
     pool = _make_pool(conn)
 
@@ -141,11 +143,12 @@ async def test_performance_full_metrics():
 
 
 async def test_performance_nps_always_null():
-    """nps_average is always None — nps_responses has no session_id FK today."""
+    """nps_average is None when the NPS query returns zero rows (no attributable responses)."""
     conn = _make_conn()
     conn.fetchrow = AsyncMock(side_effect=[
         _make_row({"tables_served": 5, "avg_ticket": 30000}),
         _make_row({"shift_count": 5}),
+        _make_row({"avg_score": None, "n_count": 0}),
     ])
     pool = _make_pool(conn)
 
@@ -172,6 +175,7 @@ async def test_performance_days_param():
     conn.fetchrow = AsyncMock(side_effect=[
         _make_row({"tables_served": 10, "avg_ticket": 20000}),
         _make_row({"shift_count": 7}),
+        _make_row({"avg_score": None, "n_count": 0}),
     ])
     pool = _make_pool(conn)
 

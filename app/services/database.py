@@ -496,6 +496,7 @@ from app.repositories.staff_repo import (
     db_get_staff,
     db_get_team_staff_by_branch,
     db_get_staff_for_pin_login,
+    db_get_staff_pin_by_id,
     db_get_staff_candidates_by_name,
     db_create_staff,
     db_update_staff,

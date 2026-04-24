@@ -48,6 +48,21 @@ function _applyZoneFilter() {
   });
 }
 
+// ── Channel badge: origen del pedido (bot WhatsApp vs POS vs QR) ──
+function _channelBadge(channel) {
+  if (!channel) return '';
+  const map = {
+    whatsapp_bot: { icon: '💬', title: 'WhatsApp bot' },
+    qr_pickup:    { icon: '📱', title: 'QR / pickup' },
+    web:          { icon: '🌐', title: 'Web' },
+    pos:          { icon: '🧾', title: 'POS' },
+    manual:       { icon: '✋', title: 'Manual' },
+  };
+  const m = map[channel];
+  if (!m) return '';
+  return `<div class="m-tbl-channel" title="${m.title}" aria-label="${m.title}">${m.icon}</div>`;
+}
+
 // ── Status → CSS class + label ───────────────────────
 function _tableState(t) {
   if (t.has_waiter_alert ?? false) return { cls: 'alert', label: '🙋 Llamó al mesero' };
@@ -83,13 +98,21 @@ function _renderTables(tables) {
     const checkBadge = (t.has_open_check ?? false) ? '<div class="m-tbl-check-badge">Cobrando</div>' : '';
     const capBadge = cap ? `<div class="m-tbl-cap ${cls === 'alert' ? 'alert' : ''}">${cls === 'alert' ? '🙋' : cap + 'p'}</div>` : '';
 
+    // Waiter attribution + channel: show WHO is serving (if known) and HOW the session started.
+    const waiterLine = t.waiter_name
+      ? `<div class="m-tbl-waiter" title="Atiende">Att: ${_esc(t.waiter_name)}</div>`
+      : '';
+    const channelBadge = _channelBadge(t.channel);
+
     return `<div class="m-tbl ${cls}" data-id="${_esc(String(t.id))}" data-zone="${_esc(zone)}">
       ${capBadge}
+      ${channelBadge}
       <div class="m-tbl-num">${name}</div>
       <div class="m-tbl-state">${_esc(label)}</div>
       <div class="m-tbl-body">
         ${total ? `<div class="m-tbl-total">${total}</div>` : ''}
         ${sinceStr ? `<div class="m-tbl-time">${sinceStr}</div>` : ''}
+        ${waiterLine}
         ${alertLabel}
         ${checkBadge}
       </div>

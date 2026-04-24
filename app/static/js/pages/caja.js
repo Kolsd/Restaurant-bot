@@ -1041,12 +1041,31 @@ function _extractMediaId(url) {
 }
 
 async function confirmDeliveryOrder(orderId, newStatus, containerEl, reloadFn) {
+  // "confirmado" = caja validated proof of payment. Use the dedicated endpoint
+  // that sets paid=TRUE atomically and fires loyalty + customer notification.
+  // Plain status PATCH would leave paid=FALSE — the Wompi path and manual
+  // validation must converge on the same post-conditions.
+  const isPaymentValidation = newStatus === 'confirmado';
+  const url = isPaymentValidation
+    ? `/api/delivery/orders/${encodeURIComponent(orderId)}/validate`
+    : `/api/delivery/orders/${encodeURIComponent(orderId)}/status`;
+  const method = isPaymentValidation ? 'POST' : 'PATCH';
+  const body = isPaymentValidation
+    ? JSON.stringify({})
+    : JSON.stringify({ status: newStatus });
   try {
-    const res = await fetch(`/api/delivery/orders/${encodeURIComponent(orderId)}/status`, {
-      method: 'PATCH', headers: mesioHeaders(), body: JSON.stringify({ status: newStatus }),
-    });
-    if (res.ok) { mesioToast('Estado actualizado', 'success'); reloadFn(); }
-    else { const j = await res.json().catch(() => ({})); mesioToast(j.detail || 'Error', 'error'); }
+    const res = await fetch(url, { method, headers: mesioHeaders(), body });
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      const msg = isPaymentValidation
+        ? (j.already_paid ? 'La orden ya estaba validada' : 'Pago validado, cocina notificada')
+        : 'Estado actualizado';
+      mesioToast(msg, 'success');
+      reloadFn();
+    } else {
+      const j = await res.json().catch(() => ({}));
+      mesioToast(j.detail || `Error ${res.status}`, 'error');
+    }
   } catch (_) { mesioToast('Error de red', 'error'); }
 }
 

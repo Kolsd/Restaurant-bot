@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.conftest import make_pool, make_row
+from app.services.tenant_context import tenant_scope
 
 
 # ── Helper: run a coroutine in the current event loop ────────────────────────
@@ -627,12 +628,18 @@ class TestCustomerMemoryIntegration:
         }))
 
         # Pool / conn: fetchrow returns None (no existing base_order),
-        # fetchval also returns None
+        # fetchval also returns None. tenant_connection() wraps conn.transaction()
+        # as an async CM, so the mock needs to support that.
+        import contextlib
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=None)
         conn.fetchval = AsyncMock(return_value=None)
-        conn.__aenter__ = AsyncMock(return_value=conn)
-        conn.__aexit__ = AsyncMock(return_value=False)
+        conn.execute  = AsyncMock(return_value=None)
+
+        @contextlib.asynccontextmanager
+        async def _fake_txn():
+            yield
+        conn.transaction = MagicMock(side_effect=lambda: _fake_txn())
 
         pool_mock = AsyncMock()
         pool_mock.acquire = MagicMock(return_value=AsyncMock(
@@ -642,7 +649,6 @@ class TestCustomerMemoryIntegration:
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=pool_mock))
 
         # Bypass the cart lock entirely
-        import contextlib
         @contextlib.asynccontextmanager
         async def _fake_cart_lock(phone, bot_number, ttl_seconds=30):
             yield
@@ -655,16 +661,19 @@ class TestCustomerMemoryIntegration:
         increment_mock = AsyncMock()
         monkeypatch.setattr(repo, "increment_after_order", increment_mock)
 
-        result = _run(
-            orders_mod.create_order(
-                phone=phone,
-                order_type="domicilio",
-                address="Calle 1 #2-3",
-                notes="",
-                bot_number=bot_number,
-                payment_method="efectivo",
+        # orders.py:266 now uses tenant_connection() (RLS-safe) instead of
+        # raw pool.acquire() — caller must be inside tenant_scope.
+        with tenant_scope(1):
+            result = _run(
+                orders_mod.create_order(
+                    phone=phone,
+                    order_type="domicilio",
+                    address="Calle 1 #2-3",
+                    notes="",
+                    bot_number=bot_number,
+                    payment_method="efectivo",
+                )
             )
-        )
 
         assert result.get("success") is True, \
             f"create_order should succeed; got: {result}"
@@ -701,11 +710,16 @@ class TestCustomerMemoryIntegration:
             "features": {"delivery_fee": 0, "timezone": "UTC"},
         }))
 
+        import contextlib
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(return_value=None)
         conn.fetchval = AsyncMock(return_value=None)
-        conn.__aenter__ = AsyncMock(return_value=conn)
-        conn.__aexit__ = AsyncMock(return_value=False)
+        conn.execute  = AsyncMock(return_value=None)
+
+        @contextlib.asynccontextmanager
+        async def _fake_txn():
+            yield
+        conn.transaction = MagicMock(side_effect=lambda: _fake_txn())
 
         pool_mock = AsyncMock()
         pool_mock.acquire = MagicMock(return_value=AsyncMock(
@@ -714,7 +728,6 @@ class TestCustomerMemoryIntegration:
         ))
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=pool_mock))
 
-        import contextlib
         @contextlib.asynccontextmanager
         async def _fake_cart_lock(phone, bot_number, ttl_seconds=30):
             yield
@@ -729,16 +742,17 @@ class TestCustomerMemoryIntegration:
             AsyncMock(side_effect=RuntimeError("db timeout")),
         )
 
-        result = _run(
-            orders_mod.create_order(
-                phone=phone,
-                order_type="domicilio",
-                address="Calle 1 #2-3",
-                notes="",
-                bot_number=bot_number,
-                payment_method="efectivo",
+        with tenant_scope(1):
+            result = _run(
+                orders_mod.create_order(
+                    phone=phone,
+                    order_type="domicilio",
+                    address="Calle 1 #2-3",
+                    notes="",
+                    bot_number=bot_number,
+                    payment_method="efectivo",
+                )
             )
-        )
 
         assert result.get("success") is True, \
             "create_order should succeed even when increment_after_order raises"

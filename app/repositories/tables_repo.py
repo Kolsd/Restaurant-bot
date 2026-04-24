@@ -1129,18 +1129,44 @@ async def db_get_tables_status_enrichment(branch_id: int) -> dict:
     """Return per-table enrichment data for /api/pos/tables-status.
 
     Returns a dict keyed by table_id with fields:
-      has_waiter_alert: bool
-      has_open_check:   bool
-      current_total:    float
-      session_active:   bool
-      session_started_at: str|None  (ISO 8601)
+      has_waiter_alert:   bool
+      has_open_check:     bool
+      current_total:      float
+      session_active:     bool
+      session_started_at: str|None   (ISO 8601)
+      active_order_id:    str|None   (most recent non-closed table_order on this table)
+      channel:            str|None   (whatsapp_bot | pos | qr_pickup | web | manual)
+      waiter_staff_id:    str|None   (from table_orders.waiter_staff_id)
+      assigned_staff_id:  str|None   (from table_sessions.assigned_staff_id)
+      waiter_name:        str|None   (friendly name; prefers waiter_staff_id else assigned_staff_id)
 
-    Single-pass query using LEFT JOINs to avoid N+1.
-    Requires active tenant_scope().
+    Uses a DISTINCT ON CTE to pick the most recent active table_order per table,
+    then LEFT JOINs staff twice (once per role) for the display name. Requires
+    active tenant_scope().
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
             """
+            WITH active_order AS (
+                SELECT DISTINCT ON (table_id)
+                    table_id,
+                    id              AS order_id,
+                    waiter_staff_id,
+                    channel
+                FROM table_orders
+                WHERE branch_id = $1
+                  AND status NOT IN ('factura_entregada', 'cancelado')
+                ORDER BY table_id, created_at DESC
+            ),
+            active_session AS (
+                SELECT DISTINCT ON (table_id)
+                    table_id,
+                    assigned_staff_id,
+                    started_at
+                FROM table_sessions
+                WHERE status IN ('active', 'nps_pending')
+                ORDER BY table_id, started_at DESC
+            )
             SELECT
                 rt.id                              AS table_id,
                 COUNT(DISTINCT wa.id) > 0          AS has_waiter_alert,
@@ -1150,23 +1176,30 @@ async def db_get_tables_status_enrichment(branch_id: int) -> dict:
                 COALESCE(SUM(tc.total) FILTER (
                     WHERE tc.status = 'open'
                 ), 0)                              AS current_total,
-                COUNT(DISTINCT ts.id) FILTER (
-                    WHERE ts.status IN ('active', 'nps_pending')
-                ) > 0                              AS session_active,
-                MIN(ts.started_at) FILTER (
-                    WHERE ts.status IN ('active', 'nps_pending')
-                )                                  AS session_started_at
+                (asess.table_id IS NOT NULL)       AS session_active,
+                asess.started_at                   AS session_started_at,
+                ao.order_id                        AS active_order_id,
+                ao.channel                         AS channel,
+                ao.waiter_staff_id::text           AS waiter_staff_id,
+                asess.assigned_staff_id::text      AS assigned_staff_id,
+                COALESCE(sw.name, sa.name)         AS waiter_name
             FROM restaurant_tables rt
-            LEFT JOIN waiter_alerts   wa ON wa.table_id = rt.id
-            LEFT JOIN table_sessions  ts ON ts.table_id = rt.id
-                                        AND ts.status IN ('active', 'nps_pending')
-            LEFT JOIN table_orders    tord ON tord.table_id = rt.id
-                                          AND tord.branch_id = $1
-                                          AND tord.status NOT IN ('factura_entregada', 'cancelado')
-            LEFT JOIN table_checks    tc  ON tc.base_order_id = tord.id
-                                        AND tc.status = 'open'
+            LEFT JOIN waiter_alerts   wa    ON wa.table_id = rt.id
+            LEFT JOIN active_session  asess ON asess.table_id = rt.id
+            LEFT JOIN active_order    ao    ON ao.table_id = rt.id
+            LEFT JOIN staff           sw    ON sw.id = ao.waiter_staff_id
+            LEFT JOIN staff           sa    ON sa.id = asess.assigned_staff_id
+            LEFT JOIN table_orders    tord  ON tord.table_id = rt.id
+                                           AND tord.branch_id = $1
+                                           AND tord.status NOT IN ('factura_entregada', 'cancelado')
+            LEFT JOIN table_checks    tc    ON tc.base_order_id = tord.id
+                                           AND tc.status = 'open'
             WHERE rt.branch_id = $1
-            GROUP BY rt.id
+            GROUP BY
+                rt.id,
+                asess.table_id, asess.started_at, asess.assigned_staff_id,
+                ao.order_id, ao.channel, ao.waiter_staff_id,
+                sw.name, sa.name
             """,
             branch_id,
         )
@@ -1179,6 +1212,11 @@ async def db_get_tables_status_enrichment(branch_id: int) -> dict:
             "current_total":      float(r["current_total"] or 0),
             "session_active":     bool(r["session_active"]),
             "session_started_at": started.isoformat() + "Z" if started else None,
+            "active_order_id":    r["active_order_id"],
+            "channel":            r["channel"],
+            "waiter_staff_id":    r["waiter_staff_id"],
+            "assigned_staff_id":  r["assigned_staff_id"],
+            "waiter_name":        r["waiter_name"],
         }
     return result
 
