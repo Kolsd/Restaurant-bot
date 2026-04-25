@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["scripts/run_inbox_worker.py"],
       "port": 0
+    },
+    {
+      "name": "static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "app"],
+      "port": 8765
     }
   ]
 }

@@ -52,6 +52,19 @@ em { font-style: italic; color: var(--accent); }
   align-items: center;
   gap: 32px;
 }
+/* Mobile: tighten gap so the right-side CTA group doesn't overflow viewport.
+   Also hide the secondary "Iniciar sesión" button — it's available inside the
+   hamburger menu, and keeping both buttons here was clipping "Solicitar demo"
+   off the right edge on 375px phones. */
+@media (max-width: 600px) {
+  .nav-inner { gap: 8px; }
+  .nav-right { gap: 6px; }
+  .nav-right > .btn-ghost { display: none; }
+  .nav-right > .btn-primary { padding: 8px 12px; font-size: 12px; }
+}
+@media (max-width: 480px) {
+  .brand-word { font-size: 18px; }
+}
 .brand { display: inline-flex; align-items: center; gap: 10px; }
 .brand-mark {
   width: 28px; height: 28px; border-radius: 6px;
@@ -162,6 +175,22 @@ em { font-style: italic; color: var(--accent); }
 }
 .masthead b { color: var(--text-on-dark-dim); font-weight: 600; }
 .masthead .sep { opacity: .35; }
+/* Mobile: pack items left-to-right with consistent gap.
+   `space-between` was stretching items to viewport edges and clipping the
+   trailing "·" separators against the right edge — the "cortado" effect. */
+@media (max-width: 720px) {
+  .masthead {
+    justify-content: flex-start;
+    gap: 8px 10px;
+    letter-spacing: .08em;
+  }
+  /* Hide separator if it lands at the start or end of a wrapped line.
+     Pure CSS workaround: hide all `.sep` on phone — items still read clearly
+     because each span is its own visual chunk separated by gap. */
+  .masthead .sep { display: none; }
+  .byline .sep { display: none; }
+  .byline { gap: 6px 10px; letter-spacing: .06em; }
+}
 .kicker {
   display: inline-flex; align-items: center; gap: 10px;
   font-family: var(--mono); font-size: 11px;
