@@ -21,22 +21,25 @@
       <span class="topbar-crumb">Operación<span class="sep">›</span></span>
       <span class="topbar-title">Mapa de mesas</span>
       <div class="topbar-right">
-        <!-- Dynamic zone filter — built by JS from API data -->
-        <div class="seg" id="zoneFilter">
-          <button class="seg-btn active" data-zone="all">Todas</button>
-        </div>
         <!-- View toggle: Mapa | QR -->
         <div class="seg">
           <button class="seg-btn active" id="viewMap">Mapa</button>
           <button class="seg-btn" id="viewQr">QR</button>
         </div>
         <span class="fp-refresh-badge" id="refreshBadge">—</span>
-        <button class="btn" id="syncBtn">↻ Sync</button>
-        <button class="btn" id="editLayoutBtn">Editar layout</button>
-        <button class="btn brand" id="btnTopbarNewTable">+ Mesa</button>
-        <button class="btn brand" id="newReservaBtn">+ Reserva</button>
+        <button class="btn btn-sm" id="syncBtn">↻ Sync</button>
+        <button class="btn btn-sm" id="editLayoutBtn">Editar layout</button>
+        <button class="btn btn-sm brand" id="btnTopbarNewTable">+ Mesa</button>
+        <button class="btn btn-sm brand" id="newReservaBtn">+ Reserva</button>
       </div>
     </header>
+
+    <!-- ── Zone filter sub-toolbar ───────────────────────────────── -->
+    <div class="fp-zone-bar" id="fpZoneBar">
+      <div class="seg" id="zoneFilter">
+        <button class="seg-btn active" data-zone="all">Todas</button>
+      </div>
+    </div>
 
     <!-- ── Mapa view (default) ──────────────────────────────────── -->
     <div class="fp-view" id="mapView">

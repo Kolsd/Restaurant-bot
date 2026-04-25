@@ -315,12 +315,51 @@ body.editing .t:active { opacity: 0.7; transform: scale(1.06); z-index: 100; }
 .tl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); margin-top: 5px; flex-shrink: 0; }
 .tl-dot.past { background: var(--text-4); }
 
-/* ── Topbar segment filter ───────────────────────────────────────── */
+/* ── Compact topbar buttons ──────────────────────────────────────── */
+.btn.btn-sm { font-size: 12px; padding: 5px 11px; }
+
+/* ── Zone filter sub-toolbar ─────────────────────────────────────── */
+.fp-zone-bar {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 0.5px solid var(--border);
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Topbar refresh badge ────────────────────────────────────────── */
 .fp-refresh-badge {
   font-size: 11px;
   color: var(--text-4);
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
+
+/* ── Modal form fields ───────────────────────────────────────────── */
+.form-field { margin-bottom: 14px; }
+.form-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  margin-bottom: 5px;
+}
+.form-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: #fff;
+  box-sizing: border-box;
+}
+.form-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(29,158,117,0.1); }
+select.form-input { cursor: pointer; }
+textarea.form-input { resize: vertical; }
 
 /* ── QR grid view ────────────────────────────────────────────────── */
 .qr-grid {

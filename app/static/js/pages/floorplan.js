@@ -962,19 +962,22 @@ function _closeModal(id) {
 // ── View toggle ───────────────────────────────────────────────────
 function _setView(view) {
   _currentView = view;
-  var mapView = el('mapView');
-  var qrView  = el('qrView');
-  var mapBtn  = el('viewMap');
-  var qrBtn   = el('viewQr');
+  var mapView  = el('mapView');
+  var qrView   = el('qrView');
+  var mapBtn   = el('viewMap');
+  var qrBtn    = el('viewQr');
+  var zoneBar  = el('fpZoneBar');
 
   if (view === 'map') {
     if (mapView) mapView.style.display = '';
     if (qrView)  qrView.style.display  = 'none';
+    if (zoneBar) zoneBar.style.display = '';
     if (mapBtn)  { mapBtn.classList.add('active'); }
     if (qrBtn)   { qrBtn.classList.remove('active'); }
   } else {
     if (mapView) mapView.style.display = 'none';
     if (qrView)  qrView.style.display  = '';
+    if (zoneBar) zoneBar.style.display = 'none';
     if (mapBtn)  { mapBtn.classList.remove('active'); }
     if (qrBtn)   { qrBtn.classList.add('active'); }
     renderQrGrid();
