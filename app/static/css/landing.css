@@ -419,8 +419,10 @@ em { font-style: italic; color: var(--accent); }
 .compare .cross { color: var(--text-on-dark-mute); }
 .compare .partial { color: var(--warning); }
 .compare td .n { font-family: var(--mono); font-size: 12px; }
-@media (max-width: 720px) { .compare-wrap { overflow-x: auto; } .compare { min-width: 640px; } }
-@media (max-width: 720px) {
+/* Tablet portrait: keep table layout with horizontal scroll + sticky 1st column */
+@media (max-width: 720px) and (min-width: 601px) {
+  .compare-wrap { overflow-x: auto; }
+  .compare { min-width: 640px; }
   .compare th:first-child,
   .compare td:first-child {
     position: sticky;
@@ -429,6 +431,74 @@ em { font-style: italic; color: var(--accent); }
     background: var(--surface-dark-2, #0f1420);
     box-shadow: 2px 0 6px rgba(0,0,0,0.3);
   }
+}
+
+/* Phone: collapse the 5-column table into stacked cards.
+   Each <tr> becomes a self-contained card; each non-first <td> shows its
+   vendor label via a :nth-child ::before so we don't need HTML data-* attrs. */
+@media (max-width: 600px) {
+  .compare-wrap { overflow: visible; border-radius: 12px; }
+  .compare,
+  .compare thead,
+  .compare tbody,
+  .compare tr,
+  .compare th,
+  .compare td { display: block; width: auto; }
+  .compare { min-width: 0; }
+  .compare thead { display: none; }
+  .compare tbody tr {
+    background: var(--surface-dark);
+    border: 1px solid var(--border-dark-strong, rgba(255,255,255,0.08));
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .compare tbody tr:last-child { margin-bottom: 0; }
+  /* Feature name = card heading */
+  .compare tbody td:first-child {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text-on-dark);
+    background: transparent;
+    width: auto;
+    padding: 0 0 10px 0;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-dark-strong, rgba(255,255,255,0.08));
+  }
+  /* Vendor cells = labeled rows below the heading */
+  .compare tbody td:not(:first-child) {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 0;
+    border: none;
+    color: var(--text-on-dark-dim);
+    font-size: 13px;
+  }
+  .compare tbody td:nth-child(2)::before { content: "Mesio"; }
+  .compare tbody td:nth-child(3)::before { content: "Rappi Partners"; }
+  .compare tbody td:nth-child(4)::before { content: "Square for Restaurants"; }
+  .compare tbody td:nth-child(5)::before { content: "Toast"; }
+  .compare tbody td:not(:first-child)::before {
+    color: var(--text-on-dark-mute);
+    font-weight: 500;
+    font-size: 12px;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+  /* Highlight Mesio row in green tint */
+  .compare tbody td.col-mesio {
+    background: rgba(16,185,129,.08);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 4px -4px;
+  }
+  .compare tbody td.col-mesio::before {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .compare tbody td.col-mesio .check,
+  .compare tbody td.col-mesio .n { color: var(--accent); }
 }
 
 /* ══════════ CLIENTS ══════════ */
