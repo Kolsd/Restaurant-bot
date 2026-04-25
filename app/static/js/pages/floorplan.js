@@ -176,7 +176,9 @@ function renderTables() {
     return (t.zone || 'Salón').trim().toLowerCase() === _activeZone;
   });
 
-  var useGrid = !_hasCustomPositions(_tables);
+  // Grid mode by default for predictable layout. Absolute mode only inside edit
+  // mode (when user is actively dragging tiles to a custom layout).
+  var useGrid = !_editMode || !_hasCustomPositions(_tables);
   canvas.classList.toggle('grid-mode', useGrid);
 
   if (useGrid) {
@@ -663,9 +665,32 @@ async function selectTable(tableId) {
     }
   }
 
-  // QR iframe
-  var qrFrame = el('dQrFrame');
-  if (qrFrame) qrFrame.src = '/api/tables/' + tableId + '/qr';
+  // QR — render client-side via qrcodejs (iframe blocked by X-Frame-Options DENY)
+  _renderDetailQr(tableId);
+}
+
+function _renderDetailQr(tableId) {
+  var canvas = el('dQrCanvas');
+  if (!canvas) return;
+  canvas.innerHTML = '';
+  if (typeof QRCode === 'undefined') {
+    canvas.textContent = 'QR no disponible';
+    return;
+  }
+  var url = window.location.origin + '/menu/' + encodeURIComponent(tableId);
+  try {
+    new QRCode(canvas, {
+      text: url,
+      width: 180,
+      height: 180,
+      colorDark: '#0D1412',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  } catch (e) {
+    console.warn('[floorplan] QR render failed', e); // lint-allow: diagnostic
+    canvas.textContent = 'No se pudo generar el QR';
+  }
 }
 
 // ── Close detail panel ────────────────────────────────────────────
@@ -673,9 +698,8 @@ function closePanel() {
   _selectedTableId = null;
   el('detailPanel').classList.add('hidden');
   el('detailEmpty').classList.remove('hidden');
-  // Clear QR iframe to avoid stale load
-  var qrFrame = el('dQrFrame');
-  if (qrFrame) qrFrame.src = '';
+  var qrCanvas = el('dQrCanvas');
+  if (qrCanvas) qrCanvas.innerHTML = '';
   renderTables();
 }
 
@@ -1040,17 +1064,10 @@ function bindAll() {
     if (_selectedTableId) window.location.href = '/caja?table=' + _selectedTableId + '&action=add';
   });
 
-  var btnMove = el('btnMove');
-  if (btnMove) btnMove.addEventListener('click', function () {
-    if (!_selectedTableId) return;
-    if (!_editMode) _enterEditMode();
-    // Scroll the tile into view and highlight it
-    var tile = document.querySelector('[data-table-id="' + _selectedTableId + '"]');
-    if (tile) {
-      tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      tile.classList.add('highlight');
-      setTimeout(function () { tile.classList.remove('highlight'); }, 1200);
-    }
+  // Editar mesa (capacidad, tipo, zona) — abre el modal de propiedades
+  var btnEditTable = el('btnEditTable');
+  if (btnEditTable) btnEditTable.addEventListener('click', function () {
+    if (_selectedTableId) _openPropsModal(_selectedTableId);
   });
 
   // Print QR from detail panel

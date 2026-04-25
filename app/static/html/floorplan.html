@@ -51,15 +51,6 @@
       <!-- Canvas area — table tiles injected by JS -->
       <div class="canvas" id="fpCanvas">
 
-        <!-- Legend (discreet, bottom-left) -->
-        <div class="fp-legend" id="fpLegend">
-          <span><span class="leg-swatch" style="background:var(--fp-libre-bg);border:1.5px solid var(--fp-libre);"></span>Libre</span>
-          <span><span class="leg-swatch" style="background:var(--fp-sentados-bg);border:1.5px solid var(--fp-sentados);"></span>Sentados</span>
-          <span><span class="leg-swatch" style="background:var(--fp-ocupada-bg);border:1.5px solid var(--fp-ocupada);"></span>Comiendo</span>
-          <span><span class="leg-swatch" style="background:var(--fp-factura-bg);border:1.5px solid var(--fp-factura);"></span>Facturando</span>
-          <span><span class="leg-swatch" style="background:var(--fp-reservada-bg);border:1.5px solid var(--fp-reservada);"></span>Reservada</span>
-        </div>
-
         <!-- Empty state (shown when 0 tables or fetch error) -->
         <div class="fp-canvas-empty" id="canvasEmpty" style="display:none;">
           <div style="font-size:48px;">🪑</div>
@@ -75,6 +66,15 @@
           </div>
         </div>
 
+      </div>
+
+      <!-- Legend (always at bottom of mapView) -->
+      <div class="fp-legend" id="fpLegend">
+        <span><span class="leg-swatch" style="background:var(--fp-libre-bg);border:1.5px solid var(--fp-libre);"></span>Libre</span>
+        <span><span class="leg-swatch" style="background:var(--fp-sentados-bg);border:1.5px solid var(--fp-sentados);"></span>Sentados</span>
+        <span><span class="leg-swatch" style="background:var(--fp-ocupada-bg);border:1.5px solid var(--fp-ocupada);"></span>Comiendo</span>
+        <span><span class="leg-swatch" style="background:var(--fp-factura-bg);border:1.5px solid var(--fp-factura);"></span>Facturando</span>
+        <span><span class="leg-swatch" style="background:var(--fp-reservada-bg);border:1.5px solid var(--fp-reservada);"></span>Reservada</span>
       </div>
     </div>
 
@@ -112,14 +112,14 @@
         <button class="btn" id="btnTicket">📇 Ver ticket</button>
         <button class="btn" id="btnInvoice">🧾 Facturar</button>
         <button class="btn" id="btnAddItem">+ Ítem</button>
-        <button class="btn" id="btnMove">↔ Mover mesa</button>
+        <button class="btn" id="btnEditTable">⚙ Editar mesa</button>
       </div>
 
       <!-- QR section -->
       <div class="d-sec">
         <div class="d-sec-h">QR de la mesa</div>
         <div class="d-qr-wrap">
-          <iframe id="dQrFrame" src="" sandbox="allow-scripts" class="d-qr-frame" title="QR mesa"></iframe>
+          <div id="dQrCanvas" class="d-qr-canvas"></div>
         </div>
         <button class="btn" id="btnPrintQr" style="width:100%;margin-top:8px;">🖨️ Imprimir hoja QR</button>
       </div>
