@@ -27,7 +27,7 @@
       <span class="brand-mark">M</span>
       <span class="brand-word">Mesio<span class="dot">.</span></span>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" id="nav-links">
       <a href="#modulos">Producto</a>
       <a href="#como">Cómo funciona</a>
       <a href="#clientes">Clientes</a>
@@ -35,6 +35,7 @@
       <a href="#faq">FAQ</a>
     </nav>
     <div class="nav-right">
+      <button class="nav-hamburger" id="nav-hamburger" aria-label="Menú" aria-expanded="false">&#9776;</button>
       <span class="nav-meta"><span class="live-dot"></span>847 restaurantes activos</span>
       <a class="btn btn-ghost btn-sm" href="/login">Iniciar sesión</a>
       <a class="btn btn-primary btn-sm" href="#final">Solicitar demo</a>
@@ -802,6 +803,24 @@
 <script>
 (function () {
   'use strict';
+
+  /* ── Hamburger nav toggle ── */
+  var hamburger = document.getElementById('nav-hamburger');
+  var navLinks  = document.getElementById('nav-links');
+  if (hamburger && navLinks) {
+    hamburger.addEventListener('click', function () {
+      var open = navLinks.classList.toggle('open');
+      hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      hamburger.textContent = open ? '\u2715' : '\u2630';
+    });
+    navLinks.querySelectorAll('a').forEach(function (a) {
+      a.addEventListener('click', function () {
+        navLinks.classList.remove('open');
+        hamburger.setAttribute('aria-expanded', 'false');
+        hamburger.textContent = '\u2630';
+      });
+    });
+  }
 
   /* ── Pricing country toggle ── */
   const COUNTRIES = {

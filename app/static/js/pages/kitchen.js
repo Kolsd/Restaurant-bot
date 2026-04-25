@@ -66,12 +66,12 @@ function _ticketClass(mins) {
 }
 
 // ── Source badge ─────────────────────────────────────
+// NOTE: kitchen.js only ever shows table_orders (via /api/table-orders?station=kitchen).
+// table_orders has no is_delivery column — that field lives on the delivery orders table.
+// The channel field (migration 0039) IS present on table_orders and distinguishes origin.
 function _srcBadge(order) {
-  if (order.is_delivery) {
-    const type = order.order_type === 'recoger' ? '🛍️ Para Recoger' : '🛵 Domicilio';
-    return `<span class="tag" style="background:#1a2033;color:#60A5FA;">${type}</span>`;
-  }
-  if (order.channel === 'whatsapp') return `<span class="tag src">📱 WhatsApp</span>`;
+  if (order.channel === 'whatsapp_bot') return `<span class="tag src">📱 WhatsApp</span>`;
+  if (order.channel === 'whatsapp')     return `<span class="tag src">📱 WhatsApp</span>`;
   return '';
 }
 
@@ -109,7 +109,7 @@ function _renderWall(orders) {
     }).join('');
 
     const tableName = (() => { const e = document.createElement('div'); e.textContent = o.table_name || o.table_id || '#'; return e.innerHTML; })();
-    const tblCls = o.is_delivery ? 'DOM' : tableName;
+    const tblCls = tableName; // is_delivery removed — kitchen only shows table_orders, never delivery orders
     const metaPax = o.guests ? `<span class="tag">Mesa · ${o.guests}p</span>` : `<span class="tag">Mesa</span>`;
     const srcBadge = _srcBadge(o);
     const hotBadge = mins >= 12 ? `<span class="tag hot">🔥 Retrasado</span>` : '';
@@ -145,6 +145,7 @@ function _renderWall(orders) {
       const id = btn.dataset.id;
       _localPlusMins[id] = (_localPlusMins[id] || 0) + 2;
       mesioToast('+2 minutos (local)', 'warning', 1500);
+      _renderWall(_tickets);
     });
   });
 
@@ -205,6 +206,7 @@ async function markListo(orderId) {
 
 // ── Load orders ───────────────────────────────────────
 async function loadOrders() {
+  _selectedIdx = -1;
   try {
     const res = await fetch('/api/table-orders?station=kitchen', { headers: mesioHeaders() });
     mesioTrackFetch(res.ok);
@@ -214,7 +216,7 @@ async function loadOrders() {
 
     // Filter by active station
     if (_station === 'delayed') {
-      orders = orders.filter(o => _elapsedMins(o.created_at, _localPlusMins[o.id]) >= 12);
+      orders = orders.filter(o => o.status !== 'listo' && o.status !== 'entregado' && _elapsedMins(o.created_at, _localPlusMins[o.id] || 0) >= 12);
     } else if (_station === 'done') {
       orders = orders.filter(o => o.status === 'listo');
     } else {
@@ -236,6 +238,8 @@ document.addEventListener('keydown', e => {
   if (e.key === '/') {
     e.preventDefault();
     const si = document.getElementById('kds-search');
+    const row = document.getElementById('kds-search-row');
+    if (row) row.classList.add('open');
     if (si) si.focus();
     return;
   }
@@ -253,6 +257,7 @@ document.addEventListener('keydown', e => {
     const id = _tickets[_selectedIdx].id;
     _localPlusMins[id] = (_localPlusMins[id] || 0) + 2;
     mesioToast('+2 minutos (local)', 'warning', 1500);
+    _renderWall(_tickets);
     return;
   }
 });
@@ -269,7 +274,14 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
     si.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { si.value = ''; si.blur(); loadOrders(); }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        si.value = '';
+        si.blur();
+        const row = document.getElementById('kds-search-row');
+        if (row) row.classList.remove('open');
+        loadOrders();  // reset any active filter
+      }
     });
   }
 

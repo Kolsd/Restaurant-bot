@@ -58,6 +58,10 @@ function _updateStats(orders) {
   const pEl = document.getElementById('bar-stat-avg');
   if (qEl) qEl.textContent = active.length;
   if (pEl) { pEl.textContent = `${String(avg).padStart(2,'0')}:${String(avgSecs).padStart(2,'0')}`; pEl.className = 'bar-kstat-v ' + (avg < 5 ? '' : 'text-warn'); }
+  const subEl = document.getElementById('bar-queue-sub');
+  if (subEl) {
+    subEl.textContent = active.length === 0 ? 'Sin bebidas pendientes' : `${active.length} en cola`;
+  }
 }
 
 // ── Render queue ─────────────────────────────────────
@@ -140,6 +144,7 @@ async function markListo(orderId) {
     mesioTrackFetch(res.ok);
     if (!res.ok) throw new Error('status ' + res.status);
     mesioToast('✅ Bebidas listas', 'success', 2000);
+    _selectedIdx = -1;
     loadOrders();
   } catch (err) {
     mesioToast('Error al marcar listo', 'error');
@@ -173,6 +178,7 @@ async function loadOrders() {
 async function loadInventory() {
   try {
     const res = await fetch('/api/stats/inventory-critical', { headers: mesioHeaders() });
+    if (res.status === 401) { window.location.href = '/login'; return; }
     if (!res.ok) return;
     const data = await res.json();
     renderInventory(data.alerts || []);
@@ -223,7 +229,7 @@ function renderPopularBeverages(orders) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
   if (!top.length) {
-    el.innerHTML = '<div style="font-size:12px;color:var(--b-text-3);">Sin pedidos aún este turno.</div>';
+    el.innerHTML = '<div style="font-size:12px;color:var(--b-text-3);">Cola vacía.</div>';
     return;
   }
   el.innerHTML = top.map(([name, qty]) => `

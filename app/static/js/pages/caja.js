@@ -291,16 +291,29 @@ async function loadQIMMenu() {
       menu = {};
       data.categories.forEach(c => { menu[c.name] = c.items || []; });
     }
-    area.innerHTML = Object.entries(menu).map(([cat, items]) =>
-      `<div class="qim-cat-title">${_esc(cat)}</div>` +
-      items.map(d => `<div class="qim-dish" data-price="${Number(d.price||0)}" data-name="${_esc(d.name||'')}">
-        <div class="qim-dish-name">${_esc(d.name||'')}</div>
-        <div class="qim-dish-price">${mesioFmt(d.price||0)}</div>
-      </div>`).join('')
-    ).join('');
-    area.querySelectorAll('.qim-dish').forEach(el => {
-      el.addEventListener('click', () => qimAddItem(el.dataset.name, Number(el.dataset.price)));
-    });
+    area.innerHTML = '';
+    for (const [cat, items] of Object.entries(menu)) {
+      const catTitle = document.createElement('div');
+      catTitle.className = 'qim-cat-title';
+      catTitle.textContent = cat;
+      area.appendChild(catTitle);
+      for (const d of items) {
+        const el = document.createElement('div');
+        el.className = 'qim-dish';
+        el.dataset.price = Number(d.price || 0);
+        el.dataset.name = d.name || '';
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'qim-dish-name';
+        nameDiv.textContent = d.name || '';
+        const priceDiv = document.createElement('div');
+        priceDiv.className = 'qim-dish-price';
+        priceDiv.textContent = mesioFmt(d.price || 0);
+        el.appendChild(nameDiv);
+        el.appendChild(priceDiv);
+        el.addEventListener('click', () => qimAddItem(el.dataset.name, Number(el.dataset.price)));
+        area.appendChild(el);
+      }
+    }
   } catch (_) { area.innerHTML = '<div style="padding:20px;color:#999;">Error</div>'; }
 }
 let _qimCart = [];
@@ -1070,7 +1083,7 @@ async function confirmDeliveryOrder(orderId, newStatus, containerEl, reloadFn) {
 }
 
 async function rejectDeliveryOrder(orderId, reloadFn) {
-  const confirmed = await mesioConfirm('¿Rechazar este pedido?', { confirmLabel: 'Rechazar', cancelLabel: 'Cancelar', danger: true });
+  const confirmed = await mesioConfirm('¿Rechazar este pedido?', { confirmText: 'Rechazar', cancelText: 'Cancelar', danger: true });
   if (!confirmed) return;
   await confirmDeliveryOrder(orderId, 'cancelado', null, reloadFn);
 }
@@ -1174,6 +1187,21 @@ mesioInterval(() => {
 document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([_loadBillingConfig(), loadMenu(), loadOpenTables()]);
   _initSearch();
+
+  // Auto-select table when navigated from /mesero via ?tableId=X or sessionStorage caja_open_table
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetTableId = urlParams.get('tableId');
+  let targetMeta = null;
+  try {
+    const raw = sessionStorage.getItem('caja_open_table');
+    if (raw) targetMeta = JSON.parse(raw);
+  } catch (_) { /* ignore bad json */ }
+  sessionStorage.removeItem('caja_open_table'); // consume once
+
+  if (targetTableId) {
+    const tIdx = (_activeTables || []).findIndex(x => String(x.id) === String(targetTableId));
+    if (tIdx >= 0) selectTable(tIdx);
+  }
 
   document.getElementById('btn-send-kitchen')?.addEventListener('click', sendToKitchen);
   document.getElementById('btn-pay')?.addEventListener('click', openPayModal);

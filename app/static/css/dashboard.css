@@ -153,6 +153,13 @@ input:checked + .toggle-slider:before { transform: translateX(16px); }
 .ai-chip    { background: rgba(29,158,117,0.15); border: 1px solid rgba(29,158,117,0.3); color: #9FE1CB; font-size: 11px; padding: 4px 10px; border-radius: 20px; }
 .pos-grid   { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 1.5rem; }
 .pos-grid3  { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 1.5rem; }
+@media (max-width: 768px) {
+  .pos-grid  { grid-template-columns: 1fr; }
+  .pos-grid3 { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .pos-grid3 { grid-template-columns: 1fr; }
+}
 .pos-metric { background: #fff; border: 0.5px solid #e0e0d8; border-radius: 12px; padding: 1rem 1.25rem; }
 .pos-metric-label { font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em; }
 .pos-metric-value { font-size: 22px; font-weight: 600; color: #111; }
@@ -280,7 +287,7 @@ input:checked + .toggle-slider:before { transform: translateX(16px); }
   .metric { padding: .75rem; }
   .metric-value { font-size: 20px; }
   .grid2 { grid-template-columns: 1fr; gap: 10px; }
-  .card { overflow-x: hidden; }
+  .card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   table { min-width: 480px; font-size: 12px; }
   canvas { max-height: 180px !important; }
   .period-bar { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }

@@ -59,6 +59,11 @@ function _renderHero(orders) {
   const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   setEl('dom-stat-delivered', done.length);
   setEl('dom-stat-pending', pending.length);
+
+  // Fix D-1: populate tips stat from delivered orders
+  const tipsToday = done.reduce((sum, o) => sum + Number(o.tip_amount || 0), 0);
+  const tipsEl = document.getElementById('dom-stat-tips');
+  if (tipsEl) tipsEl.textContent = tipsToday > 0 ? mesioFmt(tipsToday) : '—';
 }
 
 // ── Render active delivery ────────────────────────────
@@ -139,8 +144,13 @@ function _renderActive(orders) {
   });
 
   activeEl.querySelector('.dom-waze-btn')?.addEventListener('click', async (e) => {
+    // Opening Waze should NOT silently advance the order status — the driver may
+    // be checking the address before actually departing. Gate the transition with
+    // an explicit confirmation so accidental taps don't commit the state.
     const orderId = e.currentTarget.dataset.id;
-    if (orderId) await updateStatus(orderId, 'en_puerta');
+    if (!orderId) return;
+    const ok = await mesioConfirm('¿Confirmar llegada al cliente?', { confirmText: 'Sí, en puerta' });
+    if (ok) await updateStatus(orderId, 'en_puerta');
   });
 }
 

@@ -194,7 +194,8 @@ async def db_save_nps_response(phone: str, bot_number: str, score: int, comment:
             SELECT ts.id AS session_id, rt.branch_id AS branch_id
             FROM table_sessions ts
             JOIN restaurant_tables rt ON ts.table_id = rt.id
-            WHERE ts.phone = $1 ORDER BY ts.started_at DESC LIMIT 1
+            WHERE ts.phone = $1 AND ts.started_at > NOW() - INTERVAL '24 hours'
+            ORDER BY ts.started_at DESC LIMIT 1
         """, phone)
         session_id = row["session_id"] if row else None
         branch_id  = row["branch_id"]  if row else None
@@ -224,7 +225,8 @@ async def db_save_nps_pending(phone: str, bot_number: str, score: int) -> int:
             SELECT ts.id AS session_id, rt.branch_id AS branch_id
             FROM table_sessions ts
             JOIN restaurant_tables rt ON ts.table_id = rt.id
-            WHERE ts.phone = $1 ORDER BY ts.started_at DESC LIMIT 1
+            WHERE ts.phone = $1 AND ts.started_at > NOW() - INTERVAL '24 hours'
+            ORDER BY ts.started_at DESC LIMIT 1
         """, phone)
         session_id = attrib["session_id"] if attrib else None
         branch_id  = attrib["branch_id"]  if attrib else None

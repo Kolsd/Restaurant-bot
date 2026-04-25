@@ -140,6 +140,58 @@
     </div>
   `;
 
+  function initMobileSidebar() {
+    var sidebar = document.querySelector('.sidebar');
+    var topbar = document.querySelector('.topbar');
+    if (!sidebar || !topbar) return;
+
+    // Inject hamburger if not already present
+    if (!document.querySelector('.sb-hamburger')) {
+      var ham = document.createElement('button');
+      ham.className = 'sb-hamburger';
+      ham.setAttribute('aria-label', 'Abrir menú');
+      ham.setAttribute('aria-expanded', 'false');
+      ham.innerHTML = '☰';
+      topbar.insertBefore(ham, topbar.firstChild);
+    }
+
+    // Inject overlay if not already present
+    if (!document.querySelector('.sidebar-overlay')) {
+      var ov = document.createElement('div');
+      ov.className = 'sidebar-overlay';
+      document.body.appendChild(ov);
+    }
+
+    var hamBtn = document.querySelector('.sb-hamburger');
+    var overlay = document.querySelector('.sidebar-overlay');
+
+    function openDrawer() {
+      sidebar.classList.add('open');
+      overlay.classList.add('open');
+      hamBtn.setAttribute('aria-expanded', 'true');
+    }
+    function closeDrawer() {
+      sidebar.classList.remove('open');
+      overlay.classList.remove('open');
+      hamBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    hamBtn.addEventListener('click', function () {
+      if (sidebar.classList.contains('open')) closeDrawer(); else openDrawer();
+    });
+    overlay.addEventListener('click', closeDrawer);
+
+    // Close drawer when a nav link inside is clicked
+    sidebar.addEventListener('click', function (e) {
+      if (e.target.closest('a, .sb-item')) closeDrawer();
+    });
+
+    // Close on Escape
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && sidebar.classList.contains('open')) closeDrawer();
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const sb = document.querySelector('.sidebar');
     if (!sb) return;
@@ -218,5 +270,8 @@
     // Feature-flag gating
     if (features.module_loyalty === false) hide('fidelizacion');
     if (features.module_reservations === false) hide('reservaciones');
+
+    // Fix 3: initialize mobile hamburger + drawer after sidebar is fully rendered
+    initMobileSidebar();
   });
 })();

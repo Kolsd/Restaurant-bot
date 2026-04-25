@@ -178,6 +178,7 @@ function _dateRange(period) {
 async function _apiFetch(url) {
   const r = await fetch(url, { headers: mesioHeaders() });
   mesioTrackFetch(r.ok);
+  if (r.status === 401) { window.location.replace('/login'); return; } // Fix 11: expired session
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }

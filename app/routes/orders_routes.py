@@ -365,41 +365,7 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
     else:
         log.warning("orders.delivery_notification_no_credentials", phone=phone, bot_number=bot_number, has_token=bool(token), has_phone_id=bool(phone_id))
 
-    # NPS is triggered by the caller (update_delivery_status) with await so that
-    # the state is committed to state_store BEFORE the PATCH response returns.
-    # send_delivery_notification must NOT call trigger_nps itself; it is kept here
-    # only as a no-op guard in case this function is called from other sites.
-
-        if has_credentials:
-            # Send interactive NPS message with "No calificar" button
-            try:
-                nps_label = rest_name or "nuestro restaurante"
-                nps_text = (
-                    f"⭐ ¿Cómo calificarías tu experiencia con {nps_label}?\n"
-                    "Responde con un número del 1 al 5\n"
-                    "(1 = Muy mala · 5 = Excelente)"
-                )
-                async with httpx.AsyncClient(timeout=5) as client:
-                    await client.post(
-                        f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
-                        headers={"Authorization": f"Bearer {token}"},
-                        json={
-                            "messaging_product": "whatsapp",
-                            "to": clean_phone,
-                            "type": "interactive",
-                            "interactive": {
-                                "type": "button",
-                                "body": {"text": nps_text},
-                                "action": {
-                                    "buttons": [
-                                        {"type": "reply", "reply": {"id": "skip_nps", "title": "No calificar"}}
-                                    ]
-                                }
-                            }
-                        }
-                    )
-            except Exception as e:
-                log.error("orders.nps_interactive_delivery_failed", phone=phone, error=str(e))
+    # NPS is triggered by the caller (update_delivery_status).
 
 
 @router.get("/delivery/check-updates")
@@ -473,6 +439,8 @@ async def validate_delivery_order(order_id: str, body: ValidateDeliveryBody, req
     # 2. Ownership check (org-level, same pattern as update_delivery_status).
     order_rid = order.get("org_id") or order.get("restaurant_id")
     user_rid = user.get("branch_id") or user.get("restaurant_id")
+    if not order_rid or not user_rid:
+        raise HTTPException(status_code=403, detail="No se puede resolver la pertenencia de la orden")
     if order_rid and user_rid:
         with bypass_tenant_scope("validate_delivery_order: resolve user org_id"):
             user_rest = await db.db_get_restaurant_by_id(int(user_rid))

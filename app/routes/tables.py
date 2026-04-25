@@ -29,9 +29,9 @@ _APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
 # Role-based status transition map: which roles may set each status
 _STATUS_ROLE_MAP: dict[str, set[str]] = {
-    'recibido':         {'cocina', 'caja', 'mesero', 'admin', 'owner', 'gerente'},
-    'en_preparacion':   {'cocina', 'admin', 'owner', 'gerente'},
-    'listo':            {'cocina', 'admin', 'owner', 'gerente'},
+    'recibido':         {'cocina', 'bar', 'caja', 'mesero', 'admin', 'owner', 'gerente'},
+    'en_preparacion':   {'cocina', 'bar', 'admin', 'owner', 'gerente'},
+    'listo':            {'cocina', 'bar', 'admin', 'owner', 'gerente'},
     'entregado':        {'mesero', 'caja', 'admin', 'owner', 'gerente'},
     'generar_factura':  {'caja', 'admin', 'owner', 'gerente'},
     'cerrar_mesa':      {'caja', 'admin', 'owner', 'gerente'},
@@ -621,7 +621,7 @@ async def update_delivery_order_status(request: Request, order_id: str):
 # ── TABLE ORDERS & OTHERS ──────────────────────────────────────────
 
 @router.get("/api/table-orders")
-async def get_table_orders(request: Request, status: str = None, station: str = None):
+async def get_table_orders(request: Request, status: str = None, station: str = None, table_id: str = None):
     """Devuelve órdenes de mesa filtradas por sucursal y estado."""
     user = await get_current_user(request)
     branch_id = user.get("branch_id")
@@ -655,6 +655,9 @@ async def get_table_orders(request: Request, status: str = None, station: str = 
 
     if station:
         result = [r for r in result if r.get("station", "all") in (station, "all")]
+
+    if table_id:
+        result = [r for r in result if str(r.get("table_id", "")) == str(table_id)]
 
     return {"orders": result}
 
@@ -1189,6 +1192,11 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
     el frontend pueda referenciarlo después si es necesario.
     """
     user = await get_current_user(request)
+
+    # TOCTOU guard — serialize concurrent single-pay attempts per mesa.
+    rl_key = f"pay_single:{base_order_id}"
+    if not await state_store.rate_limit_check(rl_key, max_requests=1, window_seconds=15):
+        raise HTTPException(status_code=429, detail="Ya hay un cobro de mesa en proceso. Espera unos segundos.")
 
     # Fetch ticket — cross-branch bypass mirrors the pattern in create_checks.
     with bypass_tenant_scope("pay_check_single: ticket lookup across branches"):

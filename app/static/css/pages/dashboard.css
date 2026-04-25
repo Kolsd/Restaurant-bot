@@ -168,6 +168,61 @@
   .g-3, .g-4, .metrics-row { grid-template-columns: 1fr; }
 }
 
+/* ── Responsive grid containers (Fix 4b — replaces inline styles) ────────── */
+.grid-chart-channels {
+  display: grid;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 16px;
+}
+.grid-live-payments {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 16px;
+}
+.grid-dishes-inventory {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .grid-chart-channels,
+  .grid-live-payments,
+  .grid-dishes-inventory {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Fix 6: Period control scrollable on mobile ───────────────────────────── */
+@media (max-width: 768px) {
+  .period {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+  .period::-webkit-scrollbar { display: none; }
+  .period > * { flex-shrink: 0; }
+}
+
+/* ── Fix 8: Donut + legend wrap on narrow screens ─────────────────────────── */
+@media (max-width: 600px) {
+  #card-payment-status .donut-flex,
+  #card-payment-status > div > div[style] {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+/* ── Fix 9: live-row middle cell min-width:0 prevents text overflow ────────── */
+.live-row > * { min-width: 0; }
+.live-row > *:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Offline banner ───────────────────────────────────────────────────────── */
 #offline-banner {
   display: none; position: fixed; bottom: 16px; right: 16px; z-index: 9999;

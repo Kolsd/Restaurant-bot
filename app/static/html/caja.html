@@ -481,8 +481,30 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('qim-close-btn')?.addEventListener('click', () => closeQuickInvoiceModal());
 
   // QIM generate button (delegates to existing flow)
-  document.getElementById('qim-gen-btn')?.addEventListener('click', () => {
-    mesioToast('Funcionalidad completa disponible en caja.html', 'warning', 3000);
+  document.getElementById('qim-gen-btn')?.addEventListener('click', async () => {
+    if (!_qimCart || !_qimCart.length) {
+      mesioToast('Agrega al menos un producto', 'warning'); return;
+    }
+    try {
+      const body = {
+        items: _qimCart.map(i => ({ name: i.name, qty: i.qty, unit_price: i.price })),
+        tip_amount: 0,
+        payment_method: 'efectivo',
+        customer_name: 'Consumidor Final',
+        customer_nit: '222222222',
+        order_type: 'salon',
+        table_name: 'Caja'
+      };
+      const res = await fetch('/api/pos/quick-invoice', {
+        method: 'POST', headers: mesioHeaders(), body: JSON.stringify(body)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) { mesioToast(json.detail || 'Error al generar factura', 'error'); return; }
+      mesioToast('Factura generada');
+      closeQuickInvoiceModal();
+    } catch(e) {
+      mesioToast('Error de conexión. Intenta de nuevo.', 'error');
+    }
   });
 });
 </script>

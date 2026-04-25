@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Demo Mesio — Dashboard interactivo</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -16,7 +16,8 @@
   .role-card:hover { border-color: #1D9E75; background: #f9fdfb; }
   .role-card.active { border-color: #1D9E75; background: #E1F5EE; box-shadow: 0 4px 12px rgba(29,158,117,0.15); }
   .role-card.active::after { content: '✓'; position: absolute; top: 6px; right: 8px; font-size: 14px; color: #0F6E56; font-weight: bold; }
-  .segmented-control { display:flex; gap:4px; margin-bottom:1.5rem; background:#e0e0d8; border-radius:10px; padding:4px; width:fit-content; }
+  .segmented-control { display:flex; gap:4px; margin-bottom:1.5rem; background:#e0e0d8; border-radius:10px; padding:4px; width:fit-content; max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; scrollbar-width:none; }
+  .segmented-control::-webkit-scrollbar { display:none; }
   .seg-btn { padding:8px 20px; border-radius:8px; border:none; font-size:13px; font-weight:600; cursor:pointer; transition: all 0.2s; }
   .seg-btn.active { background:#fff; color:#111; box-shadow:0 2px 6px rgba(0,0,0,0.08); }
   .seg-btn:not(.active) { background:transparent; color:#666; }
@@ -55,7 +56,7 @@
   }
   #demo-cta {
     position: fixed;
-    bottom: 24px;
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     right: 24px;
     background: #FF6B35;
     color: #fff;
@@ -70,6 +71,20 @@
     transition: opacity 0.2s, transform 0.2s;
   }
   #demo-cta:hover { opacity: 0.92; transform: scale(1.03); }
+  @media (max-width: 480px) {
+    #demo-cta { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); font-size: 13px; padding: 10px 14px; }
+  }
+  /* DD-P0-3: Stack NPS 280px+1fr grid on mobile */
+  @media (max-width: 600px) {
+    .nps-score-grid { grid-template-columns: 1fr !important; }
+  }
+  /* DD-P0-1: Expose scroll wrapper for shifts table */
+  .table-scroll-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
 
   /* Push the real dashboard layout down below the banner */
   .mobile-overlay,
@@ -77,11 +92,11 @@
   .mobile-topbar,
   .sidebar,
   .main {
-    top: calc(0px + 38px) !important;
+    top: calc(0px + var(--demo-banner-h, 38px)) !important;
   }
-  .sidebar { top: 38px !important; }
+  .sidebar { top: var(--demo-banner-h, 38px) !important; }
   .main    { padding-top: calc(2rem + 0px); }
-  body     { padding-top: 38px; }
+  body     { padding-top: var(--demo-banner-h, 38px); overflow-x: hidden; }
 </style>
 </head>
 <body>
@@ -202,7 +217,7 @@
     <div id="orders-tab-rt">
       <div class="card" style="border-top:4px solid #378ADD;margin-bottom:1.5rem;">
         <div class="card-title" style="margin-bottom:1rem;">🛵 Monitor Domicilios (Bot)</div>
-        <div class="metrics" style="grid-template-columns:repeat(4,1fr);">
+        <div class="metrics">
           <div class="metric"><div class="metric-label">Domicilios Atendidos</div><div class="metric-value" id="rt-dom-total">0</div></div>
           <div class="metric"><div class="metric-label">En Cocina</div><div class="metric-value" style="color:#BA7517;" id="rt-dom-cocina">0</div></div>
           <div class="metric"><div class="metric-label">En Entrega</div><div class="metric-value" style="color:#378ADD;" id="rt-dom-entrega">0</div></div>
@@ -212,7 +227,7 @@
       </div>
       <div class="card" style="border-top:4px solid #1D9E75;">
         <div class="card-title" style="margin-bottom:1rem;">🪑 Monitor de Salón (POS)</div>
-        <div class="metrics" style="grid-template-columns:repeat(4,1fr);" id="salon-metrics-container"></div>
+        <div class="metrics" id="salon-metrics-container"></div>
         <div id="dine-in-container" style="margin-top:1rem;"><div class="empty-state">Cargando monitores...</div></div>
       </div>
     </div>
@@ -254,7 +269,7 @@
       </div>
     </div>
     <div id="convs-panel-ses" style="display:none;">
-      <div class="metrics" style="grid-template-columns:repeat(4,1fr);margin-bottom:1rem;">
+      <div class="metrics" style="margin-bottom:1rem;">
         <div class="metric"><div class="metric-label">Sesiones</div><div class="metric-value" id="ses-total">—</div></div>
         <div class="metric"><div class="metric-label">Por mesero</div><div class="metric-value" id="ses-waiter" style="color:#BA7517;">—</div><div style="font-size:11px;color:#BA7517;margin-top:4px;">Cierres forzados</div></div>
         <div class="metric"><div class="metric-label">Por cliente</div><div class="metric-value" id="ses-client">—</div></div>
@@ -474,7 +489,7 @@
         <button class="period-btn nps-period-btn" onclick="setNPSPeriod('year',this)">Año</button>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;margin-bottom:1.5rem;">
+    <div class="nps-score-grid" style="display:grid;grid-template-columns:280px 1fr;gap:16px;margin-bottom:1.5rem;">
       <div class="card" style="margin-bottom:0;display:flex;align-items:center;justify-content:center;">
         <div id="nps-score-display"><div style="text-align:center;color:#aaa;font-size:13px;">Cargando...</div></div>
       </div>
@@ -812,6 +827,18 @@
     ].map(s => `<div class="upsell-card"><span class="upsell-icon">${s.icon}</span><span class="upsell-text">${s.texto}</span><span class="upsell-badge">${s.ganancia}</span></div>`).join('');
     _set('upsell-container', upsellHtml);
   };
+
+  // DD-P0-1: Dynamic banner height so wrapping on narrow screens doesn't clip topbar
+  (function setBannerH() {
+    function update() {
+      var b = document.querySelector('#demo-banner');
+      if (!b) return;
+      document.documentElement.style.setProperty('--demo-banner-h', b.offsetHeight + 'px');
+    }
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('load', update);
+  })();
 
   window.askMesioAI = function() {
     const question = document.getElementById('ai-question').value.trim();

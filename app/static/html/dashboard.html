@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Mesio — Panel de control</title>
   <link rel="icon" type="image/png" href="/static/img/logo.png">
   <link rel="stylesheet" href="/static/css/tokens.css">
@@ -104,7 +104,7 @@
       </div>
 
       <!-- Revenue chart + Sales by channel -->
-      <div style="display:grid;grid-template-columns:1.8fr 1fr;gap:16px;margin-bottom:16px;" id="grid-chart-channels">
+      <div class="grid-chart-channels" style="margin-bottom:16px;" id="grid-chart-channels">
         <!-- Revenue chart card -->
         <div class="card flush" id="card-revenue-chart">
           <div class="card-head">
@@ -141,7 +141,7 @@
       </div>
 
       <!-- Live orders + Payment status donut -->
-      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-bottom:16px;" id="grid-live-payments">
+      <div class="grid-live-payments" style="margin-bottom:16px;" id="grid-live-payments">
         <!-- Live orders -->
         <div class="card flush" id="card-live-orders">
           <div class="card-head">
@@ -189,7 +189,7 @@
       </div>
 
       <!-- Top dishes + Critical inventory -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" id="grid-dishes-inventory">
+      <div class="grid-dishes-inventory" id="grid-dishes-inventory">
         <!-- Top dishes -->
         <div class="card flush" id="card-top-dishes">
           <div class="card-head">

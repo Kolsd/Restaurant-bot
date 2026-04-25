@@ -57,6 +57,7 @@ const SC_ROLE_META = {
 /* ── Profile state ─────────────────────────────────────────────── */
 let _profile = null;
 let _durInterval = null;
+let SC_STAFF_ID = null; // populated by scLoadProfile; needed for PIN verify endpoint
 
 async function scLoadProfile() {
   try {
@@ -65,6 +66,7 @@ async function scLoadProfile() {
     });
     if (!res.ok) { if (res.status === 401) scLogout(); return; }
     _profile = await res.json();
+    SC_STAFF_ID = _profile.id || null; // used by mobile PIN verify flow
     scRenderHeader(_profile);
     scRenderShiftStatus(_profile);
     scRenderButtons(_profile);
@@ -858,7 +860,12 @@ async function scWebAuthnAuth(action) {
   if (_scKioscoMode) {
     _scKioscoHandleAuthSuccess(action, result);
   } else {
-    await _dispatchClockAction(action);
+    // NOTE: auth-complete already executed the clock action server-side
+    // (db_clock_in / db_clock_out / break toggle). Do NOT call _dispatchClockAction
+    // here — that would fire a second clock action causing a 409 conflict error.
+    // Instead, just refresh the profile so the UI reflects the new shift state.
+    await scLoadProfile();
+    await scLoadTimecardPreview();
   }
 }
 
@@ -912,11 +919,65 @@ function scPinPress(d) {
   _pin += d;
   scRenderPin();
   if (_pin.length === 6) {
-    setTimeout(async () => {
+    setTimeout(() => _scVerifyPin(), 200);
+  }
+}
+
+async function _scVerifyPin() {
+  // Kiosco PIN requires a different design (staff picker). This path handles
+  // mobile only — the staff is already authenticated (SC_TOKEN valid).
+  // PIN verify just confirms identity before dispatching the clock action.
+  if (_scKioscoMode) {
+    // TODO: kiosco PIN needs a staff-picker flow before verify-pin — out of scope for this sprint.
+    scClosePin();
+    scPinReset();
+    scShowToast('PIN en kiosco requiere selección de empleado. Usa huella biométrica.', true);
+    return;
+  }
+
+  if (!SC_STAFF_ID) {
+    scPinReset();
+    scShowToast('Cargando perfil, intenta de nuevo', true);
+    return;
+  }
+
+  // Show "Verificando…" state by disabling the keypad visually
+  const dotEls = document.querySelectorAll('#sc-pin-dots .sc-pin-dot');
+  dotEls.forEach(d => d.classList.add('filled'));
+
+  try {
+    const res = await fetch('/api/staff/self/verify-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SC_TOKEN },
+      body: JSON.stringify({
+        restaurant_id: SC_REST.id,
+        staff_id:      SC_STAFF_ID,
+        pin:           _pin,
+      }),
+    });
+
+    if (res.status === 429) {
       scClosePin();
       scPinReset();
-      scShowToast('PIN no soportado aún — registra tu huella biométrica para fichar.', true);
-    }, 200);
+      scShowToast('Demasiados intentos. Espera 15 minutos.', true);
+      return;
+    }
+
+    if (!res.ok) {
+      // 401 → wrong PIN; other → server error
+      scPinReset();
+      scShowToast(res.status === 401 ? 'PIN incorrecto' : 'Error verificando PIN', true);
+      return;
+    }
+
+    // PIN verified — identity confirmed. SC_TOKEN is already valid for the clock
+    // endpoints; verify-pin was only to confirm the person at the device.
+    scClosePin();
+    scPinReset();
+    await _dispatchClockAction(_pendingAction);
+  } catch (_) {
+    scPinReset();
+    scShowToast('Error de conexión al verificar PIN', true);
   }
 }
 function scPinBack()  { _pin = _pin.slice(0, -1); scRenderPin(); }
@@ -1203,8 +1264,38 @@ function _scRenderSwapOutgoing(container, swaps) {
     statusEl.style.cssText = 'font-size:11px;color:var(--sc-brand,#1D9E75);font-weight:600;white-space:nowrap;';
     statusEl.textContent = _SC_SWAP_STATUS[s.status] || s.status;
 
+    const rightEl = document.createElement('div');
+    rightEl.style.cssText = 'display:flex;align-items:center;gap:6px;flex-shrink:0;';
+    rightEl.appendChild(statusEl);
+
+    // Fix SH-1: withdraw button for pending requests
+    if (s.status === 'pending') {
+      const withdrawBtn = document.createElement('button');
+      withdrawBtn.style.cssText = 'background:none;border:1px solid var(--sc-border,#E5E7EB);color:var(--sc-text-2,#64748B);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;';
+      withdrawBtn.textContent = 'Retirar';
+      withdrawBtn.addEventListener('click', async () => {
+        const ok = typeof mesioConfirm === 'function'
+          ? await mesioConfirm('¿Retirar esta solicitud de cambio?', { confirmText: 'Retirar' })
+          : window.confirm('¿Retirar esta solicitud?');
+        if (!ok) return;
+        try {
+          const res = await fetch(`/api/staff/self/shift-swap/${s.id}/withdraw`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + SC_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          if (typeof scShowToast === 'function') scShowToast('Solicitud retirada');
+          scLoadSwapOutgoing();
+        } catch(_) {
+          if (typeof scShowToast === 'function') scShowToast('Error al retirar. Intenta de nuevo.', true);
+        }
+      });
+      rightEl.appendChild(withdrawBtn);
+    }
+
     row.appendChild(leftEl);
-    row.appendChild(statusEl);
+    row.appendChild(rightEl);
     container.appendChild(row);
   });
 }

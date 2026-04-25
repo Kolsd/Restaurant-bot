@@ -36,6 +36,7 @@ function setZone(zone) {
   _currentZone = zone;
   document.querySelectorAll('.m-zone-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.zone === zone);
+    btn.setAttribute('aria-selected', btn.dataset.zone === zone ? 'true' : 'false');
   });
   _applyZoneFilter();
 }
@@ -104,7 +105,8 @@ function _renderTables(tables) {
       : '';
     const channelBadge = _channelBadge(t.channel);
 
-    return `<div class="m-tbl ${cls}" data-id="${_esc(String(t.id))}" data-zone="${_esc(zone)}">
+    const tileAriaLabel = `Mesa ${name}, ${label}`;
+    return `<div class="m-tbl ${cls}" role="button" tabindex="0" aria-label="${_esc(tileAriaLabel)}" data-id="${_esc(String(t.id))}" data-zone="${_esc(zone)}">
       ${capBadge}
       ${channelBadge}
       <div class="m-tbl-num">${name}</div>
@@ -119,12 +121,18 @@ function _renderTables(tables) {
     </div>`;
   }).join('');
 
-  // Click → open POS
+  // Click + keyboard → open POS
   floor.querySelectorAll('.m-tbl').forEach(tile => {
     tile.addEventListener('click', () => {
       const id = tile.dataset.id;
       const t = tables.find(x => String(x.id) === id);
       if (t) openTable(t);
+    });
+    tile.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        tile.click();
+      }
     });
   });
 
@@ -267,7 +275,14 @@ async function loadTables() {
     mesioTrackFetch(res.ok);
     if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error(); }
     const data = await res.json();
-    _renderTables(data.tables || data || []);
+    const tables = data.tables || data || [];
+    _renderTables(tables);
+    const subEl = document.getElementById('mesero-sub');
+    if (subEl) {
+      const n = tables.length;
+      const active = tables.filter(t => t.session_active || t.has_open_check).length;
+      subEl.textContent = `${n} mesa${n === 1 ? '' : 's'} · ${active} activa${active === 1 ? '' : 's'}`;
+    }
     _loadAlerts();
   } catch (_) {
     mesioTrackFetch(false);

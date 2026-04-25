@@ -806,7 +806,7 @@ async def db_staff_performance(
                        JOIN table_orders tord
                          ON tord.table_id = ts2.table_id
                         AND tord.created_at >= ts2.started_at
-                        AND tord.created_at <= COALESCE(ts2.ended_at, NOW())
+                        AND tord.created_at <= COALESCE(ts2.closed_at, NOW())
                       WHERE ts2.id = n.table_session_id
                         AND tord.waiter_staff_id = $1::uuid
                    )
