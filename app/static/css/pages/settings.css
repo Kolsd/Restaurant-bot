@@ -201,7 +201,37 @@
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 900px) {
-  .set-layout { grid-template-columns: 1fr; }
-  .set-nav { position: static; }
-  .field-group { grid-template-columns: 1fr; gap: 8px; }
+  /* minmax(0, 1fr) so children can shrink below intrinsic min-content */
+  .set-layout { grid-template-columns: minmax(0, 1fr); }
+  .set-nav { position: static; min-width: 0; }
+  .set-sec { min-width: 0; }
+  .field-group { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+}
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Hours rows: shrink the columns slightly */
+  .hours-header,
+  .hours-row {
+    grid-template-columns: 72px minmax(0, 1fr) minmax(0, 1fr) 50px;
+    gap: 6px;
+  }
+  /* Save status text noisy on narrow viewports — hide; button alone suffices */
+  #saveStatus { display: none; }
+  /* Tighter save button padding to keep topbar within viewport */
+  #saveBtnTop { padding: 6px 10px; font-size: 12.5px; }
+  /* Integration rows already flex — they wrap fine */
+}
+
+/* ── Very narrow ≤360px (iPhone SE 1st gen): stack hours per day vertically */
+@media (max-width: 360px) {
+  .hours-header { display: none; }
+  .hours-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    border-bottom: 0.5px solid var(--border);
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+  }
+  #saveBtnTop { padding: 5px 8px; font-size: 12px; }
 }

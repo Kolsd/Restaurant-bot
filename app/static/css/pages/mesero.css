@@ -234,3 +234,18 @@ body {
   .m-rail { display: none; }
   .m-zone-tabs { display: none; }
 }
+
+@media (max-width: 480px) {
+  /* Action bar: wrap 4 metrics into 2×2 grid on phones */
+  .m-action-bar { flex-wrap: wrap; gap: 8px; padding: 10px; }
+  .m-act-metric { flex: 1 1 calc(50% - 4px); padding: 4px 10px; min-width: 0; border-right: none; }
+  .m-act-metric:nth-child(odd) { border-right: 0.5px solid var(--border, #e0e0d8); }
+  .m-act-val { font-size: 14px; }
+  .m-act-label { font-size: 9px; }
+  /* Legend row: hide verbose labels on phone, keep only live-sync badge */
+  .m-legend { flex-wrap: wrap; gap: 6px; padding: 6px 12px; overflow: hidden; }
+  .m-lg { font-size: 10px; gap: 4px; }
+  .m-live-row { margin-left: 0; }
+  /* Head: tighten padding */
+  .m-head { padding: 10px 12px; }
+}

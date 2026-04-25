@@ -518,6 +518,12 @@ body {
 
 /* ── Utility ────────────────────────────────────────────────────── */
 .row { display: flex; gap: 12px; align-items: center; }
+/* Mobile: allow generic .row containers to wrap so CTAs/filters don't overflow viewport.
+   This catches cases (e.g. menu-admin tab-disp toolbar) where `.row` holds buttons that
+   together exceed mobile width. */
+@media (max-width: 768px) {
+  .row { flex-wrap: wrap; min-width: 0; }
+}
 .col { display: flex; flex-direction: column; gap: 12px; }
 .grow { flex: 1; }
 .spacer { flex: 1; }
@@ -544,6 +550,76 @@ body {
 /* Fix 12: prevent iOS auto-zoom on search input focus */
 @media (max-width: 768px) {
   .search input { font-size: 16px; }
+}
+
+/* ── Mobile overflow fixes (375px+ viewports) ──────────────────────
+   Fix M1: Topbar — hide search (noisy on mobile), shrink bot-status
+   Fix M2: Segmented controls — scroll horizontally instead of overflow
+   Fix M3: Page-head button rows — allow wrap
+   Fix M4: Metrics row — 2-col at 600px, 1-col at 375px
+   ─────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* M1a: Reduce topbar horizontal padding */
+  .topbar {
+    padding-left: 12px;
+    padding-right: 12px;
+    gap: 8px;
+  }
+
+  /* M1b: Topbar-right — shrink gap, allow items to shrink */
+  .topbar-right {
+    gap: 6px;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  /* M1c: Hide search inside topbar-right only
+     (searches inside .page body are unaffected) */
+  .topbar-right .search {
+    display: none;
+  }
+
+  /* M1d: Hide bot-status label text, keep the live dot */
+  .topbar-right .row span:not(.dot):not(.live-dot) {
+    display: none;
+  }
+  /* Keep the border-left divider container but shrink it */
+  .topbar-right .row {
+    padding: 2px 4px !important;
+    margin-left: 0 !important;
+  }
+
+  /* M2: Segmented controls scroll horizontally, never overflow */
+  .seg {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    max-width: 100%;
+    flex-wrap: nowrap;
+  }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg .seg-btn { flex-shrink: 0; white-space: nowrap; }
+
+  /* M3: Page-head button row wraps on narrow viewports */
+  .page-head { flex-wrap: wrap; }
+  .page-head > .row { flex-wrap: wrap; gap: 8px; }
+  .page-head .btn { font-size: 12px; padding: 6px 10px; }
+}
+
+/* M4: metrics-row collapses to 1-col below 600px
+   (already 2-col at 900px via the rule above) */
+@media (max-width: 600px) {
+  .metrics-row { grid-template-columns: 1fr; }
+  .metric { border-right: none; }
+}
+
+/* M5: Very narrow viewports (≤360px — iPhone SE 1st gen / older Androids)
+   Hide breadcrumb prefix to give room for title + topbar-right CTA. */
+@media (max-width: 360px) {
+  .topbar-crumb { display: none; }
+  .topbar { gap: 6px; }
+  .topbar-right { flex-shrink: 0; }
+  .topbar-title { font-size: 13px; }
 }
 
 /* Sparkline bars */

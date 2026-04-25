@@ -1563,12 +1563,15 @@ function scScaleKiosco() {
 function scScaleMobile() {
   const el = document.querySelector('.sc-stage-mobile .sc-phone');
   if (!el) return;
+  const phoneW = 390 + 20;  // 390 content + 10px border each side
+  const phoneH = 844 + 20;
+  const availW = window.innerWidth - 16;   // small horizontal breathing room
   const availH = window.innerHeight - 80;
-  if (availH < 864) {
-    const s = availH / 864;
+  const s = Math.min(availW / phoneW, availH / phoneH, 1);
+  if (s < 1) {
     el.style.transform = 'scale(' + s + ')';
     el.style.transformOrigin = 'top center';
-    el.style.marginBottom = (-864 * (1 - s)) + 'px';
+    el.style.marginBottom = (-phoneH * (1 - s)) + 'px';
   } else {
     el.style.transform = '';
     el.style.marginBottom = '';

@@ -658,3 +658,9 @@ body.staff-clock-page {
 
 /* SR-only */
 .sc-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+
+/* Phone viewport: scScaleMobile() uses transform which doesn't reduce layout width.
+   Clip at body level so the scaled phone frame doesn't cause horizontal scroll. */
+@media (max-width: 430px) {
+  html, body { overflow-x: hidden; max-width: 100vw; }
+}

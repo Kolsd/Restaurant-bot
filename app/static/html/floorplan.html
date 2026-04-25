@@ -15,67 +15,72 @@
   <!-- ── Sidebar (shared component — sidebar.js) ───────────────── -->
   <aside class="sidebar" role="navigation" aria-label="Menú principal"></aside>
 
-  <!-- ── Main (canvas) ──────────────────────────────────────── -->
+  <!-- ── Main ──────────────────────────────────────────────────── -->
   <main class="main">
     <header class="topbar">
       <span class="topbar-crumb">Operación<span class="sep">›</span></span>
       <span class="topbar-title">Mapa de mesas</span>
       <div class="topbar-right">
-        <div class="seg">
+        <!-- Dynamic zone filter — built by JS from API data -->
+        <div class="seg" id="zoneFilter">
           <button class="seg-btn active" data-zone="all">Todas</button>
-          <button class="seg-btn" data-zone="terraza">Terraza</button>
-          <button class="seg-btn" data-zone="salón">Salón</button>
-          <button class="seg-btn" data-zone="privado">Privado</button>
+        </div>
+        <!-- View toggle: Mapa | QR -->
+        <div class="seg">
+          <button class="seg-btn active" id="viewMap">Mapa</button>
+          <button class="seg-btn" id="viewQr">QR</button>
         </div>
         <span class="fp-refresh-badge" id="refreshBadge">—</span>
         <button class="btn" id="syncBtn">↻ Sync</button>
-        <!-- TODO: Edit layout — requires PATCH /api/floor-plan (v2) -->
-        <button class="btn" title="Modo edición — próximamente">Editar layout</button>
+        <button class="btn" id="editLayoutBtn">Editar layout</button>
         <button class="btn brand" id="newReservaBtn">+ Reserva</button>
       </div>
     </header>
 
-    <!-- Canvas -->
-    <div class="canvas" id="fpCanvas">
+    <!-- ── Mapa view (default) ──────────────────────────────────── -->
+    <div class="fp-view" id="mapView">
 
-      <!-- Zone labels (static chrome) -->
-      <div class="zone-label" style="top:18px;left:20px;">Terraza</div>
-      <div class="zone-label" style="top:18px;left:48%;">Salón principal</div>
-      <div class="zone-label" style="top:18px;right:30px;">Privado</div>
-
-      <!-- Structural walls -->
-      <div class="fp-wall" style="top:58px;left:42%;width:3px;height:calc(100% - 80px);"></div>
-      <div class="fp-wall" style="top:58px;right:22%;width:3px;height:calc(100% - 80px);"></div>
-      <div class="fp-door" style="top:280px;left:calc(42% - 18px);"></div>
-
-      <!-- Bar counter -->
-      <div class="bar-counter" style="bottom:40px;left:48%;width:220px;height:36px;">BARRA · 6 plazas</div>
-
-      <!-- Legend -->
-      <div class="fp-legend">
-        <span>
-          <span class="leg-swatch" style="background:var(--fp-libre-bg);border:1.5px solid var(--fp-libre);"></span>Libre
-        </span>
-        <span>
-          <span class="leg-swatch" style="background:var(--fp-sentados-bg);border:1.5px solid var(--fp-sentados);"></span>Sentados
-        </span>
-        <span>
-          <span class="leg-swatch" style="background:var(--fp-ocupada-bg);border:1.5px solid var(--fp-ocupada);"></span>Comiendo
-        </span>
-        <span>
-          <span class="leg-swatch" style="background:var(--fp-factura-bg);border:1.5px solid var(--fp-factura);"></span>Facturando
-        </span>
-        <span>
-          <span class="leg-swatch" style="background:var(--fp-reservada-bg);border:1.5px solid var(--fp-reservada);"></span>Reservada
-        </span>
+      <!-- Edit-mode floating toolbar -->
+      <div class="fp-edit-toolbar" id="editToolbar" style="display:none;">
+        <span class="fp-edit-hint">Arrastra para reorganizar · Click derecho para propiedades</span>
+        <button class="btn brand" id="btnNewTable">+ Mesa nueva</button>
+        <button class="btn" id="btnExitEdit">Salir de edición</button>
       </div>
 
-      <!-- Dynamic table tiles are injected here by floorplan.js -->
+      <!-- Canvas area — table tiles injected by JS -->
+      <div class="canvas" id="fpCanvas">
+
+        <!-- Legend (discreet, bottom-left) -->
+        <div class="fp-legend" id="fpLegend">
+          <span><span class="leg-swatch" style="background:var(--fp-libre-bg);border:1.5px solid var(--fp-libre);"></span>Libre</span>
+          <span><span class="leg-swatch" style="background:var(--fp-sentados-bg);border:1.5px solid var(--fp-sentados);"></span>Sentados</span>
+          <span><span class="leg-swatch" style="background:var(--fp-ocupada-bg);border:1.5px solid var(--fp-ocupada);"></span>Comiendo</span>
+          <span><span class="leg-swatch" style="background:var(--fp-factura-bg);border:1.5px solid var(--fp-factura);"></span>Facturando</span>
+          <span><span class="leg-swatch" style="background:var(--fp-reservada-bg);border:1.5px solid var(--fp-reservada);"></span>Reservada</span>
+        </div>
+
+        <!-- Empty state (shown when 0 tables) -->
+        <div class="fp-canvas-empty" id="canvasEmpty" style="display:none;">
+          <div style="font-size:48px;">🪑</div>
+          <div style="font-size:16px;font-weight:600;margin-top:8px;">No hay mesas</div>
+          <div style="font-size:13px;color:var(--text-4);margin-top:4px;">Crea la primera mesa para comenzar</div>
+          <button class="btn brand" id="btnFirstTable" style="margin-top:16px;">+ Crear primera mesa</button>
+        </div>
+
+      </div>
     </div>
+
+    <!-- ── QR view (hidden by default) ─────────────────────────── -->
+    <div class="fp-view" id="qrView" style="display:none;">
+      <div class="qr-grid" id="qrGrid">
+        <!-- QR cards injected by JS -->
+      </div>
+    </div>
+
   </main>
 
-  <!-- ── Right detail panel ─────────────────────────────────── -->
-  <aside class="detail">
+  <!-- ── Right detail panel ─────────────────────────────────────── -->
+  <aside class="detail" id="detailAside">
 
     <!-- Empty state (shown when no table is selected) -->
     <div class="d-empty" id="detailEmpty">
@@ -102,6 +107,15 @@
         <button class="btn" id="btnMove">↔ Mover mesa</button>
       </div>
 
+      <!-- QR section -->
+      <div class="d-sec">
+        <div class="d-sec-h">QR de la mesa</div>
+        <div class="d-qr-wrap">
+          <iframe id="dQrFrame" src="" sandbox="allow-scripts" class="d-qr-frame" title="QR mesa"></iframe>
+        </div>
+        <button class="btn" id="btnPrintQr" style="width:100%;margin-top:8px;">🖨️ Imprimir hoja QR</button>
+      </div>
+
       <div class="d-sec">
         <div class="d-sec-h">Orden actual</div>
         <div id="dOrders"></div>
@@ -120,6 +134,168 @@
 
 </div><!-- /app -->
 
+<!-- ── Reserva modal ──────────────────────────────────────────── -->
+<div class="m-modal-overlay" id="reservaModal" role="dialog" aria-modal="true" aria-labelledby="reservaModalTitle">
+  <div class="m-modal-box">
+    <h3 id="reservaModalTitle">Nueva reserva</h3>
+
+    <div class="form-field">
+      <label for="resName">Nombre del cliente <span style="color:var(--danger)">*</span></label>
+      <input id="resName" class="form-input" type="text" placeholder="Nombre completo" maxlength="200" />
+    </div>
+
+    <div class="form-field">
+      <label for="resPhone">Teléfono (opcional)</label>
+      <input id="resPhone" class="form-input" type="tel" placeholder="+57 300 000 0000" maxlength="30" />
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-field">
+        <label for="resDate">Fecha <span style="color:var(--danger)">*</span></label>
+        <input id="resDate" class="form-input" type="date" />
+      </div>
+      <div class="form-field">
+        <label for="resTime">Hora <span style="color:var(--danger)">*</span></label>
+        <input id="resTime" class="form-input" type="time" />
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-field">
+        <label for="resGuests">Personas <span style="color:var(--danger)">*</span></label>
+        <input id="resGuests" class="form-input" type="number" min="1" max="99" value="2" />
+      </div>
+      <div class="form-field">
+        <label for="resTable">Mesa (opcional)</label>
+        <select id="resTable" class="form-input">
+          <option value="">— Sin asignar —</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-field">
+      <label for="resNotes">Notas (opcional)</label>
+      <textarea id="resNotes" class="form-input" rows="2" placeholder="Ocasión especial, restricciones, etc." style="resize:vertical;"></textarea>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="reservaModalCancel">Cancelar</button>
+      <button class="btn brand" id="reservaModalSubmit">Crear reserva</button>
+    </div>
+    <button class="icon-btn" id="reservaModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<!-- ── Propiedades de mesa modal ──────────────────────────────── -->
+<div class="m-modal-overlay" id="propsModal" role="dialog" aria-modal="true" aria-labelledby="propsModalTitle">
+  <div class="m-modal-box">
+    <h3 id="propsModalTitle">Propiedades de mesa</h3>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-field">
+        <label for="propNum">Número</label>
+        <input id="propNum" class="form-input" type="text" placeholder="Ej: 5" maxlength="10" />
+      </div>
+      <div class="form-field">
+        <label for="propName">Nombre (opcional)</label>
+        <input id="propName" class="form-input" type="text" placeholder="Ej: Terraza A" maxlength="60" />
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-field">
+        <label for="propCapacity">Capacidad</label>
+        <input id="propCapacity" class="form-input" type="number" min="1" max="50" placeholder="4" />
+      </div>
+      <div class="form-field">
+        <label for="propType">Tipo</label>
+        <select id="propType" class="form-input">
+          <option value="interior">Interior</option>
+          <option value="terraza">Terraza</option>
+          <option value="barra">Barra</option>
+          <option value="privado">Privado</option>
+          <option value="vip">VIP</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-field">
+      <label for="propZone">Zona</label>
+      <input id="propZone" class="form-input" type="text" list="propZoneList" placeholder="Ej: Salón, Terraza…" maxlength="60" />
+      <datalist id="propZoneList"></datalist>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;">
+      <button class="btn" id="btnDeleteTable" style="color:var(--danger);border-color:var(--danger);">Eliminar mesa</button>
+      <div style="display:flex;gap:10px;">
+        <button class="btn" id="propsModalCancel">Cancelar</button>
+        <button class="btn brand" id="propsModalSubmit">Guardar</button>
+      </div>
+    </div>
+    <button class="icon-btn" id="propsModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<!-- ── Nueva mesa modal ───────────────────────────────────────── -->
+<div class="m-modal-overlay" id="newTableModal" role="dialog" aria-modal="true" aria-labelledby="newTableModalTitle">
+  <div class="m-modal-box">
+    <h3 id="newTableModalTitle">Crear mesa</h3>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-field">
+        <label for="ntNum">Número <span style="color:var(--danger)">*</span></label>
+        <input id="ntNum" class="form-input" type="text" placeholder="Ej: 8" maxlength="10" />
+      </div>
+      <div class="form-field">
+        <label for="ntName">Nombre (opcional)</label>
+        <input id="ntName" class="form-input" type="text" placeholder="Ej: Jardín 1" maxlength="60" />
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-field">
+        <label for="ntCapacity">Capacidad</label>
+        <input id="ntCapacity" class="form-input" type="number" min="1" max="50" value="4" />
+      </div>
+      <div class="form-field">
+        <label for="ntType">Tipo</label>
+        <select id="ntType" class="form-input">
+          <option value="interior">Interior</option>
+          <option value="terraza">Terraza</option>
+          <option value="barra">Barra</option>
+          <option value="privado">Privado</option>
+          <option value="vip">VIP</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-field">
+      <label for="ntZone">Zona</label>
+      <input id="ntZone" class="form-input" type="text" list="ntZoneList" placeholder="Ej: Salón, Terraza…" maxlength="60" />
+      <datalist id="ntZoneList"></datalist>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button class="btn" id="newTableModalCancel">Cancelar</button>
+      <button class="btn brand" id="newTableModalSubmit">Crear mesa</button>
+    </div>
+    <button class="icon-btn" id="newTableModalClose" style="position:absolute;top:16px;right:16px;" aria-label="Cerrar modal">✕</button>
+  </div>
+</div>
+
+<!-- ── Ticket modal ───────────────────────────────────────────── -->
+<div class="m-modal-overlay" id="ticketModal" role="dialog" aria-modal="true" aria-labelledby="ticketModalTitle">
+  <div class="m-modal-box" style="max-width:420px;">
+    <h3 id="ticketModalTitle">Ticket</h3>
+    <div id="ticketBody" style="font-size:13px;"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+      <button class="btn" id="ticketModalClose">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- QR library for client-side generation in QR view -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/pages/sidebar.js"></script>
 <script src="/static/js/pages/floorplan.js"></script>

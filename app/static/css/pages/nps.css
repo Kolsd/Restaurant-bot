@@ -37,3 +37,17 @@
 .theme-chip.pos { border-color: var(--brand); color: var(--brand-dark); background: #F0FAF5; }
 .theme-chip.neg { border-color: var(--danger); color: var(--danger-text); background: #FEF5F5; }
 .theme-chip b { font-family: var(--font-mono); font-size: 11px; }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* NPS hero: 3 cols → stack vertically */
+  .nps-hero {
+    grid-template-columns: 1fr;
+  }
+  .nps-hero > div { border-right: none; border-bottom: 0.5px solid var(--border); }
+  .nps-hero > div:last-child { border-bottom: none; }
+  /* Score big shrinks a bit */
+  .score-big { font-size: 56px; }
+  /* Theme chips wrap */
+  .theme-chips-row { flex-wrap: wrap; gap: 6px; }
+}

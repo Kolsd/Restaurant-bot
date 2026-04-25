@@ -32,3 +32,12 @@
 .alert-strip.danger { background: #FEF2F2; border-color: #FCA5A5; }
 
 .chip-tag { display: inline-flex; align-items: center; padding: 2px 7px; font-size: 11px; border-radius: 4px; background: #f0f0e8; color: var(--text-2); }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Inventory table: 6 fixed columns → scroll horizontally */
+  .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .inv-row { min-width: 600px; }
+  /* Dish grid already uses auto-fill — just ensure min width doesn't overflow */
+  .dish-grid { padding: 10px 12px 12px; grid-template-columns: 1fr; }
+}

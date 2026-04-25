@@ -419,3 +419,36 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .qim-gen-btn { width:100%; padding:13px; font-size:15px; font-weight:700; border-radius:12px; background:#27ae60; color:#fff; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(39,174,96,.3); transition:opacity .2s; }
 .qim-gen-btn:disabled { opacity:.6; cursor:not-allowed; }
 .qim-gen-btn:active:not(:disabled) { opacity:.85; transform:translateY(1px); }
+
+/* ── Phone responsive (≤768px): caja is tablet-first; on phones, stack cart below main ── */
+@media (max-width: 768px) {
+  .caja-v2 {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto 1fr auto !important;
+    overflow-y: auto !important;
+    height: auto !important;
+    min-height: 100vh;
+  }
+  /* Rail collapses to a horizontal top strip */
+  .rail {
+    flex-direction: row !important;
+    height: 48px !important;
+    width: 100% !important;
+    padding: 0 10px !important;
+    gap: 4px !important;
+    border-right: none !important;
+    border-bottom: 1px solid #1a1d26 !important;
+    overflow-x: auto;
+  }
+  .rail-sep { width: 1px; height: 24px; margin: 0 4px; }
+  .rail-bottom { flex-direction: row; margin-top: 0; margin-left: auto; }
+  /* Cart sidebar goes full-width below main content */
+  .caja-v2 > aside,
+  .caja-v2 > .cart {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-left: none !important;
+    border-top: 1px solid #1a1d26 !important;
+  }
+  body { overflow-y: auto !important; height: auto !important; }
+}

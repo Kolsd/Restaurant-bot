@@ -33,3 +33,14 @@
 .channel-pill.pos { background: #FEF3C7; color: #92400E; }
 .channel-pill.dom { background: #DBEAFE; color: #1E40AF; }
 .channel-pill.qr { background: #EDE9FE; color: #5B21B6; }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* History table: rows are too wide → give the card scroll on x */
+  #tab-hist .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .hist-row { min-width: 640px; }
+  /* Filter chips wrap instead of overflow */
+  .card-head .row { flex-wrap: wrap; gap: 6px; }
+  /* KDS grid: single column */
+  .kds-grid { grid-template-columns: 1fr; padding: 10px 12px 12px; }
+}

@@ -28,3 +28,24 @@
 
 .occ-bar { display: flex; gap: 1px; margin-top: 8px; height: 14px; border-radius: 3px; overflow: hidden; background: #f0f0e8; }
 .occ-bar > div { transition: flex .2s; }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Stat strip: 6 cols → scroll horizontally */
+  .stat-strip {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    grid-template-columns: repeat(6, minmax(90px, 1fr));
+    border-radius: 10px;
+  }
+  .stat-strip > div { min-width: 90px; }
+  /* Day nav label: shrink min-width so navigator fits */
+  .day-nav .day-label { min-width: 130px; font-size: 12px; }
+  /* Timeline: make the slot area scrollable without overflowing body */
+  .timeline { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Reservation cards min-width shrinks for mobile */
+  .res-card { min-width: 160px; }
+}
+@media (max-width: 375px) {
+  .day-nav .day-label { min-width: 110px; font-size: 11px; padding: 0 6px; }
+}

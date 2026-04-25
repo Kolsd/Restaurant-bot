@@ -570,9 +570,19 @@ em { font-style: italic; color: var(--accent); }
 .integ-kind { font-family: var(--mono); font-size: 9.5px; color: var(--text-on-dark-mute); text-transform: uppercase; letter-spacing: .1em; }
 
 /* ══════════ PRICING ══════════ */
-.plans { display: grid; grid-template-columns: 1fr; gap: 16px; }
-@media (min-width: 900px) { .plans { grid-template-columns: repeat(3, 1fr); align-items: stretch; } }
-.plan { background: var(--surface-dark); border: 1px solid var(--border-dark-strong); border-radius: 14px; padding: 32px 28px; display: flex; flex-direction: column; gap: 20px; position: relative; }
+.plans { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 900px) { .plans { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; } }
+.plan {
+  background: var(--surface-dark); border: 1px solid var(--border-dark-strong);
+  border-radius: 14px; padding: 32px 28px;
+  display: flex; flex-direction: column; gap: 20px;
+  position: relative;
+  min-width: 0;          /* Allow plan card to shrink below content min-width */
+  overflow-wrap: anywhere;/* Long unbreakable words wrap on narrow viewports */
+}
+@media (max-width: 360px) {
+  .plan { padding: 24px 18px; }
+}
 .plan.pop { border-color: var(--accent); background: linear-gradient(180deg, rgba(16,185,129,.06), rgba(16,185,129,.02) 60%, transparent); }
 .plan-tag { position: absolute; top: -12px; left: 28px; background: var(--accent); color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; padding: 5px 10px; border-radius: 4px; }
 .plan-name { font-family: var(--font-display); font-weight: 500; font-size: 20px; color: var(--text-on-dark); letter-spacing: -.01em; }

@@ -34,3 +34,25 @@
 .toggle-slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: .15s; box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
 .toggle input:checked + .toggle-slider { background: var(--brand); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(14px); }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Campaigns table: 6 fixed cols → scroll */
+  .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .camp-row { min-width: 620px; }
+  /* Funnel step: 4 fixed cols → flexible layout that fits 375px */
+  .funnel-step {
+    grid-template-columns: minmax(80px, 120px) 1fr 64px 44px;
+    gap: 6px;
+  }
+  /* Tier cards: inline style grid is 4-col → override to 2-col.
+     :has() has broad support on modern mobile (Chrome 105+, Safari 15.4+).
+     Fallback: tier-card min-width:0 ensures they don't blow out the container. */
+  .tier-card { min-width: 0; }
+  .page > div:has(.tier-card) {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+@media (max-width: 375px) {
+  .tier-val { font-size: 28px; }
+}

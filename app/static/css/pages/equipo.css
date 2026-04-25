@@ -177,3 +177,25 @@
 @media (max-width: 800px) {
   .metrics-row { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Shift grid: 14 day columns + name = very wide → scroll via its parent */
+  .shift-grid { min-width: 800px; }
+  /* People table: scroll horizontally */
+  .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* People table rows need a minimum width */
+  .ppl-tbl { min-width: 560px; }
+  /* Role filter wraps */
+  .role-filter { flex-wrap: wrap; gap: 6px; }
+  /* Metrics row: already 2-col at 800px, maintain 2-col on mobile */
+  .metrics-row { grid-template-columns: repeat(2, 1fr); }
+  /* Two-column inline grid (shift card + tips) → stack vertically.
+     Selector targets the inline-style element via :has() */
+  .page > div:has(.shift-grid) {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 375px) {
+  .metrics-row { grid-template-columns: repeat(2, 1fr); }
+}

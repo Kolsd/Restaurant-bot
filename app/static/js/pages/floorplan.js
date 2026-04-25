@@ -1,16 +1,14 @@
-/* ══ Floor plan page — read-only live view ═══════════════════════════
-   Fetches /api/floor-plan on load and auto-refreshes every 15s.
-   Click a table tile → show detail panel.
-   Keyboard: Esc closes panel.
-   Edit mode: deferred to v2 — requires PATCH /api/floor-plan (tracked separately).  // lint-allow: v2 feature note, not stale wiring
+/* ══ Floor plan page ════════════════════════════════════════════════
+   Phase 1 — Adaptive layout + dynamic zones
+   Phase 2 — Edit layout mode (drag-to-reposition, create, delete)
+   Phase 3 — QR view + real detail-panel actions
    ═══════════════════════════════════════════════════════════════════ */
 
 'use strict';
 
 // ── Auth guard ────────────────────────────────────────────────────
 (function () {
-  var token = localStorage.getItem('rb_token');
-  if (!token) { window.location.href = '/login'; }
+  if (!localStorage.getItem('rb_token')) { window.location.href = '/login'; }
 })();
 
 // ── State ─────────────────────────────────────────────────────────
@@ -18,46 +16,135 @@ var _tables = [];
 var _selectedTableId = null;
 var _refreshTimer = null;
 var _activeZone = 'all';
-var _lastRefresh = null;
+var _editMode = false;
+var _currentView = 'map'; // 'map' | 'qr'
+var _propsTableId = null; // which table is open in props modal
+var _dragState = null;    // {tableId, startX, startY, origX, origY, el}
 
-// ── DOM refs ──────────────────────────────────────────────────────
-function el(id) { return document.getElementById(id); }
-
-// ── Status → CSS class mapping ────────────────────────────────────
+// ── Status maps ───────────────────────────────────────────────────
 var STATUS_CLASS = {
-  free:       '',
-  available:  '',
-  seated:     'sent',
-  eating:     'occ',
-  billing:    'fac',
-  reserved:   'res'
+  free:      '',
+  available: '',
+  seated:    'sent',
+  eating:    'occ',
+  billing:   'fac',
+  reserved:  'res',
+  occupied:  'occ'
 };
 
 var STATUS_LABEL = {
-  free:       'Libre',
-  available:  'Libre',
-  seated:     'Sentados',
-  eating:     'Comiendo',
-  billing:    'Facturando',
-  reserved:   'Reservada',
-  occupied:   'Ocupada'
+  free:      'Libre',
+  available: 'Libre',
+  seated:    'Sentados',
+  eating:    'Comiendo',
+  billing:   'Facturando',
+  reserved:  'Reservada',
+  occupied:  'Ocupada'
 };
+
+// ── Helpers ───────────────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
+
+function _hasCustomPositions(tables) {
+  return tables.some(function (t) {
+    return (t.position_x != null && t.position_x !== 0) ||
+           (t.position_y != null && t.position_y !== 0);
+  });
+}
+
+function _distinctZones(tables) {
+  var seen = {};
+  var zones = [];
+  tables.forEach(function (t) {
+    var z = (t.zone || 'Salón').trim();
+    if (!seen[z]) { seen[z] = true; zones.push(z); }
+  });
+  return zones;
+}
+
+function _tileSize(capacity) {
+  var base = capacity ? Math.max(96, Math.min(140, 60 + capacity * 10)) : 96;
+  return base;
+}
+
+// ── Build zone datalist for modals ────────────────────────────────
+function _populateZoneDatalist(listId) {
+  var dl = el(listId);
+  if (!dl) return;
+  dl.innerHTML = '';
+  var zones = _distinctZones(_tables);
+  zones.forEach(function (z) {
+    var opt = document.createElement('option');
+    opt.value = z;
+    dl.appendChild(opt);
+  });
+}
 
 // ── Fetch floor plan ──────────────────────────────────────────────
 async function loadFloorPlan() {
+  var badge = el('refreshBadge');
+  if (badge) badge.classList.add('loading');
+
   try {
     var res = await fetch('/api/tables/floor-plan', { headers: mesioHeaders() });
+    mesioTrackFetch(res.ok);
     if (res.status === 401) { window.location.href = '/login'; return; }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
     _tables = Array.isArray(data) ? data : (data.tables || []);
+    _rebuildZoneFilter();
     renderTables();
+    if (_currentView === 'qr') renderQrGrid();
+    if (_selectedTableId) selectTable(_selectedTableId);
     updateRefreshBadge();
-    mesioTrackFetch(true);
+    _populateReservaTables();
   } catch (e) {
     mesioTrackFetch(false);
     console.warn('floor-plan fetch failed:', e);
+  } finally {
+    if (badge) badge.classList.remove('loading');
   }
+}
+
+// ── Dynamic zone filter ───────────────────────────────────────────
+function _rebuildZoneFilter() {
+  var container = el('zoneFilter');
+  if (!container) return;
+  var zones = _distinctZones(_tables);
+
+  // Count per zone
+  var counts = {};
+  _tables.forEach(function (t) {
+    var z = (t.zone || 'Salón').trim();
+    counts[z] = (counts[z] || 0) + 1;
+  });
+
+  // Rebuild buttons: Todas + one per zone
+  container.innerHTML = '';
+  var allBtn = document.createElement('button');
+  allBtn.className = 'seg-btn' + (_activeZone === 'all' ? ' active' : '');
+  allBtn.dataset.zone = 'all';
+  allBtn.textContent = 'Todas';
+  container.appendChild(allBtn);
+
+  zones.forEach(function (z) {
+    var btn = document.createElement('button');
+    var key = z.toLowerCase();
+    btn.className = 'seg-btn' + (_activeZone === key ? ' active' : '');
+    btn.dataset.zone = key;
+    btn.textContent = z + ' · ' + (counts[z] || 0);
+    container.appendChild(btn);
+  });
+
+  // Bind clicks
+  container.querySelectorAll('.seg-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      container.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      _activeZone = btn.dataset.zone;
+      renderTables();
+    });
+  });
 }
 
 // ── Render table tiles ────────────────────────────────────────────
@@ -65,112 +152,392 @@ function renderTables() {
   var canvas = el('fpCanvas');
   if (!canvas) return;
 
-  // Remove existing dynamic tiles (keep static structure: zones, walls, legend)
-  canvas.querySelectorAll('.t').forEach(function (t) { t.remove(); });
+  // Remove existing dynamic tiles
+  canvas.querySelectorAll('.t, .fp-zone-swimlane').forEach(function (n) { n.remove(); });
 
-  var zoneCounts = {};
-  _tables.forEach(function (tbl) {
-    var zone = (tbl.zone || 'Salón').toLowerCase();
-    if (_activeZone !== 'all' && zone !== _activeZone) return;
+  // Show empty state when 0 tables
+  var emptyEl = el('canvasEmpty');
+  if (_tables.length === 0) {
+    if (emptyEl) emptyEl.style.display = '';
+    canvas.classList.remove('grid-mode');
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
 
-    var tile = document.createElement('div');
-    tile.className = 't';
-    var status = (tbl.status || 'free').toLowerCase();
-    var cls = STATUS_CLASS[status] || 'occ';
-    if (cls) tile.classList.add(cls);
-    if (String(tbl.id) === String(_selectedTableId)) tile.classList.add('sel');
-
-    // Position
-    var x = tbl.position_x != null ? tbl.position_x : (20 + Math.random() * 60);
-    var y = tbl.position_y != null ? tbl.position_y : (80 + Math.random() * 300);
-    var w = tbl.capacity ? Math.max(80, 60 + tbl.capacity * 8) : 92;
-    var h = w;
-    tile.style.cssText = 'left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;height:' + h + 'px;';
-
-    // Content
-    var numDiv = document.createElement('div');
-    numDiv.className = 'tn';
-    numDiv.textContent = tbl.table_number || tbl.id;
-    tile.appendChild(numDiv);
-
-    var stDiv = document.createElement('div');
-    stDiv.className = 'st';
-    stDiv.textContent = (STATUS_LABEL[status] || status) + (tbl.capacity ? ' · ' + tbl.capacity + 'p' : '');
-    tile.appendChild(stDiv);
-
-    if (tbl.current_total) {
-      var mtDiv = document.createElement('div');
-      mtDiv.className = 'mt';
-      mtDiv.textContent = mesioFmt(tbl.current_total);
-      tile.appendChild(mtDiv);
-    }
-
-    // Alert badge
-    if (tbl.has_alert || tbl.waiter_called) {
-      var alertDiv = document.createElement('div');
-      alertDiv.className = 'alert';
-      alertDiv.textContent = 'LLAMA';
-      tile.appendChild(alertDiv);
-    }
-
-    tile.dataset.tableId = tbl.id;
-    tile.addEventListener('click', function () { selectTable(tbl.id); });
-
-    canvas.appendChild(tile);
-    zoneCounts[zone] = (zoneCounts[zone] || 0) + 1;
+  var filtered = _tables.filter(function (t) {
+    if (_activeZone === 'all') return true;
+    return (t.zone || 'Salón').trim().toLowerCase() === _activeZone;
   });
 
-  // Update sidebar table count
-  var countEl = el('tableCount');
-  if (countEl) { countEl.textContent = _tables.length + ' mesas'; }
+  var useGrid = !_hasCustomPositions(_tables);
+  canvas.classList.toggle('grid-mode', useGrid);
+
+  if (useGrid) {
+    _renderGridMode(canvas, filtered);
+  } else {
+    _renderAbsoluteMode(canvas, filtered);
+  }
 }
 
-// ── Select table → detail panel ───────────────────────────────────
+function _renderGridMode(canvas, tables) {
+  // Group by zone
+  var groups = {};
+  var order = [];
+  tables.forEach(function (t) {
+    var z = (t.zone || 'Salón').trim();
+    if (!groups[z]) { groups[z] = []; order.push(z); }
+    groups[z].push(t);
+  });
+
+  order.forEach(function (zone) {
+    var swimlane = document.createElement('div');
+    swimlane.className = 'fp-zone-swimlane';
+
+    var header = document.createElement('div');
+    header.className = 'fp-zone-header';
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'fp-zone-name';
+    nameSpan.textContent = zone;
+    var countSpan = document.createElement('span');
+    countSpan.className = 'fp-zone-count';
+    countSpan.textContent = groups[zone].length;
+    header.appendChild(nameSpan);
+    header.appendChild(countSpan);
+    swimlane.appendChild(header);
+
+    var tilesRow = document.createElement('div');
+    tilesRow.className = 'fp-zone-tiles';
+    groups[zone].forEach(function (tbl) {
+      tilesRow.appendChild(_buildTile(tbl));
+    });
+    swimlane.appendChild(tilesRow);
+    canvas.appendChild(swimlane);
+  });
+}
+
+function _renderAbsoluteMode(canvas, tables) {
+  // Compute canvas minimum size so tiles don't go off-screen
+  var maxX = 0; var maxY = 0;
+  tables.forEach(function (t) {
+    var x = t.position_x || 0;
+    var y = t.position_y || 0;
+    var s = _tileSize(t.capacity);
+    if (x + s + 20 > maxX) maxX = x + s + 20;
+    if (y + s + 20 > maxY) maxY = y + s + 20;
+  });
+  canvas.style.minWidth = maxX + 'px';
+  canvas.style.minHeight = maxY + 'px';
+
+  tables.forEach(function (tbl) {
+    var tile = _buildTile(tbl);
+    var x = tbl.position_x || 0;
+    var y = tbl.position_y || 0;
+    var s = _tileSize(tbl.capacity);
+    tile.style.left = x + 'px';
+    tile.style.top  = y + 'px';
+    tile.style.width  = s + 'px';
+    tile.style.height = s + 'px';
+    canvas.appendChild(tile);
+  });
+}
+
+function _buildTile(tbl) {
+  var tile = document.createElement('div');
+  tile.className = 't';
+  var status = (tbl.status || 'free').toLowerCase();
+  var cls = STATUS_CLASS[status] || '';
+  if (cls) tile.classList.add(cls);
+  if (String(tbl.id) === String(_selectedTableId)) tile.classList.add('sel');
+
+  // Tooltip
+  var cap = tbl.capacity ? tbl.capacity + ' personas' : '';
+  var typ = tbl.table_type ? ' · ' + tbl.table_type : '';
+  var zon = tbl.zone ? ' · ' + tbl.zone : '';
+  tile.title = [cap, typ, zon].filter(Boolean).join('') || 'Mesa';
+
+  // Number label
+  var numDiv = document.createElement('div');
+  numDiv.className = 'tn';
+  numDiv.textContent = tbl.table_number || tbl.id;
+  tile.appendChild(numDiv);
+
+  // Status
+  var stDiv = document.createElement('div');
+  stDiv.className = 'st';
+  stDiv.textContent = STATUS_LABEL[status] || status;
+  tile.appendChild(stDiv);
+
+  // Capacity badge
+  if (tbl.capacity) {
+    var capDiv = document.createElement('div');
+    capDiv.className = 'cap-badge';
+    capDiv.textContent = tbl.capacity + 'p';
+    tile.appendChild(capDiv);
+  }
+
+  // Current total
+  if (tbl.current_total) {
+    var mtDiv = document.createElement('div');
+    mtDiv.className = 'mt';
+    mtDiv.textContent = mesioFmt(tbl.current_total);
+    tile.appendChild(mtDiv);
+  }
+
+  // Alert badge
+  if (tbl.has_alert || tbl.waiter_called) {
+    var alertDiv = document.createElement('div');
+    alertDiv.className = 'alert';
+    alertDiv.textContent = 'LLAMA';
+    tile.appendChild(alertDiv);
+  }
+
+  tile.dataset.tableId = tbl.id;
+
+  // Click: select (unless we're dragging)
+  tile.addEventListener('click', function (e) {
+    if (_editMode && e._wasDrag) return;
+    if (!_editMode) { selectTable(tbl.id); }
+  });
+
+  // Right-click in edit mode: open props modal
+  tile.addEventListener('contextmenu', function (e) {
+    if (!_editMode) return;
+    e.preventDefault();
+    _openPropsModal(tbl.id);
+  });
+
+  // Drag in edit mode
+  if (_editMode) {
+    _attachDrag(tile, tbl);
+  }
+
+  return tile;
+}
+
+// ── Phase 2: Drag-to-reposition ───────────────────────────────────
+function _attachDrag(tile, tbl) {
+  tile.addEventListener('pointerdown', function (e) {
+    if (!_editMode) return;
+    e.preventDefault();
+    var canvas = el('fpCanvas');
+    var rect = canvas.getBoundingClientRect();
+    var startClientX = e.clientX;
+    var startClientY = e.clientY;
+    var origLeft = parseFloat(tile.style.left) || 0;
+    var origTop  = parseFloat(tile.style.top)  || 0;
+    var moved = false;
+
+    tile.setPointerCapture(e.pointerId);
+    tile.style.zIndex = '200';
+    tile.style.transition = 'none';
+
+    function onMove(ev) {
+      var dx = ev.clientX - startClientX;
+      var dy = ev.clientY - startClientY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      tile.style.left = Math.max(0, origLeft + dx) + 'px';
+      tile.style.top  = Math.max(0, origTop  + dy) + 'px';
+    }
+
+    async function onUp(ev) {
+      tile.removeEventListener('pointermove', onMove);
+      tile.removeEventListener('pointerup', onUp);
+      tile.style.zIndex = '';
+      tile.style.transition = '';
+
+      if (!moved) return;
+      ev._wasDrag = true;
+
+      var newX = parseFloat(tile.style.left) || 0;
+      var newY = parseFloat(tile.style.top)  || 0;
+
+      // Persist position
+      try {
+        var r = await fetch('/api/tables/' + tbl.id + '/position', {
+          method: 'PUT',
+          headers: mesioHeaders(),
+          body: JSON.stringify({ position_x: newX, position_y: newY })
+        });
+        mesioTrackFetch(r.ok);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        // Update local state
+        var t = _tables.find(function (t) { return String(t.id) === String(tbl.id); });
+        if (t) { t.position_x = newX; t.position_y = newY; }
+        mesioToast('Posición guardada', 'success');
+      } catch (err) {
+        mesioToast('Error guardando posición', 'error');
+        tile.style.left = origLeft + 'px';
+        tile.style.top  = origTop  + 'px';
+      }
+    }
+
+    tile.addEventListener('pointermove', onMove);
+    tile.addEventListener('pointerup', onUp);
+  });
+}
+
+// ── Phase 2: Edit mode toggle ─────────────────────────────────────
+function _enterEditMode() {
+  _editMode = true;
+  document.body.classList.add('editing');
+  var btn = el('editLayoutBtn');
+  if (btn) { btn.textContent = '✓ Modo edición'; btn.classList.add('brand'); }
+  var tb = el('editToolbar');
+  if (tb) tb.style.display = '';
+  renderTables();
+}
+
+function _exitEditMode() {
+  _editMode = false;
+  document.body.classList.remove('editing');
+  var btn = el('editLayoutBtn');
+  if (btn) { btn.textContent = 'Editar layout'; btn.classList.remove('brand'); }
+  var tb = el('editToolbar');
+  if (tb) tb.style.display = 'none';
+  renderTables();
+}
+
+// ── Phase 2: Props modal ──────────────────────────────────────────
+function _openPropsModal(tableId) {
+  _propsTableId = tableId;
+  var tbl = _tables.find(function (t) { return String(t.id) === String(tableId); });
+  if (!tbl) return;
+
+  el('propNum').value      = tbl.table_number || '';
+  el('propName').value     = tbl.name || '';
+  el('propCapacity').value = tbl.capacity || '';
+  el('propType').value     = tbl.table_type || 'interior';
+  el('propZone').value     = tbl.zone || '';
+  _populateZoneDatalist('propZoneList');
+
+  el('propsModal').classList.add('open');
+}
+
+async function _saveProps() {
+  if (!_propsTableId) return;
+  var body = {
+    capacity:   parseInt(el('propCapacity').value) || null,
+    table_type: el('propType').value,
+    zone:       el('propZone').value.trim() || null
+  };
+  try {
+    var r = await fetch('/api/tables/' + _propsTableId + '/properties', {
+      method: 'PUT',
+      headers: mesioHeaders(),
+      body: JSON.stringify(body)
+    });
+    mesioTrackFetch(r.ok);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    mesioToast('Mesa actualizada', 'success');
+    el('propsModal').classList.remove('open');
+    await loadFloorPlan();
+  } catch (e) {
+    mesioToast('Error al guardar: ' + e.message, 'error');
+  }
+}
+
+async function _deleteTable() {
+  if (!_propsTableId) return;
+  var tbl = _tables.find(function (t) { return String(t.id) === String(_propsTableId); });
+  var name = tbl ? 'Mesa ' + (tbl.table_number || _propsTableId) : 'esta mesa';
+  var ok = await mesioConfirm('¿Eliminar ' + name + '? Esta acción no se puede deshacer.', { confirmText: 'Eliminar', danger: true });
+  if (!ok) return;
+  try {
+    var r = await fetch('/api/tables/' + _propsTableId, {
+      method: 'DELETE',
+      headers: mesioHeaders()
+    });
+    mesioTrackFetch(r.ok);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    mesioToast('Mesa eliminada', 'success');
+    el('propsModal').classList.remove('open');
+    if (String(_selectedTableId) === String(_propsTableId)) closePanel();
+    await loadFloorPlan();
+  } catch (e) {
+    mesioToast('Error al eliminar: ' + e.message, 'error');
+  }
+}
+
+// ── Phase 2: Create table modal ───────────────────────────────────
+function _openNewTableModal() {
+  el('ntNum').value = '';
+  el('ntName').value = '';
+  el('ntCapacity').value = '4';
+  el('ntType').value = 'interior';
+  el('ntZone').value = '';
+  _populateZoneDatalist('ntZoneList');
+  el('newTableModal').classList.add('open');
+}
+
+async function _createTable() {
+  var num = el('ntNum').value.trim();
+  if (!num) { mesioToast('El número de mesa es obligatorio', 'error'); return; }
+
+  var body = {
+    number:     num,
+    name:       el('ntName').value.trim() || null,
+    capacity:   parseInt(el('ntCapacity').value) || null,
+    table_type: el('ntType').value,
+    zone:       el('ntZone').value.trim() || null
+  };
+  try {
+    var r = await fetch('/api/tables', {
+      method: 'POST',
+      headers: mesioHeaders(),
+      body: JSON.stringify(body)
+    });
+    mesioTrackFetch(r.ok);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      throw new Error(err.detail || 'HTTP ' + r.status);
+    }
+    mesioToast('Mesa creada', 'success');
+    el('newTableModal').classList.remove('open');
+    await loadFloorPlan();
+  } catch (e) {
+    mesioToast('Error al crear: ' + e.message, 'error');
+  }
+}
+
+// ── Phase 3: Select table → detail panel ─────────────────────────
 async function selectTable(tableId) {
   _selectedTableId = tableId;
-  // Re-render to update .sel class
   renderTables();
 
   var tbl = _tables.find(function (t) { return String(t.id) === String(tableId); });
   if (!tbl) return;
 
-  var panel = el('detailPanel');
-  var empty = el('detailEmpty');
-  if (panel) panel.classList.remove('hidden');
-  if (empty) empty.classList.add('hidden');
+  el('detailPanel').classList.remove('hidden');
+  el('detailEmpty').classList.add('hidden');
 
-  // Header
+  // Header number + state
+  var status = (tbl.status || 'free').toLowerCase();
   var numEl = el('dNum');
-  var stateEl = el('dState');
-  if (numEl) { numEl.textContent = 'M' + (tbl.table_number || tbl.id); }
-  if (stateEl) {
-    var status = (tbl.status || 'free').toLowerCase();
-    stateEl.textContent = STATUS_LABEL[status] || status;
-    stateEl.className = 'd-state';
-    var stateColor = {
-      seated: 'fp-sentados-text', eating: 'fp-ocupada-text',
-      billing: 'fp-factura-text', reserved: 'fp-reservada-text'
-    };
-    if (numEl) { numEl.style.color = 'var(--' + (stateColor[status] || 'fp-libre-text') + ')'; }
+  if (numEl) {
+    numEl.textContent = 'M' + (tbl.table_number || tbl.id);
+    var stateColors = { seated: 'fp-sentados-text', eating: 'fp-ocupada-text', billing: 'fp-factura-text', reserved: 'fp-reservada-text' };
+    numEl.style.color = 'var(--' + (stateColors[status] || 'fp-libre-text') + ')';
   }
+  var stateEl = el('dState');
+  if (stateEl) stateEl.textContent = STATUS_LABEL[status] || status;
 
   // Meta
   var metaEl = el('dMeta');
   if (metaEl) {
-    var meta = '';
-    if (tbl.customer_name) { meta += '<strong>' + _escHtml(tbl.customer_name) + '</strong>'; }
-    if (tbl.guests) { meta += (tbl.customer_name ? ' · ' : '') + tbl.guests + ' personas'; }
+    var parts = [];
+    if (tbl.customer_name) parts.push('<strong>' + _escHtml(tbl.customer_name) + '</strong>');
+    if (tbl.guests) parts.push((tbl.customer_name ? '' : '') + tbl.guests + ' personas');
     if (tbl.opened_at) {
       var mins = Math.round((Date.now() - new Date(tbl.opened_at).getTime()) / 60000);
-      meta += '<br>Abierta hace <strong>' + mins + ' min</strong>';
+      parts.push('Abierta hace <strong>' + mins + ' min</strong>');
     }
-    metaEl.innerHTML = meta || '<span style="color:var(--text-4)">Sin sesión activa</span>';
+    metaEl.innerHTML = parts.length ? parts.join(' · ') : '<span style="color:var(--text-4)">Sin sesión activa</span>';
   }
 
   // Orders list
-  var ordersList = el('dOrders');
-  if (ordersList) {
-    ordersList.innerHTML = '';
+  var ordersEl = el('dOrders');
+  if (ordersEl) {
+    ordersEl.innerHTML = '';
     var orders = tbl.current_orders || [];
     if (orders.length) {
       orders.forEach(function (item) {
@@ -187,23 +554,26 @@ async function selectTable(tableId) {
         right.textContent = mesioFmt(item.price * (item.quantity || 1));
         row.appendChild(left);
         row.appendChild(right);
-        ordersList.appendChild(row);
+        ordersEl.appendChild(row);
       });
     } else {
-      var empty2 = document.createElement('div');
-      empty2.style.cssText = 'font-size:12px;color:var(--text-4);padding:8px 0;';
-      empty2.textContent = 'Sin ítems aún';
-      ordersList.appendChild(empty2);
+      var noItems = document.createElement('div');
+      noItems.style.cssText = 'font-size:12px;color:var(--text-4);padding:8px 0;';
+      noItems.textContent = 'Sin ítems aún';
+      ordersEl.appendChild(noItems);
     }
   }
 
   // Total
+  var totalRow = el('dTotalRow');
   var totalEl = el('dTotal');
-  if (totalEl && tbl.current_total) {
-    totalEl.textContent = mesioFmt(tbl.current_total);
-    totalEl.closest('.d-total').style.display = '';
-  } else if (totalEl) {
-    totalEl.closest('.d-total').style.display = 'none';
+  if (totalEl && totalRow) {
+    if (tbl.current_total) {
+      totalEl.textContent = mesioFmt(tbl.current_total);
+      totalRow.style.display = '';
+    } else {
+      totalRow.style.display = 'none';
+    }
   }
 
   // Timeline
@@ -211,138 +581,468 @@ async function selectTable(tableId) {
   if (timelineEl) {
     timelineEl.innerHTML = '';
     var events = tbl.timeline || [];
-    events.forEach(function (ev) {
-      var row = document.createElement('div');
-      row.className = 'timeline-row';
-      var timeDiv = document.createElement('div');
-      timeDiv.className = 'tl-time';
-      timeDiv.textContent = ev.time || '';
-      var dot = document.createElement('div');
-      dot.className = 'tl-dot' + (ev.past ? ' past' : '');
-      var textDiv = document.createElement('div');
-      var strong = document.createElement('strong');
-      strong.textContent = ev.title || '';
-      textDiv.appendChild(strong);
-      if (ev.subtitle) {
-        var sub = document.createElement('div');
-        sub.className = 'text-mute';
-        sub.style.fontSize = '11px';
-        sub.textContent = ev.subtitle;
-        textDiv.appendChild(sub);
-      }
-      row.appendChild(timeDiv);
-      row.appendChild(dot);
-      row.appendChild(textDiv);
-      timelineEl.appendChild(row);
-    });
-    if (!events.length) {
+    if (events.length) {
+      events.forEach(function (ev) {
+        var row = document.createElement('div');
+        row.className = 'timeline-row';
+        var timeDiv = document.createElement('div');
+        timeDiv.className = 'tl-time';
+        timeDiv.textContent = ev.time || '';
+        var dot = document.createElement('div');
+        dot.className = 'tl-dot' + (ev.past ? ' past' : '');
+        var textDiv = document.createElement('div');
+        var strong = document.createElement('strong');
+        strong.textContent = ev.title || '';
+        textDiv.appendChild(strong);
+        if (ev.subtitle) {
+          var sub = document.createElement('div');
+          sub.style.cssText = 'font-size:11px;color:var(--text-3);';
+          sub.textContent = ev.subtitle;
+          textDiv.appendChild(sub);
+        }
+        row.appendChild(timeDiv);
+        row.appendChild(dot);
+        row.appendChild(textDiv);
+        timelineEl.appendChild(row);
+      });
+    } else {
       var noEv = document.createElement('div');
       noEv.style.cssText = 'font-size:12px;color:var(--text-4);padding:8px 0;';
       noEv.textContent = 'Sin eventos registrados';
       timelineEl.appendChild(noEv);
     }
   }
+
+  // QR iframe
+  var qrFrame = el('dQrFrame');
+  if (qrFrame) qrFrame.src = '/api/tables/' + tableId + '/qr';
 }
 
-// ── Close panel ───────────────────────────────────────────────────
+// ── Close detail panel ────────────────────────────────────────────
 function closePanel() {
   _selectedTableId = null;
-  var panel = el('detailPanel');
-  var empty = el('detailEmpty');
-  if (panel) panel.classList.add('hidden');
-  if (empty) empty.classList.remove('hidden');
+  el('detailPanel').classList.add('hidden');
+  el('detailEmpty').classList.remove('hidden');
+  // Clear QR iframe to avoid stale load
+  var qrFrame = el('dQrFrame');
+  if (qrFrame) qrFrame.src = '';
   renderTables();
 }
 
-// ── Zone filter ───────────────────────────────────────────────────
-function bindZoneFilter() {
-  var btns = document.querySelectorAll('.seg-btn[data-zone]');
-  btns.forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      btns.forEach(function (b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      _activeZone = btn.dataset.zone || 'all';
-      renderTables();
-    });
+// ── Phase 3: Ver ticket ───────────────────────────────────────────
+async function _showTicket(tableId) {
+  var tbl = _tables.find(function (t) { return String(t.id) === String(tableId); });
+  if (!tbl) return;
+
+  // Try to get order_id from the table data, else fetch active orders
+  var orderId = tbl.current_order_id;
+  if (!orderId) {
+    try {
+      var r = await fetch('/api/table-orders?status=active', { headers: mesioHeaders() });
+      mesioTrackFetch(r.ok);
+      if (r.ok) {
+        var data = await r.json();
+        var orders = Array.isArray(data) ? data : (data.orders || []);
+        var match = orders.find(function (o) {
+          return String(o.table_id) === String(tableId);
+        });
+        if (match) orderId = match.id;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  if (!orderId) {
+    mesioToast('Sin orden activa para esta mesa', 'info');
+    return;
+  }
+
+  try {
+    var r2 = await fetch('/api/table-orders/' + orderId + '/ticket', { headers: mesioHeaders() });
+    mesioTrackFetch(r2.ok);
+    if (!r2.ok) throw new Error('HTTP ' + r2.status);
+    var ticket = await r2.json();
+
+    var body = el('ticketBody');
+    if (!body) return;
+    body.innerHTML = '';
+
+    // Render items
+    var items = ticket.items || ticket.orders || [];
+    if (items.length) {
+      var list = document.createElement('div');
+      list.style.cssText = 'margin-bottom:12px;';
+      items.forEach(function (item) {
+        var row = document.createElement('div');
+        row.className = 'd-item';
+        var left = document.createElement('div');
+        var q = document.createElement('span');
+        q.className = 'q';
+        q.textContent = (item.quantity || 1) + '×';
+        left.appendChild(q);
+        left.appendChild(document.createTextNode(item.name || item.dish_name || ''));
+        var right = document.createElement('div');
+        right.textContent = mesioFmt((item.unit_price || item.price || 0) * (item.quantity || 1));
+        row.appendChild(left);
+        row.appendChild(right);
+        list.appendChild(row);
+      });
+      body.appendChild(list);
+    }
+
+    // Total line
+    var totalDiv = document.createElement('div');
+    totalDiv.style.cssText = 'display:flex;justify-content:space-between;font-weight:700;padding-top:10px;border-top:0.5px solid var(--border);font-size:15px;';
+    var lbl = document.createElement('span');
+    lbl.textContent = 'Total';
+    var val = document.createElement('span');
+    val.style.fontFamily = 'var(--font-display)';
+    val.textContent = mesioFmt(ticket.total || 0);
+    totalDiv.appendChild(lbl);
+    totalDiv.appendChild(val);
+    body.appendChild(totalDiv);
+
+    el('ticketModal').classList.add('open');
+  } catch (e) {
+    mesioToast('Error cargando ticket: ' + e.message, 'error');
+  }
+}
+
+// ── Phase 3: QR view ──────────────────────────────────────────────
+function renderQrGrid() {
+  var grid = el('qrGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  var filtered = _tables.filter(function (t) {
+    if (_activeZone === 'all') return true;
+    return (t.zone || 'Salón').trim().toLowerCase() === _activeZone;
   });
+
+  filtered.forEach(function (tbl) {
+    var card = document.createElement('div');
+    card.className = 'qr-card';
+
+    var name = document.createElement('div');
+    name.className = 'qr-card-name';
+    name.textContent = 'Mesa ' + (tbl.table_number || tbl.id);
+    card.appendChild(name);
+
+    var meta = document.createElement('div');
+    meta.className = 'qr-card-meta';
+    var metaParts = [];
+    if (tbl.capacity) metaParts.push(tbl.capacity + ' personas');
+    if (tbl.zone) metaParts.push(tbl.zone);
+    meta.textContent = metaParts.join(' · ');
+    card.appendChild(meta);
+
+    // Status badge
+    var status = (tbl.status || 'free').toLowerCase();
+    var badgeCls = STATUS_CLASS[status] || 'libre';
+    if (!badgeCls) badgeCls = 'libre';
+    var badge = document.createElement('span');
+    badge.className = 'qr-card-badge ' + badgeCls;
+    badge.textContent = STATUS_LABEL[status] || 'Libre';
+    card.appendChild(badge);
+
+    // QR canvas container
+    var qrWrap = document.createElement('div');
+    qrWrap.className = 'qr-card-canvas';
+    var qrDiv = document.createElement('div');
+    qrWrap.appendChild(qrDiv);
+    card.appendChild(qrWrap);
+
+    var qrUrl = window.location.origin + '/menu/' + tbl.id;
+    // Generate QR client-side via qrcodejs
+    if (typeof QRCode !== 'undefined') {
+      new QRCode(qrDiv, {
+        text: qrUrl,
+        width: 140,
+        height: 140,
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    } else {
+      // Fallback: link text
+      var link = document.createElement('a');
+      link.href = qrUrl;
+      link.textContent = qrUrl;
+      link.style.fontSize = '10px';
+      link.style.wordBreak = 'break-all';
+      qrDiv.appendChild(link);
+    }
+
+    // Print link
+    var printLink = document.createElement('a');
+    printLink.className = 'qr-card-print';
+    printLink.href = '/api/tables/' + tbl.id + '/qr-sheet';
+    printLink.target = '_blank';
+    printLink.rel = 'noopener noreferrer';
+    printLink.textContent = '🖨️ Imprimir QR';
+    card.appendChild(printLink);
+
+    grid.appendChild(card);
+  });
+
+  if (filtered.length === 0) {
+    var empty = document.createElement('div');
+    empty.style.cssText = 'grid-column:1/-1;text-align:center;color:var(--text-4);padding:60px 20px;font-size:14px;';
+    empty.textContent = 'No hay mesas para mostrar';
+    grid.appendChild(empty);
+  }
+}
+
+// ── Phase 3: Reserva modal ────────────────────────────────────────
+function _openReservaModal() {
+  // Defaults: today, current time + 1h
+  var now = new Date();
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  el('resDate').value = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  now.setHours(now.getHours() + 1, 0, 0, 0);
+  el('resTime').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  el('resGuests').value = '2';
+  el('resName').value = '';
+  el('resPhone').value = '';
+  el('resNotes').value = '';
+
+  // Pre-select current table if one is selected
+  var sel = el('resTable');
+  if (sel && _selectedTableId) sel.value = String(_selectedTableId);
+  else if (sel) sel.value = '';
+
+  el('reservaModal').classList.add('open');
+}
+
+function _populateReservaTables() {
+  var sel = el('resTable');
+  if (!sel) return;
+  var current = sel.value;
+  sel.innerHTML = '<option value="">— Sin asignar —</option>';
+  _tables.forEach(function (t) {
+    var opt = document.createElement('option');
+    opt.value = t.id;
+    var cap = t.capacity ? ' (' + t.capacity + 'p)' : '';
+    opt.textContent = 'Mesa ' + (t.table_number || t.id) + (t.zone ? ' — ' + t.zone : '') + cap;
+    sel.appendChild(opt);
+  });
+  if (current) sel.value = current;
+}
+
+async function _submitReserva() {
+  var name = el('resName').value.trim();
+  if (!name) { mesioToast('El nombre del cliente es obligatorio', 'error'); return; }
+  var date = el('resDate').value;
+  var time = el('resTime').value;
+  if (!date || !time) { mesioToast('La fecha y hora son obligatorias', 'error'); return; }
+  var guests = parseInt(el('resGuests').value);
+  if (!guests || guests < 1) { mesioToast('El número de personas debe ser mayor a 0', 'error'); return; }
+
+  // Validate future date
+  var dt = new Date(date + 'T' + time);
+  if (dt <= new Date()) { mesioToast('La reserva debe ser en el futuro', 'error'); return; }
+
+  var body = {
+    customer_name: name,
+    customer_phone: el('resPhone').value.trim() || null,
+    date: date,
+    time: time,
+    party_size: guests,
+    notes: el('resNotes').value.trim() || null,
+    source: 'admin'
+  };
+  var tableVal = el('resTable').value;
+  if (tableVal) body.table_id = parseInt(tableVal);
+
+  try {
+    var r = await fetch('/api/reservations', {
+      method: 'POST',
+      headers: mesioHeaders(),
+      body: JSON.stringify(body)
+    });
+    mesioTrackFetch(r.ok);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      throw new Error(err.detail || 'HTTP ' + r.status);
+    }
+    mesioToast('Reserva creada correctamente', 'success');
+    el('reservaModal').classList.remove('open');
+    await loadFloorPlan();
+  } catch (e) {
+    mesioToast('Error: ' + e.message, 'error');
+  }
 }
 
 // ── Refresh badge ─────────────────────────────────────────────────
 function updateRefreshBadge() {
-  _lastRefresh = new Date();
-  var badgeEl = el('refreshBadge');
-  if (badgeEl) { badgeEl.textContent = 'Actualizado ' + _lastRefresh.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+  var now = new Date();
+  var badge = el('refreshBadge');
+  if (badge) {
+    badge.textContent = 'Actualizado ' + now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
 }
 
-// ── Sync button ───────────────────────────────────────────────────
-function bindSync() {
-  var syncBtn = el('syncBtn');
-  if (syncBtn) {
-    syncBtn.addEventListener('click', function () { loadFloorPlan(); });
+// ── Close panel ───────────────────────────────────────────────────
+function _closeModal(id) {
+  var m = el(id);
+  if (m) m.classList.remove('open');
+}
+
+// ── View toggle ───────────────────────────────────────────────────
+function _setView(view) {
+  _currentView = view;
+  var mapView = el('mapView');
+  var qrView  = el('qrView');
+  var mapBtn  = el('viewMap');
+  var qrBtn   = el('viewQr');
+
+  if (view === 'map') {
+    if (mapView) mapView.style.display = '';
+    if (qrView)  qrView.style.display  = 'none';
+    if (mapBtn)  { mapBtn.classList.add('active'); }
+    if (qrBtn)   { qrBtn.classList.remove('active'); }
+  } else {
+    if (mapView) mapView.style.display = 'none';
+    if (qrView)  qrView.style.display  = '';
+    if (mapBtn)  { mapBtn.classList.remove('active'); }
+    if (qrBtn)   { qrBtn.classList.add('active'); }
+    renderQrGrid();
   }
 }
 
 // ── Keyboard ──────────────────────────────────────────────────────
 function bindKeyboard() {
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') { closePanel(); }
+    if (e.key === 'Escape') {
+      // Close any open modal first; else close panel
+      var openModal = document.querySelector('.m-modal-overlay.open');
+      if (openModal) { openModal.classList.remove('open'); return; }
+      if (_editMode) { _exitEditMode(); return; }
+      closePanel();
+    }
   });
-}
-
-// ── Detail action buttons (stubs) ─────────────────────────────────
-function bindDetailActions() {
-  var btnTicket = el('btnTicket');
-  var btnInvoice = el('btnInvoice');
-  var btnAddItem = el('btnAddItem');
-  var btnMove = el('btnMove');
-  var btnClosePanel = el('btnClosePanel');
-
-  if (btnTicket) { btnTicket.addEventListener('click', function () {
-    mesioToast('Ver ticket — navega a /caja', 'info');
-  }); }
-  if (btnInvoice) { btnInvoice.addEventListener('click', function () {
-    mesioToast('Facturar — navega a /caja', 'info');
-  }); }
-  if (btnAddItem) { btnAddItem.addEventListener('click', function () {
-    mesioToast('Añadir ítem — usa el POS en /caja', 'info');
-  }); }
-  if (btnMove) { btnMove.addEventListener('click', function () {
-    mesioToast('Mover mesa — disponible en modo edición (próximamente)', 'warn');
-  }); }
-  if (btnClosePanel) { btnClosePanel.addEventListener('click', closePanel); }
-}
-
-// ── New reserva button (stub) ─────────────────────────────────────
-function bindNewReserva() {
-  var btn = el('newReservaBtn');
-  if (btn) { btn.addEventListener('click', function () {
-    mesioToast('Gestión de reservas — navega a /dashboard#reservations', 'info');
-  }); }
-}
-
-// ── Logout ────────────────────────────────────────────────────────
-function bindLogout() {
-  var btn = el('logoutBtn');
-  if (btn) { btn.addEventListener('click', mesioLogout); }
 }
 
 // ── Auto-refresh every 15s ────────────────────────────────────────
 function startAutoRefresh() {
   clearInterval(_refreshTimer);
-  _refreshTimer = setInterval(function () {
+  _refreshTimer = mesioInterval(function () {
     loadFloorPlan();
-    if (_selectedTableId) { selectTable(_selectedTableId); }
   }, 15000);
+}
+
+// ── Wire all buttons ──────────────────────────────────────────────
+function bindAll() {
+  // Sync
+  var syncBtn = el('syncBtn');
+  if (syncBtn) syncBtn.addEventListener('click', function () { loadFloorPlan(); });
+
+  // Edit layout toggle
+  var editBtn = el('editLayoutBtn');
+  if (editBtn) editBtn.addEventListener('click', function () {
+    if (_editMode) _exitEditMode(); else _enterEditMode();
+  });
+
+  // Exit edit from toolbar
+  var exitBtn = el('btnExitEdit');
+  if (exitBtn) exitBtn.addEventListener('click', _exitEditMode);
+
+  // New table (from toolbar)
+  var newTblBtn = el('btnNewTable');
+  if (newTblBtn) newTblBtn.addEventListener('click', _openNewTableModal);
+
+  // New table (from canvas empty state)
+  var firstTblBtn = el('btnFirstTable');
+  if (firstTblBtn) firstTblBtn.addEventListener('click', _openNewTableModal);
+
+  // New reserva
+  var resBtn = el('newReservaBtn');
+  if (resBtn) resBtn.addEventListener('click', _openReservaModal);
+
+  // View toggle
+  var mapBtn = el('viewMap');
+  var qrBtn  = el('viewQr');
+  if (mapBtn) mapBtn.addEventListener('click', function () { _setView('map'); });
+  if (qrBtn)  qrBtn.addEventListener('click',  function () { _setView('qr'); });
+
+  // Close panel
+  var closePanelBtn = el('btnClosePanel');
+  if (closePanelBtn) closePanelBtn.addEventListener('click', closePanel);
+
+  // Detail actions
+  var btnTicket = el('btnTicket');
+  if (btnTicket) btnTicket.addEventListener('click', function () {
+    if (_selectedTableId) _showTicket(_selectedTableId);
+  });
+
+  var btnInvoice = el('btnInvoice');
+  if (btnInvoice) btnInvoice.addEventListener('click', function () {
+    if (_selectedTableId) window.location.href = '/caja?table=' + _selectedTableId;
+  });
+
+  var btnAddItem = el('btnAddItem');
+  if (btnAddItem) btnAddItem.addEventListener('click', function () {
+    if (_selectedTableId) window.location.href = '/caja?table=' + _selectedTableId + '&action=add';
+  });
+
+  var btnMove = el('btnMove');
+  if (btnMove) btnMove.addEventListener('click', function () {
+    if (!_selectedTableId) return;
+    if (!_editMode) _enterEditMode();
+    // Scroll the tile into view and highlight it
+    var tile = document.querySelector('[data-table-id="' + _selectedTableId + '"]');
+    if (tile) {
+      tile.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      tile.classList.add('highlight');
+      setTimeout(function () { tile.classList.remove('highlight'); }, 1200);
+    }
+  });
+
+  // Print QR from detail panel
+  var btnPrintQr = el('btnPrintQr');
+  if (btnPrintQr) btnPrintQr.addEventListener('click', function () {
+    if (_selectedTableId) window.open('/api/tables/' + _selectedTableId + '/qr-sheet', '_blank');
+  });
+
+  // Reserva modal
+  var resCancel = el('reservaModalCancel');
+  var resClose  = el('reservaModalClose');
+  var resSubmit = el('reservaModalSubmit');
+  if (resCancel) resCancel.addEventListener('click', function () { _closeModal('reservaModal'); });
+  if (resClose)  resClose.addEventListener('click',  function () { _closeModal('reservaModal'); });
+  if (resSubmit) resSubmit.addEventListener('click', _submitReserva);
+
+  // Props modal
+  var propsCancel = el('propsModalCancel');
+  var propsClose  = el('propsModalClose');
+  var propsSubmit = el('propsModalSubmit');
+  var deleteBtn   = el('btnDeleteTable');
+  if (propsCancel) propsCancel.addEventListener('click', function () { _closeModal('propsModal'); });
+  if (propsClose)  propsClose.addEventListener('click',  function () { _closeModal('propsModal'); });
+  if (propsSubmit) propsSubmit.addEventListener('click', _saveProps);
+  if (deleteBtn)   deleteBtn.addEventListener('click', _deleteTable);
+
+  // New table modal
+  var ntCancel = el('newTableModalCancel');
+  var ntClose  = el('newTableModalClose');
+  var ntSubmit = el('newTableModalSubmit');
+  if (ntCancel) ntCancel.addEventListener('click', function () { _closeModal('newTableModal'); });
+  if (ntClose)  ntClose.addEventListener('click',  function () { _closeModal('newTableModal'); });
+  if (ntSubmit) ntSubmit.addEventListener('click', _createTable);
+
+  // Ticket modal
+  var ticketClose = el('ticketModalClose');
+  if (ticketClose) ticketClose.addEventListener('click', function () { _closeModal('ticketModal'); });
+
+  // Close modals on overlay click
+  document.querySelectorAll('.m-modal-overlay').forEach(function (overlay) {
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) overlay.classList.remove('open');
+    });
+  });
 }
 
 // ── Init ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
-  bindZoneFilter();
-  bindSync();
   bindKeyboard();
-  bindDetailActions();
-  bindNewReserva();
-  bindLogout();
+  bindAll();
   loadFloorPlan();
   startAutoRefresh();
 });

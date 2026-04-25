@@ -100,6 +100,12 @@ body { background: #0a0c10; color: var(--k-text); overflow: hidden; height: 100v
 /* live dot */
 .dot.live { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--brand); animation:pulse-live 2s infinite; margin-right:4px; }
 @keyframes pulse-live { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── Phone: KDS is tablet-only — JS scales .kds to fit viewport width ── */
+@media (max-width: 768px) {
+  html, body { overflow: hidden; max-width: 100vw; }
+  .kds { transform-origin: top left; }
+}
 </style>
 
 <div class="kds">
@@ -162,5 +168,20 @@ body { background: #0a0c10; color: var(--k-text); overflow: hidden; height: 100v
 
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/pages/kitchen.js" defer></script>
+<script>
+/* Phone scale — KDS is tablet-first; on small viewports scale to fit */
+(function() {
+  function applyKdsScale() {
+    var kds = document.querySelector('.kds');
+    if (!kds) return;
+    if (window.innerWidth >= 768) { kds.style.transform = ''; kds.style.width = ''; return; }
+    var s = window.innerWidth / 768;
+    kds.style.transform = 'scale(' + s + ')';
+    kds.style.width = '768px';
+  }
+  document.addEventListener('DOMContentLoaded', applyKdsScale);
+  window.addEventListener('resize', applyKdsScale);
+})();
+</script>
 </body>
 </html>

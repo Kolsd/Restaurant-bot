@@ -11,6 +11,9 @@ body { overflow: hidden; }
 }
 .main { overflow: hidden; flex: 1; display: flex; flex-direction: column; }
 
+/* ── View containers ─────────────────────────────────────────────── */
+.fp-view { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
 /* ── Canvas area ─────────────────────────────────────────────────── */
 .canvas {
   flex: 1;
@@ -18,44 +21,54 @@ body { overflow: hidden; }
   background-image: radial-gradient(circle, #d4d4c4 1px, transparent 1px);
   background-size: 24px 24px;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
 }
 
-/* ── Zone labels ─────────────────────────────────────────────────── */
-.zone-label {
-  position: absolute;
+/* ── Grid mode: zone swimlanes ───────────────────────────────────── */
+.canvas.grid-mode {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.fp-zone-swimlane {
+  padding: 16px 20px 24px;
+  border-bottom: 0.5px solid var(--border);
+}
+.fp-zone-swimlane:last-child { border-bottom: none; }
+
+.fp-zone-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.fp-zone-name {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-4);
-  background: rgba(253,253,249,0.9);
-  padding: 3px 9px;
-  border-radius: 5px;
-  pointer-events: none;
 }
-
-/* ── Structural elements ─────────────────────────────────────────── */
-.fp-wall { position: absolute; background: #d4cfc0; border-radius: 3px; }
-.fp-door { position: absolute; width: 40px; height: 6px; background: #8a8373; border-radius: 3px; }
-.bar-counter {
-  position: absolute;
-  background: #f0ead6;
-  border: 1.5px solid #a89967;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #6b5d2e;
+.fp-zone-count {
+  font-size: 10.5px;
+  background: var(--surface-alt);
+  color: var(--text-3);
+  border-radius: 99px;
+  padding: 1px 7px;
   font-weight: 600;
 }
 
-/* ── Table tiles ─────────────────────────────────────────────────── */
+.fp-zone-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 140px));
+  gap: 10px;
+}
+
+/* ── Table tiles (shared between grid-mode and absolute-mode) ────── */
 .t {
-  position: absolute;
   background: var(--fp-libre-bg);
   border: 1.5px solid var(--fp-libre);
   border-radius: 12px;
@@ -68,14 +81,25 @@ body { overflow: hidden; }
   font-weight: 700;
   cursor: pointer;
   transition: transform 0.12s, box-shadow 0.12s;
-  padding: 6px;
+  padding: 10px 6px;
   user-select: none;
+  min-height: 96px;
+  min-width: 96px;
+  max-width: 140px;
+  position: relative;
 }
+/* Absolute-mode tiles are positioned via inline style */
+.canvas:not(.grid-mode) .t { position: absolute; }
+
 .t:hover { transform: scale(1.04); z-index: 10; box-shadow: var(--shadow); }
 .t .tn { font-size: 22px; letter-spacing: -1px; line-height: 1; }
 .t .st { font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; font-family: var(--font-body); opacity: 0.85; }
 .t .mt { font-size: 10.5px; font-weight: 500; font-family: var(--font-mono); margin-top: 2px; opacity: 0.7; }
+.t .cap-badge { font-size: 9px; color: var(--text-4); margin-top: 3px; font-family: var(--font-body); font-weight: 500; }
 .t.sel { outline: 3px solid var(--brand); outline-offset: 3px; }
+
+/* Tooltip via title attribute is used; keep hover hint via title */
+.t[title] { }
 
 /* Table state variants */
 .t.sent { background: var(--fp-sentados-bg); border-color: var(--fp-sentados); color: var(--fp-sentados-text); }
@@ -96,27 +120,100 @@ body { overflow: hidden; }
   font-family: var(--font-body);
 }
 
+/* Edit mode — tile dragging affordances */
+body.editing .t {
+  cursor: move;
+  outline: 1.5px dashed var(--brand);
+  outline-offset: 2px;
+}
+body.editing .t:active { opacity: 0.7; transform: scale(1.06); z-index: 100; }
+
+/* Highlight animation for "Move mesa" */
+@keyframes fp-highlight {
+  0%   { box-shadow: 0 0 0 0 rgba(29,158,117,0.6); }
+  50%  { box-shadow: 0 0 0 12px rgba(29,158,117,0); }
+  100% { box-shadow: 0 0 0 0 rgba(29,158,117,0); }
+}
+.t.highlight { animation: fp-highlight 1s ease-out; }
+
+/* Refresh pulse */
+@keyframes fp-pulse {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+.fp-refresh-badge.loading { animation: fp-pulse 0.8s infinite; }
+
+/* ── Edit-mode floating toolbar ──────────────────────────────────── */
+.fp-edit-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: var(--surface);
+  border: 0.5px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.fp-edit-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
 /* ── Legend ──────────────────────────────────────────────────────── */
 .fp-legend {
-  position: absolute;
-  bottom: 20px; left: 20px;
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  margin: 0 20px 12px;
   background: rgba(253,253,249,0.95);
   border: 0.5px solid var(--border);
   border-radius: 9px;
   padding: 9px 14px;
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   font-size: 11.5px;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
+  z-index: 10;
 }
+/* In absolute (non-grid) mode, legend sits in bottom-left */
+.canvas:not(.grid-mode) .fp-legend {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  right: auto;
+  margin: 0;
+  width: fit-content;
+}
+
 .fp-legend .leg-swatch {
   display: inline-block;
   width: 10px; height: 10px;
   border-radius: 3px;
   vertical-align: middle;
   margin-right: 5px;
+}
+
+/* ── Canvas empty state ──────────────────────────────────────────── */
+.fp-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(253,253,249,0.9);
+  z-index: 5;
 }
 
 /* ── Right detail panel ──────────────────────────────────────────── */
@@ -161,6 +258,24 @@ body { overflow: hidden; }
   letter-spacing: 0.08em;
   margin-bottom: 8px;
 }
+
+/* QR iframe section */
+.d-qr-wrap {
+  display: flex;
+  justify-content: center;
+  background: #fff;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}
+.d-qr-frame {
+  width: 180px;
+  height: 180px;
+  border: none;
+  border-radius: 4px;
+  display: block;
+}
+
 .d-item {
   display: flex;
   justify-content: space-between;
@@ -207,19 +322,64 @@ body { overflow: hidden; }
   font-family: var(--font-mono);
 }
 
-/* ── Toast ───────────────────────────────────────────────────────── */
-.m-toast {
-  position: fixed;
-  bottom: 24px; left: 50%;
-  transform: translateX(-50%);
-  z-index: 9999;
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-size: 13.5px; font-weight: 500;
-  box-shadow: var(--shadow-lg);
-  transition: opacity 0.3s;
-  pointer-events: none;
+/* ── QR grid view ────────────────────────────────────────────────── */
+.qr-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 240px));
+  gap: 16px;
+  align-content: start;
+  background: #fdfdf9;
 }
-.m-toast--success { background: var(--success-light); color: var(--success); }
-.m-toast--error   { background: var(--danger-light);  color: var(--danger-text); }
-.m-toast--info    { background: var(--info-light);    color: var(--info-text); }
+
+.qr-card {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: default;
+}
+.qr-card-name {
+  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: -0.5px;
+}
+.qr-card-meta {
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
+  line-height: 1.4;
+}
+.qr-card-canvas {
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  background: #fff;
+}
+.qr-card-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.qr-card-badge.libre    { background: var(--fp-libre-bg);    color: var(--fp-libre-text); }
+.qr-card-badge.sent     { background: var(--fp-sentados-bg); color: var(--fp-sentados-text); }
+.qr-card-badge.occ      { background: var(--fp-ocupada-bg);  color: var(--fp-ocupada-text); }
+.qr-card-badge.fac      { background: var(--fp-factura-bg);  color: var(--fp-factura-text); }
+.qr-card-badge.res      { background: var(--fp-reservada-bg); color: var(--fp-reservada-text); }
+.qr-card-print {
+  font-size: 11px;
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 500;
+}
+.qr-card-print:hover { text-decoration: underline; }

@@ -1,4 +1,44 @@
 /* ── Sucursales page ─────────────────────────────────────────────── */
+
+/* Branch grid: 3-col desktop → 2-col tablet → 1-col mobile */
+.branches-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .branches-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .branches-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Consolidated banner ─────────────────────────────────────────── */
+.consolidated-banner { background: var(--surface); border: 0.5px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+.consolidated-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-4); margin-bottom: 12px; }
+.consolidated-stats { display: flex; gap: 24px; flex-wrap: wrap; }
+.consolidated-stats > div { min-width: 0; }
+.consolidated-val { font-family: var(--font-display); font-weight: 600; font-size: 22px; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+.consolidated-val.brand-glow { color: var(--brand); }
+.consolidated-sub { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.ai-banner { background: #F0FAF5; border: 0.5px solid var(--brand-light); border-radius: 10px; padding: 14px 18px; }
+.ai-banner-label { font-size: 11px; font-weight: 600; color: var(--brand-dark); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+.ai-banner-body { font-size: 13px; color: var(--text-2); line-height: 1.55; }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Comparison card: enable horizontal scroll */
+  .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Comparison rows: explicit min-width so they don't collapse */
+  .cmp-row {
+    min-width: 640px;
+    grid-template-columns: 1.4fr repeat(7, minmax(60px, 1fr));
+  }
+  /* Consolidated stats already flex-wrap — fine on mobile */
+  .consolidated-stats { gap: 14px; }
+  .consolidated-val { font-size: 18px; }
+}
+
 .branch-card { background: #fff; border: 0.5px solid var(--border); border-radius: 12px; padding: 18px 20px; position: relative; overflow: hidden; }
 .branch-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .branch-logo { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 18px; flex-shrink: 0; }

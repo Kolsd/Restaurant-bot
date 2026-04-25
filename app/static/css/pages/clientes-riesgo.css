@@ -16,3 +16,11 @@
 .spark { display: flex; align-items: flex-end; gap: 2px; height: 24px; }
 .spark > div { flex: 1; background: var(--text-4); border-radius: 1px; min-height: 2px; }
 .spark > div.recent { background: var(--danger); }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Risk table: 8 fixed cols → scroll horizontally */
+  .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .risk-row { min-width: 700px; }
+  /* Risk cards (mobile alt view) stay single column via shared .g-* rules */
+}

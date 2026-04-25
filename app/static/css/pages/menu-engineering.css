@@ -36,3 +36,17 @@
 .quad-badge.puzzles { background: var(--warning-light); color: var(--warning-text); }
 .quad-badge.plowhorses { background: #DBEAFE; color: #1E40AF; }
 .quad-badge.dogs { background: #f0f0e8; color: var(--text-3); }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* BCG matrix: reduce height, keep scrollable overflow for bubbles */
+  .matrix-wrap { height: 340px; overflow: hidden; }
+  /* Engineering table: scroll horizontally */
+  .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .me-tbl { min-width: 560px; }
+  /* Legend wraps */
+  .legend-row { gap: 10px; }
+}
+@media (max-width: 375px) {
+  .matrix-wrap { height: 280px; }
+}

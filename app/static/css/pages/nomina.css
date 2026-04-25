@@ -12,3 +12,17 @@
 .period-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; font-weight: 500; }
 .period-big { font-family: var(--font-display); font-weight: 600; font-size: 44px; letter-spacing: -1.5px; line-height: 1; margin-top: 8px; font-variant-numeric: tabular-nums; }
 .period-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 20px; padding-top: 16px; border-top: 0.5px solid rgba(255,255,255,0.15); }
+
+/* ── Mobile overrides ≤768px ────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Payroll table: 8 fixed cols → scroll horizontally */
+  .card.flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .pay-row { min-width: 760px; }
+  /* Period card meta: 4 cols → 2×2 grid */
+  .period-meta { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  /* Period big number: reduce font size */
+  .period-big { font-size: 34px; }
+}
+@media (max-width: 375px) {
+  .period-meta { grid-template-columns: 1fr 1fr; gap: 10px; }
+}
