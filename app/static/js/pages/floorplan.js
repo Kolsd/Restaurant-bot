@@ -36,10 +36,10 @@ var STATUS_LABEL = {
   free:      'Libre',
   available: 'Libre',
   seated:    'Sentados',
-  eating:    'Comiendo',
-  billing:   'Facturando',
+  eating:    'COMIENDO',
+  billing:   'PIDIÓ CUENTA',
   reserved:  'Reservada',
-  occupied:  'Ocupada'
+  occupied:  'COMIENDO'
 };
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -92,6 +92,7 @@ async function loadFloorPlan() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
     _tables = Array.isArray(data) ? data : (data.tables || []);
+    console.log('[floorplan] /api/tables/floor-plan:', _tables.length, 'tables'); // lint-allow: diagnostic for production debug
     _rebuildZoneFilter();
     renderTables();
     if (_currentView === 'qr') renderQrGrid();
@@ -101,6 +102,12 @@ async function loadFloorPlan() {
   } catch (e) {
     mesioTrackFetch(false);
     console.warn('floor-plan fetch failed:', e);
+    mesioToast('Error cargando mesas: ' + e.message, 'error');
+    // Show error hint in empty state so user can diagnose
+    var emptyEl = el('canvasEmpty');
+    if (emptyEl) emptyEl.style.display = '';
+    var errHint = el('canvasEmptyError');
+    if (errHint) { errHint.textContent = 'Error: ' + e.message; errHint.style.display = ''; }
   } finally {
     if (badge) badge.classList.remove('loading');
   }
@@ -261,18 +268,35 @@ function _buildTile(tbl) {
   numDiv.textContent = tbl.table_number || tbl.id;
   tile.appendChild(numDiv);
 
-  // Status
+  // Status + capacity inline: "LIBRE · 4P"
   var stDiv = document.createElement('div');
   stDiv.className = 'st';
-  stDiv.textContent = STATUS_LABEL[status] || status;
+  var stLabel = STATUS_LABEL[status] || status;
+  if (tbl.capacity) {
+    stLabel += ' · ' + tbl.capacity + 'P';
+  }
+  stDiv.textContent = stLabel;
   tile.appendChild(stDiv);
 
-  // Capacity badge
-  if (tbl.capacity) {
-    var capDiv = document.createElement('div');
-    capDiv.className = 'cap-badge';
-    capDiv.textContent = tbl.capacity + 'p';
-    tile.appendChild(capDiv);
+  // Reserved: show reservation time and note if available
+  if (status === 'reserved' && tbl.next_reservation) {
+    var resInfo = tbl.next_reservation;
+    var resDiv = document.createElement('div');
+    resDiv.className = 'tile-res-info';
+    if (resInfo.time) {
+      var timeSpan = document.createTextNode('RESERVA ' + resInfo.time);
+      resDiv.appendChild(timeSpan);
+    }
+    if (resInfo.note || resInfo.party_size) {
+      var noteDiv = document.createElement('div');
+      noteDiv.className = 'tile-res-note';
+      var noteParts = [];
+      if (resInfo.note) noteParts.push(resInfo.note);
+      if (resInfo.party_size) noteParts.push(resInfo.party_size + 'p');
+      noteDiv.textContent = noteParts.join(' · ');
+      resDiv.appendChild(noteDiv);
+    }
+    tile.appendChild(resDiv);
   }
 
   // Current total
@@ -460,8 +484,6 @@ async function _deleteTable() {
 
 // ── Phase 2: Create table modal ───────────────────────────────────
 function _openNewTableModal() {
-  el('ntNum').value = '';
-  el('ntName').value = '';
   el('ntCapacity').value = '4';
   el('ntType').value = 'interior';
   el('ntZone').value = '';
@@ -470,28 +492,47 @@ function _openNewTableModal() {
 }
 
 async function _createTable() {
-  var num = el('ntNum').value.trim();
-  if (!num) { mesioToast('El número de mesa es obligatorio', 'error'); return; }
-
-  var body = {
-    number:     num,
-    name:       el('ntName').value.trim() || null,
-    capacity:   parseInt(el('ntCapacity').value) || null,
-    table_type: el('ntType').value,
-    zone:       el('ntZone').value.trim() || null
-  };
+  // Step 1: POST /api/tables with empty body — backend auto-generates number/name
   try {
     var r = await fetch('/api/tables', {
       method: 'POST',
       headers: mesioHeaders(),
-      body: JSON.stringify(body)
+      body: JSON.stringify({})
     });
     mesioTrackFetch(r.ok);
     if (!r.ok) {
       var err = await r.json().catch(function () { return {}; });
       throw new Error(err.detail || 'HTTP ' + r.status);
     }
-    mesioToast('Mesa creada', 'success');
+    var created = await r.json();
+    var tableId = created.table_id;
+    var tableName = created.name || ('Mesa ' + tableId);
+
+    // Step 2: if user filled capacity/type/zone, apply via PUT /api/tables/{id}/properties
+    var capacity   = parseInt(el('ntCapacity').value) || null;
+    var tableType  = el('ntType').value;
+    var zone       = el('ntZone').value.trim() || null;
+    var hasProps   = capacity || tableType !== 'interior' || zone;
+
+    if (hasProps && tableId) {
+      var propsBody = {};
+      if (capacity)              propsBody.capacity   = capacity;
+      if (tableType)             propsBody.table_type = tableType;
+      if (zone)                  propsBody.zone       = zone;
+
+      var r2 = await fetch('/api/tables/' + tableId + '/properties', {
+        method: 'PUT',
+        headers: mesioHeaders(),
+        body: JSON.stringify(propsBody)
+      });
+      mesioTrackFetch(r2.ok);
+      // Non-fatal: table already created, props failure just means defaults remain
+      if (!r2.ok) {
+        console.warn('[floorplan] properties update failed for', tableId, r2.status); // lint-allow: diagnostic for production debug
+      }
+    }
+
+    mesioToast(tableName + ' creada', 'success');
     el('newTableModal').classList.remove('open');
     await loadFloorPlan();
   } catch (e) {
@@ -526,10 +567,19 @@ async function selectTable(tableId) {
   if (metaEl) {
     var parts = [];
     if (tbl.customer_name) parts.push('<strong>' + _escHtml(tbl.customer_name) + '</strong>');
-    if (tbl.guests) parts.push((tbl.customer_name ? '' : '') + tbl.guests + ' personas');
+    if (tbl.guests) parts.push(tbl.guests + ' personas');
     if (tbl.opened_at) {
       var mins = Math.round((Date.now() - new Date(tbl.opened_at).getTime()) / 60000);
       parts.push('Abierta hace <strong>' + mins + ' min</strong>');
+    }
+    // Mesera line — only render if API provides it
+    var waiterName = tbl.assigned_staff_name || tbl.waiter_name;
+    if (waiterName) parts.push('Mesero/a: <strong>' + _escHtml(waiterName) + '</strong>');
+    // Last event — only render if API provides it
+    if (tbl.last_event && tbl.last_event.at) {
+      var evMins = Math.round((Date.now() - new Date(tbl.last_event.at).getTime()) / 60000);
+      var evLabel = tbl.last_event.label || 'Último evento';
+      parts.push(_escHtml(evLabel) + ' hace <strong>' + evMins + ' min</strong>');
     }
     metaEl.innerHTML = parts.length ? parts.join(' · ') : '<span style="color:var(--text-4)">Sin sesión activa</span>';
   }
@@ -944,13 +994,21 @@ function bindAll() {
   var exitBtn = el('btnExitEdit');
   if (exitBtn) exitBtn.addEventListener('click', _exitEditMode);
 
-  // New table (from toolbar)
+  // New table (permanent topbar button)
+  var topbarNewTblBtn = el('btnTopbarNewTable');
+  if (topbarNewTblBtn) topbarNewTblBtn.addEventListener('click', _openNewTableModal);
+
+  // New table (from toolbar in edit mode)
   var newTblBtn = el('btnNewTable');
   if (newTblBtn) newTblBtn.addEventListener('click', _openNewTableModal);
 
   // New table (from canvas empty state)
   var firstTblBtn = el('btnFirstTable');
   if (firstTblBtn) firstTblBtn.addEventListener('click', _openNewTableModal);
+
+  // Reload button in empty/error state
+  var reloadBtn = el('btnEmptyReload');
+  if (reloadBtn) reloadBtn.addEventListener('click', function () { loadFloorPlan(); });
 
   // New reserva
   var resBtn = el('newReservaBtn');
