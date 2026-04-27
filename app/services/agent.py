@@ -885,6 +885,22 @@ def _make_order_fingerprint(items: list) -> str:
     return hashlib.md5("|".join(normalized).encode()).hexdigest()[:12]
 
 
+def _make_reservation_fingerprint(tool_input: dict) -> str:
+    """Create a fingerprint of reservation params for dedup.
+
+    Same date+time+guests+name = same reservation. The customer almost never
+    actually wants two reservations on the same slot in 60s — a duplicate
+    call is virtually always a network/LLM retry.
+    """
+    parts = [
+        str(tool_input.get("date", "")).strip().lower(),
+        str(tool_input.get("time", "")).strip().lower(),
+        str(tool_input.get("guests", "")).strip().lower(),
+        str(tool_input.get("name", "")).strip().lower(),
+    ]
+    return hashlib.md5("|".join(parts).encode()).hexdigest()[:12]
+
+
 _CONFIRM_WORDS = frozenset([
     "sí", "si", "sii", "siii", "siiii", "sip", "sipo", "dale", "dale!",
     "ok", "okay", "va", "vale", "bueno", "perfecto", "claro", "correcto",
@@ -1122,6 +1138,25 @@ async def _validate_tool_call(
         if not is_ok:
             log.warning("guard.duplicate_order_blocked", tool=tool_name, phone=_ofuscar_phone(phone), fingerprint=item_key)
             return None, "Tu pedido ya está siendo procesado. En un momento te confirmo.", {}
+
+    # 3c. Duplicate reservation detection — money path with Wompi deposits.
+    # Without this, an LLM retry or network glitch fires make_reservation twice
+    # in 30s → two reservation rows + two Wompi links + (if customer paid both)
+    # double deposit charged. The customer almost never wants two reservations
+    # on the same slot back-to-back; a duplicate is virtually always a retry.
+    if tool_name == "make_reservation":
+        res_key = _make_reservation_fingerprint(tool_input)
+        is_ok = await state_store.rate_limit_check(
+            f"reservation_dedup:{phone}:{bot_number}:{res_key}",
+            max_requests=1, window_seconds=60,
+        )
+        if not is_ok:
+            log.warning(
+                "guard.duplicate_reservation_blocked",
+                phone=_ofuscar_phone(phone),
+                fingerprint=res_key,
+            )
+            return None, "Tu reserva ya está siendo procesada. En un momento te confirmo.", {}
 
     # 4. Delivery without address
     if tool_name == "create_delivery_order":
