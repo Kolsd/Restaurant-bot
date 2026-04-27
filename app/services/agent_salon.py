@@ -191,7 +191,17 @@ def _ask_payment_for_check(state: dict, idx: int) -> str:
 async def _save_checkout_proposal(
     phone: str, bot_number: str, state: dict, table_context: dict | None
 ) -> list[str]:
-    """Persiste la propuesta de pago en DB usando las funciones de database.py."""
+    """Persiste la propuesta de pago en DB usando las funciones de database.py.
+
+    Honors state['check_amounts'] when set (per-item assignment, e.g. "una
+    paga la Club, otra el Camarón"). Falls back to even division by n when
+    check_amounts is None or shape mismatches.
+
+    Bug fix (audit TOP-2): the previous version always re-computed
+    subtotal/n, ignoring the per-item amounts the customer specified. The
+    bot promised "$8K + $45K" but DB stored "$26.5K + $26.5K" — caja saw
+    different numbers than the bot quoted, leading to disputes at the till.
+    """
     base_order_id = state.get("base_order_id")
     if not base_order_id:
         raise ValueError("base_order_id missing from checkout state")
@@ -201,9 +211,34 @@ async def _save_checkout_proposal(
     tip_total = state["tip_amount"]
 
     subtotal_d = to_decimal(subtotal)
-    per = quantize_money(subtotal_d / n)
-    amounts = [per] * n
-    amounts[-1] = quantize_money(subtotal_d - per * (n - 1))
+
+    # Prefer the per-item assignment when the parser captured one.
+    # check_amounts entries are str (from _serialize_money_for_state) and
+    # must match split_count length — otherwise we fall back to even split
+    # to avoid silently dropping checks.
+    raw_check_amounts = state.get("check_amounts")
+    use_assigned = (
+        isinstance(raw_check_amounts, list)
+        and len(raw_check_amounts) == n
+        and n >= 1
+    )
+    if use_assigned:
+        amounts = [quantize_money(to_decimal(x)) for x in raw_check_amounts]
+        # Re-balance any sub-cent drift onto the last check so the totals
+        # add up exactly to the order subtotal — caja will reconcile against
+        # subtotal_d, not against the bot's quoted numbers.
+        delta = quantize_money(subtotal_d - money_sum(amounts))
+        if delta != ZERO:
+            amounts[-1] = quantize_money(amounts[-1] + delta)
+            log.info(
+                "checkout_proposal.rebalanced_drift",
+                base_order_id=base_order_id,
+                drift=str(delta),
+            )
+    else:
+        per = quantize_money(subtotal_d / n)
+        amounts = [per] * n
+        amounts[-1] = quantize_money(subtotal_d - per * (n - 1))
 
     # Crear checks en DB
     checks_payload = [
