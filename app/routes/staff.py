@@ -171,12 +171,36 @@ async def create_staff(
     
 _PIN_MAX_ATTEMPTS = 10
 _PIN_WINDOW = 900  # 15 minutes
+# Defense-in-depth: a global per-IP cap stops distributed brute force across
+# many (restaurant_id, name) tuples. Without this an attacker iterating
+# restaurant_id=1..1000 with name="Pedro"+pin="1234" gets 10 attempts per
+# bucket — 10K total before any single bucket triggers. The global cap
+# kicks in after 30 attempts per IP per 15min regardless of target.
+_PIN_GLOBAL_MAX_ATTEMPTS = 30
+_PIN_GLOBAL_WINDOW = 900  # 15 minutes
 
 
 async def _check_pin_rate_limit(request: Request, restaurant_id: int, name: str) -> None:
-    """Rate-limit PIN login via Redis (cross-worker safe)."""
+    """Rate-limit PIN login via Redis (cross-worker safe).
+
+    Two layers:
+      1. Per (restaurant_id, name, IP) bucket — granular protection.
+      2. Per IP global — stops cross-tenant brute force iteration.
+    """
     ip = request.client.host if request.client else "unknown"
-    key = f"pin_login:{restaurant_id}:{name.lower().strip()}:{ip}"
+
+    # Layer 2: global per-IP cap (cross-restaurant).
+    global_allowed = await state_store.rate_limit_check(
+        key=f"pin_login_global:{ip}",
+        max_requests=_PIN_GLOBAL_MAX_ATTEMPTS,
+        window_seconds=_PIN_GLOBAL_WINDOW,
+    )
+    if not global_allowed:
+        log.warning("staff.pin_login.global_rate_limit_hit", ip=ip)
+        raise HTTPException(status_code=429, detail="Demasiados intentos. Intenta en 15 minutos.")
+
+    # Layer 1: granular bucket.
+    key = f"pin_login:{restaurant_id}:{str(name).lower().strip()}:{ip}"
     allowed = await state_store.rate_limit_check(
         key=key, max_requests=_PIN_MAX_ATTEMPTS, window_seconds=_PIN_WINDOW
     )
@@ -191,6 +215,17 @@ async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
     # Use a constant-time response regardless of whether the employee was found
     # or the PIN was wrong — prevents username enumeration oracle.
     if not member or not _pwd_ctx.verify(body.pin, member["pin"]):
+        # Audit trail: every failed attempt logged for ops visibility.
+        # Aggregating these across the fleet surfaces distributed brute-force
+        # attempts that the per-bucket rate limit alone cannot stop.
+        ip = request.client.host if request.client else "unknown"
+        log.warning(
+            "staff.pin_login_failed",
+            ip=ip,
+            restaurant_id=body.restaurant_id,
+            name_len=len(str(body.name or "")),
+            member_found=bool(member),
+        )
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
     token = await sessions_repo.create_session(f"staff:{member['id']}")
@@ -254,6 +289,13 @@ async def staff_verify_pin(request: Request, body: StaffVerifyPinRequest):
     pin_hash = member["pin"] if member else _DUMMY
     ok = _pwd_ctx.verify(body.pin, pin_hash)
     if not member or not ok:
+        ip = request.client.host if request.client else "unknown"
+        log.warning(
+            "staff.verify_pin_failed",
+            ip=ip,
+            restaurant_id=body.restaurant_id,
+            member_found=bool(member),
+        )
         raise HTTPException(status_code=401, detail="Credenciales inválidas.")
 
     token = await sessions_repo.create_session(f"staff:{member['id']}")
