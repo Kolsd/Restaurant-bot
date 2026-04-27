@@ -525,8 +525,12 @@ class TestWaiterFlows:
         """POST pay check with sufficient payment → 200 success."""
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(total=25000.0)
+        # Race-free flow: route uses db_claim_check_for_payment (open→paying)
+        # then db_finalize_check_payment (paying→invoiced, returns True on success).
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value={**check, "status": "paying"}))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
-        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock())
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=True))
+        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
         import app.services.loyalty as loyalty_mod
@@ -774,8 +778,10 @@ class TestCashierFlows:
         """Pay check with tip <= 50% of total → 200."""
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(total=20000.0)
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value={**check, "status": "paying"}))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
-        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock())
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=True))
+        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
         # Stub out loyalty to avoid side-effects
@@ -798,7 +804,9 @@ class TestCashierFlows:
         """Pay check with tip > 50% of total → 400."""
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(total=10000.0)
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value={**check, "status": "paying"}))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=True))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
 
         resp = client.post(
@@ -816,7 +824,9 @@ class TestCashierFlows:
         """Pay check with payment amount < check total → 400."""
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(total=30000.0)
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value={**check, "status": "paying"}))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=True))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
 
         resp = client.post(
@@ -834,8 +844,10 @@ class TestCashierFlows:
         """When dian_active=False billing adapter is never called."""
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(total=15000.0)
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value={**check, "status": "paying"}))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
-        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock())
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=True))
+        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         mock_billing = AsyncMock(return_value=None)
         monkeypatch.setattr("app.services.billing.get_billing_config", mock_billing)
@@ -866,8 +878,10 @@ class TestCashierFlows:
             **_mock_order_row(status="factura_entregada", phone="manual"),
             "table_id": "t1",
         }
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value={**check, "status": "paying"}))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
-        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock())
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=True))
+        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=first_order))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
         import app.services.loyalty as loyalty_mod
@@ -885,10 +899,17 @@ class TestCashierFlows:
         assert resp.json()["success"] is True
 
     def test_pay_already_paid_check_rejected(self, client, monkeypatch):
-        """Paying an already-paid check → 400."""
+        """Paying an already-paid check → 409 (Conflict).
+
+        Was 400 in the pre-race-fix flow; now 409 because the request conflicts
+        with the resource's current state — accurate HTTP semantic.
+        """
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         check = _mock_check(status="paid", total=20000.0)
+        # Claim refused because status != 'open'.
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value=None))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=False))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
 
         resp = client.post(
@@ -899,7 +920,7 @@ class TestCashierFlows:
             },
             headers={"Authorization": "Bearer fake"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 409
 
     def test_get_open_shifts_summary(self, client, monkeypatch):
         """GET /api/staff/open-shifts returns current open shifts for admin dashboard."""
@@ -1401,8 +1422,10 @@ class TestEndToEndTableFlow:
         patch_auth(monkeypatch, role="caja", features={"dian_active": False})
         # Match base_order_id to the URL segment
         check = _mock_check(check_id="chk-1", base_order_id="o-new", total=28000.0)
+        monkeypatch.setattr(db, "db_claim_check_for_payment", AsyncMock(return_value={**check, "status": "paying"}))
         monkeypatch.setattr(db, "db_get_check", AsyncMock(return_value=check))
-        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock())
+        monkeypatch.setattr(db, "db_release_check", AsyncMock(return_value=True))
+        monkeypatch.setattr(db, "db_finalize_check_payment", AsyncMock(return_value=True))
         monkeypatch.setattr(db, "db_get_first_table_order", AsyncMock(return_value=None))
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
         import app.services.loyalty as loyalty_mod

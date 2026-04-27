@@ -772,6 +772,70 @@ async def db_get_check(check_id: str) -> dict | None:
     return _serialize(dict(row)) if row else None
 
 
+# Status transitions for table_checks (race-free payment flow):
+#   open  ──claim──▶  paying  ──finalize──▶  invoiced
+#                       │
+#                       └────release────▶ open  (rollback when DIAN fails)
+#
+# Two cashiers paying the same check in parallel: only the FIRST claim
+# transitions open→paying; the SECOND sees status='paying' and gets
+# rejected upfront, before DIAN is even attempted.
+
+
+async def db_claim_check_for_payment(check_id: str, base_order_id: str) -> dict | None:
+    """Atomically claim a check for payment processing.
+
+    Returns the full check row if the claim succeeded (status open → paying).
+    Returns None if the check is missing, doesn't belong to the given order,
+    or is in any state other than 'open' (already paying / invoiced / cancelled).
+
+    The caller MUST follow up with EITHER:
+      - db_finalize_check_payment(...) — commits the payment (paying → invoiced).
+      - db_release_check(check_id)     — rolls back the claim (paying → open),
+        e.g. if DIAN invoice generation fails.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        async with conn.transaction():
+            # SELECT FOR UPDATE serializes concurrent pay_check calls on this row.
+            # The second cashier blocks here until the first commits, then sees
+            # status='paying' and the UPDATE below returns 0 rows.
+            row = await conn.fetchrow(
+                """SELECT * FROM table_checks
+                   WHERE id=$1 AND base_order_id=$2
+                   FOR UPDATE""",
+                check_id, base_order_id,
+            )
+            if not row or row["status"] != "open":
+                return None
+            await conn.execute(
+                "UPDATE table_checks SET status='paying' WHERE id=$1",
+                check_id,
+            )
+    # Return the row content as it was BEFORE the claim (for downstream use).
+    # We don't refetch — the caller only needs the immutable fields (items, total, etc.).
+    claimed = _serialize(dict(row))
+    claimed["status"] = "paying"
+    return claimed
+
+
+async def db_release_check(check_id: str) -> bool:
+    """Roll back a claim: paying → open.
+
+    Returns True if the rollback applied (check was 'paying'), False otherwise.
+    Used as compensation when DIAN invoice generation fails after the claim.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        result = await conn.fetchrow(
+            "UPDATE table_checks SET status='open' WHERE id=$1 AND status='paying' RETURNING id",
+            check_id,
+        )
+    return result is not None
+
+
 async def db_finalize_check_payment(
     check_id: str,
     base_order_id: str,
@@ -782,30 +846,43 @@ async def db_finalize_check_payment(
     customer_nit: str = None,
     customer_email: str = None,
     tip_amount: float = 0.0,
-) -> None:
+) -> bool:
     """
     Atómicamente:
-    1. Actualiza el check a status='invoiced' con pagos y cambio.
+    1. Actualiza el check de status='paying' a status='invoiced' con pagos y cambio.
     2. Si TODOS los checks del base_order_id están en {invoiced, cancelled},
        actualiza table_orders a status='factura_entregada'.
+
+    Returns True if the finalize succeeded, False if the check was not in
+    'paying' state (e.g. already finalized by a concurrent call). The caller
+    should treat False as a 409 — DO NOT proceed with loyalty accrual or
+    customer-facing side effects on False.
+
+    Pre-condition: caller has previously called db_claim_check_for_payment
+    successfully (which transitioned status open → paying).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
         # tenant_connection() opens a transaction; conn.transaction() creates a SAVEPOINT.
         async with conn.transaction():
-            await conn.execute(
+            updated = await conn.fetchrow(
                 """UPDATE table_checks
                    SET payments=$1::jsonb, change_amount=$2,
                        fiscal_invoice_id=$3, status='invoiced',
                        customer_name=$4, customer_nit=$5, customer_email=$6,
                        tip_amount=$7, paid_at=NOW()
-                   WHERE id=$8""",
+                   WHERE id=$8 AND status='paying'
+                   RETURNING id""",
                 json.dumps(payments), to_decimal(change_amount),
                 fiscal_invoice_id,
                 customer_name, customer_nit, customer_email,
                 to_decimal(tip_amount), check_id
             )
+            if updated is None:
+                # Concurrent finalize already happened, or claim was lost.
+                # Caller will detect via False return and stop downstream work.
+                return False
             # Marcar propuesta como confirmada si existía
             await conn.execute(
                 """UPDATE table_checks
@@ -828,6 +905,7 @@ async def db_finalize_check_payment(
                          AND status NOT IN ('cancelado','factura_entregada')""",
                     base_order_id
                 )
+    return True
 
 
 async def db_delete_open_check(check_id: str) -> bool:
@@ -1023,7 +1101,7 @@ async def db_update_table_properties(table_id: str, **kwargs):
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    allowed = {"capacity", "table_type", "zone"}
+    allowed = {"name", "capacity", "table_type", "zone"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not updates:
         return None

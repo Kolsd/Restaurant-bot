@@ -138,11 +138,18 @@ async def test_create_checks_id_incluye_chk_numero():
 
 @pytest.mark.asyncio
 async def test_finalize_check_marca_invoiced():
-    """db_finalize_check_payment debe UPDATE el check a status='invoiced'."""
+    """db_finalize_check_payment debe UPDATE el check a status='invoiced'.
+
+    Post race-fix: the UPDATE now uses RETURNING id (so fetchrow, not execute)
+    and requires status='paying' as a precondition. The mock returns a row to
+    simulate a successful state transition.
+    """
     from app.services import database as db
 
     mock_conn = AsyncMock()
     mock_conn.execute  = AsyncMock()
+    # Main UPDATE uses fetchrow now (RETURNING id). Non-None means success.
+    mock_conn.fetchrow = AsyncMock(return_value=_make_row({"id": "BASE-001-CHK-1"}))
     mock_conn.fetchval = AsyncMock(return_value=0)  # 0 checks pendientes → cierra mesa
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
@@ -151,7 +158,7 @@ async def test_finalize_check_marca_invoiced():
 
     with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
         with _bypass("test: db_finalize_check_payment invoiced"):
-            await db.db_finalize_check_payment(
+            result = await db.db_finalize_check_payment(
                 check_id="BASE-001-CHK-1",
                 base_order_id="BASE-001",
                 payments=[{"method": "efectivo", "amount": 100000}],
@@ -162,15 +169,56 @@ async def test_finalize_check_marca_invoiced():
                 customer_email="j@test.co",
             )
 
-    # UPDATE table_checks llamado (main UPDATE with SET payments=)
-    update_check_calls = [c for c in mock_conn.execute.call_args_list
+    assert result is True
+    # Main UPDATE moved from execute to fetchrow. Verify it was called with
+    # the expected SQL fragments.
+    update_check_calls = [c for c in mock_conn.fetchrow.call_args_list
                           if "UPDATE table_checks" in str(c) and "SET payments=" in str(c)]
     assert len(update_check_calls) == 1
-
-    # Los args del UPDATE deben incluir el fiscal_invoice_id y change_amount
+    # And it requires the 'paying' precondition for race safety.
+    sql_text = str(update_check_calls[0])
+    assert "status='paying'" in sql_text
+    assert "RETURNING id" in sql_text
+    # Args include fiscal_invoice_id and change_amount.
     args = update_check_calls[0].args
-    assert 42 in args      # fiscal_invoice_id
-    assert 10000.0 in args # change_amount
+    assert 42 in args
+    assert 10000.0 in args
+
+
+@pytest.mark.asyncio
+async def test_finalize_check_returns_false_when_not_paying():
+    """Race protection: if check is not in 'paying' state, finalize returns False
+    without touching the rest of the transaction (no proposal update, no mesa close)."""
+    from app.services import database as db
+
+    mock_conn = AsyncMock()
+    mock_conn.execute  = AsyncMock()
+    # fetchrow returns None — UPDATE matched 0 rows because status != 'paying'.
+    mock_conn.fetchrow = AsyncMock(return_value=None)
+    mock_conn.fetchval = AsyncMock(return_value=0)
+    mock_conn.transaction = MagicMock(return_value=AsyncMock(
+        __aenter__=AsyncMock(return_value=None),
+        __aexit__=AsyncMock(return_value=False),
+    ))
+
+    with patch.object(db, "get_pool", AsyncMock(return_value=_make_pool(mock_conn))):
+        with _bypass("test: db_finalize_check_payment race"):
+            result = await db.db_finalize_check_payment(
+                check_id="BASE-001-CHK-1",
+                base_order_id="BASE-001",
+                payments=[{"method": "efectivo", "amount": 100000}],
+                change_amount=0,
+                fiscal_invoice_id=None,
+            )
+
+    assert result is False
+    # Critical: no follow-up UPDATEs should have run (no proposal_status, no mesa close)
+    follow_up = [c for c in mock_conn.execute.call_args_list
+                 if "UPDATE" in str(c) and "table_checks" in str(c)]
+    assert follow_up == []
+    table_orders_updates = [c for c in mock_conn.execute.call_args_list
+                            if "UPDATE table_orders" in str(c)]
+    assert table_orders_updates == []
 
 
 @pytest.mark.asyncio
@@ -180,6 +228,7 @@ async def test_finalize_check_cierra_mesa_si_todos_pagados():
 
     mock_conn = AsyncMock()
     mock_conn.execute  = AsyncMock()
+    mock_conn.fetchrow = AsyncMock(return_value=_make_row({"id": "BASE-001-CHK-2"}))
     mock_conn.fetchval = AsyncMock(return_value=0)  # ningún check pendiente
     mock_conn.transaction = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=None),
@@ -374,11 +423,17 @@ def test_pay_check_endpoint_pago_insuficiente(client, monkeypatch):
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
 
-    async def mock_get_check(check_id):
-        return {"id": check_id, "base_order_id": "BASE-001",
-                "status": "open", "total": 90000, "items": "[]"}
+    # New flow: pay_check uses db_claim_check_for_payment, which transitions
+    # open → paying atomically. Mock it to return a 'paying' check.
+    async def mock_claim(check_id, base_order_id):
+        return {"id": check_id, "base_order_id": base_order_id,
+                "status": "paying", "total": 90000, "items": "[]"}
 
-    monkeypatch.setattr(db_mod, "db_get_check", mock_get_check)
+    async def mock_release(check_id):
+        return True
+
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", mock_claim)
+    monkeypatch.setattr(db_mod, "db_release_check", mock_release)
 
     # billing config returns None → payment would fail before billing
     async def mock_get_billing_config(restaurant_id):
@@ -396,14 +451,25 @@ def test_pay_check_endpoint_pago_insuficiente(client, monkeypatch):
 
 
 def test_pay_check_endpoint_check_ya_cobrado(client, monkeypatch):
-    """POST /checks/{id}/pay debe retornar 400 si el check ya está invoiced."""
+    """POST /checks/{id}/pay returns 409 (Conflict) if the check is already invoiced.
+
+    Previously this returned 400; the race-free flow now uses 409 because the
+    request conflicts with the current resource state — the more accurate HTTP
+    semantic. The error detail still mentions 'procesado'.
+    """
     from app.services import database as db_mod
     db_mod = _mock_auth(monkeypatch)
+
+    # New flow: db_claim_check_for_payment returns None when status != 'open'.
+    # Then the route falls back to db_get_check for error messaging.
+    async def mock_claim(check_id, base_order_id):
+        return None  # claim refused — already paying/invoiced/cancelled
 
     async def mock_get_check(check_id):
         return {"id": check_id, "base_order_id": "BASE-001",
                 "status": "invoiced", "total": 90000, "items": "[]"}
 
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", mock_claim)
     monkeypatch.setattr(db_mod, "db_get_check", mock_get_check)
 
     resp = client.post(
@@ -411,7 +477,7 @@ def test_pay_check_endpoint_check_ya_cobrado(client, monkeypatch):
         json={"payments": [{"method": "efectivo", "amount": 90000}]},
         headers={"Authorization": "Bearer fake"}
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 409
     assert "procesado" in resp.json()["detail"].lower()
 
 
@@ -486,10 +552,12 @@ def _pay_check_mocks(monkeypatch, check_total: float):
 
     Patches:
       - auth / restaurant (features={} so dian_active=False, no fiscal path)
-      - db.db_get_check        → open check with the given total
-      - billing.get_billing_config → None (no DIAN path)
-      - db.db_finalize_check_payment → no-op
-      - loyalty_svc.accrue_on_check  → no-op (avoid AttributeError)
+      - db.db_claim_check_for_payment → returns "paying" check with the given total
+      - db.db_get_check               → fallback for error messaging
+      - billing.get_billing_config    → None (no DIAN path)
+      - db.db_finalize_check_payment  → returns True (success path)
+      - db.db_release_check           → no-op
+      - loyalty_svc.accrue_on_check   → no-op (avoid AttributeError)
     """
     from app.services import database as db_mod
 
@@ -503,22 +571,33 @@ def _pay_check_mocks(monkeypatch, check_total: float):
         # features={} → dian_active=False, currency=None
         return {"id": 1, "whatsapp_number": "+57300", "name": "R", "features": {}}
 
-    async def mock_get_check(check_id):
+    def _check_dict(check_id, status="paying"):
         return {
             "id":           check_id,
             "base_order_id": "BASE-001",
-            "status":       "open",
+            "status":       status,
             "total":        check_total,
             "items":        "[]",
             "proposed_payments": None,
             "proposed_tip":     None,
         }
 
+    async def mock_claim(check_id, base_order_id):
+        # Race-free claim succeeded — returns the check with status='paying'.
+        return _check_dict(check_id, status="paying")
+
+    async def mock_get_check(check_id):
+        # Used only for error messaging when claim returns None (not in this happy-path test).
+        return _check_dict(check_id, status="open")
+
     async def mock_get_billing_config(restaurant_id):
         return None  # no fiscal path
 
     async def mock_finalize(*args, **kwargs):
-        pass
+        return True  # success path
+
+    async def mock_release(check_id):
+        return True
 
     async def mock_get_first_table_order(base_order_id):
         # Return None → skips the farewell/NPS block entirely
@@ -527,9 +606,11 @@ def _pay_check_mocks(monkeypatch, check_total: float):
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", mock_claim)
     monkeypatch.setattr(db_mod, "db_get_check", mock_get_check)
     monkeypatch.setattr("app.routes.tables.billing.get_billing_config", mock_get_billing_config)
     monkeypatch.setattr(db_mod, "db_finalize_check_payment", mock_finalize)
+    monkeypatch.setattr(db_mod, "db_release_check", mock_release)
     monkeypatch.setattr(db_mod, "db_get_first_table_order", mock_get_first_table_order)
     # Avoid loyalty AttributeError if the module has no accrue_on_check
     monkeypatch.setattr("app.routes.tables.loyalty_svc", MagicMock(spec=[]), raising=False)

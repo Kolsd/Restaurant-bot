@@ -455,9 +455,12 @@ def test_get_checks_empty(client, monkeypatch):
 
 
 def test_pay_check_not_found(client, monkeypatch):
-    """Check inexistente → 404."""
+    """Check inexistente → 404. New flow: claim returns None, then db_get_check
+    returns None → 404."""
     _auth(monkeypatch)
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_get_check", AsyncMock(return_value=None))
+    monkeypatch.setattr(db_mod, "db_release_check", AsyncMock(return_value=False))
     r = client.post("/api/table-orders/MESA-AA3E4A/checks/NOPE/pay",
                     json={"payments": [{"method": "efectivo", "amount": 25000}], "tip_amount": 0},
                     headers=_HEADERS)
@@ -465,10 +468,13 @@ def test_pay_check_not_found(client, monkeypatch):
 
 
 def test_pay_check_wrong_base_order(client, monkeypatch):
-    """Check de otra mesa → 400."""
+    """Check de otra mesa → 400. New flow: claim refuses (base_order mismatches),
+    fallback db_get_check shows the wrong base_order, route returns 400."""
     _auth(monkeypatch)
     wrong_check = {**_CHECK, "base_order_id": "OTHER"}
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_get_check", AsyncMock(return_value=wrong_check))
+    monkeypatch.setattr(db_mod, "db_release_check", AsyncMock(return_value=False))
     r = client.post("/api/table-orders/MESA-AA3E4A/checks/chk-001/pay",
                     json={"payments": [{"method": "efectivo", "amount": 25000}], "tip_amount": 0},
                     headers=_HEADERS)
@@ -476,20 +482,29 @@ def test_pay_check_wrong_base_order(client, monkeypatch):
 
 
 def test_pay_check_already_paid(client, monkeypatch):
-    """Check ya pagado → 400."""
+    """Check ya procesado → 409 (Conflict). Was 400 in the old flow.
+
+    Race-free flow uses 409 because the request conflicts with the resource's
+    current state — accurate HTTP semantic.
+    """
     _auth(monkeypatch)
     paid = {**_CHECK, "status": "paid"}
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", AsyncMock(return_value=None))
     monkeypatch.setattr(db_mod, "db_get_check", AsyncMock(return_value=paid))
+    monkeypatch.setattr(db_mod, "db_release_check", AsyncMock(return_value=False))
     r = client.post("/api/table-orders/MESA-AA3E4A/checks/chk-001/pay",
                     json={"payments": [{"method": "efectivo", "amount": 25000}], "tip_amount": 0},
                     headers=_HEADERS)
-    assert r.status_code == 400
+    assert r.status_code == 409
 
 
 def test_pay_check_tip_exceeds_50pct(client, monkeypatch):
-    """Propina > 50% del total → 400."""
+    """Propina > 50% del total → 400. The check IS claimable (open → paying),
+    but business validation rejects the tip."""
     _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_check", AsyncMock(return_value=_CHECK))
+    claimed_check = {**_CHECK, "status": "paying"}
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", AsyncMock(return_value=claimed_check))
+    monkeypatch.setattr(db_mod, "db_release_check", AsyncMock(return_value=True))
     import app.services.billing as billing_mod
     monkeypatch.setattr(billing_mod, "get_billing_config", AsyncMock(return_value={}))
     r = client.post("/api/table-orders/MESA-AA3E4A/checks/chk-001/pay",
@@ -500,9 +515,11 @@ def test_pay_check_tip_exceeds_50pct(client, monkeypatch):
 
 
 def test_pay_check_insufficient_payment(client, monkeypatch):
-    """Pago insuficiente → 400."""
+    """Pago insuficiente → 400. Claim succeeds, payment validation fails."""
     _auth(monkeypatch)
-    monkeypatch.setattr(db_mod, "db_get_check", AsyncMock(return_value=_CHECK))
+    claimed_check = {**_CHECK, "status": "paying"}
+    monkeypatch.setattr(db_mod, "db_claim_check_for_payment", AsyncMock(return_value=claimed_check))
+    monkeypatch.setattr(db_mod, "db_release_check", AsyncMock(return_value=True))
     import app.services.billing as billing_mod
     monkeypatch.setattr(billing_mod, "get_billing_config", AsyncMock(return_value={}))
     r = client.post("/api/table-orders/MESA-AA3E4A/checks/chk-001/pay",

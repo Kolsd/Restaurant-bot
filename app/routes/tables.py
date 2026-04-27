@@ -258,6 +258,7 @@ _VALID_TABLE_TYPES = {"interior", "terraza", "barra", "privado", "vip"}
 
 
 class TablePropertiesBody(BaseModel):
+    name: str | None = Field(None, max_length=60)
     capacity: int | None = Field(None, ge=1, le=100)
     table_type: str | None = None
     zone: str | None = None
@@ -1275,6 +1276,10 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
 
 @router.post("/api/table-orders/{base_order_id}/checks/{check_id}/pay")
 async def pay_check(request: Request, base_order_id: str, check_id: str, body: PayCheckBody):
+    # _claimed tracks whether we hold the check in 'paying' state. If we exit
+    # via an error after claiming but before db_finalize_check_payment commits,
+    # we must release the claim so a retry can succeed.
+    _claimed = False
     try:
         # Rate limit: 3 payments per check per 10 seconds (prevents double-click)
         from app.services import state_store
@@ -1282,15 +1287,25 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         if not await state_store.rate_limit_check(rl_key, max_requests=3, window_seconds=10):
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes de pago. Intenta de nuevo en unos segundos.")
         restaurant = await get_current_restaurant(request)
-        with tenant_scope(restaurant["id"]):
-            check = await db.db_get_check(check_id)
 
-        if not check:
-            raise HTTPException(status_code=404, detail="Check no encontrado")
-        if check["base_order_id"] != base_order_id:
-            raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
-        if check["status"] != "open":
-            raise HTTPException(status_code=400, detail=f"Este check ya fue procesado (status: {check['status']})")
+        # Atomic claim: SELECT FOR UPDATE + transition open→paying. Two cashiers
+        # paying concurrently — only the first wins; the second gets None and
+        # the request fails with 409 BEFORE any DIAN invoice is generated.
+        with tenant_scope(restaurant["id"]):
+            check = await db.db_claim_check_for_payment(check_id, base_order_id)
+
+        if check is None:
+            # Could be: not found, wrong order, or already paying/invoiced/cancelled.
+            # We do a follow-up read to give a precise error message — it's not
+            # part of the race-protected path so it's fine to query unscoped here.
+            with tenant_scope(restaurant["id"]):
+                existing = await db.db_get_check(check_id)
+            if not existing:
+                raise HTTPException(status_code=404, detail="Check no encontrado")
+            if existing["base_order_id"] != base_order_id:
+                raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
+            raise HTTPException(status_code=409, detail=f"Este check ya fue procesado (status: {existing['status']})")
+        _claimed = True
 
         # Si no se enviaron pagos, usar proposed_payments del check (flujo bot)
         if not body.payments:
@@ -1368,6 +1383,10 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             try:
                 fiscal = await adapter.create_invoice(order_for_billing, config)
             except Exception as exc:
+                # DIAN failed AFTER we claimed the check. Release the claim so
+                # the cashier can retry without waiting for the lock to expire.
+                # The except below would also do this via the _claimed flag, but
+                # being explicit here keeps the rollback close to the failure.
                 raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
             fiscal_invoice_id = fiscal["id"]
         else:
@@ -1376,7 +1395,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
 
         with tenant_scope(restaurant["id"]):
-            await db.db_finalize_check_payment(
+            finalized = await db.db_finalize_check_payment(
                 check_id=check_id,
                 base_order_id=base_order_id,
                 payments=payments_list,
@@ -1387,6 +1406,15 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 customer_email=body.customer_email,
                 tip_amount=body.tip_amount,
             )
+        if not finalized:
+            # The claim was lost between db_claim_check_for_payment and here
+            # (extremely unlikely — would require external state mutation).
+            # Treat as 409 and DO NOT proceed to loyalty accrual / NPS.
+            _claimed = False  # don't release a claim that's no longer ours
+            log.warning("tables.pay_check.finalize_no_op", check_id=check_id, base_order_id=base_order_id)
+            raise HTTPException(status_code=409, detail="El check fue modificado por otra operación. Refresca la pantalla.")
+        # From here on, the check is invoiced. No release on subsequent errors.
+        _claimed = False
 
         if hasattr(loyalty_svc, "accrue_on_check"):
             _loyalty_org_id = restaurant["id"]
@@ -1429,8 +1457,22 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             "fiscal":   fiscal,
         }
     except HTTPException:
+        # Release the claim so the cashier can retry without waiting.
+        # Only releases if we still hold it (status='paying').
+        if _claimed:
+            try:
+                with tenant_scope(restaurant["id"]):
+                    await db.db_release_check(check_id)
+            except Exception:
+                log.exception("tables.pay_check.release_failed", check_id=check_id)
         raise
     except Exception as e:
+        if _claimed:
+            try:
+                with tenant_scope(restaurant["id"]):
+                    await db.db_release_check(check_id)
+            except Exception:
+                log.exception("tables.pay_check.release_failed", check_id=check_id)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")

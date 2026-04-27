@@ -474,6 +474,8 @@ from app.repositories.tables_repo import (
     db_create_checks,
     db_get_checks,
     db_get_check,
+    db_claim_check_for_payment,
+    db_release_check,
     db_finalize_check_payment,
     db_delete_open_check,
     db_attach_proposal,
