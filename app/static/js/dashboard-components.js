@@ -2427,11 +2427,11 @@ async function _loadLoyaltyStats() {
           ${rows.map((c, i) => `
             <tr style="border-bottom:0.5px solid #f0f0e8;">
               <td style="padding:8px;color:#aaa;">${i + 1}</td>
-              <td style="padding:8px;font-weight:500;">${c.phone}</td>
-              <td style="padding:8px;text-align:right;font-weight:700;color:#1D9E75;">${c.points_balance}</td>
-              <td style="padding:8px;text-align:right;color:#555;">${fmtCur(c.points_balance * pointVal)}</td>
-              <td style="padding:8px;text-align:right;color:#888;">${c.total_earned}</td>
-              <td style="padding:8px;text-align:right;color:#888;">${c.total_redeemed || 0}</td>
+              <td style="padding:8px;font-weight:500;">${_escHtml(c.phone || '')}</td>
+              <td style="padding:8px;text-align:right;font-weight:700;color:#1D9E75;">${Number(c.points_balance) || 0}</td>
+              <td style="padding:8px;text-align:right;color:#555;">${fmtCur((Number(c.points_balance) || 0) * pointVal)}</td>
+              <td style="padding:8px;text-align:right;color:#888;">${Number(c.total_earned) || 0}</td>
+              <td style="padding:8px;text-align:right;color:#888;">${Number(c.total_redeemed) || 0}</td>
             </tr>`).join('')}
         </tbody>
       </table>`;

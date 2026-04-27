@@ -6,7 +6,11 @@ Extracted from database.py — Fase 6 Repository Pattern.
 Migrated to tenant_connection() — RLS pilot Step 2.
 """
 import json
+from decimal import Decimal
+from typing import Union
+
 from app.services.logging import get_logger
+from app.services.money import to_decimal
 from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
@@ -72,32 +76,53 @@ async def db_accrue_loyalty_points(
     restaurant_id: int,
     phone: str,
     order_id: str,
-    total_cop: float,
+    total_cop: Union[Decimal, int, float, str],
 ) -> int:
     """
-    Calcula y acumula puntos por una compra pagada. Idempotente: si ya existe
-    una entrada positiva en el ledger para este order_id, no duplica.
-    Retorna los puntos acumulados (0 si ya estaba procesado).
+    Calcula y acumula puntos por una compra pagada. Idempotente a nivel DB:
+    UNIQUE INDEX parcial on (org_id, order_id) WHERE delta > 0 (migración 0055)
+    + ON CONFLICT DO NOTHING + RETURNING. Si una segunda llamada concurrente
+    con el mismo order_id pierde la carrera, fetchrow() retorna None y la
+    función retorna 0 sin tocar loyalty_customers (el contador solo refleja
+    el primer accrual).
+
+    Retorna los puntos acumulados, o 0 si ya estaba procesado.
+
+    Type contract:
+      total_cop accepts Decimal/int/float/str — coerced internally via
+      to_decimal. The previous `: float` typing violated the no-float-money
+      rule (CLAUDE.md). float entry is preserved for backward compat with
+      legacy callers but the internal math is all Decimal.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     await _ensure_loyalty_tables()
     clean_phone = _normalize_phone(phone)
+    total_d = to_decimal(total_cop)
     async with tenant_connection() as conn:
         cfg = await _loyalty_cfg(conn, restaurant_id)
-        points = max(1, int(total_cop / 1000) * cfg["points_per_1k"])
-        # Idempotencia: verificar si ya se procesó este order_id
-        existing = await conn.fetchval(
-            "SELECT id FROM loyalty_ledger WHERE org_id=$1 AND order_id=$2 AND delta > 0 LIMIT 1",
-            restaurant_id, order_id,
-        )
-        if existing:
-            return 0
-        await conn.execute(
+        # int(total_d / 1000) is exact for Decimal — Decimal / Decimal returns
+        # Decimal, no float drift. Equivalent to floor(total/1000) when total >= 0.
+        points = max(1, int(total_d / Decimal(1000)) * cfg["points_per_1k"])
+
+        # Race-safe ledger insert. RETURNING id tells us whether the row was
+        # actually inserted (None = a concurrent caller won the race for this
+        # order_id and we MUST NOT bump the customer counter).
+        inserted = await conn.fetchrow(
             """INSERT INTO loyalty_ledger (org_id, phone, delta, reason, order_id)
-               VALUES ($1, $2, $3, 'purchase', $4)""",
+               VALUES ($1, $2, $3, 'purchase', $4)
+               ON CONFLICT (org_id, order_id) WHERE delta > 0 AND order_id IS NOT NULL
+               DO NOTHING
+               RETURNING id""",
             restaurant_id, clean_phone, points, order_id,
         )
+        if inserted is None:
+            log.info(
+                "loyalty.accrual_idempotent_skip",
+                org_id=restaurant_id, order_id=order_id,
+            )
+            return 0
+
         await conn.execute(
             """INSERT INTO loyalty_customers (org_id, phone, points_balance, total_earned)
                VALUES ($1, $2, $3, $3)
