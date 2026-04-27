@@ -704,11 +704,15 @@ async def get_order_ticket(request: Request, order_id: str):
         if row.get("notes"):
             notes_parts.append(row["notes"])
 
-    # Datos fiscales: última factura emitida para esta orden (deferred to billing layer)
+    # Datos fiscales: última factura emitida para esta orden (deferred to billing layer).
+    # Use tenant_connection so the lookup inherits the active bypass_tenant_scope
+    # set above (admins legitimately view tickets across branches). Raw pool.acquire
+    # would create a new connection without the GUC — RLS-blocked under mesio_app
+    # in prod, accidentally cross-tenant under postgres in test.
     fiscal = None
     try:
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
+        from app.services.tenant_db import tenant_connection as _tc  # noqa: PLC0415
+        async with _tc() as conn:
             fiscal_row = await conn.fetchrow(
                 """SELECT cufe, qr_data, invoice_number, issue_date,
                           tax_regime, tax_pct, dian_status, uuid_dian
@@ -719,7 +723,10 @@ async def get_order_ticket(request: Request, order_id: str):
             if fiscal_row:
                 fiscal = dict(fiscal_row)
     except Exception:
-        pass  # tabla puede no existir en entornos sin billing
+        # Don't crash the ticket endpoint if billing config is missing or DIAN
+        # tables aren't provisioned. But DO log — silent except hid real RLS
+        # errors during the audit.
+        log.exception("tables.ticket.fiscal_lookup_failed", order_id=order_id)
 
     created = first.get("created_at")
     if created and hasattr(created, "isoformat"):

@@ -119,7 +119,14 @@ async def db_get_all_conversations(bot_number: str = None, branch_id: int | str 
             idx += 1
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-        query = f"SELECT phone, bot_number, history, updated_at, created_at FROM conversations {where} ORDER BY updated_at DESC"
+        # Hard cap: history JSONB can be 100s of KB per row. 50K conversations
+        # without LIMIT = OOM risk + unresponsive admin page. The dashboard
+        # only renders the most recent 200 anyway; admins paginate via
+        # date_from/date_to for older windows.
+        query = (
+            f"SELECT phone, bot_number, history, updated_at, created_at "
+            f"FROM conversations {where} ORDER BY updated_at DESC LIMIT 200"
+        )
 
         rows = await conn.fetch(query, *params)
 
