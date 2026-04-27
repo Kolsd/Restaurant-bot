@@ -508,7 +508,13 @@ async def get_delivery_orders(request: Request):
 async def delivery_check_updates(request: Request):
     await require_auth(request)
     import hashlib as _hashlib
-    rows = await tr.db_get_delivery_status_hash()
+    # Tenant-scoped: only return hash of THIS org's orders. The unscoped
+    # variant (db_get_delivery_status_hash) leaked order IDs across
+    # tenants — every kitchen page polled it every 10s. Use the
+    # _for_restaurant variant always when called from a tenant-auth route.
+    restaurant = await get_current_restaurant(request)
+    with tenant_scope(restaurant["id"]):
+        rows = await tr.db_get_delivery_status_hash_for_restaurant(restaurant["id"])
     h = _hashlib.md5(str([(r["id"], r["status"]) for r in rows]).encode()).hexdigest()
     return {"hash": h}
 

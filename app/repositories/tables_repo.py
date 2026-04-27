@@ -19,8 +19,8 @@ re-export shim added to that module.
 Bypass rationale:
   - Scheduler functions (db_get_stale_sessions, db_get_closeable_sessions,
     db_get_active_session_table_ids) iterate across ALL tenants by design.
-  - Kitchen/delivery views (db_get_delivery_orders_for_caja,
-    db_get_delivery_status_hash) are cross-tenant kitchen displays.
+  - Kitchen/delivery views (db_get_delivery_orders_for_caja) are
+    tenant-scoped via active tenant_scope() at the call site.
   - db_get_waiter_alerts(bot_number) is tenant-scoped; call site must pass bot_number.
   - db_verify_branch_is_child queries `restaurants` across tenant boundary.
 """
@@ -1475,21 +1475,6 @@ async def db_get_delivery_orders_for_caja() -> list:
                AND status NOT IN ('en_camino', 'en_puerta', 'entregado', 'cancelado')
                ORDER BY created_at DESC"""
         )
-    return [dict(r) for r in rows]
-
-
-async def db_get_delivery_status_hash() -> list:
-    """Return id+status pairs for active delivery orders (for hash-based polling).
-
-    Cross-tenant kitchen display.
-    # Uses bypass_tenant_scope internally (global kitchen view).
-    """
-    with bypass_tenant_scope("kitchen: delivery status hash cross-tenant polling"):
-        async with tenant_connection() as conn:
-            rows = await conn.fetch(
-                "SELECT id, status FROM orders WHERE order_type IN ('domicilio','recoger')"
-                " AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC"
-            )
     return [dict(r) for r in rows]
 
 

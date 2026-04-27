@@ -218,12 +218,25 @@ _ZERO_DECIMAL_CURRENCIES = {"COP", "CLP", "JPY", "KRW", "VND", "PYG", "ISK"}
 
 
 def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP") -> str:
+    # Fail-fast on missing config: silently signing with empty secret produces
+    # a link Wompi rejects, so the customer gets a "broken link" with no clue
+    # what went wrong. Better to crash here so the deploy alarms fire.
+    if not WOMPI_INTEGRITY_SECRET:
+        log.error("orders.wompi_integrity_secret_missing", order_id=order_id)
+        raise RuntimeError(
+            "WOMPI_INTEGRITY_SECRET is not configured. Cannot generate payment link."
+        )
+    if not WOMPI_PUBLIC_KEY:
+        log.error("orders.wompi_public_key_missing", order_id=order_id)
+        raise RuntimeError(
+            "WOMPI_PUBLIC_KEY is not configured. Cannot generate payment link."
+        )
+
     if currency in _ZERO_DECIMAL_CURRENCIES:
         amount_cents = int(amount)
     else:
         amount_cents = int(amount * 100)
-    secret = WOMPI_INTEGRITY_SECRET or ""
-    signature_string = f"{order_id}{amount_cents}{currency}{secret}"
+    signature_string = f"{order_id}{amount_cents}{currency}{WOMPI_INTEGRITY_SECRET}"
     signature = hashlib.sha256(signature_string.encode()).hexdigest()
     redirect_base = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
     redirect_url = f"{redirect_base}/api/payment/confirm"
@@ -316,12 +329,18 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                         "created_at":          datetime.now(ZoneInfo(tz_str)).isoformat(),
                         "bot_number":          bot_number,
                         "payment_method":      payment_method or base_order.get("payment_method", ""),
-                        "payment_url":         generate_wompi_payment_link(order_id, subtotal),
                         "is_additional":       True,
                         "base_order_id":       base_id,
                         "sub_number":          sub_number,
                         "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
                     }
+                    try:
+                        order["payment_url"] = generate_wompi_payment_link(order_id, subtotal)
+                    except RuntimeError:
+                        # Wompi env vars missing — alarms fire from generate_wompi_payment_link.
+                        # Keep the bot conversational by returning a friendly error.
+                        log.exception("create_order.payment_link_unavailable", phone=phone, order_id=order_id)
+                        return {"success": False, "error": "No pudimos generar el link de pago en este momento. El equipo ya fue notificado."}
                     try:
                         await commit_order_transaction(
                             pool,
@@ -371,12 +390,16 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 "created_at":          datetime.now(ZoneInfo(tz_str)).isoformat(),
                 "bot_number":          bot_number,
                 "payment_method":      payment_method,
-                "payment_url":         generate_wompi_payment_link(order_id, total),
                 "is_additional":       False,
                 "base_order_id":       None,
                 "sub_number":          1,
                 "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
             }
+            try:
+                order["payment_url"] = generate_wompi_payment_link(order_id, total)
+            except RuntimeError:
+                log.exception("create_order.payment_link_unavailable", phone=phone, order_id=order_id)
+                return {"success": False, "error": "No pudimos generar el link de pago en este momento. El equipo ya fue notificado."}
             try:
                 await commit_order_transaction(
                     pool,

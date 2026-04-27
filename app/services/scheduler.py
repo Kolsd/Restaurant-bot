@@ -236,7 +236,7 @@ async def _run_occupancy_snapshot():
     Capture a point-in-time occupancy snapshot for every restaurant.
     Runs every 15 minutes via the scheduler loop.
     """
-    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
 
     try:
         # Wave-2: occupancy is per-SEDE (each location has its own tables),

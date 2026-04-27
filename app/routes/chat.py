@@ -130,17 +130,29 @@ async def get_whatsapp_media(
     if not token:
         raise HTTPException(status_code=503, detail="Token de acceso no configurado")
 
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        headers = {"Authorization": f"Bearer {token}"}
-        res = await client.get(f"https://graph.facebook.com/{META_API_VERSION}/{media_id}", headers=headers)
+    # Timeouts protect against pool starvation when Meta is slow. Without
+    # this, every cashier loading thumbnails could pile up uvicorn workers
+    # waiting for httpx requests that never resolve. 10s connect + 20s read
+    # is generous but bounded.
+    timeout = httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=5.0)
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            res = await client.get(f"https://graph.facebook.com/{META_API_VERSION}/{media_id}", headers=headers)
 
-        if res.status_code == 200:
-            data = res.json()
-            media_url = data.get("url")
-            if media_url:
-                media_res = await client.get(media_url, headers=headers)
-                if media_res.status_code == 200:
-                    return Response(content=media_res.content, media_type=data.get("mime_type", "image/jpeg"))
+            if res.status_code == 200:
+                data = res.json()
+                media_url = data.get("url")
+                if media_url:
+                    media_res = await client.get(media_url, headers=headers)
+                    if media_res.status_code == 200:
+                        return Response(content=media_res.content, media_type=data.get("mime_type", "image/jpeg"))
+    except httpx.TimeoutException:
+        log.warning("chat.media_proxy.timeout", media_id=media_id)
+        return Response(content="Imagen no disponible (timeout)", status_code=504)
+    except httpx.HTTPError:
+        log.exception("chat.media_proxy.http_error", media_id=media_id)
+        return Response(content="Error al obtener la imagen", status_code=502)
 
     return Response(content="Imagen no encontrada o expirada", status_code=404)
 
