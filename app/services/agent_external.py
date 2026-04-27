@@ -294,9 +294,7 @@ async def execute_external_action(
         if customer_lat is not None and customer_lon is not None:
             org_id = restaurant_obj.get("id")
 
-            # Wave 1: try Org-based Location routing first (new model).
-            # Falls through to legacy restaurants routing if no Location rows exist.
-            _org_location_resolved = False
+            # Org-based Location routing (Wave-2 native).
             try:
                 from app.repositories.restaurant_repo import (  # noqa: PLC0415
                     db_resolve_location_by_gps,
@@ -306,8 +304,6 @@ async def execute_external_action(
                 if nearest_loc is not None:
                     routing_context["location_id"] = nearest_loc["id"]
                     routing_context["branch_id"] = nearest_loc["id"]  # backward-compat alias
-                    _org_location_resolved = True
-                    # Use Location's own WhatsApp number if it has one (multi-number chain)
                     if nearest_loc.get("whatsapp_number"):
                         effective_bot_number = nearest_loc["whatsapp_number"]
                     log.info(
@@ -329,45 +325,10 @@ async def execute_external_action(
                             f"Sin embargo, tu pedido sigue guardado en el carrito. Puedes cambiarlo a la modalidad de Recoger y pasar por él a {branch_info}. "
                             f"¿Te gustaría que lo preparemos para recoger?"
                         )
-                    elif locs_with_gps:
-                        # Geocoded but no location in range — accept text address, continue
-                        log.info("delivery_routing_geocode_no_location", address=address, phone=phone)
-                        _org_location_resolved = True  # don't fall through to restaurants
+                    # Geocoded but no location in range — accept text address, continue.
+                    log.info("delivery_routing_geocode_no_location", address=address, phone=phone)
             except Exception:
                 log.exception("delivery_org_routing_failed", phone=phone, org_id=org_id)
-
-            # Legacy restaurants routing (Wave 1 fallback when locations table is empty)
-            if not _org_location_resolved:
-                try:
-                    parent_id = org_id
-                    nearest = await db.db_find_nearest_branch(customer_lat, customer_lon, parent_id)
-                    if nearest:
-                        effective_bot_number = nearest["whatsapp_number"] or bot_number
-                        routing_context["branch_id"] = nearest["id"]
-                        log.info("delivery_routed", branch=nearest["name"], bot=effective_bot_number)
-                    else:
-                        if not has_gps:
-                            # Geocoded but no branch in range — accept text address, continue
-                            log.info("delivery_routing_geocode_no_branch", address=address, phone=phone)
-                        else:
-                            from app.services.tenant_db import tenant_connection  # noqa: PLC0415
-                            async with tenant_connection() as conn:
-                                abs_nearest = await conn.fetchrow('''
-                                    SELECT r.name, r.address,
-                                           (6371 * acos(cos(radians($1)) * cos(radians(r.latitude::float)) * cos(radians(r.longitude::float) - radians($2)) + sin(radians($1)) * sin(radians(r.latitude::float)))) AS distance_km
-                                    FROM restaurants r
-                                    JOIN locations l ON l.id = r.id
-                                    WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $3)
-                                      AND l.id != $3
-                                      AND r.latitude IS NOT NULL
-                                      AND r.longitude IS NOT NULL
-                                    ORDER BY distance_km ASC LIMIT 1
-                                ''', customer_lat, customer_lon, parent_id)
-
-                            branch_info = f"{abs_nearest['name']} ({abs_nearest['address']})" if abs_nearest else "nuestra sucursal más cercana"
-                            return f"Lo siento mucho, verificamos tu ubicación GPS y estás fuera de nuestra zona de cobertura para domicilios. 😔\n\nSin embargo, tu pedido sigue guardado en el carrito. Puedes cambiarlo a la modalidad de Recoger y pasar por él a {branch_info}. ¿Te gustaría que lo preparemos para recoger?"
-                except Exception:
-                    log.exception("delivery_routing_failed", phone=phone, bot_number=bot_number)
         # If geocoding failed or was not attempted, accept the text address as-is.
         # GPS is preferred but NEVER a hard requirement — text addresses are valid.
 
@@ -376,13 +337,11 @@ async def execute_external_action(
         org_id = restaurant_obj.get("id")
         cart_data = await db.db_get_cart(phone, bot_number)
 
-        # Wave 1: try Org-based Location routing for pickup
-        _pickup_org_resolved = False
+        # Org-based Location routing (Wave-2 native).
         try:
             from app.repositories.restaurant_repo import db_get_org_locations  # noqa: PLC0415
             org_locations = await db_get_org_locations(org_id)
             if org_locations:
-                _pickup_org_resolved = True
                 if len(org_locations) == 1:
                     # Single location — auto-assign without asking
                     only_loc = org_locations[0]
@@ -429,82 +388,6 @@ async def execute_external_action(
                     )
         except Exception:
             log.exception("pickup_org_routing_failed", phone=phone, org_id=org_id)
-
-        if not _pickup_org_resolved:
-            # Legacy restaurants-based pickup routing (Wave 1 fallback)
-            parent_id = org_id
-
-            # Check if restaurant has branches at all
-            branches_list: list = []
-            try:
-                from app.services.tenant_db import tenant_connection as _tc  # noqa: PLC0415
-                async with _tc() as _conn:
-                    branches_list = await _conn.fetch(
-                        """
-                        SELECT r.id, r.name, r.address, r.whatsapp_number
-                        FROM restaurants r
-                        JOIN locations l ON l.id = r.id
-                        WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $1)
-                          AND l.id != $1
-                        ORDER BY r.name
-                        """,
-                        parent_id,
-                    )
-            except Exception:
-                log.exception("pickup_branches_query_failed", phone=phone, parent_id=parent_id)
-
-            has_branches = len(branches_list) > 0
-
-            if cart_data.get("latitude") is not None and cart_data.get("longitude") is not None:
-                try:
-                    nearest = await db.db_find_nearest_branch_any(
-                        float(cart_data["latitude"]), float(cart_data["longitude"]), parent_id
-                    )
-                    if nearest:
-                        effective_bot_number = nearest["whatsapp_number"] or bot_number
-                        routing_context["branch_id"] = nearest["id"]
-                        log.info("pickup_gps_routed", branch=nearest["name"], bot=effective_bot_number)
-                except Exception:
-                    log.exception("pickup_gps_routing_failed", phone=phone, bot_number=bot_number)
-            elif parsed.get("branch_id"):
-                try:
-                    from app.services.tenant_db import tenant_connection as _tc2  # noqa: PLC0415
-                    async with _tc2() as _conn:
-                        branch_row = await _conn.fetchrow(
-                            """
-                            SELECT r.id, r.name, r.whatsapp_number
-                            FROM restaurants r
-                            JOIN locations l ON l.id = r.id
-                            WHERE l.id = $1
-                              AND l.org_id = (SELECT org_id FROM locations WHERE id = $2)
-                              AND l.id != $2
-                            """,
-                            int(parsed["branch_id"]), parent_id,
-                        )
-                    if branch_row:
-                        effective_bot_number = branch_row["whatsapp_number"] or bot_number
-                        routing_context["branch_id"] = branch_row["id"]
-                        log.info("pickup_branch_routed", branch=branch_row["name"], bot=effective_bot_number)
-                except Exception:
-                    log.exception("pickup_branch_routing_failed", phone=phone, branch_id=parsed.get("branch_id"))
-
-            # GUARD (legacy path only): multi-branch restaurant but no branch was resolved → ask customer
-            if has_branches and "branch_id" not in routing_context:
-                log.warning(
-                    "pickup_missing_branch",
-                    phone=phone,
-                    has_gps=cart_data.get("latitude") is not None,
-                    llm_branch_id=parsed.get("branch_id"),
-                )
-                branch_lines = "\n".join(
-                    f"• *{b['name']}* — {b['address'] or 'sin dirección'}" for b in branches_list
-                )
-                return (
-                    f"¿En cuál sucursal prefieres recoger tu pedido? 🛍️\n\n"
-                    f"{branch_lines}\n\n"
-                    f"También puedes compartirnos tu ubicación 📍 (ícono de clip en WhatsApp) "
-                    f"y te asignamos automáticamente la más cercana."
-                )
 
     # ── Migrate cart if routed to different branch ────────────────────
     if effective_bot_number != bot_number:

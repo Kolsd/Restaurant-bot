@@ -7,7 +7,7 @@ import asyncio
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from app.services import database as db
-from app.services.orders import cart_summary, clear_cart
+from app.services.orders import cart_summary
 from app.routes.deps import require_auth, get_current_restaurant, get_current_user
 from app.services.agent import trigger_nps
 from app.services.logging import get_logger
@@ -25,10 +25,6 @@ router = APIRouter()
 
 # Sin contraseñas por defecto por seguridad
 WOMPI_EVENTS_SECRET = os.getenv("WOMPI_EVENTS_SECRET")
-
-class ClearCartRequest(BaseModel):
-    phone: str
-    bot_number: str
 
 
 @router.get("/orders")
@@ -66,11 +62,6 @@ async def get_single_order(request: Request, order_id: str):
     if order_rid and user_rid and int(order_rid) != int(user_rid):
         raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
     return order
-
-@router.post("/cart/clear")
-async def clear_user_cart(request: ClearCartRequest):
-    await clear_cart(request.phone, request.bot_number)
-    return {"success": True}
 
 @router.get("/cart/{phone}/{bot_number}")
 async def view_cart(request: Request, phone: str, bot_number: str):

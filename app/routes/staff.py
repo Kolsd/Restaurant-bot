@@ -403,17 +403,6 @@ async def get_shifts(
     return {"shifts": shifts}
 
 
-# ── Tip distributions ────────────────────────────────────────────────────────
-
-@router.get("/tip-distributions", dependencies=_MODULE_DEPS)
-async def tip_distributions(
-    restaurant: dict = Depends(get_current_restaurant_scoped),
-):
-    """Return the 20 most recent tip distribution cuts."""
-    cuts = await db.db_get_tip_distributions(restaurant["id"])
-    return {"distributions": cuts}
-
-
 class TipsAutoRequest(BaseModel):
     period_start: str
     period_end: str

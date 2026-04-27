@@ -58,7 +58,6 @@ from app.routes.internal.admin import router as internal_admin_router
 from app.routes.internal.analytics import router as internal_analytics_router
 from app.routes.internal.billing_admin import router as internal_billing_admin_router
 from app.routes.internal.ops import router as internal_ops_router
-from app.routes.legacy_redirects import router as legacy_redirects_router
 from app.services import database as db  # ← FIX: import directo de db
 from app.services.logging import get_logger as _get_logger
 
@@ -267,5 +266,3 @@ app.include_router(internal_admin_router)
 app.include_router(internal_analytics_router)
 app.include_router(internal_billing_admin_router)
 app.include_router(internal_ops_router)
-# ── Legacy URL redirects (30-day grace period, then remove) ───────────────────
-app.include_router(legacy_redirects_router)

@@ -8,8 +8,7 @@ Covers the staff/HR aggregate:
   - breaks (start, end, query)
   - schedules / weekly shifts (upsert, bulk, list, delete)
   - shift editing and timecard / overtime / attendance reports
-  - tips: db_calculate_tip_pool, db_calculate_tips_by_attendance,
-          db_save_tip_distribution, db_get_tip_distributions
+  - tips: db_calculate_tip_pool, db_calculate_tips_by_attendance
   - manual deduction items
   - payroll (calculate, save run, get runs, approve)
   - contract templates (CRUD, assign to staff)
@@ -819,57 +818,6 @@ async def db_calculate_tips_by_attendance(
             "unallocated": float(quantize_money(unallocated)),
             "pct_config": pct_config,
         }
-
-
-async def db_save_tip_distribution(
-    restaurant_id: int,
-    period_start: str,
-    period_end: str,
-    total_tips: float,
-    distribution: list,
-    pct_config: dict,
-    created_by: str,
-) -> dict:
-    """Persist a tip distribution cut. Returns the saved row.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        row = await conn.fetchrow(
-            """INSERT INTO tip_distributions
-               (org_id, period_start, period_end,
-                total_tips, distribution, pct_config, created_by)
-               VALUES ($1, $2, $3,
-                       $4, $5::jsonb, $6::jsonb, $7)
-               RETURNING id::text, org_id, period_start, period_end,
-                         total_tips, distribution, pct_config, created_by, created_at""",
-            restaurant_id,
-            _ensure_datetime(period_start),
-            _ensure_datetime(period_end),
-            to_decimal(total_tips),
-            json.dumps(distribution),
-            json.dumps(pct_config),
-            created_by,
-        )
-    return _serialize(dict(row))
-
-
-async def db_get_tip_distributions(restaurant_id: int, limit: int = 20) -> list:
-    """Return recent tip distribution cuts for a restaurant.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with tenant_connection() as conn:
-        rows = await conn.fetch(
-            """SELECT id::text, org_id, period_start, period_end,
-                      total_tips, distribution, pct_config, created_by, created_at
-               FROM tip_distributions
-               WHERE org_id=$1
-               ORDER BY created_at DESC
-               LIMIT $2""",
-            restaurant_id, limit,
-        )
-    return [_serialize(dict(r)) for r in rows]
 
 
 # ── WebAuthn ─────────────────────────────────────────────────────────────────

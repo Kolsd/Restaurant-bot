@@ -87,8 +87,6 @@ async def test_delivery_resolves_location_by_gps_within_radius():
             "app.repositories.restaurant_repo.db_resolve_location_by_gps",
             AsyncMock(return_value=nearest_loc),
         ),
-        # db_find_nearest_branch should NOT be called (Org routing takes over)
-        patch("app.services.database.db_find_nearest_branch", AsyncMock(return_value=None)),
         # Cart check for empty order guard
         patch("app.services.database.db_get_cart", AsyncMock(return_value=cart_data)),
         # Order creation — success
@@ -132,7 +130,6 @@ async def test_delivery_out_of_coverage_replies_friendly():
             "app.repositories.restaurant_repo.db_resolve_location_by_gps",
             AsyncMock(return_value=None),  # out of range
         ),
-        patch("app.services.database.db_find_nearest_branch", AsyncMock(return_value=None)),
     ):
         reply = await execute_external_action(
             parsed, "5551234", "573001234567", restaurant_obj, routing_context, ""

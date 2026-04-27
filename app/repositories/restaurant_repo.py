@@ -1050,61 +1050,6 @@ async def db_get_all_restaurants(parent_id: int = None):
         return [_serialize(dict(r)) for r in rows]
 
 
-async def db_find_nearest_branch(customer_lat: float, customer_lon: float, parent_id: int) -> dict | None:
-    """Finds the nearest branch to the customer's location within its delivery_radius_km.
-    Uses the Haversine formula via PostgreSQL.
-    Returns the nearest branch within coverage, or None if no branch covers that area."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT r.id, r.name, r.whatsapp_number, r.latitude, r.longitude,
-                   r.features->>'delivery_radius_km' AS radius_km,
-                   (
-                     6371 * acos(
-                       cos(radians($1)) * cos(radians(r.latitude::float))
-                       * cos(radians(r.longitude::float) - radians($2))
-                       + sin(radians($1)) * sin(radians(r.latitude::float))
-                     )
-                   ) AS distance_km
-            FROM restaurants r
-            JOIN locations l ON l.id = r.id
-            WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $3)
-              AND l.id != $3
-              AND r.latitude IS NOT NULL
-              AND r.longitude IS NOT NULL
-            ORDER BY distance_km ASC
-        """, customer_lat, customer_lon, parent_id)
-        for r in rows:
-            radius = float(r["radius_km"] or 5.0)
-            if r["distance_km"] is not None and r["distance_km"] <= radius:
-                return _serialize(dict(r))
-    return None
-
-
-async def db_find_nearest_branch_any(customer_lat: float, customer_lon: float, parent_id: int) -> dict | None:
-    """Finds the geographically nearest branch with no delivery-radius constraint.
-    Used for pickup routing where any branch is reachable by the customer."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT r.id, r.name, r.address, r.whatsapp_number,
-                   (6371 * acos(
-                     cos(radians($1)) * cos(radians(r.latitude::float))
-                     * cos(radians(r.longitude::float) - radians($2))
-                     + sin(radians($1)) * sin(radians(r.latitude::float))
-                   )) AS distance_km
-            FROM restaurants r
-            JOIN locations l ON l.id = r.id
-            WHERE l.org_id = (SELECT org_id FROM locations WHERE id = $3)
-              AND l.id != $3
-              AND r.latitude IS NOT NULL
-              AND r.longitude IS NOT NULL
-            ORDER BY distance_km ASC
-            LIMIT 1
-        """, customer_lat, customer_lon, parent_id)
-        return _serialize(dict(row)) if row else None
-
-
 async def db_check_module(bot_number: str, module_name: str) -> bool:
     """
     Return True if module_name is explicitly enabled (true) in the restaurant's
@@ -2013,7 +1958,7 @@ async def db_resolve_location_by_gps(
 
     Returns None if no active Location of the Org is within range.
 
-    Uses the same Haversine formula as db_find_nearest_branch for consistency:
+    Uses the standard Haversine formula:
       distance_km = 6371 * acos(
         cos(radians(lat1)) * cos(radians(lat2))
         * cos(radians(lon2) - radians(lon1))

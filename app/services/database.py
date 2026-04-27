@@ -315,8 +315,6 @@ from app.repositories.restaurant_repo import (
     db_get_restaurant_by_name,
     db_get_restaurant_by_id,
     db_get_all_restaurants,
-    db_find_nearest_branch,
-    db_find_nearest_branch_any,
     db_check_module,
     db_create_restaurant,
     db_sync_menu_to_branches,
@@ -508,8 +506,6 @@ from app.repositories.staff_repo import (
     db_get_shifts,
     db_calculate_tip_pool,
     db_calculate_tips_by_attendance,
-    db_save_tip_distribution,
-    db_get_tip_distributions,
 )
 
 

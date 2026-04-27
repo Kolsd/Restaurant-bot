@@ -54,7 +54,6 @@ Restaurant-bot/
 │   │   ├── orders_routes.py         # Órdenes externas (domicilio/recoger) y Webhook Wompi
 │   │   ├── billing.py               # DIAN, facturación electrónica (restaurant-facing)
 │   │   ├── health.py                # GET /health — Railway healthcheck only
-│   │   ├── legacy_redirects.py      # 301 redirects for /api/crm, /api/admin, /api/analytics, etc. (30-day grace)
 │   │   ├── staff.py                 # Personal, turnos, propinas, nómina, contratos, overtime
 │   │   ├── staff_webauthn.py        # Autenticación biométrica FIDO2 para clock-in/out
 │   │   ├── inventory.py             # Inventario, recetas (escandallos)
@@ -450,7 +449,7 @@ Ver "Pendientes de calendario" arriba — puntos 5-10 son features v2 / schema e
 `conversations`, `carts`, `staff`, `fiscal_invoices`, `inventory`, `dish_recipes`,
 `webhook_inbox`, `sessions` (con `token_hash`)
 
-### RLS (Row-Level Security) activo en 39 tablas (Fase 1 v11.0 + Sprints C/W + pre-launch 0044 + "No-v2" 0049)
+### RLS (Row-Level Security) activo en 38 tablas (Fase 1 v11.0 + Sprints C/W + pre-launch 0044 + "No-v2" 0049 + post 0054 drop tip_distributions)
 `attendance_deductions`, `billing_log`, `carts`, `contract_templates`, `conversations`,
 `customer_profiles`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
 `loyalty_campaigns`, `loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
@@ -458,7 +457,7 @@ Ver "Pendientes de calendario" arriba — puntos 5-10 son features v2 / schema e
 `overtime_requests`, `payroll_runs`, `shift_swap_requests`, `staff`, `staff_announcements`,
 `staff_deduction_items`, `staff_schedules`, `staff_shifts`, `staff_task_completions`,
 `staff_tasks`, `subscription_usage`, `table_orders`, `table_sessions`, `time_slot_discounts`,
-`tip_distributions`, `waiter_alerts`, `webauthn_challenges`, `weekly_reports`
+`waiter_alerts`, `webauthn_challenges`, `weekly_reports`
 
 Tablas nuevas agregadas por sprints recientes:
 - `staff_announcements`, `staff_tasks`, `staff_task_completions` (0042 — Sprint C, admin↔staff messaging)
@@ -479,7 +478,6 @@ Todas con policy `tenant_isolation` + `ENABLE + FORCE ROW LEVEL SECURITY`. Tabla
 | `payroll_runs` | Corridas de nómina guardadas como borrador/aprobadas |
 | `contract_templates` | Plantillas de contrato: `weekly_hours`, `monthly_salary` (Decimal), `pay_period`, `transport_subsidy` (Decimal), `arl_pct`/`health_pct`/`pension_pct` (Decimal), `breaks_billable`, `lunch_billable`, `lunch_minutes` |
 | `overtime_requests` | Solicitudes de overtime semanal: `status` (pending/approved/rejected). UNIQUE (staff_id, week_start) |
-| `tip_distributions` | Histórico de cortes (legacy, no usa para cálculo activo) |
 | `webauthn_challenges` | Challenges FIDO2 single-use, expiran en 5 min |
 | `webauthn_credentials` | Credenciales biométricas registradas por empleado |
 
@@ -701,7 +699,7 @@ currency_exponent(currency) -> int               # 0 o 2
 | `inbox_repo` | `enqueue`, `fetch_batch`, `mark_processed`, `mark_failed` | `webhook_inbox` |
 | `sessions_repo` | `create_session`, `get_session`, `delete_session`, `cleanup_expired_sessions` + aliases `db_*` | `sessions` |
 | `inventory_repo` | 17 funciones | `inventory`, `dish_recipes`, `inventory_movements` |
-| `staff_repo` | 62+ funciones | `staff`, `staff_shifts`, `staff_breaks`, `staff_schedules`, `attendance_deductions`, `staff_deduction_items`, `payroll_runs`, `contract_templates`, `overtime_requests`, `tip_distributions`, `webauthn_*` |
+| `staff_repo` | ~60 funciones | `staff`, `staff_shifts`, `staff_breaks`, `staff_schedules`, `attendance_deductions`, `staff_deduction_items`, `payroll_runs`, `contract_templates`, `overtime_requests`, `webauthn_*` |
 | `tables_repo` | 62+ funciones | `restaurant_tables`, `table_orders`, `table_sessions`, `table_checks`, `waiter_alerts` |
 | `conversations_repo` | 20+ funciones | `conversations`, `carts`, NPS per-conv, processed_wam_ids, features |
 | `restaurant_repo` | 50+ funciones | `restaurants`, `users`, `orders`, `nps_responses`, `branches`, `subscription_usage` |
@@ -1282,8 +1280,8 @@ La única excepción permitida es `app/routes/chat.py` que importa `register_inb
 | `/api/internal/crm/*` | `routes/internal/crm.py` | API CRM prospectos |
 | `/api/internal/ops/metrics` | `routes/internal/ops.py` | Métricas operacionales |
 
-### Legacy redirects (eliminar después de 30 días con cero hits)
-`app/routes/legacy_redirects.py` redirige con 301 las URLs viejas (`/api/crm/*`, `/api/admin/*`, etc.) a las nuevas. Cada hit loguea `internal.legacy_url` con el path. Cuando `git grep "internal.legacy_url"` en los logs esté en cero durante 2 semanas, se puede borrar el archivo.
+### Legacy redirects (eliminados 2026-04-27)
+`app/routes/legacy_redirects.py` fue eliminado en la sesión "Dead Code Cleanup". Antes hacía 301 de `/api/crm/*`, `/api/admin/*`, `/api/analytics/*`, `/api/billing/admin/*`, `/health/metrics`, `/analytics`, `/monitoring` hacia `/internal/*`. Las URLs viejas ahora retornan 404. Si una herramienta interna o bookmark del equipo Mesio sigue pegándole, actualizar al canónico `/internal/...`.
 
 ## Post-migration Monitoring Queries (Org/Location — Wave 2 historical)
 
@@ -1325,7 +1323,6 @@ SELECT 'subscription_usage',    COUNT(*) FROM subscription_usage    WHERE org_id
 SELECT 'table_orders',          COUNT(*) FROM table_orders          WHERE org_id IS NULL UNION ALL
 SELECT 'table_sessions',        COUNT(*) FROM table_sessions        WHERE org_id IS NULL UNION ALL
 SELECT 'time_slot_discounts',   COUNT(*) FROM time_slot_discounts   WHERE org_id IS NULL UNION ALL
-SELECT 'tip_distributions',     COUNT(*) FROM tip_distributions     WHERE org_id IS NULL UNION ALL
 SELECT 'waiter_alerts',         COUNT(*) FROM waiter_alerts         WHERE org_id IS NULL UNION ALL
 SELECT 'webauthn_challenges',   COUNT(*) FROM webauthn_challenges   WHERE org_id IS NULL UNION ALL
 SELECT 'weekly_reports',        COUNT(*) FROM weekly_reports        WHERE org_id IS NULL
@@ -1427,10 +1424,11 @@ O usar `services/alerts.py` y agregar un check personalizado al scheduler.
 - **`org_id` + `location_id`** — las columnas canónicas. `org_id` es el tenant key. `location_id` es la sede operativa.
 - **RLS:** policy `org_isolation` (por `org_id`) activa en las 33 tablas + FORCE RLS. Policy legacy `tenant_isolation` DROPPED en 0037.
 - **Triggers auto-populate:** DROPPED en 0037. App code debe setear `org_id` y `location_id` explícitamente en INSERTs.
-- **Migración head actual:** `0038_drop_legacy_compat`. Cadena: `0036 → 0037b → 0037c → 0037d → 0037 → 0038`.
+- **Migración head actual:** `0054_drop_tip_distributions`. Cadena Wave-2: `0036 → 0037b → 0037c → 0037d → 0037 → 0038`. Posterior: `0039 → 0049` ("No-v2"), `0050-0053` (incrementales), `0054` (drop tip_distributions).
 - **billing_config** — en `organizations.billing_config` (0037c), expuesto en la VIEW.
-- **location_id nullable** en 18 tablas operativas (0037d): orders, table_orders, staff, staff_shifts, staff_schedules, staff_deduction_items, attendance_deductions, fiscal_invoices, fiscal_resolution, inventory, menu_availability, occupancy_snapshots, overtime_requests, table_sessions, time_slot_discounts, tip_distributions, waiter_alerts, webauthn_challenges.
+- **location_id nullable** en 17 tablas operativas (0037d, post-0054): orders, table_orders, staff, staff_shifts, staff_schedules, staff_deduction_items, attendance_deductions, fiscal_invoices, fiscal_resolution, inventory, menu_availability, occupancy_snapshots, overtime_requests, table_sessions, time_slot_discounts, waiter_alerts, webauthn_challenges.
 - ~~`legacy_restaurant_id` columna~~ — **DROPPED** por migración 0041 (2026-04-19).
+- ~~`tip_distributions` tabla~~ — **DROPPED** por migración 0054 (2026-04-27, sesión "Dead Code Cleanup").
 
 ### Forward guards contra reintroducción de symbols obsoletos
 

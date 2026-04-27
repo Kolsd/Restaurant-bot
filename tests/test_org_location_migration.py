@@ -292,7 +292,6 @@ async def test_orphan_org_ids(db_conn):
         "staff_shifts",
         "table_sessions",
         "time_slot_discounts",
-        "tip_distributions",
         "waiter_alerts",
         "webauthn_challenges",
         # Org-level
@@ -360,7 +359,6 @@ async def test_orphan_org_ids(db_conn):
         "staff_shifts",
         "table_sessions",
         "time_slot_discounts",
-        "tip_distributions",
         "waiter_alerts",
         "webauthn_challenges",
         "reservation_deposits",

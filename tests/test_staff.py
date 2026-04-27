@@ -264,34 +264,7 @@ def test_get_shifts_with_date_range(client, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 14. Tip distribution history
-# ══════════════════════════════════════════════════════════════════════════════
-
-def test_get_tip_distributions(client, monkeypatch):
-    """GET /api/staff/tip-distributions returns list of past cuts."""
-    _auth(monkeypatch)
-    import app.services.database as db_mod
-
-    cut = {
-        "id": "dddddddd-0000-4000-8000-000000000001",
-        "restaurant_id": 1,
-        "period_start": "2026-03-25T00:00:00+00:00",
-        "period_end":   "2026-03-25T23:59:59+00:00",
-        "total_tips":   50000.0,
-        "distribution": [],
-        "pct_config":   {},
-        "created_by":   "+573009999999",
-        "created_at":   "2026-03-25T17:00:00+00:00",
-    }
-    monkeypatch.setattr(db_mod, "db_get_tip_distributions", AsyncMock(return_value=[cut]))
-
-    r = client.get("/api/staff/tip-distributions", headers=_HEADERS)
-    assert r.status_code == 200
-    assert len(r.json()["distributions"]) == 1
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 15–16. DB layer unit tests (no HTTP)
+# 14. DB layer unit tests (no HTTP)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio

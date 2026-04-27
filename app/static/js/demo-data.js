@@ -433,8 +433,6 @@ function _demoMatch(path, method) {
     return _tipsAuto;
   if (p === '/staff/tip-distribution' && method === 'PATCH')
     return { ok: true };
-  if (p === '/staff/tip-distributions' && method === 'GET')
-    return [];
 
   if (/^\/staff\/\d+\/deductions$/.test(p) && method === 'GET')
     return [];

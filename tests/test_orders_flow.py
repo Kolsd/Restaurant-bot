@@ -238,21 +238,6 @@ def test_view_cart_empty(client, monkeypatch):
     assert r.json()["summary"]["items"] == []
 
 
-def test_clear_cart_success(client, monkeypatch):
-    """POST /api/cart/clear → 200."""
-    monkeypatch.setattr("app.routes.orders_routes.clear_cart", AsyncMock())
-    r = client.post("/api/cart/clear",
-                    json={"phone": "+573001111111", "bot_number": "+573009999999"})
-    assert r.status_code == 200
-    assert r.json()["success"] is True
-
-
-def test_clear_cart_missing_phone(client, monkeypatch):
-    """Sin phone → 422."""
-    r = client.post("/api/cart/clear", json={"bot_number": "+573009999999"})
-    assert r.status_code == 422
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # D. WEBHOOK WOMPI
 # ══════════════════════════════════════════════════════════════════════════════
