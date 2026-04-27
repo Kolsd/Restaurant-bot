@@ -285,23 +285,9 @@ async def _is_image_safe(image_id: str, access_token: str) -> bool:
         return True
 
 
-async def _send_wa_text(user_phone: str, text: str, phone_id: str, access_token: str):
-    """Envía un mensaje de texto simple a WhatsApp sin pasar por la IA."""
-    try:
-        url = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
-        headers = {"Authorization": f"Bearer {access_token}"}
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": user_phone,
-            "type": "text",
-            "text": {"body": text},
-        }
-        async with httpx.AsyncClient(timeout=10) as client:
-            res = await client.post(url, headers=headers, json=payload)
-            if res.status_code != 200:
-                log.error("chat.send_wa_text_failed", phone=user_phone, status=res.status_code, body=res.text[:200])
-    except Exception:
-        log.exception("chat.send_wa_text_error", phone=user_phone)
+# NOTE: the standalone _send_wa_text (1-attempt no-retry) was removed in
+# favor of app.services.meta_api.send_text (3-retry exponential backoff).
+# All callers in this module and inbox_worker.py now go through meta_api.
 
 
 @router.post("/webhook/meta")
@@ -403,7 +389,12 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                 if user_phone and is_limited:
                     log.warning("chat.rate_limited", phone=user_phone, bot_number=bot_number)
                     try:
-                        await _send_wa_text(user_phone, "Un momento por favor, estoy procesando tu mensaje anterior.", phone_id, access_token)
+                        from app.services.meta_api import send_text as _meta_send  # noqa: PLC0415
+                        await _meta_send(
+                            bot_number, access_token, user_phone,
+                            "Un momento por favor, estoy procesando tu mensaje anterior.",
+                            phone_id=phone_id,
+                        )
                     except Exception:
                         log.exception("chat.send_ratelimit_msg_failed", phone=user_phone)
                     continue
@@ -443,12 +434,16 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                             if proposal and proposal.get("proposal_status") == "awaiting_proof":
                                 # Moderación de contenido: rechazar imágenes inapropiadas
                                 is_safe = await _is_image_safe(image_id, access_token)
+                                from app.services.meta_api import send_text as _meta_send  # noqa: PLC0415
                                 if not is_safe:
                                     rejection_msg = (
                                         "⚠️ Tu imagen no pudo ser procesada. "
                                         "Por favor envía una captura clara de tu comprobante de pago."
                                     )
-                                    await _send_wa_text(user_phone, rejection_msg, phone_id, access_token)
+                                    await _meta_send(
+                                        bot_number, access_token, user_phone, rejection_msg,
+                                        phone_id=phone_id,
+                                    )
                                     continue
                                 await db.db_attach_proof(
                                     proposal["base_order_id"], user_phone, media_url
@@ -459,7 +454,8 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                                 # Enviar confirmación vía background task
                                 confirm_msg = "✅ Comprobante recibido, caja lo está validando. ¡Gracias! 🙏"
                                 background_tasks.add_task(
-                                    _send_wa_text, user_phone, confirm_msg, phone_id, access_token
+                                    _meta_send,
+                                    bot_number, access_token, user_phone, confirm_msg, phone_id,
                                 )
                                 continue
                     except Exception as e:

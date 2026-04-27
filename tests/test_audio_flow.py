@@ -305,7 +305,7 @@ class TestAudioVoiceNotes:
 
         monkeypatch.setattr("app.services.transcription.download_whatsapp_media", download_mock)
         monkeypatch.setattr("app.services.transcription.transcribe_audio", transcribe_mock)
-        monkeypatch.setattr("app.routes.chat._send_wa_text", send_mock)
+        monkeypatch.setattr("app.services.meta_api.send_text", send_mock)
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.repositories.restaurant_repo.db_get_org_by_phone",
@@ -320,7 +320,7 @@ class TestAudioVoiceNotes:
         )
 
         send_mock.assert_awaited_once()
-        fallback_text = send_mock.call_args.args[1]
+        fallback_text = send_mock.call_args.args[3]
         assert "audios" in fallback_text.lower() or "escrib" in fallback_text.lower(), (
             f"Expected fallback about audio/writing, got: {fallback_text!r}"
         )
@@ -338,7 +338,7 @@ class TestAudioVoiceNotes:
 
         monkeypatch.setattr("app.services.transcription.download_whatsapp_media", download_mock)
         monkeypatch.setattr("app.services.transcription.transcribe_audio", transcribe_mock)
-        monkeypatch.setattr("app.routes.chat._send_wa_text", send_mock)
+        monkeypatch.setattr("app.services.meta_api.send_text", send_mock)
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.repositories.restaurant_repo.db_get_org_by_phone",
@@ -353,7 +353,7 @@ class TestAudioVoiceNotes:
         )
 
         send_mock.assert_awaited_once()
-        fallback_text = send_mock.call_args.args[1]
+        fallback_text = send_mock.call_args.args[3]
         assert "largo" in fallback_text.lower() or "corto" in fallback_text.lower(), (
             f"Expected fallback about length, got: {fallback_text!r}"
         )
@@ -403,7 +403,7 @@ class TestAudioVoiceNotes:
 
         monkeypatch.setattr("app.services.transcription.download_whatsapp_media", download_mock)
         monkeypatch.setattr("app.services.transcription.transcribe_audio", transcribe_mock)
-        monkeypatch.setattr("app.routes.chat._send_wa_text", send_mock)
+        monkeypatch.setattr("app.services.meta_api.send_text", send_mock)
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.repositories.restaurant_repo.db_get_org_by_phone",
@@ -418,7 +418,7 @@ class TestAudioVoiceNotes:
         )
 
         send_mock.assert_awaited_once()
-        fallback_text = send_mock.call_args.args[1]
+        fallback_text = send_mock.call_args.args[3]
         assert "escuch" in fallback_text.lower() or "intent" in fallback_text.lower(), (
             f"Expected fallback about hearing nothing, got: {fallback_text!r}"
         )
@@ -435,7 +435,7 @@ class TestAudioVoiceNotes:
 
         monkeypatch.setattr("app.services.transcription.download_whatsapp_media", download_mock)
         monkeypatch.setattr("app.services.transcription.transcribe_audio", transcribe_mock)
-        monkeypatch.setattr("app.routes.chat._send_wa_text", send_mock)
+        monkeypatch.setattr("app.services.meta_api.send_text", send_mock)
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.repositories.restaurant_repo.db_get_org_by_phone",
@@ -451,7 +451,7 @@ class TestAudioVoiceNotes:
         )
 
         send_mock.assert_awaited_once()
-        fallback_text = send_mock.call_args.args[1]
+        fallback_text = send_mock.call_args.args[3]
         assert "audio" in fallback_text.lower() or "escrib" in fallback_text.lower(), (
             f"Expected fallback mentioning audio/writing, got: {fallback_text!r}"
         )
@@ -464,7 +464,7 @@ class TestAudioVoiceNotes:
         send_mock = AsyncMock()
         process_mock = AsyncMock()
 
-        monkeypatch.setattr("app.routes.chat._send_wa_text", send_mock)
+        monkeypatch.setattr("app.services.meta_api.send_text", send_mock)
         monkeypatch.setattr("app.routes.chat._process_message", process_mock)
         monkeypatch.setattr(
             "app.repositories.restaurant_repo.db_get_org_by_phone",

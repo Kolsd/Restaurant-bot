@@ -330,7 +330,8 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
     MANDATORY — do NOT conditional it or catch TenantNotSetError.
     """
     import os
-    from app.routes.chat import _process_message, _send_wa_text
+    from app.routes.chat import _process_message
+    from app.services.meta_api import send_text as meta_send_text  # noqa: PLC0415
     from app.repositories.restaurant_repo import (  # noqa: PLC0415
         db_get_org_by_phone,
         db_get_location_by_id,
@@ -403,29 +404,26 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
             transcribed = await transcribe_audio(audio_bytes, mime_type=mime_type)
         except TranscriptionUnavailable:
             log.warning("audio.key_unavailable", audio_id=audio_id)
-            await _send_wa_text(
-                user_phone,
+            await meta_send_text(
+                bot_number, access_token, user_phone,
                 "Aún no proceso audios aquí. ¿Me lo escribes? 🙂",
-                phone_id,
-                access_token,
+                phone_id=phone_id,
             )
             return  # ack — do not retry, key won't appear on its own
         except AudioTooLongError:
             log.warning("audio.too_long", audio_id=audio_id)
-            await _send_wa_text(
-                user_phone,
+            await meta_send_text(
+                bot_number, access_token, user_phone,
                 "El audio es muy largo. ¿Me mandas uno más corto o lo escribes?",
-                phone_id,
-                access_token,
+                phone_id=phone_id,
             )
             return  # ack — retrying won't shrink the file
         except EmptyTranscriptionError:
             log.warning("audio.empty_transcription", audio_id=audio_id)
-            await _send_wa_text(
-                user_phone,
+            await meta_send_text(
+                bot_number, access_token, user_phone,
                 "No logré escuchar tu nota de voz. ¿Puedes intentar de nuevo o escribirlo?",
-                phone_id,
-                access_token,
+                phone_id=phone_id,
             )
             return  # ack — retrying won't help with an inaudible audio
         except TranscriptionError:
@@ -436,11 +434,10 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
         except Exception:
             # Unknown failure — send fallback and ack (do not retry unknown errors).
             log.exception("audio.processing_failed", audio_id=audio_id)
-            await _send_wa_text(
-                user_phone,
+            await meta_send_text(
+                bot_number, access_token, user_phone,
                 "No pude entender tu audio. ¿Me lo escribes?",
-                phone_id,
-                access_token,
+                phone_id=phone_id,
             )
             return
 
