@@ -284,6 +284,60 @@ async def test_lookup_works_inside_active_tenant_scope(org_and_cleanup):
 
 
 @pytest.mark.asyncio
+async def test_phone_match_when_modal_omits_country_code(org_and_cleanup):
+    """Bug fix: customer types '3144914554' (10-digit CO mobile, no country
+    code) in the menu modal. Bot receives '573144914554' from Meta.
+
+    Both must canonicalize to the same stored value. Pre-fix, the modal
+    saved '3144914554' and the bot looked up '573144914554' → no match,
+    claim never consumed. Now both sides go through _canonical_phone.
+    """
+    from app.repositories import qr_claims_repo
+    from app.services.tenant_context import tenant_scope
+
+    org_id = org_and_cleanup
+    bot = "+57888nocc"
+
+    # Customer types raw 10-digit number into the modal.
+    with tenant_scope(org_id):
+        claim_id = await qr_claims_repo.create_claim(
+            bot_number=bot, table_id="t-no-cc",
+            phone="3144914554", org_id=org_id,
+        )
+    assert claim_id > 0
+
+    # Bot receives the Meta-format phone (with country code) and looks up.
+    found = await qr_claims_repo.find_unclaimed_by_phone("573144914554", bot)
+    assert found is not None, "lookup must find the claim regardless of how the modal stored it"
+    assert found["table_id"] == "t-no-cc"
+    assert found["phone"] == "573144914554"
+
+
+@pytest.mark.asyncio
+async def test_phone_match_when_modal_includes_country_code(org_and_cleanup):
+    """Customer types '+57 314 491 4554' (with country code, '+', spaces)
+    in the modal. Bot receives '573144914554'. Match must succeed.
+    """
+    from app.repositories import qr_claims_repo
+    from app.services.tenant_context import tenant_scope
+
+    org_id = org_and_cleanup
+    bot = "+57888wcc"
+
+    with tenant_scope(org_id):
+        claim_id = await qr_claims_repo.create_claim(
+            bot_number=bot, table_id="t-w-cc",
+            phone="+57 314 491 4554", org_id=org_id,
+        )
+    assert claim_id > 0
+
+    found = await qr_claims_repo.find_unclaimed_by_phone("573144914554", bot)
+    assert found is not None
+    assert found["table_id"] == "t-w-cc"
+    assert found["phone"] == "573144914554"
+
+
+@pytest.mark.asyncio
 async def test_consume_race_returns_false_for_loser(org_and_cleanup):
     """Two workers calling mark_claimed on the same id concurrently:
     exactly one wins (returns True), the other returns False."""

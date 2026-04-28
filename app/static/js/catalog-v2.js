@@ -754,10 +754,10 @@ function promptPhoneAndClaim(state) {
           Para conectarte con el mesero virtual de ${restaurantLabel} por WhatsApp, dejanos tu número:
         </p>
         <label for="qr-claim-phone" style="display:block;font-size:0.82rem;color:#666;margin-bottom:4px;">
-          📱 Tu WhatsApp
+          📱 Tu WhatsApp (incluye código de país, ej: 573001234567)
         </label>
         <input id="qr-claim-phone" type="tel" inputmode="numeric" autocomplete="tel"
-               placeholder="3001234567" maxlength="15"
+               placeholder="573001234567" maxlength="15"
                style="width:100%;padding:0.7rem 0.8rem;font-size:1rem;
                       border:1.5px solid #ddd;border-radius:8px;outline:none;
                       box-sizing:border-box;" />

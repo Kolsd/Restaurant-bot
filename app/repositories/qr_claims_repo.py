@@ -34,11 +34,45 @@ from app.services.tenant_db import tenant_connection
 log = get_logger(__name__)
 
 
-def _normalize_phone(raw: str) -> str:
-    """Digits only, no '+'. Matches the format used by Meta webhooks."""
+def _canonical_phone(raw: str) -> str:
+    """Canonicalize a phone to digits-only WITH country code, matching the
+    format Meta WhatsApp webhooks deliver (e.g. '573144914554').
+
+    Both sides of the QR-Phone-Claim flow MUST agree on this canonical form
+    or the lookup fails:
+      - The web menu modal (catalog-v2.js → POST /api/qr-claim) — customer
+        may type the number with or without country code, with or without
+        '+', with or without spaces/dashes.
+      - The bot inbox path (Meta webhook → find_unclaimed_by_phone) —
+        Meta always sends digits-only with country code prefixed.
+
+    Rules (Colombia-only assumption — Mesio is CO-only today):
+      - Strip all non-digit characters (spaces, '+', '-', '(', ')', etc.).
+      - 10 digits starting with '3' → mobile CO without country code →
+        prepend '57' → e.g. '3144914554' becomes '573144914554'.
+      - 11 digits starting with '57' followed by a non-3 digit (e.g. '5712345678')
+        → treat as already canonical (CO landline format).
+      - 12+ digits → assume already canonical (any country), return as-is.
+      - <7 digits → invalid, return ''.
+
+    TODO (international expansion): once Mesio supports non-CO tenants,
+    pass the org's default country code (or detect from bot_number prefix)
+    so we don't hard-code '57'. For now, the assumption is safe because
+    every restaurant on the platform is Colombian.
+    """
     if not raw:
         return ""
-    return str(raw).replace(" ", "").replace("+", "").replace("-", "").strip()
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    if len(digits) < 7:
+        return ""
+    if len(digits) == 10 and digits.startswith("3"):
+        # CO mobile without country code → prepend 57
+        return "57" + digits
+    if len(digits) == 11 and digits.startswith("57") and not digits.startswith("573"):
+        # CO landline already with country code (e.g. 5712345678)
+        return digits
+    # 11+ digits otherwise (12, 13, 14, 15) → assume already canonical
+    return digits
 
 
 async def create_claim(
@@ -59,7 +93,7 @@ async def create_claim(
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    norm_phone = _normalize_phone(phone)
+    norm_phone = _canonical_phone(phone)
     if not norm_phone or not bot_number or not table_id:
         raise ValueError("bot_number, table_id, and phone are all required")
 
@@ -105,7 +139,7 @@ async def find_unclaimed_by_phone(phone: str, bot_number: str) -> Optional[dict]
 
     Returns None if no matching claim exists.
     """
-    norm_phone = _normalize_phone(phone)
+    norm_phone = _canonical_phone(phone)
     if not norm_phone or not bot_number:
         return None
 
