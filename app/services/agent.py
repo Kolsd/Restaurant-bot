@@ -41,9 +41,72 @@ def _ofuscar_phone(p: str) -> str:
 
 # h11 ≥0.16.0 enforces strict RFC 9110 header validation — strip accidental
 # leading whitespace/newlines/equals that some env var editors inject.
-_raw_api_key = os.getenv("ANTHROPIC_API_KEY", "")
-_api_key = _raw_api_key.strip().lstrip("=").strip()
-client = AsyncAnthropic(api_key=_api_key, timeout=30.0)
+def _resolve_anthropic_api_key() -> str:
+    raw = os.getenv("ANTHROPIC_API_KEY", "")
+    return raw.strip().lstrip("=").strip()
+
+
+def _diagnose_anthropic_key() -> None:
+    """Boot-time log so ops can verify the env var actually reached the
+    container, WITHOUT leaking the secret. We log just length + prefix
+    enough to recognize sk-ant-* style keys."""
+    key = _resolve_anthropic_api_key()
+    if not key:
+        log.error(
+            "anthropic.api_key.missing",
+            note="ANTHROPIC_API_KEY env var is empty/missing at module init",
+        )
+        return
+    prefix = key[:7] if len(key) > 8 else "(short)"
+    log.info(
+        "anthropic.api_key.present",
+        length=len(key),
+        prefix=prefix,
+    )
+
+
+_anthropic_client: AsyncAnthropic | None = None
+
+
+def _get_anthropic_client() -> AsyncAnthropic:
+    """Lazy singleton. Re-resolves the env var on first access so a key
+    seted POST container start (e.g. via Railway variable change without
+    a forced redeploy) still works on the next request. Once resolved
+    successfully, the client is cached for the process lifetime.
+    """
+    global _anthropic_client
+    if _anthropic_client is not None:
+        return _anthropic_client
+    key = _resolve_anthropic_api_key()
+    if not key:
+        # Don't crash; surface a clear error to call_claude which will
+        # already be in a try/except and fall back to a friendly reply.
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not configured. Set it in Railway env vars "
+            "and redeploy. Current value resolves to empty string."
+        )
+    _anthropic_client = AsyncAnthropic(api_key=key, timeout=30.0)
+    log.info("anthropic.client.initialized", key_length=len(key))
+    return _anthropic_client
+
+
+# Boot diagnostic — fires at module import so the first lines of the
+# Railway log show whether the env var reached the container.
+_diagnose_anthropic_key()
+
+# Backward-compat shim: existing code paths use `client.messages.create(...)`.
+# We need a sync attribute that always works, including before
+# _get_anthropic_client has been called once. Calling `client` itself is
+# safe because AsyncAnthropic constructor doesn't make network calls — it
+# only validates headers when create() is invoked.
+class _LazyClient:
+    """Forwards attribute access to the underlying AsyncAnthropic client,
+    re-resolving the env var if it wasn't available at module init."""
+    def __getattr__(self, name):
+        return getattr(_get_anthropic_client(), name)
+
+
+client = _LazyClient()
 
 MODEL_FAST    = os.environ.get("BOT_MODEL_FAST", "claude-haiku-4-5-20251001")
 MODEL_PRECISE = os.environ.get("BOT_MODEL_PRECISE", "claude-sonnet-4-6")
