@@ -826,10 +826,15 @@ function initCatalog() {
     }
     const itemsText = items.join('\n');
     if (state.tableId) {
-      // Include table name so detect_table_context can always identify the table,
-      // even if the user skipped the QR greeting and went straight to ordering.
+      // The [t:<id>] marker is REQUIRED by detect_table_context (agent.py:154)
+      // to establish a salon session. Without it the bot falls through to
+      // manual-text detection which is rejected by default for security
+      // (features.allow_manual_table_number=False). Append the marker so the
+      // customer's first message identifies the table unambiguously regardless
+      // of how WhatsApp formats the prefilled body.
       const tablePrefix = state.tableName ? `Estoy en ${state.tableName}\n` : '';
-      return `${tablePrefix}Quiero pedir:\n${itemsText}`;
+      const marker = `[t:${state.tableId}]`;
+      return `${tablePrefix}Quiero pedir:\n${itemsText}\n${marker}`;
     }
     return `Hola, me gustaría pedir:\n${itemsText}`;
   }

@@ -338,7 +338,13 @@ async def public_menu_context(table_id: str):
     wa_number = await get_table_wa_number(table)
     if not wa_number:
         raise HTTPException(status_code=404, detail="Restaurante no configurado para esta mesa")
-    wa_msg = f"Hola! Estoy en {table['name']}"
+    # The [t:<id>] marker is REQUIRED by detect_table_context (agent.py:154) to
+    # establish a salon session. Without it the bot falls through to manual-text
+    # detection which is gated by features.allow_manual_table_number=False (the
+    # secure default) and rejects the customer with no visible explanation. The
+    # marker is invisible in WhatsApp's preview because it sits at end-of-line
+    # and most clients trim it visually.
+    wa_msg = f"Hola! Estoy en {table['name']} [t:{table['id']}]"
     wa_url = f"https://wa.me/{wa_number}?text={urllib.parse.quote(wa_msg)}"
 
     menu = await db.db_get_menu(wa_number) or {}
