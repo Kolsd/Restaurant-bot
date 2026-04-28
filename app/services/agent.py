@@ -50,8 +50,9 @@ def _ofuscar_phone(p: str) -> str:
 # first).
 _ANTHROPIC_KEY_ENV_NAMES = (
     "ANTHROPIC_API_KEY",   # canonical
-    "ANTROPIC_API_KEY",    # common typo (missing H)
-    "ANTHROPHIC_API_KEY",  # less common typo (extra H)
+    "ANTROPIC_API_KEY",    # typo: missing H
+    "ANTHROPHIC_API_KEY",  # typo: extra H at the end
+    "ANTROPHIC_API_KEY",   # typo: P-H reversed (PM's actual prod env var, 2026-04-28)
 )
 
 
