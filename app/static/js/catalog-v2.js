@@ -130,7 +130,16 @@ const BADGE_SVG = {
   popular: `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M5 9C3 9 2 7.5 2 6C2 4.5 3 4 4 3C3.5 5 4.5 5.5 5 5.5C4 4 4.5 2.5 6.5 1C6.5 3 7 3.5 7 5C8 4 7.5 3 7.5 3C9 4 8.5 6 8.5 6.5C8.5 8 7 9 5 9Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>`
 };
 
-/* ── Cart persistence ── */
+/* ── Cart persistence ──
+ *
+ * Cart is persisted in localStorage with a 6-hour TTL. Stale carts from
+ * earlier sessions auto-expire so a customer who opens /menu hours later
+ * doesn't see a phantom "1 item" footer from a browse they never finished.
+ * The TTL lives inside the saved object alongside the cart so we don't
+ * need a separate key.
+ */
+const CART_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 function cartKey(botNumber) {
   // Returns null when botNumber is absent — callers must guard against null
   return botNumber ? 'mesio_cart_' + botNumber : null;
@@ -140,7 +149,20 @@ function loadCart(botNumber) {
   const key = cartKey(botNumber);
   if (!key) return {};
   try {
-    return JSON.parse(localStorage.getItem(key) || '{}');
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const stored = JSON.parse(raw);
+    // Backward compat: old carts were the raw map (no _savedAt). Treat them
+    // as expired so they don't linger forever.
+    if (!stored || typeof stored !== 'object' || !stored._savedAt) {
+      localStorage.removeItem(key);
+      return {};
+    }
+    if (Date.now() - stored._savedAt > CART_TTL_MS) {
+      localStorage.removeItem(key);
+      return {};
+    }
+    return stored.items || {};
   } catch { return {}; }
 }
 
@@ -148,7 +170,12 @@ function saveCart(botNumber, cart) {
   const key = cartKey(botNumber);
   if (!key) return;
   try {
-    localStorage.setItem(key, JSON.stringify(cart));
+    // Empty cart → wipe the key entirely so it doesn't sit there with TTL.
+    if (!cart || Object.keys(cart).length === 0) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify({ items: cart, _savedAt: Date.now() }));
   } catch (e) { console.warn('Cart persist failed (storage quota?):', e); }
 }
 
