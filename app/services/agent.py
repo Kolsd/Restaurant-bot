@@ -41,20 +41,40 @@ def _ofuscar_phone(p: str) -> str:
 
 # h11 ≥0.16.0 enforces strict RFC 9110 header validation — strip accidental
 # leading whitespace/newlines/equals that some env var editors inject.
-def _resolve_anthropic_api_key() -> str:
-    raw = os.getenv("ANTHROPIC_API_KEY", "")
-    return raw.strip().lstrip("=").strip()
+#
+# Tolerant to common typo of the variable name: hispanohablantes often write
+# "Antropic" instead of "Anthropic" (silent H), and Railway/.env files keep
+# whatever name was first typed. We accept both spellings — first one found
+# wins, with a warning logged when only the typo'd version is present so
+# ops can clean it up later. Order matches preference (correct spelling
+# first).
+_ANTHROPIC_KEY_ENV_NAMES = (
+    "ANTHROPIC_API_KEY",   # canonical
+    "ANTROPIC_API_KEY",    # common typo (missing H)
+    "ANTHROPHIC_API_KEY",  # less common typo (extra H)
+)
+
+
+def _resolve_anthropic_api_key() -> tuple[str, str | None]:
+    """Return (key, source_env_name). source is None if no key found."""
+    for name in _ANTHROPIC_KEY_ENV_NAMES:
+        raw = os.getenv(name, "")
+        cleaned = raw.strip().lstrip("=").strip() if raw else ""
+        if cleaned:
+            return cleaned, name
+    return "", None
 
 
 def _diagnose_anthropic_key() -> None:
     """Boot-time log so ops can verify the env var actually reached the
     container, WITHOUT leaking the secret. We log just length + prefix
     enough to recognize sk-ant-* style keys."""
-    key = _resolve_anthropic_api_key()
+    key, source = _resolve_anthropic_api_key()
     if not key:
         log.error(
             "anthropic.api_key.missing",
-            note="ANTHROPIC_API_KEY env var is empty/missing at module init",
+            checked=list(_ANTHROPIC_KEY_ENV_NAMES),
+            note="No Anthropic API key env var found at module init.",
         )
         return
     prefix = key[:7] if len(key) > 8 else "(short)"
@@ -62,7 +82,15 @@ def _diagnose_anthropic_key() -> None:
         "anthropic.api_key.present",
         length=len(key),
         prefix=prefix,
+        source=source,
     )
+    if source != "ANTHROPIC_API_KEY":
+        log.warning(
+            "anthropic.api_key.using_typo_fallback",
+            using=source,
+            recommended="ANTHROPIC_API_KEY",
+            note="Key found under a typo'd env var name. Rename in Railway when convenient.",
+        )
 
 
 _anthropic_client: AsyncAnthropic | None = None
@@ -77,16 +105,16 @@ def _get_anthropic_client() -> AsyncAnthropic:
     global _anthropic_client
     if _anthropic_client is not None:
         return _anthropic_client
-    key = _resolve_anthropic_api_key()
+    key, source = _resolve_anthropic_api_key()
     if not key:
         # Don't crash; surface a clear error to call_claude which will
         # already be in a try/except and fall back to a friendly reply.
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not configured. Set it in Railway env vars "
-            "and redeploy. Current value resolves to empty string."
+            "Anthropic API key is not configured. Set ANTHROPIC_API_KEY in "
+            f"Railway env vars and redeploy. Checked: {list(_ANTHROPIC_KEY_ENV_NAMES)}."
         )
     _anthropic_client = AsyncAnthropic(api_key=key, timeout=30.0)
-    log.info("anthropic.client.initialized", key_length=len(key))
+    log.info("anthropic.client.initialized", key_length=len(key), source=source)
     return _anthropic_client
 
 
