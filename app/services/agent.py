@@ -152,6 +152,54 @@ def _block_attr(block, attr: str):
     return getattr(block, attr, None)
 
 async def detect_table_context(message: str, phone: str, bot_number: str) -> dict | None:
+    # 0. QR-Phone-Claim (Capa 1, post-2026-04-28).
+    #    Cuando el cliente escaneó un QR vía /menu y registró su phone en
+    #    /api/qr-claim, hay un "claim" pendiente que vincula su phone al
+    #    table_id sin necesidad de un marker visible en el mensaje. Esto
+    #    permite que el wa.me prefilled sea 100% limpio. Path 0 corre
+    #    ANTES del marker [t:X] porque el claim es la fuente más confiable
+    #    cuando existe (cliente recién escaneó), y ANTES del path "sesión
+    #    activa" porque un cliente que re-escanea quiere empezar fresh
+    #    sobre la nueva mesa que escaneó. Diseño: docs/MESA_QR_ARCHITECTURE.md.
+    from app.repositories import qr_claims_repo  # noqa: PLC0415
+    claim = await qr_claims_repo.find_unclaimed_by_phone(phone, bot_number)
+    if claim:
+        # Mark the claim as consumed BEFORE creating the session so a
+        # concurrent worker (rare) sees it taken.
+        consumed = await qr_claims_repo.mark_claimed(claim["id"])
+        if consumed:
+            with _bypass_tenant("agent.detect_table_context: qr_claim → table lookup"):
+                table = await db.db_get_table_by_id(claim["table_id"])
+            if table:
+                with _bypass_tenant("agent.detect_table_context: qr_claim session setup"):
+                    # Same logic as path 1 below — close any prior session
+                    # for this phone on a DIFFERENT table, then open the new
+                    # one. Multi-participant on the SAME table is handled by
+                    # Capa 2 (join_code, see MESA_QR_ARCHITECTURE.md).
+                    session = await db.db_get_active_session(phone, bot_number)
+                    if session and session.get("table_id") != table["id"]:
+                        await db.db_close_session(
+                            phone, bot_number,
+                            reason="scanned_new_table_via_qr_claim",
+                            closed_by_username="system",
+                        )
+                    await db.db_create_table_session(
+                        phone, bot_number, table["id"], table["name"],
+                        org_id=table.get("org_id"),
+                        location_id=table.get("location_id"),
+                    )
+                table["is_new_session"] = True
+                table["from_qr_claim"] = True
+                table["geo_verified"] = claim.get("geo_verified")
+                return table
+            # Claim referenced a table that doesn't exist (corrupt state) —
+            # fall through to other paths and log for visibility.
+            log.warning(
+                "qr_claim.table_not_found",
+                claim_id=claim["id"],
+                table_id=claim["table_id"],
+            )
+
     # 1. Retrocompatibilidad: table_id explícito (por si hay QRs viejos físicos)
     tid_match = re.search(r'\[(?:table_id|t):([^\]]+)\]', message)
     if tid_match:

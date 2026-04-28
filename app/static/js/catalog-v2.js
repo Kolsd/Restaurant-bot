@@ -709,6 +709,161 @@ class HeroCarousel {
   }
 }
 
+/* ── QR-Phone-Claim modal (Capa 1) ──
+ *
+ * Shown once per page load when state.tableId is set (i.e. customer arrived
+ * via a table QR scan). Asks for their WhatsApp phone, attempts a
+ * best-effort browser geolocation, posts to /api/qr-claim, and resolves.
+ *
+ * Returns: { ok: true, geo_verified: bool|null } on success.
+ *          { ok: false, reason: 'dismissed'|'invalid'|'network' } otherwise.
+ *
+ * The modal is keyboard-accessible and traps focus while open.
+ * UX intent: this is the ONE friction point the customer sees — make it
+ * fast, friendly, and explain why we ask.
+ */
+function promptPhoneAndClaim(state) {
+  return new Promise((resolve) => {
+    if (!state.tableId || !state.botNumber) {
+      resolve({ ok: false, reason: 'no_table_context' });
+      return;
+    }
+
+    // Build modal DOM. Inline styles to avoid extra CSS file dependency
+    // (matches the pattern used by mesioConfirm in mesio-utils.js).
+    const overlay = document.createElement('div');
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'qr-claim-title');
+    overlay.style.cssText = (
+      'position:fixed;inset:0;background:rgba(0,0,0,0.55);' +
+      'display:flex;align-items:center;justify-content:center;' +
+      'z-index:10000;padding:1rem;'
+    );
+
+    const tableLabel = state.tableName ? `Mesa ${_escHtml(state.tableName)}` : 'tu mesa';
+    const restaurantLabel = state.restaurantName ? _escHtml(state.restaurantName) : 'el restaurante';
+
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:14px;max-width:420px;width:100%;
+                  padding:1.5rem;box-shadow:0 10px 40px rgba(0,0,0,0.25);">
+        <h2 id="qr-claim-title" style="margin:0 0 0.5rem;font-size:1.15rem;font-weight:600;color:#1a1a1a;">
+          🌟 Bienvenido a ${tableLabel}
+        </h2>
+        <p style="margin:0 0 1rem;font-size:0.92rem;color:#555;line-height:1.45;">
+          Para conectarte con el mesero virtual de ${restaurantLabel} por WhatsApp, dejanos tu número:
+        </p>
+        <label for="qr-claim-phone" style="display:block;font-size:0.82rem;color:#666;margin-bottom:4px;">
+          📱 Tu WhatsApp
+        </label>
+        <input id="qr-claim-phone" type="tel" inputmode="numeric" autocomplete="tel"
+               placeholder="3001234567" maxlength="15"
+               style="width:100%;padding:0.7rem 0.8rem;font-size:1rem;
+                      border:1.5px solid #ddd;border-radius:8px;outline:none;
+                      box-sizing:border-box;" />
+        <div id="qr-claim-error" style="display:none;color:#C0392B;font-size:0.82rem;
+                                          margin-top:6px;"></div>
+        <div style="display:flex;gap:8px;margin-top:1.2rem;">
+          <button type="button" id="qr-claim-skip"
+                  style="flex:1;padding:0.7rem;background:#f1f1f1;border:none;
+                         border-radius:8px;color:#666;cursor:pointer;font-size:0.95rem;">
+            Saltar
+          </button>
+          <button type="button" id="qr-claim-submit"
+                  style="flex:2;padding:0.7rem;background:#1D9E75;border:none;
+                         border-radius:8px;color:#fff;cursor:pointer;font-size:0.95rem;
+                         font-weight:600;">
+            Continuar
+          </button>
+        </div>
+        <p style="margin:0.85rem 0 0;font-size:0.74rem;color:#999;line-height:1.4;text-align:center;">
+          Tu número solo se usa para identificarte con el bot. No spam.
+        </p>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    const phoneInput = overlay.querySelector('#qr-claim-phone');
+    const submitBtn = overlay.querySelector('#qr-claim-submit');
+    const skipBtn = overlay.querySelector('#qr-claim-skip');
+    const errEl = overlay.querySelector('#qr-claim-error');
+    phoneInput.focus();
+
+    const cleanup = () => {
+      try { document.body.removeChild(overlay); } catch (e) { /* already removed */ }
+    };
+
+    const showErr = (msg) => {
+      errEl.textContent = msg;
+      errEl.style.display = '';
+    };
+
+    const tryGeolocate = () => new Promise((res) => {
+      if (!navigator.geolocation) { res({ lat: null, lon: null }); return; }
+      const timer = setTimeout(() => res({ lat: null, lon: null }), 3500);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          clearTimeout(timer);
+          res({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        },
+        () => { clearTimeout(timer); res({ lat: null, lon: null }); },
+        { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 }
+      );
+    });
+
+    const submit = async () => {
+      const raw = phoneInput.value || '';
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length < 7 || digits.length > 15) {
+        showErr('Por favor ingresa un número válido (al menos 7 dígitos).');
+        phoneInput.focus();
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Conectando...';
+      const { lat, lon } = await tryGeolocate();
+      try {
+        const r = await fetch('/api/qr-claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bot_number: state.botNumber,
+            table_id: state.tableId,
+            phone: digits,
+            geo_lat: lat,
+            geo_lon: lon,
+          }),
+        });
+        if (!r.ok) {
+          showErr(`No pudimos registrarte (${r.status}). Continúa de todos modos.`);
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Continuar';
+          // After a brief moment, close the modal and let the customer browse —
+          // they'll fall back to the [t:X] marker path when they tap WhatsApp.
+          setTimeout(() => { cleanup(); resolve({ ok: false, reason: 'network' }); }, 1500);
+          return;
+        }
+        const data = await r.json();
+        cleanup();
+        resolve({ ok: true, geo_verified: data.geo_verified, claim_id: data.claim_id });
+      } catch (e) {
+        showErr('Error de red. Continuamos sin registrarte.');
+        setTimeout(() => { cleanup(); resolve({ ok: false, reason: 'network' }); }, 1500);
+      }
+    };
+
+    submitBtn.addEventListener('click', submit);
+    phoneInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submit();
+    });
+    skipBtn.addEventListener('click', () => {
+      cleanup();
+      resolve({ ok: false, reason: 'dismissed' });
+    });
+  });
+}
+
+
 /* ── Main CatalogPage ── */
 // Maps card element → { dish, cat, available, callbacks } for rerenderCards
 const _cardMeta = new WeakMap();
@@ -735,6 +890,10 @@ function initCatalog() {
     openDish: null,
     loading: true,
     error: null,
+    // QR-Phone-Claim (Capa 1): when this is true, the bot will identify
+    // the table via the registered claim — the wa.me message can be sent
+    // without the [t:tbl-X] marker. See docs/MESA_QR_ARCHITECTURE.md.
+    qrClaimDone: false,
   };
 
   // Detect endpoint
@@ -826,13 +985,17 @@ function initCatalog() {
     }
     const itemsText = items.join('\n');
     if (state.tableId) {
-      // The [t:<id>] marker is REQUIRED by detect_table_context (agent.py:154)
-      // to establish a salon session. Without it the bot falls through to
-      // manual-text detection which is rejected by default for security
-      // (features.allow_manual_table_number=False). Append the marker so the
-      // customer's first message identifies the table unambiguously regardless
-      // of how WhatsApp formats the prefilled body.
+      // QR-Phone-Claim (Capa 1, post-2026-04-28): when state.qrClaimDone is
+      // true the customer registered their phone via the modal and the bot
+      // will identify the table via that claim — no marker needed, message
+      // 100% clean. When the claim FAILED (modal skipped, network error,
+      // /api/qr-claim returned non-2xx) we fall back to the visible [t:X]
+      // marker so the customer doesn't lose their table.
+      // See docs/MESA_QR_ARCHITECTURE.md.
       const tablePrefix = state.tableName ? `Estoy en ${state.tableName}\n` : '';
+      if (state.qrClaimDone) {
+        return `${tablePrefix}Quiero pedir:\n${itemsText}`;
+      }
       const marker = `[t:${state.tableId}]`;
       return `${tablePrefix}Quiero pedir:\n${itemsText}\n${marker}`;
     }
@@ -1239,6 +1402,28 @@ function initCatalog() {
       errorBannerEl.style.display = 'none';
       renderHeader(state);
       setState({});
+
+      // QR-Phone-Claim (Capa 1, post-2026-04-28). If the customer arrived
+      // via a table QR scan, prompt for their WhatsApp number BEFORE they
+      // tap "Pedir por WhatsApp". The phone is pre-bound on the server so
+      // the bot identifies the table by exact phone match, and the prefilled
+      // wa.me message stays clean (no [t:X] marker visible to the customer).
+      // The modal is best-effort — if the customer dismisses it or the
+      // server rejects, we still let them browse and the marker fallback
+      // (in buildWaMessage) keeps things working. Design:
+      // docs/MESA_QR_ARCHITECTURE.md.
+      if (state.tableId && !state.qrClaimDone) {
+        try {
+          const claim = await promptPhoneAndClaim(state);
+          if (claim && claim.ok) {
+            state.qrClaimDone = true;
+            state.geoVerified = claim.geo_verified;
+          }
+        } catch (e) {
+          // Non-blocking: log to console for debug, continue with fallback.
+          console.warn('QR claim flow skipped:', e);
+        }
+      }
     } catch (err) {
       state.loading = false;
       state.error = String(err.message || err);

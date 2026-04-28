@@ -244,6 +244,111 @@ async def public_restaurant_info(id: int):
     return {"name": restaurant.get("name", "")}
 
 
+# ── QR-Phone-Claim (Capa 1 de identificación de mesa) ─────────────────
+# Diseño completo: docs/MESA_QR_ARCHITECTURE.md
+# El cliente escanea QR → /menu/{table_id} pide su teléfono → el browser
+# llama a este endpoint para registrar el pre-binding (phone, table). Cuando
+# el cliente envía el primer mensaje al bot, detect_table_context busca
+# por igualdad exacta de phone y abre la sesión sobre la mesa correcta —
+# sin race conditions ni markers visibles en el WhatsApp.
+
+class QrClaimRequest(BaseModel):
+    bot_number: str
+    table_id: str
+    phone: str
+    geo_lat: float | None = None
+    geo_lon: float | None = None
+
+    @field_validator("phone")
+    @classmethod
+    def _phone_digits_only(cls, v: str) -> str:
+        digits = "".join(ch for ch in (v or "") if ch.isdigit())
+        if len(digits) < 7 or len(digits) > 15:
+            raise ValueError("phone must be 7-15 digits")
+        return digits
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Haversine formula — same as db_resolve_location_by_gps."""
+    from math import radians, sin, cos, asin, sqrt
+    r1, r2 = radians(lat1), radians(lat2)
+    dlat = r2 - r1
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(r1) * cos(r2) * sin(dlon / 2) ** 2
+    return 6371.0 * 2 * asin(sqrt(a))
+
+
+@router.post("/api/qr-claim")
+async def post_qr_claim(request: Request, body: QrClaimRequest):
+    """Register a pre-binding between a phone and a table QR scan.
+
+    Public endpoint (no auth — scanned by anonymous customers). Rate-limited
+    by IP to prevent abuse: 30 claims/min/IP.
+
+    Returns 201 + claim_id on success. Returns 404 if bot_number doesn't
+    resolve to any org. Returns 422 if phone format is invalid (Pydantic).
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    allowed = await state_store.rate_limit_check(
+        f"qr_claim:{client_ip}", max_requests=30, window_seconds=60,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    normalized_bot = body.bot_number.replace("+", "").replace(" ", "").strip()
+
+    # Resolve org/location from bot_number BEFORE entering tenant_scope.
+    # The client menu page knows the bot_number from the URL it loaded.
+    with bypass_tenant_scope("post_qr_claim: pre-resolve org from bot_number"):
+        rest = await restaurant_repo.db_get_restaurant_by_bot_number(normalized_bot)
+    if not rest:
+        raise HTTPException(status_code=404, detail="Restaurante no encontrado para ese número")
+
+    org_id = int(rest["id"])
+    location_id = rest.get("location_id")
+
+    # Geo-fence check: 50m radius around the location's coords.
+    geo_verified: bool | None = None
+    if body.geo_lat is not None and body.geo_lon is not None:
+        loc_lat = rest.get("latitude")
+        loc_lon = rest.get("longitude")
+        if loc_lat is not None and loc_lon is not None:
+            try:
+                distance_km = _haversine_km(
+                    float(body.geo_lat), float(body.geo_lon),
+                    float(loc_lat), float(loc_lon),
+                )
+                geo_verified = distance_km <= 0.05  # 50m
+                if not geo_verified:
+                    log.warning(
+                        "qr_claim.geo_far",
+                        org_id=org_id,
+                        table_id=body.table_id,
+                        distance_km=round(distance_km, 3),
+                    )
+            except (TypeError, ValueError):
+                geo_verified = None
+
+    from app.repositories import qr_claims_repo  # noqa: PLC0415
+    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+
+    with tenant_scope(org_id):
+        claim_id = await qr_claims_repo.create_claim(
+            bot_number=normalized_bot,
+            table_id=body.table_id,
+            phone=body.phone,
+            org_id=org_id,
+            location_id=int(location_id) if location_id else None,
+            geo_verified=geo_verified,
+        )
+
+    return {
+        "ok": True,
+        "claim_id": claim_id,
+        "geo_verified": geo_verified,
+    }
+
+
 @router.get("/api/public/menu/{bot_number}")
 async def get_public_menu(request: Request, bot_number: str):
     # ── Rate limit: 30 req/min por IP — previene harvesting masivo ─────────────
