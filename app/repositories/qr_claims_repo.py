@@ -143,23 +143,35 @@ async def find_unclaimed_by_phone(phone: str, bot_number: str) -> Optional[dict]
     if not norm_phone or not bot_number:
         return None
 
+    # Try canonical form first (what _canonical_phone produces). Fall back to
+    # the raw local form (10-digit Colombia mobile without country code) for
+    # any legacy claims stored before the canonicalization fix in d7ceacc
+    # (2026-04-28). Within 10 min those legacy rows expire; this fallback
+    # bridges the gap without losing in-flight claims.
+    candidates = [norm_phone]
+    if norm_phone.startswith("57") and len(norm_phone) == 12:
+        candidates.append(norm_phone[2:])  # strip CO country code → 10 digits
+
     with bypass_tenant_scope_if_unset("qr_claims_repo.find_unclaimed_by_phone: pre-tenant lookup"):
         async with tenant_connection() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT id, bot_number, org_id, location_id, table_id,
-                       phone, geo_verified, created_at, expires_at, claimed_at
-                FROM qr_scan_pending
-                WHERE phone = $1
-                  AND bot_number = $2
-                  AND claimed_at IS NULL
-                  AND expires_at > NOW()
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                norm_phone, bot_number,
-            )
-    return dict(row) if row else None
+            for candidate in candidates:
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, bot_number, org_id, location_id, table_id,
+                           phone, geo_verified, created_at, expires_at, claimed_at
+                    FROM qr_scan_pending
+                    WHERE phone = $1
+                      AND bot_number = $2
+                      AND claimed_at IS NULL
+                      AND expires_at > NOW()
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    candidate, bot_number,
+                )
+                if row:
+                    return dict(row)
+    return None
 
 
 async def mark_claimed(claim_id: int) -> bool:
