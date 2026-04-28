@@ -152,6 +152,10 @@ def _get_anthropic_client() -> AsyncAnthropic:
         return _anthropic_client
     key, source = _resolve_anthropic_api_key()
     if not key:
+        # Re-emit the full diagnostic on EVERY missing-key event so log
+        # filters / file downloads that excluded the boot-time entry
+        # still surface the env-var state. Idempotent and cheap.
+        _diagnose_anthropic_key()
         # Don't crash; surface a clear error to call_claude which will
         # already be in a try/except and fall back to a friendly reply.
         raise RuntimeError(
