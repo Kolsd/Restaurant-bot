@@ -56,12 +56,35 @@ _ANTHROPIC_KEY_ENV_NAMES = (
 
 
 def _resolve_anthropic_api_key() -> tuple[str, str | None]:
-    """Return (key, source_env_name). source is None if no key found."""
+    """Return (key, source_env_name). source is None if no key found.
+
+    Two passes:
+
+    1. Canonical lookup by exact name (fast path).
+    2. Defensive scan over os.environ: find any var whose NAME, after
+       stripping whitespace/newlines, matches one of the targets. This
+       catches the case where Railway's UI accepted a trailing newline
+       in the variable NAME (e.g. "ANTHROPIC_API_KEY\\n") — os.getenv
+       with the clean name then returns "" and the legit value lives
+       under the malformed key. Diagnosed in deploy 3576a78d
+       (2026-04-28).
+    """
     for name in _ANTHROPIC_KEY_ENV_NAMES:
         raw = os.getenv(name, "")
         cleaned = raw.strip().lstrip("=").strip() if raw else ""
         if cleaned:
             return cleaned, name
+
+    targets = {n.upper() for n in _ANTHROPIC_KEY_ENV_NAMES}
+    for actual_name, raw in os.environ.items():
+        normalized = actual_name.strip().upper()
+        if normalized in targets:
+            cleaned = (raw or "").strip().lstrip("=").strip()
+            if cleaned:
+                # Return the literal (malformed) name so the warning log
+                # shows ops exactly what to clean up in Railway.
+                return cleaned, actual_name
+
     return "", None
 
 
