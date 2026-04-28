@@ -71,9 +71,31 @@ def _diagnose_anthropic_key() -> None:
     enough to recognize sk-ant-* style keys."""
     key, source = _resolve_anthropic_api_key()
     if not key:
+        # Help ops find the misnamed env var: list every env var name in
+        # the container that even REMOTELY looks like an API key. This
+        # exposes typos and trailing-whitespace issues without leaking
+        # any secret values (only NAMES are logged, never values).
+        suspicious_keys = sorted(
+            repr(k) for k in os.environ.keys()
+            if any(
+                token in k.upper().replace(" ", "")
+                for token in ("ANTHROP", "ANTROP", "API_KEY", "APIKEY", "CLAUDE")
+            )
+        )
+        # Also log how the canonical name LOOKS to the resolver (raw len
+        # before stripping) so we can detect "value is just whitespace".
+        canonical_raw = os.environ.get("ANTHROPIC_API_KEY", None)
+        canonical_state = (
+            "unset" if canonical_raw is None
+            else f"set_but_empty(len={len(canonical_raw)})" if not canonical_raw.strip()
+            else f"set_with_content(len={len(canonical_raw)})"  # impossible if resolver returned "" — log anyway
+        )
         log.error(
             "anthropic.api_key.missing",
             checked=list(_ANTHROPIC_KEY_ENV_NAMES),
+            canonical_state=canonical_state,
+            suspicious_env_keys=suspicious_keys,
+            total_env_vars=len(os.environ),
             note="No Anthropic API key env var found at module init.",
         )
         return
