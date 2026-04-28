@@ -49,11 +49,13 @@ def _ofuscar_phone(p: str) -> str:
 # ops can clean it up later. Order matches preference (correct spelling
 # first).
 _ANTHROPIC_KEY_ENV_NAMES = (
-    "ANTHROPIC_API_KEY",   # canonical
-    "ANTROPIC_API_KEY",    # typo: missing H
-    "ANTHROPHIC_API_KEY",  # typo: extra H at the end
-    "ANTROPHIC_API_KEY",   # typo: P-H reversed (PM's actual prod env var, 2026-04-28)
+    "ANTHROPIC_API_KEY",   # canonical — only accepted spelling
 )
+# Typo fallbacks (ANTROPIC_API_KEY, ANTHROPHIC_API_KEY, ANTROPHIC_API_KEY) were
+# active 2026-04-28 to unblock production while a misnamed Railway var was
+# in place. Removed by PM request — rely on canonical naming + the
+# trailing-whitespace pass below to handle edge cases. Any future typo
+# becomes visible via anthropic.api_key.missing.suspicious_env_keys.
 
 
 def _resolve_anthropic_api_key() -> tuple[str, str | None]:
