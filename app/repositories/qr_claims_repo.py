@@ -25,7 +25,10 @@ from __future__ import annotations
 from typing import Optional
 
 from app.services.logging import get_logger
-from app.services.tenant_context import bypass_tenant_scope
+from app.services.tenant_context import (
+    bypass_tenant_scope,
+    bypass_tenant_scope_if_unset,
+)
 from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
@@ -87,20 +90,26 @@ async def create_claim(
 async def find_unclaimed_by_phone(phone: str, bot_number: str) -> Optional[dict]:
     """Look up the most recent unclaimed, unexpired claim for this phone+bot.
 
-    Called from the bot's pre-tenant resolution path — the bot does NOT
-    yet know which org owns the message. Uses bypass_tenant_scope to
-    cross-tenant query qr_scan_pending; the returned claim contains the
-    org_id which the caller uses to enter tenant_scope for downstream
-    calls.
+    Soft-scope contract:
+      - Production: called from agent.detect_table_context which runs inside
+        tenant_scope(org_id) set by inbox_worker (Rule #14). The lookup
+        uses the active scope — RLS filters to that org, which is correct
+        because qr_scan_pending was created by /api/qr-claim under the
+        SAME org (resolved from the same bot_number).
+      - Tests / legacy /chat endpoint: called without a scope. The soft
+        bypass enters bypass mode so the lookup works.
 
-    Returns None if no matching claim exists (caller falls back to
-    legacy table identification paths).
+    A strict bypass_tenant_scope here would conflict with the active
+    tenant_scope in production (TenantContextConflict). Diagnosed in
+    deploy 2f91b58f-963c-41e1-8368-d12ce16ef60a (2026-04-28).
+
+    Returns None if no matching claim exists.
     """
     norm_phone = _normalize_phone(phone)
     if not norm_phone or not bot_number:
         return None
 
-    with bypass_tenant_scope("qr_claims_repo.find_unclaimed_by_phone: pre-tenant lookup"):
+    with bypass_tenant_scope_if_unset("qr_claims_repo.find_unclaimed_by_phone: pre-tenant lookup"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 """
@@ -124,9 +133,10 @@ async def mark_claimed(claim_id: int) -> bool:
     unclaimed → claimed; False if it was already claimed (race with
     another worker — rare but possible with parallel inbox workers).
 
-    # Requires active tenant_scope() or bypass_tenant_scope().
+    Same soft-scope contract as find_unclaimed_by_phone — works under
+    an active tenant_scope (production) or without one (tests).
     """
-    with bypass_tenant_scope("qr_claims_repo.mark_claimed: cross-tenant claim consumption"):
+    with bypass_tenant_scope_if_unset("qr_claims_repo.mark_claimed: cross-tenant claim consumption"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 """

@@ -253,6 +253,37 @@ async def test_geo_verified_persisted(org_and_cleanup, patched_pool):
 
 
 @pytest.mark.asyncio
+async def test_lookup_works_inside_active_tenant_scope(org_and_cleanup):
+    """Regression: production calls find_unclaimed_by_phone from WITHIN
+    tenant_scope (set by inbox_worker per CLAUDE.md Rule #14). The repo
+    used to use strict bypass_tenant_scope which raised TenantContextConflict
+    in this path. Now uses bypass_tenant_scope_if_unset (soft bypass).
+
+    This test reproduces the exact production scenario that crashed in
+    deploy 2f91b58f-963c-41e1-8368-d12ce16ef60a (2026-04-28) and verifies
+    the fix.
+    """
+    from app.repositories import qr_claims_repo
+    from app.services.tenant_context import tenant_scope
+
+    org_id = org_and_cleanup
+    bot = "+57888prod"
+
+    with tenant_scope(org_id):
+        claim_id = await qr_claims_repo.create_claim(
+            bot_number=bot, table_id="t-prod", phone="3008888888", org_id=org_id,
+        )
+
+    # Now simulate inbox_worker flow: tenant_scope active when lookup runs.
+    with tenant_scope(org_id):
+        found = await qr_claims_repo.find_unclaimed_by_phone("3008888888", bot)
+        assert found is not None, "lookup must work inside an active tenant_scope"
+        assert found["table_id"] == "t-prod"
+        consumed = await qr_claims_repo.mark_claimed(int(found["id"]))
+        assert consumed is True
+
+
+@pytest.mark.asyncio
 async def test_consume_race_returns_false_for_loser(org_and_cleanup):
     """Two workers calling mark_claimed on the same id concurrently:
     exactly one wins (returns True), the other returns False."""
