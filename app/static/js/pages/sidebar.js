@@ -273,5 +273,162 @@
 
     // Fix 3: initialize mobile hamburger + drawer after sidebar is fully rendered
     initMobileSidebar();
+
+    // Sede switcher: wire the sb-switcher element to a popover that lists
+    // the org's locations and lets the user filter the dashboard to a sede.
+    initSedeSwitcher(sb);
   });
+
+  // ── Sede switcher (multi-sucursal navigation) ───────────────────────────
+  // Shows a popover under #sb-switcher with the org's locations + Casa Matriz.
+  // Only visible to owner/admin/gerente roles. On select, persists the choice
+  // to localStorage (rb_branch_id for legacy header, rb_current_location_id
+  // for X-Location-ID) and reloads the page so all data refetches.
+  function initSedeSwitcher(sb) {
+    const switcherEl = sb.querySelector('#sb-switcher');
+    if (!switcherEl) return;
+
+    const role = (localStorage.getItem('rb_role') || 'owner').toLowerCase();
+    const operationalRoles = ['caja', 'mesero', 'cocina', 'bar', 'domiciliario'];
+    if (operationalRoles.includes(role)) return; // staff can't switch sedes
+
+    switcherEl.style.cursor = 'pointer';
+    switcherEl.setAttribute('role', 'button');
+    switcherEl.setAttribute('aria-haspopup', 'listbox');
+    switcherEl.setAttribute('aria-expanded', 'false');
+
+    let popover = null;
+    let isOpen = false;
+
+    function close() {
+      if (popover) { popover.remove(); popover = null; }
+      isOpen = false;
+      switcherEl.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    }
+
+    function onDocClick(e) {
+      if (!popover) return;
+      if (popover.contains(e.target) || switcherEl.contains(e.target)) return;
+      close();
+    }
+
+    function onKey(e) {
+      if (e.key === 'Escape') close();
+    }
+
+    async function fetchBranches() {
+      try {
+        const headers = (typeof mesioHeaders === 'function')
+          ? mesioHeaders()
+          : { 'Authorization': 'Bearer ' + (localStorage.getItem('rb_token') || '') };
+        const r = await fetch('/api/team/branches', { headers });
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Array.isArray(data.branches) ? data.branches : [];
+      } catch (e) { console.warn('sede switcher: fetchBranches failed', e); return []; }
+    }
+
+    function applyAndReload(value) {
+      try {
+        if (value === 'matriz' || value === '' || value == null) {
+          localStorage.removeItem('rb_branch_id');
+          if (typeof mesioSetCurrentLocationId === 'function') mesioSetCurrentLocationId('all');
+        } else {
+          localStorage.setItem('rb_branch_id', String(value));
+          if (typeof mesioSetCurrentLocationId === 'function') mesioSetCurrentLocationId(value);
+        }
+      } catch (e) { console.warn('sede switcher: persist failed', e); }
+      window.location.reload();
+    }
+
+    async function open() {
+      if (isOpen) return;
+      isOpen = true;
+      switcherEl.setAttribute('aria-expanded', 'true');
+
+      const branches = await fetchBranches();
+      const current = localStorage.getItem('rb_branch_id') || 'matriz';
+
+      popover = document.createElement('div');
+      popover.className = 'sb-switcher-popover';
+      popover.setAttribute('role', 'listbox');
+      popover.style.cssText = [
+        'position:absolute',
+        'left:8px',
+        'right:8px',
+        'top:' + (switcherEl.offsetTop + switcherEl.offsetHeight + 4) + 'px',
+        'background:#fff',
+        'border:1px solid var(--border-2,#e2e2dd)',
+        'border-radius:10px',
+        'box-shadow:0 8px 24px rgba(0,0,0,.08)',
+        'z-index:1000',
+        'overflow:hidden',
+        'max-height:340px',
+        'overflow-y:auto'
+      ].join(';');
+
+      const items = [
+        { value: 'matriz', name: 'Casa Matriz', sub: 'Todas las sucursales' }
+      ].concat(
+        branches.map(b => ({ value: String(b.id), name: b.name || ('Sede ' + b.id), sub: '' }))
+      );
+
+      items.forEach(function(it) {
+        const row = document.createElement('div');
+        row.setAttribute('role', 'option');
+        const isActive = String(current) === String(it.value);
+        row.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        row.style.cssText = [
+          'padding:10px 14px',
+          'cursor:pointer',
+          'font-size:13px',
+          'color:var(--text-1,#1a1a1a)',
+          'border-bottom:1px solid var(--border-3,#f1f1ec)',
+          'display:flex',
+          'align-items:center',
+          'gap:8px',
+          isActive ? 'background:var(--brand-soft,#e8f5ee)' : ''
+        ].join(';');
+        const check = document.createElement('span');
+        check.textContent = isActive ? '✓' : '';
+        check.style.cssText = 'width:14px;color:var(--brand,#1D9E75);font-weight:700;flex-shrink:0;';
+        const txt = document.createElement('div');
+        txt.style.cssText = 'flex:1;min-width:0;';
+        const name = document.createElement('div');
+        name.textContent = it.name;
+        name.style.cssText = 'font-weight:' + (isActive ? '600' : '500');
+        txt.appendChild(name);
+        if (it.sub) {
+          const sub = document.createElement('div');
+          sub.textContent = it.sub;
+          sub.style.cssText = 'font-size:11px;color:var(--text-3,#888);margin-top:2px;';
+          txt.appendChild(sub);
+        }
+        row.appendChild(check);
+        row.appendChild(txt);
+        row.addEventListener('mouseenter', function() {
+          if (!isActive) row.style.background = 'var(--bg-2,#f7f7f3)';
+        });
+        row.addEventListener('mouseleave', function() {
+          if (!isActive) row.style.background = '';
+        });
+        row.addEventListener('click', function() { applyAndReload(it.value); });
+        popover.appendChild(row);
+      });
+
+      sb.appendChild(popover);
+      // defer so this same click doesn't immediately close it
+      setTimeout(function() {
+        document.addEventListener('click', onDocClick);
+        document.addEventListener('keydown', onKey);
+      }, 0);
+    }
+
+    switcherEl.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (isOpen) close(); else open();
+    });
+  }
 })();
