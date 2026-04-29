@@ -412,6 +412,11 @@ from app.repositories.tables_repo import (
     db_get_closed_sessions,
     db_get_session_by_id,
     db_reopen_session,
+    # Capa 3 anti-impostor
+    db_session_is_verified,
+    db_session_has_prior_orders,
+    db_confirm_table_real,
+    db_mark_table_ghost,
 )
 
 # === Conversations (NPS per-conversation state): moved to app.repositories.conversations_repo (Fase 6) ===

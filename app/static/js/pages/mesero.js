@@ -347,6 +347,57 @@ const _STATUS_LABELS = {
   generar_factura: { txt: 'Cobrando',     color: '#a78bfa', bg: '#2d1f3d' },
 };
 
+// ── Capa 3: Validation action helpers ────────────────────────────────────────
+
+async function _confirmTableReal(tableId, parentModal) {
+  if (typeof mesioConfirm === 'function') {
+    const ok = await mesioConfirm('¿Confirmar que el cliente está físicamente en la mesa?');
+    if (!ok) return;
+  }
+  try {
+    const res = await fetch('/api/mesero/tables/' + encodeURIComponent(tableId) + '/confirm-real', {
+      method: 'POST',
+      headers: _hdr(),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (typeof mesioToast === 'function') mesioToast(d.message || 'Mesa confirmada', 'success', 2500);
+      if (parentModal) {
+        const ordersDiv = parentModal.querySelector('#mesero-modal-orders');
+        if (ordersDiv) await _loadTableOrders(tableId, ordersDiv);
+      }
+      loadTables();
+    } else {
+      if (typeof mesioToast === 'function') mesioToast('No se pudo confirmar la mesa', 'error');
+    }
+  } catch (_) {
+    if (typeof mesioToast === 'function') mesioToast('Error de conexión', 'error');
+  }
+}
+
+async function _markTableGhost(tableId, parentModal) {
+  if (typeof mesioConfirm === 'function') {
+    const ok = await mesioConfirm('¿Marcar esta mesa como fantasma? Se cancelarán los pedidos y se bloqueará el teléfono por 24 h.');
+    if (!ok) return;
+  }
+  try {
+    const res = await fetch('/api/mesero/tables/' + encodeURIComponent(tableId) + '/mark-ghost', {
+      method: 'POST',
+      headers: _hdr(),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (typeof mesioToast === 'function') mesioToast(d.message || 'Mesa fantasma marcada', 'warning', 3000);
+      if (parentModal) parentModal.remove();
+      loadTables();
+    } else {
+      if (typeof mesioToast === 'function') mesioToast('No se pudo marcar la mesa', 'error');
+    }
+  } catch (_) {
+    if (typeof mesioToast === 'function') mesioToast('Error de conexión', 'error');
+  }
+}
+
 async function _loadTableOrders(tableId, container) {
   try {
     const url = '/api/table-orders?table_id=' + encodeURIComponent(tableId);
@@ -364,7 +415,53 @@ async function _loadTableOrders(tableId, container) {
       return;
     }
 
+    // Clear and rebuild.  Pending validation UI comes first if applicable.
     container.innerHTML = '';
+
+    // Capa 3: detect if any orders are pending waiter validation
+    const hasPendingValidation = orders.some(o => o.pending_table_validation);
+    if (hasPendingValidation) {
+      // Find the modal that wraps this container to pass to confirm/ghost handlers
+      const parentModal = container.closest('#mesero-table-modal');
+
+      // Banner
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:#92400e;border:1px solid #f59e0b;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:#fef3c7;line-height:1.4;';
+      banner.textContent = 'Validacion pendiente — la mesa abrio sesion por QR pero no confirmaste fisicamente al cliente.'; // lint-allow: accents stripped for ascii safety
+
+      // Geo badge (pull from the first pending order's geo_verified field if present)
+      const pendingOrder = orders.find(o => o.pending_table_validation);
+      const geoVerified = pendingOrder ? pendingOrder.geo_verified : null;
+      const geoBadge = document.createElement('span');
+      geoBadge.style.cssText = 'display:inline-block;margin-left:8px;font-size:14px;';
+      if (geoVerified === true)       geoBadge.setAttribute('title', 'Geolocalización: dentro del radio de la sede');
+      else if (geoVerified === false) geoBadge.setAttribute('title', 'Geolocalización: fuera del radio — posible impostor');
+      else                            geoBadge.setAttribute('title', 'Geolocalización: no disponible');
+      geoBadge.textContent = geoVerified === true ? '🟢' : geoVerified === false ? '🔴' : '🟡'; // green/red/yellow circle via unicode
+      banner.appendChild(geoBadge);
+      container.appendChild(banner);
+
+      // Confirm / Ghost buttons
+      const actionRow = document.createElement('div');
+      actionRow.style.cssText = 'display:flex;gap:8px;margin-bottom:14px;';
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'm-btn m-btn--sm';
+      confirmBtn.style.cssText = 'flex:2;background:#10b981;color:#fff;font-weight:700;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;';
+      confirmBtn.textContent = 'Confirmar mesa real';
+      confirmBtn.addEventListener('click', () => _confirmTableReal(tableId, parentModal));
+      actionRow.appendChild(confirmBtn);
+
+      const ghostBtn = document.createElement('button');
+      ghostBtn.className = 'm-btn m-btn--sm';
+      ghostBtn.style.cssText = 'flex:1;background:#7f1d1d;color:#fca5a5;font-weight:700;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;';
+      ghostBtn.textContent = 'Mesa fantasma';
+      ghostBtn.addEventListener('click', () => _markTableGhost(tableId, parentModal));
+      actionRow.appendChild(ghostBtn);
+
+      container.appendChild(actionRow);
+    }
+
     orders.forEach(o => {
       const orderCard = document.createElement('div');
       orderCard.style.cssText = 'background:var(--surface-3,#252d40);border-radius:10px;padding:12px;margin-bottom:10px;';

@@ -753,7 +753,34 @@ async def execute_salon_action(
                 "branch_id":     branch_id_val,
                 "org_id":        org_id_val,
                 "channel":       "whatsapp_bot",
+                "pending_table_validation": _needs_validation,
             }
+
+        # ── Capa 3: Anti-impostor — pending_table_validation ──────────
+        # First order in an unverified session is held for waiter
+        # confirmation.  Subsequent orders (or verified sessions) go
+        # straight to the kitchen.
+        _needs_validation = False
+        try:
+            _session_verified = await db.db_session_is_verified(phone, bot_number)
+            if not _session_verified:
+                _has_prior = await db.db_session_has_prior_orders(phone, bot_number)
+                if not _has_prior:
+                    _needs_validation = True
+                    log.info(
+                        "table_order.pending_validation",
+                        phone=_ofuscar_phone(phone),
+                        bot_number=bot_number,
+                        table_id=table_context.get("id"),
+                    )
+        except Exception:
+            log.exception(
+                "capa3_verification_check_failed",
+                phone=_ofuscar_phone(phone),
+                bot_number=bot_number,
+            )
+            # Fail-open: if the check errors, don't block the customer.
+            _needs_validation = False
 
         _is_duplicate_order = False
         if separate_bill or base_order_id is None:
@@ -971,31 +998,37 @@ async def execute_salon_action(
 
         # Append receipt card for diner (skip on duplicates — dup path must stay silent)
         if not _is_duplicate_order and reply:
-            try:
-                eta_min = 20
+            if _needs_validation:
+                # Capa 3: order is held — do NOT show the standard receipt with
+                # ETA.  Natural message so customer doesn't know they're being
+                # validated (Rule 4 of MESA_QR_ARCHITECTURE.md §Capa 3).
+                reply = "Listo, ya envié tu pedido. El mesero pasará en un momento a confirmarte."
+            else:
                 try:
-                    eta_min = int(features.get("kitchen_eta_minutes") or 20)
-                except (TypeError, ValueError, AttributeError):
                     eta_min = 20
-                final_order_id = locals().get("order_id") or base_order_id
-                short_id = str(final_order_id)[-6:] if final_order_id else "------"
-                items_lines = "\n".join(
-                    f"{int(i.get('quantity', 1))}x {i.get('name', 'Ítem')}" for i in cart_items
-                )
-                total_int = int(quantize_money(to_decimal(cart_total)))  # display only, not stored
-                total_fmt = f"${total_int:,}".replace(",", ".")
-                receipt = (
-                    "\n\n━━━━━━━━━━━━━━━\n"
-                    f"🧾 Pedido #{short_id}\n"
-                    f"{items_lines}\n"
-                    f"Total: {total_fmt}\n"
-                    f"⏱️ Estará listo en ~{eta_min} min\n"
-                    "━━━━━━━━━━━━━━━\n"
-                    "¡El equipo ya está en ello! 👨‍🍳"
-                )
-                reply = reply + receipt
-            except Exception:
-                log.exception("salon_receipt_append_failed", order_id=locals().get("order_id"))
+                    try:
+                        eta_min = int(features.get("kitchen_eta_minutes") or 20)
+                    except (TypeError, ValueError, AttributeError):
+                        eta_min = 20
+                    final_order_id = locals().get("order_id") or base_order_id
+                    short_id = str(final_order_id)[-6:] if final_order_id else "------"
+                    items_lines = "\n".join(
+                        f"{int(i.get('quantity', 1))}x {i.get('name', 'Ítem')}" for i in cart_items
+                    )
+                    total_int = int(quantize_money(to_decimal(cart_total)))  # display only, not stored
+                    total_fmt = f"${total_int:,}".replace(",", ".")
+                    receipt = (
+                        "\n\n━━━━━━━━━━━━━━━\n"
+                        f"🧾 Pedido #{short_id}\n"
+                        f"{items_lines}\n"
+                        f"Total: {total_fmt}\n"
+                        f"⏱️ Estará listo en ~{eta_min} min\n"
+                        "━━━━━━━━━━━━━━━\n"
+                        "¡El equipo ya está en ello! 👨‍🍳"
+                    )
+                    reply = reply + receipt
+                except Exception:
+                    log.exception("salon_receipt_append_failed", order_id=locals().get("order_id"))
 
         return reply
 

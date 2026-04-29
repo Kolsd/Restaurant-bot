@@ -250,6 +250,10 @@ async function loadOrders() {
     const data = await res.json();
     let orders = data.orders || data || [];
 
+    // Capa 3: never show orders that are pending waiter validation.
+    // The waiter must confirm the table is real before kitchen sees them.
+    orders = orders.filter(o => !o.pending_table_validation);
+
     // Filter by active station
     if (_station === 'delayed') {
       orders = orders.filter(o => o.status !== 'listo' && o.status !== 'entregado' && _elapsedMins(o.created_at, _localPlusMins[o.id] || 0) >= 12);

@@ -390,6 +390,40 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
 
     _tenant_id: int = org["id"]  # Wave 1: org_id == tenant scope key
 
+    # ── Capa 3: Phone blocklist guard ─────────────────────────────────────────
+    # Cross-tenant check: a phone blocked by ANY org is rejected here.
+    # bypass_tenant_scope is required because the inbox_worker runs outside
+    # any per-org tenant_scope at this point (Rule 14 CLAUDE.md).
+    try:
+        from app.repositories.phone_blocklist_repo import is_phone_blocked
+        from app.services.tenant_context import bypass_tenant_scope as _bypass_ts
+
+        with _bypass_ts("inbox_worker: phone_blocklist cross-tenant check"):
+            _block = await is_phone_blocked(user_phone)
+
+        if _block is not None:
+            log.info(
+                "inbox.phone_blocked",
+                user_phone=user_phone,
+                bot_number=bot_number,
+                reason=_block.get("reason"),
+                blocked_until=_block.get("blocked_until"),
+            )
+            # Polite rejection to the customer.  Access token already resolved.
+            try:
+                await meta_send_text(
+                    bot_number, access_token, user_phone,
+                    "No puedo atenderte ahora. Por favor contacta directamente al restaurante.",
+                    phone_id=phone_id,
+                )
+            except Exception:
+                log.exception("inbox.blocked_phone_send_failed", user_phone=user_phone)
+            return  # ack without retry — block is intentional
+    except Exception:
+        # Non-fatal: if blocklist check fails, continue processing normally.
+        # We prefer false negatives over false positives on a critical path.
+        log.exception("inbox.phone_blocklist_check_failed", user_phone=user_phone)
+
     # ── Voice note: transcribe before calling _process_message ────────────────
     if payload.get("needs_transcription"):
         audio_id = payload.get("audio_id", "")

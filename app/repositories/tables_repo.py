@@ -193,8 +193,8 @@ async def db_save_table_order(order: dict):
             INSERT INTO table_orders
                 (id, table_id, table_name, phone, items, status, notes, total,
                  base_order_id, sub_number, station, branch_id, org_id,
-                 channel, waiter_staff_id)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                 channel, waiter_staff_id, pending_table_validation)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
             ON CONFLICT (id) DO UPDATE SET
                 items=EXCLUDED.items,
                 status=EXCLUDED.status,
@@ -213,7 +213,8 @@ async def db_save_table_order(order: dict):
             order.get('branch_id'),
             rid,
             order.get('channel'),
-            order.get('waiter_staff_id'))
+            order.get('waiter_staff_id'),
+            bool(order.get('pending_table_validation', False)))
 
 
 async def db_get_base_order_status(base_order_id: str) -> str | None:
@@ -1942,3 +1943,161 @@ async def db_session_alert_waiter(session_id: int, message: str) -> bool:
             )
             return True
     return False
+
+
+# ── Capa 3: Anti-impostor (pending_table_validation) ────────────────────────
+
+async def db_session_is_verified(phone: str, bot_number: str) -> bool:
+    """Return True if the active session for this phone+bot is verified.
+
+    Used by the bot to decide whether a place_order should set
+    pending_table_validation=true (unverified session) or go straight
+    to the kitchen (verified session or no session at all).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT verified FROM table_sessions "
+            "WHERE phone=$1 AND bot_number=$2 AND status='active' "
+            "ORDER BY started_at DESC LIMIT 1",
+            phone,
+            bot_number,
+        )
+        if row is None:
+            # No active session — no pending hold needed.
+            return True
+        return bool(row["verified"])
+
+
+async def db_session_has_prior_orders(phone: str, bot_number: str) -> bool:
+    """Return True if the active session for this phone already has at least
+    one table_order that is NOT pending_table_validation.
+
+    Used to allow the second+ order in an unverified session to go through
+    without hold (once the first order is already pending, the waiter will
+    come to confirm — no need to hold subsequent ones).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        session = await conn.fetchrow(
+            "SELECT table_id FROM table_sessions "
+            "WHERE phone=$1 AND bot_number=$2 AND status='active' "
+            "ORDER BY started_at DESC LIMIT 1",
+            phone,
+            bot_number,
+        )
+        if session is None:
+            return False
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM table_orders "
+            "WHERE table_id=$1 AND phone=$2 "
+            "  AND status NOT IN ('cancelado') ",
+            session["table_id"],
+            phone,
+        )
+        return int(count or 0) > 0
+
+
+async def db_confirm_table_real(table_id: str, org_id: int, mesero_username: str) -> int:
+    """Waiter confirms the customer is real at this table.
+
+    1. Updates all pending_table_validation orders on the table to false
+       (releases them to the kitchen queue).
+    2. Sets table_sessions.verified=true for active sessions on this table.
+
+    Returns the count of orders released to the kitchen.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        released = await conn.fetchval(
+            """
+            WITH updated AS (
+                UPDATE table_orders
+                SET    pending_table_validation = false,
+                       updated_at = NOW()
+                WHERE  table_id = $1
+                  AND  pending_table_validation = true
+                  AND  status NOT IN ('cancelado', 'entregado', 'factura_entregada')
+                RETURNING id
+            )
+            SELECT COUNT(*) FROM updated
+            """,
+            table_id,
+        )
+        await conn.execute(
+            """
+            UPDATE table_sessions
+            SET    verified = true
+            WHERE  table_id = $1
+              AND  status = 'active'
+            """,
+            table_id,
+        )
+
+    from app.services.logging import get_logger as _gl
+    _log = _gl("tables_repo")
+    _log.info(
+        "table.confirmed_real",
+        table_id=table_id,
+        org_id=org_id,
+        confirmed_by=mesero_username,
+        orders_released=int(released or 0),
+    )
+    return int(released or 0)
+
+
+async def db_mark_table_ghost(table_id: str, org_id: int, mesero_username: str) -> dict:
+    """Waiter marks this table as a ghost (no real customer).
+
+    1. Cancels all pending_table_validation orders on this table.
+    2. Closes active sessions (status='ghost_blocked').
+    3. Returns the list of phone numbers that had sessions (for blocklist).
+
+    Returns: {"orders_cancelled": N, "phones": [str, ...]}
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        # 1. Cancel pending orders
+        cancelled = await conn.fetchval(
+            """
+            WITH updated AS (
+                UPDATE table_orders
+                SET    status = 'cancelado',
+                       updated_at = NOW()
+                WHERE  table_id = $1
+                  AND  pending_table_validation = true
+                  AND  status NOT IN ('cancelado', 'entregado', 'factura_entregada')
+                RETURNING id
+            )
+            SELECT COUNT(*) FROM updated
+            """,
+            table_id,
+        )
+        # 2. Collect phones and close sessions
+        phones_rows = await conn.fetch(
+            """
+            UPDATE table_sessions
+            SET    status = 'ghost_blocked'
+            WHERE  table_id = $1
+              AND  status = 'active'
+            RETURNING phone
+            """,
+            table_id,
+        )
+        phones = list({r["phone"] for r in phones_rows})
+
+    from app.services.logging import get_logger as _gl
+    _log = _gl("tables_repo")
+    _log.info(
+        "table.ghost_marked",
+        table_id=table_id,
+        org_id=org_id,
+        marked_by=mesero_username,
+        orders_cancelled=int(cancelled or 0),
+        phones_blocked=len(phones),
+    )
+    return {"orders_cancelled": int(cancelled or 0), "phones": phones}
