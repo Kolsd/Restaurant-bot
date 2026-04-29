@@ -575,6 +575,41 @@ async function _loadAlerts() {
   } catch (_) { /* non-critical */ }
 }
 
+async function _dismissAlert(alertId, li, modal) {
+  try {
+    const res = await fetch('/api/waiter-alerts/' + encodeURIComponent(alertId) + '/dismiss', {
+      method: 'POST',
+      headers: _hdr(),
+    });
+    if (!res.ok) {
+      if (typeof mesioToast === 'function') mesioToast('No se pudo resolver la alerta', 'error');
+      return;
+    }
+  } catch (_) {
+    if (typeof mesioToast === 'function') mesioToast('Error de conexión', 'error');
+    return;
+  }
+  li.remove();
+  // Update title count
+  const remaining = modal.querySelectorAll('[data-alert-id]').length;
+  const title = modal.querySelector('h3');
+  if (title) title.textContent = remaining
+    ? `${remaining} alerta${remaining > 1 ? 's' : ''} activa${remaining > 1 ? 's' : ''}`
+    : 'Sin alertas pendientes';
+  if (!remaining) {
+    const list = modal.querySelector('ul');
+    if (list) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:16px;text-align:center;color:var(--text-3,#94a3b8);font-size:13px;';
+      empty.textContent = 'Todas las alertas han sido atendidas.';
+      list.replaceWith(empty);
+    }
+  }
+  // Refresh banner + tiles in background
+  loadTables();
+  _loadAlerts();
+}
+
 function _showAllAlerts(alerts) {
   const existing = document.getElementById('mesero-alerts-modal');
   if (existing) existing.remove();
@@ -587,7 +622,7 @@ function _showAllAlerts(alerts) {
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
 
   const card = document.createElement('div');
-  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:280px;max-width:380px;width:90%;';
+  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:280px;max-width:400px;width:90%;';
 
   const title = document.createElement('h3');
   title.style.cssText = 'margin:0 0 16px;font-size:16px;color:var(--text-1,#fff);';
@@ -598,21 +633,28 @@ function _showAllAlerts(alerts) {
   list.style.cssText = 'list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:8px;';
   alerts.forEach(a => {
     const li = document.createElement('li');
+    li.dataset.alertId = String(a.id);
     li.style.cssText = 'background:var(--surface-3,#252d40);border-radius:8px;padding:10px 12px;display:flex;gap:8px;align-items:center;';
     const badge = document.createElement('span');
-    badge.style.cssText = 'font-size:11px;font-weight:600;color:var(--warn,#f59e0b);white-space:nowrap;';
+    badge.style.cssText = 'font-size:11px;font-weight:600;color:var(--warn,#f59e0b);white-space:nowrap;flex:1;';
     badge.textContent = a.table_name || `Mesa ${a.table_id}`;
     const type = document.createElement('span');
-    type.style.cssText = 'font-size:12px;color:var(--text-2,#94a3b8);';
+    type.style.cssText = 'font-size:12px;color:var(--text-2,#94a3b8);flex:1;';
     type.textContent = a.alert_type || '';
+    const resolveBtn = document.createElement('button');
+    resolveBtn.className = 'm-btn m-btn--sm';
+    resolveBtn.style.cssText = 'font-size:11px;padding:4px 10px;min-height:28px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;';
+    resolveBtn.textContent = '✓ Atendido';
+    resolveBtn.addEventListener('click', () => _dismissAlert(a.id, li, modal));
     li.appendChild(badge);
     li.appendChild(type);
+    li.appendChild(resolveBtn);
     list.appendChild(li);
   });
   card.appendChild(list);
 
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'm-btn m-btn--sm';
+  closeBtn.className = 'm-btn m-btn--sm m-btn--ghost';
   closeBtn.style.cssText = 'width:100%;';
   closeBtn.textContent = 'Cerrar';
   closeBtn.addEventListener('click', () => modal.remove());

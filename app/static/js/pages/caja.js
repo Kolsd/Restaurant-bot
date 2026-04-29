@@ -19,7 +19,8 @@ let _menu = {};
 let _activeCategory = '';
 let _cart = [];
 let _activeTables = [];
-let _activeTableIdx = 0;
+let _activeTableIdx = -1;
+let _mesaGridMode = true;
 let _billingConfig = null;
 let _customerCard = null;
 let _productHints = [];
@@ -215,49 +216,147 @@ async function loadOpenTables() {
     const res = await fetch('/api/pos/tables-status', { headers: mesioHeaders() });
     if (!res.ok) return;
     const data = await res.json();
-    _activeTables = (data.tables || []).filter(t => t.session_active || t.bot_active || (t.pending_orders && t.pending_orders.length));
-    _renderTableChips();
+    _activeTables = data.tables || [];
+    if (_mesaGridMode) _renderMesaGrid();
+    else _renderTableChips();
   } catch (_) {}
 }
+// ── Mesa grid mode helpers ─────────────────────────────
+function _tableStateCaja(t) {
+  if (t.has_waiter_alert) return { cls: 'alert',   label: 'Llamó al mesero' };
+  if (!(t.session_active || t.bot_active)) return { cls: 'free', label: 'Libre' };
+  if (t.has_open_check) return { cls: 'billing', label: 'Facturando' };
+  if ((t.pending_orders || []).some(s => s === 'listo')) return { cls: 'active', label: 'Comiendo' };
+  if ((t.pending_orders || []).length) return { cls: 'active', label: 'En cocina' };
+  return { cls: 'active', label: 'Activa' };
+}
+function _tableBorderColor(t) {
+  if (t.has_waiter_alert) return '#EF4444';
+  if (!(t.session_active || t.bot_active)) return '#1a1d26';
+  if (t.has_open_check) return 'rgba(167,139,250,.5)';
+  return 'rgba(29,158,117,.5)';
+}
+function _tableStatusColor(t) {
+  if (t.has_waiter_alert) return '#EF4444';
+  if (!(t.session_active || t.bot_active)) return '#6B7280';
+  if (t.has_open_check) return '#a78bfa';
+  return '#1d9e75';
+}
+
+function _enterMesaGrid() {
+  _mesaGridMode = true;
+  const bar = document.getElementById('caja-table-bar');
+  if (bar) { bar.classList.add('mesa-grid-mode'); bar.style.display = ''; }
+  const searchRow = document.querySelector('.search-row');
+  const catBar    = document.querySelector('.cat-bar');
+  if (searchRow) searchRow.style.display = 'none';
+  if (catBar)    catBar.style.display    = 'none';
+  document.querySelectorAll('[data-view]').forEach(el => el.style.display = 'none');
+  _renderMesaGrid();
+}
+
+function _exitMesaGrid(idx) {
+  _mesaGridMode = false;
+  const bar = document.getElementById('caja-table-bar');
+  if (bar) bar.classList.remove('mesa-grid-mode');
+  const searchRow = document.querySelector('.search-row');
+  const catBar    = document.querySelector('.cat-bar');
+  const mesasView = document.querySelector('[data-view="mesas"]');
+  if (searchRow) searchRow.style.display = '';
+  if (catBar)    catBar.style.display    = '';
+  if (mesasView) mesasView.style.display = 'flex';
+  selectTable(idx);
+}
+
+function _renderMesaGrid() {
+  const bar = document.getElementById('caja-table-bar');
+  if (!bar) return;
+  bar.innerHTML = '';
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;width:100%;';
+
+  if (!_activeTables.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'grid-column:1/-1;padding:40px;text-align:center;color:#6B7280;font-size:13px;';
+    empty.textContent = 'No hay mesas configuradas. Configúralas desde el panel de administración.';
+    grid.appendChild(empty);
+  } else {
+    _activeTables.forEach((t, idx) => {
+      const { cls, label } = _tableStateCaja(t);
+      const tile = document.createElement('div');
+      tile.className = 'mesa-tile' + (cls !== 'free' ? ' t-' + (cls === 'alert' ? 'alert' : cls === 'billing' ? 'billing' : 'active') : '');
+
+      const name = document.createElement('div');
+      name.style.cssText = 'font-family:var(--font-display);font-weight:700;font-size:20px;color:#E8EAEE;';
+      name.textContent = t.name || t.table_name || String(t.id);
+
+      const statusEl = document.createElement('div');
+      statusEl.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:' + _tableStatusColor(t) + ';';
+      statusEl.textContent = label;
+
+      tile.appendChild(name);
+      tile.appendChild(statusEl);
+
+      if (t.current_total) {
+        const totalEl = document.createElement('div');
+        totalEl.style.cssText = 'font-family:var(--font-display);font-size:14px;color:var(--brand);font-weight:700;margin-top:6px;';
+        totalEl.textContent = mesioFmt(t.current_total);
+        tile.appendChild(totalEl);
+      }
+      if (t.has_waiter_alert) {
+        const alertEl = document.createElement('div');
+        alertEl.style.cssText = 'font-size:10px;color:#EF4444;font-weight:600;';
+        alertEl.textContent = '🔔 Llamó';
+        tile.appendChild(alertEl);
+      }
+      if (t.guests) {
+        const guestEl = document.createElement('div');
+        guestEl.style.cssText = 'font-size:10px;color:#6B7280;margin-top:auto;';
+        guestEl.textContent = t.guests + ' pers.';
+        tile.appendChild(guestEl);
+      }
+
+      tile.addEventListener('click', () => _exitMesaGrid(idx));
+      grid.appendChild(tile);
+    });
+  }
+  bar.appendChild(grid);
+}
+
+// ── Table chips (POS mode — single selected table) ──────
 function _renderTableChips() {
   const bar = document.getElementById('caja-table-bar');
   if (!bar) return;
   bar.innerHTML = '';
-  const newBtn = document.createElement('button');
-  newBtn.className = 'm-btn m-btn--ghost m-btn--sm';
-  newBtn.style.cssText = 'border-color:#1a1d26;color:#E8EAEE;background:#14171f;font-size:12px;';
-  newBtn.textContent = '+ Nueva orden';
-  bar.appendChild(newBtn);
-  newBtn.addEventListener('click', openNewOrderModal);
 
-  if (!_activeTables.length) {
-    const empty = document.createElement('span');
-    empty.style.cssText = 'font-size:12px;color:#6B7280;padding:0 8px;';
-    empty.textContent = 'Sin mesas activas';
-    bar.appendChild(empty);
-    return;
-  }
-  _activeTables.forEach((t, idx) => {
+  const backBtn = document.createElement('button');
+  backBtn.className = 'm-btn m-btn--ghost m-btn--sm';
+  backBtn.style.cssText = 'border-color:#1a1d26;color:#9CA3AF;background:#14171f;font-size:11px;flex-shrink:0;white-space:nowrap;';
+  backBtn.textContent = '⬅ Mesas';
+  backBtn.addEventListener('click', () => {
+    _cart = [];
+    _selectedTableOrder = null;
+    _checks = [];
+    _renderCart();
+    _enterMesaGrid();
+  });
+  bar.appendChild(backBtn);
+
+  const t = _activeTables[_activeTableIdx];
+  if (t) {
     const chip = document.createElement('div');
-    chip.className = 'tbl-chip' + (idx === _activeTableIdx ? ' active' : '');
-    chip.dataset.idx = idx;
+    chip.className = 'tbl-chip active';
     const num = document.createElement('div');
     num.className = 'tbl-chip-num';
     num.textContent = t.name || t.table_name || String(t.id);
     const sub = document.createElement('div');
     sub.className = 'tbl-chip-sub';
-    sub.textContent = t.guests ? `${t.guests} pers.` : 'Mesa';
+    sub.textContent = _tableStateCaja(t).label;
     chip.appendChild(num);
-    // Waiter alert badge
-    if (t.has_waiter_alert) {
-      const badge = document.createElement('div');
-      badge.style.cssText = 'width:7px;height:7px;border-radius:50%;background:#EF4444;flex-shrink:0;';
-      chip.appendChild(badge);
-    }
     chip.appendChild(sub);
     bar.appendChild(chip);
-    chip.addEventListener('click', () => selectTable(idx));
-  });
+  }
 }
 function selectTable(idx) {
   _activeTableIdx = idx;
@@ -421,12 +520,30 @@ async function sendToKitchen() {
 function switchTab(tabId) {
   _currentTab = tabId;
   document.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
-  document.querySelectorAll('[data-view]').forEach(el => {
-    el.style.display = el.dataset.view === tabId ? (el.dataset.view === 'mesas' ? 'flex' : '') : 'none';
-  });
-  if (tabId === 'pickup') loadPickupOrders();
-  if (tabId === 'proposals') loadDeliveryProposals();
-  if (tabId === 'chats') loadChatsTab();
+  const bar       = document.getElementById('caja-table-bar');
+  const searchRow = document.querySelector('.search-row');
+  const catBar    = document.querySelector('.cat-bar');
+  if (tabId === 'mesas') {
+    if (bar) bar.style.display = '';
+    if (_mesaGridMode || _activeTableIdx < 0) { _enterMesaGrid(); return; }
+    // POS mode — restore product view
+    if (searchRow) searchRow.style.display = '';
+    if (catBar)    catBar.style.display    = '';
+    document.querySelectorAll('[data-view]').forEach(el => {
+      el.style.display = el.dataset.view === 'mesas' ? 'flex' : 'none';
+    });
+  } else {
+    // Non-mesas tabs: hide bar + search/cat (only relevant for mesas POS)
+    if (bar) { bar.classList.remove('mesa-grid-mode'); bar.style.display = 'none'; }
+    if (searchRow) searchRow.style.display = 'none';
+    if (catBar)    catBar.style.display    = 'none';
+    document.querySelectorAll('[data-view]').forEach(el => {
+      el.style.display = el.dataset.view === tabId ? '' : 'none';
+    });
+    if (tabId === 'pickup')    loadPickupOrders();
+    if (tabId === 'proposals') loadDeliveryProposals();
+    if (tabId === 'chats')     loadChatsTab();
+  }
 }
 
 // ── Mesas — load pending session detail ───────────────
@@ -1225,6 +1342,7 @@ mesioInterval(() => {
 document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([_loadBillingConfig(), loadMenu(), loadOpenTables()]);
   _initSearch();
+  _enterMesaGrid();
 
   // Auto-select table when navigated from /mesero via ?tableId=X or sessionStorage caja_open_table
   const urlParams = new URLSearchParams(window.location.search);
@@ -1238,7 +1356,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (targetTableId) {
     const tIdx = (_activeTables || []).findIndex(x => String(x.id) === String(targetTableId));
-    if (tIdx >= 0) selectTable(tIdx);
+    if (tIdx >= 0) _exitMesaGrid(tIdx);
   }
 
   document.getElementById('btn-send-kitchen')?.addEventListener('click', sendToKitchen);

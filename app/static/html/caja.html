@@ -60,6 +60,21 @@ body { background: #0b0d12; color: #E8EAEE; overflow: hidden; height: 100vh; fon
   padding: 12px 20px; border-bottom: 1px solid #1a1d26;
   display: flex; align-items: center; gap: 8px; overflow-x: auto; flex-shrink: 0;
 }
+/* Mesa grid mode — bar expands to fill remaining height */
+.caja-table-bar.mesa-grid-mode {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  flex-direction: column; align-items: stretch; padding: 14px 16px; gap: 0;
+}
+/* Mesa tile in grid */
+.mesa-tile {
+  background: #14171f; border: 2px solid #1a1d26; border-radius: 10px;
+  padding: 14px 12px; cursor: pointer; display: flex; flex-direction: column;
+  gap: 4px; transition: border-color .15s, background .15s; min-height: 85px;
+}
+.mesa-tile:hover { background: #181c25; }
+.mesa-tile.t-alert   { border-color: #EF4444; }
+.mesa-tile.t-active  { border-color: rgba(29,158,117,.5); }
+.mesa-tile.t-billing { border-color: rgba(167,139,250,.5); }
 .tbl-chip {
   padding: 6px 12px; background: #14171f; border: 1px solid #1a1d26;
   border-radius: 8px; display: flex; align-items: center; gap: 8px; cursor: pointer;
