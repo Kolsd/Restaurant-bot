@@ -881,6 +881,26 @@ async def update_order_status(request: Request, order_id: str):
             if await state_store.rate_limit_check(_rl_key, max_requests=1, window_seconds=300):
                 msg = f"🍽️ ¡Tu pedido en {table_name} está listo!\n\nUn mesero te lo llevará en un momento. ¡Buen provecho! 😋"
                 await send_wa_msg(phone, msg, db_phone_id)
+            # Notify the assigned mesero that food is ready at the pass.
+            # Best-effort: failure to create the alert MUST NOT block the
+            # customer notification or the status update. Same pattern as
+            # the bill_request alert documented in CLAUDE.md Regla #17.
+            try:
+                with bypass_tenant_scope("update_order_status: waiter_alert on listo"):
+                    await db.db_create_waiter_alert(
+                        phone=phone,
+                        bot_number=_bot_number,
+                        alert_type="ready",
+                        message=f"Pedido listo en pase — Mesa {table_name}",
+                        table_id=order.get("table_id", ""),
+                        table_name=table_name,
+                    )
+            except Exception:
+                log.exception(
+                    "tables.waiter_alert_listo_failed",
+                    order_id=order_id,
+                    table_id=order.get("table_id"),
+                )
 
     return {"success": True, "order_id": order_id, "status": status}
 
