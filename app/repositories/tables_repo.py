@@ -57,14 +57,23 @@ async def db_init_tables():
 async def db_get_tables(branch_id: int = None):
     """
     Devuelve las mesas.
-    Si branch_id tiene un número, trae las de esa sucursal/matriz.
+    Si branch_id tiene un número, trae las de esa sede.
     Si branch_id es None, trae TODAS las mesas (admin global).
+
+    Wave-2: filter is by `location_id` (canonical sede id) — not the legacy
+    `branch_id` column. Pre-Wave-2 data sometimes has branch_id stuck on the
+    org_id (e.g. restaurant-tables for org 8 stored with branch_id=8 but
+    location_id=1). The endpoint resolves location_id from the user's
+    restaurant context post-Wave-2; using branch_id here would fail to find
+    tables whose legacy branch_id wasn't backfilled. Param name preserved
+    for backward-compat at the function signature; semantically it's a
+    location_id.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
         if branch_id is not None:
-            rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND branch_id=$1 ORDER BY number", branch_id)
+            rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE AND location_id=$1 ORDER BY number", branch_id)
         else:
             # Modo Admin Global: Trae todo
             rows = await conn.fetch("SELECT * FROM restaurant_tables WHERE active=TRUE ORDER BY number")
