@@ -1450,13 +1450,15 @@ async def db_adjust_table_bill(
 
 
 async def db_get_table_order_record(order_id: str) -> dict | None:
-    """Return phone, table_name, base_order_id, table_id for a table order.
+    """Return phone, table_name, base_order_id, table_id, org_id, location_id
+    for a table order.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT phone, table_name, base_order_id, table_id FROM table_orders WHERE id=$1",
+            "SELECT phone, table_name, base_order_id, table_id, org_id, location_id, bot_number "
+            "FROM table_orders WHERE id=$1",
             order_id,
         )
     return dict(row) if row else None
