@@ -34,6 +34,9 @@ HTML_DIR = ROOT / "app" / "static" / "html"
 # window.fetch so the demo runs without a backend. Not served to real admins.
 MOCK_FILE_ALLOWLIST = {
     "demo-data.js",
+    "mesio-demo-bus.js",
+    "mesio-demo-orchestrator.js",
+    "mesio-demo-scenarios.js",
 }
 
 # HTML pages exempt from seed-data checks — these are marketing/demo surfaces

@@ -1238,6 +1238,79 @@ async def pos_manual_order(request: Request, body: ManualOrderRequest):
     return {"success": True, "order_id": order_id, "message": f"Comanda enviada a {dest}"}
 
 
+# ── PRE-CUENTA ─────────────────────────────────────────────────────────────────
+
+@router.post("/api/pos/tables/{table_id}/pre-cuenta")
+async def pos_pre_cuenta(request: Request, table_id: str):
+    """Sends a WhatsApp pre-bill summary to the customer at the table.
+
+    Queries the active session to get the customer's phone, aggregates all open
+    table orders, and sends a formatted WA text message.
+    Returns {success, phone, items_count, total} or 404 if no active session.
+    """
+    restaurant = await get_current_restaurant(request)
+
+    # 1. Find active session for this table
+    with bypass_tenant_scope("pre_cuenta: active session lookup for table"):
+        sess = await db.db_get_active_session_by_table_id(table_id)
+
+    if not sess:
+        raise HTTPException(status_code=404, detail="No hay sesión activa en esta mesa")
+
+    customer_phone = sess["phone"]
+    meta_phone_id = sess.get("meta_phone_id")
+
+    # 2. Get all open orders for this table
+    with bypass_tenant_scope("pre_cuenta: order aggregation for table"):
+        base_order_id = await db.db_get_base_order_id(table_id)
+
+    if not base_order_id:
+        raise HTTPException(status_code=404, detail="No hay pedidos activos en esta mesa")
+
+    with bypass_tenant_scope("pre_cuenta: ticket aggregation"):
+        ticket = await db.db_get_order_ticket_data(base_order_id, None)
+
+    if not ticket:
+        raise HTTPException(status_code=404, detail="No se pudo obtener el ticket de la mesa")
+
+    items = ticket.get("items", [])
+    total = ticket.get("total", 0)
+    table_name = ticket.get("table_name", table_id)
+
+    # 3. Build the pre-cuenta message
+    if items:
+        lines = []
+        for item in items:
+            name = item.get("name", "")
+            qty  = item.get("qty", item.get("quantity", 1))
+            price = item.get("price", item.get("unit_price", 0))
+            subtotal = (qty or 1) * (price or 0)
+            lines.append(f"  • {qty}x {name} — ${int(subtotal):,}")
+        items_text = "\n".join(lines)
+    else:
+        items_text = "  (sin ítems)"
+
+    total_fmt = f"${int(total):,}"
+    wa_text = (
+        f"🧾 *Pre-cuenta — {table_name}*\n\n"
+        f"{items_text}\n\n"
+        f"*Total: {total_fmt}*\n\n"
+        f"¿Todo bien? Responde *Sí* para pedir la cuenta formalmente o dinos si hay algo más."
+    )
+
+    db_phone_id = meta_phone_id or restaurant.get("phone_number_id") or None
+    await send_wa_msg(customer_phone, wa_text, db_phone_id=db_phone_id)
+
+    log.info("tables.pre_cuenta_sent", table_id=table_id, phone=customer_phone, items=len(items), total=total)
+    return {
+        "success":     True,
+        "phone":       customer_phone,
+        "items_count": len(items),
+        "total":       float(total),
+        "message":     f"Pre-cuenta enviada a {customer_phone}",
+    }
+
+
 # ── SPLIT CHECKS / PAGOS MIXTOS (FASE 5) ──────────────────────────────────────
 
 class CheckItem(BaseModel):

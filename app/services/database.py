@@ -395,6 +395,7 @@ from app.repositories.tables_repo import (
     db_dismiss_waiter_alert,
     db_init_table_sessions,
     db_get_active_session,
+    db_get_active_session_by_table_id,
     db_get_active_session_on_table_by_other_phone,
     db_get_session_join_code,
     db_set_session_join_code,

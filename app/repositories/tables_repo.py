@@ -547,6 +547,23 @@ async def db_get_active_session_on_table_by_other_phone(table_id: str, phone: st
         return _serialize(dict(row)) if row else None
 
 
+async def db_get_active_session_by_table_id(table_id: str) -> dict | None:
+    """Return the active session for a table_id (phone, bot_number, meta_phone_id).
+
+    Used by pre-cuenta to identify the customer to message.
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT phone, bot_number, meta_phone_id
+               FROM table_sessions
+               WHERE table_id = $1 AND status = 'active'
+               ORDER BY started_at DESC LIMIT 1""",
+            table_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
 async def db_get_session_join_code(table_id: str, bot_number: str) -> str | None:
     """Return the join_code of the active session for this table, or None if
     the table has no active session (caller becomes the host).

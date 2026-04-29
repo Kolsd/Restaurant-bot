@@ -682,6 +682,15 @@ function _renderCheckModal(baseOrderId, tableName) {
 
 // ── Pay a single check ─────────────────────────────────
 function openPayCheckForm(baseOrderId, checkId, checkTotal) {
+  // Resolve items for the invoice preview
+  let items = [];
+  if (checkId) {
+    const chk = _checks.find(c => String(c.id) === String(checkId));
+    if (chk) items = Array.isArray(chk.items) ? chk.items : [];
+  } else {
+    items = (_checks || []).flatMap(c => (Array.isArray(c.items) ? c.items : []));
+  }
+
   let modal = document.getElementById('pay-check-modal');
   if (!modal) {
     modal = _buildPayCheckModal();
@@ -691,27 +700,31 @@ function openPayCheckForm(baseOrderId, checkId, checkTotal) {
   modal.dataset.checkId = checkId || '';
   modal.dataset.checkTotal = String(checkTotal);
   modal.style.display = 'flex';
-  _renderPayCheckModal(baseOrderId, checkId, checkTotal);
+  _renderPayCheckModal(baseOrderId, checkId, checkTotal, items);
 }
 
 function _buildPayCheckModal() {
   const modal = document.createElement('div');
   modal.id = 'pay-check-modal';
-  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3200;align-items:center;justify-content:center;';
+  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3200;align-items:center;justify-content:center;padding:12px;';
   modal.innerHTML = `
-    <div style="background:#1a1d26;border-radius:16px;width:480px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:0;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
-      <div style="padding:20px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;">
+    <div style="background:#1a1d26;border-radius:16px;width:100%;max-width:920px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
+      <div style="padding:18px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
         <div style="font-size:16px;font-weight:700;color:#E8EAEE;">Cobrar Check</div>
         <button id="pcm-close" style="background:none;border:1px solid #343b4d;color:#9CA3AF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
       </div>
-      <div id="pcm-body" style="padding:20px 24px;"></div>
+      <div style="display:flex;flex:1;min-height:0;overflow:hidden;">
+        <div id="pcm-body" style="flex:1;min-width:0;padding:20px 24px;overflow-y:auto;border-right:1px solid #252836;"></div>
+        <div id="pcm-invoice-preview" style="width:300px;flex-shrink:0;padding:20px 18px;overflow-y:auto;background:#0e1016;"></div>
+      </div>
     </div>`;
   modal.querySelector('#pcm-close').addEventListener('click', () => { modal.style.display = 'none'; });
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
   return modal;
 }
 
-function _renderPayCheckModal(baseOrderId, checkId, checkTotal) {
+function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
+  items = items || [];
   const body = document.getElementById('pcm-body');
   if (!body) return;
 
@@ -776,6 +789,76 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal) {
     return Math.round(base * _tipPct / 100);
   }
 
+  function _renderInvoicePreview() {
+    const preview = document.getElementById('pcm-invoice-preview');
+    if (!preview) return;
+
+    const tip = _getTipAmount();
+    const svc = Number(document.getElementById('pcm-service-charge')?.value || 0);
+    const grand = checkTotal + svc;
+    const custName = document.getElementById('pcm-cust-name')?.value || 'Consumidor Final';
+    const custNit  = document.getElementById('pcm-cust-nit')?.value  || '222222222';
+    const tableName = _selectedTableOrder?.table_name || 'Mesa';
+    const restName  = _org.name || 'Restaurante';
+    const now = new Date();
+    const dateStr = now.toLocaleString('es-CO', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+
+    const rows = document.querySelectorAll('.pcm-pay-row');
+    const payMethods = Array.from(rows).map(r => ({
+      method: r.querySelector('.pcm-pay-method')?.value || 'efectivo',
+      amount: Number(r.querySelector('.pcm-pay-amount')?.value || 0),
+    })).filter(p => p.amount > 0);
+
+    const labelMap = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', nequi: 'Nequi', daviplata: 'Daviplata', otro: 'Otro' };
+
+    const itemsHtml = items.length
+      ? items.map(it => {
+          const qty   = it.qty || it.quantity || 1;
+          const price = it.price || it.unit_price || 0;
+          const sub   = qty * price;
+          return `<tr>
+            <td style="padding:3px 0;color:#9CA3AF;font-size:11px;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(it.name)}</td>
+            <td style="padding:3px 0;color:#6B7280;font-size:11px;text-align:center;">${qty}</td>
+            <td style="padding:3px 0;color:#E8EAEE;font-size:11px;text-align:right;">${fmt(sub)}</td>
+          </tr>`;
+        }).join('')
+      : `<tr><td colspan="3" style="color:#4B5563;font-size:11px;padding:6px 0;text-align:center;">sin ítems</td></tr>`;
+
+    const payHtml = payMethods.length
+      ? payMethods.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-top:3px;"><span>${labelMap[p.method] || p.method}</span><span>${fmt(p.amount)}</span></div>`).join('')
+      : `<div style="font-size:11px;color:#4B5563;">—</div>`;
+
+    preview.innerHTML = `
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#4ADE9E;margin-bottom:14px;">Vista previa · Factura</div>
+      <div style="background:#14171f;border-radius:10px;padding:16px;font-family:monospace,monospace;">
+        <div style="text-align:center;margin-bottom:12px;">
+          <div style="font-size:13px;font-weight:700;color:#E8EAEE;">${_esc(restName)}</div>
+          <div style="font-size:10px;color:#6B7280;margin-top:2px;">${_esc(tableName)}</div>
+          <div style="font-size:10px;color:#6B7280;">${dateStr}</div>
+        </div>
+        <div style="border-top:1px dashed #252836;margin:10px 0;"></div>
+        <div style="font-size:10px;color:#9CA3AF;margin-bottom:4px;">Cliente: <span style="color:#E8EAEE;">${_esc(custName)}</span></div>
+        <div style="font-size:10px;color:#9CA3AF;margin-bottom:10px;">NIT/CC: <span style="color:#E8EAEE;">${_esc(custNit)}</span></div>
+        <div style="border-top:1px dashed #252836;margin:8px 0;"></div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:4px;">
+          <thead><tr>
+            <th style="font-size:10px;color:#4B5563;text-align:left;padding-bottom:4px;font-weight:600;">Ítem</th>
+            <th style="font-size:10px;color:#4B5563;text-align:center;padding-bottom:4px;font-weight:600;">Cant</th>
+            <th style="font-size:10px;color:#4B5563;text-align:right;padding-bottom:4px;font-weight:600;">Valor</th>
+          </tr></thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+        <div style="border-top:1px dashed #252836;margin:8px 0;"></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-bottom:3px;"><span>Subtotal</span><span>${fmt(checkTotal)}</span></div>
+        ${svc > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-bottom:3px;"><span>Cargo servicio</span><span>${fmt(svc)}</span></div>` : ''}
+        ${tip > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-bottom:3px;"><span>Propina</span><span>${fmt(tip)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#4ADE9E;margin-top:6px;border-top:1px solid #252836;padding-top:6px;"><span>TOTAL</span><span>${fmt(grand)}</span></div>
+        <div style="border-top:1px dashed #252836;margin:10px 0;"></div>
+        <div style="font-size:10px;color:#6B7280;margin-bottom:4px;font-weight:600;">PAGO</div>
+        ${payHtml}
+      </div>`;
+  }
+
   function _updateChange() {
     const tip = _getTipAmount();
     const svc = Number(document.getElementById('pcm-service-charge')?.value || 0);
@@ -787,6 +870,7 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal) {
     if (changeEl) changeEl.textContent = change >= 0 ? fmt(change) : `−${fmt(Math.abs(change))}`;
     const tipDisp = document.getElementById('pcm-tip-display');
     if (tipDisp) tipDisp.textContent = tip > 0 ? `Propina: ${fmt(tip)}` : '';
+    _renderInvoicePreview();
   }
 
   body.querySelectorAll('.pcm-tip-preset').forEach(btn => {
@@ -826,6 +910,11 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal) {
 
   // Wire existing row change listeners
   body.querySelectorAll('.pcm-pay-amount').forEach(inp => inp.addEventListener('input', _updateChange));
+
+  // Customer info updates preview in real-time
+  document.getElementById('pcm-cust-name')?.addEventListener('input', _renderInvoicePreview);
+  document.getElementById('pcm-cust-nit')?.addEventListener('input', _renderInvoicePreview);
+  body.querySelectorAll('.pcm-pay-method').forEach(sel => sel.addEventListener('change', _updateChange));
 
   // Submit
   document.getElementById('pcm-submit')?.addEventListener('click', async () => {
@@ -905,6 +994,9 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal) {
       if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Cobrar'; }
     }
   });
+
+  // Initial invoice preview render
+  _renderInvoicePreview();
 }
 
 function _paymentRowHtml(idx) {
@@ -1100,10 +1192,30 @@ async function _submitSplit(baseOrderId, checks, tableName) {
 }
 
 // ── Pre-cuenta ─────────────────────────────────────────
-function openPreCuenta() {
+async function openPreCuenta() {
   const table = _activeTables[_activeTableIdx];
   if (!table) { mesioToast('Selecciona una mesa activa', 'warning'); return; }
-  mesioToast('Pre-cuenta generada', 'success', 2000);
+
+  const btn = document.getElementById('btn-pre-cuenta');
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = 'Enviando…'; btn.disabled = true; }
+
+  try {
+    const res = await fetch('/api/pos/tables/' + encodeURIComponent(table.table_id || table.id) + '/pre-cuenta', {
+      method: 'POST',
+      headers: mesioHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      mesioToast(data.detail || 'Error al enviar pre-cuenta', 'error');
+      return;
+    }
+    mesioToast(`Pre-cuenta enviada por WhatsApp (${data.phone})`, 'success', 3500);
+  } catch (err) {
+    mesioToast('Error de red: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.textContent = orig; btn.disabled = false; }
+  }
 }
 
 // ── Pickup orders ─────────────────────────────────────
