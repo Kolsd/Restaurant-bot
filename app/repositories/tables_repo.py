@@ -1041,6 +1041,14 @@ async def db_get_open_proposal_for_phone(
     Útil en chat.py para interceptar imágenes y adjuntarlas sin pasar por el LLM.
     Retorna el check (con base_order_id) o None.
 
+    Caller passes restaurant_id = the org_id (post-Wave-2 db_get_restaurant_by_phone
+    normalises restaurants.id → org_id). The legacy filter `tor.branch_id = $1`
+    was the SAME bug pattern that broke /floor-plan and /dashboard/conversations:
+    after migration 0057 synced branch_id := location_id (1, 3, 4 for a multi-
+    sede org), `branch_id = 8` matched zero rows. As a result the bot's
+    proof-shortcut in chat.py (msg_type=='image') never fired and the LLM kept
+    asking the customer to send the proof again. Fix: filter by org_id.
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
@@ -1050,7 +1058,7 @@ async def db_get_open_proposal_for_phone(
                JOIN table_orders tor ON tor.base_order_id = tc.base_order_id
               WHERE tc.proposal_customer_phone = $2
                 AND tc.proposal_status IN ('pending', 'awaiting_proof')
-                AND tor.branch_id = $1
+                AND tor.org_id = $1
               ORDER BY tc.proposal_created_at DESC
               LIMIT 1""",
             restaurant_id,
@@ -1066,27 +1074,55 @@ async def db_list_checkout_proposals(
     Lista mesas que tienen checks con propuestas bot activas (pending/awaiting_proof/proof_received).
     Agrupado por base_order_id para la vista de Caja.
 
+    Caller passes restaurant_id = org_id. branch_ids (when given) is a list
+    of location_ids to narrow down within the org. When omitted we filter
+    by org_id alone (cross-sede view).
+
+    Pre-2026-04-29 the SQL filtered `tor.branch_id = ANY($1::int[])` with
+    `[org_id]` as the default — broken post-migration 0057 (branch_id ==
+    location_id). Same bug family as db_get_open_proposal_for_phone above.
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
-    ids = branch_ids if branch_ids else [restaurant_id]
     async with tenant_connection() as conn:
-        rows = await conn.fetch(
-            """SELECT DISTINCT ON (tor.table_name, COALESCE(tor.branch_id, 0))
-                 tor.base_order_id,
-                 tor.table_name,
-                 tor.total           AS order_total,
-                 tor.branch_id,
-                 json_agg(tc.* ORDER BY tc.check_number) AS checks
-               FROM table_orders tor
-               JOIN table_checks tc ON tc.base_order_id = tor.base_order_id
-              WHERE tor.branch_id = ANY($1::int[])
-                AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
-                AND tc.status = 'open'
-              GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.branch_id
-              ORDER BY tor.table_name, COALESCE(tor.branch_id, 0),
-                       MIN(tc.proposal_created_at) DESC""",
-            ids,
-        )
+        if branch_ids:
+            # Specific sedes (location_ids) within the org
+            sql = (
+                """SELECT DISTINCT ON (tor.table_name, COALESCE(tor.branch_id, 0))
+                     tor.base_order_id,
+                     tor.table_name,
+                     tor.total           AS order_total,
+                     tor.branch_id,
+                     json_agg(tc.* ORDER BY tc.check_number) AS checks
+                   FROM table_orders tor
+                   JOIN table_checks tc ON tc.base_order_id = tor.base_order_id
+                  WHERE tor.org_id = $1
+                    AND tor.branch_id = ANY($2::int[])
+                    AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
+                    AND tc.status = 'open'
+                  GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.branch_id
+                  ORDER BY tor.table_name, COALESCE(tor.branch_id, 0),
+                           MIN(tc.proposal_created_at) DESC"""
+            )
+            rows = await conn.fetch(sql, restaurant_id, branch_ids)
+        else:
+            sql = (
+                """SELECT DISTINCT ON (tor.table_name, COALESCE(tor.branch_id, 0))
+                     tor.base_order_id,
+                     tor.table_name,
+                     tor.total           AS order_total,
+                     tor.branch_id,
+                     json_agg(tc.* ORDER BY tc.check_number) AS checks
+                   FROM table_orders tor
+                   JOIN table_checks tc ON tc.base_order_id = tor.base_order_id
+                  WHERE tor.org_id = $1
+                    AND tc.proposal_status IN ('pending', 'awaiting_proof', 'proof_received')
+                    AND tc.status = 'open'
+                  GROUP BY tor.base_order_id, tor.table_name, tor.total, tor.branch_id
+                  ORDER BY tor.table_name, COALESCE(tor.branch_id, 0),
+                           MIN(tc.proposal_created_at) DESC"""
+            )
+            rows = await conn.fetch(sql, restaurant_id)
     return [_serialize(dict(r)) for r in rows]
 
 
