@@ -1094,6 +1094,10 @@ async def test_capa3_ghost_table_blocks_phone(
     )
 
     # ── Etapa 11: ASSERT — no new active session created for Phone Y ──────────
+    # table_sessions has `started_at` (not `created_at`) for the open-time
+    # column. The original assertion query used `created_at` which doesn't
+    # exist on the table — fixed to `started_at`. The org_id filter uses the
+    # value directly (it's already the canonical tenant key post-Wave-2).
     with bypass_tenant_scope("e2e_capa3g_assert_no_new_session"):
         async with pool.acquire() as conn:
             new_session = await conn.fetchrow(
@@ -1101,8 +1105,8 @@ async def test_capa3_ghost_table_blocks_phone(
                 SELECT id, status
                 FROM table_sessions
                 WHERE phone = $1
-                  AND org_id = (SELECT org_id FROM organizations WHERE id = $2)
-                  AND created_at > NOW() - INTERVAL '2 minutes'
+                  AND org_id = $2
+                  AND started_at > NOW() - INTERVAL '2 minutes'
                   AND status = 'active'
                 LIMIT 1
                 """,
