@@ -136,13 +136,6 @@ async def crm_internal_alias():
     p = STATIC / "html" / "internal" / "crm.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
-@router.get("/demo-chat", response_class=HTMLResponse)
-async def demo_chat_bot_page():
-    p = STATIC / "html" / "demo-chat.html"
-    if p.exists():
-        return HTMLResponse(p.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Falta el archivo demo-chat.html en la carpeta static</h1>", status_code=404)
-
 @router.get("/catalog", response_class=HTMLResponse)
 async def catalog_page():
     p = STATIC / "html" / "catalog.html"

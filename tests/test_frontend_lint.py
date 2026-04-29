@@ -2,7 +2,7 @@
 Runs scripts/lint_frontend.py as a pytest test so CI blocks regressions.
 
 Three checks enforced (see scripts/lint_frontend.py for details):
-  1. MOCK   — mock/fake/dummy keywords in admin JS (demo-data.js is exempt)
+  1. MOCK   — mock/fake/dummy keywords in admin JS (mesio-demo-* files exempt)
   2. TODO   — TODO/FIXME/XXX/HACK markers (force explicit handling)
   3. FETCH  — fetch('/api/...') paths that don't match any registered route
 

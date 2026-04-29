@@ -16,7 +16,6 @@
  *   dashboard.html          → /dashboard
  *   pedidos.html            → /caja
  *   reservaciones.html      → /reservaciones
- *   demo-chat.html          → /dashboard  (WhatsApp tab, no standalone page yet)
  *   floorplan.html          → /floorplan
  *   menu-admin.html         → /menu-admin
  *   menu-engineering.html   → /menu-engineering

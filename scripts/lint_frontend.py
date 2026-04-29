@@ -30,20 +30,20 @@ JS_DIR = ROOT / "app" / "static" / "js"
 HTML_DIR = ROOT / "app" / "static" / "html"
 
 # Files that are allowed to contain mock data by design.
-# demo-data.js powers the public marketing demo at /demo-chat; it intercepts
-# window.fetch so the demo runs without a backend. Not served to real admins.
+# These power the public marketing demo at /demo and /dashboard-demo.
+# Not served to real admins.
 MOCK_FILE_ALLOWLIST = {
-    "demo-data.js",
     "mesio-demo-bus.js",
     "mesio-demo-orchestrator.js",
     "mesio-demo-scenarios.js",
+    "dashboard-demo-mesio.js",
 }
 
 # HTML pages exempt from seed-data checks — these are marketing/demo surfaces
 # where fake names and hardcoded numbers are the point (landing, sales demo).
 HTML_SEED_EXEMPT = {
     "landing.html",
-    "demo-chat.html",
+    "demo.html",
     "dashboard-demo.html",
     "privacidad.html",
     "terminos.html",

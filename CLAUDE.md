@@ -427,7 +427,8 @@ El frontend completo fue rediseñado en 2 bundles de Claude Design + 7 sprints d
 ### Pages públicas
 - `/login.html` (dark split panel + 2 modos: admin + staff)
 - `/menu.html` (QR público — muestra "Valentina te atiende" cuando table_sessions.assigned_staff_id presente)
-- `/demo-chat.html` (interactive marketing demo — el static v2-wip quedó preservado)
+- `/demo` (money shot split-screen WhatsApp ↔ dashboard, 5 escenarios auto-play, GTM landing)
+- `/dashboard-demo` (full-dashboard demo rediseñado, 11-section sidebar, AI insight, trust block)
 
 ### Sprints A–W (polish post-audit)
 
@@ -909,7 +910,7 @@ State machine `loyalty_campaigns.status`: `draft` → `active`, `active` ↔ `pa
 ### Lint frontend — `scripts/lint_frontend.py` + `tests/test_frontend_lint.py`
 
 Script auto-invocado como pytest test. Cinco checks:
-1. **MOCK** — keywords `mock|fake|dummy|lorem|ipsum` en JS (`demo-data.js` exento)
+1. **MOCK** — keywords `mock|fake|dummy|lorem|ipsum` en JS (archivos `mesio-demo-*` y `dashboard-demo-mesio.js` exentos)
 2. **TODO** — marcadores `TODO|FIXME|XXX|HACK` en admin JS (fuerzan resolución explícita)
 3. **FETCH** — cada `fetch('/api/…')` contra rutas FastAPI registradas (segment-match soporta `{param}` + string concat `'/api/x/' + id`)
 4. **HTML-SEED (nombres)** — nombres españoles hardcoded en admin HTML (`María`, `Carlos`, etc.)

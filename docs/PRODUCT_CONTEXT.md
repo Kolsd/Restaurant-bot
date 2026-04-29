@@ -294,7 +294,7 @@ PM aún no ha llegado a hacer demo a un restaurante. Cuando llegue ese momento, 
 2. **🥈 Loom de 2min del lado dueño** — después de tocar el bot. Muestra orden cayendo en cocina, propina distribuyéndose, NPS llegando al cliente.
 3. **🥉 Landing con UN solo CTA** — "Probá el bot ahora". Loom embebido. Módulos como Lego con precio. Form "Hablemos".
 4. **Dashboard sembrado del demo** — 80 órdenes ficticias, staff, sucursales mock. Cuando PM screenshare, se ve VIVO.
-5. **`/demo-chat.html` como fallback** — para prospects que no quieren compartir su WhatsApp.
+5. **`/demo` como fallback** — para prospects que no quieren compartir su WhatsApp.
 
 **Pre-condición no negociable:** las "Reglas del Bot" verificadas con `run_ai_sim.py --smoke` corriendo verde de manera reproducible. Bot buggy en demo público = matás la marca.
 
