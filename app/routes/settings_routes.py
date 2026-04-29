@@ -497,13 +497,26 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
     if not user:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
 
-    branch_id = user.get("branch_id")
+    role = user.get("role", "")
     branch_header = request.headers.get("X-Branch-ID")
 
-    if branch_header == "all" and user.get("role", "") in ("owner", "admin"):
-        branch_id = "all"
-    elif branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
+    # For owner/admin: respect X-Branch-ID. If they didn't explicitly pick a
+    # sede (no header, 'matriz', 'all'), show all sedes of the org. The old
+    # fallback to user.branch_id assumed branch_id == location_id, which broke
+    # post-Wave-2 (user.branch_id is the org_id, not a location_id, so
+    # filtering downstream by location_id matched nothing).
+    if role in ("owner", "admin"):
+        if branch_header == "all":
+            branch_id = "all"
+        elif branch_header and branch_header.isdigit():
+            branch_id = int(branch_header)
+        else:
+            # Default for owners/admins: cross-sede view ('all'). bot_number
+            # filter (resolved below) provides tenant scoping.
+            branch_id = "all"
+    else:
+        # gerente / staff: pinned to their own sede.
+        branch_id = user.get("branch_id")
 
     bot_number = None
     if branch_id and branch_id != "all":

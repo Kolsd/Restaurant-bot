@@ -625,6 +625,20 @@ async def db_get_dashboard_conversations(
 ) -> list[dict]:
     """Return conversations for the dashboard filtered by branch/bot_number.
 
+    Filter semantics post-Wave-2:
+      - branch_id = 'all' → no sede filter (relies on bot_number for tenant
+        scoping; admin owner viewing 'Casa Matriz' sees all of their org's
+        conversations across every sede)
+      - branch_id = digit AND looks like a location_id → filter location_id
+      - bot_number always applied when present (defense in depth — unique
+        per restaurant, ensures no cross-tenant leak under bypass)
+
+    Pre-2026-04-29 the SQL filtered `WHERE branch_id = $1`. Post-migration
+    0057 (sync_table_branch_id) the conversations.branch_id column carries
+    location_id, NOT org_id. The dashboard route used to default branch_id
+    to user.branch_id (= org_id) and the filter matched zero rows for every
+    Herradura-style multi-sede org. Same bug family as floor_plan.
+
     RLS active — runs under bypass (dashboard route has no scoped dep wired yet).
     """
     from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
@@ -635,15 +649,19 @@ async def db_get_dashboard_conversations(
             params: list = []
             idx = 1
 
-            if branch_id == "all":
-                pass
-            elif branch_id:
-                conditions.append(f"branch_id = ${idx}")
-                params.append(branch_id)
-                idx += 1
-            elif bot_number:
+            # bot_number is the strongest tenant filter we have under bypass —
+            # apply unconditionally when known, regardless of branch selection.
+            if bot_number:
                 conditions.append(f"bot_number = ${idx}")
                 params.append(bot_number)
+                idx += 1
+
+            # location_id filter only when caller explicitly picked a sede.
+            # 'all' or None → cross-sede view of the same org (bot_number filter
+            # already scopes to the org).
+            if branch_id and branch_id != "all":
+                conditions.append(f"location_id = ${idx}")
+                params.append(branch_id)
                 idx += 1
 
             if conditions:

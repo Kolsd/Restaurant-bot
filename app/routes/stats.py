@@ -221,14 +221,22 @@ async def get_conversations(request: Request):
     await require_auth(request)
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
-    
-    bot_number = restaurant.get("whatsapp_number", "")
-    
-    branch_id = restaurant["id"]
 
+    bot_number = restaurant.get("whatsapp_number", "")
+
+    # X-Branch-ID semantics for /dashboard/conversations:
+    # - digit value (= location_id from sidebar dropdown) → filter to that sede
+    # - 'matriz', 'all', missing → no sede filter; RLS (org_isolation on
+    #   conversations) returns every conversation of the current org
+    # Pre-2026-04-29 the default fallback was restaurant["id"] (= org_id post-
+    # Wave-2 normalization in db_get_restaurant_by_id), but conversations
+    # carry branch_id == location_id post-migration 0057 — filtering
+    # branch_id = org_id matched zero rows. Same bug family as floor_plan.
     branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and any(r in user.get("role", "") for r in ["owner", "admin"]):
-        branch_id = int(branch_header)
+    branch_id: int | None = None
+    if branch_header and branch_header.isdigit():
+        if any(r in user.get("role", "") for r in ["owner", "admin"]):
+            branch_id = int(branch_header)
 
     with tenant_scope(restaurant["id"]):
         conversations = await db.db_get_all_conversations(bot_number=bot_number, branch_id=branch_id)
