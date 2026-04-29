@@ -644,22 +644,30 @@ async def test_salon_qr_claim_full_lifecycle(
     # File owners: app/routes/tables.py (_farewell_and_nps),
     #              app/services/agent.py (trigger_nps),
     #              app/repositories/conversations_repo.py (db_save_nps_waiting).
-    await asyncio.sleep(1.5)  # allow trigger_nps async side-effects to complete
-
+    # _farewell_and_nps uses asyncio.create_task(trigger_nps(...)) fire-and-forget,
+    # which means the DB INSERT into nps_waiting happens AFTER pay_check returns
+    # its HTTP response. Empirically this can take 10–20s on remote DBs because
+    # trigger_nps awaits Redis lock + db_get_restaurant_by_bot_number + tenant
+    # scope entry + INSERT, each adding network roundtrip latency. Poll for up
+    # to 30s instead of a single fetch.
     nps_waiting_row = None
-    with bypass_tenant_scope("e2e_assert_nps_waiting"):
-        async with pool.acquire() as conn:
-            nps_waiting_row = await conn.fetchrow(
-                """
-                SELECT id, phone, bot_number, created_at
-                FROM nps_waiting
-                WHERE phone = $1
-                  AND created_at > NOW() - INTERVAL '5 minutes'
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                CUSTOMER_PHONE,
-            )
+    for attempt in range(60):
+        with bypass_tenant_scope("e2e_assert_nps_waiting"):
+            async with pool.acquire() as conn:
+                nps_waiting_row = await conn.fetchrow(
+                    """
+                    SELECT phone, bot_number, created_at
+                    FROM nps_waiting
+                    WHERE phone = $1
+                      AND created_at > NOW() - INTERVAL '5 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    CUSTOMER_PHONE,
+                )
+        if nps_waiting_row:
+            break
+        await asyncio.sleep(0.5)
 
     assert nps_waiting_row is not None, (
         f"DISCONNECT #8: NPS no se encoló en nps_waiting para phone={CUSTOMER_PHONE} "
@@ -672,9 +680,9 @@ async def test_salon_qr_claim_full_lifecycle(
     )
     log.info(
         "e2e.qr_claim_nps_waiting_confirmed",
-        nps_id=str(nps_waiting_row["id"]),
         phone=nps_waiting_row["phone"],
         bot_number=nps_waiting_row["bot_number"],
+        created_at=str(nps_waiting_row["created_at"]),
     )
 
     # ── Final summary ──────────────────────────────────────────────────────────
