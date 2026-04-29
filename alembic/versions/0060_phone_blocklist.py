@@ -13,10 +13,16 @@ Background:
   is needed by the inbox_worker using bypass_tenant_scope) or org_id matches
   the current session scope.
 
-  The partial unique index ux_phone_blocklist_active enforces that only ONE
-  active block per phone exists at a time.  The unique predicate is
-  `blocked_until > NOW()` — expired rows do not participate, so a phone
-  can be re-blocked after expiry without a conflict.
+  Index strategy: a regular (non-partial, non-unique) index on phone for
+  the lookup hot path (is_phone_blocked filters by `phone = $1 AND
+  blocked_until > NOW()`). A partial unique index `WHERE blocked_until >
+  NOW()` was the original design, but Postgres rejects predicates that
+  reference NOW() — the function is STABLE, not IMMUTABLE, and partial
+  index predicates require IMMUTABLE expressions. The "one active block
+  per phone" semantic is enforced in app code by `add_to_blocklist` doing
+  ON CONFLICT against the (phone) column with active-window check
+  inside the upsert logic. cleanup_expired() prunes rows older than the
+  expiry window so the table doesn't grow unbounded.
 
 RLS: org_isolation policy (same pattern as qr_scan_pending).
 
@@ -47,13 +53,34 @@ def upgrade() -> None:
         );
         """
     )
-    # Partial unique index: only ONE active block per phone.
-    # Expired rows (blocked_until <= NOW()) do not count toward uniqueness.
+    # Lookup index: hot path is `WHERE phone = $1 AND blocked_until > NOW()`.
+    # Postgres rejects partial indexes whose predicate references NOW() (must
+    # be IMMUTABLE). Plain (non-unique) index covers the lookup; the "one
+    # active block per phone" semantic is handled in app code (see
+    # add_to_blocklist in phone_blocklist_repo.py — uses an UPDATE-then-INSERT
+    # pattern to dedupe). cleanup_expired() drops stale rows.
     op.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_phone_blocklist_active
-            ON phone_blocklist (phone)
-            WHERE blocked_until > NOW();
+        CREATE INDEX IF NOT EXISTS ix_phone_blocklist_phone
+            ON phone_blocklist (phone, blocked_until DESC);
+        """
+    )
+    # Grant runtime role access to the new table. Without these the app
+    # connection (mesio_app) hits permission denied as soon as it tries
+    # to read/write phone_blocklist. Mirrors the grants applied to other
+    # tables in earlier migrations / conftest setup.
+    op.execute(
+        """
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mesio_app') THEN
+                EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON phone_blocklist TO mesio_app';
+                EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE phone_blocklist_id_seq TO mesio_app';
+            END IF;
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mesio_superadmin') THEN
+                EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON phone_blocklist TO mesio_superadmin';
+                EXECUTE 'GRANT USAGE, SELECT ON SEQUENCE phone_blocklist_id_seq TO mesio_superadmin';
+            END IF;
+        END $$;
         """
     )
     op.execute("ALTER TABLE phone_blocklist ENABLE ROW LEVEL SECURITY;")

@@ -37,36 +37,52 @@ async def add_to_blocklist(
 ) -> int:
     """Block *phone* for *hours* hours.
 
-    Uses ON CONFLICT ... DO UPDATE so that if the phone is already blocked we
-    simply extend / refresh the block with the new reason and expiry.  The
-    unique partial index ux_phone_blocklist_active only covers rows where
-    blocked_until > NOW(), so an expired row will not conflict — a fresh row
-    is inserted instead.
+    Implementation note: the original design used a partial UNIQUE index
+    `WHERE blocked_until > NOW()` + ON CONFLICT UPSERT to enforce "one
+    active block per phone". Postgres rejects partial-index predicates
+    that reference NOW() (must be IMMUTABLE), so the schema uses a plain
+    (non-unique) (phone, blocked_until DESC) index instead. We replicate
+    the upsert semantics in app code: if there's an active block for this
+    phone, UPDATE it; otherwise INSERT a fresh row. cleanup_expired prunes
+    history so the table doesn't grow unbounded.
 
     Returns the row id.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with _conn() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO phone_blocklist (phone, org_id, reason, blocked_by, blocked_until)
-            VALUES ($1, $2, $3, $4, NOW() + ($5 || ' hours')::INTERVAL)
-            ON CONFLICT (phone) WHERE blocked_until > NOW()
-            DO UPDATE SET
-                blocked_until = NOW() + ($5 || ' hours')::INTERVAL,
-                reason        = EXCLUDED.reason,
-                blocked_by    = EXCLUDED.blocked_by,
-                org_id        = EXCLUDED.org_id
-            RETURNING id
-            """,
-            phone,
-            org_id,
-            reason,
-            blocked_by,
-            str(hours),
-        )
-        row_id: int = row["id"]
+        async with conn.transaction():
+            # Try to UPDATE the most recent active block for this phone.
+            existing = await conn.fetchrow(
+                """
+                UPDATE phone_blocklist
+                SET blocked_until = NOW() + ($1 || ' hours')::INTERVAL,
+                    reason        = $2,
+                    blocked_by    = $3,
+                    org_id        = $4
+                WHERE id = (
+                    SELECT id FROM phone_blocklist
+                    WHERE phone = $5 AND blocked_until > NOW()
+                    ORDER BY blocked_until DESC
+                    LIMIT 1
+                    FOR UPDATE
+                )
+                RETURNING id
+                """,
+                str(hours), reason, blocked_by, org_id, phone,
+            )
+            if existing is not None:
+                row_id = existing["id"]
+            else:
+                inserted = await conn.fetchrow(
+                    """
+                    INSERT INTO phone_blocklist (phone, org_id, reason, blocked_by, blocked_until)
+                    VALUES ($1, $2, $3, $4, NOW() + ($5 || ' hours')::INTERVAL)
+                    RETURNING id
+                    """,
+                    phone, org_id, reason, blocked_by, str(hours),
+                )
+                row_id = inserted["id"]
         log.info(
             "phone_blocklist.added",
             phone=phone,

@@ -219,18 +219,22 @@ async def _make_table_order(
     status: str = "pendiente",
 ) -> str:
     order_id = f"order-ai-{secrets.token_hex(4)}"
+    # table_orders NOT NULL columns: id, table_id, table_name, phone, items,
+    # org_id, station. No `subtotal` or `order_payload` columns. `total` is
+    # nullable. Keep INSERT minimal to those required + the test fields.
     await db_conn.execute(
         """
         INSERT INTO table_orders
-            (id, phone, bot_number, table_id, org_id, location_id,
-             status, order_payload, total, pending_table_validation, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6,
-                $7, '{"items":[]}'::jsonb, 15000, $8, NOW() - INTERVAL '2 minutes')
+            (id, phone, bot_number, table_id, table_name, org_id, location_id,
+             station, status, items, total, pending_table_validation, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7,
+                'cocina', $8, '[]'::jsonb, 15000, $9, NOW() - INTERVAL '2 minutes')
         """,
         order_id,
         phone,
         bot,
         table_id,
+        f"Mesa {table_id[-2:]}",   # table_name (NOT NULL)
         org_id,
         loc_id,
         status,
