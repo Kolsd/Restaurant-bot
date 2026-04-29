@@ -272,6 +272,44 @@ function selectTable(idx) {
   const lbl = document.getElementById('cart-table-label');
   const t = _activeTables[idx];
   if (lbl && t) lbl.textContent = t.name || t.table_name || `Mesa ${t.id}`;
+  // Auto-load the mesa's active order so caja sees what's on the table
+  // immediately after selecting it (PM feedback: 'Comanda Sin productos'
+  // even when customer had ordered via bot). Read-only preview — F12
+  // 'Cobrar' uses _selectedTableOrder.base_order_id to open the pay modal.
+  if (t) _loadActiveOrderForTable(t).catch(e => console.warn('caja: load mesa order failed', e));
+}
+
+async function _loadActiveOrderForTable(table) {
+  if (!table || !table.id) return;
+  try {
+    const url = `/api/table-orders?table_id=${encodeURIComponent(table.id)}`;
+    const res = await fetch(url, { headers: mesioHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const all = (data.orders || []);
+    const active = all.find(o => o.base_order_id && !['factura_entregada','cancelado','closed'].includes(o.status));
+    if (!active) return;
+    const items = Array.isArray(active.items) ? active.items : [];
+    if (!items.length) return;
+    // Populate _cart from the existing order items so the comanda panel
+    // and totals reflect the real mesa state. Caja can still tweak +/−
+    // if they want to add extras to the current order before cobrar.
+    _cart = items.map((it, i) => ({
+      id: it.id || ('mesa-' + i),
+      name: it.name || '—',
+      price: Number(it.price || it.unit_price || 0),
+      qty: Number(it.quantity || it.qty || 1),
+      notes: it.notes || '',
+      _from_mesa: true,
+    }));
+    _selectedTableOrder = {
+      base_order_id: active.base_order_id,
+      table_name: table.name || `Mesa ${table.id}`,
+      table_id: table.id,
+      status: active.status,
+    };
+    _renderCart();
+  } catch (_) { /* non-critical */ }
 }
 function openNewOrderModal() {
   const qim = document.getElementById('quick-invoice-screen');
