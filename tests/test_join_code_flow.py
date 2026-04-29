@@ -152,16 +152,21 @@ async def org_id(db_conn):
 
 @pytest.fixture
 async def location_id(db_conn, org_id):
-    """Create a location for the org."""
+    """Create a location for the org. Note: locations has `code` not `slug`
+    (slug lives on organizations); whatsapp_number on the location is unique
+    across all locations so we generate a per-test value to avoid collisions
+    when tests run in parallel or share a long-lived test DB.
+    """
     row = await db_conn.fetchrow(
         """
         INSERT INTO locations
-            (org_id, name, address, whatsapp_number, slug)
-        VALUES ($1, 'TestBranch', 'Test St 1', '57999000001', $2)
+            (org_id, name, code, address, whatsapp_number)
+        VALUES ($1, 'TestBranch', $2, 'Test St 1', $3)
         RETURNING id
         """,
         org_id,
         f"test-branch-{secrets.token_hex(4)}",
+        f"57999{secrets.token_hex(3).lower()}",
     )
     return row["id"]
 
