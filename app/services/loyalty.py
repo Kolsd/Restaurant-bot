@@ -17,14 +17,17 @@ _module_dep = Depends(require_module(_MODULE))
 def _resolve_branch_id(request: Request, user: dict, restaurant: dict) -> int | str | None:
     branch_header = request.headers.get("X-Branch-ID")
     is_admin = any(r in user.get("role", "") for r in ["owner", "admin"])
-    
+
     if is_admin:
         if branch_header == "all": return "all"
         elif branch_header == "matriz": return None
         elif branch_header and branch_header.isdigit(): return int(branch_header)
         return None
-        
-    return user.get("branch_id") or (restaurant["id"] if restaurant.get("parent_restaurant_id") else None)
+
+    # Non-admin (gerente): user.branch_id is a location_id (set when the branch
+    # user account was created). parent_restaurant_id is always None post-Wave-2
+    # (0038 dropped it from the VIEW) — the fallback was dead code; removed.
+    return user.get("branch_id")
     
 class RedeemBody(BaseModel):
     phone:    str = Field(..., min_length=7, max_length=15)
@@ -42,8 +45,9 @@ async def get_loyalty_balance(
     phone: str = Query(..., min_length=7, max_length=15),
 ):
     restaurant = await get_current_restaurant(request)
-    matriz_id = restaurant.get("parent_restaurant_id") or restaurant["id"]
-    result = await db.db_get_loyalty_balance(matriz_id, phone)
+    # parent_restaurant_id is always None post-Wave-2 (0038 dropped it).
+    # restaurant["id"] is the org_id via the restaurants VIEW.
+    result = await db.db_get_loyalty_balance(restaurant["id"], phone)
     return result
 
 @router.get("/stats", dependencies=[_module_dep])
@@ -54,10 +58,7 @@ async def get_loyalty_stats(
     user = await get_current_user(request)
     restaurant = await get_current_restaurant(request)
     
-    # 🛡️ Leer la sucursal del Dashboard
-    branch_id = _resolve_branch_id(request, user, restaurant)
-    
-    rows = await db.db_get_loyalty_stats(restaurant["id"], limit, branch_id=branch_id)
+    rows = await db.db_get_loyalty_stats(restaurant["id"], limit)
     return {"customers": rows, "total": len(rows)}
 
 @router.post("/redeem", dependencies=[_module_dep])

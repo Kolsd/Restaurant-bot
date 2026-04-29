@@ -12,8 +12,8 @@ not the column name):
 - delivery/pickup orders  → JOIN restaurants r ON r.whatsapp_number = o.bot_number
                             WHERE r.id = $location_id  (restaurants is a VIEW
                             over locations JOIN organizations; r.id == locations.id)
-- table orders            → WHERE branch_id = $location_id
-                            OR (branch_id IS NULL AND $location_id is the matriz)
+- table orders            → WHERE org_id = $org_id
+                            (post-Wave-2 + 0057: branch_id carries location_id, not org_id)
 - NPS responses           → bot_number LIKE base_bot_number || '%'
                             where base_bot_number = split_part(r.whatsapp_number, '_b', 1)
                             This covers both exact matches and sucursal suffixes (_b<ts>).
@@ -124,11 +124,11 @@ async def compute_weekly_stats(
         delivery_count        = int(delivery_row["count_current"] or 0)
         delivery_count_prev   = int(delivery_row["count_previous"] or 0)
 
-        # ── 2. Dine-in revenue (table_orders table, by branch_id) ─────────────
-        # For a matriz (parent_restaurant_id IS NULL): include rows where
-        #   branch_id = restaurant_id OR branch_id IS NULL
-        # For a sucursal: only branch_id = restaurant_id.
-        # Exclude statuses in REVENUE_STATUSES_TABLE_EXCLUDE.
+        # ── 2. Dine-in revenue (table_orders table) ──────────────────────────────
+        # Post-Wave-2 + migration 0057: table_orders.branch_id carries location_id,
+        # NOT org_id. Filtering branch_id = org_id matched zero rows for every
+        # multi-sede org. Use org_id = $1 (the canonical tenant key) instead.
+        # RLS already enforces org_id scoping; this is an explicit belt-and-suspenders.
         table_row = await conn.fetchrow(
             """
             SELECT
@@ -142,10 +142,7 @@ async def compute_weekly_stats(
                            THEN 1 END)                         AS count_previous
             FROM table_orders o
             WHERE o.status <> ALL($5)
-              AND (
-                  o.branch_id = $1
-                  OR o.branch_id IS NULL
-              )
+              AND o.org_id = $1
             """,
             restaurant_id,
             week_start, week_end,
