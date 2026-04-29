@@ -1066,7 +1066,11 @@ async def confirm_table_real(request: Request, table_id: str):
 
     Auth: any authenticated staff role (mesero, caja, admin, owner, gerente).
     """
-    user = await require_auth(request)
+    # require_auth() returns the username string; get_current_user() returns the dict.
+    # Original Capa 3 endpoint mistakenly called user.get(...) on the str. Production
+    # bug — would crash on every real call. Caught by E2E test.
+    username = await require_auth(request)
+    user = await get_current_user(request)
     role = user.get("role", "")
     allowed_roles = {"owner", "admin", "gerente", "mesero", "caja"}
     if not any(r in role for r in allowed_roles):
@@ -1077,8 +1081,6 @@ async def confirm_table_real(request: Request, table_id: str):
         org_id = restaurant.get("org_id") or restaurant.get("id")
     except HTTPException:
         org_id = user.get("restaurant_id") or user.get("branch_id")
-
-    username = user.get("username") or user.get("name") or user.get("sub", "")
 
     with bypass_tenant_scope("confirm_table_real: release pending validation orders"):
         released = await tr.db_confirm_table_real(table_id, org_id, username)
@@ -1108,7 +1110,10 @@ async def mark_table_ghost(request: Request, table_id: str):
 
     Auth: any authenticated staff role (mesero, caja, admin, owner, gerente).
     """
-    user = await require_auth(request)
+    # Same fix as confirm-real above: require_auth() returns username str,
+    # get_current_user() returns the user dict.
+    username = await require_auth(request)
+    user = await get_current_user(request)
     role = user.get("role", "")
     allowed_roles = {"owner", "admin", "gerente", "mesero", "caja"}
     if not any(r in role for r in allowed_roles):
@@ -1119,8 +1124,6 @@ async def mark_table_ghost(request: Request, table_id: str):
         org_id = restaurant.get("org_id") or restaurant.get("id")
     except HTTPException:
         org_id = user.get("restaurant_id") or user.get("branch_id")
-
-    username = user.get("username") or user.get("name") or user.get("sub", "")
 
     with bypass_tenant_scope("mark_table_ghost: cancel orders and close sessions"):
         result = await tr.db_mark_table_ghost(table_id, org_id, username)
