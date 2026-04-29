@@ -450,11 +450,289 @@ async function loadTables() {
   }
 }
 
+// ── Active orders modal (cross-table flat list) ────────
+// Closes DISCONNECT #7 (mesero tab 'Pedidos activos'). The redesign
+// removed this view and forced the user to click each mesa to see
+// orders. Now there's a single button → modal with all active orders.
+async function openActiveOrdersModal() {
+  const existing = document.getElementById('mesero-orders-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'mesero-orders-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 16px;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:680px;width:100%;max-height:85vh;overflow-y:auto;';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 16px;font-size:18px;color:var(--text-1,#fff);display:flex;align-items:center;gap:8px;';
+  title.innerHTML = '📋 Pedidos activos';
+  card.appendChild(title);
+
+  const body = document.createElement('div');
+  body.id = 'mesero-orders-modal-body';
+  body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">Cargando…</div>';
+  card.appendChild(body);
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'm-btn m-btn--sm m-btn--ghost';
+  closeBtn.style.cssText = 'flex:1;';
+  closeBtn.textContent = 'Cerrar';
+  closeBtn.addEventListener('click', () => modal.remove());
+  footer.appendChild(closeBtn);
+  card.appendChild(footer);
+
+  modal.appendChild(card);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.addEventListener('keydown', function onEsc(e) {
+    if (e.key === 'Escape') { modal.remove(); document.removeEventListener('keydown', onEsc); }
+  });
+  document.body.appendChild(modal);
+
+  try {
+    const res = await fetch('/api/table-orders', { headers: _hdr() });
+    if (!res.ok) {
+      body.innerHTML = '<div style="padding:20px;color:#ef4444;">No se pudieron cargar los pedidos (HTTP ' + res.status + ').</div>';
+      return;
+    }
+    const data = await res.json();
+    const all = data.orders || [];
+    const orders = all.filter(o => !_CLOSED_ORDER_STATUSES.includes(o.status));
+    if (!orders.length) {
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">No hay pedidos activos en ninguna mesa.</div>';
+      return;
+    }
+    // Group by table
+    const byTable = {};
+    orders.forEach(o => {
+      const k = String(o.table_id || 'sin-mesa');
+      if (!byTable[k]) byTable[k] = { table_id: o.table_id, table_name: o.table_name, orders: [] };
+      byTable[k].orders.push(o);
+    });
+
+    body.innerHTML = '';
+    Object.values(byTable).forEach(grp => {
+      const grpEl = document.createElement('div');
+      grpEl.style.cssText = 'margin-bottom:14px;';
+      const head = document.createElement('div');
+      head.style.cssText = 'font-size:13px;font-weight:600;color:var(--text-1,#fff);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;';
+      const name = document.createElement('span');
+      name.textContent = 'Mesa ' + (grp.table_name || grp.table_id || '—');
+      const count = document.createElement('span');
+      count.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);font-weight:500;';
+      count.textContent = grp.orders.length + ' pedido' + (grp.orders.length === 1 ? '' : 's');
+      head.appendChild(name);
+      head.appendChild(count);
+      grpEl.appendChild(head);
+
+      grp.orders.forEach(o => {
+        const oCard = document.createElement('div');
+        oCard.style.cssText = 'background:var(--surface-3,#252d40);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;';
+        const left = document.createElement('div');
+        left.style.cssText = 'flex:1;min-width:0;';
+        const idLine = document.createElement('div');
+        idLine.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);font-family:monospace;';
+        idLine.textContent = '#' + String(o.id || '').slice(-6);
+        const itemsLine = document.createElement('div');
+        itemsLine.style.cssText = 'font-size:12px;color:var(--text-2,#cbd5e1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        const items = Array.isArray(o.items) ? o.items : [];
+        itemsLine.textContent = items.length
+          ? items.map(it => (it.qty || 1) + '× ' + (it.name || '?')).join(', ')
+          : '—';
+        left.appendChild(idLine);
+        left.appendChild(itemsLine);
+        const right = document.createElement('div');
+        const statusInfo = _STATUS_LABELS[o.status] || { txt: o.status, color: '#94a3b8', bg: '#1e2535' };
+        const badge = document.createElement('span');
+        badge.style.cssText = 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:' + statusInfo.bg + ';color:' + statusInfo.color + ';';
+        badge.textContent = statusInfo.txt;
+        right.appendChild(badge);
+        oCard.appendChild(left);
+        oCard.appendChild(right);
+        oCard.addEventListener('click', () => {
+          modal.remove();
+          openTable({ id: grp.table_id, name: grp.table_name });
+        });
+        grpEl.appendChild(oCard);
+      });
+      body.appendChild(grpEl);
+    });
+  } catch (e) {
+    body.innerHTML = '<div style="padding:20px;color:#ef4444;">Error de conexión.</div>';
+  }
+}
+
+// ── Active chats modal (bot conversations visibility) ─
+// Closes DISCONNECT #5 (mesero/caja no ve chats activos del bot).
+// Lists recent conversations + click row → individual chat history.
+async function openChatsModal() {
+  const existing = document.getElementById('mesero-chats-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'mesero-chats-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 16px;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:580px;width:100%;max-height:85vh;display:flex;flex-direction:column;';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 16px;font-size:18px;color:var(--text-1,#fff);display:flex;align-items:center;gap:8px;';
+  title.innerHTML = '💬 Chats activos';
+  card.appendChild(title);
+
+  const body = document.createElement('div');
+  body.id = 'mesero-chats-modal-body';
+  body.style.cssText = 'flex:1;overflow-y:auto;';
+  body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">Cargando…</div>';
+  card.appendChild(body);
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'display:flex;gap:8px;margin-top:16px;flex-shrink:0;';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'm-btn m-btn--sm m-btn--ghost';
+  closeBtn.style.cssText = 'flex:1;';
+  closeBtn.textContent = 'Cerrar';
+  closeBtn.addEventListener('click', () => modal.remove());
+  footer.appendChild(closeBtn);
+  card.appendChild(footer);
+
+  modal.appendChild(card);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.addEventListener('keydown', function onEsc(e) {
+    if (e.key === 'Escape') { modal.remove(); document.removeEventListener('keydown', onEsc); }
+  });
+  document.body.appendChild(modal);
+
+  try {
+    const res = await fetch('/api/dashboard/conversations', { headers: _hdr() });
+    if (!res.ok) {
+      body.innerHTML = '<div style="padding:20px;color:#ef4444;">No se pudieron cargar las conversaciones (HTTP ' + res.status + ').</div>';
+      return;
+    }
+    const data = await res.json();
+    const convs = data.conversations || [];
+    if (!convs.length) {
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">No hay conversaciones recientes.</div>';
+      return;
+    }
+    body.innerHTML = '';
+    convs.forEach(c => {
+      const row = document.createElement('div');
+      row.style.cssText = 'background:var(--surface-3,#252d40);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;';
+      const left = document.createElement('div');
+      left.style.cssText = 'flex:1;min-width:0;';
+      const phoneEl = document.createElement('div');
+      phoneEl.style.cssText = 'font-size:13px;font-weight:600;color:var(--text-1,#fff);';
+      phoneEl.textContent = _maskPhone(c.phone);
+      const previewEl = document.createElement('div');
+      previewEl.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;';
+      previewEl.textContent = (c.last_message || c.preview || '').slice(0, 80) || '—';
+      left.appendChild(phoneEl);
+      left.appendChild(previewEl);
+      const right = document.createElement('div');
+      right.style.cssText = 'font-size:10px;color:var(--text-3,#94a3b8);text-align:right;flex-shrink:0;';
+      if (c.last_at || c.updated_at) {
+        const iso = (c.last_at || c.updated_at);
+        right.textContent = _elapsed(iso);
+      }
+      row.appendChild(left);
+      row.appendChild(right);
+      row.addEventListener('click', () => openChatHistoryModal(c.phone));
+      body.appendChild(row);
+    });
+  } catch (e) {
+    body.innerHTML = '<div style="padding:20px;color:#ef4444;">Error de conexión.</div>';
+  }
+}
+
+function _maskPhone(p) {
+  if (!p) return '';
+  const s = String(p);
+  if (s.length <= 4) return s;
+  return s.slice(0, -4).replace(/\d/g, '•') + s.slice(-4);
+}
+
+async function openChatHistoryModal(phone) {
+  const existing = document.getElementById('mesero-chat-history-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'mesero-chat-history-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:40px 16px;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:20px;min-width:320px;max-width:520px;width:100%;max-height:90vh;display:flex;flex-direction:column;';
+
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0;';
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0;font-size:15px;color:var(--text-1,#fff);';
+  title.textContent = 'Chat ' + _maskPhone(phone);
+  const xBtn = document.createElement('button');
+  xBtn.className = 'm-btn m-btn--sm m-btn--ghost';
+  xBtn.textContent = '✕';
+  xBtn.style.cssText = 'min-width:28px;padding:4px 10px;';
+  xBtn.addEventListener('click', () => modal.remove());
+  head.appendChild(title);
+  head.appendChild(xBtn);
+  card.appendChild(head);
+
+  const msgs = document.createElement('div');
+  msgs.style.cssText = 'flex:1;overflow-y:auto;background:#0e1117;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;';
+  msgs.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:12px;font-size:12px;">Cargando historial…</div>';
+  card.appendChild(msgs);
+
+  modal.appendChild(card);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  try {
+    const res = await fetch('/api/conversations/' + encodeURIComponent(phone), { headers: _hdr() });
+    if (!res.ok) {
+      msgs.innerHTML = '<div style="color:#ef4444;text-align:center;padding:12px;">No se pudo cargar (HTTP ' + res.status + ').</div>';
+      return;
+    }
+    const d = await res.json();
+    const history = d.history || [];
+    if (!history.length) {
+      msgs.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:12px;font-size:12px;">Sin mensajes.</div>';
+      return;
+    }
+    msgs.innerHTML = '';
+    history.forEach(m => {
+      const isUser = m.role === 'user';
+      const bubble = document.createElement('div');
+      bubble.style.cssText = 'max-width:80%;padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.4;word-wrap:break-word;align-self:' + (isUser ? 'flex-start' : 'flex-end') + ';background:' + (isUser ? '#252d40' : '#1f3d2f') + ';color:' + (isUser ? '#cbd5e1' : '#d1fae5') + ';';
+      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      bubble.textContent = content;
+      msgs.appendChild(bubble);
+    });
+    msgs.scrollTop = msgs.scrollHeight;
+  } catch (e) {
+    msgs.innerHTML = '<div style="color:#ef4444;text-align:center;padding:12px;">Error de conexión.</div>';
+  }
+}
+
 // ── Zone tabs setup ───────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.m-zone-btn').forEach(btn => {
     btn.addEventListener('click', () => setZone(btn.dataset.zone || 'all'));
   });
+
+  const ordersBtn = document.getElementById('m-btn-orders');
+  if (ordersBtn) ordersBtn.addEventListener('click', openActiveOrdersModal);
+  const chatsBtn = document.getElementById('m-btn-chats');
+  if (chatsBtn) chatsBtn.addEventListener('click', openChatsModal);
 
   loadTables();
   mesioInterval(loadTables, 20000);

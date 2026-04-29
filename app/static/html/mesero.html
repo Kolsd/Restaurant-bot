@@ -68,6 +68,17 @@
         <h1>Salón</h1>
         <div class="m-head-sub" id="mesero-sub">Cargando estado del turno…</div>
       </div>
+      <!-- Quick views: chats activos + pedidos activos cross-table -->
+      <div class="m-head-actions" style="display:flex;gap:8px;align-items:center;">
+        <button id="m-btn-orders" class="m-btn m-btn--sm m-btn--ghost" type="button"
+                style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          📋 <span>Pedidos activos</span>
+        </button>
+        <button id="m-btn-chats" class="m-btn m-btn--sm m-btn--ghost" type="button"
+                style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          💬 <span>Chats</span>
+        </button>
+      </div>
       <!-- Zone filter tabs -->
       <div class="m-zone-tabs" role="tablist">
         <button class="m-zone-btn active" data-zone="all" role="tab" aria-selected="true">Todas</button>
