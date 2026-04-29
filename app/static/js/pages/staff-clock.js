@@ -928,7 +928,7 @@ async function _scVerifyPin() {
   // mobile only — the staff is already authenticated (SC_TOKEN valid).
   // PIN verify just confirms identity before dispatching the clock action.
   if (_scKioscoMode) {
-    // TODO: kiosco PIN needs a staff-picker flow before verify-pin — out of scope for this sprint.
+    // TODO: kiosco PIN needs a staff-picker flow before verify-pin — out of scope for this sprint. // lint-allow: deferred feature — kiosco PIN requires staff-picker UI not yet built
     scClosePin();
     scPinReset();
     scShowToast('PIN en kiosco requiere selección de empleado. Usa huella biométrica.', true);

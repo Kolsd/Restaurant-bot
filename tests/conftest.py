@@ -11,6 +11,21 @@ Fixtures:
   auth_override       — (module-level) sets app.dependency_overrides for auth deps
   make_pool / make_row — DB connection factory helpers (async tests)
 """
+import os
+
+# Ensure all feature-gated routers (loyalty, marketing, reviews, staff_webauthn,
+# discounts) are included when running the test suite.  This must be set BEFORE
+# importing app.main, because _maybe_include() reads DISABLED_MODULES at module
+# load time and only registers routers that are NOT in the disabled set.
+# Force all feature-gated routers to be enabled in tests.
+# main.py reads DISABLED_MODULES at module load time; setting it here (before
+# the first import of app.main anywhere in the test session) ensures every
+# router — loyalty, marketing, reviews, staff_webauthn, discounts — is
+# registered in the FastAPI app so HTTP endpoint tests get 200s, not 404s.
+# We use __setitem__ (not setdefault) so an ambient env var cannot accidentally
+# disable routers during CI runs.
+os.environ["DISABLED_MODULES"] = ""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
@@ -72,6 +87,10 @@ def make_pool(conn):
     Also ensures conn.transaction() is a sync callable returning an async ctx-mgr,
     as required by tenant_connection() which calls `async with conn.transaction():`.
     If conn already has transaction set to a MagicMock, it is left unchanged.
+
+    Also ensures conn.execute is an AsyncMock so tenant_connection()'s
+    `await conn.execute("SET LOCAL ROLE mesio_app")` call does not crash with
+    "object MagicMock can't be used in 'await' expression".
     """
     # Ensure transaction() is a sync MagicMock returning an async ctx-mgr.
     # AsyncMock's auto-generated attributes return coroutines when called, which
@@ -81,6 +100,16 @@ def make_pool(conn):
         _txn.__aenter__ = AsyncMock(return_value=_txn)
         _txn.__aexit__ = AsyncMock(return_value=False)
         conn.transaction = MagicMock(return_value=_txn)
+    # Ensure execute() is awaitable — tenant_connection() calls
+    # `await conn.execute("SET LOCAL ROLE mesio_app")` unconditionally.
+    # Only patch if the current attribute is the auto-generated MagicMock child
+    # (i.e., it was never explicitly assigned by the test).  AsyncMock and plain
+    # coroutine functions are both awaitable and must be left untouched.
+    import asyncio as _asyncio
+    _exec = getattr(conn, "execute", None)
+    _is_awaitable = isinstance(_exec, AsyncMock) or _asyncio.iscoroutinefunction(_exec)
+    if not _is_awaitable:
+        conn.execute = AsyncMock(return_value=None)
     pool = AsyncMock()
     pool.acquire = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=conn),

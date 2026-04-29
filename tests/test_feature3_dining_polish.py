@@ -41,6 +41,8 @@ class TestFeature3DiningPolish:
 
         monkeypatch.setattr(db, "db_get_table_by_id", AsyncMock(return_value=fake_table))
         monkeypatch.setattr(db, "db_get_active_session", AsyncMock(return_value=None))
+        # Rule #5 cooldown check: no other active session on this table
+        monkeypatch.setattr(db, "db_get_active_session_on_table_by_other_phone", AsyncMock(return_value=None))
         monkeypatch.setattr(db, "db_create_table_session", AsyncMock())
 
         result = _run(detect_table_context("[t:tbl-42] hola", "+57300", "+57999"))
@@ -61,6 +63,8 @@ class TestFeature3DiningPolish:
                             AsyncMock(return_value={"table_id": "tbl-OLD"}))
         close_mock = AsyncMock()
         monkeypatch.setattr(db, "db_close_session", close_mock)
+        # Rule #5 cooldown check: no other active session on this table
+        monkeypatch.setattr(db, "db_get_active_session_on_table_by_other_phone", AsyncMock(return_value=None))
         monkeypatch.setattr(db, "db_create_table_session", AsyncMock())
 
         result = _run(detect_table_context("[t:tbl-99] hola", "+57300", "+57999"))

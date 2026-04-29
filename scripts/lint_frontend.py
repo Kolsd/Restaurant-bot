@@ -170,10 +170,22 @@ def _normalize_path(p: str) -> str:
 def _load_backend_routes() -> set[str]:
     """Import the FastAPI app and harvest every registered path."""
     # Ensure minimal env so `from app.main import app` succeeds outside tests.
-    os.environ.setdefault("ANTHROPIC_API_KEY", "sk-lint-dummy")
-    os.environ.setdefault("META_APP_SECRET", "lint-dummy")
-    os.environ.setdefault("ADMIN_KEY", "lint-dummy")
-    os.environ.setdefault("DATABASE_URL", "postgresql://u:p@127.0.0.1/lint")
+    # Track which keys we are injecting so we can clean them up afterwards —
+    # leaving dummy values in os.environ pollutes integration tests that run
+    # after this function (e.g. test_health.py::TestHealthIntegration skips
+    # correctly when DATABASE_URL is absent but *fails* when it finds the
+    # dummy 127.0.0.1 URL and actually attempts a TCP connection).
+    _injected: list[str] = []
+
+    def _setdefault_tracking(key: str, value: str) -> None:
+        if key not in os.environ:
+            os.environ[key] = value
+            _injected.append(key)
+
+    _setdefault_tracking("ANTHROPIC_API_KEY", "sk-lint-dummy")
+    _setdefault_tracking("META_APP_SECRET", "lint-dummy")
+    _setdefault_tracking("ADMIN_KEY", "lint-dummy")
+    _setdefault_tracking("DATABASE_URL", "postgresql://u:p@127.0.0.1/lint")
 
     sys.path.insert(0, str(ROOT))
     from app.main import app  # noqa: E402
@@ -184,6 +196,12 @@ def _load_backend_routes() -> set[str]:
         if not path:
             continue
         routes.add(_normalize_path(path))
+
+    # Clean up any dummy env vars we injected so they don't bleed into
+    # subsequent test code (e.g. health integration tests).
+    for key in _injected:
+        os.environ.pop(key, None)
+
     return routes
 
 

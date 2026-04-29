@@ -315,9 +315,12 @@ async def test_decimal_coercion_float_inputs(db_conn):
     )
     assert row is not None, "Order row not found"
 
-    # The orders schema stores these as INTEGER — asyncpg returns int.
-    assert isinstance(row["subtotal"], int), (
-        f"subtotal should be int (INTEGER column), got {type(row['subtotal'])}"
+    # Migration 0046 changed money columns from INTEGER to NUMERIC(14,2).
+    # asyncpg returns NUMERIC as Decimal; accept both Decimal and int for
+    # forward-compat in case some environments still have INTEGER columns.
+    from decimal import Decimal as _Decimal
+    assert isinstance(row["subtotal"], (_Decimal, int)), (
+        f"subtotal should be Decimal/int (NUMERIC/INTEGER column), got {type(row['subtotal'])}"
     )
     assert row["subtotal"] == 35000, f"Unexpected subtotal: {row['subtotal']}"
     assert row["delivery_fee"] == 3000, f"Unexpected delivery_fee: {row['delivery_fee']}"
