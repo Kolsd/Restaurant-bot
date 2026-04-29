@@ -97,7 +97,21 @@ function _renderWall(orders) {
     const isSelected = idx === _selectedIdx;
 
     const items = Array.isArray(o.items) ? o.items : [];
-    const itemsHtml = items.map(item => {
+
+    // Group items by course (DISCONNECT #6 visual aid). When the menu has
+    // course-tagged dishes (item.course = 'entrada' | 'principal' | 'postre'
+    // | 'bebida'), cocina sees them grouped under headers so they can decide
+    // pacing manually. When no items have a course, falls back to the
+    // legacy flat render — zero behaviour change.
+    const _COURSE_ORDER = ['bebida', 'entrada', 'principal', 'postre', 'sin_curso'];
+    const _COURSE_LABEL = {
+      bebida:    '🥤 Bebidas',
+      entrada:   '🥗 Entradas',
+      principal: '🍽 Plato fuerte',
+      postre:    '🍰 Postres',
+      sin_curso: 'Otros',
+    };
+    const renderItem = (item) => {
       const el = document.createElement('div');
       el.textContent = item.name || '';
       const safeName = el.innerHTML;
@@ -106,7 +120,29 @@ function _renderWall(orders) {
       const safeQty = qEl.innerHTML;
       const modHtml = item.notes ? `<div class="tkt-mods">${_escHtmlSafe(item.notes)}</div>` : '';
       return `<div class="tkt-item" data-done="0"><div class="tkt-qty">${safeQty}</div><div><div class="tkt-dish">${safeName}</div>${modHtml}</div><div class="tkt-check"></div></div>`;
-    }).join('');
+    };
+
+    const anyCourse = items.some(it => (it.course || '').trim());
+    let itemsHtml;
+    if (anyCourse) {
+      const grouped = {};
+      items.forEach(it => {
+        const c = ((it.course || '').trim().toLowerCase()) || 'sin_curso';
+        if (!grouped[c]) grouped[c] = [];
+        grouped[c].push(it);
+      });
+      const orderedKeys = _COURSE_ORDER.filter(k => grouped[k] && grouped[k].length);
+      // Append any unrecognized course names at the end so we never drop items.
+      Object.keys(grouped).forEach(k => { if (!orderedKeys.includes(k)) orderedKeys.push(k); });
+      itemsHtml = orderedKeys.map(k => {
+        const label = _COURSE_LABEL[k] || (k.charAt(0).toUpperCase() + k.slice(1));
+        const safeLabel = (() => { const e = document.createElement('div'); e.textContent = label; return e.innerHTML; })();
+        return `<div class="tkt-course-hdr" style="padding:6px 16px;font-size:11px;font-weight:700;color:var(--k-text-3,#7C8393);text-transform:uppercase;letter-spacing:0.04em;background:rgba(255,255,255,0.02);">${safeLabel}</div>`
+             + grouped[k].map(renderItem).join('');
+      }).join('');
+    } else {
+      itemsHtml = items.map(renderItem).join('');
+    }
 
     const tableName = (() => { const e = document.createElement('div'); e.textContent = o.table_name || o.table_id || '#'; return e.innerHTML; })();
     const tblCls = tableName; // is_delivery removed — kitchen only shows table_orders, never delivery orders
