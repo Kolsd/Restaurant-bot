@@ -546,6 +546,148 @@ async def db_get_active_session_on_table_by_other_phone(table_id: str, phone: st
         return _serialize(dict(row)) if row else None
 
 
+async def db_get_session_join_code(table_id: str, bot_number: str) -> str | None:
+    """Return the join_code of the active session for this table, or None if
+    the table has no active session (caller becomes the host).
+
+    Used by detect_table_context Capa 2: if a session already exists on the
+    table, the bot must ask the new participant for the code before opening
+    a second session.
+
+    # Requires active tenant_scope() or bypass_tenant_scope_if_unset().
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT join_code
+            FROM table_sessions
+            WHERE table_id = $1
+              AND bot_number = $2
+              AND status = 'active'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            table_id, bot_number,
+        )
+        if row is None:
+            return None
+        return row["join_code"]  # may still be None if host didn't set it yet
+
+
+async def db_set_session_join_code(session_id: int, join_code: str) -> bool:
+    """Atomically set join_code on a session that does NOT have one yet.
+
+    Returns True if the UPDATE touched exactly one row (success).
+    Returns False if the session already had a code (race between two
+    concurrent hosts opening the same mesa simultaneously — rare).
+
+    Uses WHERE join_code IS NULL so the operation is idempotent/safe.
+
+    # Requires active tenant_scope() or bypass_tenant_scope_if_unset().
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE table_sessions
+            SET join_code = $2
+            WHERE id = $1
+              AND join_code IS NULL
+            RETURNING id
+            """,
+            session_id, join_code,
+        )
+        return row is not None
+
+
+async def db_link_participant_session(
+    phone: str,
+    bot_number: str,
+    table_id: str,
+    table_name: str,
+    join_code: str,
+    org_id: int,
+    location_id: int | None,
+) -> dict | None:
+    """Open a NEW table_session for a participant joining an existing mesa
+    with the correct join_code. Verifies the code against the active host
+    session for that table.
+
+    Returns the new session dict if the code matched and the session was
+    created. Returns None if no active session with that join_code exists
+    for the table (wrong code or stale).
+
+    Steps:
+      1. SELECT the active session WHERE table_id=$1 AND join_code=$2 —
+         if no row, the code is wrong → return None.
+      2. INSERT a new table_sessions row for phone+bot+table_id with the
+         SAME join_code so all participants share the identifier.
+         Auto-assigns a mesero using the same load-balanced logic as
+         db_create_table_session.
+
+    # Requires active tenant_scope() or bypass_tenant_scope_if_unset().
+    """
+    async with tenant_connection() as conn:
+        # Step 1: verify the code matches an active session for this table.
+        host_row = await conn.fetchrow(
+            """
+            SELECT id, assigned_staff_id
+            FROM table_sessions
+            WHERE table_id = $1
+              AND join_code = $2
+              AND status = 'active'
+            LIMIT 1
+            """,
+            table_id, join_code,
+        )
+        if host_row is None:
+            return None  # wrong code or no active session
+
+        # Step 2: auto-assign a mesero (load-balanced, same as db_create_table_session).
+        assigned_staff_id = None
+        if location_id is not None:
+            assigned_staff_id = await conn.fetchval(
+                """
+                SELECT s.id
+                FROM staff s
+                WHERE s.location_id = $1
+                  AND s.active = true
+                  AND (s.role = 'mesero' OR s.roles @> '"mesero"'::jsonb)
+                ORDER BY (
+                    SELECT COUNT(*)
+                    FROM table_sessions ts
+                    WHERE ts.assigned_staff_id = s.id
+                      AND ts.status = 'active'
+                ) ASC,
+                s.id ASC
+                LIMIT 1
+                """,
+                location_id,
+            )
+
+        # Step 3: insert the new participant session with the same join_code.
+        row = await conn.fetchrow(
+            """
+            INSERT INTO table_sessions
+                (phone, bot_number, table_id, table_name,
+                 org_id, location_id, assigned_staff_id,
+                 join_code, status, last_activity)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NOW())
+            RETURNING *
+            """,
+            phone, bot_number, table_id, table_name,
+            org_id, location_id, assigned_staff_id,
+            join_code,
+        )
+        session = _serialize(dict(row))
+        log.info(
+            "table_session.participant_joined",
+            session_id=session.get("id"),
+            table_id=table_id,
+            join_code=join_code,
+        )
+        return session
+
+
 async def db_create_table_session(
     phone: str,
     bot_number: str,

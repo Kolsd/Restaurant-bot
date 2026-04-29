@@ -4,6 +4,7 @@ import uuid
 import json
 import re
 import hashlib
+import secrets
 from datetime import datetime, timezone as _dt_utc
 from anthropic import AsyncAnthropic, APIStatusError, APITimeoutError, APIConnectionError
 from app.services import orders, database as db
@@ -38,6 +39,16 @@ def _ofuscar_phone(p: str) -> str:
     if not p:
         return "***"
     return "***" + p[-4:] if len(p) >= 4 else "***"
+
+
+def _generate_join_code() -> str:
+    """Generate a 4-digit numeric join code (0000–9999, leading zeros allowed).
+
+    Uses secrets.randbelow for cryptographic randomness — no birthday
+    problem at 4 digits over the lifetime of a single table session.
+    """
+    return f"{secrets.randbelow(10000):04d}"
+
 
 # h11 ≥0.16.0 enforces strict RFC 9110 header validation — strip accidental
 # leading whitespace/newlines/equals that some env var editors inject.
@@ -339,10 +350,7 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                 table = await db.db_get_table_by_id(claim["table_id"])
             if table:
                 with _bypass_tenant("agent.detect_table_context: qr_claim session setup"):
-                    # Same logic as path 1 below — close any prior session
-                    # for this phone on a DIFFERENT table, then open the new
-                    # one. Multi-participant on the SAME table is handled by
-                    # Capa 2 (join_code, see MESA_QR_ARCHITECTURE.md).
+                    # Close any prior session for this phone on a DIFFERENT table.
                     session = await db.db_get_active_session(phone, bot_number)
                     if session and session.get("table_id") != table["id"]:
                         await db.db_close_session(
@@ -350,15 +358,80 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
                             reason="scanned_new_table_via_qr_claim",
                             closed_by_username="system",
                         )
-                    await db.db_create_table_session(
+
+                    # Capa 2 (MESA_QR_ARCHITECTURE.md): check whether this table
+                    # already has an active session from a DIFFERENT phone.
+                    #
+                    # Case A — re-scan by the SAME phone:
+                    #   session.table_id == table["id"] → they're already the host,
+                    #   fall through to "session active" path (Path 2 below) which
+                    #   touches the session and returns normally.  Do NOT open a
+                    #   second session for them.
+                    #
+                    # Case B — new phone scanning a table with an existing session:
+                    #   → This phone must supply the join_code before a session is
+                    #   opened. We do NOT open a session here; we store the
+                    #   "join_code_pending" state in state_store and return a dict
+                    #   with requires_join_code=True so the bot flow in agent_salon.py
+                    #   can ask for the code.
+                    #
+                    # Case C — no session on this table:
+                    #   → Open session normally AND generate + persist the join_code.
+                    same_phone_session = session and session.get("table_id") == table["id"]
+                    if same_phone_session:
+                        # Same phone re-scanned the same table — no new session needed.
+                        # Touch the existing session so last_activity is current.
+                        await db.db_touch_session(phone, bot_number)
+                        table["is_new_session"] = False
+                        table["from_qr_claim"] = True
+                        table["geo_verified"] = claim.get("geo_verified")
+                        return table
+
+                    other_session = await db.db_get_active_session_on_table_by_other_phone(
+                        table["id"], phone
+                    )
+                    if other_session:
+                        # Case B: another phone already has a session on this table.
+                        # Store pending state and signal the bot to ask for the code.
+                        log.info(
+                            "session.join_code_required",
+                            table_id=table["id"],
+                            incoming_phone=_ofuscar_phone(phone),
+                            holder_phone=_ofuscar_phone(other_session["phone"]),
+                        )
+                        await state_store.join_code_pending_set(phone, bot_number, {
+                            "table_id": table["id"],
+                            "table_name": table.get("name", table["id"]),
+                            "attempts": 0,
+                            "org_id": table.get("org_id"),
+                            "location_id": table.get("location_id"),
+                        })
+                        return {
+                            "requires_join_code": True,
+                            "table_id": table["id"],
+                            "table_name": table.get("name", table["id"]),
+                        }
+
+                    # Case C: no existing session → host path.
+                    new_session = await db.db_create_table_session(
                         phone, bot_number, table["id"], table["name"],
                         org_id=table.get("org_id"),
                         location_id=table.get("location_id"),
                     )
-                table["is_new_session"] = True
-                table["from_qr_claim"] = True
-                table["geo_verified"] = claim.get("geo_verified")
-                return table
+                    # Generate and persist the join_code for this host session.
+                    host_join_code = _generate_join_code()
+                    from app.repositories.tables_repo import db_set_session_join_code  # noqa: PLC0415
+                    await db_set_session_join_code(new_session["id"], host_join_code)
+                    log.info(
+                        "session.join_code_generated",
+                        session_id=new_session["id"],
+                        table_id=table["id"],
+                    )
+                    table["is_new_session"] = True
+                    table["from_qr_claim"] = True
+                    table["geo_verified"] = claim.get("geo_verified")
+                    table["join_code"] = host_join_code
+                    return table
             # Claim referenced a table that doesn't exist (corrupt state) —
             # fall through to other paths and log for visibility.
             log.warning(
@@ -2351,6 +2424,100 @@ async def _resolve_branch_id(
     )
 
 
+# ── Capa 2 join-code participant flow ────────────────────────────────────────
+
+_JOIN_CODE_RE = re.compile(r'^\s*(\d{4})\s*$')
+_JOIN_CODE_MAX_ATTEMPTS = 3
+_JOIN_CODE_BLOCK_TTL = 600  # 10 minutes after 3 wrong attempts
+
+
+async def _handle_join_code_flow(
+    phone: str,
+    bot_number: str,
+    message: str,
+    pending: dict,
+) -> dict:
+    """Handle the participant join-code validation loop (Capa 2).
+
+    pending: state dict from state_store.join_code_pending_get, shape:
+        {"table_id": str, "table_name": str, "attempts": int,
+         "org_id": int, "location_id": int | None}
+
+    Returns a {"message": str} dict — the bot reply.
+
+    Bot Rules respected:
+      #1 (no Decimal in state_store) — only plain int/str/None.
+      #5 (cart locks) — not relevant; no cart ops here.
+      #10 (4-worker state via state_store) — all state goes through state_store.
+    """
+    from app.repositories.tables_repo import db_link_participant_session  # noqa: PLC0415
+
+    table_id = pending["table_id"]
+    table_name = pending.get("table_name", table_id)
+    attempts = int(pending.get("attempts", 0))
+    org_id = pending.get("org_id")
+    location_id = pending.get("location_id")
+
+    # Check if the message looks like a 4-digit code.
+    m = _JOIN_CODE_RE.match(message)
+    if not m:
+        # Not a numeric 4-digit string — re-prompt.
+        return {"message": (
+            "Ingresa el código de 4 dígitos que te dio quien abrió la cuenta."
+        )}
+
+    code = m.group(1)
+
+    # Validate the code against the active session for this table.
+    with _bypass_tenant("agent._handle_join_code_flow: participant session link"):
+        new_session = await db_link_participant_session(
+            phone=phone,
+            bot_number=bot_number,
+            table_id=table_id,
+            table_name=table_name,
+            join_code=code,
+            org_id=org_id,
+            location_id=location_id,
+        )
+
+    if new_session is None:
+        # Wrong code.
+        new_attempts = attempts + 1
+        if new_attempts >= _JOIN_CODE_MAX_ATTEMPTS:
+            # Block: too many wrong attempts.
+            await state_store.join_code_pending_delete(phone, bot_number)
+            log.warning(
+                "session.join_code_failed",
+                phone=_ofuscar_phone(phone),
+                bot_number=bot_number,
+                table_id=table_id,
+                attempts=new_attempts,
+            )
+            return {"message": (
+                "Demasiados intentos fallidos. Pídele al mesero el código actualizado "
+                "o pasa la próxima vez."
+            )}
+        # Update attempts in state.
+        pending["attempts"] = new_attempts
+        await state_store.join_code_pending_set(phone, bot_number, pending)
+        remaining = _JOIN_CODE_MAX_ATTEMPTS - new_attempts
+        return {"message": (
+            f"Código incorrecto. Intenta de nuevo ({remaining} intento{'s' if remaining != 1 else ''} restante{'s' if remaining != 1 else ''})."
+        )}
+
+    # Code matched — session opened. Clear the pending state.
+    await state_store.join_code_pending_delete(phone, bot_number)
+    log.info(
+        "session.participant_joined",
+        session_id=new_session.get("id"),
+        phone=_ofuscar_phone(phone),
+        table_id=table_id,
+    )
+    return {"message": (
+        f"¡Bienvenido/a! ¿Cómo te llamamos?"
+    )}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main orchestrator
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2381,12 +2548,31 @@ async def chat(
     if nps_result is not None:
         return nps_result if nps_result else None  # {} sentinel → return None
 
+    # 3b. Capa 2 join-code pending check — must run BEFORE detect_table_context so
+    #     that a participant who messages without a fresh QR scan (second message,
+    #     wrong code retry) also gets the join-code prompt rather than falling into
+    #     the normal delivery/session flow.
+    join_code_pending = await state_store.join_code_pending_get(user_phone, bot_number)
+    if join_code_pending:
+        return await _handle_join_code_flow(
+            user_phone, bot_number, user_message_clean, join_code_pending
+        )
+
     # 4. Detect table/session context (needed by checkout flow for branch_id in history)
     # Pass the RAW message (not user_message_clean) because _clean_incoming_message
     # strips the [table_id:X] tag injected by QR scans. Without the raw message,
     # the QR-based detection path at detect_table_context line 129 never fires
     # — production has been silently relying on the text-regex fallback.
     table_context = await detect_table_context(user_message, user_phone, bot_number)
+
+    # Capa 2: QR scanned, table has existing session from another phone.
+    # detect_table_context returns {"requires_join_code": True, ...} instead of
+    # opening a session. We intercept here BEFORE the LLM is invoked.
+    if table_context and table_context.get("requires_join_code"):
+        return {"message": (
+            f"Veo que ya hay una cuenta abierta en {table_context.get('table_name', 'esta mesa')}. "
+            "¿Cuál es el código?"
+        )}
 
     # Rule #5 (table cooldown): another customer already has this table open.
     # Reply with a neutral occupied message and do NOT open a parallel session,

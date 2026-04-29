@@ -543,3 +543,54 @@ async def scheduler_leader_renew(token: str, ttl_seconds: int = 90) -> bool:
             return True
     # No Redis reachable — same as fallback token, no race.
     return True
+
+
+# ── Join-code pending (Capa 2 — multi-participant table join) ────────────────
+# State shape: {"table_id": "...", "table_name": "...", "attempts": 0,
+#               "org_id": int, "location_id": int | None}
+# Key: mesio:join_code_pending:{phone}:{bot_number}
+# TTL: 600 seconds (10 min — long enough for the group to share the code)
+
+_fb_join_code_pending: dict[str, tuple[float, Any]] = {}
+_JOIN_CODE_PENDING_TTL = 600  # 10 minutes
+
+
+def _join_code_pending_redis_key(phone: str, bot_number: str) -> str:
+    return f"mesio:join_code_pending:{phone}:{bot_number}"
+
+
+async def join_code_pending_get(phone: str, bot_number: str) -> dict | None:
+    """Return the pending join-code state for this phone+bot, or None."""
+    key = _join_code_pending_redis_key(phone, bot_number)
+    r = await _rc.get_redis()
+    if r is not None:
+        raw = await r.get(key)
+        return _rc.decode(raw)
+    _maybe_warn("join_code_pending")
+    value = _fb_get(_fb_join_code_pending, key)
+    return copy.deepcopy(value) if isinstance(value, dict) else value
+
+
+async def join_code_pending_set(
+    phone: str, bot_number: str, state: dict, ttl_seconds: int = _JOIN_CODE_PENDING_TTL
+) -> None:
+    """Persist the pending join-code state (overwrites existing). state MUST NOT
+    contain Decimal values — use plain int/str/None (Rule #1)."""
+    key = _join_code_pending_redis_key(phone, bot_number)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, _rc.encode(state), ex=ttl_seconds)
+        return
+    _maybe_warn("join_code_pending")
+    _fb_set(_fb_join_code_pending, key, state, ttl_seconds, family="join_code_pending")
+
+
+async def join_code_pending_delete(phone: str, bot_number: str) -> None:
+    """Clear the pending join-code state for this phone+bot."""
+    key = _join_code_pending_redis_key(phone, bot_number)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.delete(key)
+        return
+    _maybe_warn("join_code_pending")
+    _fb_delete(_fb_join_code_pending, key)

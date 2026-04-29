@@ -162,12 +162,30 @@ def build_salon_prompt(restrictions: str = "", table_context: dict | None = None
         blocks.append({"type": "text", "text": restrictions})
     if table_context and table_context.get("is_new_session"):
         table_name = table_context.get("name", "tu mesa")
-        greeting_block = (
-            f"\nIMPORTANTE (primer mensaje del comensal en esta mesa):\n"
-            f"El comensal acaba de sentarse en {table_name}. Empieza tu respuesta con un saludo cálido y breve "
-            f"que confirme la mesa por su nombre (ej: \"¡Hola! Bienvenido a {table_name} 🍽️\"). "
-            f"Si conoces su nombre del perfil, úsalo. No agregues el saludo en mensajes siguientes de esta misma sesión."
-        )
+        join_code = table_context.get("join_code")
+        if join_code:
+            # Capa 2 host flow: the customer opened the session. After greeting and
+            # asking for their name, the bot MUST share the join code so companions
+            # can join the shared tab. Design in docs/MESA_QR_ARCHITECTURE.md §Capa2.
+            greeting_block = (
+                f"\nIMPORTANTE (primer mensaje del comensal en esta mesa):\n"
+                f"El comensal acaba de sentarse en {table_name}. Empieza tu respuesta con:\n"
+                f"  \"¡Hola! Te tengo en {table_name} 🍽️ ¿Cómo te llamamos?\"\n"
+                f"Cuando el comensal responda con su nombre (siguiente turno), "
+                f"confirma con EXACTAMENTE este texto (sustituye [Nombre] por el nombre dado):\n"
+                f"  \"Listo [Nombre] 👍 Acabo de abrir tu cuenta.\n\n"
+                f"Código de la mesa: {join_code}\n\n"
+                f"Si vienes con compañía, pasales este código.\"\n"
+                f"NO uses formato markdown (sin asteriscos). NO omitas el código. "
+                f"NO agregues el saludo en mensajes siguientes de esta misma sesión."
+            )
+        else:
+            greeting_block = (
+                f"\nIMPORTANTE (primer mensaje del comensal en esta mesa):\n"
+                f"El comensal acaba de sentarse en {table_name}. Empieza tu respuesta con un saludo cálido y breve "
+                f"que confirme la mesa por su nombre (ej: \"¡Hola! Bienvenido a {table_name} 🍽️\"). "
+                f"Si conoces su nombre del perfil, úsalo. No agregues el saludo en mensajes siguientes de esta misma sesión."
+            )
         blocks.append({"type": "text", "text": greeting_block})
     return blocks
 
