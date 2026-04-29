@@ -243,9 +243,23 @@ async def delete_table(table_id: str, restaurant=Depends(get_current_restaurant_
 
 @router.get("/api/tables/floor-plan")
 async def get_floor_plan(request: Request, restaurant=Depends(get_current_restaurant_scoped)):
-    """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta."""
+    """Devuelve todas las mesas con posiciones y ocupación actual para el mapa de planta.
+
+    Filtering:
+      - X-Branch-ID = digit (location_id) → filter to that sede.
+      - X-Branch-ID = 'matriz' / 'all' / absent → no sede filter; RLS
+        (ENABLE+FORCE ROW LEVEL SECURITY on restaurant_tables, scoped by
+        org_id from get_current_restaurant_scoped) returns every table of
+        the current org across all sedes.
+
+    Pre-2026-04-29 the fallback was restaurant["id"], which post-Wave-2
+    is org_id. After migration 0057 (sync_table_branch_id) tables carry
+    branch_id == location_id, so filtering "branch_id = org_id" matched
+    nothing for any owner whose branch dropdown was on Casa Matriz —
+    floor plan went empty for everyone.
+    """
     branch_id_str = request.headers.get("x-branch-id")
-    branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else restaurant["id"]
+    branch_id = int(branch_id_str) if branch_id_str and branch_id_str.isdigit() else None
     return await db.db_get_floor_plan(branch_id=branch_id)
 
 

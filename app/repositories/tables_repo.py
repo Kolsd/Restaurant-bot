@@ -1180,6 +1180,11 @@ async def db_update_table_position(table_id: str, position_x: float, position_y:
 async def db_get_floor_plan(branch_id: int = None):
     """Get all tables with positions and current occupancy for floor plan view.
 
+    Note on the `branch_id` param: kept for caller back-compat, but the SQL
+    actually filters by `location_id` (Wave-2 canonical sede id). The
+    `branch_id` column is a legacy alias post-migration 0057 and is no
+    longer the canonical filter. Same fix as db_get_tables (commit 2fdc124).
+
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
@@ -1195,7 +1200,7 @@ async def db_get_floor_plan(branch_id: int = None):
         """
         params = []
         if branch_id is not None:
-            sql += " AND t.branch_id = $1"
+            sql += " AND t.location_id = $1"
             params.append(branch_id)
         sql += " ORDER BY t.zone, t.number"
         rows = await conn.fetch(sql, *params)
