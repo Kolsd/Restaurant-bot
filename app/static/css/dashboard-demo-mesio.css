@@ -941,11 +941,18 @@ em { font-style: italic; color: var(--brand); font-family: 'Fraunces', serif; fo
 @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
 
 .tour-tooltip {
-  position: absolute;
+  /* Fixed bottom-right so it never covers the highlighted target.
+     The highlight ring on the target does the directing; the tooltip
+     just narrates from a parked corner. */
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
   background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 22px 24px;
+  padding: 20px 22px;
   width: 360px;
+  max-width: calc(100vw - 48px);
   box-shadow: var(--shadow-4);
   pointer-events: auto;
   animation: tooltip-in .35s cubic-bezier(.17,.84,.44,1);

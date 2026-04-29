@@ -213,26 +213,21 @@
     document.getElementById('tour-text').textContent = step.text;
     document.getElementById('tour-next').textContent = stepIdx === tourSteps.length - 1 ? 'Empezar a explorar' : 'Siguiente →';
 
-    // Highlight target
+    // Highlight target + scroll it into view (account for sticky frame+topbar)
     document.querySelectorAll('.tour-highlight').forEach(el => el.classList.remove('tour-highlight'));
     const target = document.querySelector(step.target);
     if (target) {
       target.classList.add('tour-highlight');
-      // Position tooltip just below the target
       const r = target.getBoundingClientRect();
-      const ttRect = { width: 360, height: 200 };
-      let top = r.bottom + 16 + window.scrollY;
-      let left = r.left + r.width / 2 - ttRect.width / 2 + window.scrollX;
-      const vw = window.innerWidth;
-      if (left < 16) left = 16;
-      if (left + ttRect.width > vw - 16) left = vw - ttRect.width - 16;
-      // If target is too low, place above
-      if (r.bottom + ttRect.height + 24 > window.innerHeight) {
-        top = r.top - ttRect.height - 16 + window.scrollY;
+      const stickyOffset = 120; // demo-frame (40) + topbar (64) + buffer
+      const desiredTop = stickyOffset;
+      const scrollDelta = r.top - desiredTop;
+      // Only scroll if target is meaningfully out of place (avoid jitter)
+      if (Math.abs(scrollDelta) > 24) {
+        window.scrollTo({ top: window.scrollY + scrollDelta, behavior: 'smooth' });
       }
-      tooltip.style.top = top + 'px';
-      tooltip.style.left = left + 'px';
     }
+    // Tooltip is CSS-positioned (fixed bottom-right) — no JS layout needed.
 
     document.getElementById('tour-next').onclick = () => showTour(stepIdx + 1);
     document.getElementById('tour-skip').onclick = endTour;
