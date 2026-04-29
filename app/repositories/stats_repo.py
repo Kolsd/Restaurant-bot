@@ -137,6 +137,7 @@ async def db_sales_by_channel(
         # ── salon table orders ──────────────────────────────────────────────
         if location_id is not None:
             table_rows = await conn.fetch(
+                # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
                 """SELECT channel, total
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2
@@ -231,6 +232,7 @@ async def db_top_dishes(
                 ps, d_to_inclusive, location_id,
             )
             table_items_rows = await conn.fetch(
+                # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
                 """SELECT items
                    FROM table_orders
                    WHERE created_at >= $1 AND created_at < $2

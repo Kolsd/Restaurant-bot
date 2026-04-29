@@ -414,6 +414,7 @@ async def db_get_order_ticket_data(base_order_id: str, branch_id: int = None) ->
     async with tenant_connection() as conn:
         if branch_id is not None:
             rows = await conn.fetch(
+                # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
                 """SELECT * FROM table_orders
                    WHERE (id = $1 OR base_order_id = $1) AND branch_id = $2
                    ORDER BY created_at ASC""",
@@ -1284,6 +1285,7 @@ async def db_get_pending_orders_by_branch(branch_id: int) -> list:
     """
     async with tenant_connection() as conn:
         rows = await conn.fetch(
+            # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
             "SELECT table_id, status FROM table_orders "
             "WHERE status NOT IN ('factura_entregada', 'cancelado') AND branch_id = $1",
             branch_id,
@@ -1457,6 +1459,7 @@ async def db_get_table_orders_by_base_id(
     async with tenant_connection() as conn:
         if branch_id is not None:
             rows = await conn.fetch(
+                # branch_id-guard-allow: location_id passed by caller; table_orders.branch_id == location_id post-0057
                 """SELECT * FROM table_orders
                    WHERE (id = $1 OR base_order_id = $1) AND branch_id = $2
                    ORDER BY created_at ASC""",
