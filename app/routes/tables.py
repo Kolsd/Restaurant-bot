@@ -1055,6 +1055,115 @@ async def get_tables_status(request: Request):
 
     return {"tables": tables}
 
+# ── Capa 3: Anti-impostor validation endpoints ────────────────────────────────
+
+@router.post("/api/mesero/tables/{table_id}/confirm-real")
+async def confirm_table_real(request: Request, table_id: str):
+    """Waiter confirms the customer is real at this table.
+
+    Releases all pending_table_validation orders to the kitchen queue and
+    marks the session as verified (subsequent orders go straight to kitchen).
+
+    Auth: any authenticated staff role (mesero, caja, admin, owner, gerente).
+    """
+    user = await require_auth(request)
+    role = user.get("role", "")
+    allowed_roles = {"owner", "admin", "gerente", "mesero", "caja"}
+    if not any(r in role for r in allowed_roles):
+        raise HTTPException(status_code=403, detail="Rol no autorizado")
+
+    try:
+        restaurant = await get_current_restaurant(request)
+        org_id = restaurant.get("org_id") or restaurant.get("id")
+    except HTTPException:
+        org_id = user.get("restaurant_id") or user.get("branch_id")
+
+    username = user.get("username") or user.get("name") or user.get("sub", "")
+
+    with bypass_tenant_scope("confirm_table_real: release pending validation orders"):
+        released = await tr.db_confirm_table_real(table_id, org_id, username)
+
+    log.info(
+        "mesero.confirm_table_real",
+        table_id=table_id,
+        org_id=org_id,
+        confirmed_by=username,
+        orders_released=released,
+    )
+    return {
+        "success": True,
+        "table_id": table_id,
+        "orders_released": released,
+        "message": f"{released} pedido(s) liberado(s) a cocina.",
+    }
+
+
+@router.post("/api/mesero/tables/{table_id}/mark-ghost")
+async def mark_table_ghost(request: Request, table_id: str):
+    """Waiter marks this table as a ghost (no real customer present).
+
+    Cancels all pending_table_validation orders, closes active sessions
+    with status='ghost_blocked', and adds the phone numbers to the
+    phone_blocklist for 24 hours.
+
+    Auth: any authenticated staff role (mesero, caja, admin, owner, gerente).
+    """
+    user = await require_auth(request)
+    role = user.get("role", "")
+    allowed_roles = {"owner", "admin", "gerente", "mesero", "caja"}
+    if not any(r in role for r in allowed_roles):
+        raise HTTPException(status_code=403, detail="Rol no autorizado")
+
+    try:
+        restaurant = await get_current_restaurant(request)
+        org_id = restaurant.get("org_id") or restaurant.get("id")
+    except HTTPException:
+        org_id = user.get("restaurant_id") or user.get("branch_id")
+
+    username = user.get("username") or user.get("name") or user.get("sub", "")
+
+    with bypass_tenant_scope("mark_table_ghost: cancel orders and close sessions"):
+        result = await tr.db_mark_table_ghost(table_id, org_id, username)
+
+    phones = result.get("phones", [])
+
+    # Block each phone for 24 hours.
+    if phones:
+        from app.repositories.phone_blocklist_repo import add_to_blocklist
+        for phone in phones:
+            try:
+                with bypass_tenant_scope("mark_table_ghost: add phone to blocklist"):
+                    await add_to_blocklist(
+                        phone=phone,
+                        org_id=org_id,
+                        reason="ghost_table_marked",
+                        blocked_by=username,
+                        hours=24,
+                    )
+            except Exception:
+                log.exception(
+                    "mesero.ghost_blocklist_add_failed",
+                    phone=phone,
+                    table_id=table_id,
+                )
+
+    log.info(
+        "mesero.mark_table_ghost",
+        table_id=table_id,
+        org_id=org_id,
+        marked_by=username,
+        orders_cancelled=result.get("orders_cancelled", 0),
+        phones_blocked=len(phones),
+    )
+    return {
+        "success": True,
+        "table_id": table_id,
+        "orders_cancelled": result.get("orders_cancelled", 0),
+        "phones_blocked": len(phones),
+        "message": f"Mesa marcada como fantasma. {result.get('orders_cancelled', 0)} pedido(s) cancelado(s), {len(phones)} teléfono(s) bloqueado(s).",
+    }
+
+
 @router.patch("/api/table-orders/{base_order_id}/adjust")
 async def adjust_table_bill(request: Request, base_order_id: str):
     """Ajusta ítems y total de una factura antes de cobrar (descuentos, propina, etc.)"""
