@@ -140,10 +140,171 @@ function _renderTables(tables) {
   _updateActionBar();
 }
 
-// ── Open table → navigate to caja with table pre-loaded ──
-function openTable(t) {
-  sessionStorage.setItem('caja_open_table', JSON.stringify({ id: t.id, name: t.name || t.table_name }));
-  window.location.href = `/caja?tableId=${encodeURIComponent(t.id)}`;
+// ── Open table → in-page modal with active orders + delivery actions ──
+// Mesero stays on /mesero. Previously this redirected to /caja, but caja
+// is a different role's view (cashier) and the mesero couldn't mark
+// orders as 'entregado' from there. Backend already accepts mesero role
+// for the 'entregado' status transition (see _STATUS_ROLE_MAP in tables.py).
+async function openTable(t) {
+  const existing = document.getElementById('mesero-table-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'mesero-table-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-label', 'Pedidos de la mesa ' + (t.name || t.id));
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:520px;width:92%;max-height:85vh;overflow-y:auto;';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 4px;font-size:18px;color:var(--text-1,#fff);';
+  title.textContent = 'Mesa ' + (t.name || t.table_name || t.id);
+  card.appendChild(title);
+
+  const subtitle = document.createElement('div');
+  subtitle.style.cssText = 'margin:0 0 16px;font-size:12px;color:var(--text-3,#94a3b8);';
+  if (t.session_started_at) subtitle.textContent = 'Sesión activa · ' + _elapsed(t.session_started_at);
+  else if (t.waiter_name)   subtitle.textContent = 'Atiende: ' + t.waiter_name;
+  card.appendChild(subtitle);
+
+  const ordersDiv = document.createElement('div');
+  ordersDiv.id = 'mesero-modal-orders';
+  ordersDiv.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">Cargando…</div>';
+  card.appendChild(ordersDiv);
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'm-btn m-btn--sm m-btn--ghost';
+  closeBtn.style.cssText = 'flex:1;';
+  closeBtn.textContent = 'Cerrar';
+  closeBtn.addEventListener('click', () => modal.remove());
+  footer.appendChild(closeBtn);
+  card.appendChild(footer);
+
+  modal.appendChild(card);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.addEventListener('keydown', function onEsc(e) {
+    if (e.key === 'Escape') { modal.remove(); document.removeEventListener('keydown', onEsc); }
+  });
+  document.body.appendChild(modal);
+
+  await _loadTableOrders(t.id, ordersDiv);
+}
+
+const _ACTIVE_ORDER_STATUSES = ['recibido', 'en_preparacion', 'listo'];
+const _CLOSED_ORDER_STATUSES = ['factura_entregada', 'cancelado', 'closed'];
+const _STATUS_LABELS = {
+  recibido:        { txt: 'Recibido',     color: '#94a3b8', bg: '#1e2535' },
+  en_preparacion:  { txt: 'En cocina',    color: '#fbbf24', bg: '#3d2f1f' },
+  listo:           { txt: 'Listo',        color: '#10b981', bg: '#1f3d2f' },
+  entregado:       { txt: 'Entregado',    color: '#60a5fa', bg: '#1f2d3d' },
+  generar_factura: { txt: 'Cobrando',     color: '#a78bfa', bg: '#2d1f3d' },
+};
+
+async function _loadTableOrders(tableId, container) {
+  try {
+    const url = '/api/table-orders?table_id=' + encodeURIComponent(tableId);
+    const res = await fetch(url, { headers: _hdr() });
+    if (!res.ok) {
+      container.innerHTML = '<div style="padding:20px;color:#ef4444;">No se pudieron cargar los pedidos (HTTP ' + res.status + ').</div>';
+      return;
+    }
+    const data = await res.json();
+    const all = data.orders || [];
+    const orders = all.filter(o => !_CLOSED_ORDER_STATUSES.includes(o.status));
+
+    if (!orders.length) {
+      container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3,#94a3b8);">No hay pedidos activos en esta mesa.</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    orders.forEach(o => {
+      const orderCard = document.createElement('div');
+      orderCard.style.cssText = 'background:var(--surface-3,#252d40);border-radius:10px;padding:12px;margin-bottom:10px;';
+
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;';
+      const orderId = document.createElement('span');
+      orderId.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);font-family:monospace;';
+      orderId.textContent = '#' + String(o.id || '').slice(-6);
+      const statusInfo = _STATUS_LABELS[o.status] || { txt: o.status, color: '#94a3b8', bg: '#1e2535' };
+      const statusBadge = document.createElement('span');
+      statusBadge.style.cssText = 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:' + statusInfo.bg + ';color:' + statusInfo.color + ';';
+      statusBadge.textContent = statusInfo.txt;
+      head.appendChild(orderId);
+      head.appendChild(statusBadge);
+      orderCard.appendChild(head);
+
+      const items = Array.isArray(o.items) ? o.items : [];
+      if (items.length) {
+        const itemsList = document.createElement('ul');
+        itemsList.style.cssText = 'list-style:none;margin:0 0 10px;padding:0;font-size:13px;color:var(--text-2,#cbd5e1);';
+        items.forEach(it => {
+          const li = document.createElement('li');
+          li.style.cssText = 'padding:2px 0;';
+          li.textContent = (it.qty || it.quantity || 1) + '× ' + (it.name || '—');
+          itemsList.appendChild(li);
+        });
+        orderCard.appendChild(itemsList);
+      }
+
+      if (o.total != null) {
+        const totalRow = document.createElement('div');
+        totalRow.style.cssText = 'font-size:12px;color:var(--text-3,#94a3b8);margin-bottom:8px;';
+        totalRow.textContent = 'Total: ' + mesioFmt(o.total);
+        orderCard.appendChild(totalRow);
+      }
+
+      // Action: only when the kitchen has finished and the food is ready
+      // to deliver, or when the order is sitting at 'recibido' / 'en_preparacion'
+      // and the mesero wants to short-circuit (e.g. food directly handed off).
+      // Backend already validates the role permission.
+      if (_ACTIVE_ORDER_STATUSES.includes(o.status)) {
+        const btn = document.createElement('button');
+        btn.className = 'm-btn m-btn--sm';
+        btn.style.cssText = 'width:100%;background:#10b981;color:#fff;font-weight:600;border:none;padding:10px;border-radius:8px;cursor:pointer;';
+        btn.textContent = '✓ Marcar entregado';
+        btn.addEventListener('click', async function() {
+          btn.disabled = true;
+          btn.style.opacity = '0.6';
+          btn.textContent = 'Marcando…';
+          const ok = await _markOrderDelivered(o.id);
+          if (ok) {
+            if (typeof mesioToast === 'function') mesioToast('Pedido entregado', 'success', 1800);
+            await _loadTableOrders(tableId, container);
+            // Refresh the mesa grid in the background so the tile state updates
+            loadTables();
+          } else {
+            btn.disabled = false;
+            btn.style.opacity = '';
+            btn.textContent = '✓ Marcar entregado';
+            if (typeof mesioToast === 'function') mesioToast('No se pudo marcar entregado', 'error');
+          }
+        });
+        orderCard.appendChild(btn);
+      }
+
+      container.appendChild(orderCard);
+    });
+  } catch (e) {
+    container.innerHTML = '<div style="padding:20px;color:#ef4444;">Error de conexión.</div>';
+  }
+}
+
+async function _markOrderDelivered(orderId) {
+  try {
+    const res = await fetch('/api/table-orders/' + encodeURIComponent(orderId) + '/status', {
+      method: 'POST',
+      headers: _hdr(),
+      body: JSON.stringify({ status: 'entregado' }),
+    });
+    return res.ok;
+  } catch (_) { return false; }
 }
 
 // ── Waiter alerts banner ─────────────────────────────
