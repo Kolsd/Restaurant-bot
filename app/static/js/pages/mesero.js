@@ -177,6 +177,17 @@ async function openTable(t) {
 
   const footer = document.createElement('div');
   footer.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
+
+  // Cobrar mesa: physical-payment trigger by mesero. Picks service %,
+  // marks every active order as generar_factura → caja sees them in
+  // their queue ready to invoice.
+  const cobrarBtn = document.createElement('button');
+  cobrarBtn.className = 'm-btn m-btn--sm';
+  cobrarBtn.style.cssText = 'flex:2;background:#10b981;color:#fff;font-weight:700;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;';
+  cobrarBtn.textContent = '💰 Cobrar mesa';
+  cobrarBtn.addEventListener('click', () => _showCobrarServiceModal(t, modal));
+  footer.appendChild(cobrarBtn);
+
   const closeBtn = document.createElement('button');
   closeBtn.className = 'm-btn m-btn--sm m-btn--ghost';
   closeBtn.style.cssText = 'flex:1;';
@@ -193,6 +204,137 @@ async function openTable(t) {
   document.body.appendChild(modal);
 
   await _loadTableOrders(t.id, ordersDiv);
+}
+
+// ── Cobrar mesa: service % picker + send orders to caja queue ────────
+async function _showCobrarServiceModal(table, parentModal) {
+  const existing = document.getElementById('mesero-cobrar-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'mesero-cobrar-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:10001;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface-2,#1e2535);border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:92%;';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin:0 0 6px;font-size:17px;color:var(--text-1,#fff);';
+  title.textContent = '¿Cobrar Mesa ' + (table.name || table.table_name || table.id) + '?';
+  card.appendChild(title);
+
+  const subtitle = document.createElement('div');
+  subtitle.style.cssText = 'margin:0 0 18px;font-size:12px;color:var(--text-3,#94a3b8);line-height:1.4;';
+  subtitle.textContent = 'El pedido se envía a caja con el % de servicio que elijas. Caja confirma el cobro físico.';
+  card.appendChild(subtitle);
+
+  const opts = [
+    { pct: 0,   label: 'Sin servicio',    sub: '0%'    },
+    { pct: 8,   label: 'Servicio 8%',     sub: 'Sugerido' },
+    { pct: 10,  label: 'Servicio 10%',    sub: 'Premium' },
+    { pct: -1,  label: 'Otro %',          sub: 'Personalizar' },
+  ];
+  const optsDiv = document.createElement('div');
+  optsDiv.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-bottom:16px;';
+  let chosenPct = 8;
+  function highlight() {
+    optsDiv.querySelectorAll('[data-opt]').forEach(el => {
+      const p = Number(el.dataset.opt);
+      const isActive = p === chosenPct;
+      el.style.background  = isActive ? 'var(--brand-soft,#1f3d2f)' : 'var(--surface-3,#252d40)';
+      el.style.borderColor = isActive ? '#10b981' : 'transparent';
+    });
+  }
+  opts.forEach(o => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.dataset.opt = String(o.pct);
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:8px;border:2px solid transparent;cursor:pointer;background:var(--surface-3,#252d40);color:var(--text-1,#fff);font-size:13px;font-family:inherit;';
+    const left = document.createElement('span');
+    left.textContent = o.label;
+    left.style.fontWeight = '600';
+    const right = document.createElement('span');
+    right.textContent = o.sub;
+    right.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);';
+    row.appendChild(left);
+    row.appendChild(right);
+    row.addEventListener('click', () => {
+      if (o.pct === -1) {
+        const v = window.prompt('% de servicio (0–25):', '12');
+        const num = Math.min(25, Math.max(0, parseInt(v, 10)));
+        if (!Number.isFinite(num)) return;
+        chosenPct = num;
+      } else {
+        chosenPct = o.pct;
+      }
+      highlight();
+    });
+    optsDiv.appendChild(row);
+  });
+  card.appendChild(optsDiv);
+  highlight();
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:8px;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'm-btn m-btn--sm m-btn--ghost';
+  cancelBtn.style.cssText = 'flex:1;';
+  cancelBtn.textContent = 'Cancelar';
+  cancelBtn.addEventListener('click', () => modal.remove());
+  const okBtn = document.createElement('button');
+  okBtn.className = 'm-btn m-btn--sm';
+  okBtn.style.cssText = 'flex:2;background:#10b981;color:#fff;font-weight:700;border:none;padding:10px;border-radius:8px;cursor:pointer;';
+  okBtn.textContent = 'Mandar a caja';
+  okBtn.addEventListener('click', async () => {
+    okBtn.disabled = true;
+    okBtn.textContent = 'Enviando…';
+    const ok = await _generateFacturaForTable(table.id, chosenPct);
+    if (ok) {
+      if (typeof mesioToast === 'function') mesioToast(`Mesa enviada a caja · servicio ${chosenPct}%`, 'success', 2400);
+      modal.remove();
+      if (parentModal) parentModal.remove();
+      loadTables();
+    } else {
+      okBtn.disabled = false;
+      okBtn.textContent = 'Mandar a caja';
+      if (typeof mesioToast === 'function') mesioToast('No se pudo enviar a caja', 'error');
+    }
+  });
+  actions.appendChild(cancelBtn);
+  actions.appendChild(okBtn);
+  card.appendChild(actions);
+
+  modal.appendChild(card);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+async function _generateFacturaForTable(tableId, servicePct) {
+  // Find every active table_order on this mesa and transition them to
+  // generar_factura. Backend handler (tables.py update_order_status) marks
+  // each as factura_generada AND notifies the customer via WhatsApp.
+  try {
+    const res = await fetch('/api/table-orders?table_id=' + encodeURIComponent(tableId), { headers: _hdr() });
+    if (!res.ok) return false;
+    const data = await res.json();
+    const orders = (data.orders || []).filter(o => !_CLOSED_ORDER_STATUSES.includes(o.status));
+    if (!orders.length) {
+      if (typeof mesioToast === 'function') mesioToast('No hay pedidos activos en esta mesa', 'warning');
+      return false;
+    }
+    const results = await Promise.all(orders.map(o =>
+      fetch('/api/table-orders/' + encodeURIComponent(o.base_order_id || o.id) + '/status', {
+        method: 'POST',
+        headers: _hdr(),
+        body: JSON.stringify({ status: 'generar_factura', suggested_service_pct: servicePct }),
+      }).then(r => r.ok).catch(() => false)
+    ));
+    return results.every(Boolean);
+  } catch (e) {
+    return false;
+  }
 }
 
 const _ACTIVE_ORDER_STATUSES = ['recibido', 'en_preparacion', 'listo'];

@@ -33,7 +33,7 @@ _STATUS_ROLE_MAP: dict[str, set[str]] = {
     'en_preparacion':   {'cocina', 'bar', 'admin', 'owner', 'gerente'},
     'listo':            {'cocina', 'bar', 'admin', 'owner', 'gerente'},
     'entregado':        {'mesero', 'caja', 'admin', 'owner', 'gerente'},
-    'generar_factura':  {'caja', 'admin', 'owner', 'gerente'},
+    'generar_factura':  {'caja', 'admin', 'owner', 'gerente', 'mesero'},
     'cerrar_mesa':      {'caja', 'admin', 'owner', 'gerente'},
     'factura_entregada':{'caja', 'admin', 'owner', 'gerente'},
     'cancelado':        {'caja', 'mesero', 'admin', 'owner', 'gerente'},
