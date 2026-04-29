@@ -1247,6 +1247,7 @@ Wrapper Cloudinary. Funciones clave:
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.
 - **Roadmap Fase 2+3**: Antes de empezar trabajo de hardening adicional, LEER `PHASE_2_3_PLAN.md` en raíz del repo. Ahí está el plan priorizado, con deuda residual, tareas concretas, y sugerencias de delegación.
+- **Regla "Si lo ves, lo arreglás" (PM 2026-04-29)**: Si durante una sesión encontrás algo roto, raro o sospechoso — aunque sea pre-existente, aunque no esté en el scope literal de la tarea — NO escribís en el reporte "es pre-existente", "no es mío", "fuera de scope", "deuda histórica". Lo arreglás o, si requiere decisión de producto (no técnica), preguntás al PM antes. Cada problema visto y no arreglado es deuda que reaparece. Excepción legítima: si arreglarlo expande el scope >50% del trabajo original, anotalo como sub-tarea concreta con archivo/líneas (no como handwave) y preguntás al PM si seguimos.
 
 ## Separación Internal vs App
 
