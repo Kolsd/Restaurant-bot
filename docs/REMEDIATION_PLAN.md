@@ -3,6 +3,84 @@
 **Compañero:** [docs/AUDIT_REPORT.md](AUDIT_REPORT.md)
 **Fecha:** 2026-04-27
 
+---
+
+## ⚠️ ACTUALIZACIÓN POST-2026-04-28 — Re-priorización
+
+Las 10 sesiones originales del audit (debajo) están ~80% completadas. Status:
+
+- ✅ Sesión 1 (`pay_check` race) — shipped commit `1a504b8`.
+- ✅ Sesión 2 (endpoints sin auth) — shipped commit `aeb2428` + dead code `e5e2a08`.
+- ✅ Sesión 3 (`_save_checkout_proposal`) — shipped commit `5b64dd1`.
+- ✅ Sesión 4 (Meta retry unify) — shipped commit `ce92144`.
+- ✅ Sesión 5 (make_reservation dedup) — shipped commit `0ee4fdf`.
+- ✅ Sesión 6 (loyalty + XSS) — shipped commit `44baeab`.
+- ✅ Sesión 7 (Matriz invariant cleanup) — shipped commits `e5e2a08` (dead paths) y `2fdc124` (location_id filter).
+- ✅ Sesión 8 (LIMIT + tenant_connection ticket) — shipped commit `7adede3`.
+- ✅ Sesión 9 (PIN login global rate-limit) — shipped commit `cdd1a1a`.
+- ✅ Sesión 10 (auth fallback cleanup) — diferido (PM tiene users de prueba; ver PM_ANSWERS.md duda 10).
+
+**Pero el testing real con PM destapó un problema MÁS GRANDE que los 10 bugs del audit**: el flujo de mesa end-to-end NO está conectado. Diez disconnects entre módulos operativos (bot ↔ mesa ↔ cocina ↔ mesero ↔ caja ↔ factura ↔ NPS) — ninguno cubierto por los 1170+ tests existentes porque los tests son unitarios, no E2E.
+
+**Próximas sesiones tienen prioridad cambiada:**
+
+### SESIÓN 0 — End-to-End Flow Test (NUEVA, ARRANCA AQUÍ)
+
+**Por qué importa (negocio):** sin un test que cubra el flujo entero, cualquier feature nueva agrega más bugs. PM probó hoy el flujo y vio que aunque las piezas individuales pasan tests, las conexiones entre módulos tienen leaks. La prioridad #1 es **construir un E2E test que falle meaningfully** y use sus failures como roadmap concreto.
+
+**Entregable:**
+- `tests/test_e2e_table_flow.py`: integración real (no mocks salvo Anthropic/Meta/Wompi) que cubra:
+  1. POST /api/qr-claim (cliente entra teléfono).
+  2. Bot recibe primer mensaje (mocked Meta webhook).
+  3. detect_table_context Path 0 abre table_session.
+  4. Bot procesa item del menú → crea table_order vinculado a la mesa.
+  5. Cocina ve la orden via /api/table-orders?station=kitchen.
+  6. Cocina marca status=listo via POST /api/table-orders/{id}/status.
+  7. Mesero recibe alerta (waiter_alert) automática.
+  8. Mesero marca status=entregado.
+  9. Caja factura via pay_check.
+  10. NPS dispara.
+  11. table_session.verified, factura_entregada, NPS sent — todos true.
+
+**Resultado esperado**: el test FALLA en múltiples puntos. Cada falla es uno de los 10 disconnects de PRODUCT_CONTEXT.md regla #13.
+
+**Esfuerzo:** M-L (4-6h)
+**Riesgo de romper:** BAJO — el test es nuevo, no toca código existente.
+
+### SESIONES 0a-0j — Disconnect fixes (10 sub-sesiones)
+
+Una sesión por disconnect, en el orden que el E2E test los hace fallar. Cada sub-sesión:
+1. Reproduce el disconnect aislado (test rojo).
+2. Implementa el fix.
+3. Test rojo → verde.
+4. Smoke E2E completo (asegurar que no rompió otro disconnect ya arreglado).
+5. Commit + push.
+
+Lista de disconnects en PRODUCT_CONTEXT.md regla #13. Resumida acá:
+
+| # | Disconnect | Estimado | Bloquea sesiones futuras |
+|---|---|---|---|
+| 1 | Bot ↔ Mesa: items huérfanos cuando QR-claim falla | M (3h) | Capa 2/3 |
+| 2 | Mesa ↔ Mesero: assigned_staff_id sin UI | M (4h) | Notificaciones cocina-mesero |
+| 3 | Cocina ↔ Mesero: alerta `listo` faltante | S-M (2-3h) | Cierre de ciclo |
+| 4 | "Marcar entregada" UI faltante | S (2h) | Cierre de ciclo |
+| 5 | Caja ↔ Bot: chats activos no visibles a mesero | M (4h) | UX premium |
+| 6 | Bot ↔ Cocina: multi-curso secuencial | M (5h) | Restaurantes con menú largo |
+| 7 | Mesero: tab "Pedidos activos" | S (2h) | UX |
+| 8 | NPS timing: dispara antes de factura_entregada | S (1h) | Tasa de respuesta NPS |
+| 9 | Reservas → mesa auto-asignar | M (4h) | Reservas | 
+| 10 | Multi-orden por mesa (Capa 2 join_code) | L (1.5d) | Familia/grupo |
+
+### SESIÓN POST-DISCONNECTS — Capas 2 y 3 originales
+
+Una vez los 10 disconnects están verdes, retomar [docs/MESA_QR_ARCHITECTURE.md](MESA_QR_ARCHITECTURE.md):
+- Capa 2: Multi-participante con join_code.
+- Capa 3: Anti-impostor con validación primer pedido por mesero.
+
+Estas capas asumen flujo base verde. Sin disconnects resueltos, agregarlas suma capas a un piso roto.
+
+---
+
 ## Cómo leer este plan
 
 - **Orden de prioridad:** primero lo que evita que el restaurante deje de operar, después lo que protege ingresos, después lo que limpia deuda.

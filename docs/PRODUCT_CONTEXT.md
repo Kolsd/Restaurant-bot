@@ -185,6 +185,41 @@ Auto-disciplina del agente:
 
 Si ≥2 respuestas son "sí preocupante" → recomendar NO construir, dejar solo como nota de backlog.
 
+### 12. Tests E2E del flujo crítico antes de features nuevas
+
+Lección dura aprendida en sesión 2026-04-28:
+- Tenemos 1170+ tests passing.
+- Cada uno valida UNA pieza (repo, endpoint, función pura).
+- **Cero tests cubren el flow end-to-end del producto** — desde "cliente escanea QR" hasta "mesa cerrada con factura entregada y NPS enviado".
+- Resultado: las piezas funcionan; las uniones entre piezas tienen leaks. PM ve el bot responder, pero la hamburguesa no llega a la mesa, la cocina no avisa al mesero, el mesero no marca entregada, etc.
+
+**Regla operativa:**
+- Antes de cualquier feature nueva que toque ≥2 módulos del flujo (bot, mesa, cocina, mesero, caja, factura, NPS), debe existir un E2E integration test que cubra el camino feliz completo.
+- El test puede usar mocks SOLO para servicios externos (Anthropic, Meta, Wompi). El resto debe ser real (DB, repos, routes, agent logic).
+- Cualquier "agregar feature X" sin verificar que el E2E sigue verde tras el cambio = riesgo de introducir un nuevo disconnect.
+- **Cuando se encuentra un disconnect**, primero escribir el test que lo expone (rojo), después fix (verde). Sin esto, el bug regresa.
+
+Status del E2E test al cierre de sesión 2026-04-28: **NO EXISTE**. Es la prioridad #1 de la próxima sesión. Sin ese test, agregar features nuevas (Capa 2 multi-participante, Capa 3 anti-impostor, etc.) = construir techo sobre piso que cruje.
+
+### 13. Disconnect inventory: 10 leaks identificados en flujo de mesa
+
+Sesión 2026-04-28 destapó la realidad: el flujo de mesa NO está conectado end-to-end. Lista de leaks conocidos a resolver:
+
+| # | Disconnect | Síntoma | Owner del fix |
+|---|---|---|---|
+| 1 | Bot ↔ Mesa: si falla QR-claim, items no llegan a `table_orders` | Caja ve mesa abierta sin productos | bot + table_orders |
+| 2 | Mesa ↔ Mesero: `assigned_staff_id` existe pero ningún UI asigna | Nadie sabe a quién toca esa mesa | mesero UI + tables_repo |
+| 3 | Cocina ↔ Mesero: `listo` no dispara alerta al mesero asignado | Comida en pass, mesero no se entera | scheduler/notify + agent_salon |
+| 4 | Mesero ↔ Cliente: no hay botón "marcar entregada" | Orden queda en `listo` indefinidamente | mesero/caja UI + tables.py:status |
+| 5 | Caja ↔ Bot: mesero no ve chats activos del bot | Cliente le pide algo al bot, nadie lo lee | mesero UI + conversations |
+| 6 | Bot ↔ Cocina (multi-curso): entrada y plato fuerte van juntos | Plato fuerte llega frío | agent_salon + cocina state |
+| 7 | Mesero ↔ Caja: falta tab "Pedidos activos" | Mesero clickea mesa por mesa | mesero UI |
+| 8 | Mesa ↔ NPS: NPS dispara en `factura_entregada` (cliente ya se fue) | NPS llega tarde | scheduler + nps trigger |
+| 9 | Reservas ↔ Salón: reserva no auto-asigna mesa al llegar cliente | Mesero abre mesa manual aunque está reservada | reservations + tables flow |
+| 10 | Multi-orden por mesa (cuenta compartida) | Capa 2 multi-participante | join_code feature |
+
+Tabla viva: cualquier disconnect adicional descubierto se agrega acá. Cuando la próxima sesión escriba el E2E test, los failures de ese test deben mapear 1:1 con esta tabla.
+
 ---
 
 ## Mapa de zonas: sagradas, optimizables, borrables

@@ -276,25 +276,35 @@ table_sessions.join_code TEXT NULL
 
 ## Plan de implementación
 
-### Sesión 1 — QR-Phone-Claim (foundation)
+### Sesión 1 — QR-Phone-Claim (foundation) — ✅ DEPLOYED 2026-04-28
 
-Estimado: 1.5 días.
+Commits clave en main:
+- `aab0c46` feat(qr): Capa 1 — QR-Phone-Claim
+- `69b4a02` hotfix soft bypass (TenantContextConflict en producción)
+- `d7ceacc` fix canonical phone (10-dígitos local CO → 12 con código país)
+- `604f0b3` fallback defensivo legacy claims
+- `503265f` fix sidebar /kitchen → /cocina
+- `2fdc124` fix tables filter por location_id (post-Wave-2)
 
-- [ ] Migración 0056 (tabla qr_scan_pending + indexes + RLS).
-- [ ] `app/repositories/qr_claims_repo.py`: create_claim, find_unclaimed_by_phone, mark_claimed, cleanup_expired.
-- [ ] Endpoint `POST /api/qr-claim` con rate limit por IP.
-- [ ] `detect_table_context` path 0 (lookup por phone).
-- [ ] Modal teléfono + geo en `/menu` (catalog-v2.js).
-- [ ] `public_menu_context` wa_msg limpio cuando hay claim.
-- [ ] Tests unit + integration:
-  - Phone match exacto = sesión abre en mesa correcta.
-  - Phone no encontrado = bot cae a flujo manual (regular).
-  - Race con dos teléfonos distintos = cada uno encuentra el suyo.
-  - Geo lejos = `geo_verified=false` en el claim.
-  - Geo negado = `geo_verified=null`.
-  - Claim expirado = no se consume.
-- [ ] Scheduler: limpieza periódica de claims expirados.
-- [ ] Smoke E2E: simular scan + envío bot.
+Status checkpoints:
+- [x] Migración 0056 (qr_scan_pending + indexes + RLS).
+- [x] `qr_claims_repo.py`: create_claim, find_unclaimed_by_phone, mark_claimed, cleanup_expired, _canonical_phone.
+- [x] `POST /api/qr-claim` con rate limit + Pydantic validator.
+- [x] `detect_table_context` path 0 (con soft bypass).
+- [x] Modal teléfono + geo en `/menu`.
+- [x] `public_menu_context` wa_msg fallback al marker `[t:X]` cuando claim no se hizo.
+- [x] 9 integration tests passing contra TEST_DATABASE_URL.
+- [ ] **Scheduler limpieza de claims expirados** — diferido. Hoy expiran solos por TTL.
+- [ ] **Smoke E2E real "scan → bot → table session"** — DIFERIDO al E2E flow test de la próxima sesión.
+
+Gotchas descubiertas en deploy del 2026-04-28:
+1. **Path 0 usaba `bypass_tenant_scope` estricto** → `TenantContextConflict` en producción porque `inbox_worker._handle_meta_whatsapp` ya envuelve todo en `tenant_scope(rid)`. Fix: usar `bypass_tenant_scope_if_unset` (soft variant). Ver commit `69b4a02`.
+2. **Phone normalization mismatch**: cliente entra phone en modal, server guarda raw. Bot recibe Meta WhatsApp phone con código país (`573144914554`). Mismatch. Fix: `_canonical_phone()` prepende "57" si 10 dígitos empiezan con "3". Commit `d7ceacc`.
+3. **Cliente entra phone EQUIVOCADO** en el modal (su otro número, no el de WhatsApp que va a usar): no hay protección — solo confunde. UX en modal aclara "incluye código de país, ej: 573001234567" pero no hay verificación. Capa 2 puede usar OTP si vale la pena.
+4. **Tabla `restaurant_tables` con `branch_id` desincronizado de `location_id`** post-Wave-2 → `/api/pos/tables-status` retornaba 0 para Herradura. Fix: `db_get_tables` ahora filtra por `location_id`. Migración 0057 sincroniza data legacy. Commit `2fdc124`.
+5. **`/kitchen` no existía como ruta**: la ruta canónica es `/cocina`. Sidebar de caja/mesero apuntaba a `/kitchen` (404). Fix: hrefs corregidos. Commit `503265f`.
+
+Status post-deploy: **Capa 1 funciona si el cliente entra el teléfono correcto**. PM probó el flujo end-to-end y descubrió que aún con QR-claim funcionando, hay 9 disconnects MÁS abajo en el flujo (ver PRODUCT_CONTEXT.md regla #13 — Disconnect inventory).
 
 ### Sesión 2 — Multi-participante (código)
 
@@ -336,6 +346,24 @@ Estimado: 1.5 días. Bloqueada por sesión 2.
 ### Total
 
 4.5 días end-to-end. PM aprobó proceder en este orden.
+
+### CAMBIO DE PRIORIDADES POST-2026-04-28
+
+PM descubrió en testing real que Capa 1 deployada NO es suficiente para que el flujo de mesa funcione. Hay 9 disconnects adicionales (ver PRODUCT_CONTEXT.md regla #13 — Disconnect inventory).
+
+**Próxima sesión prioritaria es ahora:**
+
+**Sesión 0 — End-to-End Flow Test** (NUEVA, antes de Capa 2 y 3):
+- Estimado: medio día.
+- Escribir UN integration test que ejecute el flujo entero: QR scan → modal claim → bot abre mesa → bot pide items → table_orders creado → cocina marca listo → mesero recibe alerta → mesero marca entregada → caja cobra → factura emitida → NPS dispara.
+- Test usa mocks SOLO para servicios externos (Anthropic, Meta, Wompi). Resto real (DB, repos, routes, agent logic).
+- Failures del test → mapean 1:1 con los 10 disconnects de la tabla #13 de PRODUCT_CONTEXT.md.
+
+**Sesión 0a-0j — Disconnect fixes** (10 sub-sesiones, ~1 día c/u, prioridad por PM):
+- Cada sesión arregla un disconnect, hace pasar la pieza correspondiente del E2E test, commit, push.
+- Test E2E debe estar verde antes de ir a la siguiente.
+
+**Capa 2 (multi-participante con join_code) y Capa 3 (anti-impostor)** quedan diferidas hasta que el flujo base esté verde end-to-end.
 
 ## Notas para sesiones futuras
 
