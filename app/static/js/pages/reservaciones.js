@@ -93,7 +93,14 @@
     if (status === 'pending' && !(depositAmount > 0 && !depositPaid)) {
       parts.push('<button class="btn sm primary" data-action="confirm" data-id="' + id + '">Confirmar</button>');
     }
-    if (status !== 'cancelled' && status !== 'completed') {
+    // 'Cliente llegó' button: confirmed reservation that has not yet been
+    // seated. POSTs /api/reservations/{id}/seat which opens a table_session
+    // automatically (DISCONNECT #9). The customer's bot WhatsApp picks up
+    // immediately on the right mesa without needing to scan a QR.
+    if (status === 'confirmed') {
+      parts.push('<button class="btn sm primary" data-action="seat" data-id="' + id + '">🪑 Cliente llegó</button>');
+    }
+    if (status !== 'cancelled' && status !== 'completed' && status !== 'seated') {
       parts.push('<button class="btn sm ghost" data-action="cancel" data-id="' + id + '">Cancelar</button>');
       parts.push('<button class="btn sm ghost" data-action="assign-table" data-id="' + id + '">Asignar mesa</button>');
     }
@@ -152,6 +159,7 @@
         if (action === 'confirm') confirmReservation(id);
         else if (action === 'cancel') cancelReservation(id);
         else if (action === 'assign-table') assignTable(id);
+        else if (action === 'seat') seatReservation(id);
         else if (action === 'confirm-deposit') confirmDepositManual(id);
       });
     });
@@ -187,8 +195,10 @@
       }
       const data = await res.json();
       const reservations = data.reservations || data;
-      renderReservations(Array.isArray(reservations) ? reservations : []);
-      updateStats(Array.isArray(reservations) ? reservations : []);
+      // Cache for action handlers (seatReservation needs reservation.table_id)
+      window._lastReservations = Array.isArray(reservations) ? reservations : [];
+      renderReservations(window._lastReservations);
+      updateStats(window._lastReservations);
     } catch (e) {
       console.error('reservaciones: error', e);
       if (typeof mesioToast === 'function') mesioToast('Error al cargar reservas', 'warning');
@@ -303,6 +313,63 @@
     } catch (e) {
       console.error('reservaciones: assign-table error', e);
       if (typeof mesioToast === 'function') mesioToast('Error al asignar mesa', 'error');
+    }
+  }
+
+  // ── 'Cliente llegó' → POST /seat → opens a table_session (DISCONNECT #9) ──
+  async function seatReservation(id) {
+    const reservation = (window._lastReservations || []).find(function (r) { return r.id === id; });
+
+    // Resolve table_id: prefer the table_id already set on the reservation (assigned
+    // when the host taps 'Asignar mesa' before arrival). If none, prompt the host
+    // to pick one now from the floor plan list.
+    let tableId = (reservation && reservation.table_id) ? String(reservation.table_id) : '';
+    if (!tableId) {
+      if (!_tables.length) {
+        try {
+          const h = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
+          const r = await fetch('/api/tables/floor-plan', { headers: h });
+          if (r.ok) {
+            const d = await r.json();
+            _tables = (d.tables || d || []).filter(function (t) { return t.id; });
+          }
+        } catch (e) { console.error('reservaciones: floor-plan error', e); }
+      }
+      if (!_tables.length) {
+        if (typeof mesioToast === 'function') mesioToast('No hay mesas — primero asigna una', 'warning');
+        return;
+      }
+      const opts = _tables.map(function (t) {
+        return (t.table_number || t.name || 'Mesa') + ' [' + t.id + ']' + ' (cap. ' + (t.capacity || '?') + ')';
+      }).join('\n');
+      const choice = window.prompt('Seleccionar mesa para sentar al cliente:\n' + opts + '\n\nIngresa el ID de la mesa:');
+      if (!choice) return;
+      tableId = String(choice).trim();
+    }
+
+    try {
+      const headers = Object.assign({ 'Content-Type': 'application/json' },
+        typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token });
+      const res = await fetch('/api/reservations/' + id + '/seat', {
+        method: 'POST', headers,
+        body: JSON.stringify({ table_id: tableId })
+      });
+      if (!res.ok) {
+        let detail = '';
+        try { const j = await res.json(); detail = j.detail || ''; } catch (_) { /* ignore */ }
+        throw new Error(detail || ('status ' + res.status));
+      }
+      const data = await res.json();
+      if (data.already_seated) {
+        if (typeof mesioToast === 'function') mesioToast('Ya estaba sentada', 'info', 1800);
+      } else {
+        if (typeof mesioToast === 'function') mesioToast('Cliente sentado · sesión abierta', 'success', 2200);
+      }
+      loadReservations();
+    } catch (e) {
+      console.error('reservaciones: seat error', e);
+      const msg = (e && e.message) ? e.message : 'Error al sentar al cliente';
+      if (typeof mesioToast === 'function') mesioToast(msg, 'error');
     }
   }
 

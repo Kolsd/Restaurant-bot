@@ -336,6 +336,111 @@ async def update_reservation_status(
     return reservation
 
 
+class SeatReservationBody(BaseModel):
+    table_id: str
+
+    @field_validator("table_id")
+    @classmethod
+    def _table_id_not_empty(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("table_id cannot be empty")
+        return v
+
+
+@router.post("/{reservation_id}/seat")
+async def seat_reservation(
+    reservation_id: int,
+    body: SeatReservationBody,
+    request: Request,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Mark a confirmed reservation as 'seated' and open a table_session.
+
+    Closes DISCONNECT #9 (Reservas ↔ Salón) from PRODUCT_CONTEXT.md
+    regla #13. Previously the host had to open the mesa manually
+    (no link between the reservation and the table_session). Now:
+
+      1. Customer arrives, host taps 'Cliente llegó' on the
+         reservation card and picks the table from a quick selector.
+      2. POST /api/reservations/{id}/seat with {table_id} →
+         creates a table_session linking reservation.phone to the
+         chosen table_id (with mesero auto-assigned via the existing
+         db_create_table_session logic from DISCONNECT #2 fix).
+      3. Reservation status transitions to 'seated' so the
+         dashboard knows it's no longer "upcoming" / "confirmed".
+      4. From then on, when the customer messages the bot the
+         table_session is already open — bot picks them up on the
+         right mesa without needing a QR scan.
+
+    Idempotent: returns already_seated=true if the reservation is
+    already in 'seated' status.
+    """
+    reservation = await _verify_reservation_ownership(reservation_id, restaurant)
+
+    if reservation.get("status") == "cancelled":
+        raise HTTPException(status_code=409, detail="La reserva está cancelada.")
+    if reservation.get("status") == "seated":
+        return {"already_seated": True, "reservation": reservation}
+
+    phone = (reservation.get("phone") or "").strip()
+    if not phone:
+        raise HTTPException(
+            status_code=422,
+            detail="Reserva sin phone — no se puede abrir sesión sin número de contacto.",
+        )
+
+    # Verify the table exists AND belongs to this org (defense in depth — RLS
+    # already filters but a clear 404 here helps the UI).
+    table = await db.db_get_table_by_id(body.table_id)
+    if not table:
+        raise HTTPException(status_code=404, detail="Mesa no encontrada.")
+    caller_org_id = restaurant.get("org_id") or restaurant.get("id")
+    if table.get("org_id") and caller_org_id and int(table["org_id"]) != int(caller_org_id):
+        raise HTTPException(status_code=403, detail="La mesa no pertenece a este restaurante.")
+
+    bot_number = (restaurant.get("whatsapp_number") or "").strip()
+    if not bot_number:
+        raise HTTPException(
+            status_code=422,
+            detail="Restaurante sin bot_number configurado — no se puede abrir sesión.",
+        )
+
+    # Create the table_session. db_create_table_session auto-assigns the
+    # least-loaded mesero at the location (DISCONNECT #2 fix).
+    try:
+        session = await db.db_create_table_session(
+            phone=phone,
+            bot_number=bot_number,
+            table_id=body.table_id,
+            table_name=table.get("name") or body.table_id,
+            org_id=caller_org_id,
+            location_id=table.get("location_id"),
+        )
+    except Exception:
+        log.exception(
+            "reservations.seat_create_session_failed",
+            reservation_id=reservation_id,
+            table_id=body.table_id,
+            phone_hash=hash(phone),
+        )
+        raise HTTPException(status_code=500, detail="No se pudo abrir la sesión de mesa.")
+
+    # Transition reservation status to 'seated'. Free-form status column,
+    # no schema enforcement of allowed values — generic helper handles it.
+    updated = await reservations_repo.db_update_reservation_status(
+        reservation_id, status="seated"
+    )
+
+    log.info(
+        "reservations.seated",
+        reservation_id=reservation_id,
+        table_id=body.table_id,
+        session_id=session.get("id") if session else None,
+    )
+    return {"success": True, "session": session, "reservation": updated}
+
+
 class ConfirmDepositManualBody(BaseModel):
     proof_media_id: Optional[str] = None
     notes: Optional[str] = None
