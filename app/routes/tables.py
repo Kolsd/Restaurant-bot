@@ -885,22 +885,30 @@ async def update_order_status(request: Request, order_id: str):
             # Best-effort: failure to create the alert MUST NOT block the
             # customer notification or the status update. Same pattern as
             # the bill_request alert documented in CLAUDE.md Regla #17.
-            try:
-                with bypass_tenant_scope("update_order_status: waiter_alert on listo"):
-                    await db.db_create_waiter_alert(
-                        phone=phone,
-                        bot_number=_bot_number,
-                        alert_type="ready",
-                        message=f"Pedido listo en pase — Mesa {table_name}",
-                        table_id=order.get("table_id", ""),
-                        table_name=table_name,
+            #
+            # We use tenant_scope (NOT bypass) here because db_create_waiter_alert
+            # reads app.org_id via current_setting() to populate the NOT NULL
+            # org_id column. The order row was loaded above and has org_id, so
+            # we have the right tenant identity.
+            _order_org_id = order.get("org_id")
+            if _order_org_id is not None:
+                try:
+                    with tenant_scope(int(_order_org_id)):
+                        await db.db_create_waiter_alert(
+                            phone=phone,
+                            bot_number=_bot_number,
+                            alert_type="ready",
+                            message=f"Pedido listo en pase — Mesa {table_name}",
+                            table_id=order.get("table_id", ""),
+                            table_name=table_name,
+                        )
+                except Exception:
+                    log.exception(
+                        "tables.waiter_alert_listo_failed",
+                        order_id=order_id,
+                        table_id=order.get("table_id"),
+                        org_id=_order_org_id,
                     )
-            except Exception:
-                log.exception(
-                    "tables.waiter_alert_listo_failed",
-                    order_id=order_id,
-                    table_id=order.get("table_id"),
-                )
 
     return {"success": True, "order_id": order_id, "status": status}
 
