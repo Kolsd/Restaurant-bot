@@ -558,7 +558,9 @@ async def db_create_table_session(
 
     org_id is required by schema (NOT NULL). If not passed, resolved from
     restaurant_tables.org_id. location_id is also persisted when available.
-    assigned_staff_id optionally records which mesero opened/owns the table.
+    assigned_staff_id: if not explicitly provided, auto-assigned to the
+    least-loaded mesero at the location (fewest active table_sessions).
+    If no mesero exists at the location, remains NULL — no exception raised.
     """
     async with tenant_connection() as conn:
         if org_id is None or location_id is None:
@@ -574,6 +576,28 @@ async def db_create_table_session(
                 location_id = tbl["location_id"]
         if org_id is None:
             raise ValueError(f"Cannot resolve org_id for table {table_id}")
+
+        # Auto-assign least-loaded mesero when no explicit assignment is given.
+        if assigned_staff_id is None and location_id is not None:
+            assigned_staff_id = await conn.fetchval(
+                """
+                SELECT s.id
+                FROM staff s
+                WHERE s.location_id = $1
+                  AND s.active = true
+                  AND (s.role = 'mesero' OR s.roles @> '"mesero"'::jsonb)
+                ORDER BY (
+                    SELECT COUNT(*)
+                    FROM table_sessions ts
+                    WHERE ts.assigned_staff_id = s.id
+                      AND ts.status = 'active'
+                ) ASC,
+                s.id ASC
+                LIMIT 1
+                """,
+                location_id,
+            )
+
         row = await conn.fetchrow(
             "INSERT INTO table_sessions "
             "(phone, bot_number, table_id, table_name, org_id, location_id, "
@@ -582,7 +606,21 @@ async def db_create_table_session(
             phone, bot_number, table_id, table_name, org_id, location_id,
             assigned_staff_id,
         )
-        return _serialize(dict(row))
+        session = _serialize(dict(row))
+        if assigned_staff_id is not None:
+            log.info(
+                "table_session.mesero_assigned",
+                session_id=session.get("id"),
+                staff_id=str(assigned_staff_id),
+                location_id=location_id,
+            )
+        else:
+            log.warning(
+                "table_session.no_mesero_available",
+                location_id=location_id,
+                reason="no active mesero at location",
+            )
+        return session
 
 
 async def db_touch_session(phone: str, bot_number: str):
