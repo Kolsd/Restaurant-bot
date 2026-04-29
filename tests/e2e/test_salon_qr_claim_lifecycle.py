@@ -698,6 +698,6 @@ async def test_salon_qr_claim_full_lifecycle(
     )
     print(
         f"\n[OK] E2E QR-Phone-Claim test passed: order {base_order_id} completed full "
-        f"dine-in lifecycle (QR-claim→clean-message→Path0→order→kitchen→pay_check→NPS). "
+        f"dine-in lifecycle (QR-claim -> clean-message -> Path0 -> order -> kitchen -> pay_check -> NPS). "
         f"{len(wa_capture.messages)} WA messages captured."
     )
