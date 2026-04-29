@@ -442,6 +442,7 @@ function _openPropsModal(tableId) {
 async function _saveProps() {
   if (!_propsTableId) return;
   var body = {
+    name:       el('propName').value.trim() || null,
     capacity:   parseInt(el('propCapacity').value) || null,
     table_type: el('propType').value,
     zone:       el('propZone').value.trim() || null
