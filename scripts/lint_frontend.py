@@ -186,6 +186,11 @@ def _load_backend_routes() -> set[str]:
     _setdefault_tracking("META_APP_SECRET", "lint-dummy")
     _setdefault_tracking("ADMIN_KEY", "lint-dummy")
     _setdefault_tracking("DATABASE_URL", "postgresql://u:p@127.0.0.1/lint")
+    # Enable ALL routers so every fetch('/api/…') in the frontend has a chance
+    # to match.  Without this, the default _DEFAULT_DISABLED list in main.py
+    # skips loyalty, reviews, webauthn, etc. and the lint check flags valid
+    # calls as dead fetches.
+    _setdefault_tracking("DISABLED_MODULES", "")
 
     sys.path.insert(0, str(ROOT))
     from app.main import app  # noqa: E402
