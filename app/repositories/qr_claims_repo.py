@@ -200,6 +200,35 @@ async def mark_claimed(claim_id: int) -> bool:
     return False
 
 
+async def count_pending_for_bot(bot_number: str, minutes: int = 5) -> int:
+    """Count unconsumed claims for a bot in the last N minutes.
+
+    Used as a soft signal for DISCONNECT #1 (Bot↔Mesa items huérfanos):
+    when detect_table_context Path 0 fails to find a claim by phone but
+    a claim DOES exist for the same restaurant (likely customer typed
+    a different phone in the modal than the one they used to send the
+    WhatsApp message), we log a structured warning so the admin can
+    spot and manually link the orphaned delivery order to the mesa.
+
+    Returns 0 if bot_number is empty or no recent pending claims.
+    """
+    if not bot_number:
+        return 0
+    with bypass_tenant_scope_if_unset("qr_claims_repo.count_pending_for_bot: pre-tenant lookup"):
+        async with tenant_connection() as conn:
+            row = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM qr_scan_pending
+                WHERE bot_number = $1
+                  AND claimed_at IS NULL
+                  AND expires_at > NOW()
+                  AND created_at > NOW() - ($2::int * INTERVAL '1 minute')
+                """,
+                bot_number, minutes,
+            )
+    return int(row or 0)
+
+
 async def cleanup_expired(older_than_hours: int = 1) -> int:
     """Delete claims that have been expired for at least N hours.
 

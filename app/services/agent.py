@@ -306,6 +306,30 @@ async def detect_table_context(message: str, phone: str, bot_number: str) -> dic
     #    sobre la nueva mesa que escaneó. Diseño: docs/MESA_QR_ARCHITECTURE.md.
     from app.repositories import qr_claims_repo  # noqa: PLC0415
     claim = await qr_claims_repo.find_unclaimed_by_phone(phone, bot_number)
+    if claim is None:
+        # Defensive visibility for DISCONNECT #1 (Bot↔Mesa items huérfanos):
+        # the customer's phone didn't match any pending claim, but a claim
+        # may still exist for this restaurant (customer typed a different
+        # phone in the /menu modal than the one used to send the WhatsApp
+        # message). Log a structured warning so the admin can manually
+        # link the resulting delivery order to the mesa if needed. Cheap
+        # diagnostic: one count() against a small partial index.
+        try:
+            pending = await qr_claims_repo.count_pending_for_bot(bot_number, minutes=5)
+            if pending > 0:
+                log.warning(
+                    "qr_claim.no_match_with_pending_present",
+                    phone_hash=hashlib.sha256(phone.encode()).hexdigest()[:8] if phone else None,
+                    bot_number=bot_number,
+                    pending_claim_count=pending,
+                    note=("Customer's phone did not match any pending QR claim, but "
+                          "%d claim(s) exist for this restaurant in the last 5 min. "
+                          "Likely customer typed a different phone in the modal than "
+                          "the WhatsApp number they used. Resulting order will go "
+                          "to delivery flow, not table. Manual link may be needed.") % pending,
+                )
+        except Exception:
+            log.exception("qr_claim.count_pending_for_bot.failed", bot_number=bot_number)
     if claim:
         # Mark the claim as consumed BEFORE creating the session so a
         # concurrent worker (rare) sees it taken.
