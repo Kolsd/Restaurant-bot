@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mesio · Demo en vivo</title>
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900;1,9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/demo-mesio.css">
+</head>
+<body>
+
+<!-- ═══════════════ CHROME (top) ═══════════════ -->
+<header class="topframe" role="banner">
+  <div class="topframe-inner">
+    <a class="brand" href="#" aria-label="Mesio">
+      <span class="brand-mark">M</span>
+      <span class="brand-word">Mesio<span class="brand-dot">.</span></span>
+    </a>
+    <div class="frame-pill" aria-label="Estado del demo">
+      <span class="live-dot" aria-hidden="true"></span>
+      Demo en vivo · Restaurante <b>Sazón Caribe</b>
+    </div>
+    <div class="frame-actions">
+      <button class="btn btn-ghost" id="btn-share" type="button">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+        Compartir
+      </button>
+      <a class="btn btn-primary" href="#cta">
+        Ver con tus datos
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ MAIN STAGE ═══════════════ -->
+<main class="stage">
+
+  <!-- LEFT — Phone (chat) -->
+  <section class="col col-phone" aria-label="Conversación de WhatsApp del cliente">
+    <div class="col-label">
+      <span class="col-icon">📲</span>
+      Cliente · WhatsApp
+    </div>
+
+    <div class="phone" id="phone">
+      <div class="phone-bezel">
+        <div class="phone-notch" aria-hidden="true"></div>
+
+        <!-- WA header -->
+        <div class="wa-header">
+          <div class="wa-back" aria-hidden="true">‹</div>
+          <div class="wa-avatar" aria-hidden="true">SC</div>
+          <div class="wa-meta">
+            <div class="wa-name">Sazón Caribe</div>
+            <div class="wa-status"><span class="wa-typing-dot"></span>en línea</div>
+          </div>
+          <div class="wa-icons" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 15.5c-1.25 0-2.45-.2-3.57-.57a1 1 0 0 0-1.02.24l-2.2 2.2a15.05 15.05 0 0 1-6.59-6.58l2.2-2.21a1 1 0 0 0 .25-1.02A11.36 11.36 0 0 1 8.5 4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1c0 9.39 7.61 17 17 17a1 1 0 0 0 1-1v-3.5a1 1 0 0 0-1-1z"/></svg>
+          </div>
+        </div>
+
+        <!-- Chat area -->
+        <div class="wa-chat" id="wa-chat" role="log" aria-live="polite" aria-relevant="additions">
+          <div class="wa-day"><span>hoy</span></div>
+        </div>
+
+        <!-- Typing indicator -->
+        <div class="wa-typing" id="wa-typing" hidden>
+          <div class="wa-typing-bubble">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div class="wa-input" aria-hidden="true">
+          <div class="wa-input-field">
+            <span class="wa-emoji">😀</span>
+            <span class="wa-placeholder">Mensaje</span>
+            <span class="wa-attach">📎</span>
+          </div>
+          <button class="wa-send" type="button" tabindex="-1">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CENTER — Connector (desktop only) -->
+  <div class="connector" aria-hidden="true">
+    <div class="connector-line"></div>
+    <div class="connector-pulse" id="connector-pulse"></div>
+    <div class="connector-label">en tiempo real</div>
+  </div>
+
+  <!-- RIGHT — Mini dashboard -->
+  <section class="col col-dash" aria-label="Dashboard del dueño del restaurante">
+    <div class="col-label">
+      <span class="col-icon">🖥️</span>
+      Dueño · Dashboard
+      <span class="col-meta">
+        <span class="live-dot small"></span> en vivo
+      </span>
+    </div>
+
+    <div class="dash" id="dash">
+      <!-- Dash topbar -->
+      <div class="dash-top">
+        <div class="dash-title">
+          <div class="dash-title-main">Resumen · Hoy</div>
+          <div class="dash-title-sub">Sazón Caribe · Bogotá Centro · <span id="dash-clock">12:42</span></div>
+        </div>
+        <div class="dash-top-right">
+          <span class="dash-badge"><span class="live-dot tiny"></span>Bot 24/7</span>
+        </div>
+      </div>
+
+      <!-- Live ticker (top-right of dash content) -->
+      <div class="dash-ticker" id="dash-ticker" aria-live="polite">
+        <div class="ticker-empty">Esperando actividad…</div>
+      </div>
+
+      <!-- 4 metric tiles -->
+      <div class="dash-metrics">
+        <div class="metric" data-key="revenue">
+          <div class="metric-label">Ingresos hoy</div>
+          <div class="metric-value">$<span class="num" id="m-revenue" data-current="412000">412.000</span></div>
+          <div class="metric-delta up">+8.2% vs ayer</div>
+        </div>
+        <div class="metric" data-key="orders">
+          <div class="metric-label">Pedidos</div>
+          <div class="metric-value"><span class="num" id="m-orders" data-current="27">27</span></div>
+          <div class="metric-delta up" id="m-orders-delta">+3 hoy</div>
+        </div>
+        <div class="metric" data-key="active-tables">
+          <div class="metric-label">Mesas activas</div>
+          <div class="metric-value"><span class="num" id="m-tables" data-current="4">4</span><span class="metric-frac">/ 12</span></div>
+          <div class="metric-delta flat" id="m-tables-delta">3 libres</div>
+        </div>
+        <div class="metric" data-key="ticket">
+          <div class="metric-label">Ticket promedio</div>
+          <div class="metric-value">$<span class="num" id="m-ticket" data-current="38500">38.500</span></div>
+          <div class="metric-delta up">+$1.200</div>
+        </div>
+      </div>
+
+      <!-- Two-column body: floor plan + KDS -->
+      <div class="dash-body">
+
+        <!-- Floor plan -->
+        <div class="dash-card">
+          <div class="dash-card-head">
+            <span class="dash-card-title">Salón en vivo</span>
+            <span class="dash-card-meta"><span id="floor-active">4</span> ocupadas · <span id="floor-free">7</span> libres</span>
+          </div>
+          <div class="floor" id="floor">
+            <!-- 12 tables, populated by JS for animation control -->
+          </div>
+        </div>
+
+        <!-- KDS -->
+        <div class="dash-card">
+          <div class="dash-card-head">
+            <span class="dash-card-title">Cocina (KDS)</span>
+            <span class="dash-card-meta"><span id="kds-count">2</span> tickets activos</span>
+          </div>
+          <div class="kds" id="kds" aria-live="polite">
+            <div class="kds-ticket">
+              <div class="kds-ticket-head">
+                <span class="kds-mesa">Mesa 4</span>
+                <span class="kds-time">3 min</span>
+              </div>
+              <div class="kds-line">3× Ajiaco Bogotano</div>
+              <div class="kds-line">3× Cerveza Club</div>
+            </div>
+            <div class="kds-ticket">
+              <div class="kds-ticket-head">
+                <span class="kds-mesa">Mesa 8</span>
+                <span class="kds-time">1 min</span>
+              </div>
+              <div class="kds-line">1× Cazuela de Mariscos</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inventory + DIAN — full width -->
+        <div class="dash-card dash-card-wide">
+          <div class="dash-card-head">
+            <span class="dash-card-title">Inventario · ítems críticos</span>
+            <span class="dash-card-meta">15 productos · 2 en alerta</span>
+          </div>
+          <div class="inv-row">
+            <div class="inv-item" data-key="frijoles">
+              <div class="inv-name">Frijoles</div>
+              <div class="inv-bar"><div class="inv-bar-fill" id="inv-frijoles-fill" style="width:60%"></div></div>
+              <div class="inv-stock"><span id="inv-frijoles">3.0</span> kg <span class="inv-min">· min 5.0</span></div>
+            </div>
+            <div class="inv-item">
+              <div class="inv-name">Maíz tierno</div>
+              <div class="inv-bar"><div class="inv-bar-fill warn" style="width:67%"></div></div>
+              <div class="inv-stock">2.0 kg <span class="inv-min">· min 3.0</span></div>
+            </div>
+            <div class="inv-item">
+              <div class="inv-name">Pollo</div>
+              <div class="inv-bar"><div class="inv-bar-fill ok" style="width:78%"></div></div>
+              <div class="inv-stock">15.5 kg <span class="inv-min">· min 5.0</span></div>
+            </div>
+            <div class="inv-item">
+              <div class="inv-name">Papa</div>
+              <div class="inv-bar"><div class="inv-bar-fill ok" style="width:80%"></div></div>
+              <div class="inv-stock">40 kg <span class="inv-min">· min 10</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ═══════════════ TRANSPORT (auto-play controls) ═══════════════ -->
+<div class="transport" id="transport">
+  <button class="t-btn t-play" id="btn-play" type="button" aria-label="Play / pausa">
+    <svg id="ico-play" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+    <svg id="ico-pause" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" hidden><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+  </button>
+  <div class="t-meta">
+    <div class="t-scenario" id="t-scenario">Escena 1 · Mesa con QR</div>
+    <div class="t-progress"><div class="t-progress-fill" id="t-progress-fill"></div></div>
+    <div class="t-time"><span id="t-elapsed">0:00</span> / <span id="t-total">0:14</span></div>
+  </div>
+  <button class="t-btn" id="btn-restart" type="button" aria-label="Reiniciar">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+  </button>
+  <div class="t-dots" id="t-dots" role="tablist" aria-label="Escenas">
+    <button class="t-dot active" data-key="mesa"     type="button" role="tab" aria-label="Escena 1: Mesa">1</button>
+    <button class="t-dot"        data-key="delivery" type="button" role="tab" aria-label="Escena 2: Domicilio">2</button>
+    <button class="t-dot"        data-key="nps"      type="button" role="tab" aria-label="Escena 3: NPS">3</button>
+    <button class="t-dot"        data-key="reserva"  type="button" role="tab" aria-label="Escena 4: Reserva">4</button>
+    <button class="t-dot"        data-key="nomina"   type="button" role="tab" aria-label="Escena 5: Nómina">5</button>
+  </div>
+  <div class="t-divider" aria-hidden="true"></div>
+  <button class="t-btn t-mode" id="btn-mode" type="button">
+    <span id="mode-label">Auto</span>
+  </button>
+</div>
+
+<!-- ═══════════════ CTA DOCK ═══════════════ -->
+<aside class="cta-dock" id="cta-dock" hidden>
+  <div class="cta-dock-inner">
+    <div class="cta-dock-text">
+      <div class="cta-dock-title">¿Querés ver esto con <em>los datos de tu restaurante</em>?</div>
+      <div class="cta-dock-sub">Cero compromiso. Te lo armamos en 48 h.</div>
+    </div>
+    <div class="cta-dock-actions">
+      <a class="btn btn-ghost" href="https://wa.me/573001234567" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M20.5 3.5A11.5 11.5 0 0 0 3.6 18.4L3 21l2.7-.7A11.5 11.5 0 1 0 20.5 3.5zm-8.4 17.6c-1.7 0-3.4-.5-4.8-1.3l-.3-.2-2.8.7.7-2.7-.2-.3a9.5 9.5 0 1 1 7.4 3.8z"/></svg>
+        Hablar por WhatsApp
+      </a>
+      <button class="btn btn-primary" type="button" id="cta-share">
+        Mandárselo a mi socio
+      </button>
+    </div>
+    <button class="cta-dock-close" id="cta-dock-close" aria-label="Cerrar">×</button>
+  </div>
+</aside>
+
+<!-- ═══════════════ Toast (share confirmation) ═══════════════ -->
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/js/mesio-demo-bus.js"></script>
+<script src="/static/js/mesio-demo-scenarios.js"></script>
+<script src="/static/js/mesio-demo-orchestrator.js"></script>
+</body>
+</html>

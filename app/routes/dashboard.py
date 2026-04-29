@@ -80,8 +80,13 @@ async def dashboard_page():
     return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")
 
 @router.get("/demo", response_class=HTMLResponse)
+async def demo_money_shot_page():
+    """Money-shot split-screen demo: WhatsApp ↔ Dashboard reacting in real time. GTM critical."""
+    return (STATIC / "html" / "demo.html").read_text(encoding="utf-8")
+
 @router.get("/dashboard-demo", response_class=HTMLResponse)
-async def demo_page():
+async def dashboard_demo_page():
+    """Redesigned full-dashboard demo: 11-section sidebar, AI insight, live ticker, trust block. GTM landing."""
     return (STATIC / "html" / "dashboard-demo.html").read_text(encoding="utf-8")
 
 @router.get("/landing", response_class=HTMLResponse)
