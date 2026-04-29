@@ -317,8 +317,7 @@ Antes de empezar a editar, el agente debe responder mentalmente:
 
 - [ ] ¿Leí PRODUCT_CONTEXT.md (este archivo)?
 - [ ] ¿Leí CLAUDE.md (reglas técnicas)?
-- [ ] ¿Leí PM_ANSWERS.md (resoluciones de las 10 dudas)?
-- [ ] ¿Esta tarea está en el REMEDIATION_PLAN, o es nueva?
+- [ ] ¿Esta tarea es nueva, o está documentada en CLAUDE.md "Pendientes de calendario"?
 - [ ] Si es nueva: ¿está ON-VISION? ¿flagueé OFF-VISION o VISION-CREEP si aplica?
 - [ ] ¿Toco el bot? Si sí: ¿corro `run_ai_sim.py --smoke` al final?
 - [ ] ¿El cambio implica deshabilitar una feature? Usar flag, no borrar código.

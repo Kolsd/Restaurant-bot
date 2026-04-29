@@ -86,4 +86,4 @@ Ambos servicios comparten la misma DB y Redis. Antes del primer deploy, setear `
 ## Documentacion
 
 - [CLAUDE.md](CLAUDE.md) — Spec de arquitectura completa, reglas de codigo, convenciones de repos, reglas del bot (NO ROMPER), y estado actual de todas las fases de hardening. Fuente autoritativa.
-- [PHASE_2_3_PLAN.md](PHASE_2_3_PLAN.md) — Roadmap de hardening Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA y middlewares). Leer antes de empezar trabajo de seguridad adicional.
+- [docs/PRODUCT_CONTEXT.md](docs/PRODUCT_CONTEXT.md) — Vision de producto, stage actual, reglas de comportamiento del agente IA, mapa de zonas sagradas/optimizables/borrables.

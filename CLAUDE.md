@@ -280,7 +280,7 @@ with bypass_tenant_scope("webhook_enqueue_cross_tenant"):
 - Auditar los ~20 `bypass_tenant_scope` internos en `staff_repo.py` — varios son cuestionables (breaks, self-profile) y se pueden apretar a `tenant_connection()` si el call site siempre entra con scope.
 - ~~17 integration tests + 26 más en otros archivos~~ — **CERRADO 2026-04-19**: refactorizados con `_ConnProxy` pattern (workaround `asyncpg.Connection.__slots__`) + INSERTs vía `organizations + locations` (no más `restaurants` VIEW write) + columnas `org_id` (no más `restaurant_id`). 46 tests passing post-refactor contra TEST_DATABASE_URL.
 - ~~6 X-Branch-ID conflation sites pendientes en `staff.py`~~ — **CERRADO en Paso 10**. Los 6 sitios fueron migrados al fix template: org_id consistente para queries org-level, location_id propagado al param opcional `branch_id` de `db_calculate_payroll` para tip scoping per-sede.
-- Ver `PHASE_2_3_PLAN.md` en raíz del repo para el roadmap detallado de Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA + middlewares).
+- Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA + middlewares) — ✅ shipped 2026-04-17. El plan original se eliminó del repo cuando se cerró el último item.
 
 ## Fases históricas — todas completas
 
@@ -328,38 +328,51 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 
 ### Pendientes de calendario (no de código)
 
-**Ops / config:**
+**Ops / config (Railway, no es código):**
 1. **`REDIS_URL` en Railway** — sin él, multi-worker cae a fallback in-process (operativo pero no garantizado).
 2. **`DATABASE_URL_ADMIN`** en Railway → URL superuser. `DATABASE_URL` debe apuntar a `mesio_app` (non-superuser). Sin esto, RLS no enforce en prod.
 3. **`sessions.token` plaintext drop** — bloqueado en observación de ~2 semanas con `session.legacy_lookup=0` antes de migrar.
 
-**Security roadmap:**
-4. **Fase 2 + Fase 3 del roadmap de security** — ver `PHASE_2_3_PLAN.md` en raíz. Top prioridad si hay tráfico real: 3.1 (precios por IA → Python) y 3.3 (webhook resilience bajo DB down).
-
 **QA / testing:**
-5. **`run_ai_sim.py` E2E unvalidated** post-Wave-2 — smoke flag funciona (`python run_ai_sim.py --smoke` pasa sin Anthropic). Full E2E (20 escenarios) requiere `ANTHROPIC_API_KEY` + budget (~$2-5).
-6. **`test_staff_self_tips` integration fixtures** (Sprint Y) — 4 tests skipped por datetime tz + NOT NULL de `table_checks`. Core logic validado por unit tests con mocked pool. Fix trivial (~15 min) cuando convenga.
+4. **`run_ai_sim.py` E2E unvalidated** post-Wave-2 — smoke flag funciona (`python run_ai_sim.py --smoke` pasa sin Anthropic). Full E2E (20 escenarios) requiere `ANTHROPIC_API_KEY` + budget (~$2-5).
+5. **`test_staff_self_tips` integration fixtures** (Sprint Y) — 4 tests skipped por datetime tz + NOT NULL de `table_checks`. Core logic validado por unit tests con mocked pool. Fix trivial (~15 min) cuando convenga.
 
 **Features diferidas:**
-7. **NPS per-mesero aggregation** — `db_get_staff_performance` (Sprint Z) retorna `nps_average=null` porque `nps_responses` no tiene FK a `table_sessions`. Migración futura puede agregar `nps_responses.table_session_id` para desbloquearlo.
-8. **Shift swap v2** (Sprint W v2) — same-location coworker filter, push notifications on incoming swap, `staff_schedules` weekly pattern swap (v1 solo toca `staff_shifts`).
-9. **Settings danger zone: transfer + delete** — solo `pause` shipped (Sprint X). Transfer de ownership requiere flujo legal; delete requiere política de retención.
-10. **Admin↔Staff comms v2** (Sprint C v2) — role-specific targeting (solo cocina, solo meseros), location-specific targeting (per-sede), push fanout.
-11. **Backend gaps flagged en pre-launch sprint (2026-04-20)** — `POST /api/table-orders/{id}/checks/single/pay` (caja usa pero no existe — workaround: crear check antes de pagar monto completo); `POST /api/staff/self/verify-pin` (PIN path en staff-clock bloqueado, WebAuthn es único); `?table_id=` param en `/api/table-orders` no soportado; `orders.py:266` usa `pool.acquire()` legacy en Wompi path (Rule #14 parece cumplirse vía scope post-load — double-check followup).
-12. **Homoglyph/unicode bypass** en `_INJECTION_RE` — defense-in-depth vía system prompt mitiga. Manual pentest pendiente.
-13. **Exports CSV/PDF** en 6 pages (pedidos, nomina, menu-engineering, clientes-riesgo, sucursales, + billing log) — badgeados como v2. Backend PDF/CSV generation pendiente.
+6. **NPS per-mesero aggregation** — `db_get_staff_performance` (Sprint Z) retorna `nps_average=null` porque `nps_responses` no tiene FK a `table_sessions`. Migración futura puede agregar `nps_responses.table_session_id` para desbloquearlo.
+7. **Shift swap v2** (Sprint W v2) — same-location coworker filter, push notifications on incoming swap, `staff_schedules` weekly pattern swap (v1 solo toca `staff_shifts`).
+8. **Settings danger zone: transfer + delete** — solo `pause` shipped (Sprint X). Transfer de ownership requiere flujo legal; delete requiere política de retención.
+9. **Admin↔Staff comms v2** (Sprint C v2) — role-specific targeting (solo cocina, solo meseros), location-specific targeting (per-sede), push fanout.
+10. **Homoglyph/unicode bypass** en `_INJECTION_RE` — defense-in-depth vía system prompt mitiga. Manual pentest pendiente.
+11. **Exports CSV/PDF** en 6 pages (pedidos, nomina, menu-engineering, clientes-riesgo, sucursales, + billing log) — badgeados como v2. Backend PDF/CSV generation pendiente.
+12. **Mesio Pay** (billetera digital + cashback) — DIFERIDO por regulación financiera colombiana.
 
-**Closed — historial ~2026-04-18/20** (conservados como referencia de diseño):
+**Closed — historial 2026-04-18/29** (conservados como referencia de diseño):
 - Migración `0012_b2b_sales_system.py` tablas huérfanas → dropeadas por 0031
 - `legacy_restaurant_id` column → dropeada por 0041 (zero readers reales)
 - `20 bypass_tenant_scope` audit → 18 calls legítimos, zero downgrades
 - `db_calculate_tips_by_attendance` per-sede filter → fixed + unskipped
 - `db_get_primary_location` rename → renombrada a `db_get_default_location`
-- CSP inline-onclick cleanup → resuelto vía rediseño frontend (13 primary + 9 new pages, 0 inline onclick en los nuevos)
+- CSP inline-onclick cleanup → resuelto vía rediseño frontend
 - POST /api/reservations + restaurant pause → shipped en Sprint X
 - Admin↔Staff comms (announcements + tasks) → shipped en Sprint C (migración 0042)
 - Staff self-service tips/upcoming/performance → shipped en Sprints Y+Z
 - Shift swap (v1) → shipped en Sprint W (migración 0043)
+- **Fase 2 + Fase 3 hardening** → ✅ shipped 2026-04-17 (commit ceaddf9)
+- **Wave-2 Org/Location migration (0034-0038 + 0057 sync)** → ✅ shipped y validado en producción
+- **REMEDIATION_PLAN audit (10 sesiones)** → ✅ 9/10 done, sesión 10 (auth fallback) diferida sin clientes reales (PM 2026-04-27)
+- **MESA_QR Capa 1 (QR-Phone-Claim)** → ✅ shipped 2026-04-28 (commits aab0c46 + posts)
+- **MESA_QR Capa 2 (multi-participante con join_code)** → ✅ shipped 2026-04-29 (migración 0058 + commit 185016a). 10 unit tests + 1 E2E test verdes.
+- **MESA_QR Capa 3 (anti-impostor first-order hold + phone_blocklist)** → ✅ shipped 2026-04-29 (migraciones 0059 + 0060 + commits 67fb847/df1f3b1). 10 unit tests + 2 E2E tests verdes.
+- **10 disconnects de PRODUCT_CONTEXT regla #13** → ✅ 9/10 cerrados (Capa 2 multi-orden quedó cubierto por Capa 2 join_code; #10 join_code era el mismo issue).
+- **`branch_id` legacy column eradication + forward guard test** → ✅ done 2026-04-29 (commit 1239ebd, test_no_branch_id_legacy_sql.py).
+- **36 test failures + Wompi cash-order prod bug** → ✅ done 2026-04-29 (commit 084c806). Suite 1214 passed / 0 failed.
+- **lint_frontend false-positives (DISABLED_MODULES leak)** → ✅ done 2026-04-29 (commit 2538670). 0 violations across 39 JS files.
+- **E2E test del flujo completo (Capa 1 happy path + Capa 2 multi-participante + Capa 3 validation/ghost)** → ✅ shipped 2026-04-29. 4 E2E tests reales con DB + Anthropic + inbox worker.
+- **Backend gaps pre-launch (2026-04-20)** — todos resueltos post Capa 2/3 audit:
+  - `POST /api/table-orders/{id}/checks/single/pay` → existe en tables.py:1377 ✅
+  - `POST /api/staff/self/verify-pin` → existe en staff.py:260 ✅
+  - `?table_id=` param en `/api/table-orders` → soportado y testeado en E2E ✅
+  - `orders.py` Wompi path → migrado a `tenant_connection()` ✅
 
 **Pre-launch hardening sprint (2026-04-20)** — 6-lead departmental audit + 8-wave execution (commits 39c631c → f5fcf8f):
 - Migraciones 0044-0048 (RLS gap webauthn_credentials, policy naming consistency, NUMERIC money precision, CHECK constraint shift_swap status, 7 índices compuestos)
@@ -418,7 +431,7 @@ El frontend completo fue rediseñado en 2 bundles de Claude Design + 7 sprints d
 
 ### Sprints A–W (polish post-audit)
 
-Todos completos, en main. Documento de audit en `docs/AUDIT_FRONTEND_BACKEND.md` (10 temas, top-5 fixes). Cada sprint cerró uno o más temas.
+Todos completos, en main. El documento de audit original cubrió 10 temas con top-5 fixes; cada sprint cerró uno o más. Eliminado del repo al cerrar todos los items.
 
 | Sprint | Migración | Qué entregó |
 |---|---|---|
@@ -436,7 +449,6 @@ Todos completos, en main. Documento de audit en `docs/AUDIT_FRONTEND_BACKEND.md`
 - Repos: `app/repositories/staff_comms_repo.py` (Sprint C/W — announcements, tasks, completions, shift swaps).
 - Routes: `app/routes/staff_comms.py` (20+ endpoints consolidados: announcements admin + staff, tasks + completions, tips, upcoming shifts, performance, shift swaps).
 - Migraciones: `0039_channel_and_attribution.py`, `0041_drop_legacy_restaurant_id.py`, `0042_staff_comms.py`, `0043_shift_swap_requests.py`.
-- Audit ref: `docs/AUDIT_FRONTEND_BACKEND.md` (582 LOC per-page matrix).
 
 ### Lo que quedó explícitamente para después
 
@@ -1246,7 +1258,6 @@ Wrapper Cloudinary. Funciones clave:
 - **Tests Verídicos**: Nuevos tests integration contra `TEST_DATABASE_URL` DEBEN probar correctness de agregados (seed data → assert valor exacto), tenant isolation (org A vs org B), y caso vacío (sin 500). Prohibidos: `assert status_code == 200` como única aserción, mock del repo completo, `assert "key" in data` sin checkear valor. Ver fixture de referencia en `tests/test_loyalty_aggregates.py` ("No-v2" sprint).
 - **Tool Use Nativo**: El bot usa Claude tool_use API. NUNCA volver a JSON-in-prompt. `_validate_tool_call()` es la barrera de seguridad.
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.
-- **Roadmap Fase 2+3**: Antes de empezar trabajo de hardening adicional, LEER `PHASE_2_3_PLAN.md` en raíz del repo. Ahí está el plan priorizado, con deuda residual, tareas concretas, y sugerencias de delegación.
 - **Regla "Si lo ves, lo arreglás" (PM 2026-04-29)**: Si durante una sesión encontrás algo roto, raro o sospechoso — aunque sea pre-existente, aunque no esté en el scope literal de la tarea — NO escribís en el reporte "es pre-existente", "no es mío", "fuera de scope", "deuda histórica". Lo arreglás o, si requiere decisión de producto (no técnica), preguntás al PM antes. Cada problema visto y no arreglado es deuda que reaparece. Excepción legítima: si arreglarlo expande el scope >50% del trabajo original, anotalo como sub-tarea concreta con archivo/líneas (no como handwave) y preguntás al PM si seguimos.
 
 ## Separación Internal vs App
@@ -1414,7 +1425,7 @@ O usar `services/alerts.py` y agregar un check personalizado al scheduler.
 
 ### Estado actual del schema (post-0038, 2026-04-19)
 
-- **Tablas nuevas canónicas:** `organizations` (tenant) + `locations` (sede). Ver `ORG_LOCATION_MIGRATION_PLAN.md` §2 para el mapeo completo.
+- **Tablas nuevas canónicas:** `organizations` (tenant) + `locations` (sede). El plan original Wave-2 (`ORG_LOCATION_MIGRATION_PLAN.md`) se eliminó al cerrar — schema canónico vive en las migraciones 0034-0038 + 0057.
 - **`restaurants` es ahora una VIEW read-only** sobre `locations JOIN organizations`. Cada fila de la VIEW representa una Location con los datos de su Org injerados. `id` de la VIEW == `location_id`.
 - **VIEW post-0038**: NO incluye `parent_restaurant_id` (legacy emulation eliminada). NO incluye `is_primary` (columna dropeada). Sí incluye `subscription_status` y `subscription_plan` para callers que los necesitan.
 - **`restaurants_deprecated`** — ❌ **DROPPED en 0038**. Si necesitás los datos originales pre-Wave-2, restorá de backup pre-0038.
