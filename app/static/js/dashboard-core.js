@@ -729,7 +729,10 @@ window.loadGlobalBranches = async function() {
               const opt = document.createElement('option');
               opt.value = b.id;
               // textContent — safe (XSS rule)
-              opt.textContent = b.name;
+              // Prefer location_name (per-sede) over name (org name, same across peers).
+              // Post-0038 the restaurants VIEW exposes both columns; older snapshots
+              // only have name, so fallback preserves backward compat.
+              opt.textContent = b.location_name || b.name;
               select.appendChild(opt);
           });
 

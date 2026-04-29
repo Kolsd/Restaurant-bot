@@ -369,10 +369,18 @@
         'overflow-y:auto'
       ].join(';');
 
+      // restaurants VIEW exposes BOTH name (org name, same for all peers of an org)
+      // AND location_name (per-sede name like "Herradura Norte"). Prefer the
+      // location_name in the dropdown so the user can distinguish sedes — falling
+      // back to name if the VIEW doesn't carry location_name (older VIEW snapshots).
       const items = [
         { value: 'matriz', name: 'Casa Matriz', sub: 'Todas las sucursales' }
       ].concat(
-        branches.map(b => ({ value: String(b.id), name: b.name || ('Sede ' + b.id), sub: '' }))
+        branches.map(b => {
+          const sedeName = b.location_name || b.name || ('Sede ' + b.id);
+          const sub = (b.location_name && b.name && b.location_name !== b.name) ? b.name : '';
+          return { value: String(b.id), name: sedeName, sub: sub };
+        })
       );
 
       items.forEach(function(it) {
