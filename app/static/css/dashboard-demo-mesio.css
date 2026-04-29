@@ -1146,11 +1146,47 @@ em { font-style: italic; color: var(--brand); font-family: 'Fraunces', serif; fo
 }
 @media (max-width: 720px) {
   :root { --sidebar-w: 0; }
+  /* Sidebar `display: none` would leave .main stranded in the grid's first
+     0px track — collapse the grid to a single column instead. */
+  .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
+  .demo-frame { height: auto; min-height: var(--frame-h); }
+  .demo-frame-inner { padding: 0 12px; gap: 8px; font-size: 11.5px; flex-wrap: nowrap; }
+  .df-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+  .df-name { display: none; } /* keep just "Dashboard demo · datos…" on mobile */
+  .df-cta { padding: 4px 10px; font-size: 11px; flex-shrink: 0; }
+  .topbar { padding: 0 16px; gap: 12px; height: auto; min-height: 56px; flex-wrap: wrap; }
+  .tb-period { gap: 4px; }
+  .tbp { padding: 6px 10px; font-size: 12px; }
   .tb-search { display: none; }
-  .content { padding: 16px; }
-  .dock { flex-wrap: wrap; padding: 12px 16px; border-radius: var(--radius-lg); gap: 10px; }
+  .content { padding: 16px; gap: 16px; }
+  .insight { flex-direction: column; padding: 18px; gap: 14px; }
+  .insight-icon { width: 36px; height: 36px; font-size: 20px; }
+  /* Order rows are display:grid — reflow to 2 rows on mobile so the
+     status badge has room and items + amount stay readable on row 1. */
+  .order-row { grid-template-columns: 32px 1fr auto; grid-template-rows: auto auto; column-gap: 10px; row-gap: 6px; padding: 12px 14px; }
+  .order-channel { grid-row: 1 / span 2; align-self: start; padding-top: 4px; }
+  .order-main { grid-column: 2; grid-row: 1; min-width: 0; }
+  .order-items { white-space: normal; }
+  .order-amount { grid-column: 3; grid-row: 1; font-size: 13px; }
+  .order-status { grid-column: 2 / -1; grid-row: 2; justify-self: start; font-size: 11px; }
+  /* Toast: desktop puts it at top:60 which on mobile lands ON TOP of the
+     topbar. Move it below the chrome (frame 40 + topbar ~56 + 14 buffer). */
+  .toast { top: 110px; right: 12px; left: auto; max-width: calc(100vw - 24px); }
+  .chart { gap: 4px; height: 140px; }
+  .trust-stats { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .trust-int-row { flex-wrap: wrap; gap: 6px; }
+  .int-chip { font-size: 11px; padding: 5px 9px; }
+  /* The desktop .dock + .dock.show use translateX(-50%) for centering;
+     mobile pins to viewport edges, so the X translation must be wiped
+     in BOTH the hidden and shown states (otherwise the dock slides off
+     the left edge by half its width). */
+  .dock { flex-wrap: wrap; padding: 12px 16px; border-radius: var(--radius-lg); gap: 10px; left: 12px; right: 12px; transform: translateY(120%); bottom: 12px; max-width: none; width: auto; }
+  .dock.show { transform: translateY(0); }
   .dock-text { border-right: none; padding-right: 0; }
-  .dock-actions { width: 100%; }
-  .dock-actions .btn { flex: 1; }
+  /* 3 buttons (WhatsApp / Mandárselo / Crear mi cuenta) cannot share a
+     390px row — let them wrap and each take half (or full if alone). */
+  .dock-actions { width: 100%; flex-wrap: wrap; gap: 8px; }
+  .dock-actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; padding: 10px 12px; font-size: 13px; }
+  .tour-tooltip { right: 12px; bottom: 12px; left: 12px; width: auto; max-width: none; }
 }

@@ -101,13 +101,16 @@
     const ordersEl = document.getElementById('orders');
     ordersEl.insertBefore(row, ordersEl.firstChild);
 
-    // Cascade: bump metrics
+    // Cascade: bump metrics. Ticket promedio drifts subtly with each new
+    // order (5% blend) instead of recomputing as revenue/orders, which
+    // would cause a jarring jump from the seeded value to a different
+    // figure on the very first new order.
     const oldRev = state.revenue;
     const oldOrders = state.orders;
     const oldTicket = state.ticket;
     state.revenue += tpl.amount;
     state.orders += 1;
-    state.ticket = Math.round(state.revenue / state.orders);
+    state.ticket = Math.round(state.ticket * 0.95 + tpl.amount * 0.05);
 
     setTimeout(() => {
       flashMetric('revenue');
