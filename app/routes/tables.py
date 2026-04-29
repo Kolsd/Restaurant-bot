@@ -649,24 +649,45 @@ async def update_delivery_order_status(request: Request, order_id: str):
 
 @router.get("/api/table-orders")
 async def get_table_orders(request: Request, status: str = None, station: str = None, table_id: str = None):
-    """Devuelve órdenes de mesa filtradas por sucursal y estado."""
+    """Devuelve órdenes de mesa filtradas por sede y estado.
+
+    Resolution rules (post-2026-04-29 — fixes empty 'Pedidos activos' /
+    Comanda Sin productos / proof loop bug family):
+      - Caller is owner/admin: org_id = restaurant['id'] (org_id post-
+        Wave-2). location_id (= legacy branch_id column) only when the
+        user explicitly picked a sede via X-Branch-ID = digit.
+      - Caller is staff (mesero/caja/cocina): org_id from get_current_restaurant
+        too; location_id = user.branch_id when staff is pinned to a sede.
+      - X-Branch-ID = 'all' / 'matriz' / missing: cross-sede view of the org
+        (org_id filter only).
+    """
     user = await get_current_user(request)
-    branch_id = user.get("branch_id")
-
-    # 🛡️ FILTRO GLOBAL: Leer el selector del Topbar
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
-        branch_id = int(branch_header)
-
-    # Detectar si el usuario es admin/owner (puede ver todas las sucursales)
     role = user.get("role", "")
     is_admin = any(r in role for r in ("owner", "admin", "gerente"))
 
-    # Resolve effective branch_id: from header, user, or staff context
-    effective_bid = branch_id or user.get("restaurant_id")
+    # Resolve org_id (canonical tenant key post-Wave-2). For owner/admin/gerente
+    # we rely on the restaurant lookup; for staff (mesero/caja/...) the
+    # user.branch_id is also the org_id today — same value path either way.
+    try:
+        restaurant = await get_current_restaurant(request)
+        org_id = restaurant.get("org_id") or restaurant.get("id")
+    except HTTPException:
+        org_id = user.get("restaurant_id") or user.get("branch_id")
+
+    # Specific sede: only when X-Branch-ID is a digit and caller is admin/owner.
+    # The digit value is the location_id (sede) coming from the sidebar dropdown
+    # populated by /api/team/branches.
+    location_id: int | None = None
+    branch_header = request.headers.get("X-Branch-ID")
+    if branch_header and branch_header.isdigit() and is_admin:
+        location_id = int(branch_header)
+
     with bypass_tenant_scope("get_table_orders: may span branches or be admin view"):
         rows = await tr.db_get_table_orders_for_branch(
-            branch_id=effective_bid, status=status, is_admin=is_admin
+            branch_id=location_id,
+            status=status,
+            is_admin=is_admin,
+            org_id=org_id,
         )
 
     import json as _json

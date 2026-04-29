@@ -1400,37 +1400,48 @@ async def db_get_table_orders_for_branch(
     branch_id: int | None,
     status: str | None = None,
     is_admin: bool = False,
+    org_id: int | None = None,
 ) -> list:
     """
-    Return table orders filtered by branch and optional status.
-    If branch_id is None and is_admin=True, returns all orders.
+    Return table orders filtered by org/sede and optional status.
+
+    Param semantics post-2026-04-29:
+      - org_id (preferred): caller passes the tenant org_id. SQL filters
+        `tor.org_id = $org_id` — works regardless of legacy branch_id state.
+      - branch_id: when given, treated as a SEDE id (location_id post-Wave-2).
+        Pre-2026-04-29 callers passed user.branch_id which is the org_id —
+        the route now resolves that case into org_id and leaves branch_id None.
+      - is_admin + branch_id None + org_id None: returns all orders across all
+        tenants (legacy admin view; only safe under bypass_tenant_scope).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     async with tenant_connection() as conn:
-        if branch_id is not None:
-            if status:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status = $1 AND branch_id = $2 ORDER BY created_at ASC",
-                    status, branch_id,
-                )
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') AND branch_id = $1 ORDER BY created_at ASC",
-                    branch_id,
-                )
-        elif is_admin:
-            if status:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status = $1 ORDER BY created_at ASC",
-                    status,
-                )
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM table_orders WHERE status NOT IN ('factura_entregada','cancelado') ORDER BY created_at ASC"
-                )
+        conditions: list[str] = []
+        params: list = []
+        idx = 1
+        if status:
+            conditions.append(f"status = ${idx}")
+            params.append(status)
+            idx += 1
         else:
-            rows = []
+            conditions.append("status NOT IN ('factura_entregada','cancelado')")
+        if org_id is not None:
+            conditions.append(f"org_id = ${idx}")
+            params.append(org_id)
+            idx += 1
+        if branch_id is not None:
+            # Post-0057 branch_id == location_id; we filter the canonical column
+            # to be future-proof if branch_id ever drifts again.
+            conditions.append(f"location_id = ${idx}")
+            params.append(branch_id)
+            idx += 1
+        # Safety: if neither org_id nor branch_id given AND caller is not admin,
+        # return empty (avoid leaking all orders cross-tenant).
+        if org_id is None and branch_id is None and not is_admin:
+            return []
+        sql = "SELECT * FROM table_orders WHERE " + " AND ".join(conditions) + " ORDER BY created_at ASC"
+        rows = await conn.fetch(sql, *params)
     return [dict(r) for r in rows]
 
 
