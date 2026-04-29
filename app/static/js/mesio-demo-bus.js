@@ -45,10 +45,10 @@
       ticket: 38500
     },
     floor: (function () {
-      // 12 mesas; ocupadas: 2, 4, 7, 8
+      // 8 mesas; ocupadas: 2, 4, 7, 8 → 4 ocupadas / 4 libres
       var occupiedSet = { 2: true, 4: true, 7: true, 8: true };
       var arr = [];
-      for (var i = 1; i <= 12; i++) arr.push({ num: i, occupied: !!occupiedSet[i] });
+      for (var i = 1; i <= 8; i++) arr.push({ num: i, occupied: !!occupiedSet[i] });
       return arr;
     })(),
     kds: [

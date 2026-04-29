@@ -80,7 +80,7 @@
     }
     if (e.key === 'activeTables') {
       var $td = document.getElementById('m-tables-delta');
-      if ($td) $td.textContent = (12 - e.value) + ' libres';
+      if ($td) $td.textContent = (8 - e.value) + ' libres';
     }
   });
 
@@ -91,7 +91,7 @@
     setTimeout(function () { $t.classList.remove('flash'); }, 900);
     var active = Demo.state.floor.filter(function (x) { return x.occupied; }).length;
     $floorActive.textContent = active;
-    $floorFree.textContent = 12 - active;
+    $floorFree.textContent = 8 - active;
     Demo.setMetric('activeTables', active);
   });
 
@@ -101,7 +101,7 @@
     $t.classList.remove('occupied');
     var active = Demo.state.floor.filter(function (x) { return x.occupied; }).length;
     $floorActive.textContent = active;
-    $floorFree.textContent = 12 - active;
+    $floorFree.textContent = 8 - active;
   });
 
   Bus.on('kds:add', function (e) {
@@ -234,7 +234,7 @@
     document.getElementById('m-tables').textContent = '4';
     document.getElementById('m-ticket').textContent = '38.500';
     document.getElementById('m-orders-delta').textContent = '+3 hoy';
-    document.getElementById('m-tables-delta').textContent = '8 libres';
+    document.getElementById('m-tables-delta').textContent = '4 libres';
 
     Demo.state.floor.forEach(function (t) {
       t.occupied = (t.num === 2 || t.num === 4 || t.num === 7 || t.num === 8);
