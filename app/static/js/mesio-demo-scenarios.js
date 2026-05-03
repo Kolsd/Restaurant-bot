@@ -92,7 +92,7 @@
         { at: 9200,  type: 'msg-in', text: '✅ Pedido confirmado · pago contra entrega.<br>Te aviso cuando salga del local.', time: '13:20' },
         { at: 9300,  type: 'dash-event', label: 'Domicilio asignado · Carlos M.', emoji: '🛵' },
 
-        { at: 11000, type: 'msg-in', text: '🛵 Tu pedido <b>salió hace 2 min</b>. Llega ~13:42.<br>Seguilo acá: <span style="color:#1D9E75;text-decoration:underline">mesio.app/seguir/8h2k</span>', time: '13:21' },
+        { at: 11000, type: 'msg-in', text: '🛵 Tu pedido <b>salió hace 2 min</b>. Llega ~13:42.<br>Seguilo acá: <span style="color:#1D9E75;text-decoration:underline">mesioai.com/seguir/8h2k</span>', time: '13:21' },
         { at: 11100, type: 'dash-event', label: 'En ruta · ETA 13:42', emoji: '📍' },
 
         { at: 13000, type: 'msg-in', text: '✅ <b>Entregado</b> · Pago $49.000 recibido<br>Factura DIAN: <span style="color:#1D9E75;text-decoration:underline">descargar</span>', time: '13:42' },
