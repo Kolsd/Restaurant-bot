@@ -299,8 +299,7 @@
         item.classList.add('active');
         document.getElementById('tb-title').textContent = item.textContent.trim().split(/\s+/).filter(t => !/^\d+$/.test(t)).join(' ').replace(/^[^\w]+/, '').trim() || 'Resumen';
         if (sec === 'whatsapp') {
-          // Send to chat-demo
-          window.location.href = 'demo.html';
+          window.location.href = '/demo';
         } else if (sec === 'pedidos') {
           // Scroll to orders card
           document.querySelector('.card-live').scrollIntoView({ behavior: 'smooth', block: 'start' });
