@@ -526,6 +526,8 @@ from app.repositories.loyalty_repo import (
     db_get_loyalty_balance,
     db_accrue_loyalty_points,
     db_redeem_loyalty_points,
+    db_apply_redemption_to_order,
+    db_apply_redemption_to_table_check,
     db_adjust_loyalty_points,
     db_get_loyalty_ledger,
     db_get_loyalty_stats,

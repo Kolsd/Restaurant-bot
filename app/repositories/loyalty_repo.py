@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Union
 
 from app.services.logging import get_logger
-from app.services.money import to_decimal
+from app.services.money import to_decimal, quantize_money, ZERO
 from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
@@ -185,6 +185,80 @@ async def db_redeem_loyalty_points(
         "cop_discount": points * cfg["point_value_cop"],
         "new_balance":  new_balance,
     }
+
+
+async def db_apply_redemption_to_order(
+    order_id: str,
+    points: int,
+    cop_discount: Union[Decimal, int, float, str],
+) -> bool:
+    """
+    Persist a loyalty redemption on a delivery/pickup order so caja sees the
+    discount when validating the receipt and the customer is not charged the
+    full amount.
+
+    `points` is an integer (the qty redeemed); `cop_discount` is the COP
+    equivalent — coerced to Decimal end-to-end (NUMERIC(14,2) on disk).
+
+    db_redeem_loyalty_points already wrote the ledger + decremented the
+    balance. This function ONLY annotates the order row so the till and the
+    customer-facing card can render the discount line.
+
+    Returns True if a row was updated, False if the order_id was not found
+    (RLS-scoped — the row may exist for another tenant but is invisible).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    if points <= 0:
+        raise ValueError("points must be positive")
+    cop_d = quantize_money(to_decimal(cop_discount))
+    if cop_d < ZERO:
+        raise ValueError("cop_discount cannot be negative")
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE orders
+                  SET loyalty_redeemed_points = $2,
+                      loyalty_discount_cop    = $3
+                WHERE id = $1
+            RETURNING id""",
+            order_id, int(points), cop_d,
+        )
+    return row is not None
+
+
+async def db_apply_redemption_to_table_check(
+    check_id: str,
+    points: int,
+    cop_discount: Union[Decimal, int, float, str],
+) -> bool:
+    """
+    Equivalent of db_apply_redemption_to_order but for dine-in table_checks.
+
+    The bot calls this AFTER db_redeem_loyalty_points succeeded so caja sees
+    the discount when cobrando the cuenta. We do NOT mutate `total` here —
+    caja's UI subtracts the displayed discount when computing what the
+    customer actually owes; the original total is preserved for audit / DIAN.
+
+    Returns True if updated, False if the check was not found / not visible
+    under the current tenant scope.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    if points <= 0:
+        raise ValueError("points must be positive")
+    cop_d = quantize_money(to_decimal(cop_discount))
+    if cop_d < ZERO:
+        raise ValueError("cop_discount cannot be negative")
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE table_checks
+                  SET loyalty_redeemed_points = $2,
+                      loyalty_discount_cop    = $3
+                WHERE id = $1
+            RETURNING id""",
+            check_id, int(points), cop_d,
+        )
+    return row is not None
 
 
 async def db_adjust_loyalty_points(

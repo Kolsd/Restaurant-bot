@@ -656,14 +656,25 @@ function _renderCheckModal(baseOrderId, tableName) {
       ? `<span style="font-size:10px;background:rgba(29,158,117,0.15);color:#4ADE9E;padding:2px 7px;border-radius:4px;font-weight:600;">Cobrado</span>`
       : `<span style="font-size:10px;background:rgba(245,158,11,0.15);color:#F59E0B;padding:2px 7px;border-radius:4px;font-weight:600;">Pendiente</span>`;
     const items = Array.isArray(chk.items) ? chk.items : (chk.items ? JSON.parse(chk.items) : []);
+    const loyaltyDiscount = Number(chk.loyalty_discount_cop || 0);
+    const loyaltyPoints = Number(chk.loyalty_redeemed_points || 0);
+    const grossTotal = Number(chk.total || 0);
+    const netTotal = Math.max(0, grossTotal - loyaltyDiscount);
+    const totalDisplay = loyaltyDiscount > 0
+      ? `<div style="text-align:right;"><div style="font-size:11px;color:#6B7280;text-decoration:line-through;">${fmt(grossTotal)}</div><div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--brand);">${fmt(netTotal)}</div></div>`
+      : `<div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--brand);">${fmt(grossTotal)}</div>`;
+    const loyaltyLine = loyaltyDiscount > 0
+      ? `<div style="font-size:11.5px;color:#4ADE9E;margin-bottom:8px;font-weight:600;">Descuento puntos: -${fmt(loyaltyDiscount)} (${_esc(String(loyaltyPoints))} puntos)</div>`
+      : '';
     html += `
       <div style="background:#12161f;border:1px solid #252836;border-radius:10px;padding:14px;margin-bottom:10px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <div style="font-size:13px;font-weight:600;color:#E8EAEE;">Cuenta #${_esc(String(chk.check_number || chk.id))}</div>
-          <div style="display:flex;align-items:center;gap:8px;">${statusLabel}<div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--brand);">${fmt(Number(chk.total || 0))}</div></div>
+          <div style="display:flex;align-items:center;gap:8px;">${statusLabel}${totalDisplay}</div>
         </div>
-        <div style="font-size:11.5px;color:#6B7280;margin-bottom:10px;">${items.map(it => `${_esc(String(it.qty || 1))}× ${_esc(it.name)}`).join(' · ')}</div>
-        ${!isPaid ? `<button class="cm-pay-check" data-check-id="${_esc(chk.id)}" data-total="${Number(chk.total||0)}" style="width:100%;padding:9px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">Cobrar este check</button>` : ''}
+        <div style="font-size:11.5px;color:#6B7280;margin-bottom:${loyaltyLine ? '4px' : '10px'};">${items.map(it => `${_esc(String(it.qty || 1))}× ${_esc(it.name)}`).join(' · ')}</div>
+        ${loyaltyLine}
+        ${!isPaid ? `<button class="cm-pay-check" data-check-id="${_esc(chk.id)}" data-total="${netTotal}" style="width:100%;padding:9px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit;">Cobrar este check</button>` : ''}
       </div>`;
   });
 
@@ -1298,6 +1309,16 @@ function _deliveryCardHtml(o) {
   const statusColors = { pendiente:'#F59E0B', confirmado:'#3B82F6', en_preparacion:'#8B5CF6', listo:'#10B981', en_camino:'#06B6D4', en_puerta:'#EC4899' };
   const sc = statusColors[o.status] || '#9CA3AF';
   const hasProof = o.proof_url || o.comprobante_url;
+  const loyaltyDiscount = Number(o.loyalty_discount_cop || 0);
+  const loyaltyPoints = Number(o.loyalty_redeemed_points || 0);
+  const grossTotal = Number(o.total || 0);
+  const netTotal = Math.max(0, grossTotal - loyaltyDiscount);
+  const loyaltyBlock = loyaltyDiscount > 0
+    ? `<div style="font-size:11px;color:#4ADE9E;margin-bottom:4px;font-weight:600;">Descuento puntos: -${mesioFmt(loyaltyDiscount)} (${_esc(String(loyaltyPoints))} puntos)</div>`
+    : '';
+  const totalLine = loyaltyDiscount > 0
+    ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;"><span style="font-size:11px;color:#6B7280;text-decoration:line-through;">${mesioFmt(grossTotal)}</span><span style="font-size:15px;font-weight:700;color:var(--brand);">${mesioFmt(netTotal)}</span></div>`
+    : `<div style="font-size:15px;font-weight:700;color:var(--brand);margin-bottom:8px;">${mesioFmt(grossTotal)}</div>`;
   return `
     <div style="font-weight:700;font-size:14px;color:#E8EAEE;display:flex;align-items:center;justify-content:space-between;">
       <span>#${_esc(String(o.id || '').slice(0,8))}</span>
@@ -1306,7 +1327,8 @@ function _deliveryCardHtml(o) {
     <div style="font-size:12px;color:#71717A;margin-top:2px;">${_esc(o.customer_name || o.phone || '')}</div>
     <div style="font-size:11px;color:#6B7280;margin:2px 0;">${_esc(o.address || '')}</div>
     <div style="font-size:11px;color:#6B7280;margin-bottom:4px;">${items.map(it => `${_esc(String(it.quantity||it.qty||1))}× ${_esc(it.name||it.dish||'')}`).join(', ')}</div>
-    <div style="font-size:15px;font-weight:700;color:var(--brand);margin-bottom:8px;">${mesioFmt(o.total||0)}</div>
+    ${loyaltyBlock}
+    ${totalLine}
     ${hasProof ? `<img class="del-proof-img" src="" alt="Comprobante" style="width:100%;height:120px;object-fit:cover;border-radius:7px;background:#0e1117;margin-bottom:8px;display:block;" onerror="this.style.display='none'">` : ''}
     <div style="display:flex;gap:6px;">
       <button class="m-btn m-btn--primary m-btn--sm del-confirm" style="flex:1;">Confirmar pago</button>

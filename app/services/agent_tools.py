@@ -362,6 +362,25 @@ _CANCEL_RESERVATION = {
     }
 }
 
+_REDEEM_LOYALTY_POINTS = {
+    "name": "redeem_loyalty_points",
+    "description": (
+        "Apply customer's loyalty points as a discount on their current order or "
+        "table check. Use only after the customer confirms they want to redeem. "
+        "Validate balance first via context."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "points": {
+                "type": "integer",
+                "description": "Number of points to redeem (must be > 0 and <= customer balance)",
+            }
+        },
+        "required": ["points"],
+    },
+}
+
 _REMEMBER_CUSTOMER_PREFERENCE = {
     "name": "remember_customer_preference",
     "description": (
@@ -404,6 +423,7 @@ TOOLS_SALON: list[dict] = [
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
     _SEND_DISH_CARD,
+    _REDEEM_LOYALTY_POINTS,
 ]
 """Tools available in dine-in (salon/table) mode."""
 
@@ -418,6 +438,7 @@ TOOLS_EXTERNAL: list[dict] = [
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
     _SEND_DISH_CARD,
+    _REDEEM_LOYALTY_POINTS,
 ]
 """Tools available in external (delivery/pickup) mode."""
 
@@ -441,6 +462,7 @@ ALL_TOOLS: dict[str, dict] = {
         _END_SESSION,
         _REMEMBER_CUSTOMER_PREFERENCE,
         _SEND_DISH_CARD,
+        _REDEEM_LOYALTY_POINTS,
     ]
 }
 """Maps every tool name to its definition dict for O(1) lookup."""
