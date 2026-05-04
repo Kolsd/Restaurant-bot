@@ -564,6 +564,121 @@ async def _run_weekly_owner_reports():
             )
 
 
+async def _run_eta_communication():
+    """Send ETA WhatsApp messages for orders the admin priced but we haven't told the customer yet.
+
+    Cross-tenant scan + per-tenant send pattern (mirrors _run_reservation_reminders):
+      - Enumerate active orgs under bypass.
+      - Per org, enter tenant_scope(org_id) so db_get_orders_needing_eta_communication
+        returns only that tenant's orders (RLS enforces).
+      - Send the ETA text and atomically flag the row so a parallel worker can't
+        double-send.
+
+    The scheduler tick that calls this fires every 3 minutes. Admin entry to send
+    has a typical lag of a few seconds — fine for "your food is ~30 min away".
+
+    Pickup vs delivery wording — kept generic so a single template works for both.
+    """
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
+    from app.services.meta_api import send_text  # noqa: PLC0415
+
+    try:
+        with bypass_tenant_scope("scheduler.eta_communication.scan"):
+            orgs = await db.db_get_all_orgs(active_only=True)
+    except Exception:
+        log.exception("scheduler.eta_communication.scan_failed")
+        return
+
+    for org in orgs:
+        org_id = org.get("id")
+        if org_id is None:
+            continue
+        try:
+            with tenant_scope(int(org_id)):
+                pending = await db.db_get_orders_needing_eta_communication()
+
+            for order in pending:
+                order_id = order.get("id")
+                phone = order.get("phone") or ""
+                bot_number = order.get("bot_number") or ""
+                minutes = order.get("estimated_minutes")
+                if not order_id or not phone or not bot_number or not minutes:
+                    continue
+
+                # Resolve restaurant credentials by bot_number (cross-tenant lookup).
+                with bypass_tenant_scope("scheduler.eta_communication.resolve_restaurant"):
+                    restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
+                if not restaurant:
+                    log.warning(
+                        "scheduler.eta_communication.no_restaurant",
+                        bot_number=bot_number, order_id=order_id,
+                    )
+                    continue
+                access_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
+                if not access_token:
+                    log.warning(
+                        "scheduler.eta_communication.no_token",
+                        bot_number=bot_number, order_id=order_id,
+                    )
+                    continue
+                phone_id = restaurant.get("wa_phone_id") or restaurant.get("meta_phone_id")
+
+                # Short order tag for the customer (last 6 chars, uppercased).
+                short_id = str(order_id)[-6:].upper()
+                order_type = order.get("order_type") or "domicilio"
+                if order_type == "recoger":
+                    msg = (
+                        f"🍴 Tu pedido #{short_id} estará listo en aproximadamente "
+                        f"{minutes} min. Te avisamos cuando esté listo para recoger."
+                    )
+                else:
+                    msg = (
+                        f"🛵 Tu pedido #{short_id} llega en aproximadamente "
+                        f"{minutes} min. Te avisaremos cuando salga."
+                    )
+
+                ok = await send_text(
+                    bot_number=bot_number,
+                    access_token=access_token,
+                    phone=phone,
+                    text=msg,
+                    phone_id=phone_id,
+                )
+                if not ok:
+                    log.warning(
+                        "scheduler.eta_communication.send_failed",
+                        bot_number=bot_number,
+                        order_id=order_id,
+                        phone_obf=phone[-4:] if phone else "",
+                    )
+                    # Don't mark — let the next tick retry.
+                    continue
+
+                # Atomic single-winner mark: returns False if a parallel worker
+                # beat us. In that case the customer already got the message
+                # from the other worker — nothing to recover.
+                with tenant_scope(int(org_id)):
+                    flipped = await db.db_mark_eta_communicated(order_id)
+                if flipped:
+                    log.info(
+                        "scheduler.eta_communication.sent",
+                        order_id=order_id,
+                        bot_number=bot_number,
+                        minutes=minutes,
+                        phone_obf=phone[-4:] if phone else "",
+                    )
+                else:
+                    log.info(
+                        "scheduler.eta_communication.already_marked",
+                        order_id=order_id,
+                    )
+        except Exception:
+            log.exception(
+                "scheduler.eta_communication.org_failed",
+                org_id=org_id,
+            )
+
+
 async def _run_nps_reminders():
     """Send a 24h follow-up to NPS surveys the customer ignored.
 
@@ -691,6 +806,14 @@ async def _scheduler_loop():
                 continue
 
             _reminder_counter += 1
+
+            # Run delivery ETA communication every 3 minutes
+            if _reminder_counter % 3 == 0:
+                await _run_eta_communication()
+                if not await _renew_or_abort(leader_token):
+                    log.warning("scheduler.tick_aborted_after_eta_communication")
+                    continue
+
             # Run reservation reminders every 5 minutes
             if _reminder_counter % 5 == 0:
                 await _run_reservation_reminders()

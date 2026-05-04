@@ -513,6 +513,78 @@ async def validate_delivery_order(order_id: str, body: ValidateDeliveryBody, req
     }
 
 
+class SetEtaRequest(BaseModel):
+    """Body for /api/delivery/orders/{order_id}/eta.
+
+    `minutes` is the admin-entered ETA (1..180). Outside that range we 422.
+    Sub-1 makes no sense; >180 is almost always a typo (3+ hours).
+    """
+    minutes: int
+
+
+@router.post("/delivery/orders/{order_id}/eta")
+async def set_delivery_eta(order_id: str, body: SetEtaRequest, request: Request):
+    """Set or update the ETA for a delivery/pickup order.
+
+    Admin/owner only — caja staff sees the input on the proposal card and
+    submits it. The scheduler picks the order up on its next sweep and
+    WhatsApps the customer "Tu pedido llega en aproximadamente N min."
+
+    Resetting the flag (handled in db_set_order_eta) lets admins update an
+    in-flight ETA — the scheduler will re-send with the new number.
+
+    Owner check: the route uses get_current_restaurant which already enforces
+    that the calling JWT belongs to a registered restaurant; we then verify
+    the order tenant matches before mutating.
+    """
+    minutes = body.minutes
+    if not isinstance(minutes, int) or minutes < 1 or minutes > 180:
+        raise HTTPException(
+            status_code=422,
+            detail=f"minutes must be an integer 1..180, got {minutes!r}",
+        )
+
+    restaurant = await get_current_restaurant(request)
+    user_org = restaurant.get("org_id") or restaurant.get("id")
+    if not user_org:
+        raise HTTPException(status_code=403, detail="No se pudo resolver tu organización")
+
+    # Pre-resolve the order tenant before we enter scope.
+    with bypass_tenant_scope("set_delivery_eta: pre-resolve order tenant"):
+        order = await db.db_get_order(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+    order_org = order.get("org_id") or order.get("restaurant_id")
+    if order_org and int(order_org) != int(user_org):
+        raise HTTPException(status_code=403, detail="La orden no pertenece a tu organización")
+
+    if order.get("status") in ("cancelado", "entregado"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"La orden está en estado '{order.get('status')}' y ya no admite ETA.",
+        )
+
+    with tenant_scope(int(order_org or user_org)):
+        updated = await db.db_set_order_eta(order_id, minutes)
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+    log.info(
+        "orders.eta_set",
+        order_id=order_id,
+        minutes=minutes,
+        org_id=int(order_org or user_org),
+    )
+    return {
+        "success": True,
+        "order_id": order_id,
+        "estimated_minutes": minutes,
+        "eta_communicated": False,
+    }
+
+
 @router.patch("/delivery/orders/{order_id}/status")
 async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, request: Request):
     user = await get_current_user(request)

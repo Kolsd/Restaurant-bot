@@ -655,6 +655,44 @@ Dashboard de producto para decisiones de negocio. Auth via `ADMIN_KEY`. Refresh 
 - **Trends**: gráficas CSS puras de órdenes y conversaciones diarias (30 días)
 - **API**: `GET /api/analytics/overview`, `GET /api/analytics/restaurants`, `GET /api/analytics/trends`
 
+## Background Tasks (Scheduler)
+
+`app/services/scheduler.py` runs a single leader (Redis SET NX EX) every 60s. Each periodic task lives in its own helper, gated by a counter modulo. The current cadence:
+
+| Task | Period | Helper | Notes |
+|---|---|---|---|
+| Inactivity sweep (mesa) | 60s (every tick) | `_run_inactivity_check` | Sends warning + closes idle sessions |
+| Alerts (dead letters / pool / latency / queue / errors) | 60s | `services.alerts.check_alerts` | 5 min cooldown per key |
+| ETA communication (delivery) | 3 min | `_run_eta_communication` | Sends "tu pedido llega en N min" once per `estimated_minutes` set by admin |
+| Reservation reminders (24h ahead) | 5 min | `_run_reservation_reminders` | Marks `confirmation_sent=true` after send |
+| Reservation deposit expiry | 10 min | `_run_deposit_expiry` | Cancels reservations with unpaid deposit > 2h |
+| Occupancy snapshot | 15 min | `_run_occupancy_snapshot` | One row per (org, location) pair |
+| NPS 24h reminder + cleanup | 30 min | `_run_nps_reminders` | One reminder per row; deletes rows > 48h |
+| Weekly owner report | 60s (skips internally) | `_run_weekly_owner_reports` | Only sends on Monday 09:xx local time |
+
+### Inactivity sweep — thresholds (mesa auto-close)
+
+Threshold values live in `app/repositories/tables_repo.py` (`db_get_stale_sessions`, `db_get_closeable_sessions`). The two-phase flow:
+
+1. **Phase 1 — Warning** (`_run_inactivity_check` step 1): a session becomes "stale" when:
+   - `has_order=FALSE` AND `last_activity < NOW() - 10 min`, OR
+   - `order_delivered=TRUE` AND `last_activity < NOW() - 60 min`
+   - The bot WhatsApps the customer ("¿todo bien? necesitas algo?") and sets `inactivity_warned=TRUE` atomically (single-winner across workers via `db_mark_session_warned`).
+2. **Phase 2 — Close** (`_run_inactivity_check` step 2): a session warned previously is closed when:
+   - `inactivity_warned=TRUE` AND `last_activity < NOW() - 5 min` (i.e. they didn't reply within 5 min of the warning), OR
+   - `status='nps_pending'` AND `last_activity < NOW() - 5 min` (NPS already triggered, customer didn't engage)
+   - We send a "your session has been closed" WA, clear the NPS state from Redis, and DELETE the conversation row.
+
+Effective end-to-end timeout: **15 min** for tables without a delivered order, **65 min** for tables that already received their food. Tweak the SQL intervals in `tables_repo.db_get_stale_sessions` / `db_get_closeable_sessions` if a tenant requests different values.
+
+### Delivery ETA (migration 0064)
+
+Two-column flow on `orders`:
+- `estimated_minutes INTEGER NULL` — set by admin via `POST /api/delivery/orders/{id}/eta` (range 1..180)
+- `eta_communicated BOOLEAN DEFAULT FALSE` — flips to TRUE after the scheduler sends the WA
+
+The scheduler picks orders where `paid=TRUE AND status IN ('confirmado','en_preparacion') AND estimated_minutes IS NOT NULL AND eta_communicated=FALSE`, sends a "Tu pedido #ABC llega en N min" message, and atomically marks the row (single-winner via `db_mark_eta_communicated`). Updating ETA mid-flight resets the flag, so the customer hears about the new time.
+
 ## Seguridad Anti Prompt Injection (Fase 4)
 
 ### En `agent.py`

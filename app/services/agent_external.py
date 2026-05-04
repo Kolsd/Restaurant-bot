@@ -206,23 +206,52 @@ async def execute_external_action(
             return "No tienes pedidos listos para recoger en este momento."
 
         order_id = order_row["id"]
-        # Create waiter alert so staff see the notification on the POS/caja screen
+        # Create waiter alert so staff see the notification on the POS/caja screen.
+        # Idempotency guard: customers often send "ya llegué" / "estoy aquí" /
+        # "ya estoy afuera" multiple times in the same minute. Without dedup, each
+        # message would mint a new alert and the staff inbox would buzz repeatedly
+        # for the same arrival. We accept a single alert per phone+bot pair within
+        # a 2-minute window.
         try:
+            from app.services.tenant_db import tenant_connection as _tcx  # noqa: PLC0415
             from app.services import database as _db  # noqa: PLC0415
-            await _db.db_create_waiter_alert(
-                alert_type="customer_arrived",
-                phone=phone,
-                bot_number=bot_number,
-                message=f"El cliente llegó a recoger el pedido #{order_id}.",
-                table_id="",
-                table_name="",
-            )
-            log.info(
-                "notify_arrival.alert_created",
-                order_id=order_id,
-                phone=phone,
-                bot_number=bot_number,
-            )
+            async with _tcx() as conn:
+                existing = await conn.fetchrow(
+                    """
+                    SELECT id FROM waiter_alerts
+                    WHERE phone = $1
+                      AND bot_number = $2
+                      AND alert_type = 'customer_arrived'
+                      AND dismissed = FALSE
+                      AND created_at > NOW() - INTERVAL '2 minutes'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    phone, bot_number,
+                )
+            if existing:
+                log.info(
+                    "notify_arrival.alert_dedup",
+                    order_id=order_id,
+                    phone=phone,
+                    bot_number=bot_number,
+                    existing_alert_id=existing["id"],
+                )
+            else:
+                await _db.db_create_waiter_alert(
+                    alert_type="customer_arrived",
+                    phone=phone,
+                    bot_number=bot_number,
+                    message=f"El cliente llegó a recoger el pedido #{order_id}.",
+                    table_id="",
+                    table_name="",
+                )
+                log.info(
+                    "notify_arrival.alert_created",
+                    order_id=order_id,
+                    phone=phone,
+                    bot_number=bot_number,
+                )
         except Exception:
             # Best-effort: alert failure must NOT block the customer-facing reply (Rule #17).
             log.exception("notify_arrival.alert_failed", phone=phone, order_id=order_id)

@@ -706,3 +706,92 @@ async def db_get_recent_orders_by_phone(
             "source": "delivery",
         })
     return results
+
+
+# ── Delivery ETA (estimated_minutes) ─────────────────────────────────────────
+#
+# Pair with migration 0064. Three primitives drive the flow:
+#   set_eta            → admin enters ETA via /api/delivery/orders/{id}/eta
+#   needing_communication → scheduler scans pending ones every 3 min
+#   mark_communicated  → scheduler flips the flag after WhatsApp sends
+#
+# All three are tenant-scoped (rely on RLS). The scheduler enumerates orgs
+# under bypass and enters tenant_scope per-org before calling the second one.
+
+async def db_set_order_eta(order_id: str, estimated_minutes: int) -> dict | None:
+    """Set the ETA for a delivery/pickup order.
+
+    Resets eta_communicated to FALSE so the scheduler picks the row up on
+    its next sweep, even if a previous ETA was already communicated. This
+    lets admins update the ETA mid-flight ("we're running 10 min later").
+
+    Returns the updated row dict, or None if the order does not exist.
+
+    # Requires active tenant_scope().
+    """
+    if estimated_minutes is None:
+        raise ValueError("estimated_minutes must not be None")
+    minutes = int(estimated_minutes)
+    if minutes < 1 or minutes > 180:
+        raise ValueError(f"estimated_minutes must be 1..180, got {minutes}")
+
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE orders
+               SET estimated_minutes = $2,
+                   eta_communicated  = FALSE
+             WHERE id = $1
+            RETURNING id, estimated_minutes, eta_communicated, status, paid,
+                      phone, bot_number, order_type
+            """,
+            order_id, minutes,
+        )
+        return dict(row) if row else None
+
+
+async def db_get_orders_needing_eta_communication() -> list[dict]:
+    """Return paid orders with an ETA that has not been WhatsApp'd yet.
+
+    Filtered to active statuses (confirmado, en_preparacion). Orders that
+    already shipped (en_camino, en_puerta, entregado) are excluded — their
+    notification path is handled by send_delivery_notification on status
+    transitions, not by the ETA scheduler.
+
+    # Requires active tenant_scope() (per-org wrap by the scheduler).
+    """
+    async with _tenant_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, phone, bot_number, estimated_minutes, status, order_type
+            FROM orders
+            WHERE paid              = TRUE
+              AND status            IN ('confirmado', 'en_preparacion')
+              AND estimated_minutes IS NOT NULL
+              AND eta_communicated  = FALSE
+            ORDER BY created_at ASC
+            """,
+        )
+        return [dict(r) for r in rows]
+
+
+async def db_mark_eta_communicated(order_id: str) -> bool:
+    """Atomically flip eta_communicated=TRUE — single-winner.
+
+    Returns True on the FIRST mark only. A second worker calling this on
+    the same order returns False, so we never double-WhatsApp the customer
+    even if two scheduler ticks race.
+
+    # Requires active tenant_scope().
+    """
+    async with _tenant_connection() as conn:
+        result = await conn.execute(
+            """
+            UPDATE orders
+               SET eta_communicated = TRUE
+             WHERE id = $1
+               AND eta_communicated = FALSE
+            """,
+            order_id,
+        )
+        return result == "UPDATE 1"

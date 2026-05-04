@@ -1292,6 +1292,15 @@ async function loadDeliveryProposals() {
       card.innerHTML = _deliveryCardHtml(o);
       card.querySelector('.del-confirm')?.addEventListener('click', () => confirmDeliveryOrder(o.id, 'confirmado', el, loadDeliveryProposals));
       card.querySelector('.del-reject')?.addEventListener('click', () => rejectDeliveryOrder(o.id, loadDeliveryProposals));
+      // ETA send button
+      const etaBtn = card.querySelector('.del-eta-send');
+      if (etaBtn) {
+        etaBtn.addEventListener('click', () => {
+          const input = card.querySelector('.del-eta-input');
+          const minutes = input ? parseInt(input.value, 10) : NaN;
+          setDeliveryEta(o.id, minutes, loadDeliveryProposals);
+        });
+      }
       // Proof image load
       const proofImg = card.querySelector('.del-proof-img');
       if (proofImg && o.proof_url) {
@@ -1320,6 +1329,25 @@ function _deliveryCardHtml(o) {
   const totalLine = loyaltyDiscount > 0
     ? `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;"><span style="font-size:11px;color:#6B7280;text-decoration:line-through;">${mesioFmt(grossTotal)}</span><span style="font-size:15px;font-weight:700;color:var(--brand);">${mesioFmt(netTotal)}</span></div>`
     : `<div style="font-size:15px;font-weight:700;color:var(--brand);margin-bottom:8px;">${mesioFmt(grossTotal)}</div>`;
+  // ETA section: only shown when the order is paid + still active. Once an
+  // ETA has been communicated, the input is replaced by a confirmation line so
+  // the operator sees the customer was already notified.
+  const isActive = ['confirmado', 'en_preparacion'].includes(String(o.status || ''));
+  const showEta = isActive && (o.paid === true || o.paid === 'true');
+  const etaMinutes = Number(o.estimated_minutes || 0);
+  const etaCommunicated = o.eta_communicated === true || o.eta_communicated === 'true';
+  let etaBlock = '';
+  if (showEta) {
+    if (etaCommunicated && etaMinutes > 0) {
+      etaBlock = `<div class="del-eta-sent" style="font-size:11px;color:#4ADE9E;margin-bottom:6px;font-weight:600;">ETA enviada: ${etaMinutes} min</div>`;
+    } else {
+      etaBlock = `
+      <div class="del-eta-row" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+        <input class="del-eta-input" type="number" min="1" max="180" placeholder="ETA min" value="${etaMinutes > 0 ? etaMinutes : ''}" style="width:80px;padding:5px 8px;background:#0e1117;border:1px solid #2a2f3d;border-radius:6px;color:#E8EAEE;font-size:12px;">
+        <button class="m-btn m-btn--ghost m-btn--sm del-eta-send" style="font-size:11px;padding:5px 10px;">Enviar ETA al cliente</button>
+      </div>`;
+    }
+  }
   return `
     <div style="font-weight:700;font-size:14px;color:#E8EAEE;display:flex;align-items:center;justify-content:space-between;">
       <span>#${_esc(String(o.id || '').slice(0,8))}</span>
@@ -1330,11 +1358,35 @@ function _deliveryCardHtml(o) {
     <div style="font-size:11px;color:#6B7280;margin-bottom:4px;">${items.map(it => `${_esc(String(it.quantity||it.qty||1))}× ${_esc(it.name||it.dish||'')}`).join(', ')}</div>
     ${loyaltyBlock}
     ${totalLine}
+    ${etaBlock}
     ${hasProof ? `<img class="del-proof-img" src="" alt="Comprobante" style="width:100%;height:120px;object-fit:cover;border-radius:7px;background:#0e1117;margin-bottom:8px;display:block;" onerror="this.style.display='none'">` : ''}
     <div style="display:flex;gap:6px;">
       <button class="m-btn m-btn--primary m-btn--sm del-confirm" style="flex:1;">Confirmar pago</button>
       <button class="m-btn m-btn--ghost m-btn--sm del-reject" style="border-color:#7F1D1D;color:#F87171;">Rechazar</button>
     </div>`;
+}
+
+async function setDeliveryEta(orderId, minutes, reloadFn) {
+  if (!Number.isFinite(minutes) || minutes < 1 || minutes > 180) {
+    mesioToast('ETA debe estar entre 1 y 180 minutos', 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`/api/delivery/orders/${encodeURIComponent(orderId)}/eta`, {
+      method: 'POST',
+      headers: mesioHeaders(),
+      body: JSON.stringify({ minutes }),
+    });
+    if (res.ok) {
+      mesioToast('ETA enviada al cliente', 'success');
+      if (typeof reloadFn === 'function') reloadFn();
+    } else {
+      const j = await res.json().catch(() => ({}));
+      mesioToast(j.detail || `Error ${res.status}`, 'error');
+    }
+  } catch (_) {
+    mesioToast('Error de red', 'error');
+  }
 }
 function _extractMediaId(url) {
   if (!url) return null;

@@ -292,6 +292,9 @@ from app.repositories.orders_repo import (
     db_update_pending_order_payment_method,
     db_attach_order_proof,
     db_update_order_status,
+    db_set_order_eta,
+    db_get_orders_needing_eta_communication,
+    db_mark_eta_communicated,
 )
 
 # === Conversations: moved to app.repositories.conversations_repo (Fase 6) ===
