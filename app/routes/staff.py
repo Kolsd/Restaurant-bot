@@ -468,6 +468,31 @@ async def tips_auto(
     return result
 
 
+@router.get("/tips/preview", dependencies=_MODULE_DEPS)
+async def preview_tip_distribution(
+    amount: Decimal,
+    when: str | None = None,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Preview how a single tip would be distributed across staff currently
+    on shift. Used by /caja during pay-check entry to give the cashier a
+    real-time breakdown.
+
+    Args:
+      amount: tip amount (Decimal). Must be > 0 and <= 10M.
+      when:   optional ISO8601 timestamp; defaults to NOW.
+    """
+    if amount is None or amount <= 0:
+        raise HTTPException(status_code=400, detail="amount debe ser > 0")
+    if amount > Decimal("10000000"):
+        raise HTTPException(status_code=400, detail="amount fuera de rango")
+    return await staff_repo.db_preview_tip_distribution(
+        restaurant_id=restaurant["id"],
+        tip_amount=amount,
+        paid_at_iso=when,
+    )
+
+
 class TipDistributionConfig(BaseModel):
     config: dict[str, float]
 

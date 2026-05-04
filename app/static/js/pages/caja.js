@@ -764,6 +764,7 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
         <input id="pcm-tip-custom-input" type="number" min="0" placeholder="Valor propina" style="width:100%;background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:13px;outline:none;">
       </div>
       <div id="pcm-tip-display" style="font-size:12px;color:#9FE1CB;font-weight:600;min-height:18px;"></div>
+      <div id="pcm-tip-split-preview" style="margin-top:8px;font-size:11px;color:#9CA3AF;line-height:1.4;min-height:0;"></div>
     </div>
 
     <div style="margin-bottom:16px;">
@@ -883,6 +884,98 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
     const tipDisp = document.getElementById('pcm-tip-display');
     if (tipDisp) tipDisp.textContent = tip > 0 ? `Propina: ${fmt(tip)}` : '';
     _renderInvoicePreview();
+    _scheduleTipSplitPreview(tip);
+  }
+
+  // Debounced tip-split preview (300ms) — calls /api/staff/tips/preview
+  // and renders a compact breakdown of how the tip will be distributed
+  // across staff currently on shift.
+  let _tipPreviewTimer = null;
+  let _tipPreviewSeq = 0;
+  function _scheduleTipSplitPreview(tipAmount) {
+    if (_tipPreviewTimer) {
+      clearTimeout(_tipPreviewTimer);
+      _tipPreviewTimer = null;
+    }
+    const previewEl = document.getElementById('pcm-tip-split-preview');
+    if (!previewEl) return;
+    if (!tipAmount || tipAmount <= 0) {
+      previewEl.textContent = '';
+      return;
+    }
+    _tipPreviewTimer = setTimeout(() => _fetchTipSplitPreview(tipAmount), 300);
+  }
+
+  async function _fetchTipSplitPreview(tipAmount) {
+    const previewEl = document.getElementById('pcm-tip-split-preview');
+    if (!previewEl) return;
+    const seq = ++_tipPreviewSeq;
+    try {
+      const res = await fetch(
+        `/api/staff/tips/preview?amount=${encodeURIComponent(tipAmount)}`,
+        { method: 'GET', headers: mesioHeaders() }
+      );
+      if (seq !== _tipPreviewSeq) return; // stale response
+      if (!res.ok) {
+        previewEl.textContent = '';
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!data || seq !== _tipPreviewSeq) return;
+      _renderTipSplitPreview(previewEl, data);
+    } catch (_e) {
+      if (seq === _tipPreviewSeq) previewEl.textContent = '';
+    }
+  }
+
+  function _renderTipSplitPreview(el, data) {
+    // Use textContent + DOM nodes for safety (no innerHTML with user data).
+    el.textContent = '';
+    const splits = Array.isArray(data && data.splits) ? data.splits : [];
+    const unalloc = Number((data && data.unallocated) || 0);
+    if (!splits.length && unalloc <= 0) {
+      el.textContent = '';
+      return;
+    }
+    if (!splits.length) {
+      const warn = document.createElement('div');
+      warn.style.color = '#F59E0B';
+      warn.textContent = `⚠ ${fmt(unalloc)} sin asignar (sin staff en turno)`;
+      el.appendChild(warn);
+      return;
+    }
+    const label = document.createElement('div');
+    label.style.color = '#6B7280';
+    label.style.fontWeight = '600';
+    label.style.marginBottom = '4px';
+    label.textContent = 'Reparto:';
+    el.appendChild(label);
+    const list = document.createElement('div');
+    list.style.display = 'flex';
+    list.style.flexWrap = 'wrap';
+    list.style.gap = '4px 10px';
+    splits.forEach((s, idx) => {
+      const span = document.createElement('span');
+      span.style.color = '#9FE1CB';
+      const role = s.role ? ` (${s.role})` : '';
+      // textContent assigns each piece safely
+      span.textContent = `${s.name || '—'}${role}: ${fmt(Number(s.amount || 0))}`;
+      list.appendChild(span);
+      if (idx < splits.length - 1) {
+        const dot = document.createElement('span');
+        dot.style.color = '#374151';
+        dot.textContent = '·';
+        list.appendChild(dot);
+      }
+    });
+    el.appendChild(list);
+    if (unalloc > 0) {
+      const warn = document.createElement('div');
+      warn.style.color = '#F59E0B';
+      warn.style.marginTop = '4px';
+      warn.textContent = `⚠ ${fmt(unalloc)} sin asignar`;
+      el.appendChild(warn);
+    }
   }
 
   body.querySelectorAll('.pcm-tip-preset').forEach(btn => {

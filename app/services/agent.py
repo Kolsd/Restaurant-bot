@@ -2660,6 +2660,10 @@ async def _resolve_branch_id(
 _JOIN_CODE_RE = re.compile(r'^\s*(\d{4})\s*$')
 _JOIN_CODE_MAX_ATTEMPTS = 3
 _JOIN_CODE_BLOCK_TTL = 600  # 10 minutes after 3 wrong attempts
+# Cross-worker rate limit: max 5 numeric-code attempts per phone per 60 seconds.
+# Defends against brute-force across flows (e.g. clearing state to retry).
+_JOIN_CODE_RL_MAX = 5
+_JOIN_CODE_RL_WINDOW = 60
 
 
 async def _handle_join_code_flow(
@@ -2695,6 +2699,25 @@ async def _handle_join_code_flow(
         # Not a numeric 4-digit string — re-prompt.
         return {"message": (
             "Ingresa el código de 4 dígitos que te dio quien abrió la cuenta."
+        )}
+
+    # Cross-worker rate limit: bound *numeric* attempts (after pattern match)
+    # to 5 per 60s per phone. Survives state-clearing retries by keying on
+    # phone alone, so brute-force can't leak past the per-pending counter.
+    rl_ok = await state_store.rate_limit_check(
+        f"join_code_attempt:{phone}",
+        max_requests=_JOIN_CODE_RL_MAX,
+        window_seconds=_JOIN_CODE_RL_WINDOW,
+    )
+    if not rl_ok:
+        log.warning(
+            "join_code.rate_limited",
+            phone=_ofuscar_phone(phone),
+            bot_number=bot_number,
+            table_id=table_id,
+        )
+        return {"message": (
+            "Has intentado muchos códigos seguidos. Espera un minuto e intenta de nuevo."
         )}
 
     code = m.group(1)

@@ -820,6 +820,143 @@ async def db_calculate_tips_by_attendance(
         }
 
 
+async def db_preview_tip_distribution(
+    restaurant_id: int,
+    tip_amount: Decimal,
+    paid_at_iso: str | None = None,
+) -> dict:
+    """Preview how a single tip would be distributed across staff currently
+    on shift, using the same logic as db_calculate_tips_by_attendance but
+    parametrized by a single amount + timestamp.
+
+    Args:
+      restaurant_id: location_id (or org_id for legacy data).
+      tip_amount: tip amount as Decimal (must be > 0).
+      paid_at_iso: ISO8601 timestamp; defaults to NOW (UTC).
+
+    Returns:
+      {
+        "tip_amount": float,         # JSON boundary
+        "config": {role: pct, ...},  # active distribution
+        "splits": [
+            {"staff_id": str, "name": str, "role": str, "amount": float},
+            ...
+        ],
+        "unallocated": float,        # tip share with no eligible staff
+      }
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    tip_amount = to_decimal(tip_amount)
+    # Resolve target timestamp (default NOW UTC)
+    if paid_at_iso:
+        try:
+            paid_at = datetime.fromisoformat(paid_at_iso)
+        except ValueError:
+            paid_at = datetime.now(timezone.utc)
+    else:
+        paid_at = datetime.now(timezone.utc)
+    if paid_at.tzinfo is None:
+        paid_at = paid_at.replace(tzinfo=timezone.utc)
+
+    async with tenant_connection() as conn:
+        # Read tip_distribution config from organizations.features
+        rest = await conn.fetchrow(
+            "SELECT features FROM restaurants WHERE id=$1", restaurant_id
+        )
+        features = rest["features"] or {} if rest else {}
+        if isinstance(features, str):
+            try:
+                features = json.loads(features)
+            except Exception:
+                features = {}
+        pct_config = features.get("tip_distribution", {}) or {}
+
+        # No config OR zero tip → trivially unallocated
+        if not pct_config:
+            return {
+                "tip_amount": float(quantize_money(tip_amount)),
+                "config": {},
+                "splits": [],
+                "unallocated": float(quantize_money(tip_amount)),
+            }
+
+        # Resolve org_id from location_id (Wave-2). Fallback to restaurant_id
+        # for legacy test data where org_id == location_id.
+        loc_row = await conn.fetchrow(
+            "SELECT org_id FROM locations WHERE id = $1", restaurant_id
+        )
+        org_id: int = loc_row["org_id"] if loc_row else restaurant_id
+
+        # Find staff currently on shift at paid_at, restricted to roles in config.
+        on_shift = await conn.fetch(
+            """SELECT ss.staff_id::text, s.name, s.role
+               FROM staff_shifts ss
+               JOIN staff s ON s.id = ss.staff_id
+               WHERE ss.org_id = $1
+                 AND ss.clock_in <= $2
+                 AND (ss.clock_out IS NULL OR ss.clock_out >= $2)
+                 AND s.role = ANY($3::text[])""",
+            org_id, paid_at, list(pct_config.keys()),
+        )
+
+        if not on_shift:
+            return {
+                "tip_amount": float(quantize_money(tip_amount)),
+                "config": pct_config,
+                "splits": [],
+                "unallocated": float(quantize_money(tip_amount)),
+            }
+
+        # Group staff by role
+        role_staff: dict[str, list[dict]] = {}
+        for s in on_shift:
+            role_staff.setdefault(s["role"], []).append(dict(s))
+
+        # Redistribute: only roles with staff on shift share the pot,
+        # weighted by their configured pct.
+        present_roles = list(role_staff.keys())
+        total_pct = to_decimal(sum(pct_config.get(r, 0) for r in present_roles))
+        if total_pct == ZERO:
+            return {
+                "tip_amount": float(quantize_money(tip_amount)),
+                "config": pct_config,
+                "splits": [],
+                "unallocated": float(quantize_money(tip_amount)),
+            }
+
+        splits: list[dict] = []
+        allocated = ZERO
+        for role, members in role_staff.items():
+            role_pct = to_decimal(pct_config.get(role, 0))
+            role_share = money_mul(tip_amount, role_pct / total_pct)
+            per_person = role_share / Decimal(len(members))
+            for m in members:
+                amt = quantize_money(per_person)
+                splits.append({
+                    "staff_id": m["staff_id"],
+                    "name": m["name"],
+                    "role": role,
+                    "amount": float(amt),
+                })
+                allocated += amt
+
+        # Any quantization rounding residue stays as unallocated
+        unalloc = tip_amount - allocated
+        if unalloc < ZERO:
+            unalloc = ZERO
+
+        # Sort by amount desc for UI readability
+        splits.sort(key=lambda x: x["amount"], reverse=True)
+
+        return {
+            "tip_amount": float(quantize_money(tip_amount)),
+            "config": pct_config,
+            "splits": splits,
+            "unallocated": float(quantize_money(unalloc)),
+        }
+
+
 # ── WebAuthn ─────────────────────────────────────────────────────────────────
 
 async def db_save_webauthn_credential(
