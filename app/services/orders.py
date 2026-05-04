@@ -334,17 +334,20 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                         "sub_number":          sub_number,
                         "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
                     }
-                    # Only generate Wompi link for non-cash orders
+                    # Wompi link is OPTIONAL. If env vars are missing, fall through
+                    # to the manual-proof flow: the conversation appends
+                    # `features.payment_instructions[method]` so the customer pays
+                    # to the restaurant's Nequi/Bancolombia and sends the receipt.
+                    # Cash/efectivo never needs a link.
+                    order["payment_url"] = None
                     if payment_method and payment_method.lower() not in ("efectivo", "cash"):
                         try:
                             order["payment_url"] = generate_wompi_payment_link(order_id, subtotal)
                         except RuntimeError:
-                            # Wompi env vars missing — alarms fire from generate_wompi_payment_link.
-                            # Keep the bot conversational by returning a friendly error.
-                            log.exception("create_order.payment_link_unavailable", phone=phone, order_id=order_id)
-                            return {"success": False, "error": "No pudimos generar el link de pago en este momento. El equipo ya fue notificado."}
-                    else:
-                        order["payment_url"] = None
+                            log.warning(
+                                "create_order.wompi_unavailable_manual_proof_flow",
+                                phone=phone, order_id=order_id, payment_method=payment_method,
+                            )
                     try:
                         await commit_order_transaction(
                             pool,
@@ -399,15 +402,20 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                 "sub_number":          1,
                 "scheduled_pickup_at": scheduled_pickup_at if order_type == "recoger" else None,
             }
-            # Only generate Wompi link for non-cash orders
+            # Wompi link is OPTIONAL. If env vars are missing, fall through to
+            # the manual-proof flow: the conversation appends
+            # `features.payment_instructions[method]` so the customer pays to the
+            # restaurant's Nequi/Bancolombia and sends the receipt.
+            # Cash/efectivo never needs a link.
+            order["payment_url"] = None
             if payment_method and payment_method.lower() not in ("efectivo", "cash"):
                 try:
                     order["payment_url"] = generate_wompi_payment_link(order_id, total)
                 except RuntimeError:
-                    log.exception("create_order.payment_link_unavailable", phone=phone, order_id=order_id)
-                    return {"success": False, "error": "No pudimos generar el link de pago en este momento. El equipo ya fue notificado."}
-            else:
-                order["payment_url"] = None
+                    log.warning(
+                        "create_order.wompi_unavailable_manual_proof_flow",
+                        phone=phone, order_id=order_id, payment_method=payment_method,
+                    )
             try:
                 await commit_order_transaction(
                     pool,
