@@ -307,3 +307,63 @@ class TestBuildCompactMenuPhotoMarkers:
         # Bandeja Paisa has [📷], Arroz Blanco does not
         assert "Bandeja Paisa [📷]" in result
         assert "Arroz Blanco [📷]" not in result
+
+
+# ── Section D — send_dish_card available in EXTERNAL flow ────────────────────
+
+
+class TestSendDishCardExternalFlow:
+    """send_dish_card MUST be exposed in TOOLS_EXTERNAL so delivery/pickup
+    customers can ask 'cómo se ve la bandeja paisa' and receive a photo.
+
+    The handler in agent.py is flow-agnostic (no salon-only filtering on the
+    tool name), so being present in TOOLS_EXTERNAL is sufficient — exercising
+    execute_action with a restaurant in external mode confirms parity.
+    """
+
+    def test_tool_definition_present_in_external(self):
+        from app.services.agent_tools import TOOLS_EXTERNAL, ALL_TOOLS
+
+        names = [t["name"] for t in TOOLS_EXTERNAL]
+        assert "send_dish_card" in names, "send_dish_card MUST be in TOOLS_EXTERNAL for delivery/pickup mode"
+
+        # Same definition should resolve from ALL_TOOLS lookup.
+        assert ALL_TOOLS["send_dish_card"]["name"] == "send_dish_card"
+        assert "dish_name" in ALL_TOOLS["send_dish_card"]["input_schema"]["properties"]
+
+    def test_external_flow_can_use_send_dish_card(self, monkeypatch):
+        """execute_action invoked with an EXTERNAL-mode restaurant returns the
+        LLM reply just like the salon path — handler is flow-agnostic."""
+        monkeypatch.setattr(
+            state_store, "rate_limit_check", AsyncMock(return_value=True)
+        )
+
+        external_rest = {
+            "id": 1, "name": "Test Rest",
+            "wa_access_token": "token_abc",
+            "wa_phone_id": "pid_001",
+            # No table context — implies external (delivery/pickup) flow.
+            "features": {"bot_visual_menu": True},
+        }
+
+        parsed = {
+            "action": "send_dish_card",
+            "reply": "Te muestro la bandeja:",
+            "dish_name": "Bandeja Paisa",
+            "caption": "",
+            "_resolved_dish": _DISH_WITH_IMAGE,
+        }
+
+        send_image_mock = AsyncMock(return_value=True)
+
+        with patch("app.services.meta_api.send_image", send_image_mock):
+            result = _run(
+                execute_action(
+                    parsed,
+                    _PHONE, _BOT, None, {},
+                    restaurant_obj=external_rest,
+                )
+            )
+
+        assert result == "Te muestro la bandeja:"
+        send_image_mock.assert_awaited_once()

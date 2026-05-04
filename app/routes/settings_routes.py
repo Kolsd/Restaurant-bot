@@ -1019,6 +1019,80 @@ async def delete_menu_image(
     return {"success": True, "public_id": public_id}
 
 
+# ── Catálogo Visual v2 — Visual onboarding gap report ────────────────────────
+
+@router.get("/api/menu/missing-photos")
+async def get_dishes_missing_photos(
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """
+    List dishes in this restaurant's menu that lack image_url.
+
+    Used by the admin menu editor to surface a visual-onboarding gap:
+    "X de Y platos tienen foto. Faltan: [list]". Without this, an admin
+    can believe they have a "menú visual" while only a few dishes have
+    images uploaded.
+
+    Returns:
+        {
+            "total_dishes":  int — total dishes across all categories,
+            "with_photo":    int — dishes that have a non-empty image_url,
+            "missing_count": int — dishes without image_url,
+            "missing":       [{category, name, price}, ...],
+        }
+
+    Auth: admin/owner Bearer token.
+    """
+    raw_menu = restaurant.get("menu") or {}
+
+    # Tolerate string-encoded JSON (some DB code paths return raw str).
+    if isinstance(raw_menu, str):
+        try:
+            raw_menu = json.loads(raw_menu)
+        except Exception:
+            raw_menu = {}
+
+    # Fallback: if the dict for some reason doesn't carry the menu, look it
+    # up by whatsapp_number. Mirrors the pattern in dashboard_data().
+    if not raw_menu and restaurant.get("whatsapp_number"):
+        try:
+            raw_menu = await db.db_get_menu(restaurant["whatsapp_number"]) or {}
+        except Exception as exc:
+            log.warning(
+                "menu.missing_photos.fallback_lookup_failed",
+                restaurant_id=restaurant.get("id"),
+                error=str(exc),
+            )
+            raw_menu = {}
+
+    if not isinstance(raw_menu, dict):
+        raw_menu = {}
+
+    total_dishes = 0
+    missing: list[dict] = []
+    for category, dishes in raw_menu.items():
+        if not isinstance(dishes, list):
+            continue
+        for dish in dishes:
+            if not isinstance(dish, dict):
+                continue
+            total_dishes += 1
+            image_url = dish.get("image_url")
+            if not image_url or not str(image_url).strip():
+                missing.append({
+                    "category": category,
+                    "name":     dish.get("name", ""),
+                    "price":    dish.get("price", 0),
+                })
+
+    return {
+        "total_dishes":  total_dishes,
+        "with_photo":    total_dishes - len(missing),
+        "missing_count": len(missing),
+        "missing":       missing,
+    }
+
+
 # ── Catalog v2: menu engineering analytics (Fase 5b) ─────────────────────────
 
 @router.get("/api/menu/analytics")

@@ -60,6 +60,10 @@
           <button class="btn primary" id="btn-sync-branches">🔄 Sincronizar sucursales</button>
         </div>
 
+        <!-- Visual onboarding widget — shows photo coverage and which dishes still need images. -->
+        <!-- Populated dynamically by menu-admin.js from /api/menu/missing-photos. -->
+        <div id="photo-coverage-widget" data-loaded="false" style="display:none;margin-bottom:14px;"></div>
+
         <div id="live-menu-container" data-loaded="false">
           <div style="padding:24px;color:var(--text-3);font-size:13px;">Cargando platos…</div>
         </div>

@@ -228,6 +228,124 @@
     }
   }
 
+  // ── Visual onboarding: photo coverage widget ─────────────────────────
+  // Renders a banner above the dish grid showing how many dishes still
+  // lack a photo. Clicking a missing dish scrolls to its row so the admin
+  // can hit the existing 📷 button. Refreshes after every upload/delete.
+  async function loadPhotoCoverage() {
+    var widget = document.getElementById('photo-coverage-widget');
+    if (!widget) return;
+    try {
+      var res = await fetch('/api/menu/missing-photos', { headers: mesioHeaders() });
+      if (!res.ok) {
+        widget.style.display = 'none';
+        return;
+      }
+      var data = await res.json();
+      _renderPhotoCoverage(widget, data);
+    } catch (e) {
+      widget.style.display = 'none';
+    }
+  }
+
+  function _renderPhotoCoverage(widget, data) {
+    var total   = (data && data.total_dishes)  | 0;
+    var withPh  = (data && data.with_photo)    | 0;
+    var missing = (data && data.missing) || [];
+
+    // Empty menu — nothing to nudge.
+    if (total === 0) {
+      widget.style.display = 'none';
+      widget.setAttribute('data-loaded', 'true');
+      return;
+    }
+
+    // 100% coverage — celebrate briefly, then hide on next render.
+    if (missing.length === 0) {
+      widget.style.display = '';
+      widget.innerHTML = '';
+      var done = document.createElement('div');
+      done.className = 'card flush';
+      done.style.cssText = 'padding:12px 16px;display:flex;align-items:center;gap:10px;border-left:3px solid var(--brand);';
+      var doneIcon = document.createElement('span');
+      doneIcon.textContent = '✅';
+      var doneText = document.createElement('div');
+      doneText.style.cssText = 'font-size:13px;color:var(--text-2);';
+      doneText.textContent = 'Todos los platos del menú tienen foto (' + total + '/' + total + ').';
+      done.appendChild(doneIcon);
+      done.appendChild(doneText);
+      widget.appendChild(done);
+      widget.setAttribute('data-loaded', 'true');
+      return;
+    }
+
+    widget.style.display = '';
+    widget.innerHTML = '';
+
+    var card = document.createElement('div');
+    card.className = 'card flush';
+    card.style.cssText = 'padding:12px 16px;border-left:3px solid #d97706;';
+
+    // Header line
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;';
+
+    var headerLeft = document.createElement('div');
+    headerLeft.style.cssText = 'display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-2);';
+    var icon = document.createElement('span');
+    icon.textContent = '📷';
+    var label = document.createElement('span');
+    label.textContent = withPh + ' de ' + total + ' platos tienen foto. Faltan ' + missing.length + '.';
+    headerLeft.appendChild(icon);
+    headerLeft.appendChild(label);
+
+    var arrow = document.createElement('span');
+    arrow.textContent = '▾';
+    arrow.style.cssText = 'font-size:12px;color:var(--text-3);transition:transform .15s;';
+
+    header.appendChild(headerLeft);
+    header.appendChild(arrow);
+    card.appendChild(header);
+
+    // List of missing dishes (collapsible)
+    var list = document.createElement('div');
+    list.style.cssText = 'display:none;margin-top:10px;flex-wrap:wrap;gap:6px;';
+    missing.forEach(function (m) {
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.style.cssText = 'background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:4px 10px;font-size:12px;color:var(--text-2);cursor:pointer;';
+      // textContent for user-controlled data — names/categories from DB.
+      chip.textContent = (m.category || '') + ' · ' + (m.name || '');
+      chip.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        _scrollToMissingDish(m.name);
+      });
+      list.appendChild(chip);
+    });
+    card.appendChild(list);
+
+    header.addEventListener('click', function () {
+      var open = list.style.display !== 'none';
+      list.style.display = open ? 'none' : 'flex';
+      arrow.style.transform = open ? '' : 'rotate(180deg)';
+    });
+
+    widget.appendChild(card);
+    widget.setAttribute('data-loaded', 'true');
+  }
+
+  function _scrollToMissingDish(name) {
+    if (!name) return;
+    // Dish rows carry data-dish-name set by renderMenu.
+    var sel = '[data-dish-name="' + name.replace(/"/g, '\\"') + '"]';
+    var el = document.querySelector(sel);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.style.transition = 'box-shadow .25s';
+    el.style.boxShadow = '0 0 0 2px var(--brand)';
+    setTimeout(function () { el.style.boxShadow = ''; }, 1400);
+  }
+
   // ── Inventory modal ────────────────────────────────────────────────
   var _invItems = [];
 
@@ -677,6 +795,7 @@
       mesioToast('Imagen subida correctamente', 'success');
       document.getElementById('imgModal').style.display = 'none';
       renderMenu(_imgModalCategories);
+      loadPhotoCoverage();
     } catch (err) {
       mesioToast('Error subiendo imagen: ' + err.message, 'error');
     } finally {
@@ -701,6 +820,7 @@
       mesioToast('Imagen eliminada', 'success', 1500);
       document.getElementById('imgModal').style.display = 'none';
       renderMenu(_imgModalCategories);
+      loadPhotoCoverage();
     } catch (e) {
       mesioToast('Error al eliminar la imagen', 'error');
     }
@@ -1044,6 +1164,7 @@
 
   // ── Boot ──────────────────────────────────────────────────────────
   loadMenu();
+  loadPhotoCoverage();
   loadInventory();
   loadRecipes();
 })();
