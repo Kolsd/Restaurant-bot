@@ -458,6 +458,40 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                                     bot_number, access_token, user_phone, confirm_msg, phone_id,
                                 )
                                 continue
+
+                            # Atajo no-LLM (delivery/pickup): si hay un pedido externo
+                            # pendiente de pago para este teléfono, vincular el comprobante
+                            # a orders.proof_url para que caja lo vea en su grid.
+                            from app.services.meta_api import send_text as _meta_send  # noqa: PLC0415
+                            is_safe = await _is_image_safe(image_id, access_token)
+                            if not is_safe:
+                                rejection_msg = (
+                                    "⚠️ Tu imagen no pudo ser procesada. "
+                                    "Por favor envía una captura clara de tu comprobante de pago."
+                                )
+                                await _meta_send(
+                                    bot_number, access_token, user_phone, rejection_msg,
+                                    phone_id=phone_id,
+                                )
+                                continue
+                            attached_order_id = await db.db_attach_order_proof(
+                                user_phone, bot_number, media_url
+                            )
+                            if attached_order_id:
+                                confirm_msg = (
+                                    "✅ Comprobante recibido. Caja lo está validando "
+                                    "y te confirmamos en breve. ¡Gracias! 🙏"
+                                )
+                                background_tasks.add_task(
+                                    _meta_send,
+                                    bot_number, access_token, user_phone, confirm_msg, phone_id,
+                                )
+                                log.info(
+                                    "chat.delivery_proof_attached",
+                                    phone=user_phone,
+                                    order_id=attached_order_id,
+                                )
+                                continue
                     except Exception as e:
                         log.error("chat.proof_shortcut_failed", phone=user_phone, error=str(e))
 

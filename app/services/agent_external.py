@@ -456,20 +456,47 @@ async def execute_external_action(
         order = res["order"]
 
         # ── Inject payment instructions from branch features ──────────
-        if payment_method and payment_method.lower() in ["nequi", "daviplata", "transferencia"]:
+        # Manual-proof flow: any non-cash digital method (nequi, daviplata,
+        # bancolombia, transferencia, etc.) needs the customer to pay manually
+        # and send a receipt photo. We append the configured payment_instructions
+        # so the customer knows where to pay.
+        _is_cash_method = payment_method and payment_method.lower() in ("efectivo", "cash")
+        _has_link = bool(order.get("payment_url"))  # Wompi link present → no manual flow needed
+        if payment_method and not _is_cash_method and not _has_link:
             try:
                 branch_rest = await db.db_get_restaurant_by_phone(effective_bot_number)
+                feats = {}
                 if branch_rest:
                     feats = branch_rest.get("features", {})
                     if isinstance(feats, str):
                         feats = json.loads(feats)
 
-                    inst_dict = feats.get("payment_instructions", {})
-                    instructions = inst_dict.get(payment_method.lower(), "") or inst_dict.get(payment_method.capitalize(), "")
+                inst_dict = feats.get("payment_instructions", {}) or {}
+                pm_key = payment_method.lower().strip()
+                # Tolerate common synonyms: customer may say "Transferencia" or
+                # "Bancolombia" interchangeably for the same configured key.
+                instructions = (
+                    inst_dict.get(pm_key)
+                    or inst_dict.get(payment_method.capitalize())
+                    or (inst_dict.get("bancolombia") if pm_key in ("transferencia", "transferencia bancolombia") else "")
+                    or (inst_dict.get("transferencia") if pm_key == "bancolombia" else "")
+                )
 
-                    if instructions:
-                        _proof_reminder = "" if "comprobante" in reply.lower() else "\n\nUna vez realices el pago, envíanos el comprobante (foto/captura) por aquí. 📸"
-                        reply += f"\n\nPara pagar con {payment_method}, por favor sigue estas instrucciones:\n{instructions}{_proof_reminder}"
+                _proof_reminder = "" if "comprobante" in reply.lower() else "\n\nUna vez realices el pago, envíanos el comprobante (foto/captura) por aquí. 📸"
+                if instructions:
+                    reply += f"\n\nPara pagar con {payment_method}:\n{instructions}{_proof_reminder}"
+                else:
+                    # Method is enabled but admin hasn't configured the data yet.
+                    # Don't leave the customer in the dark — give them a clear
+                    # fallback so they know what to expect next.
+                    log.warning(
+                        "payment_instructions_missing_falling_back",
+                        phone=phone, bot_number=bot_number, payment_method=payment_method,
+                    )
+                    reply += (
+                        f"\n\nEn un momento te confirmamos los datos para pagar con {payment_method}."
+                        f"{_proof_reminder}"
+                    )
             except Exception:
                 log.exception("payment_instructions_inject_failed", phone=phone, bot_number=bot_number)
 

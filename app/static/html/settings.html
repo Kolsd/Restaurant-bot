@@ -173,7 +173,7 @@
           <!-- Pagos -->
           <section id="pagos" class="card set-sec">
             <h2>Métodos de pago</h2>
-            <div class="s-sub">Los métodos activos aparecen en Caja, WhatsApp y QR de mesa.</div>
+            <div class="s-sub">Los métodos activos aparecen en Caja, WhatsApp y QR de mesa. Para los métodos digitales, escribí las instrucciones que el bot enviará al cliente para que pueda pagar (cuenta Nequi, número Bancolombia, etc.).</div>
 
             <div class="integ-row">
               <div class="integ-logo" style="background:#E1F5EE;">💵</div>
@@ -202,6 +202,29 @@
               </div>
               <button class="switch" id="pay-sw-nequi" data-toggleable aria-label="Nequi activado"></button>
             </div>
+            <div class="field-group" id="pay-inst-row-nequi">
+              <div>
+                <div class="fg-label">Instrucciones para pagar con Nequi</div>
+                <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Nequi.</div>
+              </div>
+              <textarea id="pay-inst-nequi" class="input" rows="3" placeholder="Ej: Envía a Nequi 300 123 4567 a nombre de [Restaurante]. Incluí tu número de pedido en la descripción."></textarea>
+            </div>
+
+            <div class="integ-row">
+              <div class="integ-logo" style="background:#FFE4B5;">📲</div>
+              <div class="integ-info">
+                <div class="integ-name">Daviplata</div>
+                <div class="integ-desc">Transferencia desde la app · sin comisión</div>
+              </div>
+              <button class="switch" id="pay-sw-daviplata" data-toggleable aria-label="Daviplata activado"></button>
+            </div>
+            <div class="field-group" id="pay-inst-row-daviplata">
+              <div>
+                <div class="fg-label">Instrucciones para pagar con Daviplata</div>
+                <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Daviplata.</div>
+              </div>
+              <textarea id="pay-inst-daviplata" class="input" rows="3" placeholder="Ej: Envía a Daviplata 300 123 4567 a nombre de [Restaurante]."></textarea>
+            </div>
 
             <div class="integ-row">
               <div class="integ-logo" style="background:#FEF3C7;">🏦</div>
@@ -210,6 +233,13 @@
                 <div class="integ-desc">Conciliación manual por el admin</div>
               </div>
               <button class="switch" id="pay-sw-bancolombia" data-toggleable aria-label="Bancolombia activado"></button>
+            </div>
+            <div class="field-group" id="pay-inst-row-bancolombia">
+              <div>
+                <div class="fg-label">Instrucciones para Transferencia Bancolombia</div>
+                <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Bancolombia.</div>
+              </div>
+              <textarea id="pay-inst-bancolombia" class="input" rows="3" placeholder="Ej: Cuenta de Ahorros Bancolombia 12345678 a nombre de [Empresa] NIT 900123456-7."></textarea>
             </div>
 
             <div class="integ-row">

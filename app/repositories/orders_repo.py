@@ -504,6 +504,34 @@ async def db_update_pending_order_payment_method(phone: str, bot_number: str, pa
             phone, bot_number, payment_method
         )
 
+
+async def db_attach_order_proof(phone: str, bot_number: str, media_url: str) -> str | None:
+    """
+    Adjunta URL de comprobante al pedido delivery/pickup más reciente NO PAGADO
+    de phone+bot_number. Retorna order_id si se vinculó, None si no hubo match.
+
+    Pareja del table_orders db_attach_proof, pero para órdenes externas. Solo
+    toca órdenes paid=false y no-terminales para evitar pisar comprobantes ya
+    validados o adjuntar a órdenes canceladas.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE orders SET proof_url=$3
+               WHERE id = (
+                 SELECT id FROM orders
+                 WHERE phone=$1 AND bot_number=$2
+                   AND order_type IN ('domicilio','recoger')
+                   AND paid=false
+                   AND status NOT IN ('cancelado','entregado')
+                 ORDER BY created_at DESC LIMIT 1
+               )
+               RETURNING id""",
+            phone, bot_number, media_url,
+        )
+        return row["id"] if row else None
+
 async def db_update_order_status(order_id: str, new_status: str) -> dict | None:
     """
     Actualiza el estado de un pedido y todas sus sub-órdenes con el mismo base_order_id.

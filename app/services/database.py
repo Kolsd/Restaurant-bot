@@ -289,6 +289,7 @@ from app.repositories.orders_repo import (
     db_get_all_orders,
     db_get_delivery_orders,
     db_update_pending_order_payment_method,
+    db_attach_order_proof,
     db_update_order_status,
 )
 

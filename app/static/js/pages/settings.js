@@ -63,6 +63,10 @@ function renderSettings(r) {
   var pm = (r.features && r.features.payment_methods) ? r.features.payment_methods : {};
   renderPaymentToggles(pm);
 
+  // Payment instructions (text per digital method)
+  var pi = (r.features && r.features.payment_instructions) ? r.features.payment_instructions : {};
+  renderPaymentInstructions(pi);
+
   // Notifications
   var notif = (r.features && r.features.notifications) ? r.features.notifications : {};
   renderNotifToggles(notif);
@@ -109,12 +113,23 @@ function renderHours(hours) {
 }
 
 // ── Payment method toggles ────────────────────────────────────────
-var PAYMENT_KEYS = ['cash', 'wompi', 'nequi', 'bancolombia', 'bold'];
+var PAYMENT_KEYS = ['cash', 'wompi', 'nequi', 'daviplata', 'bancolombia', 'bold'];
+// Methods that require payment_instructions text (cash/wompi/bold use other flows)
+var PAYMENT_INSTRUCTION_KEYS = ['nequi', 'daviplata', 'bancolombia'];
 function renderPaymentToggles(pm) {
   PAYMENT_KEYS.forEach(function (key) {
     var sw = document.getElementById('pay-sw-' + key);
     if (!sw) return;
     if (pm[key] !== false) { sw.classList.add('on'); } else { sw.classList.remove('on'); }
+  });
+}
+function renderPaymentInstructions(pi) {
+  PAYMENT_INSTRUCTION_KEYS.forEach(function (key) {
+    var ta = document.getElementById('pay-inst-' + key);
+    if (!ta) return;
+    // Tolerate both lower and capitalized keys (agent_external looks up both)
+    var val = pi[key] || pi[key.charAt(0).toUpperCase() + key.slice(1)] || '';
+    ta.value = val;
   });
 }
 
@@ -164,6 +179,13 @@ function collectFormData() {
     payment_methods[key] = sw ? sw.classList.contains('on') : true;
   });
 
+  // Payment instructions (free-text per digital method)
+  var payment_instructions = {};
+  PAYMENT_INSTRUCTION_KEYS.forEach(function (key) {
+    var ta = document.getElementById('pay-inst-' + key);
+    if (ta) payment_instructions[key] = (ta.value || '').trim();
+  });
+
   // Notifications
   var notifications = {};
   NOTIF_KEYS.forEach(function (key) {
@@ -182,6 +204,7 @@ function collectFormData() {
     features: Object.assign(currentFeatures, {
       opening_hours: opening_hours,
       payment_methods: payment_methods,
+      payment_instructions: payment_instructions,
       notifications: notifications
     })
   };
