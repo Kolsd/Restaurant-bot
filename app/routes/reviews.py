@@ -89,9 +89,44 @@ async def reply_to_review(
     body: ReplyBody,
     restaurant=Depends(get_current_restaurant_scoped),
 ):
-    """Save owner reply to a review."""
+    """Save owner reply to a review and best-effort deliver it via WhatsApp.
+
+    The reply is always persisted. WhatsApp delivery is attempted when we
+    have phone + bot_number + WA token; failures are logged but never block
+    the API response (the dashboard already shows the saved reply regardless).
+    Successful delivery flips owner_reply_delivered_at via
+    db_mark_review_reply_delivered.
+    """
     await _verify_review_ownership(nps_id)
     updated = await rr.db_add_owner_reply(nps_id, body.reply.strip())
     if not updated:
         raise HTTPException(status_code=404, detail="Review not found")
-    return {"success": True, "review": updated}
+
+    delivered = False
+    try:
+        review = await rr.db_get_review(nps_id)
+        if review and review.get("phone") and review.get("bot_number"):
+            from app.services import database as db
+            # Ownership was verified above; the bot_number belongs to the
+            # caller's org so the lookup stays within scope. No bypass needed.
+            rest = await db.db_get_restaurant_by_phone(review["bot_number"])
+            token    = (rest or {}).get("wa_access_token", "") or ""
+            phone_id = (rest or {}).get("wa_phone_id", "") or ""
+            if token:
+                from app.services.meta_api import send_text
+                resto_name = (rest or {}).get("name", "") or "El equipo"
+                msg = (
+                    f"Hola, gracias por tu reseña. Queríamos contarte:\n\n"
+                    f"{body.reply.strip()}\n\n— {resto_name}"
+                )
+                ok = await send_text(
+                    review["bot_number"], token, review["phone"], msg,
+                    phone_id=phone_id,
+                )
+                if ok:
+                    await rr.db_mark_review_reply_delivered(nps_id)
+                    delivered = True
+    except Exception:
+        log.exception("review.reply_delivery_failed", review_id=nps_id)
+
+    return {"success": True, "review": updated, "delivered": delivered}

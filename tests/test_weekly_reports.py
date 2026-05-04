@@ -291,9 +291,13 @@ def _fake_restaurant(overrides: dict | None = None) -> dict:
     return r
 
 
+_UNSET = object()  # sentinel — distinct from None so callers can pass None
+                    # for save_report_return to mock an ON CONFLICT skip.
+
+
 def _patch_scheduler_deps(monkeypatch, *, restaurants, local_now_dt,
                            already_sent=False, stats_override=None,
-                           save_report_return=None, send_whatsapp_return=True):
+                           save_report_return=_UNSET, send_whatsapp_return=True):
     """Monkeypatch all scheduler dependencies at the module-level symbols."""
     import app.services.scheduler as sched
     import app.services.database as db_module
@@ -316,9 +320,14 @@ def _patch_scheduler_deps(monkeypatch, *, restaurants, local_now_dt,
     compute_mock = AsyncMock(return_value=default_stats)
     monkeypatch.setattr(wrr, "compute_weekly_stats", compute_mock)
 
-    fake_row = save_report_return if save_report_return is not None else {"id": 42}
+    fake_row = {"id": 42} if save_report_return is _UNSET else save_report_return
     save_mock = AsyncMock(return_value=fake_row)
     monkeypatch.setattr(wrr, "save_report", save_mock)
+
+    # get_retriable_report defaults to None (no retriable row); tests that
+    # exercise the retry path override this via the returned dict.
+    retriable_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(wrr, "get_retriable_report", retriable_mock)
 
     mark_sent_mock  = AsyncMock()
     mark_failed_mock = AsyncMock()
@@ -332,12 +341,13 @@ def _patch_scheduler_deps(monkeypatch, *, restaurants, local_now_dt,
     monkeypatch.setattr(sched, "_send_whatsapp", send_mock)
 
     return {
-        "already_sent": already_sent_mock,
-        "compute":      compute_mock,
-        "save_report":  save_mock,
-        "mark_sent":    mark_sent_mock,
-        "mark_failed":  mark_failed_mock,
-        "send_whatsapp": send_mock,
+        "already_sent":    already_sent_mock,
+        "compute":         compute_mock,
+        "save_report":     save_mock,
+        "get_retriable":   retriable_mock,
+        "mark_sent":       mark_sent_mock,
+        "mark_failed":     mark_failed_mock,
+        "send_whatsapp":   send_mock,
     }
 
 
@@ -494,6 +504,53 @@ class TestWhatsAppFailures:
         assert mocks["send_whatsapp"].await_count == 2
         assert mocks["mark_failed"].await_count == 1
         assert mocks["mark_sent"].await_count == 1
+
+    def test_D3_retry_picks_up_failed_row(self, monkeypatch):
+        """save_report returns None (row exists already from prior failed send),
+        get_retriable_report returns a row with attempts=1 → scheduler retries
+        the WhatsApp send on the existing row, marks_sent on success."""
+        import app.services.scheduler as sched
+
+        mocks = _patch_scheduler_deps(
+            monkeypatch,
+            restaurants=[_fake_restaurant()],
+            local_now_dt=self._MONDAY_9AM,
+            save_report_return=None,   # ON CONFLICT DO NOTHING returned no row
+            send_whatsapp_return=True,
+        )
+        # Existing failed row, retriable
+        mocks["get_retriable"].return_value = {
+            "id": 99, "attempts": 1, "delivery_status": "failed",
+        }
+
+        _run(sched._run_weekly_owner_reports())
+
+        mocks["get_retriable"].assert_awaited_once()
+        mocks["send_whatsapp"].assert_awaited_once()
+        mocks["mark_sent"].assert_awaited_once_with(99)
+        mocks["mark_failed"].assert_not_called()
+
+    def test_D4_retry_skips_when_no_retriable_row(self, monkeypatch):
+        """Row exists already AND not retriable (attempts >= MAX) → skip cleanly,
+        no send attempt, no mark_failed."""
+        import app.services.scheduler as sched
+
+        mocks = _patch_scheduler_deps(
+            monkeypatch,
+            restaurants=[_fake_restaurant()],
+            local_now_dt=self._MONDAY_9AM,
+            save_report_return=None,   # row exists
+            send_whatsapp_return=True,
+        )
+        # No retriable row (attempts maxed out)
+        mocks["get_retriable"].return_value = None
+
+        _run(sched._run_weekly_owner_reports())
+
+        mocks["get_retriable"].assert_awaited_once()
+        mocks["send_whatsapp"].assert_not_called()
+        mocks["mark_sent"].assert_not_called()
+        mocks["mark_failed"].assert_not_called()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

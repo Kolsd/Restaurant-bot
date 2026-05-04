@@ -47,12 +47,34 @@
     });
   });
 
-  // Export button
-  const exportBtn = document.querySelector('.card.flush .btn.sm.ghost');
+  // Export button — downloads CSV from /api/menu/analytics/export
+  const exportBtn = document.getElementById('btn-export');
   if (exportBtn) {
-    exportBtn.addEventListener('click', function () {
-      if (typeof mesioToast === 'function') {
-        mesioToast('Disponible en la próxima versión', 'info');
+    exportBtn.addEventListener('click', async function () {
+      const activeBtn = document.querySelector('.page-head .seg-btn.active');
+      const days = (activeBtn && activeBtn.dataset.days) || '30';
+      try {
+        const headers = typeof mesioHeaders === 'function'
+          ? mesioHeaders()
+          : { 'Authorization': 'Bearer ' + token };
+        const res = await fetch('/api/menu/analytics/export?days=' + days, { headers: headers });
+        if (!res.ok) { throw new Error('HTTP ' + res.status); }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'menu-engineering-' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        if (typeof mesioToast === 'function') {
+          mesioToast('Export descargado', 'success');
+        }
+      } catch (e) {
+        if (typeof mesioToast === 'function') {
+          mesioToast('No se pudo exportar: ' + e.message, 'error');
+        }
       }
     });
   }

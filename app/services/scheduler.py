@@ -495,14 +495,26 @@ async def _run_weekly_owner_reports():
                 error_message=None if owner_phone else "missing_owner_phone",
             )
 
-            # ON CONFLICT DO NOTHING → already exists; skip to avoid double-send
+            # ON CONFLICT DO NOTHING → row exists for this week. If it's a
+            # failed row with attempts < MAX, retry; otherwise skip.
             if report_row is None:
+                retriable = await weekly_reports_repo.get_retriable_report(
+                    rid, week_start,
+                )
+                if retriable is None:
+                    log.info(
+                        "scheduler.weekly_reports.conflict_skip",
+                        restaurant_id=rid,
+                        week_start=week_start.isoformat(),
+                    )
+                    continue
+                report_row = retriable
                 log.info(
-                    "scheduler.weekly_reports.conflict_skip",
+                    "scheduler.weekly_reports.retry",
                     restaurant_id=rid,
                     week_start=week_start.isoformat(),
+                    attempts=report_row.get("attempts", 0),
                 )
-                continue
 
             report_id = report_row["id"]
 

@@ -1197,10 +1197,13 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
       NPS                      — avg score from nps_responses per location (last 30d)
       Tasa de reserva confirmada — confirmed / total reservations
       No-show rate             — no_show / total reservations
+      Food cost %              — sum(qty * cost_per_unit) / sum(qty * price) * 100
+                                 from orders.items + table_orders.items × dish_recipes
+                                 in the current window. Null when org has no recipes
+                                 or the location has zero matched revenue.
 
     Metrics returning null (pending data sources):
       Rotación mesas / día     — TODO: requires table_sessions with open/close timestamps
-      Food cost %              — TODO: requires recipe cost telemetry (dish_recipes.cost_pct or similar)
       Costo nómina / ventas    — TODO: requires payroll_runs linked to sales period
       Rotación de personal (12m) — TODO: requires staff.termination_date or departure_events table
       Crecimiento YoY          — TODO: computed at org level in branches_consolidated; per-location
@@ -1293,6 +1296,42 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
             org_id, window_start,
         )
 
+        # ── Food cost telemetry: dish_recipes JOIN inventory ─────────────────
+        # Same pattern as db_top_dishes — we compute aggregate food cost per
+        # location by looking at orders.items + table_orders.items in the
+        # window and matching against the recipe-based food cost lookup.
+        food_cost_rows = await conn.fetch(
+            """SELECT r.dish_name,
+                      ROUND(SUM(r.quantity * i.cost_per_unit)::numeric, 2) AS food_cost
+               FROM dish_recipes r
+               JOIN inventory i ON i.id = r.ingredient_id
+               WHERE r.org_id = $1
+               GROUP BY r.dish_name""",
+            org_id,
+        )
+
+        # Per-location item rows (only when we have at least 1 recipe defined,
+        # otherwise food cost % is unknowable and we skip the heavier scan).
+        order_item_rows: list = []
+        table_item_rows: list = []
+        if food_cost_rows:
+            order_item_rows = await conn.fetch(
+                """SELECT location_id, items
+                   FROM orders
+                   WHERE paid = TRUE
+                     AND created_at >= $1
+                     AND org_id = $2""",
+                window_start, org_id,
+            )
+            table_item_rows = await conn.fetch(
+                """SELECT location_id, items
+                   FROM table_orders
+                   WHERE status NOT IN ('cancelado')
+                     AND created_at >= $1
+                     AND org_id = $2""",
+                window_start, org_id,
+            )
+
     # ── Build per-location lookup maps ────────────────────────────────────────
     order_by_loc: dict[int, dict] = {}
     for r in order_sales:
@@ -1329,12 +1368,51 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
             "no_shows":  int(r["no_shows"]),
         }
 
+    # ── Food cost % per location ──────────────────────────────────────────────
+    food_costs_by_dish: dict[str, Decimal] = {
+        r["dish_name"]: to_decimal(r["food_cost"])
+        for r in food_cost_rows
+    }
+
+    def _parse_items_blob(raw):
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw)
+            except Exception:
+                return []
+        return []
+
+    food_cost_by_loc: dict[int, dict] = {}  # lid -> {cost: Decimal, revenue: Decimal}
+    if food_costs_by_dish:
+        for row in list(order_item_rows) + list(table_item_rows):
+            lid = row["location_id"]
+            if lid is None:
+                continue
+            bucket = food_cost_by_loc.setdefault(
+                lid, {"cost": Decimal("0"), "revenue": Decimal("0")},
+            )
+            for item in _parse_items_blob(row["items"]):
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name", "")
+                if not name:
+                    continue
+                qty = int(to_decimal(item.get("quantity", item.get("qty", 1))))
+                price_unit = to_decimal(item.get("price", 0))
+                fc_unit = food_costs_by_dish.get(name)
+                bucket["revenue"] += price_unit * qty
+                if fc_unit is not None:
+                    bucket["cost"] += fc_unit * qty
+
     # ── Per-location metric arrays ────────────────────────────────────────────
     daily_avg_per_loc: list[float | None]  = []
     avg_ticket_per_loc: list[float | None] = []
     nps_per_loc: list[float | None]        = []
     conf_rate_per_loc: list[float | None]  = []
     noshow_rate_per_loc: list[float | None]= []
+    food_cost_pct_per_loc: list[float | None] = []
 
     for loc in locations:
         lid = loc["id"]
@@ -1357,6 +1435,19 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
         else:
             conf_rate_per_loc.append(None)
             noshow_rate_per_loc.append(None)
+
+        # Food cost % = cost / revenue * 100. Null if no recipe data or zero revenue.
+        fc_bucket = food_cost_by_loc.get(lid)
+        if (
+            fc_bucket
+            and fc_bucket["revenue"] > 0
+            and fc_bucket["cost"] > 0
+        ):
+            food_cost_pct_per_loc.append(
+                round(float(fc_bucket["cost"] / fc_bucket["revenue"] * 100), 1)
+            )
+        else:
+            food_cost_pct_per_loc.append(None)
 
     def _build_row(metric: str, per_location: list, target: float | None = None) -> dict:
         """Build a comparison row, computing avg and top_location_id."""
@@ -1392,8 +1483,10 @@ async def db_branches_comparison(org_id: int, days: int = 30) -> dict:
         # TODO: Rotación mesas / día — requires table_sessions open/close timestamps per location
         _build_row("Rotación mesas / día",           [None] * len(locations)),
         _build_row("NPS",                            nps_per_loc),
-        # TODO: Food cost % — requires dish_recipes cost telemetry (cost_per_unit in inventory)
-        _build_row("Food cost %",                    [None] * len(locations)),
+        # Food cost % per location: cost / revenue * 100. Null when there are
+        # no recipes defined for the org (food_costs_by_dish is empty), or
+        # when a location had zero matched revenue in the window.
+        _build_row("Food cost %",                    food_cost_pct_per_loc),
         # TODO: Costo nómina / ventas — requires payroll_runs joined to a period matching sales window
         _build_row("Costo nómina / ventas",          [None] * len(locations)),
         _build_row("Tasa de reserva confirmada",     conf_rate_per_loc),

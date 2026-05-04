@@ -658,3 +658,90 @@ class TestBranchesComparison:
         assert all(v is not None and v > 0 for v in daily_row["per_location"]), (
             f"All locations should have non-null positive daily avg: {daily_row['per_location']}"
         )
+
+    @pytest.mark.asyncio
+    async def test_food_cost_pct_row_present(self, db_conn):
+        """Food cost % row is present in the comparison and behaves correctly:
+           — When org has no recipes: per_location values are all None.
+           — When org has recipes but locations have no matched orders: still None.
+           This validates wiring (the row is no longer a hard placeholder).
+        """
+        from app.repositories.stats_repo import db_branches_comparison
+        from app.services.tenant_context import tenant_scope
+        import unittest.mock as mock
+
+        org_id, loc_id = await _seed_org(db_conn, "FoodCostNoRecipes")
+        await _set_org_scope(db_conn, org_id)
+
+        with mock.patch("app.repositories.stats_repo._tenant_connection") as mock_tc:
+            mock_ctx = mock.MagicMock()
+            mock_ctx.__aenter__ = mock.AsyncMock(return_value=db_conn)
+            mock_ctx.__aexit__ = mock.AsyncMock(return_value=False)
+            mock_tc.return_value = mock_ctx
+            with tenant_scope(org_id):
+                result = await db_branches_comparison(org_id=org_id, days=30)
+
+        # Food cost % row must exist
+        fc_row = next((r for r in result["rows"] if r["metric"] == "Food cost %"), None)
+        assert fc_row is not None, "Food cost % row missing from comparison output"
+        # No recipes defined → all per_location are None (cleanly null, not crashed)
+        assert fc_row["per_location"] == [None]
+        assert fc_row["avg"] is None
+
+    @pytest.mark.asyncio
+    async def test_food_cost_pct_computes_with_recipes_and_orders(self, db_conn):
+        """When dish_recipes + inventory + matching paid orders exist, Food cost % is computed.
+
+        Recipe: dish 'Burger' uses 1 unit of 'Patty' costing 5_000.
+        Order: 1 Burger sold at price 20_000 → cost=5_000, revenue=20_000 → 25.0%.
+        """
+        from app.repositories.stats_repo import db_branches_comparison
+        from app.services.tenant_context import tenant_scope
+        import unittest.mock as mock
+
+        org_id, loc_id = await _seed_org(db_conn, "FoodCostWithRecipe")
+        await _set_org_scope(db_conn, org_id)
+
+        # Seed inventory ingredient
+        ing_id = await db_conn.fetchval(
+            """INSERT INTO inventory (org_id, restaurant_id, name, unit, current_stock, cost_per_unit)
+               VALUES ($1, $1, 'Patty', 'unit', 100, 5000)
+               RETURNING id""",
+            org_id,
+        )
+        # Seed recipe: dish 'Burger' = 1 × Patty
+        await db_conn.execute(
+            """INSERT INTO dish_recipes (org_id, restaurant_id, dish_name, ingredient_id, quantity)
+               VALUES ($1, $1, 'Burger', $2, 1)""",
+            org_id, ing_id,
+        )
+        # Seed a paid order containing 1 Burger at 20_000
+        await db_conn.execute(
+            """
+            INSERT INTO orders
+                (id, org_id, location_id, phone, order_type, status, paid,
+                 subtotal, total, items, created_at)
+            VALUES
+                (gen_random_uuid()::text,
+                 $1, $2, '+573001111111', 'domicilio', 'entregado', TRUE,
+                 20000, 20000,
+                 '[{"name":"Burger","quantity":1,"price":20000}]'::jsonb,
+                 NOW() - INTERVAL '2 minutes')
+            """,
+            org_id, loc_id,
+        )
+
+        with mock.patch("app.repositories.stats_repo._tenant_connection") as mock_tc:
+            mock_ctx = mock.MagicMock()
+            mock_ctx.__aenter__ = mock.AsyncMock(return_value=db_conn)
+            mock_ctx.__aexit__ = mock.AsyncMock(return_value=False)
+            mock_tc.return_value = mock_ctx
+            with tenant_scope(org_id):
+                result = await db_branches_comparison(org_id=org_id, days=30)
+
+        fc_row = next((r for r in result["rows"] if r["metric"] == "Food cost %"), None)
+        assert fc_row is not None
+        # 5_000 / 20_000 = 25.0%
+        assert fc_row["per_location"] == [25.0], (
+            f"Expected 25.0%, got {fc_row['per_location']}"
+        )

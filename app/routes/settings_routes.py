@@ -1291,3 +1291,69 @@ async def menu_analytics(
         matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
 
     return {"per_dish": per_dish, "matrix": matrix}
+
+
+@router.get("/api/menu/analytics/export")
+async def menu_analytics_export(
+    days: int = 30,
+    restaurant: dict = Depends(get_current_restaurant),
+):
+    """
+    Export menu engineering data as CSV download.
+    Aggregates per_dish stats + quadrant classification from get_menu_engineering_matrix.
+    Auth: admin/owner Bearer token.
+    """
+    import io
+    import csv
+    from fastapi.responses import StreamingResponse
+    from app.repositories import menu_analytics_repo
+
+    days = max(1, min(days, 365))
+    restaurant_id = restaurant["id"]
+
+    with tenant_scope(restaurant_id):
+        per_dish = await menu_analytics_repo.get_dish_analytics(restaurant_id, days)
+        matrix   = await menu_analytics_repo.get_menu_engineering_matrix(restaurant_id, days)
+
+    # Build quadrant lookup: dish_name -> quadrant label
+    quad_lookup: dict[str, str] = {}
+    for q_name, label in (
+        ("stars", "Star"),
+        ("puzzles", "Puzzle"),
+        ("plowhorses", "Plowhorse"),
+        ("dogs", "Dog"),
+    ):
+        for entry in matrix.get(q_name, []) or []:
+            quad_lookup[entry["dish_name"]] = label
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Plato",
+        "Vistas",
+        "Apertura modal",
+        "Agregados al carrito",
+        "Pedidos",
+        "Conversión vista→carrito (%)",
+        "Conversión carrito→pedido (%)",
+        "Cuadrante",
+    ])
+    for row in per_dish:
+        writer.writerow([
+            row.get("dish_name", ""),
+            row.get("views", 0),
+            row.get("modal_opens", 0),
+            row.get("add_to_carts", 0),
+            row.get("orders", 0),
+            round((row.get("cart_conversion_rate", 0) or 0) * 100, 2),
+            round((row.get("order_conversion_rate", 0) or 0) * 100, 2),
+            quad_lookup.get(row.get("dish_name", ""), ""),
+        ])
+
+    buf.seek(0)
+    filename = f"menu-engineering-{restaurant_id}-{days}d.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

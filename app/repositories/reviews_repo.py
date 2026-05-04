@@ -168,6 +168,35 @@ async def db_add_owner_reply(nps_id: int, reply_text: str) -> dict | None:
     return _serialize(dict(row)) if row else None
 
 
+async def db_get_review(nps_id: int) -> dict | None:
+    """Fetch a review row by id (RLS-scoped to the current tenant)."""
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM nps_responses WHERE id = $1",
+            nps_id,
+        )
+    return _serialize(dict(row)) if row else None
+
+
+async def db_mark_review_reply_delivered(nps_id: int) -> bool:
+    """Mark the WhatsApp delivery of the owner reply as completed.
+
+    Sets owner_reply_delivered_at = NOW(). Returns True if a row was updated.
+    Tenant-scoped via RLS.
+    """
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE nps_responses
+            SET owner_reply_delivered_at = NOW()
+            WHERE id = $1
+            RETURNING id
+            """,
+            nps_id,
+        )
+    return row is not None
+
+
 async def db_get_review_summary(bot_number: str) -> dict:
     """
     Aggregate stats for all public reviews of a restaurant:

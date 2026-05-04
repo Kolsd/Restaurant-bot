@@ -461,3 +461,92 @@ def test_menu_track_phone_forwarded(monkeypatch):
     assert resp.status_code == 200
     assert recorded["phone"] == "573009876543"
     assert recorded["bot_number"] == "444"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 16. GET /api/menu/analytics/export — CSV download (gap B coverage)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_menu_analytics_export_csv_format(monkeypatch):
+    """Export endpoint returns text/csv with correct headers + correctly
+    classified quadrant column from the matrix."""
+    from app.repositories import menu_analytics_repo
+
+    patch_auth(monkeypatch, restaurant_id=42)
+
+    monkeypatch.setattr(
+        menu_analytics_repo,
+        "get_dish_analytics",
+        AsyncMock(return_value=[
+            {"dish_name": "Bandeja", "views": 100, "modal_opens": 40,
+             "add_to_carts": 20, "orders": 10,
+             "cart_conversion_rate": 0.2, "order_conversion_rate": 0.5},
+            {"dish_name": "Ajiaco", "views": 50, "modal_opens": 10,
+             "add_to_carts": 5, "orders": 1,
+             "cart_conversion_rate": 0.1, "order_conversion_rate": 0.2},
+        ]),
+    )
+    monkeypatch.setattr(
+        menu_analytics_repo,
+        "get_menu_engineering_matrix",
+        AsyncMock(return_value={
+            "stars":      [{"dish_name": "Bandeja"}],
+            "puzzles":    [],
+            "plowhorses": [],
+            "dogs":       [{"dish_name": "Ajiaco"}],
+        }),
+    )
+
+    resp = client.get(
+        "/api/menu/analytics/export?days=30",
+        headers={"Authorization": "Bearer testtoken"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    assert "menu-engineering-42-30d.csv" in resp.headers["content-disposition"]
+
+    body = resp.text
+    lines = body.strip().splitlines()
+    # Header + 2 dishes = 3 lines
+    assert len(lines) == 3
+    assert lines[0].startswith("Plato,")
+    assert "Cuadrante" in lines[0]
+    # Bandeja must be classified as Star, Ajiaco as Dog
+    assert "Bandeja" in lines[1]
+    assert "Star"    in lines[1]
+    assert "Ajiaco"  in lines[2]
+    assert "Dog"     in lines[2]
+
+
+def test_menu_analytics_export_requires_auth(monkeypatch):
+    """No valid token → 401."""
+    monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value=None))
+    resp = client.get(
+        "/api/menu/analytics/export",
+        headers={"Authorization": "Bearer bad"},
+    )
+    assert resp.status_code == 401
+
+
+def test_menu_analytics_export_empty_data(monkeypatch):
+    """No dishes → CSV with only the header row, still 200."""
+    from app.repositories import menu_analytics_repo
+
+    patch_auth(monkeypatch, restaurant_id=1)
+    monkeypatch.setattr(
+        menu_analytics_repo, "get_dish_analytics", AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        menu_analytics_repo, "get_menu_engineering_matrix",
+        AsyncMock(return_value={"stars": [], "puzzles": [], "plowhorses": [], "dogs": []}),
+    )
+
+    resp = client.get(
+        "/api/menu/analytics/export",
+        headers={"Authorization": "Bearer testtoken"},
+    )
+    assert resp.status_code == 200
+    lines = resp.text.strip().splitlines()
+    assert len(lines) == 1   # header only
+    assert lines[0].startswith("Plato,")

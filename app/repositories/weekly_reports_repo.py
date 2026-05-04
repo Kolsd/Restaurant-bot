@@ -393,13 +393,14 @@ async def save_report(
 
 
 async def mark_sent(report_id: int) -> None:
-    """Mark a report as successfully sent."""
+    """Mark a report as successfully sent and bump the attempts counter."""
     async with _tenant_connection() as conn:
         await conn.execute(
             """
             UPDATE weekly_reports
                SET sent_at         = NOW(),
-                   delivery_status = 'sent'
+                   delivery_status = 'sent',
+                   attempts        = attempts + 1
              WHERE id = $1
             """,
             report_id,
@@ -407,18 +408,54 @@ async def mark_sent(report_id: int) -> None:
 
 
 async def mark_failed(report_id: int, error: str) -> None:
-    """Mark a report as failed and store the error message."""
+    """Mark a report as failed, store the error, and bump attempts.
+
+    Note: callers should consult MAX_SEND_ATTEMPTS to decide whether to
+    keep the row in 'failed' for retry or transition to 'failed_permanent'.
+    """
     async with _tenant_connection() as conn:
         await conn.execute(
             """
             UPDATE weekly_reports
                SET delivery_status = 'failed',
-                   error_message   = $2
+                   error_message   = $2,
+                   attempts        = attempts + 1
              WHERE id = $1
             """,
             report_id,
             error,
         )
+
+
+# Maximum number of WhatsApp send attempts per report row before we give up
+# and transition the row to a terminal state. Exposed as a module constant so
+# tests / scheduler share the same threshold.
+MAX_SEND_ATTEMPTS: int = 3
+
+
+async def get_retriable_report(restaurant_id: int, week_start: date) -> Optional[dict]:
+    """Return the row for this (org, week) when it is retriable, else None.
+
+    A report is retriable when:
+      - delivery_status = 'failed'
+      - attempts < MAX_SEND_ATTEMPTS
+
+    Used by the scheduler to pick up rows that failed on a previous tick.
+    """
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT *
+              FROM weekly_reports
+             WHERE org_id          = $1
+               AND week_start      = $2
+               AND delivery_status = 'failed'
+               AND attempts        < $3
+             LIMIT 1
+            """,
+            restaurant_id, week_start, MAX_SEND_ATTEMPTS,
+        )
+    return _serialize(dict(row)) if row else None
 
 
 async def already_sent_for_week(restaurant_id: int, week_start: date) -> bool:

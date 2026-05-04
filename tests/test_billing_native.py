@@ -371,3 +371,111 @@ def test_get_billing_config_not_configured(client, monkeypatch):
     response = client.get("/api/billing/config", headers=headers)
     assert response.status_code == 200
     assert response.json()["configured"] is False
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 7. CUFE / CUDS — DIAN spec format checks (gap A coverage)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_cufe_matches_dian_spec_format(adapter):
+    """CUFE para input fijo es exactamente SHA-384 hex (96 chars hex)."""
+    cufe = adapter._calcular_cufe(
+        num_fac="FE-FIXED-001", fec_fac="2024-01-15",
+        hor_fac="10:30:00-05:00", val_fac="100000.00",
+        val_imp1="19000.00", val_imp2="0.00", val_tot="119000.00",
+        nit_ofe="900111111", num_adq="800222222",
+        cl_tec="clave-tecnica-fixed",
+    )
+    # SHA-384 = 48 bytes = 96 hex chars
+    assert len(cufe) == 96
+    assert all(c in "0123456789abcdef" for c in cufe)
+
+
+def test_cufe_changes_with_amount_change(adapter):
+    """Cambiar val_tot manteniendo el resto produce un CUFE diferente."""
+    base = dict(
+        num_fac="FE-AMT-001", fec_fac="2024-01-15",
+        hor_fac="10:30:00-05:00", val_fac="100000.00",
+        val_imp1="19000.00", val_imp2="0.00",
+        nit_ofe="900111111", num_adq="800222222",
+        cl_tec="clave-amt",
+    )
+    cufe_a = adapter._calcular_cufe(val_tot="119000.00", **base)
+    cufe_b = adapter._calcular_cufe(val_tot="120000.00", **base)
+    assert cufe_a != cufe_b
+
+
+def test_cuds_calculation_format(adapter):
+    """CUDS = SHA-384 hex de software_id + pin + nit (96 chars hex)."""
+    import hashlib
+    software_id = "soft-uuid-A"
+    pin         = "pin-123"
+    nit         = "900333444"
+    expected    = hashlib.sha384(
+        f"{software_id}{pin}{nit}".encode("utf-8")
+    ).hexdigest()
+    cuds = adapter._calcular_cuds(software_id, pin, nit)
+    assert cuds == expected
+    assert len(cuds) == 96
+    assert all(c in "0123456789abcdef" for c in cuds)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 8. get_adapter factory — provider routing (gap A coverage)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_get_adapter_returns_correct_class():
+    """Cada provider name resuelve a su clase específica."""
+    from app.services.billing import (
+        get_adapter, SiigoAdapter, AlegraAdapter,
+        LoggroAdapter, MesioNativeAdapter,
+    )
+    assert isinstance(get_adapter("siigo"),        SiigoAdapter)
+    assert isinstance(get_adapter("alegra"),       AlegraAdapter)
+    assert isinstance(get_adapter("loggro"),       LoggroAdapter)
+    assert isinstance(get_adapter("mesio_native"), MesioNativeAdapter)
+
+
+def test_get_adapter_case_insensitive():
+    """get_adapter normaliza el nombre con .lower()."""
+    from app.services.billing import get_adapter, SiigoAdapter
+    assert isinstance(get_adapter("SIIGO"), SiigoAdapter)
+    assert isinstance(get_adapter("Siigo"), SiigoAdapter)
+
+
+def test_get_adapter_unknown_provider_raises():
+    """Provider desconocido lanza ValueError mencionando los soportados."""
+    from app.services.billing import get_adapter
+    with pytest.raises(ValueError, match="no soportado"):
+        get_adapter("nope")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 9. emit_invoice — UsageLimitExceeded re-raises (gap A coverage)
+# ══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_emit_invoice_reraises_usage_limit_exceeded():
+    """emit_invoice NO captura UsageLimitExceeded — debe propagarla a la ruta
+    para que ésta retorne 429 (no un 200 con success=False)."""
+    from app.services.billing import emit_invoice
+    from app.services.database import UsageLimitExceeded
+
+    # Adapter falso que dispara UsageLimitExceeded
+    fake_adapter = AsyncMock()
+    fake_adapter.create_invoice = AsyncMock(
+        side_effect=UsageLimitExceeded("facturas", 5, 5)
+    )
+    fake_config = {"provider": "mesio_native", "_restaurant_id": 42}
+
+    with (
+        patch("app.services.billing.get_billing_config",
+              new=AsyncMock(return_value=fake_config)),
+        patch("app.services.billing.get_adapter",
+              return_value=fake_adapter),
+        patch("app.services.billing.db.db_get_order",
+              new=AsyncMock(return_value={"id": "ORD-1", "total": 10000, "items": []})),
+        patch("app.services.billing.log_billing_event", new=AsyncMock()),
+    ):
+        with pytest.raises(UsageLimitExceeded):
+            await emit_invoice("ORD-1", 42)
