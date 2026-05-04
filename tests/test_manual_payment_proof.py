@@ -358,6 +358,38 @@ def _patch_validate_auth(
     )
 
 
+# ── Tests: validate-delivery endpoint (handler-level, no TestClient) ─────────
+#
+# We invoke `validate_delivery_order` directly instead of via TestClient.
+# Reason: pytest-asyncio fixtures hold an asyncpg connection bound to one
+# event loop; FastAPI TestClient spins up a separate loop, and the lifespan
+# pool from the app is unaware of the test's transaction. Calling the
+# handler coroutine directly keeps the seed data, scope, and verification
+# all on the same loop and inside the same rolled-back transaction.
+
+
+def _stub_user(org_id_val: int, role: str = "caja") -> dict:
+    return {
+        "id":              1,
+        "username":        "caja_test",
+        "restaurant_name": "ManualProofTestOrg",
+        "branch_id":       org_id_val,
+        "restaurant_id":   org_id_val,
+        "role":            role,
+    }
+
+
+def _stub_request(user_dict: dict):
+    """Build a minimal Request-like object whose state.user = user_dict.
+
+    The `validate_delivery_order` handler only calls `await get_current_user(request)`,
+    so we patch that helper instead of constructing a real Request.
+    """
+    class _Req:
+        pass
+    return _Req()
+
+
 @pytest.mark.asyncio
 async def test_validate_delivery_endpoint_idempotent(
     db_conn, org_id, monkeypatch
@@ -366,8 +398,8 @@ async def test_validate_delivery_endpoint_idempotent(
     Validate the same order twice. The 2nd call must return
     {"already_paid": True} without erroring (caja staff may double-click).
     """
-    from fastapi.testclient import TestClient
-    from app.main import app
+    from app.routes import orders_routes as ord_routes
+    from app.services.tenant_context import tenant_scope
 
     await _set_scope(db_conn, org_id)
     phone = "3009000010"
@@ -377,30 +409,35 @@ async def test_validate_delivery_endpoint_idempotent(
         status="pendiente", paid=False,
     )
 
-    _patch_validate_auth(monkeypatch, user_org_id=org_id)
-
-    # Send the customer notification + loyalty accrual into no-ops so the
-    # test doesn't depend on Meta access tokens or async lifecycle.
+    # Patch get_current_user to skip auth/JWT/DB lookup paths
     monkeypatch.setattr(
-        "app.routes.orders_routes.send_delivery_notification",
+        ord_routes, "get_current_user",
+        AsyncMock(return_value=_stub_user(org_id)),
+    )
+
+    # Stub db_get_restaurant_by_id (used by ownership check) so we don't need
+    # the user's org row to actually exist on this rolled-back transaction.
+    from app.services import database as _db
+    monkeypatch.setattr(
+        _db, "db_get_restaurant_by_id",
+        AsyncMock(return_value={"id": org_id, "org_id": org_id, "location_id": org_id}),
+    )
+
+    # No-op the side effects.
+    monkeypatch.setattr(
+        ord_routes, "send_delivery_notification",
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        "app.routes.orders_routes.db_accrue_loyalty_points",
+        ord_routes, "db_accrue_loyalty_points",
         AsyncMock(return_value=None),
     )
 
-    client = TestClient(app)
-    headers = {"Authorization": "Bearer caja_token"}
-    body = {"proof_media_id": "media_proof_xyz", "notes": "verified"}
+    body = ord_routes.ValidateDeliveryBody(proof_media_id="media_proof_xyz", notes="verified")
+    request = _stub_request(_stub_user(org_id))
 
     # 1st call: order flips to paid+confirmado.
-    r1 = client.post(
-        f"/api/delivery/orders/{order_id}/validate",
-        json=body, headers=headers,
-    )
-    assert r1.status_code == 200, r1.text
-    j1 = r1.json()
+    j1 = await ord_routes.validate_delivery_order(order_id, body, request)
     assert j1["success"] is True
     assert j1.get("order_id") == order_id
     # First call must NOT report already_paid.
@@ -408,13 +445,15 @@ async def test_validate_delivery_endpoint_idempotent(
         f"First validate must flip the order, not return already_paid. Got: {j1}"
     )
 
-    # 2nd call: must be idempotent — already paid path.
-    r2 = client.post(
-        f"/api/delivery/orders/{order_id}/validate",
-        json=body, headers=headers,
+    # Verify the row was actually mutated (paid=true) inside our rolled-back tx
+    db_row = await db_conn.fetchrow(
+        "SELECT paid, status FROM orders WHERE id=$1", order_id,
     )
-    assert r2.status_code == 200, r2.text
-    j2 = r2.json()
+    assert db_row["paid"] is True
+    assert db_row["status"] == "confirmado"
+
+    # 2nd call: must be idempotent — already paid path.
+    j2 = await ord_routes.validate_delivery_order(order_id, body, request)
     assert j2["success"] is True
     assert j2["already_paid"] is True
     assert j2["order_id"] == order_id
@@ -425,12 +464,11 @@ async def test_validate_delivery_endpoint_rejects_terminal_orders(
     db_conn, org_id, monkeypatch
 ):
     """
-    Order already in terminal state (cancelado / entregado) → 409 Conflict
-    with a Spanish reason. Caja must not be able to "un-cancel" an order
-    by validating its proof.
+    Order already in terminal state (cancelado) → HTTPException 409.
+    Already-paid entregado → already_paid=True (200), NOT 409 (intentional).
     """
-    from fastapi.testclient import TestClient
-    from app.main import app
+    from fastapi import HTTPException
+    from app.routes import orders_routes as ord_routes
 
     await _set_scope(db_conn, org_id)
     bot_number = "bot-validate-terminal"
@@ -446,48 +484,39 @@ async def test_validate_delivery_endpoint_rejects_terminal_orders(
         status="entregado", paid=True,
     )
 
-    _patch_validate_auth(monkeypatch, user_org_id=org_id)
-
-    # No-op the side effects.
     monkeypatch.setattr(
-        "app.routes.orders_routes.send_delivery_notification",
-        AsyncMock(return_value=None),
+        ord_routes, "get_current_user",
+        AsyncMock(return_value=_stub_user(org_id)),
+    )
+    from app.services import database as _db
+    monkeypatch.setattr(
+        _db, "db_get_restaurant_by_id",
+        AsyncMock(return_value={"id": org_id, "org_id": org_id, "location_id": org_id}),
     )
     monkeypatch.setattr(
-        "app.routes.orders_routes.db_accrue_loyalty_points",
-        AsyncMock(return_value=None),
+        ord_routes, "send_delivery_notification", AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        ord_routes, "db_accrue_loyalty_points", AsyncMock(return_value=None),
     )
 
-    client = TestClient(app)
-    headers = {"Authorization": "Bearer caja_token"}
-    body = {"proof_media_id": "media_xyz"}
+    body = ord_routes.ValidateDeliveryBody(proof_media_id="media_xyz")
+    request = _stub_request(_stub_user(org_id))
 
     # Cancelado → 409 (paid=false, status=cancelado branch).
-    r_canc = client.post(
-        f"/api/delivery/orders/{cancelled_id}/validate",
-        json=body, headers=headers,
+    with pytest.raises(HTTPException) as exc_canc:
+        await ord_routes.validate_delivery_order(cancelled_id, body, request)
+    assert exc_canc.value.status_code == 409, (
+        f"Cancelado must be rejected with 409, got {exc_canc.value.status_code}"
     )
-    assert r_canc.status_code == 409, (
-        f"Cancelado must be rejected with 409, got {r_canc.status_code}: {r_canc.text}"
-    )
-    detail_canc = r_canc.json().get("detail", "").lower()
+    detail_canc = (exc_canc.value.detail or "").lower()
     assert "cancelado" in detail_canc or "cancel" in detail_canc, (
         f"409 detail must mention the cancelled state, got: {detail_canc!r}"
     )
 
     # Entregado AND paid=true → already_paid path (200), NOT 409.
-    # Reason: db_confirm_payment is idempotent for paid=true; the route returns
-    # already_paid before checking terminal status (intentional — already paid
-    # is the dominant signal).
-    r_deliv = client.post(
-        f"/api/delivery/orders/{delivered_id}/validate",
-        json=body, headers=headers,
-    )
-    assert r_deliv.status_code == 200, (
-        f"Already-paid entregado must short-circuit to already_paid=True, "
-        f"got {r_deliv.status_code}: {r_deliv.text}"
-    )
-    assert r_deliv.json().get("already_paid") is True
+    j_deliv = await ord_routes.validate_delivery_order(delivered_id, body, request)
+    assert j_deliv.get("already_paid") is True
 
     # Verify in DB that cancelado was NOT flipped.
     final_status = await db_conn.fetchval(

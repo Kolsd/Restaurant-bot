@@ -93,6 +93,21 @@ async def raw_pool():
         await pool.close()
 
 
+async def _ensure_reminded_at_column(conn) -> None:
+    """Add 0063 column inside the test transaction if it isn't present.
+
+    Mirrors the approach in tests/test_delivery_eta.py: run the schema
+    additions under the postgres role inside a single transaction so the
+    suite passes regardless of whether migration 0063 has been applied
+    to TEST_DATABASE_URL. The ALTER is rolled back at teardown so the
+    production schema is untouched.
+    """
+    await conn.execute(
+        "ALTER TABLE nps_waiting "
+        "ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMPTZ DEFAULT NULL"
+    )
+
+
 @pytest.fixture
 async def db_conn(raw_pool, monkeypatch):
     """Yield a rolled-back connection with get_pool mocked."""
@@ -109,6 +124,8 @@ async def db_conn(raw_pool, monkeypatch):
         tx = conn.transaction()
         await tx.start()
         try:
+            # ALTER must run before SET LOCAL ROLE (mesio_app cannot DDL).
+            await _ensure_reminded_at_column(conn)
             await conn.execute("SET LOCAL ROLE mesio_app")
             yield proxy
         finally:
@@ -137,8 +154,14 @@ async def _seed_nps_waiting(conn, org, phone: str, bot_number: str, hours_ago: i
     """Insert a nps_waiting row with created_at offset by hours_ago into the past.
 
     If reminded_hours_ago is set, also seeds reminded_at to that offset.
+
+    Note: nps_waiting.created_at is TIMESTAMP (naive, see 0001_initial_schema)
+    while reminded_at is TIMESTAMPTZ (added by 0063). asyncpg cannot mix
+    tz-aware/naive in the same query against a naive column, so we use
+    naive UTC for created_at and tz-aware for reminded_at.
     """
-    created_at = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    # naive UTC for the TIMESTAMP column
+    created_at = datetime.utcnow() - timedelta(hours=hours_ago)
     if reminded_hours_ago is None:
         await conn.execute(
             """INSERT INTO nps_waiting (phone, bot_number, org_id, created_at)
@@ -146,6 +169,7 @@ async def _seed_nps_waiting(conn, org, phone: str, bot_number: str, hours_ago: i
             phone, bot_number, org, created_at,
         )
     else:
+        # reminded_at is TIMESTAMPTZ — tz-aware is fine here
         reminded_at = datetime.now(timezone.utc) - timedelta(hours=reminded_hours_ago)
         await conn.execute(
             """INSERT INTO nps_waiting (phone, bot_number, org_id, created_at, reminded_at)
@@ -161,6 +185,7 @@ async def _seed_nps_waiting(conn, org, phone: str, bot_number: str, hours_ago: i
 async def test_get_pending_reminder_returns_only_24_to_48h_window(db_conn, org_id):
     """Insert 3 rows with different ages → only the 25h row qualifies."""
     from app.repositories.conversations_repo import db_get_nps_waiting_pending_reminder
+    from app.services.tenant_context import bypass_tenant_scope
 
     await _set_scope(db_conn, org_id)
     bot_number = "bot-test-window"
@@ -172,7 +197,9 @@ async def test_get_pending_reminder_returns_only_24_to_48h_window(db_conn, org_i
     # 50h old → past the window (cleanup zone)
     await _seed_nps_waiting(db_conn, org_id, "3001000003", bot_number, hours_ago=50)
 
-    rows = await db_get_nps_waiting_pending_reminder()
+    # cross-tenant scheduler scan — must be in bypass scope
+    with bypass_tenant_scope("test_nps_pending_reminder"):
+        rows = await db_get_nps_waiting_pending_reminder()
 
     # Only the 25h row should be returned (filter by phone to scope to our seeds)
     matching = [r for r in rows if r["bot_number"] == bot_number]
@@ -185,6 +212,7 @@ async def test_get_pending_reminder_returns_only_24_to_48h_window(db_conn, org_i
 async def test_get_pending_reminder_excludes_already_reminded(db_conn, org_id):
     """A 30h row with reminded_at set must NOT appear in the pending list."""
     from app.repositories.conversations_repo import db_get_nps_waiting_pending_reminder
+    from app.services.tenant_context import bypass_tenant_scope
 
     await _set_scope(db_conn, org_id)
     bot_number = "bot-test-excludes"
@@ -197,7 +225,9 @@ async def test_get_pending_reminder_excludes_already_reminded(db_conn, org_id):
     # 30h old, NOT reminded
     await _seed_nps_waiting(db_conn, org_id, "3001000011", bot_number, hours_ago=30)
 
-    rows = await db_get_nps_waiting_pending_reminder()
+    # cross-tenant scheduler scan — must be in bypass scope
+    with bypass_tenant_scope("test_nps_pending_reminder"):
+        rows = await db_get_nps_waiting_pending_reminder()
     matching = [r for r in rows if r["bot_number"] == bot_number]
     assert len(matching) == 1
     assert matching[0]["phone"] == "3001000011"
@@ -210,13 +240,16 @@ async def test_get_pending_reminder_excludes_already_reminded(db_conn, org_id):
 async def test_mark_reminded_sets_timestamp(db_conn, org_id):
     """After mark, reminded_at is NOT NULL."""
     from app.repositories.conversations_repo import db_mark_nps_reminded
+    from app.services.tenant_context import bypass_tenant_scope
 
     await _set_scope(db_conn, org_id)
     phone = "3001000020"
     bot_number = "bot-mark-1"
     await _seed_nps_waiting(db_conn, org_id, phone, bot_number, hours_ago=30)
 
-    affected = await db_mark_nps_reminded(phone, bot_number)
+    # nps_waiting is queried by the scheduler under bypass — match prod usage
+    with bypass_tenant_scope("test_mark_reminded"):
+        affected = await db_mark_nps_reminded(phone, bot_number)
     assert affected == 1
 
     row = await db_conn.fetchrow(
@@ -230,17 +263,18 @@ async def test_mark_reminded_sets_timestamp(db_conn, org_id):
 async def test_mark_reminded_idempotent(db_conn, org_id):
     """Second call to mark on the same row affects 0 rows (WHERE reminded_at IS NULL)."""
     from app.repositories.conversations_repo import db_mark_nps_reminded
+    from app.services.tenant_context import bypass_tenant_scope
 
     await _set_scope(db_conn, org_id)
     phone = "3001000021"
     bot_number = "bot-mark-2"
     await _seed_nps_waiting(db_conn, org_id, phone, bot_number, hours_ago=30)
 
-    first = await db_mark_nps_reminded(phone, bot_number)
-    assert first == 1
-
-    second = await db_mark_nps_reminded(phone, bot_number)
-    assert second == 0
+    with bypass_tenant_scope("test_mark_reminded_idem"):
+        first = await db_mark_nps_reminded(phone, bot_number)
+        assert first == 1
+        second = await db_mark_nps_reminded(phone, bot_number)
+        assert second == 0
 
 
 # ── Gap A: db_cleanup_expired_nps_waiting ────────────────────────────────────
@@ -250,6 +284,7 @@ async def test_mark_reminded_idempotent(db_conn, org_id):
 async def test_cleanup_deletes_only_after_48h(db_conn, org_id):
     """Insert 30h + 50h rows, cleanup deletes only the 50h row."""
     from app.repositories.conversations_repo import db_cleanup_expired_nps_waiting
+    from app.services.tenant_context import bypass_tenant_scope
 
     await _set_scope(db_conn, org_id)
     bot_number = "bot-cleanup-1"
@@ -257,7 +292,9 @@ async def test_cleanup_deletes_only_after_48h(db_conn, org_id):
     await _seed_nps_waiting(db_conn, org_id, "3001000030", bot_number, hours_ago=30)
     await _seed_nps_waiting(db_conn, org_id, "3001000031", bot_number, hours_ago=50)
 
-    deleted = await db_cleanup_expired_nps_waiting()
+    # cross-tenant cleanup scheduler — must run under bypass
+    with bypass_tenant_scope("test_nps_cleanup"):
+        deleted = await db_cleanup_expired_nps_waiting()
     # We track that at least our 50h row was deleted (other tests' residue may
     # also be cleaned up, so >= 1 instead of == 1)
     assert deleted >= 1

@@ -4,4 +4,5 @@ testpaths = ["tests"]
 timeout = 900
 markers = [
     "e2e: end-to-end tests that require real Postgres, Anthropic API, and full app stack (deselect with -m 'not e2e')",
+    "e2e_no_llm: full-stack end-to-end tests against real Postgres but no Anthropic API (drives scheduler/handlers directly). Requires TEST_DATABASE_URL only.",
 ]
