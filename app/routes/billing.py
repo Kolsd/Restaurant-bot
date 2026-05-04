@@ -125,9 +125,16 @@ async def set_config(request: Request, payload: BillingConfigPayload):
 @router.post("/emit")
 async def emit(request: Request, payload: EmitInvoicePayload):
     """Emite manualmente una factura para un pedido específico."""
+    from app.services.database import UsageLimitExceeded  # noqa: PLC0415
+
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
-    result        = await emit_invoice(payload.order_id, restaurant_id, payload.customer)
+    try:
+        result = await emit_invoice(payload.order_id, restaurant_id, payload.customer)
+    except UsageLimitExceeded as exc:
+        # Plan-limit guard fired; surface as HTTP 429 so the UI can show
+        # "upgrade your plan" instead of a generic technical error.
+        raise HTTPException(status_code=429, detail=str(exc))
     if not result["success"]:
         raise HTTPException(status_code=422, detail=result["error"])
     return result

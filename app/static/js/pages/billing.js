@@ -41,7 +41,43 @@
   }
 
   async function init() {
-    await Promise.all([loadProviders(), loadCurrentConfig()]);
+    await Promise.all([loadProviders(), loadCurrentConfig(), loadPlanUsage()]);
+  }
+
+  async function loadPlanUsage() {
+    try {
+      const r = await fetch('/api/subscription/usage', { headers: hdr });
+      if (!r.ok) return;
+      const d = await r.json();
+      const card = document.getElementById('plan-usage-card');
+      if (!card) return;
+      const planLabel = document.getElementById('plan-usage-name');
+      if (planLabel) planLabel.textContent = d.plan ? '· Plan ' + d.plan : '';
+      const limits = d.limits || {};
+      const today  = (d.usage && d.usage.today)  || {};
+      const month  = (d.usage && d.usage.month)  || {};
+      _renderUsageRow(card, 'tokens',   today.tokens_used   || 0, limits.daily_tokens);
+      _renderUsageRow(card, 'invoices', today.invoices_used || 0, limits.daily_invoices);
+      _renderUsageRow(card, 'orders',   month.orders_count  || 0, limits.monthly_orders);
+    } catch (e) { console.error('plan usage load failed', e); }
+  }
+
+  function _renderUsageRow(card, rowKey, used, limit) {
+    const row = card.querySelector('[data-row="' + rowKey + '"]');
+    if (!row) return;
+    const valEl = row.querySelector('[data-val]');
+    const barEl = row.querySelector('[data-bar]');
+    if (limit === -1 || limit === undefined || limit === null) {
+      valEl.textContent = used.toLocaleString() + ' · Ilimitado';
+      barEl.style.width = '0%';
+      return;
+    }
+    valEl.textContent = used.toLocaleString() + ' / ' + Number(limit).toLocaleString();
+    const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+    barEl.style.width = pct.toFixed(1) + '%';
+    if (pct >= 90)      barEl.style.background = 'var(--m-danger, #d33)';
+    else if (pct >= 70) barEl.style.background = 'var(--m-warning, #e67e22)';
+    else                barEl.style.background = 'var(--m-brand, #1D9E75)';
   }
 
   async function loadProviders() {

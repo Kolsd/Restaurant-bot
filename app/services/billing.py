@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, date
 from typing import Optional
 from app.services import database as db
+from app.services.database import UsageLimitExceeded
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
@@ -1302,6 +1303,11 @@ async def emit_invoice(order_id: str, restaurant_id: int,
         err = f"HTTP {exc.response.status_code}: {exc.response.text[:400]}"
         await log_billing_event(restaurant_id, order_id, provider, "error", "", err)
         return {"success": False, "error": err}
+    except UsageLimitExceeded:
+        # Plan-limit guard fired (db_check_usage_limits before MATIAS call).
+        # Let the route layer translate to HTTP 429 — do NOT swallow into
+        # {success: false, error: ...} or the UI gets a generic 422.
+        raise
     except Exception as exc:
         err = str(exc)[:400]
         await log_billing_event(restaurant_id, order_id, provider, "error", "", err)

@@ -333,6 +333,23 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             # below reuse the same values without re-querying.
             wompi_pk, wompi_integrity = _wompi_credentials_from_restaurant(rest_data)
 
+            # Plan-limit guard: monthly orders cap. Enforced BEFORE we tie up
+            # any inventory or generate a Wompi link. UsageLimitExceeded is
+            # caught here and returned as a soft error so the bot replies with
+            # a message instead of dying with a stack trace.
+            if restaurant_id and rest_data:
+                try:
+                    from app.services.subscription_guard import enforce_order_limit  # noqa: PLC0415
+                    from app.services.database import UsageLimitExceeded  # noqa: PLC0415
+                    await enforce_order_limit(restaurant_id, rest_data)
+                except UsageLimitExceeded as exc:
+                    log.warning(
+                        "create_order.order_limit_hit",
+                        phone=phone, restaurant_id=restaurant_id,
+                        used=exc.used, limit=exc.limit,
+                    )
+                    return {"success": False, "error": str(exc)}
+
             subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
             total = subtotal + delivery_fee
 
@@ -429,6 +446,13 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                     except OrderCommitError as exc:
                         log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
                         return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
+                    # Track subscription usage (best-effort, never blocks the order)
+                    try:
+                        from app.repositories.subscription_repo import db_increment_orders  # noqa: PLC0415
+                        if restaurant_id:
+                            await db_increment_orders(restaurant_id)
+                    except Exception:
+                        log.exception("subscription.order_increment_failed", phone=phone, order_id=order_id)
                     # Update customer memory after successful order (best-effort, never blocks on failure)
                     try:
                         from app.repositories.customer_profiles_repo import increment_after_order  # noqa: PLC0415
@@ -501,6 +525,13 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             except OrderCommitError as exc:
                 log.exception("create_order.commit_failed", error=str(exc), order_id=order_id)
                 return {"success": False, "error": "No pudimos procesar tu pedido, por favor intenta de nuevo."}
+            # Track subscription usage (best-effort, never blocks the order)
+            try:
+                from app.repositories.subscription_repo import db_increment_orders  # noqa: PLC0415
+                if restaurant_id:
+                    await db_increment_orders(restaurant_id)
+            except Exception:
+                log.exception("subscription.order_increment_failed", phone=phone, order_id=order_id)
             # Update customer memory after successful order (best-effort, never blocks on failure)
             try:
                 from app.repositories.customer_profiles_repo import increment_after_order  # noqa: PLC0415

@@ -286,6 +286,40 @@ tr:hover td { background:#FAFAF8; }
       <div class="metric-mini"><div class="metric-mini-label">Auto-emisión</div><div class="metric-mini-val" id="m-auto">—</div></div>
     </div>
 
+    <!-- Plan usage card -->
+    <div class="card" id="plan-usage-card">
+      <div class="card-title">Uso del plan <span id="plan-usage-name" style="font-size:.85rem;color:var(--m-text-muted);">—</span></div>
+      <div id="plan-usage-rows" style="display:flex;flex-direction:column;gap:10px;">
+        <div data-row="tokens">
+          <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:4px;">
+            <span>Tokens IA hoy</span>
+            <span data-val>—</span>
+          </div>
+          <div style="height:6px;background:var(--m-surface-muted, #f0f0f0);border-radius:3px;overflow:hidden;">
+            <div data-bar style="height:100%;background:var(--m-brand, #1D9E75);width:0%;transition:width .3s;"></div>
+          </div>
+        </div>
+        <div data-row="invoices">
+          <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:4px;">
+            <span>Facturas hoy</span>
+            <span data-val>—</span>
+          </div>
+          <div style="height:6px;background:var(--m-surface-muted, #f0f0f0);border-radius:3px;overflow:hidden;">
+            <div data-bar style="height:100%;background:var(--m-brand, #1D9E75);width:0%;transition:width .3s;"></div>
+          </div>
+        </div>
+        <div data-row="orders">
+          <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:4px;">
+            <span>Órdenes este mes</span>
+            <span data-val>—</span>
+          </div>
+          <div style="height:6px;background:var(--m-surface-muted, #f0f0f0);border-radius:3px;overflow:hidden;">
+            <div data-bar style="height:100%;background:var(--m-brand, #1D9E75);width:0%;transition:width .3s;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Step 1: Provider -->
     <div class="card">
       <div class="card-title">1 · Selecciona tu sistema contable</div>
