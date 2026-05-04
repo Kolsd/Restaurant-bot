@@ -505,6 +505,7 @@ from app.repositories.tables_repo import (
     db_get_check_ticket,
     db_update_table_properties,
     db_update_table_position,
+    db_save_floor_plan_bulk,
     db_get_floor_plan,
 )
 

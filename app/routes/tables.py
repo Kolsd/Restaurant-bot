@@ -290,6 +290,73 @@ async def update_table_position(table_id: str, body: TablePositionBody, restaura
     return result
 
 
+# ── Bulk floor plan save (admin-only) ─────────────────────────────────────
+# Companion to the existing per-table PUT /position and PUT /properties: lets
+# the floor plan editor persist many edits in one request when the user hits
+# "Guardar layout". Each entry uses PATCH semantics — only fields present (and
+# non-None) get persisted; the rest of the row is left untouched.
+
+class FloorPlanTableUpdate(BaseModel):
+    id: str
+    position_x: float | None = Field(None, ge=-10000, le=10000)
+    position_y: float | None = Field(None, ge=-10000, le=10000)
+    capacity: int | None = Field(None, ge=1, le=100)
+    table_type: str | None = None  # validated against _VALID_TABLE_TYPES below
+    zone: str | None = Field(None, max_length=50)
+    name: str | None = Field(None, max_length=60)
+
+
+class FloorPlanBulkSaveBody(BaseModel):
+    tables: list[FloorPlanTableUpdate] = Field(..., min_length=1, max_length=500)
+
+
+@router.post("/api/tables/floor-plan")
+async def save_floor_plan(
+    body: FloorPlanBulkSaveBody,
+    restaurant=Depends(get_current_restaurant_scoped),
+    user=Depends(get_current_user),
+):
+    """Bulk save of floor plan layout. Admin / owner / gerente only.
+
+    Each entry uses PATCH semantics: only non-None fields are persisted.
+    Rows where the table belongs to another org are reported in `errors[]`
+    rather than 403'ing the whole request — partial saves are useful when
+    an editor session has stale ids.
+    """
+    role = (user.get("role") or "").lower()
+    user_roles = {r.strip() for r in role.split(",") if r.strip()}
+    if not (user_roles & {"owner", "admin", "gerente"}):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo owner, admin o gerente pueden editar el floor plan",
+        )
+
+    # table_type is validated against the same whitelist as the per-table
+    # PUT /properties endpoint to avoid drift.
+    for entry in body.tables:
+        if entry.table_type is not None and entry.table_type not in _VALID_TABLE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"table_type must be one of: {', '.join(sorted(_VALID_TABLE_TYPES))} "
+                    f"(table {entry.id})"
+                ),
+            )
+
+    org_id = restaurant["id"]  # post-Wave-2: restaurant["id"] == org_id
+    payload = [t.model_dump(exclude_none=True) for t in body.tables]
+
+    result = await db.db_save_floor_plan_bulk(org_id=org_id, tables=payload)
+    log.info(
+        "floor_plan.saved",
+        org_id=org_id,
+        updated=result["updated"],
+        skipped=result["skipped"],
+        errors=len(result["errors"]),
+    )
+    return result
+
+
 @router.put("/api/tables/{table_id}/properties")
 async def update_table_properties(table_id: str, body: TablePropertiesBody, restaurant=Depends(get_current_restaurant_scoped)):
     """Actualiza propiedades de una mesa (capacity, table_type, zone)."""

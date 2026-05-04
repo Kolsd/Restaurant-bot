@@ -1374,6 +1374,75 @@ async def db_update_table_position(table_id: str, position_x: float, position_y:
         return _serialize(dict(row)) if row else None
 
 
+# Whitelist of mutable columns for bulk floor plan save. Must match the
+# per-table PUT /properties + /position endpoints (single source of truth for
+# what the editor can persist). Adding a column here requires a corresponding
+# Pydantic field in FloorPlanTableUpdate (routes/tables.py).
+_FLOOR_PLAN_BULK_COLS: tuple[str, ...] = (
+    "position_x", "position_y", "capacity", "table_type", "zone", "name",
+)
+
+
+async def db_save_floor_plan_bulk(org_id: int, tables: list[dict]) -> dict:
+    """Bulk update floor plan layout.
+
+    Each entry must contain `id` (str — restaurant_tables.id is TEXT). Other
+    fields are optional and only those present (non-None) get persisted —
+    PATCH semantics, mirroring the per-table PUT endpoints.
+
+    Tenant isolation: every UPDATE pins org_id explicitly in the WHERE clause
+    so that tables belonging to another org cannot be silently mutated, even
+    in the unlikely case of an RLS policy regression. Cross-org attempts
+    surface in `errors[]` with reason='not_found_or_wrong_org'. Combined
+    with the FORCE RLS policy on restaurant_tables this is belt-and-
+    suspenders, but the explicit guard documents intent.
+
+    Returns: {updated: int, skipped: int, errors: [{table_id, reason}]}.
+
+    # Requires active tenant_scope(org_id) or bypass_tenant_scope().
+    """
+    updated = 0
+    skipped = 0
+    errors: list[dict] = []
+
+    async with tenant_connection() as conn:
+        for entry in tables:
+            tid = entry.get("id")
+            if not isinstance(tid, str) or not tid:
+                errors.append({"table_id": tid, "reason": "invalid_id"})
+                continue
+
+            sets: list[str] = []
+            vals: list = []
+            idx = 1
+            for col in _FLOOR_PLAN_BULK_COLS:
+                if col in entry and entry[col] is not None:
+                    sets.append(f"{col}=${idx}")
+                    vals.append(entry[col])
+                    idx += 1
+
+            if not sets:
+                skipped += 1
+                continue
+
+            vals.append(tid)
+            tid_pos = idx
+            vals.append(org_id)
+            org_pos = idx + 1
+
+            sql = (
+                f"UPDATE restaurant_tables SET {', '.join(sets)} "
+                f"WHERE id = ${tid_pos} AND org_id = ${org_pos}"
+            )
+            result = await conn.execute(sql, *vals)
+            if result == "UPDATE 0":
+                errors.append({"table_id": tid, "reason": "not_found_or_wrong_org"})
+            else:
+                updated += 1
+
+    return {"updated": updated, "skipped": skipped, "errors": errors}
+
+
 async def db_get_floor_plan(branch_id: int = None):
     """Get all tables with positions and current occupancy for floor plan view.
 

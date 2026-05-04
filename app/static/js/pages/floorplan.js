@@ -543,6 +543,61 @@ async function _createTable() {
   }
 }
 
+// ── Phase 2: Bulk save layout ─────────────────────────────────────
+// The drag handler already persists each position on drop via the per-table
+// PUT /position. This function bundles the WHOLE current layout (positions +
+// props) into one POST so the user gets explicit "saved" feedback after a
+// long editing session and any drag-failures get a chance to retry.
+async function saveLayout() {
+  if (!_tables.length) {
+    mesioToast('No hay mesas para guardar', 'info');
+    return;
+  }
+
+  var btn = el('btnSaveLayout');
+  if (btn) btn.disabled = true;
+
+  var payload = _tables.map(function (t) {
+    var entry = { id: String(t.id) };
+    if (t.position_x != null) entry.position_x = t.position_x;
+    if (t.position_y != null) entry.position_y = t.position_y;
+    if (t.capacity != null)   entry.capacity   = t.capacity;
+    if (t.table_type)         entry.table_type = t.table_type;
+    if (t.zone)               entry.zone       = t.zone;
+    if (t.name)               entry.name       = t.name;
+    return entry;
+  });
+
+  try {
+    var headers = mesioHeaders();
+    headers['Content-Type'] = 'application/json';
+    var r = await fetch('/api/tables/floor-plan', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({ tables: payload })
+    });
+    mesioTrackFetch(r.ok);
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      throw new Error(err.detail || 'HTTP ' + r.status);
+    }
+    var result = await r.json();
+    if (result.errors && result.errors.length) {
+      mesioToast(
+        'Guardado parcial: ' + result.updated + ' actualizadas, ' +
+          result.errors.length + ' con error',
+        'warning'
+      );
+    } else {
+      mesioToast('Layout guardado (' + result.updated + ' mesas)', 'success');
+    }
+  } catch (e) {
+    mesioToast('No se pudo guardar: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ── Phase 3: Select table → detail panel ─────────────────────────
 async function selectTable(tableId) {
   _selectedTableId = tableId;
@@ -1021,6 +1076,10 @@ function bindAll() {
   // Exit edit from toolbar
   var exitBtn = el('btnExitEdit');
   if (exitBtn) exitBtn.addEventListener('click', _exitEditMode);
+
+  // Save layout (bulk persist)
+  var saveBtn = el('btnSaveLayout');
+  if (saveBtn) saveBtn.addEventListener('click', saveLayout);
 
   // New table (permanent topbar button)
   var topbarNewTblBtn = el('btnTopbarNewTable');
