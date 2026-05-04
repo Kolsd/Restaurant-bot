@@ -291,31 +291,100 @@ async def _run_occupancy_snapshot():
 
 
 async def _run_reservation_reminders():
-    """Send WhatsApp reminders for upcoming confirmed reservations (24h ahead)."""
+    """Send WhatsApp reminders for upcoming confirmed reservations (24h ahead).
+
+    Cross-tenant scan + per-tenant send pattern (mirrors _run_nps_reminders):
+    - Enumerate active orgs under bypass.
+    - For each org, enter tenant_scope(org_id) so db_get_upcoming_unconfirmed
+      returns only that tenant's reservations (RLS enforces).
+    - Resolve restaurant credentials, send WhatsApp, mark confirmation_sent.
+
+    Without this scoping, db_get_upcoming_unconfirmed used `tenant_connection()`
+    with no scope active and crashed silently with TenantNotSetError, eaten by
+    the outer except — reminders never went out in production.
+    """
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
+    from app.services.meta_api import send_text  # noqa: PLC0415
+
     try:
-        upcoming = await db.db_get_upcoming_unconfirmed(hours_ahead=24)
-        for res in upcoming:
-            phone = res.get("phone", "")
-            bot_number = res.get("bot_number", "")
-            name = res.get("name", "")
-            date_str = res.get("date", "")
-            time_str = res.get("time", "")
-            guests = res.get("guests", 1)
-            if not phone or not bot_number:
-                continue
-            msg = (
-                f"Hola {name}, te recordamos tu reserva para el {date_str} "
-                f"a las {time_str} para {guests} persona(s). "
-                f"Responde *CONFIRMAR* para confirmar o *CANCELAR* para cancelar."
-            )
-            # Resolve phone_id from restaurant
-            restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
-            phone_id = (restaurant or {}).get("meta_phone_id", "")
-            ok = await _send_whatsapp(phone, msg, bot_number, phone_id)
-            if ok:
-                await db.db_mark_confirmation_sent(res["id"])
+        with bypass_tenant_scope("scheduler.reservation_reminders.scan"):
+            orgs = await db.db_get_all_orgs(active_only=True)
     except Exception:
-        log.exception("scheduler.reservation_reminder_failed")
+        log.exception("scheduler.reservation_reminder_orgs_failed")
+        return
+
+    for org in orgs:
+        org_id = org.get("id")
+        if org_id is None:
+            continue
+        try:
+            with tenant_scope(int(org_id)):
+                upcoming = await db.db_get_upcoming_unconfirmed(hours_ahead=24)
+
+            for res in upcoming:
+                phone = res.get("phone", "")
+                bot_number = res.get("bot_number", "")
+                name = res.get("name", "")
+                date_str = res.get("date", "")
+                time_str = res.get("time", "")
+                guests = res.get("guests", 1)
+                if not phone or not bot_number:
+                    continue
+
+                msg = (
+                    f"Hola {name}, te recordamos tu reserva para el {date_str} "
+                    f"a las {time_str} para {guests} persona(s). "
+                    f"Responde *CONFIRMAR* para confirmar o *CANCELAR* para cancelar."
+                )
+
+                # Resolve restaurant credentials by bot_number (cross-tenant
+                # lookup of the matching sede — bypass per Rule #14 pattern).
+                with bypass_tenant_scope("scheduler.reservation_reminder.resolve_restaurant"):
+                    restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
+                if not restaurant:
+                    log.warning(
+                        "scheduler.reservation_reminder_no_restaurant",
+                        bot_number=bot_number, reservation_id=res.get("id"),
+                    )
+                    continue
+                access_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
+                if not access_token:
+                    log.warning(
+                        "scheduler.reservation_reminder_no_token",
+                        bot_number=bot_number, reservation_id=res.get("id"),
+                    )
+                    continue
+                phone_id = restaurant.get("wa_phone_id") or restaurant.get("meta_phone_id")
+
+                ok = await send_text(
+                    bot_number=bot_number,
+                    access_token=access_token,
+                    phone=phone,
+                    text=msg,
+                    phone_id=phone_id,
+                )
+                if not ok:
+                    log.warning(
+                        "scheduler.reservation_reminder_send_failed",
+                        bot_number=bot_number,
+                        reservation_id=res.get("id"),
+                        phone_obf=phone[-4:] if phone else "",
+                    )
+                    continue
+
+                with tenant_scope(int(org_id)):
+                    await db.db_mark_confirmation_sent(res["id"])
+                log.info(
+                    "scheduler.reservation_reminder_sent",
+                    reservation_id=res.get("id"),
+                    bot_number=bot_number,
+                    phone_obf=phone[-4:] if phone else "",
+                )
+        except Exception:
+            log.exception(
+                "scheduler.reservation_reminder_org_failed",
+                org_id=org_id,
+            )
 
 
 async def _run_weekly_owner_reports():

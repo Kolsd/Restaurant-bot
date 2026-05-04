@@ -276,6 +276,7 @@ from app.repositories.reservations_repo import (
     db_confirm_reservation,
     db_get_upcoming_unconfirmed,
     db_mark_confirmation_sent,
+    db_get_pending_confirmation_for_phone,
 )
 
 

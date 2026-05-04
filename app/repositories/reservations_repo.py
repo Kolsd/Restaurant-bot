@@ -395,6 +395,37 @@ async def db_mark_confirmation_sent(reservation_id: int) -> None:
         )
 
 
+async def db_get_pending_confirmation_for_phone(
+    restaurant_id: int, phone: str
+) -> dict | None:
+    """Return the most recent confirmed reservation for this phone where a
+    reminder was sent and is still upcoming (within next 30h to allow for
+    confirmation responses). Used to route customer's CONFIRMAR/CANCELAR
+    keyword to the right reservation.
+
+    The org_id filter is explicit so this works correctly under either
+    `tenant_scope()` (RLS enforces) or `bypass_tenant_scope()` (the call
+    site in chat.py runs inside bypass during webhook enqueue — the
+    explicit filter is what guarantees we don't leak across tenants).
+
+    Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT * FROM reservations
+               WHERE org_id = $1
+                 AND phone = $2
+                 AND status = 'confirmed'
+                 AND confirmation_sent = TRUE
+                 AND TO_TIMESTAMP("date" || ' ' || "time", 'YYYY-MM-DD HH24:MI') >= NOW()
+                 AND TO_TIMESTAMP("date" || ' ' || "time", 'YYYY-MM-DD HH24:MI') <= NOW() + INTERVAL '30 hours'
+               ORDER BY "date" DESC, "time" DESC
+               LIMIT 1""",
+            restaurant_id, phone,
+        )
+        return _serialize(dict(row)) if row else None
+
+
 async def db_create_reservation(
     customer_name: str,
     date_str: str,

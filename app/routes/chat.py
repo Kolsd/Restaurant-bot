@@ -551,6 +551,62 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
 
                 log.info("chat.inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, text_preview=user_text[:200])
 
+                # 7b. Atajo no-LLM: si el cliente responde CONFIRMAR/CANCELAR a un
+                # recordatorio reciente de reserva, actualizar la reserva directamente
+                # sin enviar el mensaje al LLM.
+                #
+                # Tenant scoping: this whole webhook block runs under
+                # bypass_tenant_scope("webhook_enqueue_cross_tenant"). The repo
+                # functions used here (db_get_pending_confirmation_for_phone,
+                # db_confirm_reservation, db_cancel_reservation) all filter by
+                # id/org_id explicitly, so they're correct under bypass.
+                if msg_type == "text" and user_text:
+                    txt_clean = user_text.strip().lower()
+                    if txt_clean in ("confirmar", "confirmo", "confirmado",
+                                     "cancelar", "cancelo", "cancelado"):
+                        try:
+                            restaurant_data = await db.db_get_restaurant_by_bot_number(bot_number)
+                            if restaurant_data:
+                                pending = await db.db_get_pending_confirmation_for_phone(
+                                    restaurant_data["id"], user_phone,
+                                )
+                                if pending:
+                                    is_confirm = txt_clean.startswith("confirm")
+                                    if is_confirm:
+                                        await db.db_confirm_reservation(pending["id"])
+                                        ack = (
+                                            f"Listo, tu reserva para el {pending['date']} "
+                                            f"a las {pending['time']} queda confirmada. "
+                                            f"¡Te esperamos!"
+                                        )
+                                    else:
+                                        await db.db_cancel_reservation(
+                                            pending["id"],
+                                            reason="customer_reminder_response",
+                                        )
+                                        ack = (
+                                            f"Cancelamos tu reserva para el {pending['date']} "
+                                            f"a las {pending['time']}. Si querés reagendar, "
+                                            f"avisanos."
+                                        )
+                                    from app.services.meta_api import send_text as _meta_send  # noqa: PLC0415
+                                    background_tasks.add_task(
+                                        _meta_send, bot_number, access_token,
+                                        user_phone, ack, phone_id,
+                                    )
+                                    log.info(
+                                        "chat.reservation_keyword_processed",
+                                        phone=user_phone,
+                                        action="confirmed" if is_confirm else "cancelled",
+                                        reservation_id=pending["id"],
+                                    )
+                                    continue
+                        except Exception:
+                            log.exception(
+                                "chat.reservation_keyword_failed",
+                                phone=user_phone,
+                            )
+
                 # 8. Persist to webhook_inbox — durable processing survives worker restarts.
                 #    The inbox worker (inbox_worker.py) will call _process_message asynchronously.
                 try:
