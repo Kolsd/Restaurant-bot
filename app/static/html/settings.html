@@ -191,8 +191,19 @@
                 <div class="integ-name">Datáfono Wompi</div>
                 <div class="integ-desc">Visa, MC, Amex · comisión 2.9% + $0</div>
               </div>
-              <span class="badge success">Conectado</span>
-              <button class="switch on" id="pay-sw-wompi" data-toggleable aria-label="Wompi activado"></button>
+              <span class="badge" id="wompi-status-badge">Sin configurar</span>
+              <button class="switch" id="pay-sw-wompi" data-toggleable aria-label="Wompi activado"></button>
+            </div>
+            <div class="field-group" id="wompi-credentials" style="display:none;">
+              <div>
+                <div class="fg-label">Credenciales Wompi</div>
+                <div class="fg-hint">Obtené las llaves desde tu dashboard Wompi → Configuración → Llaves API. Llave pública empieza con <code>pub_test_</code> o <code>pub_prod_</code>. La integrity secret se guarda cifrada y no se muestra de nuevo.</div>
+              </div>
+              <div style="display:grid;gap:8px;">
+                <input id="wompiPublicKey" class="input mono" type="text" placeholder="pub_test_... o pub_prod_..." autocomplete="off" />
+                <input id="wompiIntegritySecret" class="input mono" type="password" placeholder="Integrity Secret" autocomplete="off" />
+                <div id="wompi-secret-hint" style="font-size:12px;color:var(--text-3);"></div>
+              </div>
             </div>
 
             <div class="integ-row">

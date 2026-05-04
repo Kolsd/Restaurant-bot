@@ -8,11 +8,14 @@ import hashlib
 from decimal import Decimal
 
 from app.services.money import to_decimal, quantize_money
+from app.services.orders import _wompi_credentials_from_restaurant
 from app.repositories import reservation_deposits_repo as deposits_repo
 from app.services.logging import get_logger
 
 log = get_logger(__name__)
 
+# NOTE: env-var Wompi credentials are LEGACY/FALLBACK. The canonical path is
+# per-restaurant configuration via `features.wompi`. See `generate_deposit_link`.
 WOMPI_PUBLIC_KEY       = os.getenv("WOMPI_PUBLIC_KEY", "")
 WOMPI_INTEGRITY_SECRET = os.getenv("WOMPI_INTEGRITY_SECRET", "")
 APP_DOMAIN             = os.getenv("APP_DOMAIN", "mesioai.com")
@@ -25,17 +28,28 @@ async def generate_deposit_link(
     reservation_id: int,
     amount: Decimal,
     currency: str = "COP",
+    restaurant: dict | None = None,
 ) -> str:
     """
     Generate a Wompi checkout link for a reservation deposit and persist the
     deposit record.  Returns the full payment URL string.
 
-    Raises RuntimeError if WOMPI_INTEGRITY_SECRET is not configured — a link
+    Credential priority:
+      1. `restaurant.features.wompi` (per-restaurant config) when `restaurant`
+         is provided.
+      2. Env vars `WOMPI_PUBLIC_KEY` / `WOMPI_INTEGRITY_SECRET` — legacy
+         fallback for deploys not yet migrated.
+
+    Raises RuntimeError if neither source supplies an integrity_secret — a link
     generated without it would have an invalid signature and Wompi would reject
     all payment attempts, creating silent data loss.
     """
+    pk_override, integrity_override = _wompi_credentials_from_restaurant(restaurant)
+    pk = pk_override or WOMPI_PUBLIC_KEY
+    integrity = integrity_override or WOMPI_INTEGRITY_SECRET
+
     # Bug 9 fix: fail-fast if secret is missing rather than generating a broken link
-    if not WOMPI_INTEGRITY_SECRET:
+    if not integrity:
         log.error("reservation_payments.integrity_secret_missing")
         raise RuntimeError("WOMPI_INTEGRITY_SECRET not configured")
 
@@ -51,13 +65,13 @@ async def generate_deposit_link(
     reference = f"dep_{reservation_id}"
 
     # Wompi integrity signature: reference + amount_cents + currency + secret
-    integrity_str = f"{reference}{amount_cents}{currency}{WOMPI_INTEGRITY_SECRET}"
+    integrity_str = f"{reference}{amount_cents}{currency}{integrity}"
     signature = hashlib.sha256(integrity_str.encode()).hexdigest()
 
     redirect_url = f"https://{APP_DOMAIN}/api/reservations/{reservation_id}"
 
     payment_url = (
-        f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}"
+        f"https://checkout.wompi.co/p/?public-key={pk}"
         f"&currency={currency}"
         f"&amount-in-cents={amount_cents}"
         f"&reference={reference}"

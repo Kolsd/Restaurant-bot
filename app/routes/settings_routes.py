@@ -39,8 +39,31 @@ def _parse_features(restaurant: dict) -> dict:
     return dict(raw)
 
 
+def _mask_wompi_for_response(features: dict) -> dict:
+    """Return a sanitized copy of features.wompi for GET responses.
+
+    The integrity_secret is a sensitive credential — NEVER returned in plaintext.
+    The public_key is shown raw (it is intentionally public). The secret is
+    replaced with a `set` boolean and a `last4` hint for the UI to display
+    "•••• 7891"-style placeholders without revealing the value.
+    """
+    out = dict(features) if isinstance(features, dict) else {}
+    raw_wompi = out.get("wompi") or {}
+    if not isinstance(raw_wompi, dict):
+        out["wompi"] = {"public_key": "", "integrity_secret_set": False, "integrity_secret_last4": ""}
+        return out
+    secret = (raw_wompi.get("integrity_secret") or "").strip()
+    out["wompi"] = {
+        "public_key":              (raw_wompi.get("public_key") or "").strip(),
+        "integrity_secret_set":    bool(secret),
+        "integrity_secret_last4":  secret[-4:] if len(secret) >= 4 else "",
+    }
+    return out
+
+
 def _build_settings_response(restaurant: dict, features: dict) -> dict:
     """Build the canonical settings response payload."""
+    safe_features = _mask_wompi_for_response(features)
     return {
         "restaurant_id":       restaurant["id"],
         "name":                restaurant.get("name", ""),
@@ -50,7 +73,7 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
         "nit":                 features.get("nit", ""),
         "city":                features.get("city", ""),
         "cuisine_type":        features.get("cuisine_type", ""),
-        "features":            features,
+        "features":            safe_features,
         "payment_methods":     features.get("payment_methods", []),
         "payment_instructions":features.get("payment_instructions", {}),
         "google_maps_url":     features.get("google_maps_url", ""),
@@ -69,6 +92,8 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu":     features.get("bot_visual_menu", False),
         "catalog_v2_enabled":  features.get("catalog_v2_enabled", True),
+        # Wompi config (sensitive: secret never returned plaintext)
+        "wompi":               safe_features.get("wompi", {}),
     }
 
 
@@ -126,11 +151,38 @@ async def save_settings(request: Request):
         "bot_visual_menu", "catalog_v2_enabled",
         # Extended info — no dedicated DB column; live in features JSONB
         "nit", "city", "cuisine_type", "notifications",
+        # Wompi per-restaurant credentials (handled with secret preservation below)
+        "wompi",
     ]
     features_patch: dict = {}
     for key in _features_updatable:
         if key in body:
             features_patch[key] = body[key]
+
+    # ── Wompi: preserve existing integrity_secret when client sends an empty
+    # or masked value (form was loaded with masked placeholder and admin only
+    # touched the public_key). Drops the wompi key entirely if the inbound
+    # payload is malformed.
+    if "wompi" in features_patch:
+        inbound = features_patch.get("wompi") or {}
+        if not isinstance(inbound, dict):
+            features_patch.pop("wompi", None)
+        else:
+            existing = current_features.get("wompi") or {}
+            if not isinstance(existing, dict):
+                existing = {}
+            new_pk = (inbound.get("public_key") or "").strip()
+            new_secret_raw = inbound.get("integrity_secret")
+            new_secret = (new_secret_raw or "").strip() if isinstance(new_secret_raw, str) else ""
+            # If client sent no secret OR a masked placeholder, keep existing
+            if not new_secret or new_secret.startswith(("xxxx", "****", "•")):
+                preserved_secret = (existing.get("integrity_secret") or "").strip()
+            else:
+                preserved_secret = new_secret
+            features_patch["wompi"] = {
+                "public_key":       new_pk,
+                "integrity_secret": preserved_secret,
+            }
 
     lat = float(body["latitude"]) if "latitude" in body and body["latitude"] not in [None, ""] else None
     lon = float(body["longitude"]) if "longitude" in body and body["longitude"] not in [None, ""] else None

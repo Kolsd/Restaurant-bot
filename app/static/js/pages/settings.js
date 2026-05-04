@@ -67,6 +67,9 @@ function renderSettings(r) {
   var pi = (r.features && r.features.payment_instructions) ? r.features.payment_instructions : {};
   renderPaymentInstructions(pi);
 
+  // Wompi per-restaurant credentials (server returns masked secret summary)
+  renderWompiCredentials(r.wompi || (r.features && r.features.wompi) || {});
+
   // Notifications
   var notif = (r.features && r.features.notifications) ? r.features.notifications : {};
   renderNotifToggles(notif);
@@ -133,6 +136,55 @@ function renderPaymentInstructions(pi) {
   });
 }
 
+// ── Wompi per-restaurant credentials ─────────────────────────────────
+// The server returns a masked summary: { public_key, integrity_secret_set,
+// integrity_secret_last4 }. The plaintext integrity_secret is NEVER returned
+// — admin only sees it when typing it into the form. On save, if the input
+// is empty the backend preserves the previously-stored secret.
+function renderWompiCredentials(wompi) {
+  var pkInput = document.getElementById('wompiPublicKey');
+  var secretInput = document.getElementById('wompiIntegritySecret');
+  var hintEl = document.getElementById('wompi-secret-hint');
+  var badgeEl = document.getElementById('wompi-status-badge');
+  if (!pkInput || !secretInput) return;
+
+  var publicKey = (wompi && wompi.public_key) || '';
+  var secretSet = !!(wompi && wompi.integrity_secret_set);
+  var last4 = (wompi && wompi.integrity_secret_last4) || '';
+
+  pkInput.value = publicKey;
+  // NEVER populate the secret input with the plaintext value — it never leaves
+  // the server. Leave it empty; placeholder hints what's stored.
+  secretInput.value = '';
+  if (secretSet) {
+    secretInput.placeholder = last4 ? ('•••• •••• •••• ' + last4) : '•••• Integrity Secret guardado';
+  } else {
+    secretInput.placeholder = 'Integrity Secret';
+  }
+
+  if (hintEl) {
+    hintEl.textContent = secretSet
+      ? 'Secret guardado. Dejá este campo vacío para conservarlo o escribí uno nuevo para reemplazarlo.'
+      : 'Sin secret configurado. Sin él, el bot usará el flujo de comprobante manual.';
+  }
+
+  if (badgeEl) {
+    var configured = !!publicKey && secretSet;
+    badgeEl.textContent = configured ? 'Conectado' : 'Sin configurar';
+    badgeEl.classList.toggle('success', configured);
+  }
+
+  // Show/hide credentials block based on Wompi toggle state
+  _toggleWompiCredentialsBlock();
+}
+
+function _toggleWompiCredentialsBlock() {
+  var sw = document.getElementById('pay-sw-wompi');
+  var block = document.getElementById('wompi-credentials');
+  if (!sw || !block) return;
+  block.style.display = sw.classList.contains('on') ? '' : 'none';
+}
+
 // ── Notification toggles ──────────────────────────────────────────
 var NOTIF_KEYS = ['waiter_call', 'late_order', 'low_stock', 'nps_negative', 'tips_ready'];
 function renderNotifToggles(notif) {
@@ -195,12 +247,21 @@ function collectFormData() {
 
   var currentFeatures = (_restaurant && _restaurant.features) ? Object.assign({}, _restaurant.features) : {};
 
+  // Wompi credentials — empty integrity_secret means "preserve existing" on the server.
+  var wompiPkEl = document.getElementById('wompiPublicKey');
+  var wompiSecretEl = document.getElementById('wompiIntegritySecret');
+  var wompiPayload = {
+    public_key:       wompiPkEl ? (wompiPkEl.value || '').trim() : '',
+    integrity_secret: wompiSecretEl ? (wompiSecretEl.value || '').trim() : ''
+  };
+
   return {
     name: getVal('inputName'),
     nit: getVal('inputNIT'),
     address: getVal('inputAddress'),
     city: getVal('inputCity'),
     cuisine_type: getVal('inputCuisine'),
+    wompi: wompiPayload,
     features: Object.assign(currentFeatures, {
       opening_hours: opening_hours,
       payment_methods: payment_methods,
@@ -346,6 +407,10 @@ function bindSwitches() {
         var closeEl = document.getElementById('h-close-' + dayIdx);
         if (openEl) openEl.disabled = !isOpen;
         if (closeEl) closeEl.disabled = !isOpen;
+      }
+      // Wompi toggle controls visibility of the credentials sub-block
+      if (sw.id === 'pay-sw-wompi') {
+        _toggleWompiCredentialsBlock();
       }
     });
   });

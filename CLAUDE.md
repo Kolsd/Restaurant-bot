@@ -16,7 +16,10 @@ Variables de entorno críticas:
                                 #   Si no se setea, alembic cae a DATABASE_URL (backward-compat).
                                 #   En prod: NUNCA apuntar la app aquí.
   ANTHROPIC_API_KEY, META_APP_SECRET, ADMIN_KEY,
-  META_ACCESS_TOKEN, WOMPI_PUBLIC_KEY, WOMPI_INTEGRITY_SECRET, APP_DOMAIN,
+  META_ACCESS_TOKEN,
+  WOMPI_PUBLIC_KEY,             # LEGACY/FALLBACK — see "Configuración Wompi per-restaurant" below
+  WOMPI_INTEGRITY_SECRET,       # LEGACY/FALLBACK — see "Configuración Wompi per-restaurant" below
+  APP_DOMAIN,
   REDIS_URL,                    # Estado compartido entre 4 workers (NPS, checkout, cooldowns)
   ALERT_WEBHOOK_URL,            # (opcional) Webhook para alertas operativas (Slack/Discord)
   DISABLE_EMBEDDED_WORKER,      # "1" para desactivar inbox worker embebido en web service
@@ -29,6 +32,36 @@ Variables de entorno críticas:
   CLOUDINARY_API_KEY,           # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
   CLOUDINARY_API_SECRET,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
 ```
+
+## Configuración Wompi per-restaurant
+
+Cada restaurante guarda sus propias credenciales Wompi en `organizations.features.wompi`:
+
+```json
+{
+  "wompi": {
+    "public_key": "pub_test_... o pub_prod_...",
+    "integrity_secret": "test_integrity_... o prod_integrity_..."
+  }
+}
+```
+
+**Por qué per-restaurant:** cada cliente tiene su propia cuenta Wompi (su comercio, su NIT, su dispersion bancaria). No tiene sentido que toda la plataforma cobre a la cuenta de Mesio. Multi-tenant SaaS: cada tenant configura sus propias llaves.
+
+**Cómo se configura:** admin/owner abre `/settings → Métodos de pago → Datáfono Wompi`, activa el toggle Wompi y aparece el bloque de credenciales. Pega la `public_key` y la `integrity_secret` desde su dashboard Wompi (Configuración → Llaves API). Guarda.
+
+**Seguridad del secret:**
+- `GET /api/settings` retorna `wompi.integrity_secret_set: bool` y `wompi.integrity_secret_last4: str` — el plaintext NUNCA sale del servidor.
+- En el form, el input es type="password" con placeholder `•••• •••• •••• {last4}`. El admin solo ve el plaintext en el momento de tipearlo.
+- `POST /api/settings`: si el `integrity_secret` viene vacío o como string masked (`xxxx_*`), el backend preserva el valor existente (admin puede actualizar solo la `public_key` sin re-tipear el secret). Si viene un valor distinto, lo reemplaza.
+
+**Resolución en runtime:**
+- `app/services/orders.py::_wompi_credentials_from_restaurant(restaurant)` extrae el par `(pk, integrity_secret)` desde `restaurant.features.wompi`. Acepta `features` como dict o JSON string (asyncpg variabilidad).
+- `generate_wompi_payment_link(order_id, amount, currency, public_key=None, integrity_secret=None)`: si los kwargs vienen seteados los usa; si vienen None, cae a las env vars `WOMPI_PUBLIC_KEY` / `WOMPI_INTEGRITY_SECRET` (fallback legacy). Cada credencial se evalúa de forma independiente.
+- `generate_deposit_link(reservation_id, amount, currency, restaurant=None)`: mismo patrón para depósitos de reserva.
+- Si ni el restaurant config ni env vars proveen `integrity_secret` → `RuntimeError`. Los call sites del bot (`create_order`, `agent.py reserve flow`) capturan ese error y caen al flujo de comprobante manual (Nequi/Bancolombia).
+
+**Migración:** las env vars `WOMPI_PUBLIC_KEY` y `WOMPI_INTEGRITY_SECRET` siguen siendo válidas como fallback durante la transición. Se pueden remover de Railway una vez que TODOS los restaurantes activos hayan configurado sus credenciales en `/settings`. Hasta entonces, los restaurantes sin config explícita seguirán cobrando a la cuenta global.
 
 ## Roles Postgres (Fase 1 RLS)
 

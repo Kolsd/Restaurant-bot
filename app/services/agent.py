@@ -1981,8 +1981,11 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                         # Preflight: validate Wompi secrets are configured without
                         # doing a DB INSERT (the real deposit is created after the
                         # reservation row exists, using the real reservation_id).
+                        # Per-restaurant credentials win over env-var fallback.
+                        from app.services.orders import _wompi_credentials_from_restaurant  # noqa: PLC0415
                         import os as _os  # noqa: PLC0415
-                        if not _os.getenv("WOMPI_INTEGRITY_SECRET", ""):
+                        _pk_pre, _integrity_pre = _wompi_credentials_from_restaurant(restaurant_obj)
+                        if not (_integrity_pre or _os.getenv("WOMPI_INTEGRITY_SECRET", "")):
                             log.error("reservation.deposit_link_preflight_failed",
                                       phone=phone, bot_number=bot_number,
                                       reason="WOMPI_INTEGRITY_SECRET not configured")
@@ -2008,7 +2011,10 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     if needs_deposit:
                         from app.services.reservation_payments import generate_deposit_link  # noqa: PLC0415
                         try:
-                            payment_url = await generate_deposit_link(reservation["id"], deposit_amount, currency)
+                            payment_url = await generate_deposit_link(
+                                reservation["id"], deposit_amount, currency,
+                                restaurant=restaurant_obj,
+                            )
                         except Exception:
                             log.exception("reservation.deposit_link_final_failed",
                                           id=reservation["id"])

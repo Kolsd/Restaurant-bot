@@ -12,10 +12,42 @@ from app.services.money import to_decimal, money_mul, money_sum, ZERO
 
 APP_DOMAIN = os.getenv("APP_DOMAIN", "")
 
+# NOTE: env-var Wompi credentials are LEGACY/FALLBACK. The canonical path is
+# per-restaurant configuration via `features.wompi = {public_key, integrity_secret}`
+# resolved by `_wompi_credentials_from_restaurant()`. Env vars exist solely so
+# legacy deploys keep working until every restaurant has migrated its keys.
 WOMPI_PUBLIC_KEY = os.getenv("WOMPI_PUBLIC_KEY")
 WOMPI_INTEGRITY_SECRET = os.getenv("WOMPI_INTEGRITY_SECRET")
 
 log = get_logger(__name__)
+
+
+def _wompi_credentials_from_restaurant(
+    restaurant: dict | None,
+) -> tuple[str | None, str | None]:
+    """Extract (public_key, integrity_secret) from `restaurant.features.wompi`.
+
+    Returns (None, None) if features.wompi is missing entirely. If only one of
+    the two values is set, returns that one and None for the other — each
+    credential falls back to its env var independently. The integrity_secret
+    is NEVER logged here (it is a secret).
+    """
+    if not restaurant:
+        return (None, None)
+    feats = restaurant.get("features") or {}
+    if isinstance(feats, str):
+        try:
+            feats = json.loads(feats)
+        except Exception:
+            return (None, None)
+    if not isinstance(feats, dict):
+        return (None, None)
+    wompi_cfg = feats.get("wompi") or {}
+    if not isinstance(wompi_cfg, dict):
+        return (None, None)
+    pk = (wompi_cfg.get("public_key") or "").strip() or None
+    integrity = (wompi_cfg.get("integrity_secret") or "").strip() or None
+    return (pk, integrity)
 
 
 @contextlib.asynccontextmanager
@@ -217,16 +249,41 @@ async def cart_summary(phone: str, bot_number: str) -> str:
 _ZERO_DECIMAL_CURRENCIES = {"COP", "CLP", "JPY", "KRW", "VND", "PYG", "ISK"}
 
 
-def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP") -> str:
+def generate_wompi_payment_link(
+    order_id: str,
+    amount: int,
+    currency: str = "COP",
+    public_key: str | None = None,
+    integrity_secret: str | None = None,
+) -> str:
+    """Generate a Wompi checkout payment link for a given order.
+
+    Credential priority:
+      1. Explicit kwargs (`public_key`, `integrity_secret`) — typically resolved
+         from the restaurant's `features.wompi` configuration via
+         `_wompi_credentials_from_restaurant()`.
+      2. Env vars `WOMPI_PUBLIC_KEY` / `WOMPI_INTEGRITY_SECRET` — backward-compat
+         fallback for deploys that have not yet migrated to per-restaurant config.
+
+    Each credential falls back independently. If neither source supplies a
+    value, raises RuntimeError so the caller can fall through to the
+    manual-proof flow (Nequi / Bancolombia text instructions).
+    """
+    pk = public_key if (public_key and public_key.strip()) else (WOMPI_PUBLIC_KEY or "")
+    integrity = (
+        integrity_secret if (integrity_secret and integrity_secret.strip())
+        else (WOMPI_INTEGRITY_SECRET or "")
+    )
+
     # Fail-fast on missing config: silently signing with empty secret produces
     # a link Wompi rejects, so the customer gets a "broken link" with no clue
     # what went wrong. Better to crash here so the deploy alarms fire.
-    if not WOMPI_INTEGRITY_SECRET:
+    if not integrity:
         log.error("orders.wompi_integrity_secret_missing", order_id=order_id)
         raise RuntimeError(
             "WOMPI_INTEGRITY_SECRET is not configured. Cannot generate payment link."
         )
-    if not WOMPI_PUBLIC_KEY:
+    if not pk:
         log.error("orders.wompi_public_key_missing", order_id=order_id)
         raise RuntimeError(
             "WOMPI_PUBLIC_KEY is not configured. Cannot generate payment link."
@@ -236,11 +293,11 @@ def generate_wompi_payment_link(order_id: str, amount: int, currency: str = "COP
         amount_cents = int(amount)
     else:
         amount_cents = int(amount * 100)
-    signature_string = f"{order_id}{amount_cents}{currency}{WOMPI_INTEGRITY_SECRET}"
+    signature_string = f"{order_id}{amount_cents}{currency}{integrity}"
     signature = hashlib.sha256(signature_string.encode()).hexdigest()
     redirect_base = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
     redirect_url = f"{redirect_base}/api/payment/confirm"
-    return f"https://checkout.wompi.co/p/?public-key={WOMPI_PUBLIC_KEY}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
+    return f"https://checkout.wompi.co/p/?public-key={pk}&currency={currency}&amount-in-cents={amount_cents}&reference={order_id}&signature:integrity={signature}&redirect-url={redirect_url}"
 
 async def create_order(phone: str, order_type: str, address: str, notes: str, bot_number: str, payment_method: str = "", channel: str | None = "whatsapp_bot", location_id: int | None = None, scheduled_pickup_at: str | None = None) -> dict:
     from app.repositories.orders_repo import commit_order_transaction, OrderCommitError, InsufficientStockError
@@ -270,6 +327,11 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
 
                 delivery_fee = to_decimal(_raw_feats.get("delivery_fee", 0)) if order_type == "domicilio" else ZERO
                 tz_str = _raw_feats.get("timezone", "UTC")
+
+            # Resolve per-restaurant Wompi credentials (fallback to env vars).
+            # Done once here so both the additional-order and new-order branches
+            # below reuse the same values without re-querying.
+            wompi_pk, wompi_integrity = _wompi_credentials_from_restaurant(rest_data)
 
             subtotal = sum(to_decimal(item["subtotal"]) for item in cart["items"])
             total = subtotal + delivery_fee
@@ -342,7 +404,11 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
                     order["payment_url"] = None
                     if payment_method and payment_method.lower() not in ("efectivo", "cash"):
                         try:
-                            order["payment_url"] = generate_wompi_payment_link(order_id, subtotal)
+                            order["payment_url"] = generate_wompi_payment_link(
+                                order_id, subtotal,
+                                public_key=wompi_pk,
+                                integrity_secret=wompi_integrity,
+                            )
                         except RuntimeError:
                             log.warning(
                                 "create_order.wompi_unavailable_manual_proof_flow",
@@ -410,7 +476,11 @@ async def create_order(phone: str, order_type: str, address: str, notes: str, bo
             order["payment_url"] = None
             if payment_method and payment_method.lower() not in ("efectivo", "cash"):
                 try:
-                    order["payment_url"] = generate_wompi_payment_link(order_id, total)
+                    order["payment_url"] = generate_wompi_payment_link(
+                        order_id, total,
+                        public_key=wompi_pk,
+                        integrity_secret=wompi_integrity,
+                    )
                 except RuntimeError:
                     log.warning(
                         "create_order.wompi_unavailable_manual_proof_flow",
