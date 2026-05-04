@@ -896,31 +896,40 @@ function initCatalog() {
     qrClaimDone: false,
   };
 
-  // Detect endpoint
+  // Detect endpoint. Query params take precedence — they unambiguously declare
+  // the context (table vs delivery/pickup). Path-based detection is the fallback
+  // for the QR-table URL form `/menu/{table_id}`. Without this ordering, the
+  // delivery URL `/menu?bot=...` is misread as table-context (lastPart = "menu"
+  // doesn't match \d{10,}, so isTableContext flips to true) and the QR-claim
+  // modal pops up for delivery customers — see PR fixing this.
   const path = window.location.pathname;
   const parts = path.split('/').filter(Boolean);
   const lastPart = parts[parts.length - 1];
-  // Bot numbers are 10+ digits only (e.g. 573108187460). Anything else is a table_id.
-  const isTableContext = !/^\d{10,}$/.test(lastPart);
 
-  let apiUrl;
-  const paramId = lastPart || '';
-
-  // Support both /menu/TABLE_ID and /menu/BOT_NUMBER
-  // Try menu-context first if it looks like a numeric table id, otherwise use bot endpoint
-  // We'll attempt fetch and fall back
-  if (isTableContext) {
-    apiUrl = `/api/public/menu-context/${paramId}`;
-  } else {
-    apiUrl = `/api/public/menu/${paramId}`;
-  }
-
-  // Also check query params
   const qp = new URLSearchParams(window.location.search);
   const qTable = qp.get('table') || qp.get('mesa');
   const qBot = qp.get('bot') || qp.get('numero');
-  if (qTable) apiUrl = `/api/public/menu-context/${qTable}`;
-  else if (qBot) apiUrl = `/api/public/menu/${qBot}`;
+
+  let isTableContext;
+  let paramId;
+  let apiUrl;
+
+  if (qTable) {
+    isTableContext = true;
+    paramId = qTable;
+    apiUrl = `/api/public/menu-context/${qTable}`;
+  } else if (qBot) {
+    isTableContext = false;
+    paramId = qBot;
+    apiUrl = `/api/public/menu/${qBot}`;
+  } else {
+    // Path-based fallback: bot numbers are 10+ digits, anything else is a table_id.
+    paramId = lastPart || '';
+    isTableContext = !/^\d{10,}$/.test(paramId);
+    apiUrl = isTableContext
+      ? `/api/public/menu-context/${paramId}`
+      : `/api/public/menu/${paramId}`;
+  }
 
   // ── DOM references ──
   const headerEl = document.getElementById('catalog-header');
