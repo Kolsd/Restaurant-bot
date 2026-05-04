@@ -543,6 +543,7 @@ function switchTab(tabId) {
     if (tabId === 'pickup')    loadPickupOrders();
     if (tabId === 'proposals') loadDeliveryProposals();
     if (tabId === 'chats')     loadChatsTab();
+    if (tabId === 'nps')       loadRecentNpsTab();
   }
 }
 
@@ -1428,6 +1429,114 @@ function openCheckoutProposalFlow(proposal) {
   }
 }
 
+// ── Recent NPS tab ────────────────────────────────────
+async function loadRecentNpsTab() {
+  const el = document.getElementById('nps-list');
+  if (!el) return;
+  el.textContent = '';
+  const loading = document.createElement('div');
+  loading.style.cssText = 'color:#6B7280;font-size:13px;';
+  loading.textContent = 'Cargando…';
+  el.appendChild(loading);
+  try {
+    const res = await fetch('/api/caja/recent-nps?limit=10', { headers: mesioHeaders() });
+    if (!res.ok) {
+      el.textContent = '';
+      const fallback = document.createElement('div');
+      fallback.style.cssText = 'padding:20px;color:#9CA3AF;font-size:13px;text-align:center;';
+      fallback.textContent = 'No se pudo cargar la lista de calificaciones.';
+      el.appendChild(fallback);
+      return;
+    }
+    const data = await res.json();
+    const items = (data && data.items) || [];
+    el.textContent = '';
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:#6B7280;padding:20px;font-size:13px;';
+      empty.textContent = 'Sin calificaciones recientes.';
+      el.appendChild(empty);
+      return;
+    }
+    items.forEach(item => el.appendChild(_renderNpsCard(item)));
+  } catch (_) {
+    el.textContent = '';
+    const errEl = document.createElement('div');
+    errEl.style.cssText = 'padding:20px;color:#9CA3AF;font-size:13px;text-align:center;';
+    errEl.textContent = 'No se pudo cargar la lista de calificaciones.';
+    el.appendChild(errEl);
+  }
+}
+
+function _renderNpsCard(item) {
+  const score = Number(item.score || 0);
+  // Color by score: red (<=2) / amber (3) / green (>=4)
+  let bgColor = '#10B981';
+  if (score <= 2) bgColor = '#7F1D1D';
+  else if (score === 3) bgColor = '#92400E';
+
+  const card = document.createElement('div');
+  card.style.cssText = `background:${bgColor};border-radius:8px;padding:12px 14px;color:#fff;display:flex;flex-direction:column;gap:6px;`;
+
+  // Header: stars + phone + date
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;';
+
+  const starsAndPhone = document.createElement('div');
+  starsAndPhone.style.cssText = 'display:flex;align-items:center;gap:10px;';
+
+  const stars = document.createElement('span');
+  stars.style.cssText = 'font-size:14px;letter-spacing:1px;';
+  stars.textContent = _starString(score);
+  starsAndPhone.appendChild(stars);
+
+  const phoneEl = document.createElement('span');
+  phoneEl.style.cssText = 'font-size:12px;opacity:0.85;';
+  phoneEl.textContent = item.phone || '***';
+  starsAndPhone.appendChild(phoneEl);
+
+  head.appendChild(starsAndPhone);
+
+  const dateEl = document.createElement('span');
+  dateEl.style.cssText = 'font-size:11px;opacity:0.8;';
+  dateEl.textContent = _relativeTime(item.created_at);
+  head.appendChild(dateEl);
+
+  card.appendChild(head);
+
+  // Comment (if any) — truncated to 80 chars, textContent for XSS safety
+  const rawComment = (item.comment || '').trim();
+  if (rawComment) {
+    const commentEl = document.createElement('div');
+    commentEl.style.cssText = 'font-size:13px;line-height:1.4;opacity:0.95;';
+    const truncated = rawComment.length > 80 ? rawComment.slice(0, 80) + '…' : rawComment;
+    commentEl.textContent = truncated;
+    card.appendChild(commentEl);
+  }
+
+  return card;
+}
+
+function _starString(score) {
+  const n = Math.max(0, Math.min(5, Math.round(score)));
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+function _relativeTime(iso) {
+  if (!iso) return '';
+  const then = new Date(iso);
+  if (isNaN(then.getTime())) return '';
+  const diffMs = Date.now() - then.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'ahora';
+  if (mins < 60) return `hace ${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `hace ${hrs} h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `hace ${days} d`;
+  return then.toLocaleDateString();
+}
+
 // ── Keyboard shortcuts ────────────────────────────────
 document.addEventListener('keydown', e => {
   if (e.key === 'F12') { e.preventDefault(); openPayModal(); return; }
@@ -1470,7 +1579,13 @@ mesioInterval(() => {
   else if (_currentTab === 'proposals') loadDeliveryProposals();
   else if (_currentTab === 'pickup') loadPickupOrders();
   else if (_currentTab === 'chats') loadChatsTab();
+  else if (_currentTab === 'nps') loadRecentNpsTab();
 }, 18000);
+
+// NPS feed gets a shorter refresh (30s) when active — fresher signal for caja.
+mesioInterval(() => {
+  if (_currentTab === 'nps') loadRecentNpsTab();
+}, 30000);
 
 // ── Boot ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {

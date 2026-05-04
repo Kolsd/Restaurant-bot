@@ -330,6 +330,7 @@ from app.repositories.restaurant_repo import (
     db_sync_batch,
     db_get_nps_stats,
     db_get_nps_responses,
+    db_get_recent_nps_for_caja,
     db_increment_token_usage,
     db_increment_invoice_usage,
     db_check_usage_limits,
@@ -433,6 +434,9 @@ from app.repositories.conversations_repo import (
 from app.repositories.conversations_repo import (
     db_save_nps_waiting,
     db_clear_nps_waiting,
+    db_get_nps_waiting_pending_reminder,
+    db_mark_nps_reminded,
+    db_cleanup_expired_nps_waiting,
 )
 
 

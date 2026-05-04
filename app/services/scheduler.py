@@ -495,6 +495,84 @@ async def _run_weekly_owner_reports():
             )
 
 
+async def _run_nps_reminders():
+    """Send a 24h follow-up to NPS surveys the customer ignored.
+
+    Scans nps_waiting for rows where created_at is 24-48h old and reminded_at
+    is NULL, then sends one polite reminder per row and marks reminded_at.
+    Also runs an idempotent cleanup of rows older than 48h (replied or not).
+
+    Cross-tenant scan + per-tenant send pattern: bypass for the scan, then
+    tenant_scope(org_id) for each individual restaurant lookup + WhatsApp send.
+    """
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
+
+    try:
+        with bypass_tenant_scope("scheduler.nps_reminders.scan"):
+            pending = await db.db_get_nps_waiting_pending_reminder()
+    except Exception:
+        log.exception("scheduler.nps_reminder_scan_failed")
+        pending = []
+
+    for entry in pending:
+        bot_number = entry.get("bot_number") or ""
+        phone = entry.get("phone") or ""
+        org_id = entry.get("org_id")
+        if not bot_number or not phone or org_id is None:
+            continue
+        try:
+            with bypass_tenant_scope("scheduler.nps_reminders.resolve_restaurant"):
+                restaurant = await db.db_get_restaurant_by_phone(bot_number)
+            if not restaurant:
+                log.warning("scheduler.nps_reminder_no_restaurant", bot_number=bot_number)
+                continue
+            access_token = restaurant.get("wa_access_token") or os.getenv("META_ACCESS_TOKEN", "")
+            if not access_token:
+                log.warning("scheduler.nps_reminder_no_token", bot_number=bot_number)
+                continue
+            phone_id = restaurant.get("wa_phone_id") or restaurant.get("meta_phone_id")
+
+            from app.services.meta_api import send_text  # noqa: PLC0415
+            msg = (
+                "Hola — ¿tuviste chance de calificar tu última visita? "
+                "Tomá 5 segundos y respondé del 1 al 5."
+            )
+            ok = await send_text(
+                bot_number=bot_number,
+                access_token=access_token,
+                phone=phone,
+                text=msg,
+                phone_id=phone_id,
+            )
+            if not ok:
+                log.warning(
+                    "scheduler.nps_reminder_send_failed",
+                    bot_number=bot_number, phone_obf=phone[-4:],
+                )
+                continue
+
+            with tenant_scope(int(org_id)):
+                await db.db_mark_nps_reminded(phone, bot_number)
+            log.info(
+                "scheduler.nps_reminder_sent",
+                bot_number=bot_number, phone_obf=phone[-4:],
+            )
+        except Exception:
+            log.exception(
+                "scheduler.nps_reminder_failed",
+                bot_number=bot_number, phone_obf=phone[-4:] if phone else "",
+            )
+
+    # Cleanup phase — bypass for cross-tenant DELETE
+    try:
+        with bypass_tenant_scope("scheduler.nps_reminders.cleanup"):
+            deleted = await db.db_cleanup_expired_nps_waiting()
+        if deleted:
+            log.info("scheduler.nps_cleanup", deleted=deleted)
+    except Exception:
+        log.exception("scheduler.nps_cleanup_failed")
+
+
 async def _renew_or_abort(token: str, ttl_seconds: int = 90) -> bool:
     """
     Renew the scheduler leader lease.  Returns False if the lease was lost
@@ -563,6 +641,13 @@ async def _scheduler_loop():
                 await _run_occupancy_snapshot()
                 if not await _renew_or_abort(leader_token):
                     log.warning("scheduler.tick_aborted_after_occupancy_snapshot")
+                    continue
+
+            # Send NPS 24h reminders + cleanup every 30 minutes
+            if _reminder_counter % 30 == 0:
+                await _run_nps_reminders()
+                if not await _renew_or_abort(leader_token):
+                    log.warning("scheduler.tick_aborted_after_nps_reminders")
                     continue
 
             # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)

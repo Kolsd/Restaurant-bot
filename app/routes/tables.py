@@ -2075,3 +2075,24 @@ async def _get_recent_orders_for_phone(org_id: int, phone: str, limit: int = 5) 
     combined = delivery + table
     combined.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return combined[:limit]
+
+
+# ── CAJA: Recent NPS feed ─────────────────────────────────────────────────────
+
+@router.get("/api/caja/recent-nps")
+async def get_caja_recent_nps(
+    limit: int = 10,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+) -> dict:
+    """Return recent NPS responses for the caja widget.
+
+    Auth: Bearer token of admin/owner/gerente (get_current_restaurant_scoped).
+    Tenant-scoped via the dep — the repo query filters by app.org_id GUC.
+
+    Returns:
+        {"items": [{"phone": "***1234", "score": 5, "comment": "...", "created_at": "..."}]}
+
+    Phone is anonymized (last 4 digits only). limit is clamped to [1, 50].
+    """
+    rows = await db.db_get_recent_nps_for_caja(limit)
+    return {"items": rows}

@@ -1493,6 +1493,45 @@ async def db_get_nps_responses(bot_number: str, period: str = "month", limit: in
             return result
 
 
+async def db_get_recent_nps_for_caja(limit: int = 10) -> list[dict]:
+    """Return the most recent NPS responses for the current tenant.
+
+    RLS-scoped via app.org_id GUC — caller must be inside tenant_scope().
+    Phone is anonymized to "***1234" (last 4 digits) so caja staff can
+    correlate with a recent customer without exposing full PII on screen.
+
+    The widget polls this every 30s; an order-by-created_at LIMIT keeps
+    it cheap even on busy tenants.
+    """
+    if limit < 1:
+        limit = 1
+    if limit > 50:
+        limit = 50
+    async with _tenant_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT phone, score, COALESCE(comment, '') AS comment, created_at
+               FROM nps_responses
+               WHERE org_id = NULLIF(current_setting('app.org_id', true), '')::int
+               ORDER BY created_at DESC
+               LIMIT $1""",
+            limit,
+        )
+    out = []
+    for r in rows:
+        raw_phone = r["phone"] or ""
+        if raw_phone:
+            anon = "***" + raw_phone[-4:]
+        else:
+            anon = "***"
+        out.append({
+            "phone": anon,
+            "score": r["score"],
+            "comment": r["comment"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+    return out
+
+
 # ── Subscription usage ────────────────────────────────────────────────────────
 
 async def _ensure_usage_table() -> None:

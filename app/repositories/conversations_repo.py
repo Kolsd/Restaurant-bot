@@ -326,6 +326,65 @@ async def db_clear_nps_waiting(phone: str, bot_number: str):
         )
 
 
+async def db_get_nps_waiting_pending_reminder() -> list:
+    """Return nps_waiting rows that need a 24h reminder.
+
+    Returns rows where:
+      - reminded_at IS NULL (no reminder sent yet)
+      - created_at is between 24h and 48h ago (window for reminder)
+
+    Caller must enter bypass_tenant_scope() — this is a cross-tenant
+    scheduler scan. Each returned row carries org_id so the caller can
+    apply tenant_scope(org_id) per-row before sending the reminder.
+    """
+    async with _tenant_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT phone, bot_number, org_id, created_at
+               FROM nps_waiting
+               WHERE reminded_at IS NULL
+                 AND created_at < NOW() - INTERVAL '24 hours'
+                 AND created_at > NOW() - INTERVAL '48 hours'"""
+        )
+    return [dict(r) for r in rows]
+
+
+async def db_mark_nps_reminded(phone: str, bot_number: str) -> int:
+    """Mark a pending NPS row as reminded. Returns affected row count.
+
+    Idempotent: a second call returns 0 because the WHERE clause requires
+    reminded_at IS NULL. Caller can safely retry on transient send failures
+    without double-marking.
+    """
+    async with _tenant_connection() as conn:
+        result = await conn.execute(
+            """UPDATE nps_waiting
+               SET reminded_at = NOW()
+               WHERE phone = $1 AND bot_number = $2 AND reminded_at IS NULL""",
+            phone, bot_number,
+        )
+    # asyncpg returns "UPDATE N" — extract the count
+    try:
+        return int(result.split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
+async def db_cleanup_expired_nps_waiting() -> int:
+    """Delete nps_waiting rows older than 48h. Returns deleted row count.
+
+    Runs as a scheduler cleanup phase. Removes rows whose 48h window has
+    expired regardless of state (replied, reminded, or ignored).
+    """
+    async with _tenant_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM nps_waiting WHERE created_at < NOW() - INTERVAL '48 hours'"
+        )
+    try:
+        return int(result.split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 # ── CARRITOS ─────────────────────────────────────────────────────────
 
 async def db_get_cart(phone: str, bot_number: str) -> dict:
