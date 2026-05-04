@@ -48,6 +48,7 @@
           <a class="set-nav-item" href="#notif">🔔 Notificaciones</a>
           <div class="set-nav-sub">Plataforma</div>
           <a class="set-nav-item" href="#integ">🔗 Integraciones</a>
+          <a class="set-nav-item" href="#seguridad">🛡️ Seguridad</a>
           <a class="set-nav-item danger" href="#peligro">⚠️ Zona peligrosa</a>
         </nav>
 
@@ -384,6 +385,54 @@
                 <div class="integ-desc">Sincroniza reservas y turnos</div>
               </div>
               <span class="badge">Próximamente</span>
+            </div>
+          </section>
+
+          <!-- Seguridad: phone blocklist -->
+          <section id="seguridad" class="card set-sec">
+            <h2>Seguridad &middot; Teléfonos bloqueados</h2>
+            <div class="s-sub">Bloqueá manualmente teléfonos que están haciendo abuso del bot (spam, suplantación, mesas fantasma). Los bloqueos automáticos por mesas marcadas como "fantasma" también aparecen acá. Cada bloqueo expira y se desbloquea solo.</div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Bloquear teléfono</div>
+                <div class="fg-hint">Solo dígitos, formato internacional sin '+'. Ej: 573001234567.</div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <input id="bl-phone" class="input mono" type="tel" inputmode="numeric" placeholder="573001234567" autocomplete="off" />
+                <select id="bl-hours" class="sel" aria-label="Duración del bloqueo">
+                  <option value="1">1 hora</option>
+                  <option value="6">6 horas</option>
+                  <option value="24" selected>24 horas</option>
+                  <option value="72">3 días</option>
+                  <option value="168">7 días</option>
+                  <option value="720">30 días</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div>
+                <div class="fg-label">Razón</div>
+                <div class="fg-hint">Para que el equipo entienda por qué se bloqueó.</div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;">
+                <textarea id="bl-reason" class="input" rows="2" placeholder="Ej: spam reiterado, mesa fantasma confirmada, intento de fraude" maxlength="200"></textarea>
+                <button class="btn brand" id="bl-block-btn" type="button">Bloquear</button>
+              </div>
+            </div>
+
+            <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <div>
+                  <div class="fg-label">Bloqueos activos</div>
+                  <div class="fg-hint" id="bl-count">&mdash;</div>
+                </div>
+                <button class="btn sm" id="bl-refresh-btn" type="button">Actualizar</button>
+              </div>
+              <div id="bl-list" role="list" aria-label="Lista de teléfonos bloqueados">
+                <div style="padding:14px;color:var(--text-3);font-size:13px;">Cargando&hellip;</div>
+              </div>
             </div>
           </section>
 

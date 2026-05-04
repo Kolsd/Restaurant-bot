@@ -240,6 +240,130 @@ async def pause_restaurant(body: _PauseBody, request: Request):
     }
 
 
+# ── PHONE BLOCKLIST (admin manual) ────────────────────────────────────
+
+
+def _normalize_phone(phone: str) -> str:
+    """Strip whitespace, '+' and dashes — keep only digits."""
+    return (phone or "").strip().replace(" ", "").replace("+", "").replace("-", "")
+
+
+def _require_admin_role(user: dict, action: str) -> None:
+    """Raise 403 unless user.role contains owner or admin."""
+    role = (user.get("role") or "").lower()
+    user_roles = {r.strip() for r in role.split(",") if r.strip()}
+    if not (user_roles & {"owner", "admin"}):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Solo owner o admin pueden {action}",
+        )
+
+
+def _resolve_org_id(restaurant: dict) -> int:
+    """Return the org_id (canonical tenant key) from a restaurant dict."""
+    org_id = restaurant.get("org_id") or restaurant.get("id")
+    if org_id is None:
+        raise HTTPException(status_code=500, detail="Restaurante sin org_id")
+    return int(org_id)
+
+
+class _BlockPhoneBody(BaseModel):
+    phone: str
+    reason: str = ""
+    hours: int = 24
+
+
+@router.get("/api/admin/blocklist")
+async def list_blocklist(restaurant: dict = Depends(get_current_restaurant)):
+    """List currently-active phone blocks for this org. Admin-facing.
+
+    Returns up to 200 active blocks (blocked_until > NOW()), ordered by
+    expiry descending. The phone field is included as-is; phone_obf is
+    a UI-friendly masked version (e.g. ***1234).
+    """
+    from app.repositories.phone_blocklist_repo import list_active_blocks_for_org
+
+    org_id = _resolve_org_id(restaurant)
+    with tenant_scope(org_id):
+        items = await list_active_blocks_for_org(org_id, limit=200)
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/api/admin/blocklist")
+async def block_phone(body: _BlockPhoneBody, request: Request):
+    """Block a phone manually for N hours. Owner/admin only.
+
+    Validation:
+      - phone: 7-15 digits (international format, no '+').
+      - hours: 1-720 (max 30 days).
+      - reason: free text, capped at 200 chars.
+    """
+    user = await get_current_user(request)
+    _require_admin_role(user, "bloquear teléfonos")
+
+    phone = _normalize_phone(body.phone)
+    if not phone.isdigit() or len(phone) < 7 or len(phone) > 15:
+        raise HTTPException(status_code=400, detail="Phone debe tener 7-15 dígitos")
+    if not isinstance(body.hours, int) or body.hours < 1 or body.hours > 720:
+        raise HTTPException(status_code=400, detail="Hours debe estar entre 1 y 720")
+
+    restaurant = await get_current_restaurant(request)
+    org_id = _resolve_org_id(restaurant)
+    blocker = user.get("username") or "admin"
+    reason = (body.reason or "manual_admin")[:200]
+
+    from app.repositories.phone_blocklist_repo import add_to_blocklist
+    with tenant_scope(org_id):
+        await add_to_blocklist(
+            phone=phone,
+            org_id=org_id,
+            reason=reason,
+            blocked_by=blocker,
+            hours=body.hours,
+        )
+
+    log.info(
+        "admin.phone_blocked",
+        phone_obf="***" + phone[-4:],
+        by=blocker,
+        org_id=org_id,
+        hours=body.hours,
+    )
+    return {"success": True, "phone": phone, "hours": body.hours}
+
+
+@router.delete("/api/admin/blocklist/{phone}")
+async def unblock_phone(phone: str, request: Request):
+    """Remove a phone from the blocklist. Owner/admin only.
+
+    Returns 404 if the phone was not currently blocked for this org.
+    """
+    user = await get_current_user(request)
+    _require_admin_role(user, "desbloquear teléfonos")
+
+    phone_clean = _normalize_phone(phone)
+    if not phone_clean.isdigit() or len(phone_clean) < 7 or len(phone_clean) > 15:
+        raise HTTPException(status_code=400, detail="Phone inválido")
+
+    restaurant = await get_current_restaurant(request)
+    org_id = _resolve_org_id(restaurant)
+
+    from app.repositories.phone_blocklist_repo import remove_from_blocklist
+    with tenant_scope(org_id):
+        removed = await remove_from_blocklist(phone_clean, org_id)
+
+    if not removed:
+        raise HTTPException(status_code=404, detail="Phone no estaba bloqueado")
+
+    log.info(
+        "admin.phone_unblocked",
+        phone_obf="***" + phone_clean[-4:],
+        by=user.get("username") or "admin",
+        org_id=org_id,
+    )
+    return {"success": True, "phone": phone_clean}
+
+
 # ── WEEKLY REPORTS ────────────────────────────────────────────────────
 
 _PHONE_RE = re.compile(r"^\+?\d{10,15}$")

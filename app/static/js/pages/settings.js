@@ -368,6 +368,197 @@ function bindLogout() {
   if (btn) { btn.addEventListener('click', mesioLogout); }
 }
 
+// ── Phone blocklist (admin) ───────────────────────────────────────
+function _formatRelativeUntil(iso) {
+  if (!iso) return '';
+  var t = Date.parse(iso);
+  if (isNaN(t)) return '';
+  var diffMs = t - Date.now();
+  if (diffMs <= 0) return 'expirado';
+  var mins = Math.round(diffMs / 60000);
+  if (mins < 60) return 'expira en ' + mins + ' min';
+  var hours = Math.round(mins / 60);
+  if (hours < 48) return 'expira en ' + hours + ' h';
+  var days = Math.round(hours / 24);
+  return 'expira en ' + days + ' días';
+}
+
+async function loadBlocklist() {
+  var listEl = document.getElementById('bl-list');
+  var countEl = document.getElementById('bl-count');
+  if (!listEl) return;
+
+  // Loading state — innerHTML with static markup only (no user data)
+  listEl.innerHTML = '<div style="padding:14px;color:var(--text-3);font-size:13px;">Cargando&hellip;</div>';
+
+  try {
+    var res = await fetch('/api/admin/blocklist', { headers: mesioHeaders() });
+    if (res.status === 401) { window.location.href = '/login'; return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    var items = (data && data.items) || [];
+
+    if (countEl) {
+      countEl.textContent = items.length === 0
+        ? 'No hay bloqueos activos'
+        : items.length + ' bloqueo' + (items.length === 1 ? '' : 's') + ' activo' + (items.length === 1 ? '' : 's');
+    }
+
+    // Clear and rebuild via DOM (textContent for all user data)
+    listEl.textContent = '';
+    if (items.length === 0) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'padding:14px;color:var(--text-3);font-size:13px;';
+      empty.textContent = 'No hay teléfonos bloqueados en este momento.';
+      listEl.appendChild(empty);
+      return;
+    }
+
+    items.forEach(function (item) {
+      var row = document.createElement('div');
+      row.setAttribute('role', 'listitem');
+      row.style.cssText = 'display:grid;grid-template-columns:140px 1fr auto;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);';
+
+      // Phone (obfuscated)
+      var phoneCell = document.createElement('div');
+      var phoneSpan = document.createElement('span');
+      phoneSpan.className = 'mono';
+      phoneSpan.style.cssText = 'font-weight:600;';
+      phoneSpan.textContent = item.phone_obf || '***';
+      phoneCell.appendChild(phoneSpan);
+      var expSpan = document.createElement('div');
+      expSpan.style.cssText = 'font-size:11px;color:var(--text-3);margin-top:2px;';
+      expSpan.textContent = _formatRelativeUntil(item.blocked_until);
+      phoneCell.appendChild(expSpan);
+      row.appendChild(phoneCell);
+
+      // Reason + blocker
+      var infoCell = document.createElement('div');
+      var reasonDiv = document.createElement('div');
+      reasonDiv.style.cssText = 'font-size:13px;color:var(--text-1);';
+      reasonDiv.textContent = item.reason || '(sin razón)';
+      infoCell.appendChild(reasonDiv);
+      var byDiv = document.createElement('div');
+      byDiv.style.cssText = 'font-size:11px;color:var(--text-3);margin-top:2px;';
+      byDiv.textContent = 'Bloqueado por: ' + (item.blocked_by || 'sistema');
+      infoCell.appendChild(byDiv);
+      row.appendChild(infoCell);
+
+      // Unblock button
+      var btnCell = document.createElement('div');
+      var btn = document.createElement('button');
+      btn.className = 'btn sm';
+      btn.type = 'button';
+      btn.textContent = 'Desbloquear';
+      btn.addEventListener('click', function () {
+        handleUnblockPhone(item.phone, item.phone_obf);
+      });
+      btnCell.appendChild(btn);
+      row.appendChild(btnCell);
+
+      listEl.appendChild(row);
+    });
+  } catch (e) {
+    listEl.textContent = '';
+    var errDiv = document.createElement('div');
+    errDiv.style.cssText = 'padding:14px;color:var(--danger);font-size:13px;';
+    errDiv.textContent = 'No se pudieron cargar los bloqueos: ' + e.message;
+    listEl.appendChild(errDiv);
+  }
+}
+
+async function handleBlockPhone() {
+  var phoneEl = document.getElementById('bl-phone');
+  var reasonEl = document.getElementById('bl-reason');
+  var hoursEl = document.getElementById('bl-hours');
+  var btn = document.getElementById('bl-block-btn');
+  if (!phoneEl || !btn) return;
+
+  var rawPhone = (phoneEl.value || '').trim();
+  var phone = rawPhone.replace(/[^\d]/g, '');
+  if (phone.length < 7 || phone.length > 15) {
+    mesioToast('El teléfono debe tener entre 7 y 15 dígitos', 'error');
+    phoneEl.focus();
+    return;
+  }
+  var reason = (reasonEl && reasonEl.value || '').trim();
+  if (!reason) {
+    mesioToast('Escribí una razón breve para el bloqueo', 'error');
+    if (reasonEl) reasonEl.focus();
+    return;
+  }
+  var hours = parseInt(hoursEl && hoursEl.value || '24', 10);
+  if (!hours || hours < 1 || hours > 720) hours = 24;
+
+  btn.disabled = true;
+  var originalText = btn.textContent;
+  btn.textContent = 'Bloqueando…';
+  try {
+    var res = await fetch('/api/admin/blocklist', {
+      method: 'POST',
+      headers: mesioHeaders(),
+      body: JSON.stringify({ phone: phone, reason: reason, hours: hours })
+    });
+    if (res.status === 401) { window.location.href = '/login'; return; }
+    if (res.status === 403) {
+      mesioToast('No tenés permiso para bloquear teléfonos', 'error');
+      return;
+    }
+    if (!res.ok) {
+      var err = await res.json().catch(function () { return {}; });
+      throw new Error(err.detail || ('HTTP ' + res.status));
+    }
+    mesioToast('Teléfono bloqueado por ' + hours + ' h', 'success');
+    phoneEl.value = '';
+    if (reasonEl) reasonEl.value = '';
+    await loadBlocklist();
+  } catch (e) {
+    mesioToast('No se pudo bloquear: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+async function handleUnblockPhone(phone, phoneObf) {
+  if (!phone) return;
+  var label = phoneObf || ('***' + phone.slice(-4));
+  var ok = await mesioConfirm('¿Desbloquear el teléfono ' + label + '? Recibirá mensajes del bot inmediatamente.');
+  if (!ok) return;
+
+  try {
+    var res = await fetch('/api/admin/blocklist/' + encodeURIComponent(phone), {
+      method: 'DELETE',
+      headers: mesioHeaders()
+    });
+    if (res.status === 401) { window.location.href = '/login'; return; }
+    if (res.status === 403) {
+      mesioToast('No tenés permiso para desbloquear teléfonos', 'error');
+      return;
+    }
+    if (res.status === 404) {
+      mesioToast('Ese teléfono ya no estaba bloqueado', 'info');
+      await loadBlocklist();
+      return;
+    }
+    if (!res.ok) {
+      var err = await res.json().catch(function () { return {}; });
+      throw new Error(err.detail || ('HTTP ' + res.status));
+    }
+    mesioToast('Teléfono desbloqueado', 'success');
+    await loadBlocklist();
+  } catch (e) {
+    mesioToast('No se pudo desbloquear: ' + e.message, 'error');
+  }
+}
+
+function bindBlocklistHandlers() {
+  var blockBtn = document.getElementById('bl-block-btn');
+  var refreshBtn = document.getElementById('bl-refresh-btn');
+  if (blockBtn) blockBtn.addEventListener('click', handleBlockPhone);
+  if (refreshBtn) refreshBtn.addEventListener('click', loadBlocklist);
+}
+
 // ── Init ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
   // Save buttons
@@ -386,6 +577,8 @@ document.addEventListener('DOMContentLoaded', function () {
   bindSwitches();
   bindNavLinks();
   bindLogout();
+  bindBlocklistHandlers();
   initScrollSpy();
   loadSettings().then(function () { _updatePauseButton(); });
+  loadBlocklist();
 });

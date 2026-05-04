@@ -125,6 +125,76 @@ async def is_phone_blocked(phone: str) -> dict | None:
         return d
 
 
+async def list_active_blocks_for_org(org_id: int, limit: int = 100) -> list[dict]:
+    """List currently-active blocks (blocked_until > NOW()) for the given org.
+
+    Returns a list of dicts with phone obfuscated (last 4 digits + ***) for
+    safer display. Caller must already be inside tenant_scope() — the RLS
+    policy ensures org_id matches even though we filter explicitly.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    safe_limit = max(1, min(limit, 500))
+    async with _conn() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, phone, reason, blocked_by, blocked_until, created_at
+            FROM phone_blocklist
+            WHERE org_id = $1 AND blocked_until > NOW()
+            ORDER BY blocked_until DESC
+            LIMIT $2
+            """,
+            org_id, safe_limit,
+        )
+    out: list[dict] = []
+    for r in rows:
+        phone = r["phone"] or ""
+        phone_obf = ("***" + phone[-4:]) if len(phone) >= 4 else "***"
+        blocked_until = r["blocked_until"]
+        created_at = r["created_at"]
+        out.append({
+            "id": r["id"],
+            "phone": phone,
+            "phone_obf": phone_obf,
+            "reason": r["reason"] or "",
+            "blocked_by": r["blocked_by"] or "",
+            "blocked_until": blocked_until.isoformat() if isinstance(blocked_until, datetime) else None,
+            "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
+        })
+    return out
+
+
+async def remove_from_blocklist(phone: str, org_id: int) -> bool:
+    """Remove all active blocks for *phone* belonging to *org_id*.
+
+    Returns True if at least one row was deleted, False otherwise.
+    Idempotent on repeat calls (second call returns False).
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with _conn() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM phone_blocklist
+            WHERE phone = $1 AND org_id = $2 AND blocked_until > NOW()
+            """,
+            phone, org_id,
+        )
+    # asyncpg returns "DELETE N" — parse N safely.
+    try:
+        deleted_count = int(result.split()[-1])
+    except (ValueError, AttributeError, IndexError):
+        deleted_count = 0
+    if deleted_count > 0:
+        log.info(
+            "phone_blocklist.removed",
+            phone=phone,
+            org_id=org_id,
+            deleted=deleted_count,
+        )
+    return deleted_count > 0
+
+
 async def cleanup_expired(older_than_hours: int = 24) -> int:
     """Delete phone_blocklist rows where blocked_until is in the past by at
     least *older_than_hours* hours.  Idempotent and safe to run repeatedly.
