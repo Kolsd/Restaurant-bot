@@ -353,10 +353,32 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                     log.error("orders.delivery_notification_rejected", phone=clean_phone, status=res.status_code, body=res.text[:200])
         except Exception as e:
             log.error("orders.delivery_notification_failed", phone=clean_phone, error=str(e))
+
+        # For entregado: send NPS question as a second message so the customer
+        # doesn't have to reply first (they rarely would after a delivery ends).
+        if status == 'entregado':
+            try:
+                from app.services.meta_api import send_text as _meta_send_text  # noqa: PLC0415
+                nps_name = f" de *{rest_name}*" if rest_name else ""
+                nps_msg = (
+                    f"⭐ ¿Cómo calificarías tu pedido{nps_name}?\n"
+                    f"Responde con un número del *1 al 5*\n"
+                    f"_(1 = Muy mala · 5 = Excelente)_"
+                )
+                await _meta_send_text(
+                    bot_number=bot_number,
+                    access_token=token,
+                    phone=clean_phone,
+                    text=nps_msg,
+                    phone_id=phone_id,
+                )
+                log.info("orders.nps_question_sent", phone=clean_phone)
+            except Exception as _nps_e:
+                log.error("orders.nps_question_failed", phone=clean_phone, error=str(_nps_e))
     else:
         log.warning("orders.delivery_notification_no_credentials", phone=phone, bot_number=bot_number, has_token=bool(token), has_phone_id=bool(phone_id))
 
-    # NPS is triggered by the caller (update_delivery_status).
+    # NPS state is set by the caller (update_delivery_status → trigger_nps).
 
 
 @router.get("/delivery/check-updates")
