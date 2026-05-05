@@ -299,19 +299,32 @@ body {
   .dom-hero { padding-top: 20px; }
 }
 
-/* ── Desktop: wide panel, no phone chrome ── */
+/* ── Desktop: full-screen app, no phone chrome ── */
 @media (min-width: 769px) {
-  .phone-wrap { align-items: flex-start; padding: 0; }
+  body { background: #f5f5f0; }
+  .phone-wrap {
+    align-items: flex-start;
+    justify-content: center;
+    padding: 0;
+    background: #f5f5f0;
+  }
   .phone-frame {
     width: 100%;
-    max-width: 640px;
+    max-width: none;
     max-height: none;
     height: 100vh;
     border-radius: 0;
     border: none;
     box-shadow: none;
+    background: #f5f5f0;
+  }
+  .phone-screen {
+    /* Limit readable line width on ultra-wide monitors */
+    max-width: 680px;
+    margin: 0 auto;
+    width: 100%;
   }
   .notch { display: none; }
   .phone-status { display: none; }
-  .dom-hero { padding-top: 28px; }
+  .dom-hero { padding-top: 28px; border-radius: 0 0 24px 24px; }
 }
