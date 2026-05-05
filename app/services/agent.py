@@ -201,7 +201,9 @@ client = _LazyClient()
 
 MODEL_FAST    = os.environ.get("BOT_MODEL_FAST", "claude-haiku-4-5-20251001")
 MODEL_PRECISE = os.environ.get("BOT_MODEL_PRECISE", "claude-sonnet-4-6")
-MAX_TOKENS    = int(os.environ.get("BOT_MAX_TOKENS", "2048"))
+MAX_TOKENS       = int(os.environ.get("BOT_MAX_TOKENS", "2048"))       # ceiling / legacy alias
+MAX_TOKENS_SHORT = int(os.environ.get("BOT_MAX_TOKENS_SHORT", "768"))  # normal bot replies
+MAX_TOKENS_LONG  = MAX_TOKENS                                           # tool_results / heavy context
 
 _INJECTION_PATTERNS = [
     r'\[MENÚ[:\s]',
@@ -986,12 +988,14 @@ async def build_system_prompt(
     else:
         prompt = build_external_prompt(restrictions)
 
+    # Append dynamic blocks as SEPARATE entries (no cache_control) so the
+    # cached block's text stays byte-for-byte identical across calls.
+    # Anthropic caches up to the last cache_control breakpoint; anything
+    # appended after is charged as uncached input, which is cheap vs. the
+    # cache-miss cost of mutating the cached text on every request.
     if discount_block or customer_block or history_block:
-        # Append all blocks to the last text entry in the system prompt list
-        for block in reversed(prompt):
-            if isinstance(block, dict) and block.get("type") == "text":
-                block["text"] = block["text"] + discount_block + customer_block + history_block
-                break
+        combined = discount_block + customer_block + history_block
+        prompt.append({"type": "text", "text": combined})
 
     return prompt
 
@@ -1002,6 +1006,7 @@ async def call_claude(
     model: str = MODEL_FAST,
     restaurant_id: int | None = None,
     tools: list | None = None,
+    max_tokens: int = MAX_TOKENS_LONG,
 ) -> dict:
     """
     Call Claude and return a structured result dict:
@@ -1010,11 +1015,13 @@ async def call_claude(
         "tool_name": str|None,  # tool called, if any
         "tool_input": dict|None # tool parameters, if any
     }
+    Use max_tokens=MAX_TOKENS_SHORT for normal one-turn bot replies.
+    Use max_tokens=MAX_TOKENS_LONG (default) for heavy tool_result threads.
     """
     if restaurant_id is not None:
         await db.db_check_usage_limits(restaurant_id)
 
-    kwargs = {"model": model, "max_tokens": MAX_TOKENS, "system": system, "messages": messages}
+    kwargs = {"model": model, "max_tokens": max_tokens, "system": system, "messages": messages}
     if tools:
         kwargs["tools"] = tools
 
@@ -2495,6 +2502,7 @@ async def _call_llm_and_execute(
             sys_prompt, messages, model=MODEL_FAST,
             restaurant_id=restaurant_obj.get("id"),
             tools=tools,
+            max_tokens=MAX_TOKENS_SHORT,
         )
     except Exception:
         log.exception("call_llm_and_execute.claude_error", phone=_ofuscar_phone(user_phone), bot_number=bot_number)

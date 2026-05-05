@@ -423,7 +423,10 @@ TOOLS_SALON: list[dict] = [
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
     _SEND_DISH_CARD,
-    _REDEEM_LOYALTY_POINTS,
+    # cache_control on the LAST tool caches all tools in this list.
+    # Anthropic prompt caching for tools: the cache breakpoint is set on
+    # the last tool entry, so all preceding tools are included in the cache.
+    {**_REDEEM_LOYALTY_POINTS, "cache_control": {"type": "ephemeral"}},
 ]
 """Tools available in dine-in (salon/table) mode."""
 
@@ -438,7 +441,8 @@ TOOLS_EXTERNAL: list[dict] = [
     _END_SESSION,
     _REMEMBER_CUSTOMER_PREFERENCE,
     _SEND_DISH_CARD,
-    _REDEEM_LOYALTY_POINTS,
+    # cache_control on the LAST tool caches all tools in this list.
+    {**_REDEEM_LOYALTY_POINTS, "cache_control": {"type": "ephemeral"}},
 ]
 """Tools available in external (delivery/pickup) mode."""
 
