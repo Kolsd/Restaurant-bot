@@ -1,1 +1,0 @@
-[lint_frontend] OK — 0 violations across 35 JS files.
