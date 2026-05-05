@@ -315,19 +315,17 @@ with bypass_tenant_scope("webhook_enqueue_cross_tenant"):
 - ~~6 X-Branch-ID conflation sites pendientes en `staff.py`~~ — **CERRADO en Paso 10**. Los 6 sitios fueron migrados al fix template: org_id consistente para queries org-level, location_id propagado al param opcional `branch_id` de `db_calculate_payroll` para tip scoping per-sede.
 - Fase 2 (integridad/concurrencia) y Fase 3 (desacoplamiento IA + middlewares) — ✅ shipped 2026-04-17. El plan original se eliminó del repo cuando se cerró el último item.
 
-## Fases históricas — todas completas
+## Sprints completados — historial en `docs/history/sprints.md`
 
-**Refactor Blindaje (Fases 1-8)**: ✅ Todas shipped. ACID órdenes, webhook inbox durable, Redis multi-worker state, SHA-256 sesiones + anti prompt injection, Decimal end-to-end, Repository pattern completo, god files extraídos, observabilidad + alertas + analytics.
+Refactor Blindaje (Fases 1-8), Integración Apparta (Fases 1-7), Pre-launch hardening, "No-v2", E2E hardening, Optimization audit, LLM/DB perf — todos shipped. Detalle completo en [docs/history/sprints.md](docs/history/sprints.md).
 
-Detalles específicos que SIGUEN siendo relevantes hoy:
-- **Worker separado (Fase 8)**: `scripts/run_inbox_worker.py` + `railway.toml` con `WORKER_MODE=inbox`. `DISABLE_EMBEDDED_WORKER=1` para web service.
+Ítems del Refactor Blindaje que SIGUEN siendo relevantes hoy (no buscar en historial):
+- **Worker separado**: `scripts/run_inbox_worker.py` + `railway.toml` con `WORKER_MODE=inbox`. `DISABLE_EMBEDDED_WORKER=1` para web service.
 - **Lifespan pattern**: `@asynccontextmanager lifespan(app)` (no `@app.on_event`).
 - **Leader election scheduler**: via `state_store.scheduler_leader_acquire` (Redis SET NX EX).
 - **Rate limiting**: `state_store.rate_limit_check()` aplicado a `pay_check` (3 req/10s).
-- **Observabilidad**: `/monitoring`, `/analytics`, `/health/metrics` + `services/alerts.py` (5 checks cada 60s, cooldown 5min, webhook vía `ALERT_WEBHOOK_URL`).
-- **Arquitectura repos**: 16+ repos (+ `staff_comms_repo` agregado en Sprint C/W). Zero SQL en routes/services.
-
-**Integración Apparta (Fases 1-7)**: ✅ Todas shipped. Reservas (schema + dashboard + bot), floor plan editor, Wompi deposits, dynamic discounts, reviews públicos.
+- **Observabilidad**: `/monitoring`, `/analytics`, `/health/metrics` + `services/alerts.py` (5 checks cada 60s).
+- **Arquitectura repos**: 16+ repos. Zero SQL en routes/services.
 
 ### Feature Flags Nuevos (Apparta)
 
@@ -379,135 +377,24 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 11. **Exports CSV/PDF** en 6 pages (pedidos, nomina, menu-engineering, clientes-riesgo, sucursales, + billing log) — badgeados como v2. Backend PDF/CSV generation pendiente.
 12. **Mesio Pay** (billetera digital + cashback) — DIFERIDO por regulación financiera colombiana.
 
-**Closed — historial 2026-04-18/29** (conservados como referencia de diseño):
-- Migración `0012_b2b_sales_system.py` tablas huérfanas → dropeadas por 0031
-- `legacy_restaurant_id` column → dropeada por 0041 (zero readers reales)
-- `20 bypass_tenant_scope` audit → 18 calls legítimos, zero downgrades
-- `db_calculate_tips_by_attendance` per-sede filter → fixed + unskipped
-- `db_get_primary_location` rename → renombrada a `db_get_default_location`
-- CSP inline-onclick cleanup → resuelto vía rediseño frontend
-- POST /api/reservations + restaurant pause → shipped en Sprint X
-- Admin↔Staff comms (announcements + tasks) → shipped en Sprint C (migración 0042)
-- Staff self-service tips/upcoming/performance → shipped en Sprints Y+Z
-- Shift swap (v1) → shipped en Sprint W (migración 0043)
-- **Fase 2 + Fase 3 hardening** → ✅ shipped 2026-04-17 (commit ceaddf9)
-- **Wave-2 Org/Location migration (0034-0038 + 0057 sync)** → ✅ shipped y validado en producción
-- **REMEDIATION_PLAN audit (10 sesiones)** → ✅ 9/10 done, sesión 10 (auth fallback) diferida sin clientes reales (PM 2026-04-27)
-- **MESA_QR Capa 1 (QR-Phone-Claim)** → ✅ shipped 2026-04-28 (commits aab0c46 + posts)
-- **MESA_QR Capa 2 (multi-participante con join_code)** → ✅ shipped 2026-04-29 (migración 0058 + commit 185016a). 10 unit tests + 1 E2E test verdes.
-- **MESA_QR Capa 3 (anti-impostor first-order hold + phone_blocklist)** → ✅ shipped 2026-04-29 (migraciones 0059 + 0060 + commits 67fb847/df1f3b1). 10 unit tests + 2 E2E tests verdes.
-- **10 disconnects de PRODUCT_CONTEXT regla #13** → ✅ 9/10 cerrados (Capa 2 multi-orden quedó cubierto por Capa 2 join_code; #10 join_code era el mismo issue).
-- **`branch_id` legacy column eradication + forward guard test** → ✅ done 2026-04-29 (commit 1239ebd, test_no_branch_id_legacy_sql.py).
-- **36 test failures + Wompi cash-order prod bug** → ✅ done 2026-04-29 (commit 084c806). Suite 1214 passed / 0 failed.
-- **lint_frontend false-positives (DISABLED_MODULES leak)** → ✅ done 2026-04-29 (commit 2538670). 0 violations across 39 JS files.
-- **E2E test del flujo completo (Capa 1 happy path + Capa 2 multi-participante + Capa 3 validation/ghost)** → ✅ shipped 2026-04-29. 4 E2E tests reales con DB + Anthropic + inbox worker.
-- **Backend gaps pre-launch (2026-04-20)** — todos resueltos post Capa 2/3 audit:
-  - `POST /api/table-orders/{id}/checks/single/pay` → existe en tables.py:1377 ✅
-  - `POST /api/staff/self/verify-pin` → existe en staff.py:260 ✅
-  - `?table_id=` param en `/api/table-orders` → soportado y testeado en E2E ✅
-  - `orders.py` Wompi path → migrado a `tenant_connection()` ✅
-
-**Pre-launch hardening sprint (2026-04-20)** — 6-lead departmental audit + 8-wave execution (commits 39c631c → f5fcf8f):
-- Migraciones 0044-0048 (RLS gap webauthn_credentials, policy naming consistency, NUMERIC money precision, CHECK constraint shift_swap status, 7 índices compuestos)
-- Wave-2 debris cleanup: `parent_restaurant_id`/`restaurant_id` lecturas muertas en ~12 sitios (team IDOR, table ownership, order status, inventory, reservations, reviews, staff self-profile KeyError)
-- RLS bypass en 8 repos (`db_get_nps_*`, `db_get_dashboard_*`, `db_delete_staff_by_id`, etc.) migrados con patrón correcto
-- Auth gaps cerrados: `POST /api/chat` (free LLM), `/api/table-sessions/*` (IDOR), Cloudinary upload signing, `/api/media/{id}` org_id comparison
-- Bot runtime: raw pool.acquire en `agent_external.py` (3 sitios) → tenant_connection (pickup/delivery ya NO devuelven 0 rows), orphan reservation fix (deposit link preflight antes del insert), confirmation guard extendido a delivery+pickup, `module_reservations` code-level gate, cart preservation on bar failures
-- `staff_payroll.py` eliminado (duplicate + crashing endpoint)
-- Caja rebuild completo (~1,175 LOC): pay flow + split checks + tip cap + proof validation + chats tab
-- Staff clock bio/PIN wiring (cerro vulnerabilidad "anyone clocks as anyone"), kiosco mode via `?kiosco=1`
-- Mesero enrichment: 5 nuevos fields en `/api/pos/tables-status`, station filter en kitchen/bar
-- Cross-sucursal leak cerrado (X-Branch-ID header en caja/kitchen/bar/mesero/domiciliario)
-- Frontend: CSP `connect-src` sin Anthropic, menu-admin image upload wired, billing.html split + XSS fix, sidebar role filtering, sw.js precache modernizado
-- PIN login enumeration oracle unificado (siempre 401), tip-distribution exige 100% exacto
-- Tests: 1065 passed / 0 failed / 105 skipped (baseline intacto)
-
-**"No-v2" sprint (2026-04-21)** — reemplazo total de placeholders `v2` + seed data fake por features reales:
-- 3 agents Sonnet en paralelo (worktrees) + 2 agents de fix de tests = 5 delegaciones
-- Frontend: 10 HTML admin limpios de nombres/montos hardcoded (María Rodríguez, $48.4M, 8 clientes, etc.) + 4 JS populan placeholders que antes nadie llenaba
-- Backend: 11 endpoints nuevos — 3 stats aggregates, 3 loyalty aggregates, 5 loyalty campaigns CRUD, 1 payroll approve
-- Migración 0049: `loyalty_campaigns` con RLS `org_isolation` + state machine draft/active/paused
-- Lint frontend extendido: 5 checks (MOCK/TODO/FETCH/HTML-SEED nombres/HTML-SEED dinero) + `// lint-allow` como supresión con razón obligatoria
-- Tests: +27 integration tests verídicos contra `TEST_DATABASE_URL` (baseline 1143 → 1170 passed / 1 pre-existing failure / 27 skipped)
-- Patrón de fixture integración documentado (function scope + `_fake_get_pool` async + `SET LOCAL ROLE mesio_app` + manual `tx.start/rollback`)
-- Bugs reales descubiertos durante el sprint (no solo polish): 4 backend-path mismatches en JS (`/delivery/orders` sin `/api` 3×, `/payroll/export/{id}` invertido, `approve` endpoint faltante, `/api/admin/logout` legacy)
-
-**E2E hardening sprint (2026-05-05)** — disparado por bug real: `domiciliario.html` deployó sin botones (los renderiza el JS según data, sin órdenes la página queda plana). Tests existentes no lo agarraron porque NUNCA cargaban data semilla a la UI.
-- 3 agents Sonnet en paralelo: theater audit, page contracts lint, real seed-based E2E
-- Theater audit: **0 deletes**, suite ya estaba limpia post-No-v2 (130 tests con value assertions reales como `o["today"] == 156`, `data["external_id"] == "999"`, `checks[0]["total"] == 8000.0`). El gap real es UI coverage, no test theater.
-- **PAGE-CONTRACTS lint check** (`scripts/lint_frontend.py`): declara botones load-bearing + fetches por cada página operacional (domiciliario, mesero, caja, kitchen, bar, staff-hq). Mutation-tested: borrar "Salir a entregar" hace fallar lint con mensaje explícito.
-- **5 nuevos E2E tests** en `tests/e2e/` con seed real a `TEST_DATABASE_URL` + assertions de valor computado + mutation tests:
-  - `test_domiciliario_page_renders_buttons.py` — confirmado→en_camino→en_puerta→entregado, total inmutable, JSON shape garantiza render
-  - `test_mesero_table_session_renders.py` — apertura mesa → orden → fire/ready/deliver → pay con tip, asserción `check_total == 56000`
-  - `test_caja_validates_proof.py` — Nequi proof URL → validate flips paid+confirmado, idempotencia (segundo POST devuelve already_paid)
-  - `test_staff_clock_full_cycle.py` — clock-in / break / clock-out + timecard math
-  - `test_staff_pin_login_e2e.py` — happy path retorna token usable + wrong PIN retorna 401
-- **Bug prod descubierto y arreglado** durante el sprint: `POST /api/staff/pin-login` llamaba `db_get_staff_for_pin_login()` sin `tenant_scope()` previo → todos los login PIN tiraban `TenantNotSetError`. Fix: wrappear en `tenant_scope(body.restaurant_id)` (mismo patrón que `/self/verify-pin`). Cubierto por test_staff_pin_login_e2e.py — mutation-tested.
-
-**Optimization audit sprint (2026-05-05)** — purga de cruft + dead code post-redesign. 3 agents Sonnet en paralelo (Python dead code, frontend assets, scripts hygiene) + cleanup local previo.
-- Borrado local (gitignored o regenerable): `.audit/`, `.design_review/`, `.design_review_v2/` (este último estaba TRACKED, 43 archivos), `ai/` scratchpad, todos los `__pycache__/` (14 dirs, ~371 .pyc), `.pytest_cache/`.
-- `.gitignore` extendido: `.design_review_v2/`, `ai/` agregados.
-- Frontend (Agent B + me): 12 archivos borrados — 8 JS legacy del dashboard pre-redesign (`dashboard-analytics/components/core/floorplan/marketing/nps-inventory/weekly-report/wizard.js`) + 1 CSS (`mesio-role.css`) + 3 SVG logos solo referenciados por el CSS borrado. Hoja CLAUDE.md actualizada (referencia stale a `dashboard-core/components/...` removida).
-- Scripts (Agent C): 7 archivos borrados — 6 debug scratchpads (`scripts/_debug_cart/conv/conv2/features/orders/redis.py` del 2026-04-17) + `scripts/REHEARSAL.md` (guía one-shot de migración 0037 ya aplicada).
-- Python (Agent A): **0 archivos borrados** (todos los .py tienen consumidores). 2 funciones dead removidas (`db_init_nps_inventory`, `db_init_dish_recipes` en `inventory_repo.py` — stubs pre-Alembic) + 3 imports unused removidos (`chat.py`, `internal/analytics.py`, `staff_comms.py`).
-- File count proyecto (excl. `.git/` y `.claude/worktrees/`): ~1,006 → ~530 (47% reducción). El "5,965" reportado por el OS incluía `.git/` (4,959) y `.claude/worktrees/` (16MB de scratchpads de agentes Claude Code, no es proyecto).
-- Validación post-cleanup: `python -c "import app.main"` OK, `pytest tests/test_money.py tests/test_dish_normalization.py tests/test_find_dish_edges.py tests/test_frontend_lint.py` 101 passed, `lint_frontend.py` 0 violaciones.
+**Sprints cerrados (Pre-launch hardening, "No-v2", E2E hardening, Optimization audit, LLM/DB perf, MESA_QR Capas 1-3, etc.):** detalle en [docs/history/sprints.md](docs/history/sprints.md). No reproducir aquí.
 
 ### Limitaciones conocidas (no críticas)
 
 - `quantize_money` interno NO recibe `currency` en la mayoría de sitios → default 2 decimales. Solo el endpoint `pay_check` propaga `features.currency`. Para COP/CLP la columna NUMERIC del schema ya enforce la precisión final. Propagar `currency` a `db_calculate_payroll`, `db_calculate_tips_by_attendance`, etc. requeriría cambios de signature en repos — diferido.
 - `/api/analytics/*` endpoints tienen SQL directo (read-only aggregate queries, admin-only) — aceptable para analytics que no son lógica de negocio.
 
-## Frontend Redesign + Polish Sprints — Shipped 2026-04-20
+## Frontend — Pages servidas
 
-El frontend completo fue rediseñado en 2 bundles de Claude Design + 7 sprints de backend polish post-audit. Todo está en main.
+**Chrome compartido**: `app/static/css/tokens.css` + `shared.css` + `pages/<page>.css`. JS: `mesio-utils.js` → `pages/sidebar.js` → `pages/<page>.js`.
 
-### HTML / CSS / JS estructura
+**Admin (servidos via `app/routes/dashboard.py`)**: `/dashboard`, `/pedidos`, `/reservaciones`, `/menu-admin`, `/menu-engineering`, `/nps`, `/fidelizacion`, `/clientes-riesgo`, `/nomina`, `/sucursales`, `/floorplan`, `/equipo`, `/settings`, `/billing`, `/staff-hq` (alias `/staff-clock`).
 
-- **Chrome compartido**: `app/static/css/tokens.css` + `app/static/css/shared.css` (foundation), `app/static/js/pages/sidebar.js` (componente de sidebar shared).
-- **Pages**: cada página admin/staff carga `tokens.css` → `shared.css` → `pages/<page>.css` + `mesio-utils.js` → `pages/sidebar.js` (si aplica) → `pages/<page>.js`.
-- **13 pages principales rediseñados** + **9 pages admin nuevos** (sub-secciones del dashboard viejo → páginas dedicadas).
-- **Zero archivos `*-legacy.html`, `*-v2.html`, `*-wip.html`** — cleanup total 2026-04-20.
+**Operacionales (dark theme)**: `/caja` (POS), `/kitchen` (KDS), `/bar` (KDS variante), `/mesero` (tablet grid), `/domiciliario` (mobile).
 
-### Pages admin (all served via `app/routes/dashboard.py`)
-- `/dashboard` (resumen + AI insight + live feed + charts)
-- `/pedidos`, `/reservaciones`, `/menu-admin`, `/menu-engineering`, `/nps`, `/fidelizacion`, `/clientes-riesgo`, `/nomina`, `/sucursales`
-- `/floorplan`, `/equipo` (admin team view — distinto del portal staff), `/settings`, `/billing`
-- `/staff-hq` = portal staff self-service (new staff-clock design), también accesible via alias `/staff-clock`
+**Públicas**: `/login.html`, `/menu.html` (QR público), `/demo`, `/dashboard-demo`.
 
-### Pages operacionales (dark theme)
-- `/caja` (POS), `/kitchen` (KDS), `/bar` (KDS variante), `/mesero` (tablet grid), `/domiciliario` (mobile)
-
-### Pages públicas
-- `/login.html` (dark split panel + 2 modos: admin + staff)
-- `/menu.html` (QR público — muestra "Valentina te atiende" cuando table_sessions.assigned_staff_id presente)
-- `/demo` (money shot split-screen WhatsApp ↔ dashboard, 5 escenarios auto-play, GTM landing)
-- `/dashboard-demo` (full-dashboard demo rediseñado, 11-section sidebar, AI insight, trust block)
-
-### Sprints A–W (polish post-audit)
-
-Todos completos, en main. El documento de audit original cubrió 10 temas con top-5 fixes; cada sprint cerró uno o más. Eliminado del repo al cerrar todos los items.
-
-| Sprint | Migración | Qué entregó |
-|---|---|---|
-| **Cleanup** (53750c1) | — | 10 wiring fixes (URLs/métodos que 404eaban) + audit doc |
-| **A** (bdb40bf) | — | POST /api/settings full save (name/nit/address/city/cuisine/hours/notifications) + GET /api/loyalty/customers |
-| **B** (bdb40bf) | — | 8 páginas render live data (pedidos/reservaciones/menu-admin/nomina/nps/fidelizacion/clientes-riesgo/sucursales) + NPS buttons + Reservaciones buttons |
-| **C** (d9b4b5c) | **0042** | Admin↔Staff Communication: 3 tablas (announcements + tasks + task_completions) + 10 endpoints + UI admin en /equipo + wire en staff-clock |
-| **X** (3c01507) | — | POST /api/reservations + POST /api/settings/pause (restaurant temporary closing) |
-| **Y** (d7e3130) | — | GET /api/staff/self/tips + GET /api/staff/self/upcoming-shifts + staff-clock wire |
-| **Z** (0157f58) | — | GET /api/staff/self/performance (tables_served + avg_ticket + tips + NPS=null TODO) |
-| **W** (a11ed7e) | **0043** | Shift swap: `shift_swap_requests` table + 9 endpoints + state machine (pending → target_accepted → admin_approved) + admin approve UI + staff request modal |
-
-### Nuevos archivos clave post-sprints
-
-- Repos: `app/repositories/staff_comms_repo.py` (Sprint C/W — announcements, tasks, completions, shift swaps).
-- Routes: `app/routes/staff_comms.py` (20+ endpoints consolidados: announcements admin + staff, tasks + completions, tips, upcoming shifts, performance, shift swaps).
-- Migraciones: `0039_channel_and_attribution.py`, `0041_drop_legacy_restaurant_id.py`, `0042_staff_comms.py`, `0043_shift_swap_requests.py`.
-
-### Lo que quedó explícitamente para después
-
-Ver "Pendientes de calendario" arriba — puntos 5-10 son features v2 / schema evolutivo.
+Detalle de sprints A-W del rediseño en [docs/history/sprints.md](docs/history/sprints.md). Para "lo que quedó para después" ver "Pendientes de calendario" arriba.
 
 ## Arquitectura de Base de Datos
 
@@ -940,64 +827,9 @@ Feature flags relacionados:
 - `bot_visual_menu` (opt-in, default false) — activa envío de fotos desde el bot (Fase 4)
 - `catalog_v2_enabled` (opt-out, default true) — kill-switch global del catálogo visual
 
-## "No-v2" Sprint — Shipped 2026-04-21
+## Test Discipline + Frontend Lint
 
-Reemplazo completo de placeholders `v2` + seed data hardcoded por endpoints reales con UI cableada. Cero features ocultas detrás de badges muted. Los 3 agents Sonnet corrieron en paralelo en worktrees aislados; test fixes delegados a 2 agents adicionales después del merge.
-
-### Endpoints nuevos (todos RLS + tenant_scope + Decimal-safe)
-
-**Stats aggregates** (`app/routes/stats.py` + `app/repositories/stats_repo.py`):
-```
-GET /api/stats/churn-summary
-  Returns: {high_count, medium_count, watch_count, ltv_sum, reactivated_count, medium_risk[]}
-  Source: customer_profiles + days-since-last-order binning
-
-GET /api/stats/branches-consolidated?days=7
-  Returns: {period, total_sales, total_tickets, avg_nps, total_staff, growth_yoy}
-  Source: orders + table_orders + nps_responses + staff, windowed
-
-GET /api/stats/branches-comparison?days=30
-  Returns: {locations[], rows[{metric, per_location[], avg, target, top_location_id, vs_target_pct}]}
-  Source: locations + orders + table_orders + nps_responses + reservations (per location GROUP BY)
-```
-
-**Loyalty aggregates** (`app/routes/loyalty.py` + `app/repositories/loyalty_repo.py`):
-```
-GET /api/loyalty/aggregates
-  Returns: {total_customers, avg_frequency, avg_ticket_member, avg_ticket_nonmember,
-           roi_multiple, redemption_pct}
-
-GET /api/loyalty/segments
-  Returns: {segments: [{id, name, description, count, potential_revenue, tone}, …]}
-  4 segmentos: vip-active, vip-dormant, new-month, birthdays
-
-GET /api/loyalty/funnel
-  Returns: {steps: [{label, description, count, pct}, …]}
-  5 pasos: primera/segunda visita, subida a plata/oro/platino (tiers de features.loyalty_tiers)
-```
-
-**Loyalty campaigns CRUD** (`app/repositories/loyalty_campaigns_repo.py`):
-```
-GET    /api/loyalty/campaigns?status=active|paused|draft
-POST   /api/loyalty/campaigns           → body: {name, description, segment, trigger_type, message_template}
-PATCH  /api/loyalty/campaigns/{id}
-DELETE /api/loyalty/campaigns/{id}
-POST   /api/loyalty/campaigns/{id}/toggle  → body: {status: active|paused}
-```
-
-State machine `loyalty_campaigns.status`: `draft` → `active`, `active` ↔ `paused`. Transición inválida (ej. `draft` → `paused` directo) retorna 409.
-
-### Frontend — datos reales, cero placeholders eternos
-
-| Página admin | Qué se cableó | Endpoint que consume |
-|---|---|---|
-| `nomina.html` | Period card + 4 summary metrics (base/tips/deductions/overtime) | agrega del response existente de `/api/staff/payroll/calculate` |
-| `menu-admin.html` | `#inv-summary` ("N productos · $X valor stock") | agrega del response de `/api/inventory` |
-| `pedidos.html` | 2º KDS grid (Salón) + 2ª metrics-row (antes no wiring) | `/api/pos/tables-status` |
-| `menu-engineering.html` | `#ai-diagnosis` banner | `/api/ai/proxy` con prompt formateado desde analytics |
-| `clientes-riesgo.html` | 5 KPIs + grid medio + banner IA | `/api/stats/churn-summary` + `/api/ai/proxy` |
-| `fidelizacion.html` | 4 métricas + 4 seg-cards + funnel 5-step + tabla campañas (con CRUD) | 4 endpoints loyalty nuevos |
-| `sucursales.html` | 5 consolidados + comparativa multi-sede + banner IA | `/api/stats/branches-*` + `/api/ai/proxy` |
+Reglas de testing y lint vivas. El detalle del "No-v2 sprint" original que las introdujo está en [docs/history/sprints.md](docs/history/sprints.md).
 
 ### Lint frontend — `scripts/lint_frontend.py` + `tests/test_frontend_lint.py`
 
@@ -1391,235 +1223,42 @@ La única excepción permitida es `app/routes/chat.py` que importa `register_inb
 ### Legacy redirects (eliminados 2026-04-27)
 `app/routes/legacy_redirects.py` fue eliminado en la sesión "Dead Code Cleanup". Antes hacía 301 de `/api/crm/*`, `/api/admin/*`, `/api/analytics/*`, `/api/billing/admin/*`, `/health/metrics`, `/analytics`, `/monitoring` hacia `/internal/*`. Las URLs viejas ahora retornan 404. Si una herramienta interna o bookmark del equipo Mesio sigue pegándole, actualizar al canónico `/internal/...`.
 
-## Post-migration Monitoring Queries (Org/Location — Wave 2 historical)
+## Wave 2 (Org/Location) — Resumen post-deploy
 
-> **Nota:** Estas queries se usaron durante la migración Wave-2 (0034-0038, abril 2026). La migración está **completada y validada**. Las queries se mantienen como referencia defensiva: si en algún momento sospechás drift de schema o leak cross-tenant, son verificaciones útiles. **En condiciones normales, todas deben retornar 0 filas.**
+**Aplicado a prod 2026-04-18.** Estado actual y aprendizajes detallados en [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Queries defensivas para auditar drift en [docs/history/wave2_monitoring_queries.md](docs/history/wave2_monitoring_queries.md). Lo importante para código nuevo:
 
-Estas queries se corren en psql (con DATABASE_URL_ADMIN) para verificar el estado de la migración Org/Location. Ejecutar antes del cutover de Wave 2 y después de cada migration.
+### Estado actual del schema (resumen, post-0038)
 
-### Query 1 — Orphan org_id check (DEBE retornar 0 en todas las filas)
-
-Corra esto después de migración 0035 y antes de aplicar 0037. Si alguna fila retorna > 0, hay rows sin backfill — NO aplicar 0037.
-
-```sql
-SELECT 'attendance_deductions' AS tbl, COUNT(*) AS nulls FROM attendance_deductions WHERE org_id IS NULL UNION ALL
-SELECT 'billing_log',           COUNT(*) FROM billing_log           WHERE org_id IS NULL UNION ALL
-SELECT 'carts',                 COUNT(*) FROM carts                 WHERE org_id IS NULL UNION ALL
-SELECT 'contract_templates',    COUNT(*) FROM contract_templates    WHERE org_id IS NULL UNION ALL
-SELECT 'conversations',         COUNT(*) FROM conversations         WHERE org_id IS NULL UNION ALL
-SELECT 'customer_profiles',     COUNT(*) FROM customer_profiles     WHERE org_id IS NULL UNION ALL
-SELECT 'dish_recipes',          COUNT(*) FROM dish_recipes          WHERE org_id IS NULL UNION ALL
-SELECT 'fiscal_invoices',       COUNT(*) FROM fiscal_invoices       WHERE org_id IS NULL UNION ALL
-SELECT 'fiscal_resolution',     COUNT(*) FROM fiscal_resolution     WHERE org_id IS NULL UNION ALL
-SELECT 'inventory',             COUNT(*) FROM inventory             WHERE org_id IS NULL UNION ALL
-SELECT 'loyalty_customers',     COUNT(*) FROM loyalty_customers     WHERE org_id IS NULL UNION ALL
-SELECT 'loyalty_ledger',        COUNT(*) FROM loyalty_ledger        WHERE org_id IS NULL UNION ALL
-SELECT 'marketing_messages_log',COUNT(*) FROM marketing_messages_log WHERE org_id IS NULL UNION ALL
-SELECT 'menu_availability',     COUNT(*) FROM menu_availability     WHERE org_id IS NULL UNION ALL
-SELECT 'menu_events',           COUNT(*) FROM menu_events           WHERE org_id IS NULL UNION ALL
-SELECT 'nps_responses',         COUNT(*) FROM nps_responses         WHERE org_id IS NULL UNION ALL
-SELECT 'nps_waiting',           COUNT(*) FROM nps_waiting           WHERE org_id IS NULL UNION ALL
-SELECT 'occupancy_snapshots',   COUNT(*) FROM occupancy_snapshots   WHERE org_id IS NULL UNION ALL
-SELECT 'orders',                COUNT(*) FROM orders                WHERE org_id IS NULL UNION ALL
-SELECT 'overtime_requests',     COUNT(*) FROM overtime_requests     WHERE org_id IS NULL UNION ALL
-SELECT 'payroll_runs',          COUNT(*) FROM payroll_runs          WHERE org_id IS NULL UNION ALL
-SELECT 'staff',                 COUNT(*) FROM staff                 WHERE org_id IS NULL UNION ALL
-SELECT 'staff_deduction_items', COUNT(*) FROM staff_deduction_items WHERE org_id IS NULL UNION ALL
-SELECT 'staff_schedules',       COUNT(*) FROM staff_schedules       WHERE org_id IS NULL UNION ALL
-SELECT 'staff_shifts',          COUNT(*) FROM staff_shifts          WHERE org_id IS NULL UNION ALL
-SELECT 'subscription_usage',    COUNT(*) FROM subscription_usage    WHERE org_id IS NULL UNION ALL
-SELECT 'table_orders',          COUNT(*) FROM table_orders          WHERE org_id IS NULL UNION ALL
-SELECT 'table_sessions',        COUNT(*) FROM table_sessions        WHERE org_id IS NULL UNION ALL
-SELECT 'time_slot_discounts',   COUNT(*) FROM time_slot_discounts   WHERE org_id IS NULL UNION ALL
-SELECT 'waiter_alerts',         COUNT(*) FROM waiter_alerts         WHERE org_id IS NULL UNION ALL
-SELECT 'webauthn_challenges',   COUNT(*) FROM webauthn_challenges   WHERE org_id IS NULL UNION ALL
-SELECT 'weekly_reports',        COUNT(*) FROM weekly_reports        WHERE org_id IS NULL
-ORDER BY nulls DESC;
--- EXPECTED: All rows return 0.
--- ACTION: If any row > 0, re-run backfill from 0035 before proceeding to 0037.
-```
-
-### Query 2 — Primary location invariant (DEBE retornar 0 filas)
-
-```sql
-SELECT org_id, COUNT(*) AS primary_count
-FROM locations
-WHERE is_primary = true
-GROUP BY org_id
-HAVING COUNT(*) <> 1;
--- EXPECTED: 0 rows.
--- VIOLATION: An org has 0 or more than 1 primary location — data integrity error.
-```
-
-### Query 3 — Verify no auto-populate triggers remain after 0037 (DEBE retornar 0 filas)
-
-```sql
-SELECT event_object_table AS table_name, trigger_name
-FROM information_schema.triggers
-WHERE trigger_name LIKE 'trg_auto_org_location_%'
-  AND trigger_schema = 'public';
--- EXPECTED: 0 rows after migration 0037.
--- If any rows: migration 0037 did not fully apply.
-```
-
-### Query 4 — Verify no legacy restaurant_id columns remain after 0037
-
-```sql
-SELECT table_name, column_name
-FROM information_schema.columns
-WHERE column_name  = 'restaurant_id'
-  AND table_schema = 'public'
-ORDER BY table_name;
--- EXPECTED after 0037: only restaurants_deprecated appears.
--- EXPECTED after 0038: 0 rows.
--- If other tables appear: DROP COLUMN did not execute for that table.
-```
-
-### Query 5 — Verify no tenant_isolation policies remain after 0037 (DEBE retornar 0 filas)
-
-```sql
-SELECT tablename, policyname
-FROM pg_policies
-WHERE policyname  = 'tenant_isolation'
-  AND schemaname  = 'public';
--- EXPECTED after 0037: 0 rows.
-```
-
-### Query 6 — Cross-org leak test (under mesio_app role)
-
-```sql
--- Run as mesio_app with a specific org_id set.
-SET LOCAL ROLE mesio_app;
-SELECT set_config('app.org_id', '1', true);   -- replace 1 with a real org_id
-SELECT COUNT(*) FROM orders;                   -- should return only org 1's orders
-SELECT COUNT(*) FROM orders WHERE org_id <> 1; -- MUST be 0
-```
-
-### Alerta de monitoreo continuo (recomendada)
-
-Configurar un cron cada hora que corra Query 1 y alerte si algún COUNT > 0:
-
-```bash
-# Ejemplo: cron horario con psql
-psql $DATABASE_URL_ADMIN -c "
-  SELECT SUM(nulls) FROM (
-    SELECT COUNT(*) AS nulls FROM orders WHERE org_id IS NULL
-    UNION ALL
-    SELECT COUNT(*) FROM staff WHERE org_id IS NULL
-  ) sub
-" | grep -v "^0$" && curl -X POST $ALERT_WEBHOOK_URL \
-  -d '{"text":"[CRITICAL] org_id IS NULL detected in production tables"}'
-```
-
-O usar `services/alerts.py` y agregar un check personalizado al scheduler.
-
----
-
-## Wave 2 (Org/Location) — Estado Post-Deploy y Aprendizajes Críticos
-
-**Fecha aplicado a prod: 2026-04-18.** Esta sección documenta el estado post-migración y las lecciones aprendidas durante el despliegue (que costó ~8-10 horas de iteración reactiva que podrían haberse evitado).
-
-### Estado actual del schema (post-0038, 2026-04-19)
-
-- **Tablas nuevas canónicas:** `organizations` (tenant) + `locations` (sede). El plan original Wave-2 (`ORG_LOCATION_MIGRATION_PLAN.md`) se eliminó al cerrar — schema canónico vive en las migraciones 0034-0038 + 0057.
-- **`restaurants` es ahora una VIEW read-only** sobre `locations JOIN organizations`. Cada fila de la VIEW representa una Location con los datos de su Org injerados. `id` de la VIEW == `location_id`.
-- **VIEW post-0038**: NO incluye `parent_restaurant_id` (legacy emulation eliminada). NO incluye `is_primary` (columna dropeada). Sí incluye `subscription_status` y `subscription_plan` para callers que los necesitan.
-- **`restaurants_deprecated`** — ❌ **DROPPED en 0038**. Si necesitás los datos originales pre-Wave-2, restorá de backup pre-0038.
-- **`_migration_restaurant_to_location`** — ❌ **DROPPED en 0038** (mapping table retirada — el lookup que la usaba se eliminó en commit f2465bc).
-- **`locations.is_primary`** — ❌ **DROPPED en 0038**. Cada location es peer; no hay "primary". Para "default location" usar `ORDER BY id ASC LIMIT 1`.
-- **`parent_restaurant_id`** — ❌ **DROPPED en 0038**. Code que lee `restaurant.get("parent_restaurant_id")` ahora obtiene `None` (cae en branch "is matriz / is primary", correcto en modelo peer).
-- **`restaurant_id` column** — DROPEADA de las 33 tablas RLS en 0037.
-- **`org_id` + `location_id`** — las columnas canónicas. `org_id` es el tenant key. `location_id` es la sede operativa.
-- **RLS:** policy `org_isolation` (por `org_id`) activa en las 33 tablas + FORCE RLS. Policy legacy `tenant_isolation` DROPPED en 0037.
+- **Tablas canónicas:** `organizations` (tenant) + `locations` (sede). `restaurants` es VIEW read-only sobre `locations JOIN organizations`. `id` de la VIEW == `location_id`.
+- **`org_id` + `location_id`** son las columnas canónicas. `org_id` es el tenant key.
+- **`restaurant_id` column** — DROPPED de las 33 tablas RLS en 0037.
+- **RLS:** policy `org_isolation` (por `org_id`) activa en 33 tablas + FORCE RLS.
 - **Triggers auto-populate:** DROPPED en 0037. App code debe setear `org_id` y `location_id` explícitamente en INSERTs.
-- **Migración head actual:** `0054_drop_tip_distributions`. Cadena Wave-2: `0036 → 0037b → 0037c → 0037d → 0037 → 0038`. Posterior: `0039 → 0049` ("No-v2"), `0050-0053` (incrementales), `0054` (drop tip_distributions).
-- **billing_config** — en `organizations.billing_config` (0037c), expuesto en la VIEW.
-- **location_id nullable** en 17 tablas operativas (0037d, post-0054): orders, table_orders, staff, staff_shifts, staff_schedules, staff_deduction_items, attendance_deductions, fiscal_invoices, fiscal_resolution, inventory, menu_availability, occupancy_snapshots, overtime_requests, table_sessions, time_slot_discounts, waiter_alerts, webauthn_challenges.
-- ~~`legacy_restaurant_id` columna~~ — **DROPPED** por migración 0041 (2026-04-19).
-- ~~`tip_distributions` tabla~~ — **DROPPED** por migración 0054 (2026-04-27, sesión "Dead Code Cleanup").
-
-### Forward guards contra reintroducción de symbols obsoletos
-
-Dos tests AST-walking que fallan CI si alguien reintroduce los símbolos dropeados en SQL strings dentro de `app/`:
-
-- **`tests/test_no_parent_restaurant_id_sql.py`** — bloquea `WHERE/JOIN/SELECT parent_restaurant_id` en cualquier `.py` del app code. Permitidos: nombres de parámetros, comments, `NULL::int AS parent_restaurant_id` (alias literal).
-- **`tests/test_no_is_primary_sql.py`** — bloquea `WHERE/ORDER BY/INSERT is_primary` en SQL string content. Permitidos: nombres de parámetros, dict accessors, comments.
-
-Si necesitás re-introducir alguno de estos symbols, **revertir los guards es señal de que estás haciendo algo mal** — el modelo Wave-2 nativo no los soporta.
+- **`location_id` nullable** en 17 tablas operativas (post-0054).
+- Symbols dropeados con forward-guard tests: `parent_restaurant_id`, `is_primary`, `restaurants_deprecated`, `_migration_restaurant_to_location`. Ver `tests/test_no_parent_restaurant_id_sql.py`, `tests/test_no_is_primary_sql.py`, `tests/test_no_branch_id_legacy_sql.py`.
 
 ### Patrón obligatorio post-Wave-2 para SQL nuevo
 
 - **Reads:** `FROM restaurants` SIGUE funcionando (VIEW). Retorna shape idéntico al viejo. `WHERE id = $1` se interpreta como filtrado por `location_id`.
-- **Writes a restaurants:** PROHIBIDAS. Routear UPDATE/INSERT/DELETE al `organizations` + `locations` apropiado. Ver `app/repositories/restaurant_repo.py` para ejemplos (`db_update_restaurant_fields`, `db_create_restaurant`, etc. ya reescritos).
-- **Queries en tablas operativas:** usar `org_id` (no `restaurant_id`). RLS hace el filtrado via `app.org_id` GUC.
-- **`app.restaurant_id` GUC:** LEGACY — sigue siendo seteado por `tenant_db.py` por compatibilidad, pero NO USAR en queries nuevas. Usar `current_setting('app.org_id', true)`.
-- **INSERTs en tablas Location-level** (orders, staff, inventory, etc.): setear `org_id` + `location_id` explícitamente. Los triggers auto-populate YA NO EXISTEN.
-- **`features` como dict:** `restaurants.features` puede venir como str JSON o dict dependiendo del driver/VIEW. Usar helper como `_features_dict()` en `scheduler.py` para normalizar.
+- **Writes a restaurants:** PROHIBIDAS. Routear UPDATE/INSERT/DELETE al `organizations` + `locations` apropiado. Ejemplos en `app/repositories/restaurant_repo.py` (`db_update_restaurant_fields`, `db_create_restaurant`).
+- **Queries en tablas operativas:** usar `org_id` (no `restaurant_id`). RLS filtra via `app.org_id` GUC.
+- **`app.restaurant_id` GUC:** LEGACY (seteado por compat, NO usar en queries nuevas). Usar `current_setting('app.org_id', true)`.
+- **INSERTs en tablas Location-level** (orders, staff, inventory, etc.): setear `org_id` + `location_id` explícitamente.
+- **`features` como dict:** puede venir como str JSON o dict según driver/VIEW. Normalizar con helper `_features_dict()`.
 
-### Variables de entorno (estado consolidado post-Wave-2)
+### Variables de entorno
 
-| Variable | Uso | Dónde |
-|---|---|---|
-| `DATABASE_URL` | Runtime app (postgres o mesio_app) | Restaurant-bot |
-| `PROD_DATABASE_URL` | Alias explícito para prod (requerido para rehearsal) | Restaurant-bot |
-| `TEST_DATABASE_URL` | Apunta al Postgres Test de Railway | Restaurant-bot |
-| `DATABASE_URL_ADMIN` | Superuser URL, opcional (cae a DATABASE_URL) | Migraciones |
-| `ANTHROPIC_API_KEY` | Requerido por bot + AI sim | Restaurant-bot |
-| `REDIS_URL` | Estado compartido multi-worker | Restaurant-bot + worker |
-| `AI_SIM_ASSUME_YES=1` | Skip prompt interactivo del sim (auto en non-tty) | Opcional |
-| `AI_SIM_ARGS` | Args extra para run_ai_sim.py (ej: `--only mesa`) | Opcional |
+| Variable | Uso |
+|---|---|
+| `DATABASE_URL` | Runtime app (postgres o mesio_app) |
+| `PROD_DATABASE_URL` | Alias explícito para prod (rehearsal) |
+| `TEST_DATABASE_URL` | Postgres Test de Railway |
+| `DATABASE_URL_ADMIN` | Superuser URL para migraciones (cae a DATABASE_URL si no se setea) |
+| `ANTHROPIC_API_KEY` | Requerido por bot + AI sim |
+| `REDIS_URL` | Estado compartido multi-worker |
+| `AI_SIM_ASSUME_YES=1` | Skip prompt interactivo del sim |
+| `AI_SIM_ARGS` | Args extra para run_ai_sim.py |
 
-**Nota:** `REHEARSAL_MODE` y `AI_SIM_MODE` fueron removidos de Railway (2026-04-19). Si los querés reintroducir (ej. para validar migración destructiva con pg_dump), ver `scripts/rehearsal_railway.py` — pero acordate de DESACTIVARLOS después del uso o prod queda caído.
+**`REHEARSAL_MODE` y `AI_SIM_MODE` fueron removidos de Railway**: si los reintroducís para validar destructiva via pg_dump, recordá DESACTIVARLOS después o prod queda caído.
 
-### Rehearsal infrastructure (disponible pero no activa)
-
-- **Script:** `scripts/rehearsal_railway.py` — corre dentro de Railway, hace pg_dump prod → restore test → alembic upgrade head → 14 smoke checks → reporta PASS/FAIL.
-- **Variables:** `PROD_DATABASE_URL` + `TEST_DATABASE_URL` seteadas. `nixpacks.toml` provee postgresql_17 para pg_dump.
-- **Uso pragmático hoy**: validación manual contra `TEST_DATABASE_URL` (correr migración + suite de tests completa) antes de push a main.
-
-### ai_sim — smoke funciona, E2E requiere presupuesto
-
-- `python run_ai_sim.py --smoke` → valida plumbing sin Anthropic (Sprint C1 shippeó este flag).
-- Full E2E (20 escenarios) requiere `ANTHROPIC_API_KEY` + budget (~$2-5 por corrida).
-- Smoke valida: seed org + tenant_scope resolve + snapshot_db_state + truncate_test_data + empty post-truncate.
-
-### Errores recurrentes que ya vimos (y sus fixes)
-
-Lecciones que se fueron ganando a lo largo de la migración. Aplicar PROACTIVAMENTE antes de escribir código nuevo:
-
-1. **Alembic `version_num VARCHAR(32)`** — cualquier revision_id > 32 chars crashea el UPDATE final. Usar IDs cortos (ej. `0034_org_locations`, no `0034_create_organizations_locations`).
-
-2. **UPDATE target alias dentro de FROM-clause JOIN** — Postgres rechaza `UPDATE t ... FROM x JOIN y ON y.col = t.col` porque `t` no es visible en el JOIN ON. Usar CTE intermedia que resuelve el mapping, luego UPDATE usando solo ctid de la CTE.
-
-3. **`ON CONFLICT` con índice UNIQUE parcial** — no funciona sin especificar el predicado. Si el índice es `... WHERE col IS NOT NULL`, hay que hacer `ON CONFLICT (col) WHERE col IS NOT NULL`. Alternativa: check de existencia antes del INSERT.
-
-4. **`SET LOCAL ROLE` no persiste en asyncpg sin transacción** — cada `execute()` en autocommit es su propia TX. `SET LOCAL` se pierde. Envolver en `async with conn.transaction():`.
-
-5. **`::regclass` cast confunde parameter substitution** — SQLAlchemy `text()` con `:param::regclass` falla porque `::` parece inicio de parámetro. Usar JOIN explícito a `pg_class` por nombre.
-
-6. **Shell `$$` expande a PID** — los bloques `DO $$ BEGIN ... END $$;` de PL/pgSQL se rompen si pasan por bash con interpolación. Pasar SQL por stdin (`psql -f -` con `input=sql`), no con `-c "..."`.
-
-7. **pg_dump version mismatch** — Railway Postgres es v17, el apt default de Ubuntu 24 es v16. En nixpacks.toml usar `nixPkgs = ["python312", "gcc", "postgresql_17"]`. Recordar: nixPkgs REEMPLAZA los packages default, hay que re-incluir python + gcc.
-
-8. **Orphan `restaurant_id` después de tenant borrado** — producción tenía filas con `restaurant_id` apuntando a un tenant eliminado. Migraciones de backfill deben auto-dedupear / auto-delete esas filas con log de advertencia, no crashear. Ceiling de seguridad: si hay >100 orphans, sí crashear.
-
-9. **Duplicados aparecidos entre drop/recreate de UNIQUE** — durante downgrades encadenados, el app puede insertar duplicados en la ventana sin constraint. Migraciones de recuperación deben auto-dedupear con `ROW_NUMBER() OVER (PARTITION BY ...)` manteniendo MAX(id).
-
-10. **Railway deploy == `alembic upgrade head` siempre corre** — significa que un archivo `.deferred` (extensión no-`.py`) es la única forma de "esconder" una migración del upgrade automático.
-
-11. **Grant USAGE on schema public** — después de `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`, se pierde el `GRANT USAGE ON SCHEMA public TO PUBLIC` default. Sin eso, grants table-level no alcanzan — el rol ni siquiera ve las tablas. Siempre re-grant después de recrear schema.
-
-12. **Variables ambiguas cuando Railway linkea múltiples DBs** — al linkear 2 Postgres a un mismo servicio, `DATABASE_URL` puede resolverse a cualquiera. Usar nombres explícitos (`PROD_DATABASE_URL`, `TEST_DATABASE_URL`) + anti-swap guard que verifica row counts antes de cualquier escritura.
-
-### Lección estratégica principal
-
-**No ser reactivo.** La migración Wave 2 costó ~8 horas de iteración principalmente por pushear sin haber pensado proactivamente qué podría fallar. La regla:
-
-Antes de cualquier `git push` que toque migraciones, schema, o deploys:
-1. Leer mentalmente cada línea del código que se modifica.
-2. Pensar "¿qué supuestos estoy haciendo?" y listar los 3-5 principales.
-3. Verificar cada supuesto contra el código real (grep, read) antes de asumir.
-4. Considerar: ¿qué pasa si corre en un estado distinto al esperado? (DB a mitad de migración, env var faltante, tool ausente).
-5. Si el deploy afecta prod (no solo tests), ¿está el rollback probado?
-
-Para migraciones grandes: **staging rehearsal obligatorio ANTES** de tocar prod. `scripts/rehearsal_railway.py` existe exactamente para esto. Nunca saltar este paso.
+12 errores recurrentes ya vistos (Alembic varchar(32), `SET LOCAL ROLE` sin tx, pg_dump v17, etc.) y la "lección estratégica principal" están en [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Consultá ese archivo antes de tocar migraciones grandes.
