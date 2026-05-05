@@ -161,11 +161,12 @@ function _renderActive(orders) {
     </div>
 
     <div class="cta-row">
-      <a class="cta-btn outline" href="tel:+${_esc(cleanPhone)}" aria-label="Llamar">📞</a>
+      <a class="cta-btn outline" href="tel:+${_esc(cleanPhone)}" aria-label="Llamar" style="flex:0 0 50px;font-size:18px;">📞</a>
       ${isAtDoor
-        ? `<button class="cta-btn dom-action-btn" data-action="entregado" data-id="${_esc(String(inRoute.id))}">✅ Marcar Entregado</button>`
-        : `<a class="cta-btn dom-maps-btn" href="${_esc(mapsUrl)}" target="_blank" rel="noopener">🗺️ Maps</a>
-           <a class="cta-btn outline dom-waze-btn" href="${_esc(wazeUrl)}" target="_blank" rel="noopener" data-id="${_esc(String(inRoute.id))}">Waze</a>`
+        ? `<button class="cta-btn dom-action-btn" data-action="entregado" data-id="${_esc(String(inRoute.id))}">✅ Entregado</button>`
+        : `<a class="cta-btn outline dom-maps-btn" href="${_esc(mapsUrl)}" target="_blank" rel="noopener" style="flex:0 0 50px;text-align:center;font-size:18px;">🗺️</a>
+           <a class="cta-btn outline" href="${_esc(wazeUrl)}" target="_blank" rel="noopener" style="flex:0 0 60px;font-size:13px;">Waze</a>
+           <button class="cta-btn dom-action-btn" data-action="en_puerta" data-id="${_esc(String(inRoute.id))}">📍 Llegué</button>`
       }
     </div>`;
 
@@ -173,20 +174,13 @@ function _renderActive(orders) {
     const btn = e.currentTarget;
     const action = btn.dataset.action;
     const orderId = btn.dataset.id;
-    if (action === 'entregado') {
+    if (action === 'en_puerta') {
+      const ok = await mesioConfirm('¿Confirmás que llegaste al destino?', { confirmText: 'Sí, llegué' });
+      if (ok) await updateStatus(orderId, 'en_puerta');
+    } else if (action === 'entregado') {
       const ok = await mesioConfirm('¿Confirmar entrega al cliente?', { confirmText: 'Sí, entregado', danger: false });
       if (ok) await updateStatus(orderId, 'entregado');
     }
-  });
-
-  activeEl.querySelector('.dom-waze-btn')?.addEventListener('click', async (e) => {
-    // Opening Waze should NOT silently advance the order status — the driver may
-    // be checking the address before actually departing. Gate the transition with
-    // an explicit confirmation so accidental taps don't commit the state.
-    const orderId = e.currentTarget.dataset.id;
-    if (!orderId) return;
-    const ok = await mesioConfirm('¿Confirmar llegada al cliente?', { confirmText: 'Sí, en puerta' });
-    if (ok) await updateStatus(orderId, 'en_puerta');
   });
 }
 
