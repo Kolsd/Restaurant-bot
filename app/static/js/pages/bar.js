@@ -11,6 +11,7 @@ if (!_token) { window.location.href = '/login'; }
 let _tickets = [];
 let _selectedIdx = -1;
 let _localPlusMins = {};
+let _seenOrderIds = null;   // Set of order IDs seen on previous polls; null = first load (suppress alert)
 
 // ── Clock ───────────────────────────────────────────
 (function _initClock() {
@@ -164,10 +165,43 @@ async function loadOrders() {
 
     _updateStats(orders);
     _renderQueue(orders);
+    _detectNewOrders(orders);
     loadInventory();
     renderPopularBeverages(orders);
   } catch (err) {
     mesioTrackFetch(false);
+  }
+}
+
+// ── New-order detection ────────────────────────────
+const _ACTIVE_STATUSES = new Set(['pendiente', 'confirmado', 'recibido', 'en_preparacion']);
+
+function _detectNewOrders(orders) {
+  const currentIds = new Set(orders.filter(o => _ACTIVE_STATUSES.has(o.status)).map(o => String(o.id)));
+
+  if (_seenOrderIds === null) {
+    // Initial load — populate seen set silently, no alert.
+    _seenOrderIds = currentIds;
+    return;
+  }
+
+  const newOrders = orders.filter(o => _ACTIVE_STATUSES.has(o.status) && !_seenOrderIds.has(String(o.id)));
+  _seenOrderIds = currentIds;
+
+  if (!newOrders.length) return;
+
+  // Fire audio only when page is visible; notification fires regardless (OS-level).
+  if (!document.hidden) mesioDing();
+
+  const count = newOrders.length;
+  if (count === 1) {
+    const o = newOrders[0];
+    const items = Array.isArray(o.items) ? o.items : [];
+    const label = o.table_name || o.table_id || 'Mesa';
+    const body = `${label} · ${items.length} bebida${items.length !== 1 ? 's' : ''}`;
+    mesioNotify('Nueva orden — Bar', body);
+  } else {
+    mesioNotify('Nuevas órdenes — Bar', `${count} nuevas órdenes llegaron`);
   }
 }
 
@@ -260,8 +294,26 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ── Notification opt-in ───────────────────────────────
+async function _initNotifyOptin() {
+  const btn = document.getElementById('kds-notify-optin');
+  if (!btn) return;
+  if ('Notification' in window && Notification.permission === 'default') {
+    btn.hidden = false;
+    btn.addEventListener('click', async () => {
+      const result = await mesioRequestNotificationPermission();
+      btn.hidden = true;
+      if (result === 'granted') {
+        mesioToast('Alertas activadas', 'success', 2500);
+        mesioDing(); // confirm sound works
+      }
+    }, { once: true });
+  }
+}
+
 // ── Boot ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  _initNotifyOptin();
   loadOrders();
   mesioInterval(loadOrders, 15000);
 });

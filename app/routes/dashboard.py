@@ -75,6 +75,10 @@ async def service_worker():
 async def login_page():
     return (STATIC / "html" / "login.html").read_text(encoding="utf-8")
 
+@router.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_page():
+    return (STATIC / "html" / "reset-password.html").read_text(encoding="utf-8")
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page():
     return (STATIC / "html" / "dashboard.html").read_text(encoding="utf-8")

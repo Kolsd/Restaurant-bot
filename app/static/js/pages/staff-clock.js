@@ -33,6 +33,14 @@
      POST /api/staff/self/shift-swap/{id}/{accept|reject} → scHandleSwap()
 */
 
+/* Kiosko bootstrap:
+ *   A shared tablet reaches /staff-hq via a URL like /staff-hq?kiosko=true&r=<id>.
+ *   When localStorage is empty (fresh device), SC_REST.id is hydrated from the
+ *   `r` query param. The owner generates this URL from the admin Settings page
+ *   ("Generar link de kiosko" — Sprint 3 will surface this UI; for now the URL
+ *   can be hand-crafted using the org id from the dashboard URL).
+ */
+
 'use strict';
 
 /* ── Constants ─────────────────────────────────────────────────── */
@@ -41,6 +49,17 @@ const SC_REST   = (() => {
   try { return JSON.parse(localStorage.getItem('rb_restaurant') || '{}'); }
   catch(_) { return {}; }
 })();
+
+// Kiosko bootstrap: if no restaurant_id in localStorage but URL has ?r=, use it.
+// localStorage wins when an admin is logged in — the URL fallback only fires
+// on fresh kiosko tablets that have never had an admin session.
+if (!SC_REST.id) {
+  const _urlParams = new URLSearchParams(window.location.search);
+  const _urlR = _urlParams.get('r');
+  if (_urlR && /^\d+$/.test(_urlR)) {
+    SC_REST.id = parseInt(_urlR, 10);
+  }
+}
 
 if (!SC_TOKEN) {
   window.location.href = '/login';
@@ -805,6 +824,14 @@ async function scStartBioRegistration() {
 
 async function scWebAuthnAuth(action) {
   const webAuthnAction = (action === 'break-start' || action === 'break-end') ? 'break' : action.replace('-', '_');
+
+  // Guard: restaurant_id must be known before hitting the public WebAuthn endpoint.
+  // On a fresh kiosko tablet SC_REST.id is hydrated from ?r= (see bootstrap block at
+  // top of file). If it is still missing, the URL was not set up correctly by the admin.
+  if (!SC_REST.id) {
+    mesioToast('No se pudo determinar el restaurante. Solicita la URL del kiosko al administrador.', 'error', 5000);
+    throw new Error('kiosko: restaurant_id missing — admin must provide ?r=<id> URL');
+  }
 
   const optRes = await fetch('/api/staff/webauthn/auth-options', {
     method: 'POST',

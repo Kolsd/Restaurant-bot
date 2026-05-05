@@ -857,6 +857,16 @@ async def _scheduler_loop():
             # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)
             await _run_weekly_owner_reports()
 
+            # Clean up expired password reset tokens every 60 minutes
+            if _reminder_counter % 60 == 0:
+                try:
+                    from app.repositories import password_reset_repo
+                    deleted = await password_reset_repo.db_cleanup_expired_password_resets()
+                    if deleted:
+                        log.info("scheduler.password_reset_cleanup", deleted=deleted)
+                except Exception:
+                    log.exception("scheduler.password_reset_cleanup_failed")
+
 
 async def start_scheduler():
     asyncio.create_task(_scheduler_loop())

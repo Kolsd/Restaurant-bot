@@ -143,3 +143,23 @@ async def db_get_session(token: str) -> str | None:
 async def db_cleanup_expired_sessions() -> int:
     """Delete expired sessions and return the count removed."""
     return await cleanup_expired_sessions()
+
+
+async def delete_sessions_for_user(username: str) -> int:
+    """Revoke ALL sessions for a given username (force re-login on all devices).
+
+    Used after a successful password reset to ensure old credentials no longer
+    grant access. Deletes by plaintext username column (global table, no RLS).
+
+    Returns the number of rows deleted.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM sessions WHERE username = $1",
+            username.lower().strip(),
+        )
+    count = int(result.split()[-1]) if result else 0
+    if count > 0:
+        log.info("sessions.revoked_for_user", count=count, username_prefix=username[:3] + "***")
+    return count

@@ -134,6 +134,72 @@ function mesioToast(message, type = 'success', duration = 3000) {
   setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
 }
 
+// ── Audio alert ──────────────────────────────────
+/**
+ * Play a short two-tone ding for new-order alerts.
+ * Uses WebAudio API (no audio file shipped). Silent fallback if not available
+ * (Safari sometimes rejects autoplay until user interaction).
+ */
+function mesioDing() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const playTone = (freq, start, dur) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0, ctx.currentTime + start);
+      gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + start + 0.02);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + start + dur);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur);
+    };
+    playTone(880,  0,    0.18);  // A5
+    playTone(1175, 0.2,  0.22);  // D6
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch (e) {
+    // silent — audio is best-effort
+  }
+}
+window.mesioDing = mesioDing;
+
+// ── Browser notifications ─────────────────────────
+/**
+ * Request browser notification permission. Returns the resulting permission
+ * state ('granted' | 'denied' | 'default'). Safe to call anywhere — checks
+ * browser support and current state internally.
+ */
+async function mesioRequestNotificationPermission() {
+  if (!('Notification' in window)) return 'denied';
+  if (Notification.permission !== 'default') return Notification.permission;
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return 'denied';
+  }
+}
+
+/**
+ * Show a browser notification (only if permission was granted).
+ * Silent no-op otherwise.
+ */
+function mesioNotify(title, body, opts = {}) {
+  try {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    const n = new Notification(title, { body, silent: false, ...opts });
+    setTimeout(() => n.close(), 8000);
+  } catch {
+    // silent
+  }
+}
+window.mesioRequestNotificationPermission = mesioRequestNotificationPermission;
+window.mesioNotify = mesioNotify;
+
 // ── Confirm dialog (replaces window.confirm) ─────
 function mesioConfirm(message, { confirmText = 'Confirmar', cancelText = 'Cancelar', danger = false } = {}) {
   return new Promise(resolve => {
@@ -279,6 +345,91 @@ function mesioPrompt(message, opts = {}) {
   });
 }
 window.mesioPrompt = mesioPrompt;
+
+// ── Focus trap for accessible modals ────────────
+/**
+ * Activate accessibility-correct modal behavior on a custom modal:
+ *  - sets role="dialog", aria-modal="true"
+ *  - traps Tab/Shift+Tab cycling between the first and last focusable elements
+ *  - ESC key triggers opts.onEscape (default: noop — caller handles close)
+ *  - Auto-focuses the first focusable element (or opts.initialFocus)
+ *  - Returns a deactivate() function that restores prior focus and removes listeners
+ *
+ * Usage:
+ *   const trap = mesioFocusTrap(myModalEl, { onEscape: closeFn, labelledBy: 'my-title-id' });
+ *   // ... when closing the modal:
+ *   trap.deactivate();
+ *
+ * @param {HTMLElement} modalEl - the modal container element
+ * @param {object} opts
+ * @param {() => void} [opts.onEscape] - called when ESC is pressed inside the modal
+ * @param {string} [opts.labelledBy] - id of element that labels the modal (sets aria-labelledby)
+ * @param {HTMLElement} [opts.initialFocus] - element to focus first (default: first focusable)
+ * @returns {{ deactivate: () => void }}
+ */
+function mesioFocusTrap(modalEl, opts) {
+  opts = opts || {};
+  var FOCUSABLE_SEL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // Set ARIA attributes
+  modalEl.setAttribute('role', 'dialog');
+  modalEl.setAttribute('aria-modal', 'true');
+  if (opts.labelledBy) {
+    modalEl.setAttribute('aria-labelledby', opts.labelledBy);
+  }
+
+  // Save prior focus for restoration on deactivate
+  var prevFocus = document.activeElement;
+
+  var onKeyDown = function(e) {
+    var focusable = Array.from(modalEl.querySelectorAll(FOCUSABLE_SEL)).filter(function(el) {
+      return el.offsetParent !== null || el === document.activeElement;
+    });
+
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      if (opts.onEscape) opts.onEscape();
+      return;
+    }
+
+    if (e.key === 'Tab' && focusable.length > 0) {
+      var first = focusable[0];
+      var last  = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        // Shift+Tab on first → wrap to last
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        // Tab on last → wrap to first
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+  };
+
+  modalEl.addEventListener('keydown', onKeyDown);
+
+  // Auto-focus after paint so the overlay is visible before focus fires
+  requestAnimationFrame(function() {
+    var target = opts.initialFocus;
+    if (!target) {
+      var focusable = modalEl.querySelectorAll(FOCUSABLE_SEL);
+      target = focusable.length ? focusable[0] : null;
+    }
+    if (target) target.focus();
+  });
+
+  return {
+    deactivate: function() {
+      modalEl.removeEventListener('keydown', onKeyDown);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();
+    }
+  };
+}
+window.mesioFocusTrap = mesioFocusTrap;
 
 // ── Connection monitor ───────────────────────────
 const _connState = { failCount: 0, maxFails: 3 };
