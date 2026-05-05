@@ -5,6 +5,7 @@ import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pathlib import Path
@@ -210,6 +211,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Gzip-compress all responses ≥ 500 bytes. Browsers send Accept-Encoding: gzip
+# by default, so this is transparent. Saves 70-80% on JS/CSS/HTML/JSON wire size.
+# minimum_size=500 avoids overhead for tiny responses (status, errors, etc.).
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
