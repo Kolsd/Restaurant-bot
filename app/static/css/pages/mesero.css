@@ -30,13 +30,13 @@ body {
   transition: background 0.15s, color 0.15s;
 }
 .m-rail-link:hover { background: #14171f; color: #E8EAEE; }
-.m-rail-link.active { background: rgba(29,158,117,0.14); color: var(--brand, #1D9E75); }
+.m-rail-link.active { background: rgba(29,158,117,0.14); color: var(--brand); }
 .m-rail-link svg { width: 20px; height: 20px; }
 .m-rail-sep { width: 28px; height: 1px; background: #1a1d26; margin: 6px 0; }
 .m-rail-bottom { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .m-rail-avatar {
   width: 36px; height: 36px; border-radius: 50%;
-  background: linear-gradient(135deg, #1D9E75, #0F6E56);
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 12px; font-weight: 700;
 }
@@ -155,7 +155,7 @@ body {
   border-radius: 999px; font-weight: 500;
 }
 .m-tbl.alert .m-tbl-cap {
-  background: var(--brand, #1D9E75); color: #fff;
+  background: var(--brand); color: #fff;
   animation: m-pulse-tbl 2s ease-in-out infinite;
 }
 @keyframes m-pulse-tbl { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }
@@ -220,7 +220,7 @@ body {
 /* ── Live badge ── */
 .m-live-dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: var(--brand, #1D9E75);
+  background: var(--brand);
   animation: m-pulse-live 2s infinite;
 }
 @keyframes m-pulse-live { 0%, 100% { opacity: 1 } 50% { opacity: 0.3 } }

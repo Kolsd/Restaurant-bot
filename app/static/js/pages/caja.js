@@ -602,6 +602,9 @@ function _buildCheckModal() {
   const modal = document.createElement('div');
   modal.id = 'check-modal';
   modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:3100;align-items:center;justify-content:center;';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'cm-title');
   modal.innerHTML = `
     <div style="background:#1a1d26;border-radius:16px;width:540px;max-width:96vw;max-height:88vh;overflow-y:auto;padding:0;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
       <div style="padding:20px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;">
@@ -615,6 +618,7 @@ function _buildCheckModal() {
     </div>`;
   modal.querySelector('#cm-close').addEventListener('click', () => { modal.style.display = 'none'; });
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+  modal.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === 'Esc') modal.style.display = 'none'; });
   return modal;
 }
 
@@ -719,10 +723,13 @@ function _buildPayCheckModal() {
   const modal = document.createElement('div');
   modal.id = 'pay-check-modal';
   modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3200;align-items:center;justify-content:center;padding:12px;';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'pcm-title');
   modal.innerHTML = `
     <div style="background:#1a1d26;border-radius:16px;width:100%;max-width:920px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
       <div style="padding:18px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-        <div style="font-size:16px;font-weight:700;color:#E8EAEE;">Cobrar Check</div>
+        <div id="pcm-title" style="font-size:16px;font-weight:700;color:#E8EAEE;">Cobrar Check</div>
         <button id="pcm-close" style="background:none;border:1px solid #343b4d;color:#9CA3AF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
       </div>
       <div style="display:flex;flex:1;min-height:0;overflow:hidden;">
@@ -732,6 +739,7 @@ function _buildPayCheckModal() {
     </div>`;
   modal.querySelector('#pcm-close').addEventListener('click', () => { modal.style.display = 'none'; });
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+  modal.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === 'Esc') modal.style.display = 'none'; });
   return modal;
 }
 
@@ -1145,16 +1153,20 @@ function _buildSplitModal() {
   const modal = document.createElement('div');
   modal.id = 'split-modal';
   modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:3300;align-items:center;justify-content:center;';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'sm-title');
   modal.innerHTML = `
     <div style="background:#1a1d26;border-radius:16px;width:500px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:0;box-shadow:0 24px 64px rgba(0,0,0,0.6);">
       <div style="padding:20px 24px;border-bottom:1px solid #252836;display:flex;align-items:center;justify-content:space-between;">
-        <div style="font-size:16px;font-weight:700;color:#E8EAEE;">Dividir cuenta</div>
+        <div id="sm-title" style="font-size:16px;font-weight:700;color:#E8EAEE;">Dividir cuenta</div>
         <button id="sm-close" style="background:none;border:1px solid #343b4d;color:#9CA3AF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;font-size:13px;">✕</button>
       </div>
       <div id="sm-body" style="padding:20px 24px;"></div>
     </div>`;
   modal.querySelector('#sm-close').addEventListener('click', () => { modal.style.display = 'none'; });
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+  modal.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === 'Esc') modal.style.display = 'none'; });
   return modal;
 }
 
@@ -1766,5 +1778,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   const payModal = document.getElementById('pay-modal');
-  if (payModal) payModal.addEventListener('click', e => { if (e.target === payModal) closePayModal(); });
+  if (payModal) {
+    payModal.setAttribute('role', 'dialog');
+    payModal.setAttribute('aria-modal', 'true');
+    payModal.addEventListener('click', e => { if (e.target === payModal) closePayModal(); });
+    payModal.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === 'Esc') closePayModal(); });
+  }
+
+  const qim = document.getElementById('quick-invoice-screen');
+  if (qim) {
+    qim.setAttribute('role', 'dialog');
+    qim.setAttribute('aria-modal', 'true');
+    qim.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === 'Esc') closeQuickInvoiceModal(); });
+  }
 });

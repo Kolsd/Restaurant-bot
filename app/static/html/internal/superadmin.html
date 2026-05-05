@@ -6,18 +6,19 @@
 <title>Mesio HQ</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <style>
+:root{--brand:#1D9E75;--brand-dark:#0F6E56;--brand-light:#E1F5EE;} /* lint-allow: standalone page — tokens.css not loaded, inline token defs required */
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f0;color:#111;}
 
 /* ── LOGIN ── */
 #login-overlay{position:fixed;inset:0;background:#f5f5f0;display:flex;align-items:center;justify-content:center;z-index:9999;}
 .login-box{background:#fff;border:0.5px solid #e0e0d8;border-radius:16px;padding:2.5rem;width:360px;box-shadow:0 8px 40px rgba(0,0,0,.08);}
-.login-logo{width:44px;height:44px;background:#1D9E75;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;margin-bottom:1.5rem;}
+.login-logo{width:44px;height:44px;background:var(--brand);border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;margin-bottom:1.5rem;}
 .login-title{font-size:20px;font-weight:700;margin-bottom:4px;}
 .login-sub{font-size:12px;color:#888;margin-bottom:1.75rem;}
 .login-input{width:100%;padding:10px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;margin-bottom:10px;}
-.login-input:focus{border-color:#1D9E75;}
-.login-btn{width:100%;background:#1D9E75;color:#fff;border:none;padding:11px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;}
+.login-input:focus{border-color:var(--brand);}
+.login-btn{width:100%;background:var(--brand);color:#fff;border:none;padding:11px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;}
 .login-btn:hover{background:#0F6E56;}
 .login-err{color:#C0392B;font-size:12px;margin-top:8px;text-align:center;}
 
@@ -25,7 +26,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 #app{display:none;}
 .sidebar{width:220px;background:#fff;border-right:0.5px solid #e0e0d8;height:100vh;position:fixed;top:0;left:0;display:flex;flex-direction:column;padding:1.5rem 1rem;overflow-y:auto;}
 .sidebar-logo{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:0.5px solid #e0e0d8;}
-.logo-icon{width:36px;height:36px;background:#1D9E75;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;}
+.logo-icon{width:36px;height:36px;background:var(--brand);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;}
 .logo-text{font-size:14px;font-weight:700;}
 .logo-sub{font-size:11px;color:#888;}
 .nav-group-label{font-size:10px;font-weight:700;color:#bbb;letter-spacing:.08em;text-transform:uppercase;padding:10px 12px 3px;margin-top:4px;}
@@ -48,7 +49,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .metric-label{font-size:12px;color:#888;margin-bottom:6px;}
 .metric-value{font-size:26px;font-weight:700;}
 .metric-sub{font-size:11px;color:#888;margin-top:4px;}
-.metric-green{color:#1D9E75;}
+.metric-green{color:var(--brand);}
 
 /* ── CARDS ── */
 .card{background:#fff;border:0.5px solid #e0e0d8;border-radius:12px;padding:1.25rem;margin-bottom:1.25rem;}
@@ -70,7 +71,7 @@ tr:hover td{background:#fafaf8;}
 
 /* ── BUTTONS ── */
 .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:none;}
-.btn-primary{background:#1D9E75;color:#fff;}
+.btn-primary{background:var(--brand);color:#fff;}
 .btn-primary:hover{background:#0F6E56;}
 .btn-secondary{background:#fff;color:#555;border:1px solid #e0e0d8;}
 .btn-secondary:hover{background:#f5f5f0;}
@@ -83,7 +84,7 @@ tr:hover td{background:#fafaf8;}
 .form-full{grid-column:1/-1;}
 label.field-label{font-size:11px;color:#888;display:block;margin-bottom:4px;font-weight:600;}
 .field-input{width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;background:#fff;}
-.field-input:focus{border-color:#1D9E75;}
+.field-input:focus{border-color:var(--brand);}
 textarea.field-input{min-height:140px;resize:vertical;font-family:inherit;}
 select.field-input{cursor:pointer;}
 
@@ -92,7 +93,7 @@ select.field-input{cursor:pointer;}
 .switch input{opacity:0;width:0;height:0;}
 .slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:22px;transition:.3s;}
 .slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s;}
-input:checked+.slider{background:#1D9E75;}
+input:checked+.slider{background:var(--brand);}
 input:checked+.slider:before{transform:translateX(18px);}
 .module-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid #f0f0e8;}
 .module-row:last-child{border-bottom:none;}
@@ -107,7 +108,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 .detail-sub{font-size:12px;color:#888;margin-top:2px;}
 .detail-tabs{display:flex;border-bottom:0.5px solid #e0e0d8;padding:0 1.5rem;}
 .detail-tab{padding:10px 16px;font-size:13px;color:#888;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;}
-.detail-tab.active{color:#1D9E75;border-bottom-color:#1D9E75;}
+.detail-tab.active{color:var(--brand);border-bottom-color:var(--brand);}
 .detail-body{padding:1.5rem;}
 .detail-tab-panel{display:none;}
 .detail-tab-panel.active{display:block;}
@@ -116,7 +117,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 .search-bar{display:flex;gap:10px;margin-bottom:1rem;align-items:center;flex-wrap:wrap;}
 .search-input{padding:8px 14px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;outline:none;width:260px;}
 .filter-btn{padding:6px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:12px;background:#fff;cursor:pointer;color:#555;}
-.filter-btn.active{background:#1D9E75;color:#fff;border-color:#1D9E75;}
+.filter-btn.active{background:var(--brand);color:#fff;border-color:var(--brand);}
 
 /* ── EMPTY STATE ── */
 .empty-state{text-align:center;padding:3rem;color:#aaa;font-size:13px;}
@@ -139,7 +140,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 
 /* ── Org/Location tabs ── */
 .org-tab-btn{padding:10px 20px;font-size:13px;font-weight:500;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#888;transition:color .15s,border-color .15s;}
-.org-tab-btn.active{border-bottom-color:#1D9E75;color:#1D9E75;}
+.org-tab-btn.active{border-bottom-color:var(--brand);color:var(--brand);}
 .org-tab-panel{display:none;}
 .org-tab-panel.active{display:block;}
 

@@ -397,14 +397,14 @@
           </div>
           <div class="sc-modal-sub">Selecciona el compañero con quien quieres cambiar el turno.</div>
           <div style="margin-bottom:12px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
-            <select class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
+            <label for="sc-swap-target-kiosco" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
+            <select id="sc-swap-target-kiosco" class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
               <option value="">— Selecciona compañero —</option>
             </select>
           </div>
           <div style="margin-bottom:12px;">
-            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
-            <input class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
+            <label for="sc-swap-reason-kiosco" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
+            <input id="sc-swap-reason-kiosco" class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
           </div>
           <button class="sc-modal-act" style="background:var(--sc-brand,#1D9E75);color:#fff;" id="sc-swap-submit">Enviar solicitud</button>
           <button class="sc-modal-act ghost" id="sc-swap-cancel">Cancelar</button>
@@ -453,7 +453,7 @@
 <style>
 .sc-fp-wrap { transition: background .2s; border-radius: 12px; padding: 16px 0; }
 .sc-fp-state-waiting .sc-fp-circle { animation: sc-fp-pulse 1.4s ease-in-out infinite; }
-.sc-fp-state-success .sc-fp-circle { color: var(--brand, #1D9E75); }
+.sc-fp-state-success .sc-fp-circle { color: var(--brand); }
 .sc-fp-state-error   .sc-fp-circle { color: #EF4444; }
 @keyframes sc-fp-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -475,14 +475,14 @@
     </div>
     <div class="sc-modal-sub">Selecciona el compañero con quien quieres cambiar.</div>
     <div style="margin-bottom:12px;">
-      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
-      <select class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
+      <label for="sc-swap-target-mobile" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Compañero</label>
+      <select id="sc-swap-target-mobile" class="sc-swap-target-sel" style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;">
         <option value="">— Selecciona compañero —</option>
       </select>
     </div>
     <div style="margin-bottom:12px;">
-      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
-      <input class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
+      <label for="sc-swap-reason-mobile" style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Razón (opcional)</label>
+      <input id="sc-swap-reason-mobile" class="sc-swap-reason" type="text" maxlength="200" placeholder="Cita médica, viaje, etc." style="width:100%;padding:8px;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;box-sizing:border-box;" />
     </div>
     <button class="sc-modal-act" style="background:var(--sc-brand,#1D9E75);color:#fff;" id="sc-swap-m-submit">Enviar solicitud</button>
     <button class="sc-modal-act ghost" id="sc-swap-m-cancel">Cancelar</button>

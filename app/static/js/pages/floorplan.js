@@ -92,7 +92,6 @@ async function loadFloorPlan() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = await res.json();
     _tables = Array.isArray(data) ? data : (data.tables || []);
-    console.log('[floorplan] /api/tables/floor-plan:', _tables.length, 'tables'); // lint-allow: diagnostic for production debug
     _rebuildZoneFilter();
     renderTables();
     if (_currentView === 'qr') renderQrGrid();

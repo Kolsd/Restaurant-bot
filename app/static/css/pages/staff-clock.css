@@ -5,13 +5,13 @@
      · kiosco  → tablet horizontal compartida (1180×820)
 
    Variables bridged from tokens.css:
-     --brand = #1D9E75   --brand-dark = #0F6E56
+     --brand = var(--brand)   --brand-dark = var(--brand-dark)
      --border = #E5E7EB  --text = #111827
    ═══════════════════════════════════════════════════════════════ */
 
 /* ── local tokens not always in tokens.css ── */
 :root {
-  --sc-brand:        #1D9E75;
+  --sc-brand:        var(--brand);
   --sc-brand-dark:   #0F6E56;
   --sc-brand-light:  #E1F5EE;
   --sc-brand-bg:     #F0FAF5;
@@ -114,7 +114,7 @@ body.staff-clock-page {
 
 /* ═══ MOBILE — HERO ═══ */
 .sc-hero-m {
-  background: linear-gradient(165deg, #0F6E56 0%, #1D9E75 60%, #2BB88C 100%);
+  background: linear-gradient(165deg, var(--brand-dark) 0%, var(--brand) 60%, #2BB88C 100%);
   color: #fff;
   padding: 50px 20px 28px;
   position: relative;
@@ -441,7 +441,7 @@ body.staff-clock-page {
 /* ═══ KIOSCO — tablet horizontal ═══ */
 .sc-k-left {
   width: 440px; flex-shrink: 0;
-  background: linear-gradient(175deg, #0F6E56 0%, #1D9E75 70%, #2BB88C 100%);
+  background: linear-gradient(175deg, var(--brand-dark) 0%, var(--brand) 70%, #2BB88C 100%);
   color: #fff; padding: 32px 30px 26px;
   display: flex; flex-direction: column; position: relative;
 }

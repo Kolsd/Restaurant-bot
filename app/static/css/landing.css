@@ -666,7 +666,7 @@ em { font-style: italic; color: var(--accent); }
 .foot-legal { display: flex; gap: 20px; flex-wrap: wrap; }
 
 /* ══ Accent override ══ */
-body[data-accent="green"]  { --accent: #1D9E75; --brand: #1D9E75; --brand-dark: #0F6E56; }
+body[data-accent="green"]  { --accent: #1D9E75; --brand: #1D9E75; --brand-dark: #0F6E56; } /* lint-allow: accent override — literal needed to reset token to brand value */
 body[data-accent="indigo"] { --accent: #6366F1; --brand: #6366F1; --brand-dark: #4338CA; }
 body[data-accent="amber"]  { --accent: #F59E0B; --brand: #F59E0B; --brand-dark: #B45309; }
 body[data-accent="coral"]  { --accent: #F56565; --brand: #F56565; --brand-dark: #C53030; }

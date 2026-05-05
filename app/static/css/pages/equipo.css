@@ -9,7 +9,7 @@
 .avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #1D9E75, #0F6E56);
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
   color: #fff;
   display: inline-flex;
   align-items: center;

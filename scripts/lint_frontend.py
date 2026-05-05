@@ -472,6 +472,47 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/staff/self/clock-out",
         ],
     },
+    "settings.html": {
+        "js": "pages/settings.js",
+        # Labels are JS strings that must exist in settings.js to prove wiring:
+        # saveBtnTop/js-save-btn = Guardar changes; kiosko-copy-btn = copy kiosko URL; btnPause = danger zone
+        "required_button_labels": [
+            "saveBtnTop",
+            "kiosko-copy-btn",
+            "btnPause",
+        ],
+        "required_fetches": [
+            "/api/settings",
+        ],
+    },
+    "equipo.html": {
+        "js": "pages/equipo.js",
+        # Labels are JS identifier strings that must exist to prove wiring:
+        # inviteBtn = Invitar miembro handler; membersTbody = team roster render target
+        "required_button_labels": [
+            "inviteBtn",
+            "membersTbody",
+        ],
+        "required_fetches": [
+            "/api/staff",
+            "/api/staff/schedules",
+        ],
+    },
+    "fidelizacion.html": {
+        "js": "pages/fidelizacion.js",
+        # Labels are JS getElementById strings that must exist to prove handler wiring:
+        # btn-new-campaign = Nueva campaña; btn-configure = Configurar programa; campaigns-list = render target
+        "required_button_labels": [
+            "btn-new-campaign",
+            "btn-configure",
+            "campaigns-list",
+        ],
+        "required_fetches": [
+            "/api/loyalty/aggregates",
+            "/api/loyalty/segments",
+            "/api/loyalty/campaigns",
+        ],
+    },
 }
 
 

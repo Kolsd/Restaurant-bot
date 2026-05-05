@@ -1,7 +1,7 @@
 /* ══ RESET & VARIABLES ══════════════════════════════════════════════ */
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{
-  --primary:#1D9E75;--primary-h:#0F6E56;--primary-l:#E1F5EE;--primary-t:#0F6E56;
+  --primary:var(--brand);--primary-h:#0F6E56;--primary-l:#E1F5EE;--primary-t:#0F6E56;
   --bg:#F5F5F0;--surface:#fff;--border:#E0E0D8;--border-s:#C8C8C0;
   --text:#111;--text-2:#555;--text-3:#888;--text-4:#bbb;
   --sw:220px;--th:56px;--dp:380px;

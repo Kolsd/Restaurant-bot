@@ -48,25 +48,6 @@ function mesioSetCurrentLocationId(id) {
   }
 }
 
-// ── Legacy → Org migration (runs once on utils load) ─
-// If rb_org is absent but rb_restaurant exists, populate minimal Org shape
-// from legacy data so downstream helpers work before the user re-logs in.
-function mesioMigrateLegacyStorageIfNeeded() {
-  if (mesioGetOrg()) return; // already migrated
-  var legacy = localStorage.getItem('rb_restaurant');
-  if (!legacy) return;
-  try {
-    var r = JSON.parse(legacy);
-    mesioSetOrg(
-      { id: r.id, name: r.name, whatsapp_number: r.whatsapp_number || null,
-        features: r.features || {}, locale: r.locale, currency: r.currency },
-      r.branch_id ? [{ id: r.branch_id, name: r.name, is_primary: true }] : [],
-      r.branch_id || r.id
-    );
-  } catch (e) { console.warn('legacy storage migration failed', e); }
-}
-mesioMigrateLegacyStorageIfNeeded();
-
 // ── Currency formatter ───────────────────────────
 var _fmtCache = {};
 function mesioFmt(n) {

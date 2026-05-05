@@ -1452,8 +1452,6 @@ function renderBranches(branches) {
   }
 }
 
-function formatRoles(roleStr) { return ''; } // Ya no es necesaria aquí pero la dejamos vacía por si acaso
-
 async function loadBranchUsers(branchId) {
   // Remove X-Branch-ID from the headers when querying by explicit branch_id param
   // to avoid the global branch selector overriding the intended query target.

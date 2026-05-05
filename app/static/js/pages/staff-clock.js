@@ -900,6 +900,11 @@ async function scWebAuthnAuth(action) {
 let _pendingAction = null;
 let _currentLayout = 'mobile';
 
+// Focus-trap handles — stored so close functions can deactivate them.
+let _authTrap = null;
+let _pinTrap  = null;
+let _swapTrap = null;
+
 function scOpenAuth(action) {
   _pendingAction = action;
   const titles = {
@@ -911,16 +916,24 @@ function scOpenAuth(action) {
   };
   const title = titles[action] || 'Confirmar';
 
+  if (_authTrap) { _authTrap.deactivate(); _authTrap = null; }
+
   if (_currentLayout === 'kiosco') {
     const titleEl = document.getElementById('sc-auth-title');
     if (titleEl) titleEl.textContent = title;
     const modalEl = document.getElementById('sc-auth-modal');
-    if (modalEl) modalEl.classList.add('open');
+    if (modalEl) {
+      modalEl.classList.add('open');
+      _authTrap = mesioFocusTrap(modalEl, { onEscape: () => scCloseAuth(), labelledBy: 'sc-auth-title' });
+    }
   } else {
     const titleEl = document.getElementById('sc-auth-title-m');
     if (titleEl) titleEl.textContent = title;
     const modalEl = document.getElementById('sc-auth-modal-m');
-    if (modalEl) modalEl.classList.add('open');
+    if (modalEl) {
+      modalEl.classList.add('open');
+      _authTrap = mesioFocusTrap(modalEl, { onEscape: () => scCloseAuthM(), labelledBy: 'sc-auth-title-m' });
+    }
   }
 
   const modalId = _currentLayout === 'kiosco' ? 'sc-auth-modal' : 'sc-auth-modal-m';
@@ -928,16 +941,32 @@ function scOpenAuth(action) {
   setTimeout(() => { _scStartAuthFlow(action); }, 200);
 }
 
-function scCloseAuth()  { const m = document.getElementById('sc-auth-modal');   if (m) m.classList.remove('open'); }
-function scCloseAuthM() { const m = document.getElementById('sc-auth-modal-m'); if (m) m.classList.remove('open'); }
+function scCloseAuth()  {
+  if (_authTrap) { _authTrap.deactivate(); _authTrap = null; }
+  const m = document.getElementById('sc-auth-modal');
+  if (m) m.classList.remove('open');
+}
+function scCloseAuthM() {
+  if (_authTrap) { _authTrap.deactivate(); _authTrap = null; }
+  const m = document.getElementById('sc-auth-modal-m');
+  if (m) m.classList.remove('open');
+}
 
 function scShowPinPad() {
   scCloseAuth(); scCloseAuthM();
   const m = document.getElementById('sc-pin-modal');
-  if (m) m.classList.add('open');
+  if (m) {
+    m.classList.add('open');
+    if (_pinTrap) { _pinTrap.deactivate(); }
+    _pinTrap = mesioFocusTrap(m, { onEscape: () => scClosePin(), labelledBy: 'sc-pin-modal-title' });
+  }
   scPinReset();
 }
-function scClosePin() { const m = document.getElementById('sc-pin-modal'); if (m) m.classList.remove('open'); }
+function scClosePin() {
+  if (_pinTrap) { _pinTrap.deactivate(); _pinTrap = null; }
+  const m = document.getElementById('sc-pin-modal');
+  if (m) m.classList.remove('open');
+}
 function scShowFp() { scClosePin(); scOpenAuth(_pendingAction); }
 
 let _pin = '';
@@ -1085,6 +1114,11 @@ function scOpenSwap(shiftDate, shiftStart, shiftEnd) {
   if (reasonEl) reasonEl.value = '';
 
   m.classList.add('open');
+  if (_swapTrap) { _swapTrap.deactivate(); }
+  _swapTrap = mesioFocusTrap(m, {
+    onEscape: () => { _currentLayout === 'kiosco' ? scCloseSwap() : scCloseSwapM(); },
+    labelledBy: 'sc-swap-modal-title',
+  });
   _scLoadCoworkersForSwap(m);
 }
 
@@ -1151,8 +1185,16 @@ async function scSubmitSwap(modalId) {
   }
 }
 
-function scCloseSwap()  { const m = document.getElementById('sc-swap-modal');   if (m) m.classList.remove('open'); }
-function scCloseSwapM() { const m = document.getElementById('sc-swap-modal-m'); if (m) m.classList.remove('open'); }
+function scCloseSwap()  {
+  if (_swapTrap) { _swapTrap.deactivate(); _swapTrap = null; }
+  const m = document.getElementById('sc-swap-modal');
+  if (m) m.classList.remove('open');
+}
+function scCloseSwapM() {
+  if (_swapTrap) { _swapTrap.deactivate(); _swapTrap = null; }
+  const m = document.getElementById('sc-swap-modal-m');
+  if (m) m.classList.remove('open');
+}
 
 /* ── Incoming swap requests (for me as target) ──────────────────── */
 

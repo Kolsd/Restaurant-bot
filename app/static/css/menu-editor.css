@@ -28,7 +28,7 @@
   transition: border 0.2s;
 }
 .menu-editor-cat-input:focus, .menu-editor-cat-input:hover {
-  border-color: #1D9E75;
+  border-color: var(--brand);
   background: #fff;
 }
 .btn-del-cat {
@@ -64,7 +64,7 @@
   font-size: 13px;
   outline: none;
 }
-.dish-inputs input:focus { border-color: #1D9E75; }
+.dish-inputs input:focus { border-color: var(--brand); }
 .btn-del-dish {
   background: #FDE8E8;
   color: #C0392B;
