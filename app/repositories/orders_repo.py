@@ -471,14 +471,15 @@ async def db_get_delivery_orders(status_list: list, restaurant_id: int | None = 
     Cada caja ve únicamente sus propios pedidos — sin herencia de sucursales."""
     async with _tenant_connection() as conn:
         if restaurant_id is not None:
+            # Filter directly on orders.org_id — no JOIN needed.
+            # The previous JOIN restaurants → locations multiplied each order row
+            # by the number of locations sharing the same whatsapp_number.
             rows = await conn.fetch(
-                """SELECT o.* FROM orders o
-                   JOIN restaurants r ON r.whatsapp_number = o.bot_number
-                   JOIN locations l ON l.id = r.id
-                   WHERE o.order_type IN ('domicilio', 'recoger')
-                     AND o.status = ANY($1)
-                     AND l.org_id = $2
-                   ORDER BY o.created_at ASC""",
+                """SELECT * FROM orders
+                   WHERE order_type IN ('domicilio', 'recoger')
+                     AND status = ANY($1)
+                     AND org_id = $2
+                   ORDER BY created_at ASC""",
                 status_list, restaurant_id
             )
         else:
