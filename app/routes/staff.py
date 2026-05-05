@@ -211,7 +211,15 @@ async def _check_pin_rate_limit(request: Request, restaurant_id: int, name: str)
 @router.post("/pin-login", status_code=200)
 async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
     await _check_pin_rate_limit(request, body.restaurant_id, body.name)
-    member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)
+
+    # Pre-auth flow: scope the tenant explicitly from the body. The downstream
+    # repos call `tenant_connection()` which requires an active scope; without
+    # this wrapper every PIN login raises TenantNotSetError (regression caught
+    # by tests/e2e/test_staff_pin_login_e2e.py).
+    from app.services.tenant_context import tenant_scope
+
+    with tenant_scope(body.restaurant_id):
+        member = await db.db_get_staff_for_pin_login(body.restaurant_id, body.name)
     # Use a constant-time response regardless of whether the employee was found
     # or the PIN was wrong — prevents username enumeration oracle.
     if not member or not _pwd_ctx.verify(body.pin, member["pin"]):
@@ -232,8 +240,8 @@ async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
 
     roles = member.get("roles") or [member.get("role", "mesero")]
 
-    # ✅ FIX: traer datos del restaurante para guardar en localStorage
-    restaurant_data = await db.db_get_restaurant_by_id(body.restaurant_id)
+    with tenant_scope(body.restaurant_id):
+        restaurant_data = await db.db_get_restaurant_by_id(body.restaurant_id)
     raw_features = restaurant_data.get("features") or {} if restaurant_data else {}
     if isinstance(raw_features, str):
         import json as _j

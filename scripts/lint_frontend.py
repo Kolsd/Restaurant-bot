@@ -350,6 +350,163 @@ def check_html_seed_money(path: Path, source: str) -> list[Violation]:
     return out
 
 
+# ── PAGE-CONTRACTS ────────────────────────────────────────────────────────────
+# Declares the MINIMUM set of load-bearing UI anchors that MUST exist in each
+# operational page's JS render code.  "Load-bearing" means: if this string
+# disappears the page renders flat / non-functional for the role that uses it.
+#
+# Format:
+#   html_file: {
+#     "js": "relative path under app/static/js/",
+#     "required_button_labels": list of button text literals that must appear,
+#     "required_fetches":       list of fetch URL substrings that must appear,
+#   }
+#
+# Rules:
+#   - 3-5 anchors per page max.  Only truly load-bearing ones.
+#   - NO lint-allow suppression is supported for PAGE-CONTRACTS violations —
+#     the check exists precisely because suppressing it trivially is dangerous.
+#   - When you add a new page, add a contract here.  When you rename a button,
+#     update the contract.
+PAGE_CONTRACTS: dict[str, dict] = {
+    "domiciliario.html": {
+        "js": "pages/domiciliario.js",
+        "required_button_labels": [
+            "Salir a entregar",
+            "Llegué",
+            "Entregado",
+            "Tomar",
+        ],
+        "required_fetches": [
+            "/api/delivery/orders",
+            "/status",
+        ],
+    },
+    "mesero.html": {
+        "js": "pages/mesero.js",
+        "required_button_labels": [
+            "Cobrar mesa",
+            "Mandar a caja",
+            "Confirmar mesa real",
+            "Marcar entregado",
+        ],
+        "required_fetches": [
+            "/api/pos/tables-status",
+            "/api/table-orders",
+            "/api/waiter-alerts",
+        ],
+    },
+    "caja.html": {
+        "js": "pages/caja.js",
+        "required_button_labels": [
+            "Cobrar total completo",
+            "Cobrar este check",
+            "Dividir cuenta",
+        ],
+        "required_fetches": [
+            "/api/pos/tables-status",
+            "/api/pos/menu",
+            "/api/pos/order",
+        ],
+    },
+    "kitchen.html": {
+        "js": "pages/kitchen.js",
+        "required_button_labels": [
+            "Listo",
+            "+ 2 min",
+        ],
+        "required_fetches": [
+            "/api/table-orders",
+            "/api/kitchen/delivery-orders",
+        ],
+    },
+    "bar.html": {
+        "js": "pages/bar.js",
+        "required_button_labels": [
+            "Listo",
+            "+2 min",
+        ],
+        "required_fetches": [
+            "/api/table-orders",
+        ],
+    },
+    "staff-hq.html": {
+        "js": "pages/staff-clock.js",
+        "required_button_labels": [
+            "Confirmar entrada",
+            "Confirmar salida",
+            "Entrada registrada",
+            "Salida registrada",
+        ],
+        "required_fetches": [
+            "/api/staff/self/profile",
+            "/api/staff/self/clock-in",
+            "/api/staff/self/clock-out",
+        ],
+    },
+}
+
+
+def check_page_contracts(violations: list[Violation]) -> None:
+    """Check that each operational page's JS contains required load-bearing anchors.
+
+    For every entry in PAGE_CONTRACTS we read the corresponding JS file and do
+    simple substring search for each required button label and fetch URL.  A
+    missing anchor means the page almost certainly renders flat or broken for
+    the role that depends on it — exactly the class of bug that escaped CI when
+    domiciliario.html was deployed with its render code gutted.
+
+    Violations are appended to the provided list in-place.  Error format:
+        PAGE-CONTRACTS [<html>]: missing required button label '<label>'
+        PAGE-CONTRACTS [<html>]: missing required fetch '<url>'
+
+    No lint-allow suppression is supported for this check.
+    """
+    js_root = JS_DIR  # app/static/js/
+
+    for html_name, contract in PAGE_CONTRACTS.items():
+        js_rel = contract["js"]          # e.g. "pages/domiciliario.js"
+        js_path = js_root / js_rel
+        if not js_path.exists():
+            violations.append(Violation(
+                file=str(js_path),
+                line=0,
+                kind="PAGE-CONTRACTS",
+                message=(
+                    f"[{html_name}]: JS file '{js_rel}' does not exist — "
+                    "cannot verify page contracts"
+                ),
+            ))
+            continue
+
+        source = js_path.read_text(encoding="utf-8")
+
+        for label in contract.get("required_button_labels", []):
+            if label not in source:
+                violations.append(Violation(
+                    file=str(js_path),
+                    line=0,
+                    kind="PAGE-CONTRACTS",
+                    message=(
+                        f"[{html_name}]: missing required button label "
+                        f"'{label}' in {js_rel} — page would render flat for "
+                        f"the role that uses this page"
+                    ),
+                ))
+
+        for fetch_url in contract.get("required_fetches", []):
+            if fetch_url not in source:
+                violations.append(Violation(
+                    file=str(js_path),
+                    line=0,
+                    kind="PAGE-CONTRACTS",
+                    message=(
+                        f"[{html_name}]: missing required fetch '{fetch_url}' "
+                        f"in {js_rel} — status-update or data-load call absent"
+                    ),
+                ))
+
+
 def run() -> list[Violation]:
     all_violations: list[Violation] = []
     backend_routes = _load_backend_routes()
@@ -365,6 +522,8 @@ def run() -> list[Violation]:
         all_violations.extend(check_html_seed_names(html_file, source))
         all_violations.extend(check_html_seed_money(html_file, source))
 
+    check_page_contracts(all_violations)
+
     return all_violations
 
 
@@ -379,7 +538,7 @@ def main() -> int:
     for v in violations:
         by_file.setdefault(v.file, []).append(v)
 
-    counts = {"MOCK": 0, "TODO": 0, "FETCH": 0}
+    counts: dict[str, int] = {}
     for v in violations:
         counts[v.kind] = counts.get(v.kind, 0) + 1
 
@@ -387,7 +546,8 @@ def main() -> int:
     for f in sorted(by_file):
         for v in by_file[f]:
             print(v.format())
-    print(f"\nTotal: {len(violations)}  (MOCK={counts['MOCK']} TODO={counts['TODO']} FETCH={counts['FETCH']})")
+    summary_parts = "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+    print(f"\nTotal: {len(violations)}  ({summary_parts})")
     return 1
 
 

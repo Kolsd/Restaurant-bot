@@ -432,6 +432,18 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 - Patrón de fixture integración documentado (function scope + `_fake_get_pool` async + `SET LOCAL ROLE mesio_app` + manual `tx.start/rollback`)
 - Bugs reales descubiertos durante el sprint (no solo polish): 4 backend-path mismatches en JS (`/delivery/orders` sin `/api` 3×, `/payroll/export/{id}` invertido, `approve` endpoint faltante, `/api/admin/logout` legacy)
 
+**E2E hardening sprint (2026-05-05)** — disparado por bug real: `domiciliario.html` deployó sin botones (los renderiza el JS según data, sin órdenes la página queda plana). Tests existentes no lo agarraron porque NUNCA cargaban data semilla a la UI.
+- 3 agents Sonnet en paralelo: theater audit, page contracts lint, real seed-based E2E
+- Theater audit: **0 deletes**, suite ya estaba limpia post-No-v2 (130 tests con value assertions reales). El gap real es UI coverage, no test theater. Reporte completo en `TEST_THEATER_AUDIT.md`.
+- **PAGE-CONTRACTS lint check** (`scripts/lint_frontend.py`): declara botones load-bearing + fetches por cada página operacional (domiciliario, mesero, caja, kitchen, bar, staff-hq). Mutation-tested: borrar "Salir a entregar" hace fallar lint con mensaje explícito.
+- **5 nuevos E2E tests** en `tests/e2e/` con seed real a `TEST_DATABASE_URL` + assertions de valor computado + mutation tests:
+  - `test_domiciliario_page_renders_buttons.py` — confirmado→en_camino→en_puerta→entregado, total inmutable, JSON shape garantiza render
+  - `test_mesero_table_session_renders.py` — apertura mesa → orden → fire/ready/deliver → pay con tip, asserción `check_total == 56000`
+  - `test_caja_validates_proof.py` — Nequi proof URL → validate flips paid+confirmado, idempotencia (segundo POST devuelve already_paid)
+  - `test_staff_clock_full_cycle.py` — clock-in / break / clock-out + timecard math
+  - `test_staff_pin_login_e2e.py` — happy path retorna token usable + wrong PIN retorna 401
+- **Bug prod descubierto y arreglado** durante el sprint: `POST /api/staff/pin-login` llamaba `db_get_staff_for_pin_login()` sin `tenant_scope()` previo → todos los login PIN tiraban `TenantNotSetError`. Fix: wrappear en `tenant_scope(body.restaurant_id)` (mismo patrón que `/self/verify-pin`). Cubierto por test_staff_pin_login_e2e.py — mutation-tested.
+
 ### Limitaciones conocidas (no críticas)
 
 - `quantize_money` interno NO recibe `currency` en la mayoría de sitios → default 2 decimales. Solo el endpoint `pay_check` propaga `features.currency`. Para COP/CLP la columna NUMERIC del schema ya enforce la precisión final. Propagar `currency` a `db_calculate_payroll`, `db_calculate_tips_by_attendance`, etc. requeriría cambios de signature en repos — diferido.
@@ -980,14 +992,17 @@ State machine `loyalty_campaigns.status`: `draft` → `active`, `active` ↔ `pa
 
 ### Lint frontend — `scripts/lint_frontend.py` + `tests/test_frontend_lint.py`
 
-Script auto-invocado como pytest test. Cinco checks:
+Script auto-invocado como pytest test. Seis checks:
 1. **MOCK** — keywords `mock|fake|dummy|lorem|ipsum` en JS (archivos `mesio-demo-*` y `dashboard-demo-mesio.js` exentos)
 2. **TODO** — marcadores `TODO|FIXME|XXX|HACK` en admin JS (fuerzan resolución explícita)
 3. **FETCH** — cada `fetch('/api/…')` contra rutas FastAPI registradas (segment-match soporta `{param}` + string concat `'/api/x/' + id`)
 4. **HTML-SEED (nombres)** — nombres españoles hardcoded en admin HTML (`María`, `Carlos`, etc.)
 5. **HTML-SEED (dinero)** — literales `$X.YM` / `$Nk` en contenido HTML admin
+6. **PAGE-CONTRACTS** — botones de acción load-bearing + fetches obligatorios por página operacional. Catches "página renderiza plana sin botones" (regresión real 2026-05-05 en `domiciliario.html`).
 
-Supresión con `// lint-allow: razón` (JS) o `<!-- lint-allow: razón -->` (HTML). PROHIBIDO suprimir sin razón.
+Supresión con `// lint-allow: razón` (JS) o `<!-- lint-allow: razón -->` (HTML). **PAGE-CONTRACTS NO permite supresión** — si renombrás un botón hay que actualizar el contrato, no silenciarlo.
+
+Contratos declarados en `PAGE_CONTRACTS` dict en `scripts/lint_frontend.py`. Páginas cubiertas: `domiciliario.html`, `mesero.html`, `caja.html`, `kitchen.html`, `bar.html`, `staff-hq.html`. Si agregás una página operacional nueva, agregar su contrato.
 
 Correr: `python scripts/lint_frontend.py` o `pytest tests/test_frontend_lint.py`. CI debe fallar si hay regresión.
 
