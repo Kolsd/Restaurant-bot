@@ -34,6 +34,10 @@ Variables de entorno críticas:
   BOT_MODEL_FAST,               # (opcional) override modelo rápido de Anthropic
   BOT_MODEL_PRECISE,            # (opcional) override modelo preciso de Anthropic
   OPENAI_API_KEY,               # (opcional) Para transcripción de voice notes (Whisper API). Sin esto, audios reciben fallback amigable.
+  SENTRY_DSN,                   # (opcional) Activa Sentry error tracking. Sin esto, init es no-op silencioso.
+  SENTRY_ENVIRONMENT,           # (opcional, default "production") Distingue prod/staging/dev en Sentry UI.
+  SENTRY_RELEASE,               # (opcional) Versión/commit SHA. Útil para tracking de deploys.
+  SENTRY_TRACES_SAMPLE_RATE,    # (opcional, default 0.1) Sampling de transacciones APM. 1.0 = 100%, 0 = off.
   CLOUDINARY_CLOUD_NAME,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
   CLOUDINARY_API_KEY,           # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
   CLOUDINARY_API_SECRET,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.

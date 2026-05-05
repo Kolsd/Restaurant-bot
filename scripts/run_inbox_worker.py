@@ -45,6 +45,9 @@ log = get_logger("inbox_worker_standalone")
 
 
 async def main():
+    from app.services.sentry import init_sentry
+    init_sentry("inbox_worker")
+
     log.info("standalone_worker.starting")
 
     # Initialize the DB pool

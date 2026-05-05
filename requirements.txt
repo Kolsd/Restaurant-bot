@@ -18,6 +18,7 @@ webauthn>=2.0.0,<3.0.0
 structlog>=24.1.0
 redis>=5.0
 cloudinary>=1.40,<2.0          # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
+sentry-sdk[fastapi]>=2.18,<3.0 # Error tracking + tracing. Activado vía SENTRY_DSN env var.
 # ── Testing ───────────────────────────────────────────────────────────
 pytest>=8.0
 pytest-asyncio>=0.24

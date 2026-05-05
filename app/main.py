@@ -74,6 +74,9 @@ async def lifespan(app):
     # All schema migrations are handled by Alembic (run `alembic upgrade head`
     # before deploying). Do NOT add DDL calls here — with 4 uvicorn workers,
     # concurrent CREATE TABLE statements cause race conditions on startup.
+    from app.services.sentry import init_sentry
+    init_sentry("web")
+
     await db.init_pool()
 
     from app.services.scheduler import start_scheduler
