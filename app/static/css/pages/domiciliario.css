@@ -285,7 +285,13 @@ body {
 
 /* ── Tab content visibility ── */
 .tab-pane { display: none; }
-.tab-pane.active { display: block; flex: 1; min-height: 0; }
+/* flex:1 + overflow-y:auto makes the pane scroll INSIDE its allocated height,
+   preventing content from bleeding behind the sticky tab bar */
+.tab-pane.active { display: block; flex: 1; min-height: 0; overflow-y: auto; }
+.tab-pane.active::-webkit-scrollbar { display: none; }
+
+/* Tab bar always on top of any overflowing card content */
+.dom-tabs { z-index: 10; }
 
 /* ── Mobile: full screen instead of phone frame ── */
 @media (max-width: 480px) {
