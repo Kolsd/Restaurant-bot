@@ -333,7 +333,89 @@ async def update_reservation_status(
     if not reservation:
         return JSONResponse({"detail": "Reservation not found"}, status_code=404)
 
+    # Best-effort WhatsApp notification on admin cancellation. The DB update
+    # above is the source of truth; the send is fire-and-forget — if it fails
+    # we still return the cancelled reservation. Only fires when the customer
+    # left a phone number AND the restaurant has WA credentials configured.
+    if status == "cancelled":
+        try:
+            await _notify_customer_of_cancellation(reservation, restaurant, reason)
+        except Exception:
+            # Never fail the API response on a notification glitch.
+            log.exception(
+                "reservations.cancel_notify_failed",
+                reservation_id=reservation_id,
+            )
+
     return reservation
+
+
+async def _notify_customer_of_cancellation(
+    reservation: dict,
+    restaurant: dict,
+    reason: str,
+) -> bool:
+    """Send a WhatsApp text to the customer announcing the cancellation.
+
+    Returns True if the message was dispatched, False otherwise. Never raises —
+    callers wrap in try/except for defense-in-depth, but this helper already
+    swallows transport errors and logs them.
+
+    Skips silently when:
+      - reservation has no phone (manual reserva walk-in)
+      - restaurant has no WA token / phone_id
+    """
+    phone = (reservation.get("phone") or "").strip()
+    if not phone:
+        return False
+
+    bot_number = (
+        reservation.get("bot_number")
+        or restaurant.get("whatsapp_number")
+        or ""
+    ).strip()
+    if not bot_number:
+        return False
+
+    token    = (restaurant.get("wa_access_token") or "").strip()
+    phone_id = (restaurant.get("wa_phone_id") or "").strip()
+    if not token:
+        log.info(
+            "reservations.cancel_notify_skipped_no_token",
+            reservation_id=reservation.get("id"),
+        )
+        return False
+
+    name = (reservation.get("name") or "").strip()
+    date = reservation.get("date") or ""
+    time_str = reservation.get("time") or ""
+    resto_name = (restaurant.get("name") or "el restaurante").strip()
+
+    greeting = f"Hola {name.split()[0]}" if name else "Hola"
+    reason_str = (reason or "").strip()
+    reason_line = f"\nMotivo: {reason_str}" if reason_str else ""
+
+    msg = (
+        f"{greeting}, lamentablemente debemos cancelar tu reserva en "
+        f"{resto_name} del {date} a las {time_str}.{reason_line}\n\n"
+        f"Si querés reagendar, escribinos por acá y buscamos otro horario."
+    )
+
+    try:
+        from app.services.meta_api import send_text  # noqa: PLC0415
+        ok = await send_text(bot_number, token, phone, msg, phone_id=phone_id)
+        if ok:
+            log.info(
+                "reservations.cancel_notify_sent",
+                reservation_id=reservation.get("id"),
+            )
+        return bool(ok)
+    except Exception:
+        log.exception(
+            "reservations.cancel_notify_send_error",
+            reservation_id=reservation.get("id"),
+        )
+        return False
 
 
 class SeatReservationBody(BaseModel):

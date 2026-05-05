@@ -142,14 +142,168 @@ async def delete_prospect(pid: int, _: None = Depends(verify_superadmin)):
     return {"success": True}
 
 
+# Valid CRM pipeline stages — must match the dropdowns in static/internal/crm.html.
+# Adding a new stage means: update this set + the HTML <option> + the kanban CSS.
+VALID_STAGES = frozenset({
+    "prospecto",      # cold lead, never contacted
+    "contactado",     # outbound message sent, awaiting reply
+    "respondio",      # replied at least once
+    "demo",           # in active demo / trial
+    "negociacion",    # discussing terms
+    "cerrado",        # converted (or about to convert) — terminal success
+    "perdido",        # lost — terminal failure
+})
+
+
 @router.patch("/prospects/{pid}/stage")
 async def move_stage(request: Request, pid: int, _: None = Depends(verify_superadmin)):
     body = await request.json()
-    new_stage = body.get("stage")
+    new_stage = (body.get("stage") or "").strip().lower()
     if not new_stage:
         raise HTTPException(status_code=400, detail="stage requerido")
+    if new_stage not in VALID_STAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"stage inválido. Valores permitidos: {', '.join(sorted(VALID_STAGES))}",
+        )
     await crm_repo.db_move_prospect_stage(pid, new_stage)
-    return {"success": True}
+    return {"success": True, "stage": new_stage}
+
+
+# ── CONVERT PROSPECT TO REAL RESTAURANT ───────────────────────────────────────
+
+
+class ConvertProspectBody(BaseModel):
+    """Optional overrides when converting. Defaults pull from the prospect row."""
+    name:            Optional[str] = None   # defaults to prospect.restaurant_name
+    whatsapp_number: Optional[str] = None   # defaults to prospect.phone
+    subscription_plan: str = "free"
+    features:        Optional[dict] = None
+
+
+@router.post("/prospects/{pid}/convert")
+async def convert_prospect_to_restaurant(
+    pid: int,
+    body: ConvertProspectBody = ConvertProspectBody(),
+    _: None = Depends(verify_superadmin),
+):
+    """Promote a prospect to a real Mesio organization + primary location.
+
+    What this does:
+      1. Reads the prospect row by id.
+      2. Validates we have the minimum to create an org (name + whatsapp).
+      3. Calls restaurant_repo.db_create_organization (cross-tenant — uses the
+         existing internal-admin bypass already configured on those helpers).
+      4. Auto-creates the primary location named 'Principal'.
+      5. Marks the prospect stage='cerrado' and tags it with `org:<id>` so
+         future CRM views can show "this prospect was converted to org #42"
+         without needing a new column / migration.
+      6. Adds a system note to the prospect timeline with the new org_id for
+         audit traceability.
+
+    Idempotency:
+      Calling convert twice on the same prospect WILL fail at the org-create
+      step (UNIQUE constraint on whatsapp_number → 409). The caller should
+      check the prospect's tags for an existing `org:<id>` tag before retrying.
+
+    Returns:
+      {"success": True, "org": {...}, "primary_location": {...}, "prospect_id": pid}
+    """
+    import asyncpg  # noqa: PLC0415
+    from app.repositories import restaurant_repo  # noqa: PLC0415
+
+    prospect = await crm_repo.db_get_prospect_by_id(pid)
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospecto no encontrado")
+
+    # Idempotency hint — if already tagged as converted, refuse with a clear
+    # message so the caller can detect (instead of getting a generic 409 from
+    # the org create when the whatsapp_number collides).
+    existing_tags = prospect.get("tags") or []
+    if any(isinstance(t, str) and t.startswith("org:") for t in existing_tags):
+        raise HTTPException(
+            status_code=409,
+            detail="Prospecto ya fue convertido. Revisar tags para encontrar org_id.",
+        )
+
+    name = (body.name or prospect.get("restaurant_name") or "").strip()
+    wa   = (body.whatsapp_number or prospect.get("phone") or "").strip()
+    if not name or not wa:
+        raise HTTPException(
+            status_code=400,
+            detail="Faltan datos: el prospecto debe tener restaurant_name y phone (o pasarlos en el body).",
+        )
+
+    # 1. Create the organization
+    try:
+        org = await restaurant_repo.db_create_organization(
+            name=name,
+            whatsapp_number=wa,
+            features=body.features or {},
+            subscription_plan=body.subscription_plan or "free",
+        )
+    except asyncpg.UniqueViolationError as exc:
+        log.warning("crm.convert.unique_violation", prospect_id=pid, detail=str(exc))
+        raise HTTPException(
+            status_code=409,
+            detail="Ya existe una organización con ese teléfono. Verificá si ya fue convertido.",
+        )
+    except Exception as exc:
+        log.exception("crm.convert.org_create_failed", prospect_id=pid)
+        raise HTTPException(status_code=500, detail=f"Error creando la org: {str(exc)[:120]}")
+
+    # 2. Create the primary location
+    try:
+        primary_loc = await restaurant_repo.db_create_location(
+            org_id=org["id"],
+            name="Principal",
+            code="principal",
+            active=True,
+        )
+    except Exception:
+        log.exception("crm.convert.location_create_failed", prospect_id=pid, org_id=org["id"])
+        # The org was created — surface that to the caller so they can decide
+        # whether to manually create the location via the orgs endpoints.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Org #{org['id']} creada, pero falló creación de sede Principal.",
+        )
+
+    # 3. Update the prospect — stage + tag + audit note. All best-effort: if
+    #    any of these glitch the conversion already succeeded above and the
+    #    caller has the org id; we just lose the kanban marker.
+    try:
+        new_tags = list(existing_tags) + [f"org:{org['id']}"]
+        await crm_repo.db_update_prospect(pid, {
+            "stage":    "cerrado",
+            "tags":     new_tags,
+            "archived": False,
+        })
+    except Exception:
+        log.exception("crm.convert.prospect_update_failed", prospect_id=pid, org_id=org["id"])
+
+    try:
+        await crm_repo.db_create_prospect_note(
+            pid, author="system",
+            content=f"Convertido a org #{org['id']} ({name}).",
+            note_type="note",
+        )
+    except Exception:
+        log.exception("crm.convert.note_create_failed", prospect_id=pid, org_id=org["id"])
+
+    log.info(
+        "crm.convert.success",
+        prospect_id=pid,
+        org_id=org["id"],
+        location_id=primary_loc.get("id"),
+    )
+
+    return {
+        "success":           True,
+        "prospect_id":       pid,
+        "org":               org,
+        "primary_location":  primary_loc,
+    }
 
 
 # ── NOTES ─────────────────────────────────────────────────────────────

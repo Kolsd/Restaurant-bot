@@ -47,6 +47,37 @@ DORMANT_DAYS: int = 21
 MIN_DORMANT_ORDERS: int = 3
 
 
+# ── Churn tiering ─────────────────────────────────────────────────────────────
+
+def churn_tier(days_since_last_order: int, total_orders: int = 0) -> str:
+    """Classify customer churn risk based on order history.
+
+    Returns one of: 'active' | 'cooling' | 'at_risk' | 'churned' | 'lost'.
+
+    Bands (days since last order):
+      - active:   <= 14 days
+      - cooling:  15-30 days
+      - at_risk:  31-60 days
+      - churned:  61-120 days
+      - lost:     > 120 days
+
+    `total_orders` is currently informational (kept in the signature so callers
+    can pass it without breaking when we extend the heuristic to consider
+    one-shot vs. repeat customers). Negative `days_since_last_order` is
+    coerced to 0 (defensive — clock skew across DB/server).
+    """
+    days = max(0, int(days_since_last_order or 0))
+    if days <= 14:
+        return "active"
+    if days <= 30:
+        return "cooling"
+    if days <= 60:
+        return "at_risk"
+    if days <= 120:
+        return "churned"
+    return "lost"
+
+
 # ── Lazy pool / serialize accessors ──────────────────────────────────────────
 
 def _tenant_connection():
@@ -307,13 +338,16 @@ async def get_at_risk_customers(restaurant_id: int, limit: int = 50) -> list[dic
 
     result = []
     for r in rows:
+        days = int(r["days_since"] or 0)
+        total_orders = int(r["total_orders"] or 0)
         result.append({
             "customer_phone": r["customer_phone"],
             "customer_name":  r["customer_name"],
             "last_order_at":  r["last_order_at"].isoformat() if r["last_order_at"] else None,
-            "days_since":     int(r["days_since"] or 0),
-            "total_orders":   int(r["total_orders"] or 0),
+            "days_since":     days,
+            "total_orders":   total_orders,
             "total_spent":    float(quantize_money(to_decimal(r["total_spent"]))),  # JSON boundary
+            "tier":           churn_tier(days, total_orders),
         })
     return result
 
