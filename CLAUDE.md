@@ -143,7 +143,7 @@ Restaurant-bot/
 │       │       ├── crm.html         # CRM prospectos
 │       │       ├── monitoring.html  # Observabilidad infraestructura
 │       │       └── superadmin.html  # Gestión restaurantes/usuarios
-│       ├── js/                      # mesio-utils.js (shared), dashboard-core/components/features/nps-inventory/floorplan, roles.js, sw.js
+│       ├── js/                      # mesio-utils.js (shared), pages/<page>.js per redesigned page, sw.js
 │       │   └── internal/            # JS para herramientas internas Mesio
 │       │       └── crm.js           # Lógica del CRM de prospectos
 │       └── css/                     # tokens.css (design system), dashboard.css
@@ -434,7 +434,7 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 
 **E2E hardening sprint (2026-05-05)** — disparado por bug real: `domiciliario.html` deployó sin botones (los renderiza el JS según data, sin órdenes la página queda plana). Tests existentes no lo agarraron porque NUNCA cargaban data semilla a la UI.
 - 3 agents Sonnet en paralelo: theater audit, page contracts lint, real seed-based E2E
-- Theater audit: **0 deletes**, suite ya estaba limpia post-No-v2 (130 tests con value assertions reales). El gap real es UI coverage, no test theater. Reporte completo en `TEST_THEATER_AUDIT.md`.
+- Theater audit: **0 deletes**, suite ya estaba limpia post-No-v2 (130 tests con value assertions reales como `o["today"] == 156`, `data["external_id"] == "999"`, `checks[0]["total"] == 8000.0`). El gap real es UI coverage, no test theater.
 - **PAGE-CONTRACTS lint check** (`scripts/lint_frontend.py`): declara botones load-bearing + fetches por cada página operacional (domiciliario, mesero, caja, kitchen, bar, staff-hq). Mutation-tested: borrar "Salir a entregar" hace fallar lint con mensaje explícito.
 - **5 nuevos E2E tests** en `tests/e2e/` con seed real a `TEST_DATABASE_URL` + assertions de valor computado + mutation tests:
   - `test_domiciliario_page_renders_buttons.py` — confirmado→en_camino→en_puerta→entregado, total inmutable, JSON shape garantiza render
@@ -443,6 +443,15 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
   - `test_staff_clock_full_cycle.py` — clock-in / break / clock-out + timecard math
   - `test_staff_pin_login_e2e.py` — happy path retorna token usable + wrong PIN retorna 401
 - **Bug prod descubierto y arreglado** durante el sprint: `POST /api/staff/pin-login` llamaba `db_get_staff_for_pin_login()` sin `tenant_scope()` previo → todos los login PIN tiraban `TenantNotSetError`. Fix: wrappear en `tenant_scope(body.restaurant_id)` (mismo patrón que `/self/verify-pin`). Cubierto por test_staff_pin_login_e2e.py — mutation-tested.
+
+**Optimization audit sprint (2026-05-05)** — purga de cruft + dead code post-redesign. 3 agents Sonnet en paralelo (Python dead code, frontend assets, scripts hygiene) + cleanup local previo.
+- Borrado local (gitignored o regenerable): `.audit/`, `.design_review/`, `.design_review_v2/` (este último estaba TRACKED, 43 archivos), `ai/` scratchpad, todos los `__pycache__/` (14 dirs, ~371 .pyc), `.pytest_cache/`.
+- `.gitignore` extendido: `.design_review_v2/`, `ai/` agregados.
+- Frontend (Agent B + me): 12 archivos borrados — 8 JS legacy del dashboard pre-redesign (`dashboard-analytics/components/core/floorplan/marketing/nps-inventory/weekly-report/wizard.js`) + 1 CSS (`mesio-role.css`) + 3 SVG logos solo referenciados por el CSS borrado. Hoja CLAUDE.md actualizada (referencia stale a `dashboard-core/components/...` removida).
+- Scripts (Agent C): 7 archivos borrados — 6 debug scratchpads (`scripts/_debug_cart/conv/conv2/features/orders/redis.py` del 2026-04-17) + `scripts/REHEARSAL.md` (guía one-shot de migración 0037 ya aplicada).
+- Python (Agent A): **0 archivos borrados** (todos los .py tienen consumidores). 2 funciones dead removidas (`db_init_nps_inventory`, `db_init_dish_recipes` en `inventory_repo.py` — stubs pre-Alembic) + 3 imports unused removidos (`chat.py`, `internal/analytics.py`, `staff_comms.py`).
+- File count proyecto (excl. `.git/` y `.claude/worktrees/`): ~1,006 → ~530 (47% reducción). El "5,965" reportado por el OS incluía `.git/` (4,959) y `.claude/worktrees/` (16MB de scratchpads de agentes Claude Code, no es proyecto).
+- Validación post-cleanup: `python -c "import app.main"` OK, `pytest tests/test_money.py tests/test_dish_normalization.py tests/test_find_dish_edges.py tests/test_frontend_lint.py` 101 passed, `lint_frontend.py` 0 violaciones.
 
 ### Limitaciones conocidas (no críticas)
 

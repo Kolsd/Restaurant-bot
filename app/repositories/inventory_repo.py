@@ -142,16 +142,6 @@ async def _recheck_dishes_for_ingredient_conn(
 # Index:   idx_rest_tables_lookup → 0020_missing_runtime_tables.py
 # Columns: conversations.created_at, restaurants.google_maps_url → 0001_initial_schema.py
 
-async def db_init_nps_inventory():
-    """No-op: schema handled by Alembic (run `alembic upgrade head` before deploying)."""
-    pass
-
-
-async def db_init_dish_recipes():
-    """No-op: schema handled by Alembic (run `alembic upgrade head` before deploying)."""
-    pass
-
-
 # ── Inventory CRUD ────────────────────────────────────────────────────────────
 
 async def db_get_inventory(restaurant_id: int) -> list:

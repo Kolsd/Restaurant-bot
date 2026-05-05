@@ -21,7 +21,11 @@ alembic/versions/*.pyc
 
 # AI sim reports (real E2E test runs — generated at runtime)
 tests/ai_sim/reports/
-.design_review/
 
-# Audit working docs (pre-launch sprint)
+# Audit / design review working dirs (pre-launch sprints — content integrated to CLAUDE.md)
 .audit/
+.design_review/
+.design_review_v2/
+
+# Per-session AI scratchpad
+ai/

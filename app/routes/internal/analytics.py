@@ -10,8 +10,6 @@ Endpoints (all require Authorization: Bearer <ADMIN_KEY>):
   GET /api/analytics/trends    → daily order & conversation counts (last 30 days)
 """
 
-from datetime import date
-
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import FileResponse, JSONResponse
 

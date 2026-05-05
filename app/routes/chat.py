@@ -5,7 +5,6 @@ import hmac
 import hashlib
 import httpx
 import traceback
-from collections import defaultdict
 from fastapi import APIRouter, BackgroundTasks, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
