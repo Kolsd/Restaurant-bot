@@ -304,7 +304,6 @@ body {
   body { background: #f5f5f0; }
   .phone-wrap {
     align-items: flex-start;
-    justify-content: center;
     padding: 0;
     background: #f5f5f0;
   }
@@ -318,13 +317,35 @@ body {
     box-shadow: none;
     background: #f5f5f0;
   }
-  .phone-screen {
-    /* Limit readable line width on ultra-wide monitors */
-    max-width: 680px;
-    margin: 0 auto;
-    width: 100%;
+  /* phone-screen fills the full frame — no centering pill */
+  .phone-screen { max-width: none; width: 100%; }
+
+  /* Hero stretches edge to edge */
+  .dom-hero {
+    padding-top: 28px;
+    padding-left: max(32px, 10vw);
+    padding-right: max(32px, 10vw);
+    border-radius: 0;
   }
+
+  /* Content cards: readable max-width, centered */
+  #dom-active-card,
+  #dom-order-section,
+  #dom-customer-section,
+  #dom-upnext,
+  .dom-section,
+  #dom-hist-list {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  /* No-active placeholder */
+  .dom-no-active {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
   .notch { display: none; }
   .phone-status { display: none; }
-  .dom-hero { padding-top: 28px; border-radius: 0 0 24px 24px; }
 }
