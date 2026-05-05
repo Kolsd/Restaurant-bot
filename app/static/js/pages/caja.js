@@ -1397,11 +1397,8 @@ async function loadDeliveryProposals() {
       // Proof image load
       const proofImg = card.querySelector('.del-proof-img');
       if (proofImg && o.proof_url) {
-        const botNum = _org.whatsapp_number || _org.bot_number || '';
-        const mediaId = _extractMediaId(o.proof_url);
-        if (mediaId && botNum) {
-          proofImg.src = `/api/media/${encodeURIComponent(mediaId)}?bot=${encodeURIComponent(botNum)}`;
-        }
+        // proof_url is already stored as /api/media/{id}?bot={bot_number} — use directly.
+        proofImg.src = o.proof_url;
       }
       el.appendChild(card);
     });
@@ -1556,12 +1553,11 @@ async function loadChatsTab() {
   }
 }
 function _chatProposalCardHtml(p) {
-  const botNum = _org.whatsapp_number || '';
-  const mediaId = _extractMediaId(p.proof_url);
+  // proof_url is already stored as /api/media/{id}?bot={bot_number} — use directly.
   return `
     <div style="font-weight:700;font-size:13px;color:#E8EAEE;">${_esc(p.table_name || p.base_order_id || '')}</div>
     <div style="font-size:12px;color:#71717A;margin:2px 0;">${_esc(p.customer_phone || '')}</div>
-    ${p.proof_url && mediaId ? `<img src="/api/media/${encodeURIComponent(mediaId)}?bot=${encodeURIComponent(botNum)}" alt="Comprobante" style="width:100%;height:100px;object-fit:cover;border-radius:6px;background:#0e1117;margin:6px 0;display:block;" onerror="this.style.display='none'">` : '<div style="height:40px;background:#0e1117;border-radius:6px;margin:6px 0;display:flex;align-items:center;justify-content:center;color:#6B7280;font-size:11px;">Sin imagen</div>'}
+    ${p.proof_url ? `<img src="${_esc(p.proof_url)}" alt="Comprobante" style="width:100%;height:100px;object-fit:cover;border-radius:6px;background:#0e1117;margin:6px 0;display:block;" onerror="this.style.display='none'">` : '<div style="height:40px;background:#0e1117;border-radius:6px;margin:6px 0;display:flex;align-items:center;justify-content:center;color:#6B7280;font-size:11px;">Sin imagen</div>'}
     <div style="font-size:15px;font-weight:700;color:var(--brand);margin-bottom:8px;">${mesioFmt(p.total || 0)}</div>
     <button class="m-btn m-btn--primary m-btn--sm prop-confirm" style="width:100%;">Procesar pago</button>`;
 }

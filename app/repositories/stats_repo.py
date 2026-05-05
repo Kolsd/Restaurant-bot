@@ -781,7 +781,7 @@ async def db_staff_performance(
                  AND status NOT IN ('cancelado')
                GROUP BY 1
                ORDER BY 1 ASC""",
-            _uuid, org_id, str(period_start),
+            _uuid, org_id, period_start,
         )
 
         # NPS per-waiter — unblocked by migration 0053 (nps_responses.table_session_id FK).
@@ -813,7 +813,7 @@ async def db_staff_performance(
                         AND tord.waiter_staff_id = $1::uuid
                    )
                  )""",
-            _uuid, org_id, str(period_start),
+            _uuid, org_id, period_start,
         )
 
     # Build complete week series (fill gaps with 0)

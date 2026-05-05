@@ -404,6 +404,26 @@ async def execute_external_action(
                     if only_loc.get("whatsapp_number"):
                         effective_bot_number = only_loc["whatsapp_number"]
                     log.info("pickup_auto_single_location", location_id=only_loc["id"], location_name=only_loc.get("name"))
+                elif parsed.get("branch_id", 0):
+                    # LLM explicitly passed a branch_id (customer selected a sede).
+                    # Use it directly instead of falling through to GPS or the ask prompt.
+                    _explicit_loc_id = int(parsed["branch_id"])
+                    _match = next((l for l in org_locations if l["id"] == _explicit_loc_id), None)
+                    if _match:
+                        routing_context["location_id"] = _match["id"]
+                        routing_context["branch_id"] = _match["id"]
+                        if _match.get("whatsapp_number"):
+                            effective_bot_number = _match["whatsapp_number"]
+                        log.info("pickup_explicit_branch_routed", location_id=_match["id"], location_name=_match.get("name"))
+                    else:
+                        # branch_id from LLM didn't match — fall back to asking
+                        loc_lines = "\n".join(
+                            f"• *{l['name']}* — {l.get('address') or 'sin dirección'}" for l in org_locations
+                        )
+                        return (
+                            f"No encontré esa sede. ¿En cuál de estas prefieres recoger tu pedido?\n\n"
+                            f"{loc_lines}"
+                        )
                 elif cart_data.get("latitude") is not None and cart_data.get("longitude") is not None:
                     # GPS available — route to nearest Location
                     from app.repositories.restaurant_repo import db_resolve_location_by_gps  # noqa: PLC0415

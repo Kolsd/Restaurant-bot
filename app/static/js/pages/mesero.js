@@ -920,8 +920,8 @@ async function openChatsModal() {
       left.appendChild(previewEl);
       const right = document.createElement('div');
       right.style.cssText = 'font-size:10px;color:var(--text-3,#94a3b8);text-align:right;flex-shrink:0;';
-      if (c.last_at || c.updated_at) {
-        const iso = (c.last_at || c.updated_at);
+      if (c.last_at || c.updated_at || c.last_updated) {
+        const iso = (c.last_at || c.updated_at || c.last_updated);
         right.textContent = _elapsed(iso);
       }
       row.appendChild(left);
@@ -972,6 +972,42 @@ async function openChatHistoryModal(phone) {
   msgs.style.cssText = 'flex:1;overflow-y:auto;background:#0e1117;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;';
   msgs.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:12px;font-size:12px;">Cargando historial…</div>';
   card.appendChild(msgs);
+
+  const foot = document.createElement('div');
+  foot.style.cssText = 'display:flex;gap:8px;margin-top:12px;flex-shrink:0;';
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'm-btn m-btn--sm m-btn--danger';
+  clearBtn.style.cssText = 'flex:1;';
+  clearBtn.textContent = '🗑 Vaciar chat';
+  clearBtn.addEventListener('click', async () => {
+    if (!await mesioConfirm('¿Vaciar este chat? El historial del bot se eliminará y el cliente podrá empezar de nuevo.', { confirmText: 'Vaciar', danger: true })) return;
+    clearBtn.disabled = true;
+    clearBtn.textContent = 'Eliminando…';
+    try {
+      const r = await fetch('/api/conversations/' + encodeURIComponent(phone), { method: 'DELETE', headers: _hdr() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      modal.remove();
+      // Reload chats list if it's still open
+      const chatsBody = document.getElementById('mesero-chats-modal-body');
+      if (chatsBody) {
+        const listModal = document.getElementById('mesero-chats-modal');
+        if (listModal) { listModal.remove(); openChatsModal(); }
+      }
+      mesioToast('Chat eliminado. El cliente puede iniciar de nuevo.', 'success');
+    } catch (err) {
+      clearBtn.disabled = false;
+      clearBtn.textContent = '🗑 Vaciar chat';
+      mesioToast('Error al eliminar el chat: ' + err.message, 'error');
+    }
+  });
+  const closeFootBtn = document.createElement('button');
+  closeFootBtn.className = 'm-btn m-btn--sm m-btn--ghost';
+  closeFootBtn.style.cssText = 'flex:1;';
+  closeFootBtn.textContent = 'Cerrar';
+  closeFootBtn.addEventListener('click', () => modal.remove());
+  foot.appendChild(clearBtn);
+  foot.appendChild(closeFootBtn);
+  card.appendChild(foot);
 
   modal.appendChild(card);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });

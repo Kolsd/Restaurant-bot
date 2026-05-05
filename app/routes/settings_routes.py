@@ -691,8 +691,10 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
             # filter (resolved below) provides tenant scoping.
             branch_id = "all"
     else:
-        # gerente / staff: pinned to their own sede.
-        branch_id = user.get("branch_id")
+        # gerente / staff: use "all" so that bot_number does the tenant scoping.
+        # user["branch_id"] stores org_id (not location_id) for staff users —
+        # passing it as location_id filter would return 0 rows post-Wave-2.
+        branch_id = "all"
 
     bot_number = None
     if branch_id and branch_id != "all":

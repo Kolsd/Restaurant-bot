@@ -869,7 +869,9 @@ async def execute_salon_action(
                         _is_duplicate_order = True
                         log.info("duplicate_sub_order_ignored", base_order_id=base_order_id, age_s=round(_age))
 
-                # Capa 2: ¿todos los ítems ya estaban en la sesión? (solo en frase de cierre)
+                # Capa 2: ¿todos los ítems ya estaban en la ÚLTIMA sub-orden? (solo en frase de cierre)
+                # Solo compara contra _recent (última sub-orden), NO contra todo el historial.
+                # Así, re-ordenar algo de una sub-orden anterior siempre se permite.
                 _CLOSING = {
                     "eso es todo", "es todo", "así está bien", "así está", "con eso está",
                     "con eso bien", "nada más", "ya está", "ya es todo", "listo gracias",
@@ -877,33 +879,30 @@ async def execute_salon_action(
                 }
                 _msg_lower = message.strip().lower()
                 _is_closing_msg = any(p in _msg_lower for p in _CLOSING)
-                if not _is_duplicate_order and _all_prev and _is_closing_msg:
-                    _session_totals: dict[str, int] = {}
-                    for _row in _all_prev:
-                        _ri2 = _row["items"] if isinstance(_row["items"], list) else json.loads(_row["items"])
-                        for _itm in _ri2:
-                            _k = _itm.get("name", "")
-                            _session_totals[_k] = _session_totals.get(_k, 0) + int(_itm.get("quantity", 1))
-                    _all_covered = bool(_session_totals) and all(
-                        _session_totals.get(_itm.get("name", ""), 0) >= int(_itm.get("quantity", 1))
+                if not _is_duplicate_order and _recent and _is_closing_msg:
+                    _ri2 = _recent["items"] if isinstance(_recent["items"], list) else json.loads(_recent["items"])
+                    _recent_totals: dict[str, int] = {}
+                    for _itm in _ri2:
+                        _k = _itm.get("name", "")
+                        _recent_totals[_k] = _recent_totals.get(_k, 0) + int(_itm.get("quantity", 1))
+                    _all_covered = bool(_recent_totals) and all(
+                        _recent_totals.get(_itm.get("name", ""), 0) >= int(_itm.get("quantity", 1))
                         for _itm in cart_items
                     )
                     if _all_covered:
                         _is_duplicate_order = True
                         log.info("closing_phrase_duplicate_ignored", base_order_id=base_order_id)
 
-                # ── Capa 3 (Bug #1 fix): filtrar ítems que el LLM repitió de órdenes previas ──
-                # El LLM a veces incluye ítems ya pedidos en la sub-orden. Esto causaría
-                # un doble cobro. Comparamos por nombre (case-insensitive) contra TODOS los
-                # ítems ya confirmados en esta sesión de mesa.
-                if not _is_duplicate_order and _all_prev and cart_items:
+                # ── Capa 3: filtrar ítems que el LLM repitió de la ÚLTIMA sub-orden ──
+                # Solo filtra contra _recent (última sub-orden confirmada), NO contra todo el
+                # historial — así el comensal puede re-pedir algo de una sub-orden anterior.
+                if not _is_duplicate_order and _recent and cart_items:
+                    _ri3 = _recent["items"] if isinstance(_recent["items"], list) else json.loads(_recent["items"])
                     _prev_names: set[str] = set()
-                    for _row in _all_prev:
-                        _ri3 = _row["items"] if isinstance(_row["items"], list) else json.loads(_row["items"])
-                        for _itm in _ri3:
-                            _n = _itm.get("name", "")
-                            if _n:
-                                _prev_names.add(_n.strip().lower())
+                    for _itm in _ri3:
+                        _n = _itm.get("name", "")
+                        if _n:
+                            _prev_names.add(_n.strip().lower())
 
                     if _prev_names:
                         _filtered_items = [
@@ -1060,6 +1059,21 @@ async def execute_salon_action(
     if action == "bill":
         table_id   = table_context["id"]
         table_name = table_context["name"]
+
+        # Guard: don't start checkout if the order hasn't been delivered yet.
+        # Customers sometimes say "la cuenta" right after ordering (excitement /
+        # force of habit). The kitchen hasn't even started — starting the
+        # checkout flow at that point confuses staff and clients alike.
+        if not session_state.get("order_delivered", False) and session_state.get("has_order", False):
+            log.info(
+                "bill_blocked_order_not_delivered",
+                table=table_name,
+                phone=_ofuscar_phone(phone),
+            )
+            return (
+                f"¡Con gusto! En cuanto lleve tu pedido a la mesa puedes pedir la cuenta. "
+                f"Mientras tanto, ¿necesitas algo más? 😊"
+            )
 
         # Iniciar flujo de checkout conversacional
         try:
