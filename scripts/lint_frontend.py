@@ -1,10 +1,15 @@
 """
 Frontend lint — catches bugs the Python test suite can't see.
 
-Three checks:
-  1. MOCK   — mock/fake/dummy/lorem/ipsum keywords in JS code.
-  2. TODO   — TODO/FIXME/XXX/HACK markers (stale deferrals become live bugs).
-  3. FETCH  — fetch('/api/...') paths that don't match any registered FastAPI route.
+Checks:
+  1. MOCK         — mock/fake/dummy/lorem/ipsum keywords in JS code.
+  2. TODO         — TODO/FIXME/XXX/HACK markers (stale deferrals become live bugs).
+  3. FETCH        — fetch('/api/...') paths that don't match any registered FastAPI route.
+  4. TOKEN-DRIFT  — hardcoded brand color #1D9E75 outside tokens.css.
+                    Strict (fail CI): dashboard.css, shared.css.
+                    Warning-only (report, don't fail): pages/*.css, inline HTML <style>.
+                    Suppression in CSS: /* lint-allow: reason */ on the same line.
+                    Suppression in HTML: <!-- lint-allow: reason --> on the same line.
 
 Run manually:
     python scripts/lint_frontend.py
@@ -28,6 +33,29 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parent.parent
 JS_DIR = ROOT / "app" / "static" / "js"
 HTML_DIR = ROOT / "app" / "static" / "html"
+CSS_DIR = ROOT / "app" / "static" / "css"
+
+# ── TOKEN-DRIFT configuration ─────────────────────────────────────────────────
+# The canonical brand color.  Any occurrence outside tokens.css is a drift.
+BRAND_HEX_RE = re.compile(r"#1[Dd]9[Ee]75", re.IGNORECASE)
+
+# Source of truth — this file is the ONLY place #1D9E75 is allowed to appear
+# as a literal value.
+TOKEN_DRIFT_EXEMPT = {
+    CSS_DIR / "tokens.css",
+}
+
+# CSS files where violations are ERRORS (fail CI).
+# These are the "compiled" shared stylesheets that have been fully tokenized.
+TOKEN_DRIFT_STRICT_CSS = {
+    CSS_DIR / "dashboard.css",
+    CSS_DIR / "shared.css",
+}
+
+# CSS suppression marker (same line):  /* lint-allow: reason */
+CSS_ALLOW_MARKER = re.compile(r"/\*\s*lint-allow:\s*(\S.+?)\s*\*/")
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Files that are allowed to contain mock data by design.
 # These power the public marketing demo at /demo and /dashboard-demo.
@@ -507,7 +535,113 @@ def check_page_contracts(violations: list[Violation]) -> None:
                 ))
 
 
+def _css_line_is_allowed(line: str) -> str | None:
+    """Return the allow-reason if the CSS line has a /* lint-allow: reason */ comment."""
+    m = CSS_ALLOW_MARKER.search(line)
+    return m.group(1) if m else None
+
+
+def check_token_drift_css(path: Path, source: str) -> list[Violation]:
+    """Flag hardcoded brand color #1D9E75 in a CSS file.
+
+    Returns Violation objects for every un-suppressed occurrence.
+    Suppression: add `/* lint-allow: reason */` on the same line.
+    The path must NOT be in TOKEN_DRIFT_EXEMPT (caller's responsibility).
+    """
+    out: list[Violation] = []
+    for i, line in enumerate(source.splitlines(), start=1):
+        if not BRAND_HEX_RE.search(line):
+            continue
+        if _css_line_is_allowed(line):
+            continue
+        if _html_line_is_allowed(line):  # handles <!-- lint-allow --> in HTML <style>
+            continue
+        out.append(Violation(
+            file=str(path),
+            line=i,
+            kind="TOKEN-DRIFT",
+            message=(
+                "hardcoded brand color #1D9E75 — use var(--brand) instead. "
+                "Suppress with: /* lint-allow: reason */"
+            ),
+        ))
+    return out
+
+
+def check_token_drift_html_inline(path: Path, source: str) -> list[Violation]:
+    """Flag hardcoded brand color #1D9E75 inside inline <style> blocks in HTML.
+
+    Only scans content inside <style>…</style> tags (case-insensitive).
+    Suppression: add <!-- lint-allow: reason --> on the same line.
+    """
+    out: list[Violation] = []
+    # Track whether we're inside a <style> block.
+    in_style = False
+    for i, line in enumerate(source.splitlines(), start=1):
+        lower = line.lower()
+        if "<style" in lower:
+            in_style = True
+        if "</style" in lower:
+            in_style = False
+            # Still check this closing line — it might contain a color on the
+            # same line as </style> in minified HTML (rare but possible).
+        if not in_style and "</style" not in lower:
+            continue
+        if not BRAND_HEX_RE.search(line):
+            continue
+        if _html_line_is_allowed(line):
+            continue
+        if _css_line_is_allowed(line):
+            continue
+        out.append(Violation(
+            file=str(path),
+            line=i,
+            kind="TOKEN-DRIFT",
+            message=(
+                "hardcoded brand color #1D9E75 in inline <style> — use var(--brand) instead. "
+                "Suppress with: <!-- lint-allow: reason -->"
+            ),
+        ))
+    return out
+
+
+def run_token_drift_check(
+    strict_violations: list[Violation],
+    warning_violations: list[Violation],
+) -> None:
+    """Scan CSS files and HTML inline styles for TOKEN-DRIFT violations.
+
+    Results are sorted into two lists:
+      strict_violations — files in TOKEN_DRIFT_STRICT_CSS (will fail CI).
+      warning_violations — all other files (reported but don't fail CI).
+
+    Both lists are mutated in-place.
+    """
+    # Scan all CSS files under app/static/css/ (recursive).
+    for css_path in sorted(CSS_DIR.rglob("*.css")):
+        if css_path in TOKEN_DRIFT_EXEMPT:
+            continue
+        source = css_path.read_text(encoding="utf-8")
+        violations = check_token_drift_css(css_path, source)
+        if css_path in TOKEN_DRIFT_STRICT_CSS:
+            strict_violations.extend(violations)
+        else:
+            warning_violations.extend(violations)
+
+    # Scan inline <style> blocks in all HTML files under app/static/html/.
+    for html_path in sorted(HTML_DIR.rglob("*.html")):
+        source = html_path.read_text(encoding="utf-8")
+        violations = check_token_drift_html_inline(html_path, source)
+        # HTML inline styles are always warning-only (not in strict set).
+        warning_violations.extend(violations)
+
+
 def run() -> list[Violation]:
+    """Return all STRICT violations (fail CI).
+
+    TOKEN-DRIFT warnings from non-strict files are handled separately in main()
+    via run_token_drift_check() so they can be reported without causing failure.
+    """
     all_violations: list[Violation] = []
     backend_routes = _load_backend_routes()
 
@@ -524,27 +658,61 @@ def run() -> list[Violation]:
 
     check_page_contracts(all_violations)
 
+    # TOKEN-DRIFT: strict files only (non-strict are warnings surfaced in main()).
+    token_strict: list[Violation] = []
+    token_warnings: list[Violation] = []
+    run_token_drift_check(token_strict, token_warnings)
+    all_violations.extend(token_strict)
+
+    # Attach the warning list as a module-level side-effect so main() can
+    # retrieve it without re-running the scan.
+    run._token_drift_warnings = token_warnings  # type: ignore[attr-defined]
+
     return all_violations
 
 
 def main() -> int:
     violations = run()
+    token_warnings: list[Violation] = getattr(run, "_token_drift_warnings", [])
+
+    # ── Print TOKEN-DRIFT warnings (non-strict files) ──────────────────────────
+    if token_warnings:
+        by_file: dict[str, list[Violation]] = {}
+        for v in token_warnings:
+            by_file.setdefault(v.file, []).append(v)
+
+        print(
+            f"[TOKEN-DRIFT] WARNING — {len(token_warnings)} hardcoded #1D9E75 occurrences "
+            f"in {len(by_file)} non-strict file(s) (not failing CI; clean up incrementally):"
+        )
+        shown = 0
+        for f in sorted(by_file):
+            count = len(by_file[f])
+            rel = f.replace(str(ROOT) + os.sep, "").replace("\\", "/")
+            print(f"  {rel}: {count} occurrence(s)")
+            if shown < 5:
+                for v in by_file[f][:max(0, 5 - shown)]:
+                    print(f"    line {v.line}: {v.message}")
+                shown += count
+        print()
+
+    # ── Strict violations ──────────────────────────────────────────────────────
     if not violations:
         print(f"[lint_frontend] OK — 0 violations across {sum(1 for _ in iter_js_files())} JS files.")
         return 0
 
     # Group by file for readable output.
-    by_file: dict[str, list[Violation]] = {}
+    by_file_strict: dict[str, list[Violation]] = {}
     for v in violations:
-        by_file.setdefault(v.file, []).append(v)
+        by_file_strict.setdefault(v.file, []).append(v)
 
     counts: dict[str, int] = {}
     for v in violations:
         counts[v.kind] = counts.get(v.kind, 0) + 1
 
     print(f"[lint_frontend] {len(violations)} violations ({counts})\n")
-    for f in sorted(by_file):
-        for v in by_file[f]:
+    for f in sorted(by_file_strict):
+        for v in by_file_strict[f]:
             print(v.format())
     summary_parts = "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
     print(f"\nTotal: {len(violations)}  ({summary_parts})")

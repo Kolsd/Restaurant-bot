@@ -32,10 +32,7 @@
   }
 
   function _fmtDate(iso) {
-    if (!iso) return '';
-    try {
-      return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
-    } catch (_) { return iso; }
+    return mesioDate(iso, { format: 'long' });
   }
 
   function _toast(msg, isError) {

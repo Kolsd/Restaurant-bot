@@ -1028,6 +1028,7 @@ function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function fmtDate(d) {
+  if (window.mesioDate) return mesioDate(d instanceof Date ? d.toISOString() : d, { format: 'long' });
   if (!d) return '—';
   const dt = d instanceof Date ? d : new Date(d);
   return dt.toLocaleDateString('es-CO', { day:'2-digit', month:'short', year:'numeric' });

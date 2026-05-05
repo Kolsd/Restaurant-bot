@@ -55,6 +55,7 @@
   }
 
   function fmtDate(iso) {
+    if (window.mesioDate) return mesioDate(iso, { format: 'long' });
     if (!iso) return "—";
     return new Date(iso).toLocaleDateString("es-CO", { day: "numeric", month: "short", year: "numeric" });
   }

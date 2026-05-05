@@ -77,6 +77,9 @@ function renderSettings(r) {
   // DIAN — read-only display
   renderDIAN(r.features || {});
 
+  // Kiosko de personal URL
+  renderKioskoUrl(r);
+
   // Sidebar user
   var avatarEl = document.getElementById('sbAvatar');
   var userNameEl = document.getElementById('sbUserName');
@@ -433,6 +436,51 @@ function bindLogout() {
   if (btn) { btn.addEventListener('click', mesioLogout); }
 }
 
+// ── Kiosko de personal ────────────────────────────────────────────
+function renderKioskoUrl(r) {
+  var urlInput = document.getElementById('kiosko-url-input');
+  if (!urlInput) return;
+  // org_id is exposed as restaurant_id in the /api/settings response
+  var orgId = (r && (r.restaurant_id || r.id)) || '';
+  var kioskUrl = orgId
+    ? (window.location.origin + '/staff-hq?kiosko=true&r=' + orgId)
+    : '';
+  urlInput.value = kioskUrl;
+}
+
+function bindKioskoHandlers() {
+  var copyBtn = document.getElementById('kiosko-copy-btn');
+  if (!copyBtn) return;
+  copyBtn.addEventListener('click', function () {
+    var urlInput = document.getElementById('kiosko-url-input');
+    var url = urlInput ? urlInput.value : '';
+    if (!url) {
+      mesioToast('No hay URL disponible aún', 'error');
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () {
+        mesioToast('URL copiada', 'success');
+      }).catch(function () {
+        _kioskoCopyFallback(urlInput);
+      });
+    } else {
+      _kioskoCopyFallback(urlInput);
+    }
+  });
+}
+
+function _kioskoCopyFallback(inputEl) {
+  if (!inputEl) return;
+  inputEl.select();
+  try {
+    document.execCommand('copy');
+    mesioToast('URL copiada', 'success');
+  } catch (_) {
+    mesioToast('Copiá manualmente la URL del campo', 'info');
+  }
+}
+
 // ── Phone blocklist (admin) ───────────────────────────────────────
 function _formatRelativeUntil(iso) {
   if (!iso) return '';
@@ -642,6 +690,7 @@ document.addEventListener('DOMContentLoaded', function () {
   bindSwitches();
   bindNavLinks();
   bindLogout();
+  bindKioskoHandlers();
   bindBlocklistHandlers();
   initScrollSpy();
   loadSettings().then(function () { _updatePauseButton(); });

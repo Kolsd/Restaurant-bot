@@ -235,10 +235,7 @@
       try {
         var ds = new Date(periodStart + 'T12:00:00');
         var de = new Date(periodEnd   + 'T12:00:00');
-        var fmtDate = function (d) {
-          return d.getDate() + ' ' + d.toLocaleString('es-CO', { month: 'short' });
-        };
-        datesEl.textContent = fmtDate(ds) + ' — ' + fmtDate(de);
+        datesEl.textContent = mesioDate(ds, { format: 'compact' }) + ' — ' + mesioDate(de, { format: 'compact' });
       } catch (e3) {
         datesEl.textContent = periodStart + ' — ' + periodEnd;
       }

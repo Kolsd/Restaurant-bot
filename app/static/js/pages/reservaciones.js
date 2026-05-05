@@ -12,7 +12,9 @@
     return d.toISOString().split('T')[0];
   }
 
-  function formatDate(d) {
+  // _dayLabel: formats a Date as "Lunes 27 abr" for the calendar day-nav header.
+  // This is a weekday-prefixed format not produced by mesioDate; kept intentionally.
+  function _dayLabel(d) {
     const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
     const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
     return days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()];
@@ -20,7 +22,7 @@
 
   function updateDayLabel() {
     const lbl = document.querySelector('.day-label');
-    if (lbl) lbl.textContent = formatDate(currentDate);
+    if (lbl) lbl.textContent = _dayLabel(currentDate);
   }
 
   // Day nav buttons

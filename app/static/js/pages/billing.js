@@ -7,14 +7,7 @@
 
   const hdr = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
 
-  const navName = document.getElementById('nav-rest-name');
-  if (navName && restaurant.name) {
-    const strong = document.createElement('strong');
-    strong.textContent = restaurant.name;
-    navName.textContent = '';
-    navName.appendChild(strong);
-    navName.appendChild(document.createTextNode(' \u00b7 Facturación'));
-  }
+  // Restaurant name shown in sidebar (injected by sidebar.js)
 
   let PROVIDERS = {};
   let currentProvider = null;
@@ -34,7 +27,7 @@
 
   function switchTab(id, btn) {
     document.querySelectorAll('.tab-section').forEach(function (s) { s.classList.remove('active'); });
-    document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+    document.querySelectorAll('.seg-btn').forEach(function (b) { b.classList.remove('active'); });
     document.getElementById('tab-' + id).classList.add('active');
     btn.classList.add('active');
     if (id === 'log') loadLog();
@@ -193,7 +186,7 @@
       const el = document.getElementById('field-' + f.key);
       if (!el) return;
       const val = el.value.trim();
-      if (f.required && !val) { el.style.borderColor = 'var(--red)'; valid = false; }
+      if (f.required && !val) { el.style.borderColor = 'var(--danger)'; valid = false; }
       else { el.style.borderColor = ''; if (val) payload[f.key] = f.type === 'number' ? parseFloat(val) : val; }
     });
     if (!valid) { toast('Completa los campos obligatorios', 'err'); return; }
@@ -346,7 +339,7 @@
         const tr = document.createElement('tr');
 
         const tdDate = document.createElement('td');
-        tdDate.style.cssText = 'color:var(--muted);font-size:.78rem;white-space:nowrap;';
+        tdDate.style.cssText = 'color:var(--text-3);font-size:.78rem;white-space:nowrap;';
         tdDate.textContent = (l.created_at || '').substring(0, 16).replace('T', ' ');
 
         const tdOrder = document.createElement('td');
@@ -370,7 +363,7 @@
         tdExt.textContent = l.external_id || '—';
 
         const tdDetail = document.createElement('td');
-        tdDetail.style.cssText = 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.75rem;color:var(--muted);';
+        tdDetail.style.cssText = 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.75rem;color:var(--text-3);';
         tdDetail.title = l.error_message || '';
         tdDetail.textContent = l.error_message || '—';
 
@@ -402,7 +395,7 @@
   });
 
   document.addEventListener('click', function (e) {
-    const tabBtn = e.target.closest('.tab-btn');
+    const tabBtn = e.target.closest('.seg-btn[data-tab-target]');
     if (!tabBtn) return;
     const id = tabBtn.dataset.tabTarget;
     if (id) switchTab(id, tabBtn);

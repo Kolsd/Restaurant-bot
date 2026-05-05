@@ -487,13 +487,45 @@ function mesioImageUrl(url, variant) {
 window.mesioImageUrl = mesioImageUrl;
 
 // ── Date formatter ───────────────────────────────
-function mesioDate(isoStr) {
-  if (!isoStr) return '—';
+/**
+ * Format an ISO date string (or Date object) for display.
+ *
+ * @param {string|Date} isoStr - ISO date string or Date object
+ * @param {object} [opts]
+ * @param {'short'|'long'|'compact'|'time'|'datetime'} [opts.format='short']
+ *   - 'short':    "27 abr · 14:30"  (day-short-month, hour:minute)  ← original behaviour
+ *   - 'long':     "27 abr 2026"     (day-short-month, 4-digit year, no time)
+ *   - 'compact':  "27 abr"          (day + short month, no year, no time)
+ *   - 'time':     "14:30"           (hour + minute only)
+ *   - 'datetime': "27 abr · 14:30"  (alias for 'short', explicit name)
+ * @param {string} [opts.locale]  Override locale (default: rb_org.locale or 'es-CO')
+ * @returns {string} Formatted date, or '—' for null/undefined, or raw string on error
+ */
+function mesioDate(isoStr, opts) {
+  if (isoStr == null || isoStr === '') return '—';
+  opts = opts || {};
+  var fmt = opts.format || 'short';
   try {
-    // Prefer new Org key (Wave 1 S5); fall back to legacy rb_restaurant
     var src = mesioGetOrg() || JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
-    return new Date(isoStr).toLocaleString(src.locale || 'es-CO', {
-      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
-    });
-  } catch { return isoStr; }
+    var locale = opts.locale || src.locale || 'es-CO';
+    var d = isoStr instanceof Date ? isoStr : new Date(isoStr);
+    if (isNaN(d.getTime())) return String(isoStr);
+    if (fmt === 'long') {
+      return d.toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    if (fmt === 'compact') {
+      return d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+    }
+    if (fmt === 'time') {
+      return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    }
+    // 'short' and 'datetime': day + short month + hour:minute (original behaviour)
+    return d.toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch (_) { return String(isoStr); }
 }
+
+/** Thin wrapper — returns only the time portion ("14:30"). */
+function mesioTime(isoStr) { return mesioDate(isoStr, { format: 'time' }); }
+
+/** Thin wrapper — returns day + short month + time ("27 abr · 14:30"). */
+function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); }

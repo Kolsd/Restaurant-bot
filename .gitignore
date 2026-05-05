@@ -6,6 +6,7 @@ app/.env
 
 # Claude Code local settings (may contain API keys in allowed commands)
 .claude/settings.local.json
+.claude/worktrees/
 
 # Python
 __pycache__/

@@ -27,7 +27,7 @@ function getWeekStart() {
   return d;
 }
 
-function formatDate(d) {
+function _isoDateStr(d) {
   return d.getFullYear() + '-' +
     String(d.getMonth() + 1).padStart(2, '0') + '-' +
     String(d.getDate()).padStart(2, '0');
@@ -58,7 +58,7 @@ async function loadAll() {
   try {
     var [staffData, schedulesData, tipsData] = await Promise.all([
       apiFetch('/api/staff'),
-      apiFetch('/api/staff/schedules?week_start=' + formatDate(getWeekStart())),
+      apiFetch('/api/staff/schedules?week_start=' + _isoDateStr(getWeekStart())),
       apiFetch('/api/stats/tips-pool').catch(function () { return null; })
     ]);
 

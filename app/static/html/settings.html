@@ -48,6 +48,7 @@
           <a class="set-nav-item" href="#notif">🔔 Notificaciones</a>
           <div class="set-nav-sub">Plataforma</div>
           <a class="set-nav-item" href="#integ">🔗 Integraciones</a>
+          <a class="set-nav-item" href="#kiosko">📱 Kiosko de personal</a>
           <a class="set-nav-item" href="#seguridad">🛡️ Seguridad</a>
           <a class="set-nav-item danger" href="#peligro">⚠️ Zona peligrosa</a>
         </nav>
@@ -62,7 +63,7 @@
 
             <div class="field-group">
               <div>
-                <div class="fg-label">Nombre comercial</div>
+                <label class="fg-label" for="inputName">Nombre comercial</label>
                 <div class="fg-hint">Aparece en recibos y WhatsApp.</div>
               </div>
               <div>
@@ -72,7 +73,7 @@
 
             <div class="field-group">
               <div>
-                <div class="fg-label">NIT</div>
+                <label class="fg-label" for="inputNIT">NIT</label>
                 <div class="fg-hint">Usado para factura electrónica DIAN.</div>
               </div>
               <div>
@@ -86,14 +87,16 @@
                 <div class="fg-hint">Dirección física del local.</div>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                <input id="inputAddress" class="input" type="text" placeholder="Cra 5 #12-34" />
-                <input id="inputCity" class="input" type="text" placeholder="Ciudad" />
+                <label class="fg-label sr-only" for="inputAddress">Dirección</label>
+                <input id="inputAddress" class="input" type="text" placeholder="Cra 5 #12-34" aria-label="Dirección" />
+                <label class="fg-label sr-only" for="inputCity">Ciudad</label>
+                <input id="inputCity" class="input" type="text" placeholder="Ciudad" aria-label="Ciudad" />
               </div>
             </div>
 
             <div class="field-group">
               <div>
-                <div class="fg-label">Tipo de cocina</div>
+                <label class="fg-label" for="inputCuisine">Tipo de cocina</label>
                 <div class="fg-hint">Para búsqueda y recomendaciones IA.</div>
               </div>
               <div>
@@ -103,7 +106,7 @@
 
             <div class="field-group">
               <div>
-                <div class="fg-label">Moneda</div>
+                <label class="fg-label" for="selCurrency">Moneda</label>
                 <div class="fg-hint">Afecta todo el sistema.</div>
               </div>
               <div>
@@ -200,7 +203,9 @@
                 <div class="fg-hint">Obtené las llaves desde tu dashboard Wompi → Configuración → Llaves API. Llave pública empieza con <code>pub_test_</code> o <code>pub_prod_</code>. La integrity secret se guarda cifrada y no se muestra de nuevo.</div>
               </div>
               <div style="display:grid;gap:8px;">
+                <label class="fg-label sr-only" for="wompiPublicKey">Llave pública Wompi</label>
                 <input id="wompiPublicKey" class="input mono" type="text" placeholder="pub_test_... o pub_prod_..." autocomplete="off" />
+                <label class="fg-label sr-only" for="wompiIntegritySecret">Integrity Secret Wompi</label>
                 <input id="wompiIntegritySecret" class="input mono" type="password" placeholder="Integrity Secret" autocomplete="off" />
                 <div id="wompi-secret-hint" style="font-size:12px;color:var(--text-3);"></div>
               </div>
@@ -216,7 +221,7 @@
             </div>
             <div class="field-group" id="pay-inst-row-nequi">
               <div>
-                <div class="fg-label">Instrucciones para pagar con Nequi</div>
+                <label class="fg-label" for="pay-inst-nequi">Instrucciones para pagar con Nequi</label>
                 <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Nequi.</div>
               </div>
               <textarea id="pay-inst-nequi" class="input" rows="3" placeholder="Ej: Envía a Nequi 300 123 4567 a nombre de [Restaurante]. Incluí tu número de pedido en la descripción."></textarea>
@@ -232,7 +237,7 @@
             </div>
             <div class="field-group" id="pay-inst-row-daviplata">
               <div>
-                <div class="fg-label">Instrucciones para pagar con Daviplata</div>
+                <label class="fg-label" for="pay-inst-daviplata">Instrucciones para pagar con Daviplata</label>
                 <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Daviplata.</div>
               </div>
               <textarea id="pay-inst-daviplata" class="input" rows="3" placeholder="Ej: Envía a Daviplata 300 123 4567 a nombre de [Restaurante]."></textarea>
@@ -248,7 +253,7 @@
             </div>
             <div class="field-group" id="pay-inst-row-bancolombia">
               <div>
-                <div class="fg-label">Instrucciones para Transferencia Bancolombia</div>
+                <label class="fg-label" for="pay-inst-bancolombia">Instrucciones para Transferencia Bancolombia</label>
                 <div class="fg-hint">El bot le enviará este texto al cliente cuando elija Bancolombia.</div>
               </div>
               <textarea id="pay-inst-bancolombia" class="input" rows="3" placeholder="Ej: Cuenta de Ahorros Bancolombia 12345678 a nombre de [Empresa] NIT 900123456-7."></textarea>
@@ -363,6 +368,23 @@
 
           </section>
 
+          <!-- Kiosko de personal -->
+          <section id="kiosko" class="card set-sec">
+            <h2>Kiosko de personal</h2>
+            <div class="s-sub">Esta URL es la dirección que tu tablet compartida usa para que los empleados fichen su entrada y salida. Abrí este link en el navegador de la tablet y agregalo a la pantalla de inicio.</div>
+
+            <div class="field-group">
+              <div>
+                <label class="fg-label" for="kiosko-url-input">URL del kiosko</label>
+                <div class="fg-hint">Copiá este link y abrilo en la tablet compartida del equipo.</div>
+              </div>
+              <div class="kiosko-url-row">
+                <input id="kiosko-url-input" class="input mono" type="text" readonly aria-label="URL del kiosko de personal" />
+                <button class="btn brand" id="kiosko-copy-btn" type="button">Copiar URL</button>
+              </div>
+            </div>
+          </section>
+
           <!-- Seguridad: phone blocklist -->
           <section id="seguridad" class="card set-sec">
             <h2>Seguridad &middot; Teléfonos bloqueados</h2>
@@ -370,7 +392,7 @@
 
             <div class="field-group">
               <div>
-                <div class="fg-label">Bloquear teléfono</div>
+                <label class="fg-label" for="bl-phone">Bloquear teléfono</label>
                 <div class="fg-hint">Solo dígitos, formato internacional sin '+'. Ej: 573001234567.</div>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -388,7 +410,7 @@
 
             <div class="field-group">
               <div>
-                <div class="fg-label">Razón</div>
+                <label class="fg-label" for="bl-reason">Razón</label>
                 <div class="fg-hint">Para que el equipo entienda por qué se bloqueó.</div>
               </div>
               <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:start;">

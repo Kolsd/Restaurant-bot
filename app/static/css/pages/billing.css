@@ -1,0 +1,235 @@
+/* ══ Billing page — page-specific styles ════════════════════════════
+   Load order: tokens.css → shared.css → pages/billing.css
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Tab section visibility ─────────────────────────────────────── */
+.billing-tabs { margin-bottom: 20px; }
+
+.tab-section { display: none; }
+.tab-section.active { display: block; }
+
+/* ── Metrics row: 3-col override (shared defaults to 4-col) ─────── */
+.billing-metrics {
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 16px;
+}
+@media (max-width: 600px) {
+  .billing-metrics { grid-template-columns: 1fr; }
+}
+
+/* ── Provider picker grid ────────────────────────────────────────── */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .provider-grid { grid-template-columns: 1fr; }
+}
+
+.provider-card {
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--surface);
+  position: relative;
+}
+.provider-card:hover {
+  border-color: var(--brand);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+.provider-card.selected {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-light);
+}
+.provider-card.selected::after {
+  content: '✓';
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 20px;
+  height: 20px;
+  background: var(--brand);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.provider-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #fff;
+}
+.logo-siigo  { background: #00529B; }
+.logo-alegra { background: #00B4D8; }
+.logo-loggro { background: #6D28D9; }
+
+.provider-name { font-weight: 600; font-size: 14px; }
+.provider-desc { font-size: 12px; color: var(--text-3); line-height: 1.45; }
+.provider-link { font-size: 12px; color: var(--info); text-decoration: none; margin-top: auto; }
+.provider-link:hover { text-decoration: underline; }
+
+/* ── Status pills ───────────────────────────────────────────────── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  letter-spacing: 0.04em;
+}
+.pill-ok    { background: var(--success-light); color: var(--success); }
+.pill-error { background: var(--danger-light);  color: var(--danger-text); }
+.pill-idle  { background: #F3F4F6;              color: var(--text-3); }
+.pill-dot   { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ── Provider badges (in log table) ─────────────────────────────── */
+.prov-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.prov-siigo  { background: #EBF4FF; color: #00529B; }
+.prov-alegra { background: #E0F7FA; color: #006064; }
+.prov-loggro { background: #F3E8FF; color: #6D28D9; }
+
+/* ── Form elements ──────────────────────────────────────────────── */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .form-grid { grid-template-columns: 1fr; }
+}
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-group.full { grid-column: 1 / -1; }
+.form-label { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.form-label .req { color: var(--danger); margin-left: 2px; }
+.req { color: var(--danger); }
+.form-input {
+  padding: 8px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.form-input:focus { border-color: var(--brand); background: var(--surface); }
+.form-select {
+  padding: 8px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+.form-hint { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.input-secret { font-family: var(--font-mono); letter-spacing: 0.05em; }
+
+/* ── Toggle switch ──────────────────────────────────────────────── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.toggle-label { font-size: 13px; font-weight: 500; }
+.toggle-sub   { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #E5E7EB;
+  border-radius: 22px;
+  transition: 0.2s;
+}
+.slider::before {
+  position: absolute;
+  content: '';
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+input:checked + .slider { background: var(--brand); }
+input:checked + .slider::before { transform: translateX(18px); }
+
+/* ── Usage progress bars ────────────────────────────────────────── */
+.billing-bar-track {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.billing-bar-fill {
+  height: 100%;
+  background: var(--brand);
+  width: 0%;
+  transition: width 0.3s;
+  border-radius: 3px;
+}
+
+/* ── Log table ──────────────────────────────────────────────────── */
+.log-table-wrap { overflow-x: auto; }
+
+/* Badge aliases expected by billing.js DOM creation */
+.badge-success { background: var(--success-light); color: var(--success);     font-size: 11.5px; padding: 2px 8px; border-radius: 5px; font-weight: 500; }
+.badge-error   { background: var(--danger-light);  color: var(--danger-text); font-size: 11.5px; padding: 2px 8px; border-radius: 5px; font-weight: 500; }
+.badge-pending { background: var(--warning-light); color: var(--warning-text);font-size: 11.5px; padding: 2px 8px; border-radius: 5px; font-weight: 500; }
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+/* ── Danger button variant ──────────────────────────────────────── */
+.btn.danger {
+  background: var(--danger-light);
+  color: var(--danger-text);
+  border-color: var(--danger-light);
+}
+.btn.danger:hover { background: #FECACA; border-color: #FECACA; }
+
+/* ── Loading state on buttons (set via JS) ──────────────────────── */
+.btn.btn-loading { opacity: 0.6; pointer-events: none; }
+
+/* ── Card spacing between sections ─────────────────────────────── */
+.tab-section .card { margin-bottom: 16px; }
+.tab-section .card:last-child { margin-bottom: 0; }
