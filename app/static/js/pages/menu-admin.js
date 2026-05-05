@@ -158,7 +158,7 @@
         var initials = (d.name || '?')[0].toUpperCase();
         var price = mesioFmt(d.price || 0);
         var thumbContent = d.image_url
-          ? '<img src="' + _escHtml(d.image_url) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">'
+          ? '<img src="' + _escHtml(mesioImageUrl(d.image_url, 'thumb')) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">'
           : _escHtml(initials);
         return '<div class="dish ' + (available ? '' : 'off') + '" data-dish-name="' + _escHtml(d.name || '') + '">' +
           '<div class="dish-thumb" style="background:linear-gradient(135deg,var(--brand),#0F6E56);position:relative;overflow:hidden;">' +
@@ -665,7 +665,7 @@
     if (_imgModalDish.image_url) {
       preview.innerHTML = '';
       var img = document.createElement('img');
-      img.src = _imgModalDish.image_url;
+      img.src = mesioImageUrl(_imgModalDish.image_url, 'card');
       img.alt = '';
       img.style.cssText = 'max-width:100%;max-height:200px;border-radius:10px;display:block;margin:0 auto 10px;';
       preview.appendChild(img);

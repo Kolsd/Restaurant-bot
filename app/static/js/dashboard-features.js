@@ -244,7 +244,7 @@ function _renderDishThumb(dish, size = 44) {
     img.style.width = size + 'px';
     img.style.height = size + 'px';
     img.alt = '';
-    img.src = dish.image_url;
+    img.src = mesioImageUrl(dish.image_url, 'thumb');
     return img;
   }
   const div = document.createElement('div');
@@ -935,7 +935,7 @@ function _renderImageZoneContent(zone, dish) {
     zone.classList.add('has-image');
     const img = document.createElement('img');
     img.className = 'dish-image-preview';
-    img.src = dish.image_url;
+    img.src = mesioImageUrl(dish.image_url, 'card');
     img.alt = 'Vista previa del plato';
     zone.appendChild(img);
 

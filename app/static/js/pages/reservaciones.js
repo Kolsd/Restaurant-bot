@@ -289,11 +289,20 @@
       return;
     }
 
-    // Build simple prompt with table list
+    // Build prompt with table list as hint text
     const options = _tables.map(function (t) {
       return (t.table_number || t.name || 'Mesa ' + t.id) + ' (cap. ' + (t.capacity || '?') + ')';
-    }).join('\n');
-    const choice = window.prompt('Seleccionar mesa:\n' + options + '\n\nIngresa el ID de la mesa:');
+    }).join(' · ');
+    const choice = await mesioPrompt('Mesas disponibles: ' + options, {
+      title: 'Asignar mesa',
+      type: 'number',
+      placeholder: 'ID de mesa',
+      validator: function (v) {
+        if (!v || !v.trim()) return 'Ingresá el ID de la mesa';
+        if (isNaN(parseInt(v, 10))) return 'Debe ser un número';
+        return null;
+      },
+    });
     if (!choice) return;
     const tableId = parseInt(choice, 10);
     if (!tableId) {
@@ -340,9 +349,18 @@
         return;
       }
       const opts = _tables.map(function (t) {
-        return (t.table_number || t.name || 'Mesa') + ' [' + t.id + ']' + ' (cap. ' + (t.capacity || '?') + ')';
-      }).join('\n');
-      const choice = window.prompt('Seleccionar mesa para sentar al cliente:\n' + opts + '\n\nIngresa el ID de la mesa:');
+        return (t.table_number || t.name || 'Mesa') + ' [' + t.id + '] (cap. ' + (t.capacity || '?') + ')';
+      }).join(' · ');
+      const choice = await mesioPrompt('Mesas disponibles: ' + opts, {
+        title: 'Sentar al cliente — elegir mesa',
+        type: 'number',
+        placeholder: 'ID de mesa',
+        validator: function (v) {
+          if (!v || !v.trim()) return 'Ingresá el ID de la mesa';
+          if (isNaN(parseInt(v, 10))) return 'Debe ser un número';
+          return null;
+        },
+      });
       if (!choice) return;
       tableId = String(choice).trim();
     }

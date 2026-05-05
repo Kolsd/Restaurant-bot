@@ -206,7 +206,7 @@ function buildDishImage(dish) {
     img.alt = dish.name; // safe — no innerHTML
     img.loading = 'lazy';
     img.decoding = 'async';
-    img.src = dish.image_url;
+    img.src = mesioImageUrl(dish.image_url, 'card');
     // Remove skeleton on load
     img.onload = () => img.classList.remove('m-skeleton');
     img.onerror = () => {
@@ -514,7 +514,7 @@ class DishModal {
     if (dish.image_url) {
       const img = document.createElement('img');
       img.alt = dish.name;
-      img.src = dish.image_url;
+      img.src = mesioImageUrl(dish.image_url, 'hero');
       img.loading = 'eager';
       heroWrap.appendChild(img);
     } else {
@@ -609,7 +609,7 @@ class HeroCarousel {
       if (dish.image_url) {
         const img = document.createElement('img');
         img.alt = dish.name;
-        img.src = dish.image_url;
+        img.src = mesioImageUrl(dish.image_url, 'hero');
         img.loading = i === 0 ? 'eager' : 'lazy';
         img.decoding = 'async';
         slide.appendChild(img);

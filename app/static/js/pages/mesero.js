@@ -260,9 +260,21 @@ async function _showCobrarServiceModal(table, parentModal) {
     right.style.cssText = 'font-size:11px;color:var(--text-3,#94a3b8);';
     row.appendChild(left);
     row.appendChild(right);
-    row.addEventListener('click', () => {
+    row.addEventListener('click', async () => {
       if (o.pct === -1) {
-        const v = window.prompt('% de servicio (0–25):', '12');
+        const v = await mesioPrompt('¿Qué porcentaje de servicio cobramos?', {
+          title: 'Servicio personalizado',
+          type: 'number',
+          placeholder: 'Ej: 12',
+          defaultValue: '12',
+          validator: function (val) {
+            const n = parseInt(val, 10);
+            if (isNaN(n)) return 'Debe ser un número';
+            if (n < 0 || n > 25) return 'Entre 0% y 25%';
+            return null;
+          },
+        });
+        if (v === null) return;
         const num = Math.min(25, Math.max(0, parseInt(v, 10)));
         if (!Number.isFinite(num)) return;
         chosenPct = num;

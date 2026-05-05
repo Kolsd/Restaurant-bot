@@ -156,6 +156,130 @@ function mesioConfirm(message, { confirmText = 'Confirmar', cancelText = 'Cancel
   });
 }
 
+// ── Prompt dialog (replaces window.prompt) ───────
+/**
+ * Show a modal prompt for text/number input. Replaces window.prompt() which
+ * is unreliable on iOS Chrome and Android PWAs in standalone mode.
+ *
+ * @param {string} message - the prompt question shown to the user
+ * @param {object} opts
+ * @param {string} [opts.title] - modal title
+ * @param {string} [opts.placeholder] - input placeholder
+ * @param {string} [opts.defaultValue] - prefilled value
+ * @param {'text'|'number'} [opts.type='text'] - input type
+ * @param {string} [opts.confirmLabel='Aceptar']
+ * @param {string} [opts.cancelLabel='Cancelar']
+ * @param {(value: string) => string|null} [opts.validator] - return error string or null if valid
+ * @returns {Promise<string|null>} - entered value, or null if cancelled
+ */
+function mesioPrompt(message, opts = {}) {
+  const {
+    title = '',
+    placeholder = '',
+    defaultValue = '',
+    type = 'text',
+    confirmLabel = 'Aceptar',
+    cancelLabel = 'Cancelar',
+    validator = null,
+  } = opts;
+
+  return new Promise(resolve => {
+    const titleId = 'm-prompt-title-' + Date.now();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'm-confirm-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+
+    const box = document.createElement('div');
+    box.className = 'm-confirm-box';
+
+    if (title) {
+      const h = document.createElement('p');
+      h.id = titleId;
+      h.style.cssText = 'font-weight:600;margin:0 0 6px;';
+      h.textContent = title;
+      overlay.setAttribute('aria-labelledby', titleId);
+      box.appendChild(h);
+    } else {
+      overlay.setAttribute('aria-label', message);
+    }
+
+    const msg = document.createElement('p');
+    msg.style.cssText = title ? 'margin:0 0 12px;' : 'font-weight:600;margin:0 0 12px;';
+    msg.textContent = message;
+    box.appendChild(msg);
+
+    const input = document.createElement('input');
+    input.type = type;
+    input.placeholder = placeholder;
+    input.value = defaultValue;
+    input.setAttribute('aria-label', message);
+    input.style.cssText = 'width:100%;box-sizing:border-box;padding:8px 10px;border-radius:6px;border:1px solid var(--border,#334155);background:var(--surface-3,#1e293b);color:var(--text-1,#f1f5f9);font-size:14px;font-family:inherit;margin-bottom:4px;';
+    box.appendChild(input);
+
+    const errorEl = document.createElement('p');
+    errorEl.style.cssText = 'color:#f87171;font-size:12px;min-height:16px;margin:0 0 10px;';
+    errorEl.setAttribute('aria-live', 'polite');
+    box.appendChild(errorEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'm-confirm-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'm-btn m-btn--ghost m-confirm-cancel';
+    cancelBtn.textContent = cancelLabel;
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'm-btn m-btn--primary m-confirm-ok';
+    confirmBtn.textContent = confirmLabel;
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+
+    const submit = () => {
+      const val = input.value;
+      if (validator) {
+        const err = validator(val);
+        if (err) {
+          errorEl.textContent = err;
+          input.focus();
+          return;
+        }
+      }
+      cleanup(val);
+    };
+
+    cancelBtn.onclick = () => cleanup(null);
+    confirmBtn.onclick = submit;
+    overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(null); });
+
+    overlay.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { cleanup(null); return; }
+      if (e.key === 'Enter') { e.preventDefault(); submit(); return; }
+      // Focus trap: Tab/Shift+Tab cycles input → confirmBtn → cancelBtn → input
+      if (e.key === 'Tab') {
+        const focusable = [input, confirmBtn, cancelBtn];
+        const idx = focusable.indexOf(document.activeElement);
+        e.preventDefault();
+        focusable[e.shiftKey
+          ? (idx - 1 + focusable.length) % focusable.length
+          : (idx + 1) % focusable.length
+        ].focus();
+      }
+    });
+
+    document.body.appendChild(overlay);
+    // Auto-focus after paint so the overlay is visible before focus fires
+    requestAnimationFrame(() => input.focus());
+  });
+}
+window.mesioPrompt = mesioPrompt;
+
 // ── Connection monitor ───────────────────────────
 const _connState = { failCount: 0, maxFails: 3 };
 function mesioTrackFetch(ok) {
@@ -185,6 +309,31 @@ function mesioInterval(fn, ms) {
     if (document.visibilityState !== 'hidden') fn();
   }, ms);
 }
+
+// ── Cloudinary image URL transform ───────────────
+/**
+ * Insert a Cloudinary transform into an image URL. Falls through unchanged
+ * if the URL isn't a Cloudinary URL (e.g. external hosting, data URIs).
+ *
+ * @param {string} url - the original Cloudinary URL
+ * @param {'thumb'|'card'|'hero'} variant - target size variant
+ * @returns {string} - transformed URL or original if not Cloudinary
+ */
+function mesioImageUrl(url, variant) {
+  if (!url || typeof url !== 'string') return url || '';
+  if (!url.includes('res.cloudinary.com')) return url;
+  if (!url.includes('/upload/')) return url;
+  // Skip if already transformed (idempotent) — detects any transform param after /upload/
+  if (/\/upload\/[a-z]_/.test(url)) return url;
+  var transforms = {
+    thumb: 'c_fill,w_300,h_300,q_auto,f_auto',
+    card:  'c_fill,w_600,h_450,q_auto,f_auto',
+    hero:  'c_fill,w_1200,h_900,q_auto,f_auto',
+  };
+  var t = transforms[variant] || transforms.card;
+  return url.replace('/upload/', '/upload/' + t + '/');
+}
+window.mesioImageUrl = mesioImageUrl;
 
 // ── Date formatter ───────────────────────────────
 function mesioDate(isoStr) {

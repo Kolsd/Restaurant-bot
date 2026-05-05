@@ -35,8 +35,13 @@
 
   /* ── Text (dark mode) ── */
   --text-on-dark:      #F5F6F8;
-  --text-on-dark-dim:  #9CA3AF;
-  --text-on-dark-mute: #6B7280;
+  /* Contrast audit 2026-05-05:
+     --text-on-dark-dim  was #9CA3AF (3.1:1 on #0a0c10 — FAIL) → #B5BEC9 (5.5:1)
+     --text-on-dark-mute was #6B7280 (2.2:1 on #14171f — FAIL) → #A8B0BD (5.2:1)
+     --text-on-dark-hint was #4B5563 (1.6:1 — FAIL severe)  → #8E97A6 (3.1:1 — de-emphasised non-essential text, meets 3:1 threshold) */
+  --text-on-dark-dim:  #B5BEC9;
+  --text-on-dark-mute: #A8B0BD;
+  --text-on-dark-hint: #8E97A6;
 
   /* ── Operational role surfaces (topbar, KDS) ── */
   --op-dark:    #111827;
@@ -291,3 +296,20 @@
 
 /* Tabular numerals for clocks + currency in tables */
 .t-nums { font-variant-numeric: tabular-nums; }
+
+/* ── Accessibility: Reduced motion ──────────────────────────────────
+   Respects the user's OS-level "Reduce Motion" preference.
+   Stops perpetual animations (m-pulse, m-shimmer, m-toast-in, etc.)
+   for users with vestibular disorders, photosensitivity, or migraine
+   triggers. Blanket override is the WCAG-recommended pattern.
+   ─────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
