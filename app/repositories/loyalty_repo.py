@@ -417,22 +417,37 @@ async def db_get_loyalty_aggregates(org_id: int) -> dict:
             org_id,
         ) or 0
 
-        # avg_frequency: mean purchase entries per member in last 30 days.
-        # One 'purchase' ledger entry represents one order event.
-        avg_freq_row = await conn.fetchrow(
+        # avg_frequency + redemption_pct both scan loyalty_ledger for this org —
+        # batched into one query to save 1 round-trip.
+        # avg_frequency uses a 30-day window (FILTER) while redemption_pct is
+        # all-time; FILTER aggregate handles this cleanly in one pass.
+        ledger_row = await conn.fetchrow(
             """
             SELECT
-                CASE WHEN COUNT(DISTINCT phone) = 0 THEN 0.0
-                     ELSE ROUND(COUNT(*)::numeric / COUNT(DISTINCT phone), 1)
-                END AS avg_frequency
+                COUNT(*) FILTER (
+                    WHERE reason = 'purchase'
+                      AND created_at >= NOW() - INTERVAL '30 days'
+                )                                                          AS freq_count,
+                COUNT(DISTINCT phone) FILTER (
+                    WHERE reason = 'purchase'
+                      AND created_at >= NOW() - INTERVAL '30 days'
+                )                                                          AS freq_members,
+                COALESCE(SUM(CASE WHEN delta > 0 THEN  delta ELSE 0 END), 0) AS accrued,
+                COALESCE(SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END), 0) AS redeemed
             FROM loyalty_ledger
             WHERE org_id = $1
-              AND reason = 'purchase'
-              AND created_at >= NOW() - INTERVAL '30 days'
             """,
             org_id,
         )
-        avg_frequency = float(avg_freq_row["avg_frequency"]) if avg_freq_row else 0.0
+        if ledger_row and int(ledger_row["freq_members"] or 0) > 0:
+            avg_frequency = float(
+                round(int(ledger_row["freq_count"]) / int(ledger_row["freq_members"]), 1)
+            )
+        else:
+            avg_frequency = 0.0
+        accrued  = int(ledger_row["accrued"])  if ledger_row else 0
+        redeemed = int(ledger_row["redeemed"]) if ledger_row else 0
+        redemption_pct = round(redeemed / accrued * 100, 1) if accrued > 0 else 0.0
 
         # avg ticket split: member vs non-member.
         # Member phones are those in loyalty_customers for this org.
@@ -463,21 +478,6 @@ async def db_get_loyalty_aggregates(org_id: int) -> dict:
             if ticket_row and ticket_row["nonmember_avg"] is not None
             else None
         )
-
-        # redemption_pct
-        redemption_row = await conn.fetchrow(
-            """
-            SELECT
-                COALESCE(SUM(CASE WHEN delta > 0 THEN  delta  ELSE 0 END), 0) AS accrued,
-                COALESCE(SUM(CASE WHEN delta < 0 THEN -delta  ELSE 0 END), 0) AS redeemed
-            FROM loyalty_ledger
-            WHERE org_id = $1
-            """,
-            org_id,
-        )
-        accrued  = int(redemption_row["accrued"])  if redemption_row else 0
-        redeemed = int(redemption_row["redeemed"]) if redemption_row else 0
-        redemption_pct = round(redeemed / accrued * 100, 1) if accrued > 0 else 0.0
 
     return {
         "total_customers":      int(total_customers),
@@ -691,11 +691,26 @@ async def db_get_loyalty_funnel(org_id: int) -> list[dict]:
         oro_min     = int((tiers.get("oro")     or [81,  200])[0])
         platino_min = int((tiers.get("platino") or [201, 9999])[0])
 
-        step1 = int(await conn.fetchval(
-            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id = $1",
-            org_id,
-        ) or 0)
+        # Steps 1, 3, 4, 5 all scan loyalty_customers for the same org —
+        # batched into one aggregate query to save 3 round-trips.
+        tier_row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*)                                                AS step1_total,
+                COUNT(*) FILTER (WHERE points_balance >= $2)           AS step3_plata,
+                COUNT(*) FILTER (WHERE points_balance >= $3)           AS step4_oro,
+                COUNT(*) FILTER (WHERE points_balance >= $4)           AS step5_platino
+            FROM loyalty_customers
+            WHERE org_id = $1
+            """,
+            org_id, plata_min, oro_min, platino_min,
+        )
+        step1 = int(tier_row["step1_total"] or 0)
+        step3 = int(tier_row["step3_plata"] or 0)
+        step4 = int(tier_row["step4_oro"] or 0)
+        step5 = int(tier_row["step5_platino"] or 0)
 
+        # Step 2 is on loyalty_ledger — separate table, stays as its own query.
         step2 = int(await conn.fetchval(
             """
             SELECT COUNT(*)
@@ -708,19 +723,6 @@ async def db_get_loyalty_funnel(org_id: int) -> list[dict]:
             ) sub
             """,
             org_id,
-        ) or 0)
-
-        step3 = int(await conn.fetchval(
-            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id=$1 AND points_balance >= $2",
-            org_id, plata_min,
-        ) or 0)
-        step4 = int(await conn.fetchval(
-            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id=$1 AND points_balance >= $2",
-            org_id, oro_min,
-        ) or 0)
-        step5 = int(await conn.fetchval(
-            "SELECT COUNT(*) FROM loyalty_customers WHERE org_id=$1 AND points_balance >= $2",
-            org_id, platino_min,
         ) or 0)
 
     def _pct(n: int) -> float:
