@@ -31,6 +31,7 @@ becomes visible again after the 3-minute window and is retried automatically.
 from __future__ import annotations
 
 import asyncio
+import os
 import traceback
 from typing import Awaitable, Callable
 
@@ -67,8 +68,11 @@ def get_metrics() -> dict:
         "inbox_latency_samples": len(lats),
     }
 
-_POLL_INTERVAL_EMPTY = 1.0   # seconds to sleep when batch was empty
-_BATCH_SIZE          = 10
+# Tunables — env-overridable for staging vs prod calibration.
+# Defaults preserve historical behaviour exactly.
+_POLL_INTERVAL_EMPTY = float(os.environ.get("INBOX_POLL_INTERVAL_EMPTY", "1.0"))
+_BATCH_SIZE          = int(os.environ.get("INBOX_BATCH_SIZE", "10"))
+_DISPATCH_TIMEOUT_S  = int(os.environ.get("INBOX_DISPATCH_TIMEOUT_S", "120"))
 
 
 def register_handler(provider: str, fn: Callable[[dict], Awaitable[None]]) -> None:
@@ -152,11 +156,11 @@ async def run_worker(stop_event: asyncio.Event) -> None:
                 dispatch_error: str | None = None
 
                 try:
-                    await asyncio.wait_for(_dispatch(provider, payload), timeout=120)
+                    await asyncio.wait_for(_dispatch(provider, payload), timeout=_DISPATCH_TIMEOUT_S)
                     # success
                 except asyncio.TimeoutError:
                     _metrics["errors"] += 1
-                    dispatch_error = "dispatch_timeout: handler exceeded 120s"
+                    dispatch_error = f"dispatch_timeout: handler exceeded {_DISPATCH_TIMEOUT_S}s"
                     log.error(
                         "inbox_dispatch_timeout",
                         inbox_id=inbox_id,

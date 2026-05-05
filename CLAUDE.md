@@ -24,7 +24,13 @@ Variables de entorno críticas:
   ALERT_WEBHOOK_URL,            # (opcional) Webhook para alertas operativas (Slack/Discord)
   DISABLE_EMBEDDED_WORKER,      # "1" para desactivar inbox worker embebido en web service
   WORKER_MODE,                  # "inbox" para Railway worker service separado
-  BOT_MAX_TOKENS,               # (opcional, default 2048) max_tokens para respuestas del LLM
+  INBOX_BATCH_SIZE,             # (opcional, default 10) filas por poll del inbox worker
+  INBOX_POLL_INTERVAL_EMPTY,    # (opcional, default 1.0) sleep en segundos cuando batch viene vacío
+  INBOX_DISPATCH_TIMEOUT_S,     # (opcional, default 120) timeout por mensaje dispatcheado
+  INBOX_BACKOFF_SECONDS,        # (opcional, default "30,120,600,3600,21600") schedule de retries CSV
+  INBOX_CLAIM_WINDOW_MINUTES,   # (opcional, default 3) ventana antes de que un row claimed sea visible de nuevo si crashea el worker
+  BOT_MAX_TOKENS,               # (opcional, default 2048) max_tokens ceiling para respuestas del LLM
+  BOT_MAX_TOKENS_SHORT,         # (opcional, default 768) max_tokens para replies normales
   BOT_MODEL_FAST,               # (opcional) override modelo rápido de Anthropic
   BOT_MODEL_PRECISE,            # (opcional) override modelo preciso de Anthropic
   OPENAI_API_KEY,               # (opcional) Para transcripción de voice notes (Whisper API). Sin esto, audios reciben fallback amigable.

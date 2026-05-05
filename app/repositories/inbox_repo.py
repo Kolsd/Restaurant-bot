@@ -5,12 +5,32 @@ All SQL uses positional $1/$2/... params (no f-strings for data).
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import asyncpg
 
-# Backoff schedule in seconds: attempt 1→2→3→4→5 delays
-_BACKOFF_SECONDS = [30, 120, 600, 3600, 21600]
+
+def _parse_backoff(env_value: str | None) -> list[int]:
+    """Parse comma-separated seconds list. Defaults to historical schedule."""
+    default = [30, 120, 600, 3600, 21600]
+    if not env_value:
+        return default
+    try:
+        parsed = [int(x.strip()) for x in env_value.split(",") if x.strip()]
+        return parsed or default
+    except ValueError:
+        return default
+
+
+# Backoff schedule in seconds: attempt 1→2→...→N delays.
+# Override via INBOX_BACKOFF_SECONDS="30,120,600,3600,21600".
+_BACKOFF_SECONDS = _parse_backoff(os.environ.get("INBOX_BACKOFF_SECONDS"))
+
+# Claim window — how long a row stays invisible to other workers after claim.
+# Must comfortably exceed the dispatch timeout so a slow handler doesn't get
+# its row stolen mid-dispatch. Default 3 minutes (vs 120s dispatch timeout).
+_CLAIM_WINDOW_MINUTES = int(os.environ.get("INBOX_CLAIM_WINDOW_MINUTES", "3"))
 
 
 async def enqueue(
@@ -92,19 +112,20 @@ async def claim_rows(conn: asyncpg.Connection, row_ids: list[int]) -> None:
     """
     Atomically claim rows so no other worker can pick them up during dispatch.
 
-    Sets next_attempt_at 3 minutes into the future and increments attempts by 1.
-    Must be called inside an open transaction (together with fetch_batch).
-    If the worker crashes after claiming but before ack, the row becomes visible
-    again after the 3-minute window and will be retried.
+    Sets next_attempt_at _CLAIM_WINDOW_MINUTES into the future (default 3) and
+    increments attempts by 1. Must be called inside an open transaction
+    (together with fetch_batch). If the worker crashes after claiming but
+    before ack, the row becomes visible again after the window and is retried.
     """
     await conn.execute(
         """
         UPDATE webhook_inbox
-        SET next_attempt_at = NOW() + INTERVAL '3 minutes',
+        SET next_attempt_at = NOW() + ($2 || ' minutes')::INTERVAL,
             attempts        = attempts + 1
         WHERE id = ANY($1::bigint[])
         """,
         row_ids,
+        str(_CLAIM_WINDOW_MINUTES),
     )
 
 
