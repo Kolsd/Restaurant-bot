@@ -66,10 +66,11 @@ function _ticketClass(mins) {
 }
 
 // ── Source badge ─────────────────────────────────────
-// NOTE: kitchen.js only ever shows table_orders (via /api/table-orders?station=kitchen).
-// table_orders has no is_delivery column — that field lives on the delivery orders table.
-// The channel field (migration 0039) IS present on table_orders and distinguishes origin.
+// kitchen.js now shows both table_orders AND delivery orders.
+// Delivery orders (_is_delivery=true) get their own type badge in metaPax;
+// channel badge only applies to table_orders.
 function _srcBadge(order) {
+  if (order._is_delivery) return '';   // type shown in metaPax already
   if (order.channel === 'whatsapp_bot') return `<span class="tag src">📱 WhatsApp</span>`;
   if (order.channel === 'whatsapp')     return `<span class="tag src">📱 WhatsApp</span>`;
   return '';
@@ -145,15 +146,24 @@ function _renderWall(orders) {
     }
 
     const tableName = (() => { const e = document.createElement('div'); e.textContent = o.table_name || o.table_id || '#'; return e.innerHTML; })();
-    const tblCls = tableName; // is_delivery removed — kitchen only shows table_orders, never delivery orders
-    const metaPax = o.guests ? `<span class="tag">Mesa · ${o.guests}p</span>` : `<span class="tag">Mesa</span>`;
+    const tblCls = tableName;
+    let metaPax;
+    if (o._is_delivery) {
+      const addrEl = document.createElement('div');
+      addrEl.textContent = o.address || '';
+      const safeAddr = addrEl.innerHTML;
+      const typeLabel = o.order_type === 'recoger' ? '🛍️ Recoger' : '🛵 Domicilio';
+      metaPax = `<span class="tag">${typeLabel}</span>` + (o.address ? `<span class="tag" style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${safeAddr}</span>` : '');
+    } else {
+      metaPax = o.guests ? `<span class="tag">Mesa · ${o.guests}p</span>` : `<span class="tag">Mesa</span>`;
+    }
     const srcBadge = _srcBadge(o);
     const hotBadge = mins >= 12 ? `<span class="tag hot">🔥 Retrasado</span>` : '';
 
     const doneStyle = isDone ? 'opacity:0.55;' : '';
     const selectedStyle = isSelected ? 'box-shadow:0 0 0 2px var(--brand);' : '';
 
-    return `<article class="tkt ${cls} ${isDone ? 'done' : ''}" data-id="${_esc(o.id)}" data-idx="${idx}" style="${doneStyle}${selectedStyle}">
+    return `<article class="tkt ${cls} ${isDone ? 'done' : ''}" data-id="${_esc(o.id)}" data-idx="${idx}" data-delivery="${o._is_delivery ? '1' : '0'}" style="${doneStyle}${selectedStyle}">
       <div class="tkt-head">
         <div class="tkt-table"><span class="n">${tblCls}</span><span class="sub">#${_esc(String(o.id).slice(0,6))}</span></div>
         <div class="tkt-time">${_fmtTime(mins, secs)}</div>
@@ -189,7 +199,12 @@ function _renderWall(orders) {
   wall.querySelectorAll('.tkt-listo').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      markListo(btn.dataset.id);
+      const article = btn.closest('article');
+      if (article && article.dataset.delivery === '1') {
+        markListoDelivery(btn.dataset.id);
+      } else {
+        markListo(btn.dataset.id);
+      }
     });
   });
 
@@ -206,7 +221,7 @@ function _esc(s) { return _escHtmlSafe(s); }
 
 // ── Tab counts ───────────────────────────────────────
 function _updateTabCounts(orders) {
-  const active   = orders.filter(o => o.status === 'recibido' || o.status === 'en_preparacion');
+  const active   = orders.filter(o => o.status === 'recibido' || o.status === 'en_preparacion' || o.status === 'confirmado');
   const delayed  = active.filter(o => _elapsedMins(o.created_at, _localPlusMins[o.id]) >= 12);
   const done     = orders.filter(o => o.status === 'listo');
 
@@ -240,19 +255,50 @@ async function markListo(orderId) {
   }
 }
 
+async function markListoDelivery(orderId) {
+  try {
+    const res = await fetch(`/api/kitchen/delivery-orders/${encodeURIComponent(orderId)}/status`, {
+      method: 'PATCH', headers: mesioHeaders(), body: JSON.stringify({ status: 'listo' })
+    });
+    mesioTrackFetch(res.ok);
+    if (!res.ok) throw new Error('status ' + res.status);
+    mesioToast('✅ Listo para entrega', 'success', 2000);
+    loadOrders();
+  } catch (err) {
+    mesioToast('Error al marcar listo', 'error');
+  }
+}
+
 // ── Load orders ───────────────────────────────────────
 async function loadOrders() {
   _selectedIdx = -1;
   try {
-    const res = await fetch('/api/table-orders?station=kitchen', { headers: mesioHeaders() });
-    mesioTrackFetch(res.ok);
-    if (!res.ok) { if (res.status === 401) { window.location.href = '/login'; return; } throw new Error('status'); }
-    const data = await res.json();
-    let orders = data.orders || data || [];
+    const [tableRes, deliveryRes] = await Promise.all([
+      fetch('/api/table-orders?station=kitchen', { headers: mesioHeaders() }),
+      fetch('/api/kitchen/delivery-orders', { headers: mesioHeaders() }),
+    ]);
+    mesioTrackFetch(tableRes.ok);
+    if (!tableRes.ok) { if (tableRes.status === 401) { window.location.href = '/login'; return; } throw new Error('status'); }
+    const tableData = await tableRes.json();
+    let orders = (tableData.orders || tableData || []);
 
     // Capa 3: never show orders that are pending waiter validation.
-    // The waiter must confirm the table is real before kitchen sees them.
     orders = orders.filter(o => !o.pending_table_validation);
+
+    // Merge confirmed delivery orders into the wall so kitchen sees domicilio/pickup too.
+    if (deliveryRes.ok) {
+      const deliveryData = await deliveryRes.json();
+      const deliveryOrders = (deliveryData.orders || []).map(o => ({
+        ...o,
+        _is_delivery: true,
+        table_name: o.order_type === 'recoger' ? '🛍️ Recoger' : '🛵 Domicilio',
+        guests: null,
+      }));
+      orders = [...orders, ...deliveryOrders];
+    }
+
+    // Oldest first so kitchen sees arrival order.
+    orders.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
     // Filter by active station
     if (_station === 'delayed') {
@@ -290,7 +336,8 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Enter' && _selectedIdx >= 0 && _tickets[_selectedIdx]) {
-    markListo(_tickets[_selectedIdx].id);
+    const t = _tickets[_selectedIdx];
+    if (t._is_delivery) { markListoDelivery(t.id); } else { markListo(t.id); }
     return;
   }
   if ((e.key === 't' || e.key === 'T') && _selectedIdx >= 0 && _tickets[_selectedIdx]) {
