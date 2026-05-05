@@ -1187,11 +1187,17 @@ function initCatalog() {
     const filteredCats = Object.keys(filteredMenu);
 
     if (allCats.length === 0) {
+      const waNum = state.botNumber ? state.botNumber.replace(/\D/g, '') : '';
+      const waMsg = encodeURIComponent('Hola, vi su QR pero el menú no está disponible. ¿Pueden ayudarme?');
+      const ctaHtml = waNum
+        ? `<a href="https://wa.me/${waNum}?text=${waMsg}" target="_blank" rel="noopener noreferrer" class="m-btn m-btn--primary" style="margin-top:16px;display:inline-block;">Escribir por WhatsApp</a>`
+        : `<p class="empty-subtitle" style="margin-top:12px;">Llama o pide al mesero</p>`;
       mainEl.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon" aria-hidden="true">🍽️</div>
           <p class="empty-title">Este restaurante aún no tiene platos</p>
-          <p class="empty-subtitle">Vuelve pronto</p>
+          <p class="empty-subtitle">Puedes contactarlos directamente</p>
+          ${ctaHtml}
         </div>`;
       return;
     }

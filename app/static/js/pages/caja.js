@@ -808,7 +808,8 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
 
     const tip = _getTipAmount();
     const svc = Number(document.getElementById('pcm-service-charge')?.value || 0);
-    const grand = checkTotal + svc;
+    // tip is part of what the customer owes — must be included in the charged total
+    const grand = checkTotal + svc + tip;
     const custName = document.getElementById('pcm-cust-name')?.value || 'Consumidor Final';
     const custNit  = document.getElementById('pcm-cust-nit')?.value  || '222222222';
     const tableName = _selectedTableOrder?.table_name || 'Mesa';
@@ -877,7 +878,8 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
     const svc = Number(document.getElementById('pcm-service-charge')?.value || 0);
     const rows = document.querySelectorAll('.pcm-pay-row');
     const paid = Array.from(rows).reduce((s, row) => s + (Number(row.querySelector('.pcm-pay-amount')?.value || 0)), 0);
-    const total = checkTotal + svc;
+    // tip is part of what the customer owes — must be included so cambio reflects the real due amount
+    const total = checkTotal + svc + tip;
     const change = paid - total;
     const changeEl = document.getElementById('pcm-change');
     if (changeEl) changeEl.textContent = change >= 0 ? fmt(change) : `−${fmt(Math.abs(change))}`;
@@ -1028,7 +1030,8 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
 
     const tip = _getTipAmount();
     const svc = Number(document.getElementById('pcm-service-charge')?.value || 0);
-    const total = checkTotal + svc;
+    // tip is part of what the customer owes — include so underpayment guard uses the real total
+    const total = checkTotal + svc + tip;
 
     if (tip > checkTotal * 0.5) {
       if (errEl) errEl.textContent = 'La propina no puede superar el 50% del subtotal de la cuenta';

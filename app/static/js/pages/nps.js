@@ -51,7 +51,7 @@
   if (surveyBtn) {
     surveyBtn.addEventListener('click', function () {
       if (typeof mesioToast === 'function') {
-        mesioToast('Envío de encuesta próximamente disponible', 'info');
+        mesioToast('Envío de encuesta no disponible aún', 'info');
       }
     });
   }
@@ -59,35 +59,78 @@
   // ── NPS stats render ──────────────────────────────────────────────
 
   function renderNPSStats(data) {
-    if (!data) return;
     const scoreEl = document.getElementById('nps-score');
+    const totalLabelEl = document.getElementById('nps-total-label');
+    const ringEl = document.getElementById('nps-ring');
+    const ringLabelsEl = document.getElementById('nps-ring-labels');
     const promoEl = document.getElementById('nps-promoters');
     const passEl = document.getElementById('nps-passives');
     const detrEl = document.getElementById('nps-detractors');
-    if (scoreEl && data.nps_score !== undefined) {
-      scoreEl.textContent = Math.round(data.nps_score);
+    const ringPromo = document.getElementById('nps-ring-promo');
+    const ringPass = document.getElementById('nps-ring-pass');
+    const ringDetr = document.getElementById('nps-ring-detr');
+
+    if (!data || !scoreEl) return;
+
+    const total = data.total_responses || 0;
+
+    if (total === 0) {
+      scoreEl.textContent = '—';
+      if (totalLabelEl) {
+        totalLabelEl.textContent = 'Sin datos suficientes aún';
+        totalLabelEl.style.color = 'var(--text-3)';
+      }
+      if (ringEl) ringEl.style.display = 'none';
+      if (ringLabelsEl) ringLabelsEl.style.display = 'none';
+      return;
     }
-    if (promoEl && data.promoters_pct !== undefined) {
-      promoEl.textContent = Math.round(data.promoters_pct) + '% promo.';
+
+    const score = typeof data.nps_score === 'number' ? Math.round(data.nps_score) : '—';
+    scoreEl.textContent = score;
+
+    if (totalLabelEl) {
+      totalLabelEl.textContent = total + ' respuesta' + (total === 1 ? '' : 's');
+      totalLabelEl.style.color = 'var(--text-2)';
     }
-    if (passEl && data.passives_pct !== undefined) {
-      passEl.textContent = Math.round(data.passives_pct) + '% pas.';
+
+    // Distribution ring — only show when there's enough data to be meaningful
+    const promoters = data.promoters || 0;
+    const passives = data.passives || 0;
+    const detractors = data.detractors || 0;
+    const promoPct = total > 0 ? Math.round((promoters / total) * 100) : 0;
+    const passPct = total > 0 ? Math.round((passives / total) * 100) : 0;
+    const detrPct = total > 0 ? Math.round((detractors / total) * 100) : 0;
+
+    if (ringEl) {
+      ringEl.style.display = 'flex';
+      if (ringPromo) ringPromo.style.flex = '0 0 ' + promoPct + '%';
+      if (ringPass) ringPass.style.flex = '0 0 ' + passPct + '%';
+      if (ringDetr) ringDetr.style.flex = '0 0 ' + detrPct + '%';
     }
-    if (detrEl && data.detractors_pct !== undefined) {
-      detrEl.textContent = Math.round(data.detractors_pct) + '% detr.';
+    if (ringLabelsEl) {
+      ringLabelsEl.style.display = '';
+      if (promoEl) promoEl.textContent = promoPct + '% promo.';
+      if (passEl) passEl.textContent = passPct + '% pas.';
+      if (detrEl) detrEl.textContent = detrPct + '% detr.';
     }
   }
 
   async function loadNPS(days) {
+    const scoreEl = document.getElementById('nps-score');
+    if (scoreEl) scoreEl.textContent = '…';
     try {
       const headers = typeof mesioHeaders === 'function' ? mesioHeaders() : { 'Authorization': 'Bearer ' + token };
       const d = parseInt(days, 10) || 30;
       const res = await fetch('/api/nps/stats?days=' + d, { headers });
-      if (!res.ok) { return; }
+      if (!res.ok) {
+        if (scoreEl) scoreEl.textContent = '—';
+        return;
+      }
       const data = await res.json();
       renderNPSStats(data);
     } catch (e) {
       console.error('nps: stats error', e);
+      if (scoreEl) scoreEl.textContent = '—';
     }
   }
 
@@ -146,7 +189,7 @@
     if (!feed) return;
 
     if (!reviews || !reviews.length) {
-      feed.innerHTML = '<div style="padding:24px;color:var(--text-3);">(sin reseñas)</div>';
+      feed.innerHTML = '<div style="padding:24px;color:var(--text-3);">Sin datos suficientes aún</div>';
       feed.setAttribute('data-loaded', 'true');
       return;
     }
@@ -180,7 +223,7 @@
     bindReviewActions(feed);
   }
 
-  // ── Review action wiring (Task 3) ─────────────────────────────────
+  // ── Review action wiring ──────────────────────────────────────────
 
   function bindReviewActions(container) {
     container.querySelectorAll('[data-action]').forEach(function (btn) {
@@ -300,7 +343,7 @@
   // Also bind existing static review action buttons (before dynamic load)
   bindReviewActions(document.getElementById('reviews-feed') || document.body);
 
-  loadNPS('30d');
+  loadNPS('30');
   loadReviews();
 
   // Auto-refresh every 30s

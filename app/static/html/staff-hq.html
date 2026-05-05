@@ -87,13 +87,13 @@
         </button>
       </div>
 
-      <!-- TIPS (placeholder — backend TODO) -->
-      <div class="sc-m-sect">Propinas · hoy <a href="#" id="sc-tips-link">Histórico ↗</a></div>
+      <!-- TIPS — populated by scLoadTips() on mount -->
+      <div class="sc-m-sect">Propinas · hoy</div>
       <div class="sc-m-card">
         <div class="sc-tip-hero">
           <div class="sc-tip-label">Tu parte del turno</div>
           <div class="sc-tip-amount" id="sc-tip-amount">—</div>
-          <div class="sc-tip-sub" id="sc-tip-sub">Datos próximamente</div>
+          <div class="sc-tip-sub" id="sc-tip-sub">Cargando…</div>
         </div>
         <div class="sc-tip-grid">
           <div class="sc-tip-cell"><div class="n" id="sc-tip-mesas">—</div><div class="l">mesas</div></div>
@@ -119,7 +119,7 @@
       <div class="sc-stations-m" id="sc-stations-m"></div>
 
       <!-- UPCOMING SHIFTS — populated by scLoadUpcomingShifts() on mount -->
-      <div class="sc-m-sect">Próximos turnos <a href="#">Calendario ↗</a></div>
+      <div class="sc-m-sect">Próximos turnos</div>
       <div class="sc-m-card" id="sc-shifts-container">
         <div style="padding:14px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
       </div>
@@ -133,13 +133,13 @@
       <!-- SWAP OUTGOING (my sent requests) -->
       <div id="sc-swap-outgoing-container" style="margin-bottom:8px;"></div>
 
-      <!-- PERFORMANCE (TODO) -->
+      <!-- PERFORMANCE — populated by scLoadPerformance() on mount -->
       <div class="sc-m-sect">Mi desempeño · este mes</div>
       <div class="sc-perf" id="sc-perf-container">
         <div class="sc-perf-head">
           <div>
             <div class="sc-perf-title">Rendimiento del período</div>
-            <div class="sc-perf-sub">Datos próximamente</div>
+            <div class="sc-perf-sub" id="sc-perf-sub">Cargando…</div>
           </div>
         </div>
         <div style="margin-top:8px;">
@@ -159,7 +159,7 @@
       </div>
 
       <!-- TIMECARD PREVIEW -->
-      <div class="sc-m-sect">Timecard · semana actual <a href="#">Ver detalle ↗</a></div>
+      <div class="sc-m-sect">Timecard · semana actual</div>
       <div class="sc-m-card sc-tc-preview">
         <div class="sc-tc-sum">
           <div>
@@ -230,7 +230,7 @@
           </div>
         </div>
 
-        <!-- Alerts (TODO: load from backend) -->
+        <!-- Alerts — populated by scLoadProfile() on mount -->
         <div class="sc-k-alerts" id="sc-k-alerts"></div>
 
         <!-- Identity card -->
@@ -305,26 +305,26 @@
             </div>
           </div>
 
-          <!-- Tips kiosco (TODO) -->
+          <!-- Tips kiosco — populated by scLoadTips() on mount -->
           <div class="sc-k-panel">
-            <div class="sc-k-panel-h"><span>Propinas · hoy</span><a href="#">Semana</a></div>
+            <div class="sc-k-panel-h"><span>Propinas · hoy</span></div>
             <div style="padding:16px;">
               <div style="font-family:var(--font-display);font-weight:700;font-size:32px;letter-spacing:-0.8px;color:#6B3F05;font-variant-numeric:tabular-nums;" id="sc-k-tip-amount">—</div>
-              <div style="font-size:11.5px;color:var(--sc-text-3);" id="sc-k-tip-sub">Datos próximamente</div>
+              <div style="font-size:11.5px;color:var(--sc-text-3);" id="sc-k-tip-sub">Cargando…</div>
             </div>
           </div>
 
-          <!-- Tasks (TODO) -->
+          <!-- Tasks — populated by scLoadTasks() on mount -->
           <div class="sc-k-panel">
-            <div class="sc-k-panel-h"><span>Checklist del turno</span><a href="#">Ver todo</a></div>
+            <div class="sc-k-panel-h"><span>Checklist del turno</span></div>
             <div id="sc-k-tasks">
               <div style="padding:12px 16px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
             </div>
           </div>
 
-          <!-- Upcoming shifts (TODO) -->
+          <!-- Upcoming shifts — populated by scLoadUpcomingShifts() on mount -->
           <div class="sc-k-panel">
-            <div class="sc-k-panel-h"><span>Próximos turnos</span><a href="#">Calendario</a></div>
+            <div class="sc-k-panel-h"><span>Próximos turnos</span></div>
             <div id="sc-k-shifts">
               <div style="padding:12px 16px;font-size:12px;color:var(--sc-text-3);">Cargando…</div>
             </div>
@@ -489,40 +489,8 @@
   </div>
 </div>
 
-<!-- TWEAKS PANEL (design preview only, activated by host) -->
-<div class="sc-tw-panel" id="sc-tw-panel">
-  <div class="sc-tw-title">Tweaks · Staff Clock</div>
-  <div class="sc-tw-row">
-    <div class="sc-tw-label">Layout</div>
-    <div class="sc-tw-seg" id="sc-tw-layout">
-      <button data-v="mobile" class="on">Móvil</button>
-      <button data-v="kiosco">Kiosco</button>
-    </div>
-  </div>
-  <div class="sc-tw-row">
-    <div class="sc-tw-label">Estado del turno</div>
-    <div class="sc-tw-seg" id="sc-tw-state">
-      <button data-v="in" class="on">En turno</button>
-      <button data-v="break">Break</button>
-      <button data-v="off">Sin fichar</button>
-    </div>
-  </div>
-  <div class="sc-tw-row">
-    <div class="sc-tw-label">Rol del empleado</div>
-    <div class="sc-tw-seg" id="sc-tw-role">
-      <button data-v="mesero" class="on">Mesero</button>
-      <button data-v="caja">Cajero</button>
-      <button data-v="cocina">Cocina</button>
-    </div>
-  </div>
-  <div class="sc-tw-hint">
-    <b>Móvil</b> — celular personal del empleado.<br>
-    <b>Kiosco</b> — tablet compartida en el restaurante.
-  </div>
-</div>
-
-<!-- Logout button (accessible from mobile) -->
-<button id="sc-logout-btn" style="display:none;" aria-label="Cerrar sesión">Cerrar sesión</button>
+<!-- Logout button — visible in mobile footer -->
+<button id="sc-logout-btn" style="position:fixed;bottom:16px;right:16px;z-index:100;padding:8px 14px;font-size:12px;border:1px solid rgba(0,0,0,0.15);border-radius:8px;background:rgba(255,255,255,0.9);color:#374151;cursor:pointer;backdrop-filter:blur(4px);" aria-label="Cerrar sesión">Cerrar sesión</button>
 
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/roles.js"></script>
@@ -598,7 +566,11 @@
   scLoadSwapOutgoing();
 
   /* ── Logout ── */
-  document.getElementById('sc-logout-btn').addEventListener('click', scLogout);
+  document.getElementById('sc-logout-btn').addEventListener('click', function() {
+    mesioConfirm('¿Cerrar sesión?', { confirmText: 'Sí, salir', cancelText: 'Cancelar' }).then(function(ok) {
+      if (ok) scLogout();
+    });
+  });
 
   /* ── Restaurant branch name in kiosco ── */
   const kBranch = document.getElementById('sc-k-branch');

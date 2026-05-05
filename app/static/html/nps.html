@@ -31,7 +31,7 @@
       <div class="page-head">
         <div>
           <div class="page-title">NPS &amp; Reseñas</div>
-          <div class="page-sub">Mesio consolida Google, TripAdvisor, WhatsApp y encuestas post-consumo. Responde desde un solo lugar.</div>
+          <div class="page-sub">Encuestas post-consumo de WhatsApp. Responde y gestiona desde un solo lugar.</div>
         </div>
         <div class="row">
           <div class="seg">
@@ -48,105 +48,18 @@
       <div class="nps-hero">
         <div>
           <div class="nps-section-label">NPS actual</div>
-          <div class="score-big" id="nps-score">72</div>
-          <div class="metric-sub metric-delta up" style="margin-top: 4px;">&#9650; 8 pts vs mes anterior</div>
-          <div class="score-ring" title="Distribución NPS">
-            <div style="flex: 0 0 76%; background: var(--brand);"></div>
-            <div style="flex: 0 0 16%; background: var(--warning);"></div>
-            <div style="flex: 0 0 8%; background: var(--danger);"></div>
+          <div class="score-big" id="nps-score">—</div>
+          <div class="metric-sub" id="nps-total-label" style="margin-top: 4px; color: var(--text-3);">Sin datos suficientes aún</div>
+          <div class="score-ring" id="nps-ring" title="Distribución NPS" style="display: none;">
+            <div id="nps-ring-promo" style="background: var(--brand);"></div>
+            <div id="nps-ring-pass" style="background: var(--warning);"></div>
+            <div id="nps-ring-detr" style="background: var(--danger);"></div>
           </div>
-          <div class="score-ring-labels">
-            <span id="nps-promoters">76% promo.</span>
-            <span id="nps-passives">16% pas.</span>
-            <span id="nps-detractors">8% detr.</span>
+          <div class="score-ring-labels" id="nps-ring-labels" style="display: none;">
+            <span id="nps-promoters"></span>
+            <span id="nps-passives"></span>
+            <span id="nps-detractors"></span>
           </div>
-        </div>
-
-        <div>
-          <div class="nps-section-label" style="margin-bottom: 8px;">Estrellas por canal</div>
-          <div style="display: flex; flex-direction: column; gap: 10px;">
-            <div class="channel-row">
-              <span class="source-chip source-google">Google</span>
-              <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-              <span class="channel-score">4.8</span>
-              <span class="channel-count">284 reseñas</span>
-            </div>
-            <div class="channel-row">
-              <span class="source-chip source-tripadvisor">TripAdvisor</span>
-              <div class="stars">&#9733;&#9733;&#9733;&#9733;<span class="off">&#9733;</span></div>
-              <span class="channel-score">4.5</span>
-              <span class="channel-count">88 reseñas</span>
-            </div>
-            <div class="channel-row">
-              <span class="source-chip source-internal">Encuestas</span>
-              <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-              <span class="channel-score">4.7</span>
-              <span class="channel-count">412 respuestas</span>
-            </div>
-            <div class="channel-row">
-              <span class="source-chip source-wa">WhatsApp</span>
-              <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-              <span class="channel-score">4.6</span>
-              <span class="channel-count">168 respuestas</span>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <div class="nps-section-label" style="margin-bottom: 8px;">Distribución de puntajes &middot; 412 resp.</div>
-          <div class="bar-chart">
-            <div class="bar-row"><span class="lbl">&#9733;&#9733;&#9733;&#9733;&#9733;</span><div class="track"><div class="fill" style="width: 78%;"></div></div><span class="num">322</span></div>
-            <div class="bar-row"><span class="lbl">&#9733;&#9733;&#9733;&#9733;</span><div class="track"><div class="fill" style="width: 14%;"></div></div><span class="num">58</span></div>
-            <div class="bar-row"><span class="lbl">&#9733;&#9733;&#9733;</span><div class="track"><div class="fill warn" style="width: 5%;"></div></div><span class="num">19</span></div>
-            <div class="bar-row"><span class="lbl">&#9733;&#9733;</span><div class="track"><div class="fill danger" style="width: 2%;"></div></div><span class="num">8</span></div>
-            <div class="bar-row"><span class="lbl">&#9733;</span><div class="track"><div class="fill danger" style="width: 1%;"></div></div><span class="num">5</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- AI themes + response status -->
-      <div class="g-2" style="margin-bottom: 16px;">
-        <div class="card">
-          <div class="ai-label" style="margin-bottom: 12px;"><span class="ai-spark"></span> Temas detectados &middot; Mesio IA</div>
-          <div style="font-size: 12.5px; color: var(--text-2); margin-bottom: 12px; line-height: 1.5;">Análisis semántico de 412 reseñas del último mes. Las menciones positivas duplican a las negativas.</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-            <span class="theme-chip pos">Ajiaco <b>+84</b></span>
-            <span class="theme-chip pos">Servicio atento <b>+67</b></span>
-            <span class="theme-chip pos">Ambiente familiar <b>+58</b></span>
-            <span class="theme-chip pos">Limonada hierbabuena <b>+42</b></span>
-            <span class="theme-chip pos">Bandeja paisa <b>+38</b></span>
-            <span class="theme-chip pos">Relación calidad-precio <b>+29</b></span>
-            <span class="theme-chip neg">Tiempo de espera <b>-18</b></span>
-            <span class="theme-chip neg">Parqueadero <b>-12</b></span>
-            <span class="theme-chip neg">Volumen música <b>-7</b></span>
-            <span class="theme-chip neg">Temperatura bebidas <b>-4</b></span>
-          </div>
-        </div>
-        <div class="card">
-          <div class="row" style="margin-bottom: 10px;">
-            <div>
-              <div style="font-size: 13px; font-weight: 600;">Estado de respuestas</div>
-              <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Mesio IA responde automáticamente las 5&#9733;; las otras requieren tu atención.</div>
-            </div>
-          </div>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px;">
-            <div class="resp-stat-card brand">
-              <div class="resp-stat-label">Respondidas</div>
-              <div class="resp-stat-value brand">387</div>
-              <div class="resp-stat-sub">94% &middot; auto IA</div>
-            </div>
-            <div class="resp-stat-card warn">
-              <div class="resp-stat-label">Pendientes</div>
-              <div class="resp-stat-value warn">19</div>
-              <div class="resp-stat-sub">Revisa manualmente</div>
-            </div>
-            <div class="resp-stat-card danger">
-              <div class="resp-stat-label">Urgentes</div>
-              <div class="resp-stat-value danger">6</div>
-              <div class="resp-stat-sub">1-2&#9733; sin respuesta</div>
-            </div>
-          </div>
-          <div class="resp-time-footer">Tiempo medio de respuesta: <b style="color: var(--text);">3h 42min</b> &middot; Mesio IA responde en <b style="color: var(--brand);">8 seg</b></div>
         </div>
       </div>
 
@@ -154,8 +67,8 @@
       <div class="card flush">
         <div class="card-head">
           <div>
-            <div class="card-title">Feed unificado</div>
-            <div class="card-sub">Todas las reseñas y respuestas, ordenadas por fecha</div>
+            <div class="card-title">Feed de encuestas</div>
+            <div class="card-sub">Todas las respuestas NPS, ordenadas por fecha</div>
           </div>
           <div class="row">
             <div class="seg">
