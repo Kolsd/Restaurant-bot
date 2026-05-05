@@ -73,7 +73,43 @@ function _renderActive(orders) {
   if (!activeEl) return;
 
   if (!inRoute) {
-    activeEl.innerHTML = '<div class="dom-no-active">Sin entregas en curso. Revisa la cola de pedidos.</div>';
+    // Show first listo order as a "ready to pick up" card so the driver can
+    // grab it. Without this the domiciliario sees an empty active area even
+    // when the kitchen has marked the order as ready.
+    const readyOrder = orders.find(o => o.status === 'listo');
+    if (!readyOrder) {
+      activeEl.innerHTML = '<div class="dom-no-active">Sin entregas en curso. Revisa la cola de pedidos.</div>';
+      return;
+    }
+    const addrEl = document.createElement('div');
+    addrEl.textContent = readyOrder.address || 'Sin dirección';
+    const safeAddr = addrEl.innerHTML;
+    const cleanPhone = (readyOrder.phone || '').replace(/\D/g, '');
+    const mapsUrl = _mapsLink(readyOrder.lat, readyOrder.lng, readyOrder.address);
+
+    activeEl.innerHTML = `
+      <div class="active-badge" style="color:#F59E0B;">
+        <span class="dot" style="background:#F59E0B;box-shadow:0 0 0 4px rgba(245,158,11,0.15);"></span>
+        Listo para recoger · #${_esc(String(readyOrder.id).slice(0,6))}
+      </div>
+      <div class="active-name">${_esc(readyOrder.customer_name || readyOrder.phone || 'Cliente')}</div>
+      <div class="active-addr">${safeAddr}</div>
+      <div class="cta-row">
+        <a class="cta-btn outline" href="tel:+${_esc(cleanPhone)}" aria-label="Llamar">📞</a>
+        <a class="cta-btn outline" href="${_esc(mapsUrl)}" target="_blank" rel="noopener" style="flex:0 0 54px;text-align:center;">🗺️</a>
+        <button class="cta-btn dom-action-btn" data-action="en_camino" data-id="${_esc(String(readyOrder.id))}">🛵 Salir a entregar</button>
+      </div>`;
+
+    activeEl.querySelector('.dom-action-btn')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true; btn.textContent = 'Confirmando…';
+      const ok = await mesioConfirm('¿Salir a entregar este pedido?', { confirmText: 'Sí, salir' });
+      if (ok) {
+        await updateStatus(btn.dataset.id, 'en_camino');
+      } else {
+        btn.disabled = false; btn.textContent = '🛵 Salir a entregar';
+      }
+    });
     return;
   }
 
@@ -211,26 +247,47 @@ function _renderCustomer(order) {
 function _renderUpnext(orders) {
   const el = document.getElementById('dom-upnext');
   if (!el) return;
-  const upcoming = orders.filter(o => o.status === 'listo' || o.status === 'confirmado');
-  if (!upcoming.length) { el.innerHTML = ''; return; }
+
+  const inRoute = orders.find(o => o.status === 'en_camino' || o.status === 'en_puerta');
+  const listoOrders = orders.filter(o => o.status === 'listo');
+  // When no order is in route, the first listo is already shown in the active card — skip it.
+  const queueListo = inRoute ? listoOrders : listoOrders.slice(1);
+  const preparing = orders.filter(o => o.status === 'confirmado' || o.status === 'en_preparacion');
+  const queue = [...queueListo, ...preparing];
+
+  if (!queue.length) { el.innerHTML = ''; return; }
 
   el.innerHTML = `<div class="dom-upnext">
     <h4>Siguientes entregas</h4>
-    ${upcoming.slice(0, 3).map((o, i) => {
+    ${queue.slice(0, 4).map((o, i) => {
       const addrEl = document.createElement('span');
       addrEl.textContent = o.address || 'Sin dirección';
-      return `<div class="up-card">
+      const isListo = o.status === 'listo';
+      return `<div class="up-card" style="align-items:center;">
         <div class="up-n">${i + 2}</div>
         <div class="up-body">
           <div class="up-name">${_esc(o.customer_name || o.phone || 'Cliente')}</div>
           <div class="up-where">${addrEl.innerHTML}</div>
         </div>
-        <div class="up-meta">
+        <div class="up-meta" style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
           <div class="up-total">${mesioFmt(o.total||0)}</div>
+          ${isListo
+            ? `<button class="dom-queue-btn cta-btn" data-id="${_esc(String(o.id))}" style="font-size:11px;padding:6px 10px;border-radius:8px;">🛵 Tomar</button>`
+            : `<div class="up-time">En cocina</div>`
+          }
         </div>
       </div>`;
     }).join('')}
   </div>`;
+
+  el.querySelectorAll('.dom-queue-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const ok = await mesioConfirm('¿Tomar este pedido para entrega?', { confirmText: 'Sí, tomar' });
+      if (ok) { await updateStatus(btn.dataset.id, 'en_camino'); }
+      else { btn.disabled = false; }
+    });
+  });
 }
 
 // ── Render historial ──────────────────────────────────
@@ -278,9 +335,10 @@ async function fetchOrders() {
 function _render() {
   _renderHero(_allOrders);
   const inRoute = _allOrders.find(o => o.status === 'en_camino' || o.status === 'en_puerta');
+  const readyOrder = !inRoute ? _allOrders.find(o => o.status === 'listo') : null;
   _renderActive(_allOrders);
-  _renderOrderItems(inRoute || null);
-  _renderCustomer(inRoute || null);
+  _renderOrderItems(inRoute || readyOrder || null);
+  _renderCustomer(inRoute || readyOrder || null);
   _renderUpnext(_allOrders);
   _renderHistorial(_allOrders);
 }

@@ -285,7 +285,7 @@ body {
 
 /* ── Tab content visibility ── */
 .tab-pane { display: none; }
-.tab-pane.active { display: block; }
+.tab-pane.active { display: block; flex: 1; min-height: 0; }
 
 /* ── Mobile: full screen instead of phone frame ── */
 @media (max-width: 480px) {
