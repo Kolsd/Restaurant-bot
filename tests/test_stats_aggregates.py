@@ -702,17 +702,20 @@ class TestBranchesComparison:
         org_id, loc_id = await _seed_org(db_conn, "FoodCostWithRecipe")
         await _set_org_scope(db_conn, org_id)
 
-        # Seed inventory ingredient
+        # Seed inventory ingredient.
+        # Note: restaurant_id column was DROPPED in migration 0037 from both
+        # inventory and dish_recipes (org-level tables). Only org_id remains.
+        # inventory is location-level so location_id is required.
         ing_id = await db_conn.fetchval(
-            """INSERT INTO inventory (org_id, restaurant_id, name, unit, current_stock, cost_per_unit)
-               VALUES ($1, $1, 'Patty', 'unit', 100, 5000)
+            """INSERT INTO inventory (org_id, location_id, name, unit, current_stock, cost_per_unit)
+               VALUES ($1, $2, 'Patty', 'unit', 100, 5000)
                RETURNING id""",
-            org_id,
+            org_id, loc_id,
         )
         # Seed recipe: dish 'Burger' = 1 × Patty
         await db_conn.execute(
-            """INSERT INTO dish_recipes (org_id, restaurant_id, dish_name, ingredient_id, quantity)
-               VALUES ($1, $1, 'Burger', $2, 1)""",
+            """INSERT INTO dish_recipes (org_id, dish_name, ingredient_id, quantity)
+               VALUES ($1, 'Burger', $2, 1)""",
             org_id, ing_id,
         )
         # Seed a paid order containing 1 Burger at 20_000

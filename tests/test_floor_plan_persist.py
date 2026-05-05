@@ -146,7 +146,7 @@ async def org_with_location(db_conn):
 
     loc = await db_conn.fetchrow(
         """
-        INSERT INTO locations (org_id, name, slug)
+        INSERT INTO locations (org_id, name, code)
         VALUES ($1, $2, $3) RETURNING id
         """,
         org_id, "Sede principal", f"sede-{suffix}",
@@ -317,11 +317,11 @@ async def test_save_bulk_tenant_isolation(db_conn):
         f"FloorPlanIsolB_{suffix_b}", f"floorplan-iso-b-{suffix_b}",
     )
     loc_a = await db_conn.fetchval(
-        "INSERT INTO locations (org_id, name, slug) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO locations (org_id, name, code) VALUES ($1, $2, $3) RETURNING id",
         org_a, "A", f"loc-a-{suffix_a}",
     )
     loc_b = await db_conn.fetchval(
-        "INSERT INTO locations (org_id, name, slug) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO locations (org_id, name, code) VALUES ($1, $2, $3) RETURNING id",
         org_b, "B", f"loc-b-{suffix_b}",
     )
 

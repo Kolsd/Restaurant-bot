@@ -1,11 +1,17 @@
 """Subscription usage tracking + plan limits resolution.
 
 Schema (subscription_usage, post-migration 0065):
-  id, restaurant_id, org_id, usage_date,
+  id, org_id, usage_date,
   total_tokens, total_invoices, orders_count,
   updated_at
 
 UNIQUE (org_id, usage_date) — canonical Wave-2 key.
+
+NOTE: restaurant_id was DROPPED by migration 0037
+(0037_drop_legacy_rls_and_restaurant_id.py). All INSERTs must NOT reference it
+or asyncpg raises UndefinedColumnError. The legacy
+restaurant_repo.db_increment_invoice_usage / db_increment_token_usage already
+followed this pattern; the helpers below are aligned with it.
 
 Conventions:
   - All increment helpers are atomic via INSERT … ON CONFLICT DO UPDATE.
@@ -70,8 +76,8 @@ async def db_increment_tokens(org_id: int, tokens: int) -> int:
         return 0
     async with tenant_connection() as conn:
         new_val = await conn.fetchval(
-            """INSERT INTO subscription_usage (org_id, restaurant_id, usage_date, total_tokens)
-               VALUES ($1, $1, CURRENT_DATE, $2)
+            """INSERT INTO subscription_usage (org_id, usage_date, total_tokens)
+               VALUES ($1, CURRENT_DATE, $2)
                ON CONFLICT (org_id, usage_date) DO UPDATE
                SET total_tokens = subscription_usage.total_tokens + $2,
                    updated_at   = NOW()
@@ -88,8 +94,8 @@ async def db_increment_invoices(org_id: int) -> int:
     """
     async with tenant_connection() as conn:
         new_val = await conn.fetchval(
-            """INSERT INTO subscription_usage (org_id, restaurant_id, usage_date, total_invoices)
-               VALUES ($1, $1, CURRENT_DATE, 1)
+            """INSERT INTO subscription_usage (org_id, usage_date, total_invoices)
+               VALUES ($1, CURRENT_DATE, 1)
                ON CONFLICT (org_id, usage_date) DO UPDATE
                SET total_invoices = subscription_usage.total_invoices + 1,
                    updated_at     = NOW()
@@ -109,8 +115,8 @@ async def db_increment_orders(org_id: int) -> int:
     """
     async with tenant_connection() as conn:
         await conn.fetchval(
-            """INSERT INTO subscription_usage (org_id, restaurant_id, usage_date, orders_count)
-               VALUES ($1, $1, CURRENT_DATE, 1)
+            """INSERT INTO subscription_usage (org_id, usage_date, orders_count)
+               VALUES ($1, CURRENT_DATE, 1)
                ON CONFLICT (org_id, usage_date) DO UPDATE
                SET orders_count = subscription_usage.orders_count + 1,
                    updated_at   = NOW()

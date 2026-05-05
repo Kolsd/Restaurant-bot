@@ -289,8 +289,8 @@ async def test_db_increment_orders_returns_monthly_total(db_conn, org_ids):
     earlier_in_month = datetime.now(timezone.utc).date().replace(day=1)
     await db_conn.execute(
         """INSERT INTO subscription_usage
-             (org_id, restaurant_id, usage_date, total_tokens, total_invoices, orders_count)
-           VALUES ($1, $1, $2, 0, 0, 5)""",
+             (org_id, usage_date, total_tokens, total_invoices, orders_count)
+           VALUES ($1, $2, 0, 0, 5)""",
         org_a, earlier_in_month,
     )
 
@@ -327,8 +327,8 @@ async def test_get_usage_summary_after_seed(db_conn, org_ids):
 
     await db_conn.execute(
         """INSERT INTO subscription_usage
-             (org_id, restaurant_id, usage_date, total_tokens, total_invoices, orders_count)
-           VALUES ($1, $1, CURRENT_DATE, 1234, 7, 3)""",
+             (org_id, usage_date, total_tokens, total_invoices, orders_count)
+           VALUES ($1, CURRENT_DATE, 1234, 7, 3)""",
         org_a,
     )
 
@@ -352,8 +352,8 @@ async def test_enforce_invoice_limit_under_cap_no_raise(db_conn, org_ids):
     # Seed: 3 invoices today, plan basic (cap=50). Should NOT raise.
     await db_conn.execute(
         """INSERT INTO subscription_usage
-             (org_id, restaurant_id, usage_date, total_invoices)
-           VALUES ($1, $1, CURRENT_DATE, 3)""",
+             (org_id, usage_date, total_invoices)
+           VALUES ($1, CURRENT_DATE, 3)""",
         org_a,
     )
     rest = {"subscription_plan": "basic", "features": {}}
@@ -372,8 +372,8 @@ async def test_enforce_invoice_limit_at_cap_raises(db_conn, org_ids):
     # Seed: invoice count == cap → must raise.
     await db_conn.execute(
         """INSERT INTO subscription_usage
-             (org_id, restaurant_id, usage_date, total_invoices)
-           VALUES ($1, $1, CURRENT_DATE, 5)""",
+             (org_id, usage_date, total_invoices)
+           VALUES ($1, CURRENT_DATE, 5)""",
         org_a,
     )
     # Use a custom override for a low cap to keep the assertion precise.
@@ -398,8 +398,8 @@ async def test_enforce_token_limit_projects_additional(db_conn, org_ids):
 
     await db_conn.execute(
         """INSERT INTO subscription_usage
-             (org_id, restaurant_id, usage_date, total_tokens)
-           VALUES ($1, $1, CURRENT_DATE, 4500)""",
+             (org_id, usage_date, total_tokens)
+           VALUES ($1, CURRENT_DATE, 4500)""",
         org_a,
     )
     rest = {"subscription_plan": "free", "features": {}}  # free cap=5000
@@ -431,8 +431,8 @@ async def test_enforce_order_limit_monthly_aggregate(db_conn, org_ids):
         d = today - timedelta(days=offset)
         await db_conn.execute(
             """INSERT INTO subscription_usage
-                 (org_id, restaurant_id, usage_date, orders_count)
-               VALUES ($1, $1, $2, $3)""",
+                 (org_id, usage_date, orders_count)
+               VALUES ($1, $2, $3)""",
             org_a, d, count,
         )
 
@@ -458,8 +458,8 @@ async def test_tenant_isolation_usage_summary(db_conn, org_ids):
     await _set_scope(db_conn, org_a)
     await db_conn.execute(
         """INSERT INTO subscription_usage
-             (org_id, restaurant_id, usage_date, total_tokens)
-           VALUES ($1, $1, CURRENT_DATE, 9999)""",
+             (org_id, usage_date, total_tokens)
+           VALUES ($1, CURRENT_DATE, 9999)""",
         org_a,
     )
 
