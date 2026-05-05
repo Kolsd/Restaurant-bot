@@ -212,7 +212,40 @@ app.add_middleware(
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+class _CachedStaticFiles(StaticFiles):
+    """StaticFiles with Cache-Control headers tuned per file type.
+
+    Strategy:
+      - Images (.png/.jpg/.svg/.webp/.ico/.gif): 7 days. Rarely change.
+      - JS/CSS: 1 day. Browser revalidates with If-Modified-Since (304 if same).
+      - sw.js: no-cache + must-revalidate. Stale service workers are a footgun.
+      - Everything else: 1 hour conservative.
+
+    StaticFiles already emits Last-Modified, so 304 conditional GETs work for
+    free. This adds explicit max-age so browsers don't heuristically guess.
+    """
+
+    _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".gif")
+    _ASSET_EXTS = (".js", ".css", ".woff", ".woff2", ".ttf")
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            lower = path.lower()
+            if lower.endswith("sw.js") or lower.endswith("/sw.js"):
+                response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            elif lower.endswith(self._IMAGE_EXTS):
+                response.headers["Cache-Control"] = "public, max-age=604800"
+            elif lower.endswith(self._ASSET_EXTS):
+                response.headers["Cache-Control"] = "public, max-age=86400, must-revalidate"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
+
+
+app.mount("/static", _CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ── Feature gating (MVP scope: bot + operational flows) ──────────────────────
