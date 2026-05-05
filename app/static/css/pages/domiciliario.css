@@ -298,3 +298,20 @@ body {
   .phone-status { display: none; }
   .dom-hero { padding-top: 20px; }
 }
+
+/* ── Desktop: wide panel, no phone chrome ── */
+@media (min-width: 769px) {
+  .phone-wrap { align-items: flex-start; padding: 0; }
+  .phone-frame {
+    width: 100%;
+    max-width: 640px;
+    max-height: none;
+    height: 100vh;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+  .notch { display: none; }
+  .phone-status { display: none; }
+  .dom-hero { padding-top: 28px; }
+}

@@ -119,6 +119,30 @@
       </a>
     </div>
 
+    <div class="sb-group" id="sb-ops-group" style="display:none;">
+      <div class="sb-group-label">Mi área</div>
+      <a class="sb-item" data-key="ops-caja" href="/pedidos" style="display:none;">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1"/><path d="M2 7h12M5 10h2M9 10h2"/></svg>
+        Caja
+      </a>
+      <a class="sb-item" data-key="ops-mesero" href="/mesero" style="display:none;">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>
+        Mesero
+      </a>
+      <a class="sb-item" data-key="ops-cocina" href="/kitchen" style="display:none;">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 6a4 4 0 018 0v2H4V6z"/><path d="M3 8h10v6H3z"/><path d="M6 11h4"/></svg>
+        Cocina
+      </a>
+      <a class="sb-item" data-key="ops-bar" href="/bar" style="display:none;">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2h6l2 5H3L5 2z"/><path d="M3 7v7h10V7"/><path d="M7 10v4M9 10v4"/></svg>
+        Bar
+      </a>
+      <a class="sb-item" data-key="ops-domiciliario" href="/domiciliario" style="display:none;">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><path d="M1 3h2l2 7h6l2-5H5"/></svg>
+        Domicilios
+      </a>
+    </div>
+
     <div class="sb-bottom">
       <a class="sb-item" data-key="settings" href="/settings">
         <svg class="sb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3"/></svg>
@@ -255,10 +279,25 @@
     hide('whatsapp');
 
     if (operationalRoles.includes(role)) {
-      // Operational staff: hide all admin sections, keep only staff-hq link
+      // Operational staff: hide all admin sections, show only their page link
       const adminKeys = ['resumen', 'pedidos', 'reservaciones', 'salon', 'menu', 'menu-eng',
         'nps', 'fidelizacion', 'riesgo', 'staff', 'nomina', 'sucursales', 'settings', 'billing'];
       adminKeys.forEach(function(k) { hide(k); });
+
+      const opsGroup = sb.querySelector('#sb-ops-group');
+      if (opsGroup) opsGroup.style.display = '';
+      const opsKeyMap = {
+        'caja': 'ops-caja',
+        'mesero': 'ops-mesero',
+        'cocina': 'ops-cocina',
+        'bar': 'ops-bar',
+        'domiciliario': 'ops-domiciliario',
+      };
+      const opsKey = opsKeyMap[role];
+      if (opsKey) {
+        const opsEl = sb.querySelector('[data-key="' + opsKey + '"]');
+        if (opsEl) opsEl.style.display = '';
+      }
     } else if (role === 'gerente') {
       hide('billing');
       const locations = restaurant.locations || [];
