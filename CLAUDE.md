@@ -1181,12 +1181,10 @@ Wrapper Cloudinary. Funciones clave:
 - **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
 - **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`.
-  - **Con `TEST_DATABASE_URL` exportada** (post-"No-v2" baseline 2026-04-21): **1170 passed / 1 pre-existing failure / 27 skipped en ~9min**. El 1 failure es `test_decimal_coercion_float_inputs` (pre-dates este sprint — expects `int` but 0046 migration changed column to `NUMERIC(14,2)`). Los 27 skipped se reparten:
-    - 17 tests de migración Wave-2 transicional (obsoletos post-0038, marcados skip con razón)
-    - 4 tests de integración `test_staff_self_tips` (Sprint Y — fixture datetime/NOT NULL, flagged)
-    - ~6 integration tests adicionales que requieren extras del entorno
+  - **Con `TEST_DATABASE_URL` exportada**: ~1198 passed / 0 failed / ~235 skipped en ~28s (sin e2e). Para acelerar: `pytest -n auto tests/ --ignore=tests/e2e --ignore=tests/ai_sim` baja a ~22s (~21% speedup). pytest-xdist está en requirements.txt.
   - **Sin `TEST_DATABASE_URL`**: ~1000 passed / 0 failed / ~90+ skipped en ~15s (integration tests gatedos por URL son skipped).
-  - Cualquier failure nuevo (fuera del 1 pre-existente) es regresión real — no merguear hasta resolverla.
+  - **E2E tests (`tests/e2e/`)**: requieren `TEST_DATABASE_URL` + `ANTHROPIC_API_KEY` (los `e2e_no_llm` solo DB). Correr serial — son lentos por seed real + Anthropic real.
+  - Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
 - **Frontend Lint ("No-v2" sprint)**: Antes de mergear cualquier cambio que toque `app/static/js/**` o `app/static/html/**`, correr `python scripts/lint_frontend.py` — CI falla si encuentra mock/TODO/dead-fetch/seed-data. Supresión legítima via `// lint-allow: razón` (JS) o `<!-- lint-allow: razón -->` (HTML). PROHIBIDO suprimir sin razón explícita.
 - **Tests Verídicos**: Nuevos tests integration contra `TEST_DATABASE_URL` DEBEN probar correctness de agregados (seed data → assert valor exacto), tenant isolation (org A vs org B), y caso vacío (sin 500). Prohibidos: `assert status_code == 200` como única aserción, mock del repo completo, `assert "key" in data` sin checkear valor. Ver fixture de referencia en `tests/test_loyalty_aggregates.py` ("No-v2" sprint).

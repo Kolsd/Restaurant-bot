@@ -172,7 +172,7 @@ async def test_db_get_customer_order_history_uses_org_id():
 
 @pytest.mark.asyncio
 async def test_db_get_delivery_orders_uses_org_id():
-    """With restaurant_id provided, query must filter by l.org_id."""
+    """With restaurant_id provided, query must filter by org_id (Wave-2 tenant key)."""
     from app.repositories.orders_repo import db_get_delivery_orders
 
     conn = _make_conn(fetch_val=[])
@@ -184,9 +184,11 @@ async def test_db_get_delivery_orders_uses_org_id():
 
     assert result == []
     sql = _captured_sql(conn)
-    assert "l.org_id" in sql, "Must filter by l.org_id (Wave-2 tenant key)"
-    assert "join locations" in sql, "Must JOIN locations"
-    assert "r.id = $2" not in sql, "Must NOT use bare r.id = $2"
+    # The query filters by orders.org_id directly — no JOIN to locations is
+    # needed since orders has its own org_id column post-Wave-2. The previous
+    # JOIN multiplied rows by locations count (same whatsapp_number).
+    assert "org_id = $2" in sql, "Must filter by org_id (Wave-2 tenant key)"
+    assert "r.id = $2" not in sql, "Must NOT use bare r.id = $2 (pre-Wave-2 pattern)"
 
 
 # ── 5. tables_repo.db_get_delivery_status_hash_for_restaurant ─────────────────
