@@ -55,6 +55,7 @@ from app.routes.health import router as health_router
 from app.routes.marketing import router as marketing_router
 from app.routes.subscription import router as subscription_router
 from app.routes.billing_subscription import router as billing_subscription_router
+from app.routes.demo import router as demo_router
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 from app.routes.internal.crm import router as internal_crm_router
 from app.routes.internal.admin import router as internal_admin_router
@@ -298,6 +299,7 @@ app.include_router(reservations_router)
 app.include_router(health_router)
 app.include_router(subscription_router)
 app.include_router(billing_subscription_router)
+app.include_router(demo_router)
 
 # Feature-gated (disabled by default for MVP bot scope)
 _maybe_include("staff", staff_router)

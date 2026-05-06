@@ -273,8 +273,59 @@
 <!-- ═══════════════ Toast (share confirmation) ═══════════════ -->
 <div class="toast" id="toast" hidden></div>
 
+<!-- ═══════════════ LIVE CHAT WIDGET ═══════════════ -->
+<aside class="demo-chat-panel" aria-label="Chat en vivo con el bot de Mesio" role="complementary">
+
+  <!-- Header -->
+  <div class="demo-chat-header">
+    <div class="demo-chat-title">
+      <span class="demo-chat-avatar" aria-hidden="true">M</span>
+      Chatea con el bot ahora
+    </div>
+    <div class="demo-chat-header-meta">
+      <span class="demo-chat-counter" id="demo-chat-counter" aria-live="polite" aria-atomic="true">0 / 30 mensajes</span>
+      <button class="demo-chat-reset-btn" id="demo-chat-reset" type="button" aria-label="Reiniciar conversación de demo">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Reiniciar
+      </button>
+    </div>
+  </div>
+
+  <!-- Status bar (hidden when empty) -->
+  <p class="demo-chat-status" id="demo-chat-status" hidden></p>
+
+  <!-- Message list -->
+  <div class="demo-chat-messages" id="demo-chat-messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Mensajes del chat de demo"></div>
+
+  <!-- Typing indicator -->
+  <div class="demo-chat-typing" id="demo-chat-typing" hidden aria-hidden="true">
+    <span class="demo-bubble-avatar" aria-hidden="true">M</span>
+    <div class="demo-typing-bubble">
+      <span></span><span></span><span></span>
+    </div>
+  </div>
+
+  <!-- Input row -->
+  <div class="demo-chat-input-row">
+    <input
+      class="demo-chat-input"
+      id="demo-chat-input"
+      type="text"
+      placeholder="Escribe un mensaje…"
+      aria-label="Mensaje para el bot de demo"
+      maxlength="500"
+      autocomplete="off"
+    >
+    <button class="demo-chat-send-btn" id="demo-chat-send" type="button" aria-label="Enviar mensaje">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="white" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+    </button>
+  </div>
+</aside>
+
+<script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/mesio-demo-bus.js"></script>
 <script src="/static/js/mesio-demo-scenarios.js"></script>
 <script src="/static/js/mesio-demo-orchestrator.js"></script>
+<script src="/static/js/pages/demo-chat.js"></script>
 </body>
 </html>
