@@ -68,14 +68,24 @@ async def db_cleanup_demo_session(customer_phone: str, org_id: int) -> None:
     from app.services.tenant_db import tenant_connection  # noqa: PLC0415
 
     async with tenant_connection() as conn:
-        # conversations (includes history stored in this table)
+        # Postgres forbids aggregate functions inside RETURNING — wrap the
+        # DELETE in a CTE and aggregate in the outer SELECT instead.
         deleted_convs = await conn.fetchval(
-            "DELETE FROM conversations WHERE phone = $1 RETURNING COUNT(*)",
+            """
+            WITH deleted AS (
+                DELETE FROM conversations WHERE phone = $1 RETURNING 1
+            )
+            SELECT COUNT(*) FROM deleted
+            """,
             customer_phone,
         )
-        # carts
         deleted_carts = await conn.fetchval(
-            "DELETE FROM carts WHERE phone = $1 RETURNING COUNT(*)",
+            """
+            WITH deleted AS (
+                DELETE FROM carts WHERE phone = $1 RETURNING 1
+            )
+            SELECT COUNT(*) FROM deleted
+            """,
             customer_phone,
         )
         log.info(
