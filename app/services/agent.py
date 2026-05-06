@@ -28,6 +28,11 @@ from app.services.agent_external import (
     execute_external_action,
 )
 from app.services.agent_tools import TOOLS_SALON, TOOLS_EXTERNAL
+from app.services.plan_enforcement import (
+    CapDecision,
+    REDIRECT_MESSAGE,
+    check_and_consume_conv_slot,
+)
 
 log = get_logger(__name__)
 
@@ -2868,6 +2873,29 @@ async def chat(
     restaurant_name      = ctx["restaurant_name"]
     feats                = ctx["feats"]
     payment_methods_text = ctx["payment_methods_text"]
+
+    # 6b. Subscription cap enforcement — 1 inbound message = 1 conversation slot.
+    # Must run AFTER restaurant_obj is resolved (we need org_id = restaurant_obj["id"]).
+    # The inbox_worker already wraps _process_message in tenant_scope(org_id), so
+    # the repo calls inside check_and_consume_conv_slot are correctly scoped (Rule 14).
+    # Errors in cap infrastructure NEVER silence the bot — fail-open (see plan_enforcement.py).
+    _org_id_for_cap = restaurant_obj.get("id") or restaurant_obj.get("org_id")
+    if _org_id_for_cap:
+        _admin_phone = feats.get("admin_phone") or restaurant_obj.get("admin_phone", "")
+        _cap_decision = await check_and_consume_conv_slot(
+            _org_id_for_cap,
+            bot_number=bot_number,
+            access_token=feats.get("wa_access_token") or restaurant_obj.get("wa_access_token", ""),
+            admin_phone=_admin_phone,
+            phone_id=meta_phone_id,
+        )
+        if _cap_decision == CapDecision.REDIRECT_TO_HUMAN:
+            log.warning(
+                "plan_enforcement.redirect_to_human",
+                org_id=_org_id_for_cap,
+                user_phone=_ofuscar_phone(user_phone),
+            )
+            return {"message": REDIRECT_MESSAGE}
 
     # 7. Build enriched user message (menu, cart, notes, loyalty, transit alert…)
     enriched, menu_url, full_history = await _build_enriched_user_message(
