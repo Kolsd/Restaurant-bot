@@ -187,14 +187,18 @@ async def seed_restaurant(conn: asyncpg.Connection) -> dict:
     log.info("seed.tables_seeded", count=SIM_TABLE_COUNT)
 
     # ── 4. subscription_usage for current month (post-0037: use org_id) ────────
-    await conn.execute(
-        """
-        INSERT INTO subscription_usage (org_id, usage_date, total_tokens, total_invoices)
-        VALUES ($1, CURRENT_DATE, 0, 0)
-        ON CONFLICT (org_id, usage_date) DO NOTHING
-        """,
-        org_id,
-    )
+    # RLS WITH CHECK on subscription_usage rejects INSERTs as mesio_app without
+    # app.org_id GUC. Use mesio_superadmin (BYPASSRLS) for cross-tenant seed.
+    async with conn.transaction():
+        await conn.execute("SET LOCAL ROLE mesio_superadmin")
+        await conn.execute(
+            """
+            INSERT INTO subscription_usage (org_id, usage_date, total_tokens, total_invoices)
+            VALUES ($1, CURRENT_DATE, 0, 0)
+            ON CONFLICT (org_id, usage_date) DO NOTHING
+            """,
+            org_id,
+        )
     log.info("seed.subscription_usage_seeded", org_id=org_id)
 
     return {"restaurant_id": restaurant_id, "bot_number": SIM_BOT_NUMBER}
@@ -255,14 +259,17 @@ async def truncate_test_data(conn: asyncpg.Connection) -> None:
         SIM_BOT_NUMBER,
     )
     if org_id is not None:
-        await conn.execute(
-            """
-            INSERT INTO subscription_usage (org_id, usage_date, total_tokens, total_invoices)
-            VALUES ($1, CURRENT_DATE, 0, 0)
-            ON CONFLICT (org_id, usage_date) DO NOTHING
-            """,
-            org_id,
-        )
+        # Same RLS bypass as seed_restaurant — re-seed runs cross-tenant.
+        async with conn.transaction():
+            await conn.execute("SET LOCAL ROLE mesio_superadmin")
+            await conn.execute(
+                """
+                INSERT INTO subscription_usage (org_id, usage_date, total_tokens, total_invoices)
+                VALUES ($1, CURRENT_DATE, 0, 0)
+                ON CONFLICT (org_id, usage_date) DO NOTHING
+                """,
+                org_id,
+            )
         log.info("seed.subscription_usage_reseeded", org_id=org_id)
 
 
