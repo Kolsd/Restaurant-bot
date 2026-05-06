@@ -699,15 +699,24 @@ async def _handle_nps_flow(phone: str, bot_number: str, message: str,
 
     if state["state"] == "waiting_score":
         # Solo aceptar el score si el mensaje es corto (≤30 chars).
+        # Bug fix 2026-05-05: regex previo `[1-5]` matcheaba por carácter, así que
+        # "10" → "1" (score 1, flujo negativo) — pésima UX para el cliente que
+        # creyó dar 10/10. Ahora extraemos números completos y validamos rango.
         stripped_msg = message.strip()
-        if len(stripped_msg) <= 30:
-            nums = re.findall(r'[1-5]', stripped_msg)
-        else:
-            nums = []
-        if not nums:
+        digit_groups = re.findall(r'\d+', stripped_msg) if len(stripped_msg) <= 30 else []
+        score: int | None = None
+        for group in digit_groups:
+            try:
+                candidate = int(group)
+            except ValueError:
+                continue
+            if 1 <= candidate <= 5:
+                score = candidate
+                break
+            # Number out of 1-5 scale → reject the whole message and reprompt.
             return "Por favor responde con un número del 1 al 5 ⭐"
-
-        score = int(nums[0])
+        if score is None:
+            return "Por favor responde con un número del 1 al 5 ⭐"
 
         # Acquire transition lock to prevent race condition where two workers both
         # process the score simultaneously (Regla 9 — NPS multi-worker race condition).
