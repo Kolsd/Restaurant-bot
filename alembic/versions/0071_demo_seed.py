@@ -200,7 +200,7 @@ def upgrade() -> None:
     org_id = conn.execute(
         sa.text("""
             INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
-            VALUES (:name, :wanum, :menu::jsonb, :features::jsonb, :slug)
+            VALUES (:name, :wanum, CAST(:menu AS jsonb), CAST(:features AS jsonb), :slug)
             ON CONFLICT (slug) DO NOTHING
             RETURNING id
         """),
