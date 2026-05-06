@@ -55,7 +55,7 @@ Lecciones que se fueron ganando a lo largo de la migración. Aplicar PROACTIVAME
 
 4. **`SET LOCAL ROLE` no persiste en asyncpg sin transacción** — cada `execute()` en autocommit es su propia TX. `SET LOCAL` se pierde. Envolver en `async with conn.transaction():`.
 
-5. **`::regclass` cast confunde parameter substitution** — SQLAlchemy `text()` con `:param::regclass` falla porque `::` parece inicio de parámetro. Usar JOIN explícito a `pg_class` por nombre.
+5. **`::tipo` cast confunde parameter substitution** — SQLAlchemy `text()` con `:param::regclass` o `:param::jsonb` deja el `:param` literal en la query final → `psycopg2.errors.SyntaxError`. Visto con `regclass` (Wave 2) y de nuevo con `jsonb` en `0071_demo_seed` (2026-05-06). Usar `CAST(:param AS tipo)` siempre. Para `regclass` específicamente, alternativa: JOIN explícito a `pg_class` por nombre.
 
 6. **Shell `$$` expande a PID** — los bloques `DO $$ BEGIN ... END $$;` de PL/pgSQL se rompen si pasan por bash con interpolación. Pasar SQL por stdin (`psql -f -` con `input=sql`), no con `-c "..."`.
 
@@ -70,6 +70,10 @@ Lecciones que se fueron ganando a lo largo de la migración. Aplicar PROACTIVAME
 11. **Grant USAGE on schema public** — después de `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`, se pierde el `GRANT USAGE ON SCHEMA public TO PUBLIC` default. Sin eso, grants table-level no alcanzan. Siempre re-grant después de recrear schema.
 
 12. **Variables ambiguas cuando Railway linkea múltiples DBs** — al linkear 2 Postgres a un mismo servicio, `DATABASE_URL` puede resolverse a cualquiera. Usar nombres explícitos (`PROD_DATABASE_URL`, `TEST_DATABASE_URL`) + anti-swap guard que verifica row counts antes de cualquier escritura.
+
+13. **Multiple alembic heads cuando dos sprints en paralelo** — `0070_plan_limits` y `0071_demo_seed` ambos pusieron `down_revision = "0069_password_reset_tokens"` y al mergear a main Railway crasheó con "Multiple head revisions are present". Antes de mergear PRs que tocan `alembic/versions/`, correr `alembic heads` localmente — debe retornar 1 línea. Si retorna 2+, agregar merge migration no-op (ver `0072_merge_plan_limits_demo_seed.py`) con `down_revision = ("rev_a", "rev_b")` y `upgrade/downgrade` vacíos. (2026-05-06)
+
+14. **`conn.execute("string")` falla en SQLAlchemy 2.0** — `op.execute("...")` SÍ acepta strings raw (alembic los convierte) pero `op.get_bind().execute(...)` requiere `sa.text(...)`. Visto en `0071_demo_seed` upgrade(): `AttributeError: 'str' object has no attribute '_execute_on_connection'`. Patrón canónico: `import sqlalchemy as sa` + `conn.execute(sa.text("..."))` (ver `0034_create_organizations_locations.py`). (2026-05-06)
 
 ## Lección estratégica principal
 

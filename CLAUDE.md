@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v11.2 (Pricing v1 sprint — plan_limits + bot cap enforcement + auto-recharge + landing rewrite + cost dashboard shipped 2026-05-05)
+# Mesio Restaurant Bot — v11.2 (Pricing v1 + Demo widget shipped; 2026-05-06 Railway hot-fix chain: 0072 merge + sa.text() + CAST(:p AS jsonb) for 0071_demo_seed)
 
 ## Entorno y Comandos
 
@@ -193,7 +193,9 @@ Restaurant-bot/
 │   ├── 0047_shift_swap_status_check.py       # Pre-launch hardening — CHECK constraint on shift_swap_requests.status
 │   ├── 0048_performance_indexes.py            # Pre-launch hardening — 7 composite indexes CONCURRENTLY (dashboard hot paths)
 │   ├── 0049_loyalty_campaigns.py              # "No-v2" sprint — loyalty_campaigns table + RLS org_isolation + state machine (draft/active/paused)
-│   └── 0070_plan_limits.py                    # Pricing v1 sprint — plan_limits + addon_modules (global) + usage_packs (RLS) + organizations.plan_code/auto_recharge_*/comp_until + seed 4 plans + 7 addons
+│   ├── 0070_plan_limits.py                    # Pricing v1 sprint — plan_limits + addon_modules (global) + usage_packs (RLS) + organizations.plan_code/auto_recharge_*/comp_until + seed 4 plans + 7 addons
+│   ├── 0071_demo_seed.py                      # Demo widget — seeds Demo Mesio org (slug=demo-mesio, bot=demo:0) with realistic Colombian menu + comp subscription. Idempotent (ON CONFLICT DO NOTHING). Uses sa.text() + CAST(:p AS jsonb) — see "Patrones Alembic" rule below.
+│   └── 0072_merge_plan_limits_demo_seed.py    # 2026-05-06 hot-fix — no-op merge migration. 0070 and 0071 both branched off 0069 in parallel sprints; Railway crashed with "Multiple head revisions are present". Joins the graph back to a single head.
 ```
 
 ## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
@@ -1185,6 +1187,10 @@ Wrapper Cloudinary. Funciones clave:
 - **Precisión Financiera**: Prohibido usar `float` para dinero. Usa `Decimal` y los helpers en `app/services/money.py`.
 - **Logging Estricto**: Usa `structlog` vía `get_logger(__name__)`. Prohibido el uso de `print()` o bloques `except Exception: pass`.
 - **Migraciones**: Usa siempre `IF NOT EXISTS` para garantizar que el comando de inicio en Railway no falle. Alembic corre con `DATABASE_URL_ADMIN` (superuser); la app runtime conecta con `DATABASE_URL` (mesio_app non-superuser).
+- **Patrones Alembic (3 footguns que rompieron prod 2026-05-06)**:
+  1. **Multiple heads**: si dos sprints paralelos crean migraciones con el mismo `down_revision`, `alembic upgrade head` falla con "Multiple head revisions are present". ANTES de mergear a main, correr `alembic heads` — debe retornar 1 línea. Si retorna 2+, crear merge migration no-op (ver `0072_merge_plan_limits_demo_seed.py` como patrón) con `down_revision = ("rev_a", "rev_b")` y `upgrade/downgrade` vacíos.
+  2. **`conn.execute("string")` no funciona en SQLAlchemy 2.0**. Usar `import sqlalchemy as sa` + `conn.execute(sa.text("..."))`. `op.execute("string")` SÍ acepta strings raw (alembic los convierte) pero `op.get_bind().execute(...)` no — son APIs distintas. Patrón canónico del repo: `0034_create_organizations_locations.py`.
+  3. **`:param::tipo` rompe con `sa.text()` bound params**. El regex de SQLAlchemy se confunde con el `::` (cast operator) y deja `:param` literal en la query final → `psycopg2.errors.SyntaxError`. Usar `CAST(:param AS tipo)` en su lugar. Ej.: `INSERT ... VALUES (CAST(:menu AS jsonb))` ✅, NO `:menu::jsonb` ❌.
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
 - **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`.
   - **Con `TEST_DATABASE_URL` exportada**: ~1198 passed / 0 failed / ~235 skipped en ~28s (sin e2e). Para acelerar: `pytest -n auto tests/ --ignore=tests/e2e --ignore=tests/ai_sim` baja a ~22s (~21% speedup). pytest-xdist está en requirements.txt.
@@ -1271,4 +1277,4 @@ La única excepción permitida es `app/routes/chat.py` que importa `register_inb
 
 **`REHEARSAL_MODE` y `AI_SIM_MODE` fueron removidos de Railway**: si los reintroducís para validar destructiva via pg_dump, recordá DESACTIVARLOS después o prod queda caído.
 
-12 errores recurrentes ya vistos (Alembic varchar(32), `SET LOCAL ROLE` sin tx, pg_dump v17, etc.) y la "lección estratégica principal" están en [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Consultá ese archivo antes de tocar migraciones grandes.
+14 errores recurrentes ya vistos (Alembic varchar(32), `SET LOCAL ROLE` sin tx, pg_dump v17, multiple heads, `conn.execute(str)` SA 2.0, `:p::tipo` cast, etc.) y la "lección estratégica principal" están en [docs/history/wave2_lessons.md](docs/history/wave2_lessons.md). Consultá ese archivo antes de tocar migraciones grandes.
