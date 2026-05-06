@@ -233,3 +233,228 @@ input:checked + .slider::before { transform: translateX(18px); }
 /* ── Card spacing between sections ─────────────────────────────── */
 .tab-section .card { margin-bottom: 16px; }
 .tab-section .card:last-child { margin-bottom: 0; }
+
+/* ══ Mi Plan — subscription dashboard ════════════════════════════ */
+.mi-plan-section { margin-bottom: 40px; }
+
+/* ── Skeleton loader while plan data loads ──────────────────────── */
+.mi-plan-skeleton {
+  height: 200px;
+  border-radius: var(--radius);
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+/* ── Plan current card header row ───────────────────────────────── */
+.mi-plan-card .card-head { align-items: center; }
+
+.plan-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.plan-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.plan-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.plan-price {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--brand);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-iva-pill {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--brand-light);
+  color: var(--brand-dark);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* ── Add-on chips ───────────────────────────────────────────────── */
+.plan-addons-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+  padding-top: 4px;
+}
+
+.plan-addon-chip {
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--brand-bg);
+  color: var(--brand-dark);
+  border: 1px solid var(--brand-light);
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+}
+
+/* ── Gauge bars ─────────────────────────────────────────────────── */
+.m-gauge {
+  padding: 10px 0 14px;
+  border-bottom: 0.5px solid var(--border);
+}
+.m-gauge:last-child { border-bottom: none; padding-bottom: 4px; }
+
+.m-gauge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+
+.m-gauge-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.m-gauge-numbers {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.m-gauge-bar {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.m-gauge-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+/* Color states */
+.m-gauge-fill.is-ok       { background: var(--brand); }
+.m-gauge-fill.is-warn50   { background: var(--brand); }
+.m-gauge-fill.is-warn80   { background: var(--warning); }
+.m-gauge-fill.is-warn90   { background: #F97316; } /* orange-500 */
+.m-gauge-fill.is-exceeded { background: var(--danger); }
+
+.m-gauge-subtext {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--warning-text);
+  line-height: 1.4;
+}
+.m-gauge-subtext.exceeded { color: var(--danger-text); }
+
+.m-gauge-unlimited {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 5px;
+}
+
+/* ── Auto-recharge warning ──────────────────────────────────────── */
+.mi-plan-warning {
+  background: var(--warning-light);
+  color: var(--warning-text);
+  border: 1px solid #FCD34D;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── Pack count display ─────────────────────────────────────────── */
+.plan-packs-count {
+  font-size: 13px;
+  color: var(--text-3);
+  margin-bottom: 12px;
+  min-height: 18px;
+}
+
+/* ── Change plan modal grid ─────────────────────────────────────── */
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.plan-option-card {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.plan-option-card:hover {
+  border-color: var(--brand);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.plan-option-card.is-current {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+  cursor: default;
+  pointer-events: none;
+}
+.plan-option-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.plan-option-price {
+  font-size: 13px;
+  color: var(--brand);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.plan-option-desc {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.45;
+}
+.plan-option-current-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--brand);
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Section divider between Mi Plan and Facturación Contable ───── */
+.mi-plan-section + .page-head {
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Mobile responsive ──────────────────────────────────────────── */
+@media (max-width: 560px) {
+  .plan-header-row { flex-direction: column; }
+  .plan-addons-list { padding-top: 0; }
+  .m-gauge-numbers { font-size: 12px; }
+  .plans-grid { grid-template-columns: 1fr; }
+  .mi-plan-section { margin-bottom: 24px; }
+}

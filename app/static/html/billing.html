@@ -24,7 +24,117 @@
     </header>
 
     <div class="page">
-      <div class="page-head">
+
+      <!-- ══ MI PLAN — Subscription dashboard ══════════════════════════ -->
+      <section class="mi-plan-section" id="mi-plan" aria-label="Mi Plan Mesio">
+        <div class="page-head" style="margin-bottom:0;">
+          <div>
+            <h1 class="page-title">Mi Plan</h1>
+            <p class="page-sub">Gestiona tu suscripción a Mesio, revisa el consumo del período y configura la recarga automática.</p>
+          </div>
+        </div>
+
+        <div id="mi-plan-loading" class="mi-plan-skeleton" aria-busy="true" aria-label="Cargando plan"></div>
+
+        <!-- A) Plan actual card -->
+        <div class="card mi-plan-card" id="plan-current-card" style="display:none;">
+          <div class="card-head">
+            <span class="card-title">Plan actual</span>
+            <button class="m-btn m-btn--ghost m-btn--sm" id="btn-change-plan" type="button" aria-haspopup="dialog">Cambiar de plan</button>
+          </div>
+          <div class="card-body">
+            <div class="plan-header-row">
+              <div>
+                <div class="plan-name" id="plan-name-display">—</div>
+                <div class="plan-price-row">
+                  <span class="plan-price" id="plan-price-display">—</span>
+                  <span class="plan-iva-pill">+IVA</span>
+                </div>
+                <div class="plan-renewal" id="plan-renewal-display" style="margin-top:6px;font-size:13px;color:var(--text-3);"></div>
+              </div>
+              <div class="plan-addons-list" id="plan-addons-display" aria-label="Complementos activos"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- B) Uso del período -->
+        <div class="card" id="plan-usage-section-card" style="display:none;">
+          <div class="card-head">
+            <span class="card-title">Uso del período actual</span>
+          </div>
+          <div class="card-body col" id="mi-plan-gauges" aria-label="Barras de consumo por dimensión">
+            <!-- Gauges rendered by JS -->
+          </div>
+        </div>
+
+        <!-- C) Auto-recarga -->
+        <div class="card" id="plan-autorecharge-card" style="display:none;">
+          <div class="card-head">
+            <span class="card-title">Auto-recarga de conversaciones</span>
+          </div>
+          <div class="card-body">
+            <div class="toggle-row" style="margin-bottom:16px;">
+              <div>
+                <div class="toggle-label">Activar auto-recarga</div>
+                <div class="toggle-sub" id="autorecharge-desc">Cuando se agoten las conversaciones del plan, Mesio compra automáticamente packs de 100 conversaciones extra a $50.000 COP cada uno. Cobramos a tu método de pago configurado.</div>
+              </div>
+              <label class="switch" aria-label="Auto-recarga de conversaciones">
+                <input type="checkbox" id="toggle-autorecharge" role="switch" aria-checked="false">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Max packs input — shown when toggle is ON -->
+            <div id="autorecharge-maxpacks-row" style="display:none;">
+              <div class="form-group" style="max-width:280px;">
+                <label class="form-label" for="input-max-packs">Máximo de packs por mes (1–5)</label>
+                <input class="form-input" type="number" id="input-max-packs" min="1" max="5" value="5" aria-describedby="maxpacks-hint">
+                <div class="form-hint" id="maxpacks-hint">Esto limita el cobro extra a máximo $250.000 COP por mes.</div>
+              </div>
+            </div>
+
+            <!-- Warning — shown when toggle is OFF -->
+            <div id="autorecharge-off-warning" class="mi-plan-warning" role="status">
+              Sin auto-recarga, cuando llegues al 100% del plan el bot redirigira a un humano hasta el siguiente periodo de cobro.
+            </div>
+
+            <div style="margin-top:16px;">
+              <button class="m-btn m-btn--primary" id="btn-save-autorecharge" type="button">Guardar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- D) Comprar pack manual -->
+        <div class="card" id="plan-buypack-card" style="display:none;">
+          <div class="card-head">
+            <span class="card-title">Recarga manual</span>
+          </div>
+          <div class="card-body">
+            <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;line-height:1.6;">
+              Compra un pack de 100 conversaciones extra de inmediato, independientemente de la auto-recarga.
+            </p>
+            <div class="plan-packs-count" id="packs-count-display"></div>
+            <button class="m-btn m-btn--secondary" id="btn-buy-pack" type="button">
+              Comprar 100 conversaciones extra ($50.000 +IVA)
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Modal: cambiar plan -->
+      <div class="m-modal-overlay" id="modal-change-plan" role="dialog" aria-modal="true" aria-labelledby="modal-plan-title">
+        <div class="m-modal-box">
+          <h3 id="modal-plan-title">Cambiar de plan</h3>
+          <div id="modal-plans-grid" class="plans-grid" aria-label="Planes disponibles">
+            <!-- Rendered by JS -->
+          </div>
+          <div style="margin-top:20px;text-align:right;">
+            <button class="m-btn m-btn--ghost" id="btn-close-plan-modal" type="button">Cerrar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="page-head" style="margin-top:32px;">
         <div>
           <h1 class="page-title">Facturación Contable</h1>
           <p class="page-sub">Conecta Mesio con tu sistema contable. Cada pedido pagado puede emitirse automáticamente como factura electrónica.</p>

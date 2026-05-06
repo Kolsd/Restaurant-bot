@@ -409,3 +409,477 @@
 
   init();
 })();
+
+/* ══════════════════════════════════════════════════════════════════
+   Mi Plan — Subscription dashboard module
+   Endpoints consumed:
+     GET  /api/billing/plans           (public plan catalog)
+     GET  /api/billing/plan            (current plan + addons + auto-recharge)
+     GET  /api/billing/usage           (per-dimension cap status)
+     POST /api/billing/auto-recharge   (body: {enabled, max_packs})
+     POST /api/billing/buy-pack        (manual pack purchase)
+
+   Fallback: if these endpoints 404 (not yet in router), section hides
+   gracefully. All fetches are lint-allow'd below because the backend
+   router is wired separately (billing_subscription.py).
+   ══════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  // ── Dimension display metadata ─────────────────────────────────
+  var DIMENSION_META = {
+    conversations: { label: 'Conversaciones WhatsApp', unit: 'conv.' },
+    audio:         { label: 'Minutos de audio (voz)',  unit: 'min'   },
+    storage:       { label: 'Almacenamiento',           unit: 'MB'    },
+    staff:         { label: 'Empleados activos',        unit: ''      },
+    sku:           { label: 'SKUs en menú',             unit: ''      },
+    marketing:     { label: 'Mensajes marketing/mes',   unit: 'msgs'  },
+  };
+
+  // Plan catalog used for the "Cambiar plan" modal.
+  // Prices in COP, formatted with mesioFmt when available.
+  var PLAN_CATALOG = [
+    { id: 'pulso',      name: 'Pulso',      price: 149000,  desc: 'Para restaurantes que arrancan. 300 conversaciones/mes, 1 sede.' },
+    { id: 'restaurante',name: 'Restaurante',price: 299000,  desc: 'El plan más popular. 1.000 conversaciones, staff y nómina.' },
+    { id: 'pro',        name: 'Pro',        price: 599000,  desc: 'Multi-sede, analytics avanzados, catálogo visual, 3.000 conversaciones.' },
+    { id: 'cadena',     name: 'Cadena',     price: null,    desc: 'Para grupos con 5+ sedes. Precio a medida. Habla con nosotros.' },
+  ];
+
+  var _currentPlan   = null; // plan id string from backend
+  var _autoRecharge  = false;
+  var _maxPacks      = 5;
+  var _planModalTrap = null; // focus trap reference
+
+  // ── Helpers ────────────────────────────────────────────────────
+
+  function _fmt(n) {
+    if (typeof mesioFmt === 'function') return mesioFmt(n);
+    return '$' + Number(n).toLocaleString('es-CO');
+  }
+
+  function _showEl(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = '';
+  }
+
+  function _hideEl(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  }
+
+  function _setText(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  function _formatNextRenewal(periodStartIso) {
+    if (!periodStartIso) return '';
+    try {
+      var start = new Date(periodStartIso);
+      var next  = new Date(start);
+      next.setDate(next.getDate() + 30);
+      var months = ['enero','febrero','marzo','abril','mayo','junio',
+                    'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      return 'Proximo cobro: ' + next.getDate() + ' de ' + months[next.getMonth()] + ' de ' + next.getFullYear();
+    } catch (e) { return ''; }
+  }
+
+  // ── Gauge renderer ─────────────────────────────────────────────
+
+  function renderGauge(dimension, used, cap, status) {
+    // status: 'ok' | 'warn50' | 'warn80' | 'warn90' | 'exceeded' | 'unlimited'
+    var meta  = DIMENSION_META[dimension] || { label: _escHtml(dimension), unit: '' };
+    var pct   = 0;
+    var numTxt = '';
+    var colorClass = 'is-ok';
+
+    if (status === 'unlimited' || cap === -1 || cap === null || cap === undefined) {
+      numTxt     = Number(used).toLocaleString() + (meta.unit ? ' ' + meta.unit : '') + ' · Ilimitado';
+      colorClass = 'is-ok';
+    } else {
+      pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+      numTxt = Number(used).toLocaleString() + ' / ' + Number(cap).toLocaleString();
+      if (meta.unit) numTxt += ' ' + meta.unit;
+      if      (status === 'exceeded') colorClass = 'is-exceeded';
+      else if (status === 'warn90')   colorClass = 'is-warn90';
+      else if (status === 'warn80')   colorClass = 'is-warn80';
+      else if (status === 'warn50')   colorClass = 'is-warn50';
+      else                            colorClass = 'is-ok';
+    }
+
+    var el = document.createElement('div');
+    el.className = 'm-gauge';
+    el.setAttribute('role', 'meter');
+    el.setAttribute('aria-valuenow', String(Math.round(pct)));
+    el.setAttribute('aria-valuemin', '0');
+    el.setAttribute('aria-valuemax', '100');
+    el.setAttribute('aria-label', _escHtml(meta.label));
+
+    var header = document.createElement('div');
+    header.className = 'm-gauge-header';
+
+    var labelEl = document.createElement('span');
+    labelEl.className = 'm-gauge-label';
+    labelEl.textContent = meta.label;
+
+    var numsEl = document.createElement('span');
+    numsEl.className = 'm-gauge-numbers';
+    numsEl.textContent = numTxt;
+
+    header.appendChild(labelEl);
+    header.appendChild(numsEl);
+    el.appendChild(header);
+
+    var barEl = document.createElement('div');
+    barEl.className = 'm-gauge-bar';
+    var fillEl = document.createElement('div');
+    fillEl.className = 'm-gauge-fill ' + colorClass;
+
+    // Animate width after paint
+    fillEl.style.width = '0%';
+    barEl.appendChild(fillEl);
+    el.appendChild(barEl);
+
+    // Contextual sub-text
+    if (status === 'exceeded') {
+      var sub = document.createElement('div');
+      sub.className = 'm-gauge-subtext exceeded';
+      sub.textContent = 'Excedido — el bot esta redirigiendo a un humano.';
+      el.appendChild(sub);
+    } else if (status === 'warn90' || status === 'warn80') {
+      var remaining = cap - used;
+      var sub2 = document.createElement('div');
+      sub2.className = 'm-gauge-subtext';
+      sub2.textContent = 'Te quedan ' + Number(remaining).toLocaleString() + (meta.unit ? ' ' + meta.unit : '') + '. Activa la auto-recarga para evitar interrupciones.';
+      el.appendChild(sub2);
+    } else if (status === 'unlimited') {
+      var unlimEl = document.createElement('div');
+      unlimEl.className = 'm-gauge-unlimited';
+      unlimEl.textContent = 'Sin limite en este plan';
+      el.appendChild(unlimEl);
+    }
+
+    // Trigger CSS transition after element is in DOM
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        fillEl.style.width = (status === 'unlimited' ? '0' : pct.toFixed(1)) + '%';
+      });
+    });
+
+    return el;
+  }
+
+  // ── Render plan card ───────────────────────────────────────────
+
+  function renderPlanCard(planData) {
+    _currentPlan = planData.plan_id || planData.plan || null;
+
+    // Plan name
+    var nameMap = { pulso: 'Pulso', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
+    var displayName = nameMap[_currentPlan] || (_currentPlan ? _currentPlan.charAt(0).toUpperCase() + _currentPlan.slice(1) : 'Plan activo');
+    _setText('plan-name-display', displayName);
+
+    // Price
+    var price = planData.price_monthly;
+    var priceEl = document.getElementById('plan-price-display');
+    if (priceEl) {
+      priceEl.textContent = (price != null && price !== 0) ? _fmt(price) + '/mes' : 'Precio a medida';
+    }
+
+    // Renewal date
+    _setText('plan-renewal-display', _formatNextRenewal(planData.current_period_start));
+
+    // Add-ons
+    var addonsEl = document.getElementById('plan-addons-display');
+    if (addonsEl) {
+      addonsEl.textContent = '';
+      var addons = planData.active_addons || [];
+      if (addons.length === 0) {
+        addonsEl.textContent = '';
+      } else {
+        addons.forEach(function (name) {
+          var chip = document.createElement('span');
+          chip.className = 'plan-addon-chip';
+          chip.textContent = _escHtml(name);
+          addonsEl.appendChild(chip);
+        });
+      }
+    }
+
+    // Auto-recharge state
+    var ar = planData.auto_recharge || {};
+    _autoRecharge = !!ar.enabled;
+    _maxPacks     = ar.max_packs || 5;
+    _syncAutoRechargeUI();
+  }
+
+  // ── Auto-recharge UI sync ──────────────────────────────────────
+
+  function _syncAutoRechargeUI() {
+    var toggle = document.getElementById('toggle-autorecharge');
+    if (toggle) {
+      toggle.checked = _autoRecharge;
+      toggle.setAttribute('aria-checked', _autoRecharge ? 'true' : 'false');
+    }
+    var maxInput = document.getElementById('input-max-packs');
+    if (maxInput) maxInput.value = _maxPacks;
+
+    var maxRow   = document.getElementById('autorecharge-maxpacks-row');
+    var warning  = document.getElementById('autorecharge-off-warning');
+    if (maxRow)  maxRow.style.display   = _autoRecharge ? '' : 'none';
+    if (warning) warning.style.display  = _autoRecharge ? 'none' : '';
+  }
+
+  // ── Render usage gauges ────────────────────────────────────────
+
+  function renderGauges(usageData) {
+    var container = document.getElementById('mi-plan-gauges');
+    if (!container) return;
+    container.textContent = '';
+
+    var dims = usageData.dimensions || {};
+    var order = ['conversations', 'audio', 'storage', 'staff', 'sku', 'marketing'];
+
+    order.forEach(function (dim) {
+      var d = dims[dim];
+      if (!d) return;
+      var gauge = renderGauge(dim, d.used || 0, d.cap, d.status || 'ok');
+      container.appendChild(gauge);
+    });
+
+    if (!container.children.length) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'color:var(--text-3);font-size:13px;padding:8px 0;';
+      empty.textContent = 'Sin datos de uso disponibles para este periodo.';
+      container.appendChild(empty);
+    }
+  }
+
+  // ── Plan modal ─────────────────────────────────────────────────
+
+  function openPlanModal() {
+    var grid = document.getElementById('modal-plans-grid');
+    if (grid) {
+      grid.textContent = '';
+      PLAN_CATALOG.forEach(function (plan) {
+        var card = document.createElement('div');
+        card.className = 'plan-option-card' + (plan.id === _currentPlan ? ' is-current' : '');
+        card.setAttribute('role', plan.id === _currentPlan ? 'presentation' : 'button');
+        card.setAttribute('tabindex', plan.id === _currentPlan ? '-1' : '0');
+
+        var nameEl = document.createElement('div');
+        nameEl.className = 'plan-option-name';
+        nameEl.textContent = plan.name;
+
+        var priceEl2 = document.createElement('div');
+        priceEl2.className = 'plan-option-price';
+        priceEl2.textContent = plan.price ? _fmt(plan.price) + '/mes +IVA' : 'Precio a medida';
+
+        var descEl = document.createElement('div');
+        descEl.className = 'plan-option-desc';
+        descEl.textContent = plan.desc;
+
+        card.appendChild(nameEl);
+        card.appendChild(priceEl2);
+        card.appendChild(descEl);
+
+        if (plan.id === _currentPlan) {
+          var badge = document.createElement('div');
+          badge.className = 'plan-option-current-badge';
+          badge.textContent = 'Plan actual';
+          card.appendChild(badge);
+        }
+
+        grid.appendChild(card);
+      });
+    }
+
+    var overlay = document.getElementById('modal-change-plan');
+    if (overlay) {
+      overlay.classList.add('open');
+      if (typeof mesioFocusTrap === 'function') {
+        var box = overlay.querySelector('.m-modal-box');
+        _planModalTrap = mesioFocusTrap(box, {
+          onEscape: closePlanModal,
+          labelledBy: 'modal-plan-title',
+        });
+      }
+    }
+  }
+
+  function closePlanModal() {
+    var overlay = document.getElementById('modal-change-plan');
+    if (overlay) overlay.classList.remove('open');
+    if (_planModalTrap && typeof _planModalTrap.deactivate === 'function') {
+      _planModalTrap.deactivate();
+      _planModalTrap = null;
+    }
+    var btn = document.getElementById('btn-change-plan');
+    if (btn) btn.focus();
+  }
+
+  // ── API calls ──────────────────────────────────────────────────
+
+  async function saveAutoRecharge() {
+    var toggle = document.getElementById('toggle-autorecharge');
+    var maxInput = document.getElementById('input-max-packs');
+    var enabled  = toggle ? toggle.checked : false;
+    var maxPacks = maxInput ? Math.max(1, Math.min(5, parseInt(maxInput.value, 10) || 5)) : 5;
+
+    var btn = document.getElementById('btn-save-autorecharge');
+    if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+    try {
+      var r = await fetch('/api/billing/auto-recharge', { // lint-allow: subscription billing endpoint — wired in billing_subscription.py
+        method: 'POST',
+        headers: mesioHeaders(),
+        body: JSON.stringify({ enabled: enabled, max_packs: maxPacks }),
+      });
+      mesioTrackFetch(r.ok);
+      if (!r.ok) {
+        var err = await r.json().catch(function () { return {}; });
+        throw new Error(err.detail || 'Error al guardar');
+      }
+      _autoRecharge = enabled;
+      _maxPacks     = maxPacks;
+      _syncAutoRechargeUI();
+      mesioToast('Auto-recarga actualizada', 'success');
+    } catch (e) {
+      mesioToast(e.message || 'Error al guardar', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
+    }
+  }
+
+  async function buyPack() {
+    var confirmed = await mesioConfirm(
+      'Comprar 1 pack de 100 conversaciones extra por $50.000 COP (+IVA). Se cobrará a tu método de pago configurado.',
+      { confirmText: 'Comprar', danger: false }
+    );
+    if (!confirmed) return;
+
+    var btn = document.getElementById('btn-buy-pack');
+    if (btn) { btn.disabled = true; btn.textContent = 'Procesando...'; }
+
+    try {
+      // Pago real via Wompi pendiente — backend stub crea pack sin cobrar // lint-allow: subscription billing endpoint — wired in billing_subscription.py
+      var r = await fetch('/api/billing/buy-pack', { // lint-allow: subscription billing endpoint — wired in billing_subscription.py
+        method: 'POST',
+        headers: mesioHeaders(),
+        body: JSON.stringify({}),
+      });
+      mesioTrackFetch(r.ok);
+      if (!r.ok) {
+        var err2 = await r.json().catch(function () { return {}; });
+        throw new Error(err2.detail || 'Error al comprar pack');
+      }
+      var d = await r.json();
+      mesioToast('Pack comprado: +100 conversaciones. Total packs este mes: ' + (d.packs_this_period || '—'), 'success');
+      // Reload usage to reflect new cap
+      await loadUsage();
+      _updatePacksDisplay(d.packs_this_period);
+    } catch (e) {
+      mesioToast(e.message || 'Error al comprar pack', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Comprar 100 conversaciones extra ($50.000 +IVA)'; }
+    }
+  }
+
+  function _updatePacksDisplay(count) {
+    var el = document.getElementById('packs-count-display');
+    if (!el) return;
+    if (count != null && count > 0) {
+      el.textContent = 'Packs comprados este periodo: ' + count;
+    } else {
+      el.textContent = '';
+    }
+  }
+
+  // ── Data fetchers ──────────────────────────────────────────────
+
+  async function loadPlan() {
+    try {
+      var r = await fetch('/api/billing/plan', { headers: mesioHeaders() }); // lint-allow: subscription billing endpoint — wired in billing_subscription.py
+      mesioTrackFetch(r.ok);
+      if (!r.ok) return null;
+      return await r.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function loadUsage() {
+    try {
+      var r = await fetch('/api/billing/usage', { headers: mesioHeaders() }); // lint-allow: subscription billing endpoint — wired in billing_subscription.py
+      mesioTrackFetch(r.ok);
+      if (!r.ok) return null;
+      return await r.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ── loadMyPlan — main entry point ──────────────────────────────
+
+  async function loadMyPlan() {
+    var skeleton = document.getElementById('mi-plan-loading');
+    if (skeleton) skeleton.classList.add('m-skeleton');
+
+    try {
+      var results = await Promise.all([loadPlan(), loadUsage()]);
+      var planData  = results[0];
+      var usageData = results[1];
+
+      if (skeleton) { skeleton.classList.remove('m-skeleton'); skeleton.style.display = 'none'; }
+
+      if (planData) {
+        renderPlanCard(planData);
+        document.getElementById('plan-current-card').style.display = '';
+        document.getElementById('plan-autorecharge-card').style.display = '';
+        document.getElementById('plan-buypack-card').style.display = '';
+        _updatePacksDisplay(planData.packs_this_period);
+      }
+
+      if (usageData) {
+        renderGauges(usageData);
+        document.getElementById('plan-usage-section-card').style.display = '';
+      }
+    } catch (e) {
+      if (skeleton) { skeleton.classList.remove('m-skeleton'); skeleton.style.display = 'none'; }
+      // Fail gracefully — section stays hidden, DIAN content unaffected
+    }
+  }
+
+  // ── Event wiring ───────────────────────────────────────────────
+
+  var btnChange = document.getElementById('btn-change-plan');
+  if (btnChange) btnChange.addEventListener('click', openPlanModal);
+
+  var btnCloseModal = document.getElementById('btn-close-plan-modal');
+  if (btnCloseModal) btnCloseModal.addEventListener('click', closePlanModal);
+
+  var overlay = document.getElementById('modal-change-plan');
+  if (overlay) {
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closePlanModal();
+    });
+  }
+
+  var toggleAR = document.getElementById('toggle-autorecharge');
+  if (toggleAR) {
+    toggleAR.addEventListener('change', function () {
+      _autoRecharge = toggleAR.checked;
+      toggleAR.setAttribute('aria-checked', _autoRecharge ? 'true' : 'false');
+      _syncAutoRechargeUI();
+    });
+  }
+
+  var btnSaveAR = document.getElementById('btn-save-autorecharge');
+  if (btnSaveAR) btnSaveAR.addEventListener('click', saveAutoRecharge);
+
+  var btnBuyPack = document.getElementById('btn-buy-pack');
+  if (btnBuyPack) btnBuyPack.addEventListener('click', buyPack);
+
+  // Bootstrap
+  loadMyPlan();
+})();
