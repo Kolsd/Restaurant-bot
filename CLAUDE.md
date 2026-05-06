@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v11.1 ("No-v2" sprint — loyalty campaigns + branch aggregates + churn summary shipped)
+# Mesio Restaurant Bot — v11.2 (Pricing v1 sprint — plan_limits + bot cap enforcement + auto-recharge + landing rewrite + cost dashboard shipped 2026-05-05)
 
 ## Entorno y Comandos
 
@@ -192,7 +192,8 @@ Restaurant-bot/
 │   ├── 0046_money_precision_numeric.py       # Pre-launch hardening — orders/table_orders money columns INTEGER → NUMERIC(14,2)
 │   ├── 0047_shift_swap_status_check.py       # Pre-launch hardening — CHECK constraint on shift_swap_requests.status
 │   ├── 0048_performance_indexes.py            # Pre-launch hardening — 7 composite indexes CONCURRENTLY (dashboard hot paths)
-│   └── 0049_loyalty_campaigns.py              # "No-v2" sprint — loyalty_campaigns table + RLS org_isolation + state machine (draft/active/paused)
+│   ├── 0049_loyalty_campaigns.py              # "No-v2" sprint — loyalty_campaigns table + RLS org_isolation + state machine (draft/active/paused)
+│   └── 0070_plan_limits.py                    # Pricing v1 sprint — plan_limits + addon_modules (global) + usage_packs (RLS) + organizations.plan_code/auto_recharge_*/comp_until + seed 4 plans + 7 addons
 ```
 
 ## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
@@ -427,6 +428,7 @@ Tablas nuevas agregadas por sprints recientes:
 - `staff_announcements`, `staff_tasks`, `staff_task_completions` (0042 — Sprint C, admin↔staff messaging)
 - `shift_swap_requests` (0043 — Sprint W, coworker shift-swap + admin approval)
 - `loyalty_campaigns` (0049 — "No-v2" sprint, WhatsApp automation campaigns with state machine)
+- `usage_packs` (0070 — Pricing v1, $50K auto-recharge packs of 100 conv credits with FIFO consumption + period expiry)
 
 Todas con policy `tenant_isolation` + `ENABLE + FORCE ROW LEVEL SECURITY`. Tablas explícitamente GLOBAL (sin RLS por diseño): `users`, `sessions`, `webhook_inbox`, `processed_wam_ids`, `prospects*`, `crm_templates`, `sales_*`.
 
