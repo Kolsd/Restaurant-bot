@@ -14,6 +14,7 @@ Revises: 0069_password_reset_tokens
 import json
 import logging
 
+import sqlalchemy as sa
 from alembic import op
 
 logger = logging.getLogger("alembic.runtime.migration")
@@ -191,18 +192,18 @@ def upgrade() -> None:
     # ── Switch to mesio_superadmin to bypass RLS ──────────────────────────────
     # organizations and locations have RLS + FORCE, so we need the bypass role
     # for the INSERT statements.
-    conn.execute("SET LOCAL ROLE mesio_superadmin")
+    conn.execute(sa.text("SET LOCAL ROLE mesio_superadmin"))
 
     logger.info("0071 upgrade: seeding Demo Mesio org")
 
     # ── 1. Organization ───────────────────────────────────────────────────────
     org_id = conn.execute(
-        """
-        INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
-        VALUES (:name, :wanum, :menu::jsonb, :features::jsonb, :slug)
-        ON CONFLICT (slug) DO NOTHING
-        RETURNING id
-        """,
+        sa.text("""
+            INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
+            VALUES (:name, :wanum, :menu::jsonb, :features::jsonb, :slug)
+            ON CONFLICT (slug) DO NOTHING
+            RETURNING id
+        """),
         {
             "name": DEMO_ORG_NAME,
             "wanum": DEMO_BOT_NUMBER,
@@ -215,7 +216,7 @@ def upgrade() -> None:
     if org_id is None:
         # Already exists — look up the id for the location step
         org_id = conn.execute(
-            "SELECT id FROM organizations WHERE slug = :slug",
+            sa.text("SELECT id FROM organizations WHERE slug = :slug"),
             {"slug": DEMO_SLUG},
         ).scalar()
         logger.info("0071 upgrade: Demo org already exists, org_id=%s", org_id)
@@ -224,17 +225,17 @@ def upgrade() -> None:
 
     # ── 2. Location ───────────────────────────────────────────────────────────
     loc_exists = conn.execute(
-        "SELECT 1 FROM locations WHERE org_id = :oid LIMIT 1",
+        sa.text("SELECT 1 FROM locations WHERE org_id = :oid LIMIT 1"),
         {"oid": org_id},
     ).scalar()
 
     if not loc_exists:
         loc_id = conn.execute(
-            """
-            INSERT INTO locations (org_id, name, code, address, active, timezone)
-            VALUES (:oid, :name, 'principal', :addr, true, 'America/Bogota')
-            RETURNING id
-            """,
+            sa.text("""
+                INSERT INTO locations (org_id, name, code, address, active, timezone)
+                VALUES (:oid, :name, 'principal', :addr, true, 'America/Bogota')
+                RETURNING id
+            """),
             {"oid": org_id, "name": DEMO_ORG_NAME, "addr": DEMO_ADDRESS},
         ).scalar()
         logger.info("0071 upgrade: Demo location created, loc_id=%s", loc_id)
@@ -246,15 +247,15 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    conn.execute("SET LOCAL ROLE mesio_superadmin")
+    conn.execute(sa.text("SET LOCAL ROLE mesio_superadmin"))
 
     # Remove Demo org and its location (CASCADE takes the location if FK exists)
     conn.execute(
-        "DELETE FROM locations WHERE org_id = (SELECT id FROM organizations WHERE slug = :slug)",
+        sa.text("DELETE FROM locations WHERE org_id = (SELECT id FROM organizations WHERE slug = :slug)"),
         {"slug": DEMO_SLUG},
     )
     conn.execute(
-        "DELETE FROM organizations WHERE slug = :slug",
+        sa.text("DELETE FROM organizations WHERE slug = :slug"),
         {"slug": DEMO_SLUG},
     )
     logger.info("0071 downgrade: Demo Mesio org removed")
