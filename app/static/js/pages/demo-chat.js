@@ -31,6 +31,8 @@
   // ── DOM refs (populated after DOMContentLoaded) ────────────────────────────
 
   var chatEl, inputEl, sendBtn, counterEl, resetBtn, typingEl, statusEl;
+  var fabBtn, panelEl, closeBtn;
+  var _sessionStarted = false;
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -42,6 +44,9 @@
     resetBtn  = document.getElementById('demo-chat-reset');
     typingEl  = document.getElementById('demo-chat-typing');
     statusEl  = document.getElementById('demo-chat-status');
+    fabBtn    = document.getElementById('demo-chat-fab');
+    panelEl   = document.getElementById('demo-chat-panel');
+    closeBtn  = document.getElementById('demo-chat-close');
 
     if (!chatEl || !inputEl || !sendBtn) return; // widget not in DOM
 
@@ -54,7 +59,40 @@
       }
     });
 
-    startSession();
+    fabBtn && fabBtn.addEventListener('click', openPanel);
+    closeBtn && closeBtn.addEventListener('click', closePanel);
+    window.addEventListener('demo:scenes-complete', revealFab);
+  }
+
+  // ── FAB / panel visibility ─────────────────────────────────────────────────
+
+  function revealFab() {
+    if (!fabBtn) return;
+    if (panelEl && !panelEl.hasAttribute('hidden')) return; // already opened
+    fabBtn.hidden = false;
+  }
+
+  function openPanel() {
+    if (!panelEl) return;
+    panelEl.hidden = false;
+    if (fabBtn) {
+      fabBtn.hidden = true;
+      fabBtn.setAttribute('aria-expanded', 'true');
+    }
+    if (!_sessionStarted) {
+      _sessionStarted = true;
+      startSession();
+    }
+    setTimeout(function () { inputEl && inputEl.focus(); }, 60);
+  }
+
+  function closePanel() {
+    if (!panelEl) return;
+    panelEl.hidden = true;
+    if (fabBtn) {
+      fabBtn.hidden = false;
+      fabBtn.setAttribute('aria-expanded', 'false');
+    }
   }
 
   // ── Session management ─────────────────────────────────────────────────────

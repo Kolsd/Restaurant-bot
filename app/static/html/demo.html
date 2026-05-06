@@ -273,8 +273,19 @@
 <!-- ═══════════════ Toast (share confirmation) ═══════════════ -->
 <div class="toast" id="toast" hidden></div>
 
+<!-- ═══════════════ LIVE CHAT FAB (revealed after last scene) ═══════════════ -->
+<button class="demo-chat-fab" id="demo-chat-fab" type="button" hidden
+        aria-label="Abrir chat con el bot de Mesio"
+        aria-controls="demo-chat-panel" aria-expanded="false">
+  <span class="demo-chat-fab-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  </span>
+  <span class="demo-chat-fab-label">Chatea con el bot</span>
+  <span class="demo-chat-fab-pulse" aria-hidden="true"></span>
+</button>
+
 <!-- ═══════════════ LIVE CHAT WIDGET ═══════════════ -->
-<aside class="demo-chat-panel" aria-label="Chat en vivo con el bot de Mesio" role="complementary">
+<aside class="demo-chat-panel" id="demo-chat-panel" aria-label="Chat en vivo con el bot de Mesio" role="complementary" hidden>
 
   <!-- Header -->
   <div class="demo-chat-header">
@@ -287,6 +298,9 @@
       <button class="demo-chat-reset-btn" id="demo-chat-reset" type="button" aria-label="Reiniciar conversación de demo">
         <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         Reiniciar
+      </button>
+      <button class="demo-chat-close-btn" id="demo-chat-close" type="button" aria-label="Cerrar chat">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
   </div>

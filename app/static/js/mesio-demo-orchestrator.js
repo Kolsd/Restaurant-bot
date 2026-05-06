@@ -346,6 +346,9 @@
       if (isLast && !ctaShown) {
         ctaShown = true;
         setTimeout(function () { $ctaDock.hidden = false; }, 600);
+        // Reveal the live-chat FAB so prospects can talk to the real bot.
+        // demo-chat.js listens for this event.
+        window.dispatchEvent(new CustomEvent('demo:scenes-complete'));
       }
       // Auto: chain to next scene; Loop: restart current; Last+Auto: stop
       if (mode === 'loop') {
