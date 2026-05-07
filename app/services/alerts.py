@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 
 import httpx
 
@@ -28,6 +28,9 @@ _last_alert: dict[str, float] = {}
 _P95_LATENCY_THRESHOLD_MS = 500.0
 _QUEUE_DEPTH_THRESHOLD = 50
 _ERROR_RATE_THRESHOLD = 0.10  # 10%
+
+# Cost runaway — alert when a tenant exceeds this multiple of its daily budget
+_COST_RUNAWAY_MULTIPLIER = 2.0
 
 
 async def check_alerts() -> None:
@@ -60,6 +63,11 @@ async def check_alerts() -> None:
         await _check_error_rate()
     except Exception:
         log.exception("alerts.check_error_rate_failed")
+
+    try:
+        await _check_cost_runaway()
+    except Exception:
+        log.exception("alerts.check_cost_runaway_failed")
 
 
 # ── Individual checks ─────────────────────────────────────────────────────────
@@ -146,6 +154,81 @@ async def _check_error_rate() -> None:
             severity="HIGH",
             title="Worker Error Rate Spike",
             detail=f"Error rate is {pct:.1f}% ({errors}/{total}) — threshold: {_ERROR_RATE_THRESHOLD * 100:.0f}%.",
+        )
+
+
+async def _check_cost_runaway() -> None:
+    """Alert when a tenant burns through more than 2× its plan's daily token budget today.
+
+    Runs cross-tenant (scheduler already holds bypass_tenant_scope).
+    Cooldown: once per (org_id, calendar day) — keyed as cost_runaway:{org_id}:{YYYY-MM-DD}.
+    Plans with limit == -1 (cadena, comp) are unlimited and skipped.
+    """
+    from app.repositories.cost_metrics_repo import _PLAN_DAILY_TOKEN_LIMITS  # late import
+
+    today = date.today()  # UTC — v1; revisit for Colombia UTC-5 if needed
+    today_str = today.isoformat()
+
+    from app.services.database import get_pool  # late import — avoids circular
+
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    su.org_id,
+                    o.name                                AS org_name,
+                    COALESCE(o.subscription_plan, 'free') AS plan_code,
+                    COALESCE(SUM(su.total_tokens), 0)::BIGINT AS tokens_today
+                FROM subscription_usage su
+                LEFT JOIN organizations o ON o.id = su.org_id
+                WHERE su.usage_date = $1
+                GROUP BY su.org_id, o.name, o.subscription_plan
+                HAVING COALESCE(SUM(su.total_tokens), 0) > 0
+                """,
+                today,
+            )
+    except Exception as exc:
+        log.exception("alerts.cost_runaway.query_error", exc_type=type(exc).__name__)
+        return
+
+    for row in rows:
+        plan = (row["plan_code"] or "free").lower()
+        daily_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS["pulso"])
+
+        # Skip unlimited plans
+        if daily_limit <= 0:
+            continue
+
+        tokens_today = int(row["tokens_today"] or 0)
+        if tokens_today <= _COST_RUNAWAY_MULTIPLIER * daily_limit:
+            continue
+
+        org_id = row["org_id"]
+        org_name = row["org_name"] or f"Org #{org_id}"
+
+        # Per-day cooldown — key includes date so the alert re-arms the next day
+        alert_key = f"cost_runaway:{org_id}:{today_str}"
+
+        # Projected daily cost (rough estimate via cost_estimator)
+        try:
+            from app.services.cost_estimator import estimate_cost_cop
+            projected_cop = float(estimate_cost_cop(tokens_today))
+            projected_str = f"~${projected_cop:,.0f} COP today"
+        except Exception:
+            projected_str = "(cost estimate unavailable)"
+
+        pct = int(tokens_today / daily_limit * 100)
+        await _fire_alert(
+            key=alert_key,
+            severity="HIGH",
+            title=f"Tenant {org_name} exceeded 2x daily token budget",
+            detail=(
+                f"Org #{org_id} ({plan}) used {tokens_today:,} tokens today "
+                f"({pct}% of {daily_limit:,} daily limit). "
+                f"Projected cost: {projected_str}."
+            ),
         )
 
 
