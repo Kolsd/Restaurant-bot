@@ -30,16 +30,22 @@ Changes:
   Note on ix_webhook_inbox_claim: already added in 0048 as
   (next_attempt_at, id) WHERE processed_at IS NULL — not duplicated here.
 
-Revision ID: 0073_perf_indexes_and_blocklist_check
+Revision ID: 0073_perf_idx_blocklist_check
 Revises: 0072_merge_plan_limits_demo_seed
 Create Date: 2026-05-07
+
+NOTE: Revision id is 29 chars (was 37 chars on first deploy attempt —
+Railway crashed because alembic_version.version_num is VARCHAR(32)). This
+is one of the 14 recurring footguns documented in
+docs/history/wave2_lessons.md. The previous DDL attempt rolled back
+transactionally — DB remains at 0072 head.
 """
 
 import logging
 
 from alembic import op
 
-revision = "0073_perf_indexes_and_blocklist_check"
+revision = "0073_perf_idx_blocklist_check"
 down_revision = "0072_merge_plan_limits_demo_seed"
 branch_labels = None
 depends_on = None
