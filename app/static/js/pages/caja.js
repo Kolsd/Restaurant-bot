@@ -54,6 +54,18 @@ async function _loadBillingConfig() {
   } catch (_) {}
 }
 
+// ── Load restaurant settings (feature flags) ─────────
+// Populates rb_restaurant in localStorage so mesioFeatureEnabled() works.
+async function _loadRestaurantSettings() {
+  try {
+    const res = await fetch('/api/settings', { headers: mesioHeaders() });
+    if (res.ok) {
+      const data = await res.json();
+      localStorage.setItem('rb_restaurant', JSON.stringify(data));
+    }
+  } catch (_) {}
+}
+
 // ── Load menu ─────────────────────────────────────────
 async function loadMenu() {
   try {
@@ -788,13 +800,14 @@ function _renderPayCheckModal(baseOrderId, checkId, checkTotal, items) {
       <input id="pcm-service-charge" type="number" min="0" placeholder="0" style="width:100%;background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:13px;outline:none;">
     </div>
 
+    ${mesioFeatureEnabled('dian_enabled') ? `
     <div style="margin-bottom:20px;">
       <div style="font-size:12px;color:#9CA3AF;margin-bottom:8px;font-weight:600;">Datos del cliente (opcional, para factura)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
         <input id="pcm-cust-name" type="text" placeholder="Nombre cliente" value="Consumidor Final" style="background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:12px;outline:none;">
         <input id="pcm-cust-nit" type="text" placeholder="NIT / Cédula" value="222222222" style="background:#14171f;border:1px solid #2a2f3d;border-radius:8px;padding:9px 12px;color:#E8EAEE;font-family:inherit;font-size:12px;outline:none;">
       </div>
-    </div>
+    </div>` : ''}
 
     <button id="pcm-submit" style="width:100%;padding:14px;background:var(--brand);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer;font-family:inherit;">Cobrar</button>
     <div id="pcm-error" style="margin-top:10px;font-size:12px;color:#F87171;text-align:center;min-height:18px;"></div>`;
@@ -1745,7 +1758,7 @@ mesioInterval(() => {
 
 // ── Boot ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([_loadBillingConfig(), loadMenu(), loadOpenTables()]);
+  await Promise.all([_loadBillingConfig(), _loadRestaurantSettings(), loadMenu(), loadOpenTables()]);
   _initSearch();
   _enterMesaGrid();
 

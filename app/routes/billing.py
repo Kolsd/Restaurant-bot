@@ -16,6 +16,7 @@ from app.services.billing import (
     get_billing_log,
     emit_invoice,
     get_adapter,
+    _is_dian_enabled,
 )
 from app.services.tenant_context import tenant_scope
 
@@ -124,6 +125,15 @@ async def emit(request: Request, payload: EmitInvoicePayload):
 
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
+
+    # DIAN feature gate — must be explicitly enabled in /settings
+    restaurant = await db.db_get_restaurant_by_id(restaurant_id)
+    if not restaurant or not _is_dian_enabled((restaurant.get("features") or {})):
+        raise HTTPException(
+            status_code=422,
+            detail="Facturación electrónica no está habilitada para este restaurante. Actívala en /settings cuando hayas adquirido tu folio DIAN.",
+        )
+
     with tenant_scope(restaurant_id):
         try:
             result = await emit_invoice(payload.order_id, restaurant_id, payload.customer)

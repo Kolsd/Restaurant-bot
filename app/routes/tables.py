@@ -655,25 +655,16 @@ async def update_delivery_order_status(request: Request, order_id: str):
             config = await billing.get_billing_config(restaurant["id"])
 
             features = restaurant.get("features") or {}
-            if isinstance(features, str):
-                import json as _json
-                try:
-                    features = _json.loads(features)
-                except Exception:
-                    features = {}
 
-            raw_dian = features.get("dian_active", False)
-            if isinstance(raw_dian, str):
-                dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
-            else:
-                dian_active = bool(raw_dian)
+            if not billing._is_dian_enabled(features):
+                # DIAN gated off — skip auto-invoice silently (no folio purchased yet)
+                log.info("dian.auto_invoice.skipped_disabled", restaurant_id=restaurant["id"], order_id=order_id)
+            elif config:
+                items = order_row["items"]
+                if isinstance(items, str):
+                    import json as _json
+                    items = _json.loads(items)
 
-            items = order_row["items"]
-            if isinstance(items, str):
-                import json as _json
-                items = _json.loads(items)
-
-            if config and dian_active:
                 config["_restaurant_id"] = restaurant["id"]
                 provider = config.get("provider", "mesio_native")
                 adapter = billing.get_adapter(provider)
@@ -1668,12 +1659,6 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
 
         config = await billing.get_billing_config(restaurant["id"])
 
-        raw_dian = features.get("dian_active", False)
-        if isinstance(raw_dian, str):
-            dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
-        else:
-            dian_active = bool(raw_dian)
-
         items = check.get("items", [])
         if isinstance(items, str):
             import json as _json
@@ -1697,7 +1682,7 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
         }
 
         fiscal_invoice_id = None
-        if config and dian_active:
+        if config and billing._is_dian_enabled(features):
             config["_restaurant_id"] = restaurant["id"]
             provider = config.get("provider", "mesio_native")
             adapter  = billing.get_adapter(provider)
@@ -1962,14 +1947,8 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
             features = {}
     _currency = features.get("currency") if isinstance(features, dict) else None
 
-    raw_dian = features.get("dian_active", False)
-    if isinstance(raw_dian, str):
-        dian_active = raw_dian.strip().lower() in ("true", "1", "yes", "on")
-    else:
-        dian_active = bool(raw_dian)
-
     fiscal_invoice_id = None
-    if dian_active:
+    if billing._is_dian_enabled(features):
         config = await billing.get_billing_config(restaurant["id"])
         if config:
             config["_restaurant_id"] = restaurant["id"]

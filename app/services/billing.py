@@ -28,6 +28,20 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _is_dian_enabled(restaurant_features) -> bool:
+    """Check if DIAN electronic invoicing is enabled for this restaurant.
+
+    Feature flag `dian_enabled` defaults to False — off until the restaurant
+    has purchased a DIAN folio (~$400K COP). CEO decision 2026-05-07.
+    """
+    if isinstance(restaurant_features, str):
+        try:
+            restaurant_features = json.loads(restaurant_features)
+        except (json.JSONDecodeError, ValueError):
+            return False
+    return bool((restaurant_features or {}).get("dian_enabled", False))
+
+
 # ══════════════════════════════════════════════════════════════════════
 # MATIAS API — token cache (module-level, compartido entre llamadas)
 # ══════════════════════════════════════════════════════════════════════

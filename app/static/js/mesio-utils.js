@@ -48,6 +48,21 @@ function mesioSetCurrentLocationId(id) {
   }
 }
 
+// ── Feature flag helper ──────────────────────────
+/**
+ * Returns true if the named feature flag is enabled for the current restaurant.
+ * Reads from rb_restaurant localStorage (populated by /api/settings on page load).
+ * Defaults to false for any unknown / unset flag.
+ */
+function mesioFeatureEnabled(featureName) {
+  try {
+    var rb = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+    return !!rb[featureName];
+  } catch (e) {
+    return false;
+  }
+}
+
 // ── Currency formatter ───────────────────────────
 var _fmtCache = {};
 function mesioFmt(n) {

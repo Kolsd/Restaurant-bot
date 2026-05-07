@@ -49,6 +49,11 @@ def test_emit_manual_invoice_endpoint(client, monkeypatch):
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
 
+    # Mock restaurant lookup with dian_enabled=True (gate check added 2026-05-07)
+    mock_restaurant = {"id": 1, "name": "Test", "features": {"dian_enabled": True}}
+    import app.routes.billing as _billing_routes_mod
+    monkeypatch.setattr(_billing_routes_mod.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant))
+
     # Burlamos la función que emite la factura a Alegra/Siigo
     mock_emit = AsyncMock(return_value={"success": True, "provider": "alegra", "external_id": "999"})
     monkeypatch.setattr(billing_routes, "emit_invoice", mock_emit)

@@ -94,6 +94,8 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
         "catalog_v2_enabled":  features.get("catalog_v2_enabled", True),
         # Voice notes transcription — opt-in, default OFF
         "bot_voice_notes":     features.get("bot_voice_notes", False),
+        # DIAN electronic invoicing — opt-in, default OFF (requires folio purchase ~$400K COP)
+        "dian_enabled":        features.get("dian_enabled", False),
         # Wompi config (sensitive: secret never returned plaintext)
         "wompi":               safe_features.get("wompi", {}),
     }
@@ -153,6 +155,8 @@ async def save_settings(request: Request):
         "bot_visual_menu", "catalog_v2_enabled",
         # Voice notes transcription — opt-in, default OFF
         "bot_voice_notes",
+        # DIAN electronic invoicing — opt-in, default OFF
+        "dian_enabled",
         # Extended info — no dedicated DB column; live in features JSONB
         "nit", "city", "cuisine_type", "notifications",
         # Wompi per-restaurant credentials (handled with secret preservation below)
@@ -939,6 +943,78 @@ async def get_dashboard_menu(request: Request):
     _, bot_number, _, _ = await get_dashboard_filters(request, "today")
     menu = await db.db_get_menu(bot_number) or {}
     return {"menu": menu}
+
+
+@router.get("/api/dashboard/pedidos-rescatados")
+async def get_pedidos_rescatados(
+    request: Request,
+    period: str = "mtd",
+):
+    """
+    North-star metric: count of bot-originated orders for the current tenant.
+
+    period values:
+      mtd  — month-to-date (1st of current month → today)
+      7d   — last 7 days
+      30d  — last 30 days
+
+    Returns:
+      {
+        "period": "mtd",
+        "count": 125,           # total (delivery + table)
+        "delivery": 80,
+        "table": 45,
+        "prev_count": 112,      # same window shifted back one period (for delta)
+        "delta_pct": 11.6       # positive = growth
+      }
+
+    Requires: active restaurant Bearer token.
+    """
+    from datetime import date, timedelta
+    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.services.tenant_context import tenant_scope
+
+    restaurant = await get_current_restaurant(request)
+    today = date.today()
+    if period == "mtd":
+        period_start = today.replace(day=1)
+        period_end   = today
+        prev_end   = period_start - timedelta(days=1)
+        prev_start = prev_end.replace(day=1)
+    elif period == "7d":
+        period_start = today - timedelta(days=6)
+        period_end   = today
+        prev_end   = period_start - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=6)
+    else:  # 30d default
+        period_start = today - timedelta(days=29)
+        period_end   = today
+        prev_end   = period_start - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=29)
+
+    org_id = restaurant["id"]
+    try:
+        with tenant_scope(org_id):
+            current = await db_count_pedidos_rescatados(period_start, period_end)
+            prev    = await db_count_pedidos_rescatados(prev_start, prev_end)
+    except Exception as exc:
+        log.exception("dashboard.pedidos_rescatados_failed", org_id=org_id)
+        raise HTTPException(status_code=500, detail="Error al calcular pedidos rescatados")
+
+    delta_pct = None
+    if prev["count"] and prev["count"] > 0:
+        delta_pct = round((current["count"] - prev["count"]) / prev["count"] * 100, 1)  # JSON boundary
+
+    return {
+        "period": period,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "count": current["count"],
+        "delivery": current["delivery"],
+        "table": current["table"],
+        "prev_count": prev["count"],
+        "delta_pct": delta_pct,
+    }
 
 
 async def _verify_session_ownership_and_scope(session_id: int, restaurant: dict) -> dict:

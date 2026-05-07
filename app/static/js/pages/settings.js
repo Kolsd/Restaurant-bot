@@ -77,6 +77,9 @@ function renderSettings(r) {
   // Bot features — voice notes
   renderBotFeatures(r.features || {});
 
+  // Commerce features — DIAN toggle
+  renderCommerceFeatures(r);
+
   // DIAN — read-only display
   renderDIAN(r.features || {});
 
@@ -209,6 +212,14 @@ function renderBotFeatures(features) {
   }
 }
 
+// ── Commerce features toggles ─────────────────────────────────────
+function renderCommerceFeatures(features) {
+  var dianSw = document.getElementById('commerce-sw-dian');
+  if (dianSw) {
+    if (features.dian_enabled) { dianSw.classList.add('on'); } else { dianSw.classList.remove('on'); }
+  }
+}
+
 // ── DIAN display (read-only) ──────────────────────────────────────
 function renderDIAN(features) {
   var provEl = document.getElementById('dianProvider');
@@ -265,6 +276,12 @@ function collectFormData() {
     bot_voice_notes: voiceSw ? voiceSw.classList.contains('on') : false,
   };
 
+  // Commerce features
+  var dianSw = document.getElementById('commerce-sw-dian');
+  var commerceFeatures = {
+    dian_enabled: dianSw ? dianSw.classList.contains('on') : false,
+  };
+
   var currentFeatures = (_restaurant && _restaurant.features) ? Object.assign({}, _restaurant.features) : {};
 
   // Wompi credentials — empty integrity_secret means "preserve existing" on the server.
@@ -285,6 +302,8 @@ function collectFormData() {
     // bot feature flags — sent as top-level keys so _features_updatable in
     // settings_routes.py picks them up and writes them into features JSONB
     bot_voice_notes: botFeatures.bot_voice_notes,
+    // commerce feature flags
+    dian_enabled: commerceFeatures.dian_enabled,
     features: Object.assign(currentFeatures, {
       opening_hours: opening_hours,
       payment_methods: payment_methods,
