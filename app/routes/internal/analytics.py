@@ -636,3 +636,57 @@ async def analytics_churn_risk(_: None = Depends(verify_superadmin)):
         })
 
     return {"at_risk": at_risk}
+
+
+# ── North-star: Pedidos Rescatados ────────────────────────────────────────────
+
+@router.get("/api/internal/analytics/pedidos-rescatados")
+async def analytics_pedidos_rescatados(
+    period: str = "mtd",
+    _: None = Depends(verify_superadmin),
+):
+    """
+    Cross-tenant north-star metric — Pedidos Rescatados.
+
+    Returns total bot-originated orders across all tenants + per-tenant ranking.
+
+    period values:
+      mtd  — month-to-date (1st of current month → today)
+      30d  — last 30 days
+
+    Response:
+      {
+        "period": "mtd",
+        "total": 1843,
+        "ranking": [
+          {"org_id": 5, "org_name": "La Parrilla", "count": 312, "delivery": 200, "table": 112},
+          ...
+        ]
+      }
+    """
+    from datetime import date, timedelta
+    from app.repositories.north_star_repo import db_count_pedidos_rescatados_global
+
+    today = date.today()
+    if period == "mtd":
+        period_start = today.replace(day=1)
+        period_end   = today
+    else:  # 30d default
+        period_start = today - timedelta(days=29)
+        period_end   = today
+
+    with bypass_tenant_scope("internal_analytics_pedidos_rescatados_cross_tenant"):
+        try:
+            ranking = await db_count_pedidos_rescatados_global(period_start, period_end)
+        except Exception as exc:
+            log.exception("analytics.pedidos_rescatados_failed")
+            return JSONResponse(status_code=500, content={"detail": "Error al calcular pedidos rescatados"})
+
+    total = sum(r["count"] for r in ranking)
+    return {
+        "period": period,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "total": total,
+        "ranking": ranking,
+    }

@@ -186,6 +186,7 @@ async function _apiFetch(url) {
 // ── Master load ───────────────────────────────────────────────────────────────
 async function _loadAll() {
   await Promise.allSettled([
+    loadPedidosRescatados(),
     loadDailyInsight(),
     loadMetricsRow(),
     loadRevenueChart(),
@@ -196,6 +197,27 @@ async function _loadAll() {
     loadInventoryCritical(),
     loadAtRiskBadge(),
   ]);
+}
+
+// ── 0. North-star: Pedidos rescatados (mes actual) ────────────────────────────
+async function loadPedidosRescatados() {
+  const countEl = document.getElementById('m-rescatados');
+  const deltaEl = document.getElementById('m-rescatados-delta');
+  if (!countEl) return;
+  try {
+    const data = await _apiFetch('/api/dashboard/pedidos-rescatados?period=mtd');
+    countEl.textContent = (data.count ?? 0).toLocaleString('es-CO');
+    if (deltaEl && data.delta_pct != null) {
+      const up = data.delta_pct >= 0;
+      deltaEl.textContent = `${up ? '▲' : '▼'} ${Math.abs(data.delta_pct).toFixed(1)}% vs. mes anterior`;
+      deltaEl.className = `metric-sub metric-delta ${up ? 'up' : 'down'}`;
+    } else if (deltaEl) {
+      deltaEl.textContent = '';
+    }
+  } catch (e) {
+    console.warn('[dashboard] loadPedidosRescatados failed', e);
+    if (countEl) countEl.textContent = '—';
+  }
 }
 
 // ── 1. Daily insight banner ───────────────────────────────────────────────────

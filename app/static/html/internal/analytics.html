@@ -286,6 +286,31 @@
   </header>
 
   <main class="main">
+    <!-- North-star: Pedidos Rescatados -->
+    <section id="section-north-star">
+      <div class="section-title">North-Star Metric</div>
+      <div class="kpi-grid" style="margin-bottom:var(--s-4);">
+        <div class="kpi-card" style="border-color:var(--brand);background:rgba(29,158,117,.06);">
+          <div class="kpi-label" style="color:var(--brand);">Pedidos Rescatados — este mes</div>
+          <div class="skeleton skel-kpi" id="kpi-rescatados-total" style="font-size:2.5rem;"></div>
+          <div class="kpi-sub" id="kpi-rescatados-sub">Total de pedidos bot (delivery + mesa)</div>
+        </div>
+      </div>
+      <!-- Per-tenant ranking -->
+      <div id="rescatados-ranking-wrap" style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--s-4);">
+          <div class="table-wrap">
+            <div style="padding:var(--s-3) var(--s-4);font-size:0.78rem;font-weight:600;color:#10b981;background:var(--dark-3);">Top 10 — Clientes más activos</div>
+            <table class="data-table"><thead><tr><th>Restaurante</th><th>Pedidos</th></tr></thead><tbody id="rescatados-top-tbody"></tbody></table>
+          </div>
+          <div class="table-wrap">
+            <div style="padding:var(--s-3) var(--s-4);font-size:0.78rem;font-weight:600;color:#ef4444;background:var(--dark-3);">Bottom 10 — Riesgo de churn</div>
+            <table class="data-table"><thead><tr><th>Restaurante</th><th>Pedidos</th></tr></thead><tbody id="rescatados-bottom-tbody"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- KPI cards -->
     <section>
       <div class="section-title">Platform Overview</div>
@@ -726,6 +751,50 @@
     });
   }
 
+  // ── North-star: Pedidos Rescatados ─────────────────────────────────────────
+  function _rankingRow(item) {
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = item.org_name || `Org #${item.org_id}`;
+    const countTd = document.createElement('td');
+    countTd.textContent = (item.count || 0).toLocaleString('es-CO');
+    countTd.style.fontWeight = '600';
+    tr.append(nameTd, countTd);
+    return tr;
+  }
+
+  function loadPedidosRescatados() {
+    return apiGet('/api/internal/analytics/pedidos-rescatados?period=mtd').then(data => {
+      const totalEl = document.getElementById('kpi-rescatados-total');
+      if (totalEl) {
+        totalEl.classList.remove('skeleton', 'skel-kpi');
+        totalEl.className = 'kpi-value brand';
+        totalEl.textContent = (data.total ?? 0).toLocaleString('es-CO');
+      }
+      const ranking = data.ranking || [];
+      if (!ranking.length) return;
+
+      const wrapEl = document.getElementById('rescatados-ranking-wrap');
+      if (wrapEl) wrapEl.style.display = '';
+
+      const topTbody = document.getElementById('rescatados-top-tbody');
+      const bottomTbody = document.getElementById('rescatados-bottom-tbody');
+      if (topTbody) {
+        topTbody.innerHTML = '';
+        ranking.slice(0, 10).forEach(item => topTbody.appendChild(_rankingRow(item)));
+      }
+      if (bottomTbody) {
+        bottomTbody.innerHTML = '';
+        const bottom = ranking.length > 10 ? ranking.slice(-10).reverse() : [...ranking].reverse();
+        bottom.forEach(item => bottomTbody.appendChild(_rankingRow(item)));
+      }
+    }).catch(err => {
+      console.warn('[analytics] loadPedidosRescatados failed', err);
+      const el = document.getElementById('kpi-rescatados-total');
+      if (el) { el.classList.remove('skeleton', 'skel-kpi'); el.className = 'kpi-value'; el.textContent = '—'; }
+    });
+  }
+
   // ── Refresh loop ────────────────────────────────────────────────────────────
   function updateTimestamp() {
     const el = document.getElementById('last-update');
@@ -734,6 +803,7 @@
 
   function loadAll() {
     Promise.allSettled([
+      loadPedidosRescatados(),
       loadOverview(),
       loadTrends(),
       loadRestaurants(),
