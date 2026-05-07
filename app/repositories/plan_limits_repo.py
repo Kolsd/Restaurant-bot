@@ -484,3 +484,172 @@ async def db_set_comp_until(
             org_id, comp_until,
         )
     log.info("plan_limits.comp_until_set", org_id=org_id, comp_until=str(comp_until))
+
+
+# ── Pending plan downgrade ────────────────────────────────────────────────────
+
+# Plan sort order for downgrade validation (lower index = smaller plan).
+_PLAN_ORDER = ["pulso", "restaurante", "pro", "cadena"]
+
+
+def _plan_rank(plan_code: str) -> int:
+    """Return numeric rank of a plan (lower = smaller). Unknown plans get rank 999."""
+    try:
+        return _PLAN_ORDER.index(plan_code.lower())
+    except ValueError:
+        return 999
+
+
+async def db_request_downgrade(
+    org_id: int,
+    new_plan_code: str,
+    kept_location_id: int,
+) -> dict:
+    """Schedule a plan downgrade for an org, effective in 7 days.
+
+    Validates:
+    - new_plan_code must exist in plan_limits.
+    - new_plan_code must be SMALLER than the current plan (downgrades only).
+    - kept_location_id must belong to this org.
+
+    Sets the three pending_* columns and returns the updated state.
+    # Requires active tenant_scope(org_id).
+    """
+    from datetime import timedelta  # noqa: PLC0415
+
+    # Validate new plan exists (global table — bypass)
+    plan = await db_get_plan(new_plan_code)
+    if plan is None:
+        raise ValueError(f"Unknown plan_code: {new_plan_code!r}")
+
+    async with tenant_connection() as conn:
+        # Read current plan
+        current_row = await conn.fetchrow(
+            "SELECT plan_code FROM organizations WHERE id = $1",
+            org_id,
+        )
+        if current_row is None:
+            raise ValueError(f"org_id {org_id} not found")
+        current_plan = current_row["plan_code"] or "pulso"
+
+        if _plan_rank(new_plan_code) >= _plan_rank(current_plan):
+            raise ValueError(
+                f"Downgrade only: {new_plan_code!r} is not smaller than current plan {current_plan!r}. "
+                "Use a different endpoint to upgrade."
+            )
+
+        # Verify kept_location_id belongs to this org
+        loc_row = await conn.fetchrow(
+            "SELECT id FROM locations WHERE id = $1 AND org_id = $2",
+            kept_location_id, org_id,
+        )
+        if loc_row is None:
+            raise ValueError(
+                f"kept_location_id {kept_location_id} does not belong to org {org_id}"
+            )
+
+        effective_at = datetime.now(tz=timezone.utc) + timedelta(days=7)
+        row = await conn.fetchrow(
+            """
+            UPDATE organizations
+               SET pending_plan_code         = $2,
+                   pending_plan_effective_at = $3,
+                   pending_kept_location_id  = $4
+             WHERE id = $1
+            RETURNING plan_code, pending_plan_code,
+                      pending_plan_effective_at, pending_kept_location_id
+            """,
+            org_id, new_plan_code, effective_at, kept_location_id,
+        )
+
+    result = _row_to_dict(row) if row else {}
+    log.info(
+        "plan_limits.downgrade_requested",
+        org_id=org_id,
+        new_plan=new_plan_code,
+        effective_at=effective_at.isoformat(),
+        kept_location_id=kept_location_id,
+    )
+    return result
+
+
+async def db_cancel_downgrade(org_id: int) -> bool:
+    """Clear any pending downgrade for an org.
+
+    Returns True if a pending downgrade existed (and was cleared), False
+    if there was nothing to cancel.
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE organizations
+               SET pending_plan_code         = NULL,
+                   pending_plan_effective_at = NULL,
+                   pending_kept_location_id  = NULL
+             WHERE id = $1
+               AND pending_plan_code IS NOT NULL
+            RETURNING id
+            """,
+            org_id,
+        )
+    existed = row is not None
+    if existed:
+        log.info("plan_limits.downgrade_cancelled", org_id=org_id)
+    return existed
+
+
+async def db_get_pending_downgrade(org_id: int) -> dict | None:
+    """Return the pending downgrade state for an org, or None if none.
+
+    # Requires active tenant_scope(org_id).
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT plan_code, pending_plan_code,
+                   pending_plan_effective_at, pending_kept_location_id
+            FROM organizations
+            WHERE id = $1
+              AND pending_plan_code IS NOT NULL
+            """,
+            org_id,
+        )
+    if row is None:
+        return None
+    return _row_to_dict(row)
+
+
+async def db_apply_due_downgrades() -> list[dict]:
+    """Apply all pending downgrades whose effective_at has passed.
+
+    For each qualifying org:
+    - Sets plan_code = pending_plan_code
+    - Clears the three pending_* fields
+
+    Cross-tenant — MUST be called under bypass_tenant_scope("scheduler_apply_downgrades").
+
+    Returns a list of dicts describing each org that was processed.
+    """
+    with bypass_tenant_scope("scheduler_apply_downgrades"):
+        async with tenant_connection() as conn:
+            rows = await conn.fetch(
+                """
+                UPDATE organizations
+                   SET plan_code                 = pending_plan_code,
+                       pending_plan_code         = NULL,
+                       pending_plan_effective_at = NULL,
+                       pending_kept_location_id  = NULL
+                 WHERE pending_plan_code IS NOT NULL
+                   AND pending_plan_effective_at <= NOW()
+                RETURNING id, plan_code, pending_kept_location_id
+                """,
+            )
+    results = [_row_to_dict(r) for r in rows]
+    if results:
+        log.info(
+            "plan_limits.downgrades_applied",
+            count=len(results),
+            org_ids=[r.get("id") for r in results],
+        )
+    return results

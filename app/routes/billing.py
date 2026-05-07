@@ -4,12 +4,12 @@ Mesio — Rutas de Billing / Facturación
 
 import json
 import os
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
 from app.services import database as db
-from app.routes.deps import get_current_user
+from app.routes.deps import get_current_user, get_current_restaurant_scoped
 from app.services.billing import (
     get_billing_config,
     save_billing_config,
@@ -165,6 +165,115 @@ async def test_connection(request: Request):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+# ── PLAN DOWNGRADE ROUTES ─────────────────────────────────────────────────────
+
+
+class DowngradeRequestPayload(BaseModel):
+    new_plan_code: str
+    kept_location_id: int
+
+
+# Plan sort order (smaller index = smaller plan) — mirrors plan_limits_repo
+_PLAN_ORDER = ["pulso", "restaurante", "pro", "cadena"]
+_PLAN_LOCATIONS = {
+    "pulso": 1,
+    "restaurante": 3,
+    "pro": 10,
+    "cadena": None,  # unlimited
+}
+_PLAN_PRICES = {
+    "pulso": 149_000,
+    "restaurante": 299_000,
+    "pro": 549_000,
+    "cadena": 899_000,
+}
+
+
+@router.get("/plan-options")
+async def plan_options(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """List all plans with sucursales_max and monthly_price_cop for the UI dropdown."""
+    from app.repositories.plan_limits_repo import db_list_plans  # noqa: PLC0415
+    plans = await db_list_plans()
+    result = []
+    for p in plans:
+        code = p["plan_code"]
+        result.append({
+            "plan_code": code,
+            "display_name": p.get("display_name", code.capitalize()),
+            "sucursales_max": p.get("locations_included"),  # None = unlimited
+            "monthly_price_cop": p.get("monthly_price_cop"),
+        })
+    return {"plans": result}
+
+
+@router.get("/plan-status")
+async def plan_status(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Return current plan, pending downgrade state, and list of current sucursales."""
+    from app.repositories.plan_limits_repo import db_get_org_subscription, db_get_pending_downgrade  # noqa: PLC0415
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    org_id = restaurant["id"]
+    sub = await db_get_org_subscription(org_id)
+    pending = await db_get_pending_downgrade(org_id)
+
+    # Fetch current sucursales (locations) under bypass (locations table has no RLS)
+    with bypass_tenant_scope("billing.plan_status.list_locations"):
+        locations = await db.db_get_org_locations(org_id, active_only=False)
+    sucursales = [
+        {"id": loc["id"], "name": loc.get("name", f"Sede {loc['id']}")}
+        for loc in locations
+    ]
+
+    return {
+        "current_plan": sub.get("plan_code"),
+        "current_plan_display": sub.get("plan_display_name"),
+        "current_sucursales": sucursales,
+        "pending_plan": pending.get("pending_plan_code") if pending else None,
+        "effective_at": pending.get("pending_plan_effective_at") if pending else None,
+        "kept_location_id": pending.get("pending_kept_location_id") if pending else None,
+    }
+
+
+@router.post("/request-downgrade")
+async def request_downgrade(
+    payload: DowngradeRequestPayload,
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Schedule a plan downgrade (effective in 7 days).
+
+    Validates: new_plan_code must be smaller than current, kept_location_id
+    must belong to this org.
+    """
+    from app.repositories.plan_limits_repo import db_request_downgrade  # noqa: PLC0415
+
+    org_id = restaurant["id"]
+    try:
+        result = await db_request_downgrade(
+            org_id=org_id,
+            new_plan_code=payload.new_plan_code,
+            kept_location_id=payload.kept_location_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, "pending": result}
+
+
+@router.post("/cancel-downgrade")
+async def cancel_downgrade(
+    restaurant: dict = Depends(get_current_restaurant_scoped),
+):
+    """Cancel a scheduled plan downgrade."""
+    from app.repositories.plan_limits_repo import db_cancel_downgrade  # noqa: PLC0415
+
+    org_id = restaurant["id"]
+    existed = await db_cancel_downgrade(org_id)
+    return {"success": True, "cancelled": existed}
 
 
 @router.get("/providers")

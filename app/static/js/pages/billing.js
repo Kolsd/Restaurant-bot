@@ -883,3 +883,264 @@
   // Bootstrap
   loadMyPlan();
 })();
+
+/* ══════════════════════════════════════════════════════════════════
+   Plan Downgrade module
+   Endpoints consumed:
+     GET  /api/billing/plan-status       (current plan + pending downgrade + sucursales)
+     GET  /api/billing/plan-options      (list of smaller plans for dropdown)
+     POST /api/billing/request-downgrade (body: {new_plan_code, kept_location_id})
+     POST /api/billing/cancel-downgrade  (no body)
+   ══════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var _planStatus     = null;   // loaded from GET /api/billing/plan-status
+  var _planOptions    = null;   // loaded from GET /api/billing/plan-options
+  var _selectedLocId  = null;   // currently selected kept_location_id
+
+  // ── Plan order for "is this a downgrade?" check ────────────────
+  var PLAN_ORDER = ['pulso', 'restaurante', 'pro', 'cadena'];
+
+  function _planRank(code) {
+    var idx = PLAN_ORDER.indexOf((code || '').toLowerCase());
+    return idx === -1 ? 999 : idx;
+  }
+
+  // ── Date formatter ─────────────────────────────────────────────
+  function _fmtDate(iso) {
+    if (!iso) return '';
+    try {
+      var d = new Date(iso);
+      var months = ['enero','febrero','marzo','abril','mayo','junio',
+                    'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      return d.getDate() + ' de ' + months[d.getMonth()] + ' de ' + d.getFullYear();
+    } catch (e) { return iso.substring(0, 10); }
+  }
+
+  // ── Render pending downgrade banner ───────────────────────────
+  function _renderBanner(status) {
+    var banner = document.getElementById('plan-downgrade-banner');
+    if (!banner) return;
+    if (!status || !status.pending_plan) {
+      banner.style.display = 'none';
+      return;
+    }
+    var nameMap = { pulso: 'Pulso', restaurante: 'Restaurante', pro: 'Pro', cadena: 'Cadena' };
+    var planName = nameMap[status.pending_plan] || status.pending_plan;
+    var keptName = '';
+    if (status.kept_location_id && status.current_sucursales) {
+      var found = status.current_sucursales.find(function (s) { return s.id === status.kept_location_id; });
+      if (found) keptName = found.name;
+    }
+    var dateStr = _fmtDate(status.effective_at);
+    var txt = 'Tu plan bajara a ' + planName + ' el ' + dateStr + '.';
+    if (keptName) txt += ' Solo quedara activa la sucursal "' + keptName + '".';
+    var textEl = document.getElementById('downgrade-banner-text');
+    if (textEl) textEl.textContent = txt;
+    banner.style.display = '';
+  }
+
+  // ── Render downgrade form ──────────────────────────────────────
+  function _renderDowngradeForm(status, options) {
+    var card = document.getElementById('plan-downgrade-card');
+    if (!card) return;
+
+    // Only show if there's no pending downgrade already
+    if (status && status.pending_plan) {
+      card.style.display = 'none';
+      return;
+    }
+
+    var select = document.getElementById('select-downgrade-plan');
+    if (!select) return;
+
+    var currentPlan = status ? (status.current_plan || '') : '';
+    var currentRank = _planRank(currentPlan);
+
+    // Populate only plans that are strictly smaller than current
+    select.textContent = '';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '— Selecciona un plan —';
+    select.appendChild(placeholder);
+
+    var hasOptions = false;
+    if (options && options.plans) {
+      options.plans.forEach(function (p) {
+        if (_planRank(p.plan_code) < currentRank) {
+          var opt = document.createElement('option');
+          opt.value = p.plan_code;
+          var priceStr = p.monthly_price_cop ? ' — $' + Number(p.monthly_price_cop).toLocaleString('es-CO') + '/mes' : '';
+          opt.textContent = (p.display_name || p.plan_code) + priceStr;
+          select.appendChild(opt);
+          hasOptions = true;
+        }
+      });
+    }
+
+    // Show the card only when there are downgradeable plans
+    card.style.display = hasOptions ? '' : 'none';
+    _onPlanSelectChange(status);
+  }
+
+  // ── Handle plan select change: show/hide location picker ──────
+  function _onPlanSelectChange(status) {
+    var select = document.getElementById('select-downgrade-plan');
+    var picker  = document.getElementById('downgrade-location-picker');
+    var list    = document.getElementById('downgrade-location-list');
+    var btn     = document.getElementById('btn-submit-downgrade');
+    if (!select || !picker || !list || !btn) return;
+
+    var newPlan = select.value;
+    btn.disabled = !newPlan;
+    _selectedLocId = null;
+
+    if (!newPlan || !status) {
+      picker.style.display = 'none';
+      return;
+    }
+
+    // Determine how many sucursales the new plan allows
+    var planLocLimits = { pulso: 1, restaurante: 3, pro: 10, cadena: null };
+    var newLimit = planLocLimits[newPlan];
+    var sucursales = status.current_sucursales || [];
+
+    if (newLimit !== null && sucursales.length > newLimit) {
+      // Need to pick which one to keep
+      list.textContent = '';
+      sucursales.forEach(function (s) {
+        var label = document.createElement('label');
+        label.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;';
+        var radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'kept-location';
+        radio.value = String(s.id);
+        radio.addEventListener('change', function () {
+          _selectedLocId = s.id;
+          btn.disabled = false;
+        });
+        var span = document.createElement('span');
+        span.textContent = s.name;
+        label.appendChild(radio);
+        label.appendChild(span);
+        list.appendChild(label);
+      });
+      picker.style.display = '';
+      btn.disabled = true; // require location selection
+    } else {
+      // Single sede or plan allows all current sedes — auto-pick first
+      picker.style.display = 'none';
+      _selectedLocId = sucursales.length > 0 ? sucursales[0].id : null;
+      btn.disabled = !newPlan;
+    }
+  }
+
+  // ── Submit downgrade ──────────────────────────────────────────
+  async function _submitDowngrade() {
+    var select = document.getElementById('select-downgrade-plan');
+    var btn    = document.getElementById('btn-submit-downgrade');
+    if (!select || !btn) return;
+
+    var newPlan = select.value;
+    if (!newPlan) { mesioToast('Selecciona un plan', 'error'); return; }
+
+    var keptId = _selectedLocId;
+    if (!keptId && _planStatus && _planStatus.current_sucursales && _planStatus.current_sucursales.length > 0) {
+      keptId = _planStatus.current_sucursales[0].id;
+    }
+    if (!keptId) { mesioToast('Selecciona la sucursal que deseas conservar', 'error'); return; }
+
+    var confirmed = typeof mesioConfirm === 'function'
+      ? await mesioConfirm('Confirmar bajada al plan ' + newPlan + '. Entrara en vigor en 7 dias. Podras cancelarla antes.')
+      : confirm('Confirmar bajada al plan ' + newPlan + '. Entrara en vigor en 7 dias.');
+    if (!confirmed) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Programando...';
+
+    try {
+      var r = await fetch('/api/billing/request-downgrade', {
+        method: 'POST',
+        headers: mesioHeaders(),
+        body: JSON.stringify({ new_plan_code: newPlan, kept_location_id: keptId }),
+      });
+      mesioTrackFetch(r.ok);
+      var d = await r.json();
+      if (!r.ok) throw new Error(d.detail || 'Error al programar bajada');
+      mesioToast('Bajada de plan programada correctamente', 'success');
+      // Reload status
+      await _loadDowngradeStatus();
+    } catch (e) {
+      mesioToast(e.message || 'Error', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Programar bajada de plan';
+    }
+  }
+
+  // ── Cancel downgrade ──────────────────────────────────────────
+  async function _cancelDowngrade() {
+    var confirmed = typeof mesioConfirm === 'function'
+      ? await mesioConfirm('Cancelar la bajada de plan programada?')
+      : confirm('Cancelar la bajada de plan programada?');
+    if (!confirmed) return;
+
+    var btn = document.getElementById('btn-cancel-downgrade');
+    if (btn) { btn.disabled = true; btn.textContent = 'Cancelando...'; }
+
+    try {
+      var r = await fetch('/api/billing/cancel-downgrade', {
+        method: 'POST',
+        headers: mesioHeaders(),
+        body: JSON.stringify({}),
+      });
+      mesioTrackFetch(r.ok);
+      var d = await r.json();
+      if (!r.ok) throw new Error(d.detail || 'Error al cancelar');
+      mesioToast('Bajada de plan cancelada', 'success');
+      await _loadDowngradeStatus();
+    } catch (e) {
+      mesioToast(e.message || 'Error', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Cancelar bajada'; }
+    }
+  }
+
+  // ── Load plan status + options, then render ───────────────────
+  async function _loadDowngradeStatus() {
+    try {
+      var results = await Promise.all([
+        fetch('/api/billing/plan-status',  { headers: mesioHeaders() }),
+        fetch('/api/billing/plan-options', { headers: mesioHeaders() }),
+      ]);
+      mesioTrackFetch(results[0].ok);
+      mesioTrackFetch(results[1].ok);
+
+      if (!results[0].ok || !results[1].ok) return;
+
+      _planStatus  = await results[0].json();
+      _planOptions = await results[1].json();
+
+      _renderBanner(_planStatus);
+      _renderDowngradeForm(_planStatus, _planOptions);
+    } catch (e) {
+      // Fail gracefully — downgrade section stays hidden
+    }
+  }
+
+  // ── Event wiring ───────────────────────────────────────────────
+  var btnCancel = document.getElementById('btn-cancel-downgrade');
+  if (btnCancel) btnCancel.addEventListener('click', _cancelDowngrade);
+
+  var btnSubmit = document.getElementById('btn-submit-downgrade');
+  if (btnSubmit) btnSubmit.addEventListener('click', _submitDowngrade);
+
+  var selectPlan = document.getElementById('select-downgrade-plan');
+  if (selectPlan) {
+    selectPlan.addEventListener('change', function () {
+      _onPlanSelectChange(_planStatus);
+    });
+  }
+
+  // Bootstrap — load after a short defer so the Mi Plan module runs first
+  setTimeout(_loadDowngradeStatus, 100);
+})();

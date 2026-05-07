@@ -789,6 +789,30 @@ async def _run_nps_reminders():
         log.exception("scheduler.nps_cleanup_failed")
 
 
+async def _run_apply_due_downgrades():
+    """Apply any pending plan downgrades whose effective_at has passed.
+
+    Cross-tenant operation: runs under bypass_tenant_scope. Fires every hour
+    (counter % 60 in the scheduler loop).  Emits one structlog event per org
+    processed.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+    from app.repositories.plan_limits_repo import db_apply_due_downgrades  # noqa: PLC0415
+
+    try:
+        with bypass_tenant_scope("scheduler_apply_downgrades"):
+            processed = await db_apply_due_downgrades()
+        for entry in processed:
+            log.info(
+                "org.plan_downgraded",
+                org_id=entry.get("id"),
+                new_plan=entry.get("plan_code"),
+                kept_location_id=entry.get("pending_kept_location_id"),
+            )
+    except Exception:
+        log.exception("scheduler.apply_due_downgrades_failed")
+
+
 async def _renew_or_abort(token: str, ttl_seconds: int = 90) -> bool:
     """
     Renew the scheduler leader lease.  Returns False if the lease was lost
@@ -876,6 +900,13 @@ async def _scheduler_loop():
 
             # Send weekly owner reports (runs every tick; skips internally when not Monday 09:xx)
             await _run_weekly_owner_reports()
+
+            # Apply pending plan downgrades every 60 minutes
+            if _reminder_counter % 60 == 0:
+                await _run_apply_due_downgrades()
+                if not await _renew_or_abort(leader_token):
+                    log.warning("scheduler.tick_aborted_after_apply_downgrades")
+                    continue
 
             # Clean up expired password reset tokens every 60 minutes
             if _reminder_counter % 60 == 0:
