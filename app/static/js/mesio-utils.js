@@ -510,3 +510,102 @@ function mesioTime(isoStr) { return mesioDate(isoStr, { format: 'time' }); }
 
 /** Thin wrapper — returns day + short month + time ("27 abr · 14:30"). */
 function mesioDateTime(isoStr) { return mesioDate(isoStr, { format: 'short' }); }
+
+// ── Floating support button ──────────────────────────────────────
+/**
+ * Injects a fixed bottom-right WhatsApp support button on admin pages.
+ * Skipped on operational KDS/POS pages and public pages (landing, menu, login, demo).
+ * Opened on DOMContentLoaded — safe to call from any admin page that loads mesio-utils.js.
+ */
+(function _mesioSupportButton() {
+  // URL patterns where the button should NOT appear
+  var SKIP_PATHS = [
+    '/caja', '/cocina', '/bar', '/mesero', '/domiciliario', '/staff-hq',
+    '/landing', '/menu', '/login', '/signup', '/demo', '/dashboard-demo',
+    '/r/',   // public QR menu routes
+  ];
+
+  function _shouldShow() {
+    var p = window.location.pathname;
+    for (var i = 0; i < SKIP_PATHS.length; i++) {
+      if (p === SKIP_PATHS[i] || p.startsWith(SKIP_PATHS[i] + '/') || p.startsWith(SKIP_PATHS[i] + '?')) {
+        return false;
+      }
+      // Exact match for paths like '/caja' that may not have trailing slash
+      if (p.replace(/\/$/, '') === SKIP_PATHS[i].replace(/\/$/, '')) return false;
+    }
+    // Only show on known admin paths — don't show on public menu.html etc.
+    var ADMIN_PATHS = [
+      '/dashboard', '/pedidos', '/reservaciones', '/menu-admin', '/menu-engineering',
+      '/nps', '/fidelizacion', '/clientes-riesgo', '/nomina', '/sucursales',
+      '/floorplan', '/equipo', '/settings', '/billing', '/stats',
+      '/internal/analytics', '/internal/monitoring', '/internal/superadmin', '/internal/crm',
+    ];
+    for (var j = 0; j < ADMIN_PATHS.length; j++) {
+      if (p === ADMIN_PATHS[j] || p.startsWith(ADMIN_PATHS[j] + '/')) return true;
+    }
+    return false;
+  }
+
+  function _inject() {
+    if (!_shouldShow()) return;
+    if (document.getElementById('mesio-support-btn')) return; // idempotent
+
+    // Build WhatsApp deep-link pre-filled with restaurant name
+    var restName = '';
+    try {
+      var rb = JSON.parse(localStorage.getItem('rb_restaurant') || '{}');
+      restName = (rb.name || rb.org_name || '').trim();
+    } catch (_) {}
+    var msgText = restName
+      ? 'Hola Mesio, necesito ayuda con mi cuenta de ' + restName
+      : 'Hola Mesio, necesito ayuda';
+    var waUrl = 'https://wa.me/573144914554?text=' + encodeURIComponent(msgText);
+
+    var btn = document.createElement('a');
+    btn.id = 'mesio-support-btn';
+    btn.href = waUrl;
+    btn.target = '_blank';
+    btn.rel = 'noopener noreferrer';
+    btn.setAttribute('aria-label', 'Soporte por WhatsApp');
+    btn.title = 'Soporte por WhatsApp';
+    btn.textContent = '💬';
+    btn.style.cssText = [
+      'position:fixed',
+      'bottom:20px',
+      'right:20px',
+      'width:48px',
+      'height:48px',
+      'border-radius:50%',
+      'background:var(--brand,#1D9E75)',
+      'color:#fff',
+      'font-size:22px',
+      'line-height:48px',
+      'text-align:center',
+      'text-decoration:none',
+      'box-shadow:0 2px 12px rgba(0,0,0,.25)',
+      'z-index:50',
+      'transition:transform .15s,box-shadow .15s',
+      'display:flex',
+      'align-items:center',
+      'justify-content:center',
+    ].join(';');
+
+    btn.addEventListener('mouseenter', function () {
+      btn.style.transform = 'scale(1.1)';
+      btn.style.boxShadow = '0 4px 18px rgba(0,0,0,.3)';
+    });
+    btn.addEventListener('mouseleave', function () {
+      btn.style.transform = '';
+      btn.style.boxShadow = '0 2px 12px rgba(0,0,0,.25)';
+    });
+
+    document.body.appendChild(btn);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _inject);
+  } else {
+    _inject();
+  }
+})();

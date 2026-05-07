@@ -279,7 +279,7 @@ class TestAudioVoiceNotes:
             "app.repositories.restaurant_repo.db_get_org_by_phone",
             AsyncMock(return_value={"id": 1, "name": "Test", "wa_access_token": "tok-test",
                                    "wa_phone_id": "ph1", "whatsapp_number": _BOT_NUMBER,
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
+                                   "menu": {}, "features": {"bot_voice_notes": True}, "matched_location_id": None}),
         )
 
         payload = _worker_audio_payload()
@@ -311,7 +311,7 @@ class TestAudioVoiceNotes:
             "app.repositories.restaurant_repo.db_get_org_by_phone",
             AsyncMock(return_value={"id": 1, "name": "Test", "wa_access_token": "tok-test",
                                    "wa_phone_id": "ph1", "whatsapp_number": _BOT_NUMBER,
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
+                                   "menu": {}, "features": {"bot_voice_notes": True}, "matched_location_id": None}),
         )
 
         payload = _worker_audio_payload()
@@ -344,7 +344,7 @@ class TestAudioVoiceNotes:
             "app.repositories.restaurant_repo.db_get_org_by_phone",
             AsyncMock(return_value={"id": 1, "name": "Test", "wa_access_token": "tok-test",
                                    "wa_phone_id": "ph1", "whatsapp_number": _BOT_NUMBER,
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
+                                   "menu": {}, "features": {"bot_voice_notes": True}, "matched_location_id": None}),
         )
 
         payload = _worker_audio_payload()
@@ -375,7 +375,7 @@ class TestAudioVoiceNotes:
             "app.repositories.restaurant_repo.db_get_org_by_phone",
             AsyncMock(return_value={"id": 1, "name": "Test", "wa_access_token": "tok-test",
                                    "wa_phone_id": "ph1", "whatsapp_number": _BOT_NUMBER,
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
+                                   "menu": {}, "features": {"bot_voice_notes": True}, "matched_location_id": None}),
         )
 
         payload = _worker_audio_payload()
@@ -409,7 +409,7 @@ class TestAudioVoiceNotes:
             "app.repositories.restaurant_repo.db_get_org_by_phone",
             AsyncMock(return_value={"id": 1, "name": "Test", "wa_access_token": "tok-test",
                                    "wa_phone_id": "ph1", "whatsapp_number": _BOT_NUMBER,
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
+                                   "menu": {}, "features": {"bot_voice_notes": True}, "matched_location_id": None}),
         )
 
         payload = _worker_audio_payload()
@@ -441,7 +441,7 @@ class TestAudioVoiceNotes:
             "app.repositories.restaurant_repo.db_get_org_by_phone",
             AsyncMock(return_value={"id": 1, "name": "Test", "wa_access_token": "tok-test",
                                    "wa_phone_id": "ph1", "whatsapp_number": _BOT_NUMBER,
-                                   "menu": {}, "features": {}, "matched_location_id": None}),
+                                   "menu": {}, "features": {"bot_voice_notes": True}, "matched_location_id": None}),
         )
 
         payload = _worker_audio_payload()
@@ -454,6 +454,39 @@ class TestAudioVoiceNotes:
         fallback_text = send_mock.call_args.args[3]
         assert "audio" in fallback_text.lower() or "escrib" in fallback_text.lower(), (
             f"Expected fallback mentioning audio/writing, got: {fallback_text!r}"
+        )
+        process_mock.assert_not_awaited()
+
+    def test_worker_voice_notes_disabled_sends_friendly_fallback(self, monkeypatch):
+        """bot_voice_notes=False (default) → friendly 'solo recibo mensajes escritos'; no transcription."""
+        from app.services import inbox_worker
+
+        download_mock = AsyncMock()
+        send_mock = AsyncMock()
+        process_mock = AsyncMock()
+
+        monkeypatch.setattr("app.services.transcription.download_whatsapp_media", download_mock)
+        monkeypatch.setattr("app.services.meta_api.send_text", send_mock)
+        monkeypatch.setattr("app.routes.chat._process_message", process_mock)
+        monkeypatch.setattr(
+            "app.repositories.restaurant_repo.db_get_org_by_phone",
+            AsyncMock(return_value={"id": 1, "name": "Test", "wa_access_token": "tok-test",
+                                   "wa_phone_id": "ph1", "whatsapp_number": _BOT_NUMBER,
+                                   "menu": {}, "features": {}, "matched_location_id": None}),
+        )
+
+        payload = _worker_audio_payload()
+        asyncio.get_event_loop().run_until_complete(
+            inbox_worker._handle_meta_whatsapp(payload)
+        )
+
+        # Audio download should NOT be called — flag disabled before transcription
+        download_mock.assert_not_awaited()
+        # A friendly message should be sent
+        send_mock.assert_awaited_once()
+        fallback_text = send_mock.call_args.args[3]
+        assert "escrit" in fallback_text.lower() or "mensajes" in fallback_text.lower(), (
+            f"Expected friendly fallback about written messages, got: {fallback_text!r}"
         )
         process_mock.assert_not_awaited()
 

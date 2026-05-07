@@ -443,6 +443,27 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
         log.exception("inbox.phone_blocklist_check_failed", user_phone=user_phone)
 
     # ── Voice note: transcribe before calling _process_message ────────────────
+    # Feature flag: bot_voice_notes must be True (opt-in, default OFF).
+    # If disabled, send a friendly fallback and ack without processing.
+    if payload.get("needs_transcription"):
+        # Normalise features regardless of asyncpg returning dict or JSON string
+        _feats = org.get("features") or {}
+        if isinstance(_feats, str):
+            import json as _json  # noqa: PLC0415
+            try: _feats = _json.loads(_feats)
+            except Exception: _feats = {}
+        if not _feats.get("bot_voice_notes"):
+            log.info("audio.feature_disabled", bot_number=bot_number, user_phone=user_phone)
+            try:
+                await meta_send_text(
+                    bot_number, access_token, user_phone,
+                    "Por ahora solo recibo mensajes escritos 🙏 ¿Me puedes escribir lo que necesitas?",
+                    phone_id=phone_id,
+                )
+            except Exception:
+                log.exception("audio.feature_disabled_send_failed", user_phone=user_phone)
+            return  # ack — do not retry
+
     if payload.get("needs_transcription"):
         audio_id = payload.get("audio_id", "")
 

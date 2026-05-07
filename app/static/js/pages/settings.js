@@ -74,6 +74,9 @@ function renderSettings(r) {
   var notif = (r.features && r.features.notifications) ? r.features.notifications : {};
   renderNotifToggles(notif);
 
+  // Bot features — voice notes
+  renderBotFeatures(r.features || {});
+
   // DIAN — read-only display
   renderDIAN(r.features || {});
 
@@ -198,6 +201,14 @@ function renderNotifToggles(notif) {
   });
 }
 
+// ── Bot features toggles ──────────────────────────────────────────
+function renderBotFeatures(features) {
+  var voiceSw = document.getElementById('bot-sw-voice-notes');
+  if (voiceSw) {
+    if (features.bot_voice_notes) { voiceSw.classList.add('on'); } else { voiceSw.classList.remove('on'); }
+  }
+}
+
 // ── DIAN display (read-only) ──────────────────────────────────────
 function renderDIAN(features) {
   var provEl = document.getElementById('dianProvider');
@@ -248,6 +259,12 @@ function collectFormData() {
     notifications[key] = sw ? sw.classList.contains('on') : true;
   });
 
+  // Bot features
+  var voiceSw = document.getElementById('bot-sw-voice-notes');
+  var botFeatures = {
+    bot_voice_notes: voiceSw ? voiceSw.classList.contains('on') : false,
+  };
+
   var currentFeatures = (_restaurant && _restaurant.features) ? Object.assign({}, _restaurant.features) : {};
 
   // Wompi credentials — empty integrity_secret means "preserve existing" on the server.
@@ -265,11 +282,14 @@ function collectFormData() {
     city: getVal('inputCity'),
     cuisine_type: getVal('inputCuisine'),
     wompi: wompiPayload,
+    // bot feature flags — sent as top-level keys so _features_updatable in
+    // settings_routes.py picks them up and writes them into features JSONB
+    bot_voice_notes: botFeatures.bot_voice_notes,
     features: Object.assign(currentFeatures, {
       opening_hours: opening_hours,
       payment_methods: payment_methods,
       payment_instructions: payment_instructions,
-      notifications: notifications
+      notifications: notifications,
     })
   };
 }

@@ -92,6 +92,8 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu":     features.get("bot_visual_menu", False),
         "catalog_v2_enabled":  features.get("catalog_v2_enabled", True),
+        # Voice notes transcription — opt-in, default OFF
+        "bot_voice_notes":     features.get("bot_voice_notes", False),
         # Wompi config (sensitive: secret never returned plaintext)
         "wompi":               safe_features.get("wompi", {}),
     }
@@ -149,6 +151,8 @@ async def save_settings(request: Request):
         "timezone", "currency", "locale",
         # Catálogo visual v2 — Fase 1
         "bot_visual_menu", "catalog_v2_enabled",
+        # Voice notes transcription — opt-in, default OFF
+        "bot_voice_notes",
         # Extended info — no dedicated DB column; live in features JSONB
         "nit", "city", "cuisine_type", "notifications",
         # Wompi per-restaurant credentials (handled with secret preservation below)
