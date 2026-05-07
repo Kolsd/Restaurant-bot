@@ -7,7 +7,7 @@ All SQL verbatim from the original route handlers.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from app.services.logging import get_logger
@@ -151,7 +151,7 @@ async def db_get_prospects_last_updated() -> Optional[str]:
 async def db_update_prospect(pid: int, updates: dict) -> Optional[dict]:
     """Update arbitrary columns on a prospect. Returns updated row or None if not found."""
     updates = dict(updates)
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
     set_clauses = [f"{k} = ${i + 2}" for i, k in enumerate(updates.keys())]
     values = [pid] + list(updates.values())

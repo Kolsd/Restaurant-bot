@@ -210,7 +210,8 @@ async function loadDailyInsight() {
     // Sanitise: render insight text safely
     // Use textContent only — user data may be embedded in the insight
     textEl.textContent = data.insight || data.text || '';
-  } catch {
+  } catch (e) {
+    console.warn('[dashboard] loadDailyInsight failed', e);
     banner.style.display = 'none';
   }
 }
@@ -324,7 +325,7 @@ async function loadRevenueChart() {
     }
   } catch (e) {
     console.warn('[dashboard] loadRevenueChart failed', e);
-    if (container) container.setAttribute('data-error', 'true');
+    if (container) { container.setAttribute('data-error', 'true'); container.textContent = 'No se pudo cargar'; }
   }
 }
 
@@ -432,7 +433,7 @@ async function loadSalesByChannel() {
     });
   } catch (e) {
     console.warn('[dashboard] loadSalesByChannel failed', e);
-    if (list) list.setAttribute('data-error', 'true');
+    if (list) { list.setAttribute('data-error', 'true'); list.textContent = 'No se pudo cargar'; }
   }
 }
 
@@ -534,7 +535,7 @@ async function loadLiveOrders() {
     });
   } catch (e) {
     console.warn('[dashboard] loadLiveOrders failed', e);
-    if (list) list.setAttribute('data-error', 'true');
+    if (list) { list.setAttribute('data-error', 'true'); list.textContent = 'No se pudo cargar'; }
   }
 }
 
@@ -615,7 +616,7 @@ async function loadPaymentStatus() {
   } catch (e) {
     console.warn('[dashboard] loadPaymentStatus failed', e);
     if (pctEl) pctEl.textContent = '—';
-    if (legendEl) legendEl.setAttribute('data-error', 'true');
+    if (legendEl) { legendEl.setAttribute('data-error', 'true'); legendEl.textContent = 'No se pudo cargar'; }
   }
 }
 
@@ -685,7 +686,7 @@ async function loadTopDishes() {
     });
   } catch (e) {
     console.warn('[dashboard] loadTopDishes failed', e);
-    if (tbody) tbody.setAttribute('data-error', 'true');
+    if (tbody) { tbody.setAttribute('data-error', 'true'); tbody.textContent = 'No se pudo cargar'; }
   }
 }
 
@@ -776,7 +777,7 @@ async function loadInventoryCritical() {
     });
   } catch (e) {
     console.warn('[dashboard] loadInventoryCritical failed', e);
-    if (tbody) tbody.setAttribute('data-error', 'true');
+    if (tbody) { tbody.setAttribute('data-error', 'true'); tbody.textContent = 'No se pudo cargar'; }
   }
 }
 

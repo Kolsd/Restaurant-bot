@@ -550,7 +550,7 @@ async def confirm_deposit_manual(
     already paid (caja double-click safety).
     """
     from app.repositories import reservation_deposits_repo as deposits_repo
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
 
     # Ownership (shared helper — fails closed on cross-org access)
     reservation = await _verify_reservation_ownership(reservation_id, restaurant)
@@ -572,7 +572,7 @@ async def confirm_deposit_manual(
     except Exception:
         user_id = None
 
-    manual_tx_id = f"manual:{user_id or 'caja'}:{_dt.utcnow().isoformat()}Z"
+    manual_tx_id = f"manual:{user_id or 'caja'}:{_dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S')}Z"
 
     result = await deposits_repo.db_confirm_deposit_and_reservation(
         reservation_id, manual_tx_id

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.services.logging import get_logger
 
@@ -55,7 +55,7 @@ async def db_create_password_reset(user_username: str) -> str:
     """
     code = _generate_code()
     code_hash = _hash_code(code)
-    expires_at = datetime.utcnow() + timedelta(minutes=_TTL_MINUTES)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=_TTL_MINUTES)
 
     pool = await _get_pool()
     async with pool.acquire() as conn:
@@ -131,7 +131,7 @@ async def db_consume_password_reset(
             return False, "too_many_attempts"
 
         # Check expiry.
-        if row["expires_at"].replace(tzinfo=None) < datetime.utcnow():
+        if row["expires_at"].replace(tzinfo=None) < datetime.now(timezone.utc).replace(tzinfo=None):
             log.info("password_reset.consume.expired", token_id=token_id)
             return False, "expired"
 

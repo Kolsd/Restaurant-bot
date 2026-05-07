@@ -124,6 +124,7 @@ function _renderQueue(orders) {
       e.stopPropagation();
       _localPlusMins[btn.dataset.id] = (_localPlusMins[btn.dataset.id] || 0) + 2;
       mesioToast('+2 min (local)', 'warning', 1500);
+      _renderQueue(_tickets);
     });
   });
 
@@ -291,6 +292,7 @@ document.addEventListener('keydown', e => {
   if ((e.key === 't' || e.key === 'T') && _selectedIdx >= 0 && _tickets[_selectedIdx]) {
     _localPlusMins[_tickets[_selectedIdx].id] = (_localPlusMins[_tickets[_selectedIdx].id] || 0) + 2;
     mesioToast('+2 min (local)', 'warning', 1500);
+    _renderQueue(_tickets);
   }
 });
 
