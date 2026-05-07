@@ -351,6 +351,38 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                 bot_number    = _normalize_number(raw_bot_number)
                 phone_id      = value.get("metadata", {}).get("phone_number_id", "")
 
+                # 3b. Group-chat guard — WhatsApp Cloud API delivers group messages
+                # with the sender's JID ending in "@g.us".  Mesio must only operate
+                # in individual chats; responding to groups would expose conversations
+                # to all group members and degrade the experience.
+                # We send ONE polite reply (rate-limited per group via Redis) and
+                # skip enqueue so the LLM is never invoked.
+                if user_phone and user_phone.endswith("@g.us"):
+                    log.info("chat.group_message_rejected", group=user_phone, bot_number=bot_number)
+                    _group_ratelimit_key = f"group_reject:{user_phone}:{bot_number}"
+                    try:
+                        from app.services.state_store import rate_limit_check as _rl  # noqa: PLC0415
+                        _should_send = await _rl(_group_ratelimit_key, max_requests=1, window_seconds=86400)
+                    except Exception:
+                        _should_send = True  # fail-open: send the message
+                    if _should_send:
+                        try:
+                            _restaurant_for_group = await db.db_get_restaurant_by_phone(bot_number)
+                            _at = (_restaurant_for_group or {}).get("wa_access_token") or os.getenv("META_ACCESS_TOKEN") or os.getenv("WHATSAPP_TOKEN", "")
+                            _pid = phone_id
+                            if not _pid and _restaurant_for_group:
+                                _pid = _restaurant_for_group.get("wa_phone_id") or phone_id
+                            from app.services.meta_api import send_text as _ms  # noqa: PLC0415
+                            await _ms(
+                                bot_number, _at, user_phone,
+                                "Hola — Mesio solo funciona en chats individuales 🙏 "
+                                "Por favor escríbeme directo a este número.",
+                                phone_id=_pid,
+                            )
+                        except Exception:
+                            log.exception("chat.group_reject_send_failed", group=user_phone)
+                    continue
+
                 # 4. Credenciales dinámicas desde PostgreSQL
                 restaurant = await db.db_get_restaurant_by_phone(bot_number)
                 if restaurant and restaurant.get("wa_access_token"):

@@ -306,6 +306,8 @@ from app.repositories.conversations_repo import (
     db_get_conversation_details,
     db_toggle_bot,
     db_cleanup_old_conversations,
+    db_increment_turns_without_progress,
+    db_reset_turns_without_progress,
 )
 
 

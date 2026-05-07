@@ -87,6 +87,34 @@ async def db_save_history(
                           updated_at=NOW()
         """, phone, bot_number, json.dumps(history[-20:]), branch_id, location_id)
 
+async def db_increment_turns_without_progress(phone: str, bot_number: str) -> int:
+    """Increment turns_without_progress counter and return the new value.
+
+    The row is expected to already exist (chat() calls db_save_history before/after
+    each turn). If the row is missing, this is a no-op and returns 0 (fail-open).
+    """
+    async with _tenant_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE conversations
+               SET turns_without_progress = turns_without_progress + 1
+             WHERE phone=$1 AND bot_number=$2
+            RETURNING turns_without_progress
+            """,
+            phone, bot_number,
+        )
+        return row["turns_without_progress"] if row else 0
+
+
+async def db_reset_turns_without_progress(phone: str, bot_number: str) -> None:
+    """Reset turns_without_progress to 0 after a productive tool call."""
+    async with _tenant_connection() as conn:
+        await conn.execute(
+            "UPDATE conversations SET turns_without_progress = 0 WHERE phone=$1 AND bot_number=$2",
+            phone, bot_number,
+        )
+
+
 async def db_get_all_conversations(bot_number: str = None, branch_id: int | str = None, date_from: str = None, date_to: str = None):
     async with _tenant_connection() as conn:
         conditions = []

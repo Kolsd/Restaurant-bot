@@ -2579,6 +2579,65 @@ async def _call_llm_and_execute(
         log.warning("call_claude.empty_reply", bot_number=bot_number, phone=_ofuscar_phone(user_phone))
         assistant_message = "Disculpa, no te entendí bien. ¿Puedes repetirme lo que necesitas?"
 
+    # ── Anti-conversational session nudge (CEO rule 2026-05-07) ──────────────
+    # If no tool was called this turn, the customer isn't progressing toward an
+    # order. Track consecutive non-productive turns and nudge/close accordingly.
+    # Tool calls that fire real actions (place_order, create_delivery_order,
+    # make_reservation, …) reset the counter to 0.
+    # Wrapped in try/except per Rule 17 — failure must NEVER block the reply.
+    try:
+        from app.repositories.conversations_repo import (  # noqa: PLC0415
+            db_increment_turns_without_progress,
+            db_reset_turns_without_progress,
+        )
+        _PROGRESS_TOOLS = {
+            "place_order", "create_delivery_order", "create_pickup_order",
+            "make_reservation", "add_to_cart", "remove_from_cart",
+            "request_bill", "call_waiter", "redeem_loyalty_points",
+            "send_dish_card", "change_payment_method", "cancel_order",
+            "notify_arrival",
+        }
+        if tool_name and tool_name in _PROGRESS_TOOLS:
+            await db_reset_turns_without_progress(user_phone, bot_number)
+        else:
+            turns = await db_increment_turns_without_progress(user_phone, bot_number)
+            _NUDGE_THRESHOLD   = 4
+            _HANDOFF_THRESHOLD = 6
+            if turns == _NUDGE_THRESHOLD:
+                assistant_message += (
+                    "\n\n¿Te puedo ayudar a hacer un pedido o tienes alguna otra pregunta?"
+                )
+            elif turns >= _HANDOFF_THRESHOLD:
+                assistant_message = (
+                    "Muchas gracias por escribirnos. Si en algún momento quieres hacer un "
+                    "pedido o tienes una pregunta, con gusto te atiendo. 😊"
+                )
+                # Best-effort: create a human_handoff waiter_alert so staff can follow up
+                try:
+                    table_id   = (table_context or {}).get("id") or ""
+                    table_name = (table_context or {}).get("name") or ""
+                    await db.db_create_waiter_alert(
+                        phone=user_phone,
+                        bot_number=bot_number,
+                        alert_type="human_handoff",
+                        message=(
+                            f"Cliente {user_phone[-4:]} lleva {turns} mensajes sin avanzar. "
+                            "Considera hacer seguimiento."
+                        ),
+                        table_id=str(table_id),
+                        table_name=table_name,
+                    )
+                except Exception:
+                    log.exception(
+                        "anti_conversational.waiter_alert_failed",
+                        phone=_ofuscar_phone(user_phone),
+                    )
+    except Exception:
+        log.exception(
+            "anti_conversational.counter_failed",
+            phone=_ofuscar_phone(user_phone),
+        )
+
     return assistant_message, routing_context
 
 
