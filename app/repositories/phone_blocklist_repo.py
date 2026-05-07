@@ -98,23 +98,21 @@ async def is_phone_blocked(phone: str) -> dict | None:
     """Return the active block row for *phone* or None.
 
     Cross-tenant: a phone blocked by ANY org is flagged everywhere.
-    This MUST be called inside bypass_tenant_scope so that the RLS
-    org_isolation policy does not filter out blocks from other orgs.
-
-    # Requires bypass_tenant_scope().
+    The internal bypass is applied here so callers don't need to wrap.
     """
-    async with _conn() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, phone, org_id, reason, blocked_by, blocked_until, created_at
-            FROM phone_blocklist
-            WHERE phone = $1
-              AND blocked_until > NOW()
-            ORDER BY blocked_until DESC
-            LIMIT 1
-            """,
-            phone,
-        )
+    with bypass_tenant_scope("phone_blocklist.is_phone_blocked: cross-tenant check"):
+        async with _conn() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, phone, org_id, reason, blocked_by, blocked_until, created_at
+                FROM phone_blocklist
+                WHERE phone = $1
+                  AND blocked_until > NOW()
+                ORDER BY blocked_until DESC
+                LIMIT 1
+                """,
+                phone,
+            )
         if row is None:
             return None
         d = dict(row)

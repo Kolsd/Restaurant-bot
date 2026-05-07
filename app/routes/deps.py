@@ -19,6 +19,8 @@ from fastapi import Request, HTTPException, Depends
 from app.services.auth import verify_token
 from app.services import database as db
 from app.services.logging import get_logger
+from app.services.tenant_context import bypass_tenant_scope
+from app.services.tenant_db import tenant_connection
 
 _log = get_logger(__name__)
 
@@ -50,22 +52,25 @@ async def get_current_user(request: Request) -> dict:
 
     if username.startswith("staff:"):
         staff_id = username.split(":", 1)[1]
-        pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            # Note: s.org_id and s.restaurant_id both exist at DB revision 0036.
-            # We use s.org_id aliased as restaurant_id because it is reliably populated
-            # by the auto-populate trigger for every row, and is the canonical tenant key
-            # going forward (Wave 1).  For Matriz restaurants org_id == restaurant_id so
-            # downstream code that treats this value as "restaurant_id" still works.
-            # The JOIN to restaurants is dropped: parent_restaurant_id is unused by
-            # callers (staff is always scoped to an Org/Location, not a legacy branch).
-            query = """
-                SELECT s.org_id AS restaurant_id, s.role, s.roles,
-                       NULL::int AS parent_restaurant_id
-                FROM staff s
-                WHERE s.id::text = $1
-            """
-            staff_member = await conn.fetchrow(query, str(staff_id))
+        # Cross-tenant pre-auth: we don't know the org yet, so we bypass RLS
+        # to look up the staff member by PK, then the rest of the request runs
+        # under the correct tenant scope.
+        with bypass_tenant_scope("deps.get_current_user.pre_auth_staff_resolution"):
+            async with tenant_connection() as conn:
+                # Note: s.org_id and s.restaurant_id both exist at DB revision 0036.
+                # We use s.org_id aliased as restaurant_id because it is reliably populated
+                # by the auto-populate trigger for every row, and is the canonical tenant key
+                # going forward (Wave 1).  For Matriz restaurants org_id == restaurant_id so
+                # downstream code that treats this value as "restaurant_id" still works.
+                # The JOIN to restaurants is dropped: parent_restaurant_id is unused by
+                # callers (staff is always scoped to an Org/Location, not a legacy branch).
+                query = """
+                    SELECT s.org_id AS restaurant_id, s.role, s.roles,
+                           NULL::int AS parent_restaurant_id
+                    FROM staff s
+                    WHERE s.id::text = $1
+                """
+                staff_member = await conn.fetchrow(query, str(staff_id))
 
             if staff_member:
                 # branch_id is always the restaurant_id (parent or branch)

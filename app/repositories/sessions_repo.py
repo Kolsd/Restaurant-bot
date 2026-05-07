@@ -13,7 +13,7 @@ Lookup strategy (two-phase, one release cycle):
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.services.database import get_pool
 from app.services.logging import get_logger
@@ -32,7 +32,7 @@ async def create_session(username: str) -> str:
     """Generate a new session token, persist only its hash, return the raw token."""
     raw = secrets.token_hex(32)
     token_hash = _hash_token(raw)
-    expires = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+    expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=SESSION_TTL_HOURS)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -116,23 +116,19 @@ async def cleanup_expired_sessions() -> int:
 # ---------------------------------------------------------------------------
 
 async def db_save_session(token: str, username: str) -> None:
-    """Persist a new session storing both the SHA-256 hash and the raw token."""
-    raw = token
-    token_hash = _hash_token(raw)
-    expires = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+    """Persist a new session storing only the SHA-256 hash (no plaintext).
+
+    Legacy callers still work; hash-only rows are resolved by get_session phase 1.
+    """
+    token_hash = _hash_token(token)
+    expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=SESSION_TTL_HOURS)
     pool = await get_pool()
     async with pool.acquire() as conn:
-        try:
-            await conn.execute(
-                "INSERT INTO sessions (token, token_hash, username, expires_at) VALUES ($1, $2, $3, $4)",
-                raw, token_hash, username, expires,
-            )
-        except Exception:
-            # Fallback: migration 0009 not yet applied in this environment.
-            await conn.execute(
-                "INSERT INTO sessions (token, username, expires_at) VALUES ($1, $2, $3)",
-                raw, username, expires,
-            )
+        await conn.execute(
+            "INSERT INTO sessions (token_hash, username, expires_at) VALUES ($1, $2, $3)",
+            token_hash, username, expires,
+        )
+    log.info("session.created.hash_only", username_prefix=username[:6] + "***")
 
 
 async def db_get_session(token: str) -> str | None:

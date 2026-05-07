@@ -10,11 +10,12 @@ import httpx
 import base64
 import hashlib
 from abc import ABC, abstractmethod
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 from app.services import database as db
 from app.services.database import UsageLimitExceeded
 from app.services.logging import get_logger
+from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
 
@@ -24,7 +25,7 @@ def _today_iso() -> str:
     return date.today().isoformat()
 
 def _now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -675,7 +676,7 @@ class MesioNativeAdapter(BillingAdapter):
         total_cents    = subtotal_cents + tax_cents
 
         # Fechas y hora
-        now        = datetime.utcnow()
+        now        = datetime.now(timezone.utc).replace(tzinfo=None)
         issue_date = now.strftime("%Y-%m-%d")
         issue_time = now.strftime("%H:%M:%S")
 
@@ -1184,8 +1185,7 @@ async def get_billing_config(restaurant_id: int) -> Optional[dict]:
     The `restaurant_id` param may be an org_id (Matriz) or a location_id
     (Sucursal) — both resolve to the same org_id via the locations table.
     """
-    pool  = await db.get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """SELECT o.billing_config
                FROM organizations o
@@ -1200,8 +1200,7 @@ async def get_billing_config(restaurant_id: int) -> Optional[dict]:
 
 async def save_billing_config(restaurant_id: int, config: dict) -> None:
     """Writes billing_config to organizations (org-level config)."""
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         await conn.execute(
             """UPDATE organizations
                SET billing_config = $1::jsonb
@@ -1211,8 +1210,7 @@ async def save_billing_config(restaurant_id: int, config: dict) -> None:
         )
 
 async def get_billing_log(restaurant_id: int, limit: int = 50) -> list:
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """SELECT * FROM billing_log
                WHERE org_id=$1
@@ -1224,8 +1222,7 @@ async def get_billing_log(restaurant_id: int, limit: int = 50) -> list:
 async def log_billing_event(restaurant_id: int, order_id: str,
                             provider: str, status: str,
                             external_id: str = "", error: str = "") -> None:
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         await conn.execute(
             """INSERT INTO billing_log
                (org_id, order_id, provider, status, external_id, error_message)
