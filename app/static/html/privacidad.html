@@ -3,29 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Política de Privacidad - Mesio</title>
+<title>Política de Privacidad y Tratamiento de Datos - Mesio</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/landing.css">
 <style>
-  /* NUEVO: Fondo blanco y textos oscuros */
   body { background: #fff; color: #333; padding-bottom: 100px; }
-  
-  .legal-container { 
-    max-width: 800px; margin: 100px auto 50px; padding: 0 20px; 
-    line-height: 1.6; font-family: 'Instrument Sans', sans-serif; 
+  .legal-container {
+    max-width: 800px; margin: 100px auto 50px; padding: 0 20px;
+    line-height: 1.7; font-family: 'Instrument Sans', sans-serif;
   }
-  
-  /* NUEVO: Textos limpios y color verde Mesio para títulos */
-  .legal-container h1 { font-family: 'Fraunces', serif; font-size: 2.5rem; margin-bottom: 10px; color: #111; }
-  .legal-container h2 { font-family: 'Fraunces', serif; font-size: 1.5rem; margin-top: 30px; margin-bottom: 15px; color: #222; }
-  
-  .legal-container p, .legal-container ul { margin-bottom: 15px; font-size: 1.05rem; }
-  .legal-container ul { padding-left: 20px; }
-  
-  /* NUEVO: Enlaces en verde Mesio */
-  .legal-container a { color: var(--brand, #1D9E75); text-decoration: none; font-weight: 600; } /* lint-allow: legal page has no tokens.css, fallback needed */
+  .legal-container h1 { font-family: 'Fraunces', serif; font-size: 2.5rem; margin-bottom: 8px; color: #111; }
+  .legal-container h2 { font-family: 'Fraunces', serif; font-size: 1.4rem; margin-top: 36px; margin-bottom: 12px; color: #222; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+  .legal-container p, .legal-container ul, .legal-container ol { margin-bottom: 14px; font-size: 1rem; }
+  .legal-container ul, .legal-container ol { padding-left: 22px; }
+  .legal-container li { margin-bottom: 6px; }
+  .legal-container a { color: var(--brand, #1D9E75); text-decoration: none; font-weight: 600; } /* lint-allow: legal page loads landing.css not tokens.css; #1D9E75 is fallback only */
   .legal-container a:hover { text-decoration: underline; }
+  .legal-meta { background: #f9f9f9; border-left: 4px solid #1D9E75; padding: 12px 16px; margin-bottom: 28px; border-radius: 4px; font-size: 0.95rem; }
+  .legal-footer-note { margin-top: 48px; padding: 20px; background: #f9f9f9; border-radius: 8px; font-size: 0.95rem; }
 </style>
 </head>
 <body>
@@ -35,32 +31,113 @@
 </nav>
 
 <div class="legal-container">
-  <h1>Política de Privacidad</h1>
-  <p><strong>Última actualización:</strong> Marzo de 2026</p>
+  <h1>Política de Privacidad y Tratamiento de Datos Personales</h1>
+  <div class="legal-meta">
+    <strong>Última actualización:</strong> 7 de mayo de 2026 &nbsp;·&nbsp;
+    <strong>Versión:</strong> 2.0 &nbsp;·&nbsp;
+    Aplica a todos los usuarios de la plataforma Mesio.
+  </div>
 
-  <h2>1. Información General</h2>
-  <p>La plataforma "Mesio" (en adelante, "Nosotros" o "La Plataforma") respeta su privacidad. Esta política explica cómo recopilamos, usamos y protegemos su información personal al utilizar nuestros servicios de bot de WhatsApp y catálogo web para restaurantes.</p>
+  <h2>1. Responsable del Tratamiento</h2>
+  <p>El responsable del tratamiento de datos personales es <strong>{NOMBRE_LEGAL}</strong>, con NIT <strong>{NIT}</strong>, domiciliada en <strong>{DIRECCION_REGISTRADA}</strong>, Bogotá D.C., Colombia, que opera la plataforma tecnológica bajo la marca <strong>Mesio</strong>.</p>
+  <p>Para cualquier consulta, solicitud o ejercicio de derechos relacionados con sus datos, puede contactarnos en: <a href="mailto:legal@mesio.app">legal@mesio.app</a>.</p>
 
-  <h2>2. Datos que Recopilamos</h2>
+  <h2>2. Marco Legal Aplicable</h2>
+  <p>Esta política se rige por la <strong>Ley Estatutaria 1581 de 2012</strong> (Ley de Hábeas Data), el <strong>Decreto 1377 de 2013</strong> y demás normas concordantes de la República de Colombia sobre protección de datos personales. El tratamiento de datos aquí descrito ha sido registrado ante la <strong>Superintendencia de Industria y Comercio (SIC)</strong> conforme al artículo 25 de la Ley 1581. <em>(Nota interna: pendiente confirmación del número de registro ante SIC.)</em></p>
+
+  <h2>3. Datos Personales que Recopilamos</h2>
+  <p><strong>De los restaurantes (clientes de Mesio):</strong></p>
   <ul>
-    <li><strong>De los Restaurantes:</strong> Información de contacto, número de WhatsApp, dirección, menú y credenciales de acceso a sistemas contables de terceros (si eligen la integración).</li>
-    <li><strong>De los Comensales:</strong> Número de teléfono de WhatsApp, contenido de los mensajes enviados al bot, selecciones de pedidos e historial de interacción con el restaurante. No almacenamos datos de tarjetas de crédito (los pagos se procesan a través de pasarelas externas seguras).</li>
+    <li>Nombre del negocio, número de WhatsApp Business, dirección física y correo electrónico del administrador.</li>
+    <li>Credenciales de acceso a la plataforma (contraseña almacenada con cifrado bcrypt; nunca en texto plano).</li>
+    <li>Datos de facturación: nombre o razón social, NIT/cédula, dirección de facturación.</li>
+    <li>Información del menú, catálogo de productos, precios y configuración operativa.</li>
+    <li>Datos del personal: nombre, número de documento, salario, horarios (para la funcionalidad de nómina).</li>
+  </ul>
+  <p><strong>De los comensales (usuarios finales del bot de WhatsApp):</strong></p>
+  <ul>
+    <li>Número de teléfono de WhatsApp e identificador de usuario de Meta.</li>
+    <li>Contenido de los mensajes enviados al bot del restaurante.</li>
+    <li>Historial de pedidos, reservaciones y preferencias declaradas.</li>
+    <li>Puntuaciones NPS y comentarios de satisfacción.</li>
+  </ul>
+  <p><strong>No almacenamos:</strong> números de tarjeta de crédito, datos bancarios ni credenciales de sistemas de pago. Los pagos son procesados directamente por pasarelas externas (Wompi); Mesio recibe únicamente la confirmación de la transacción.</p>
+
+  <h2>4. Finalidades del Tratamiento</h2>
+  <p>Sus datos serán tratados exclusivamente para las siguientes finalidades:</p>
+  <ol>
+    <li>Prestar el servicio de bot de atención al cliente por WhatsApp, gestión de pedidos y reservaciones.</li>
+    <li>Procesar pagos y generar facturas electrónicas conforme a la normativa DIAN.</li>
+    <li>Operar el módulo de nómina y personal del restaurante.</li>
+    <li>Enviar notificaciones operativas relacionadas con el servicio (confirmaciones de pedido, alertas de sistema).</li>
+    <li>Mejorar los modelos de inteligencia artificial de respuesta del bot mediante datos anonimizados o agregados.</li>
+    <li>Cumplir obligaciones legales, fiscales y regulatorias aplicables en Colombia.</li>
+    <li>Atender solicitudes de soporte técnico y atención al cliente.</li>
+  </ol>
+  <p><strong>No utilizamos sus datos</strong> para venta a terceros, publicidad de terceros, ni elaboración de perfiles con fines distintos a los descritos.</p>
+
+  <h2>5. Proveedores de Terceros (Subprocesadores)</h2>
+  <p>Para prestar el servicio compartimos datos estrictamente necesarios con los siguientes proveedores, todos sujetos a contratos de confidencialidad y cumplimiento de sus respectivas políticas de privacidad:</p>
+  <ul>
+    <li><strong>Meta Platforms, Inc.</strong> — WhatsApp Business API. Datos compartidos: número de teléfono, mensajes de texto, identificador de usuario. <a href="https://www.whatsapp.com/legal/privacy-policy" target="_blank" rel="noopener">Política de Meta</a>.</li>
+    <li><strong>Anthropic, PBC</strong> — Modelo de lenguaje Claude (procesamiento del bot de IA). Datos compartidos: texto de los mensajes para generación de respuesta. <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener">Política de Anthropic</a>.</li>
+    <li><strong>OpenAI, LLC</strong> — Transcripción de mensajes de voz (Whisper API), cuando el comensal envía notas de audio. <a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener">Política de OpenAI</a>.</li>
+    <li><strong>Cloudinary, Inc.</strong> — Almacenamiento y entrega de imágenes del catálogo del restaurante. <a href="https://cloudinary.com/privacy" target="_blank" rel="noopener">Política de Cloudinary</a>.</li>
+    <li><strong>Wompi (Bancolombia S.A.)</strong> — Pasarela de pagos en línea. Datos compartidos: referencia de orden y monto; los datos de pago del comensal son ingresados directamente en los servidores de Wompi. <a href="https://wompi.com/es/privacidad" target="_blank" rel="noopener">Política de Wompi</a>.</li>
+    <li><strong>Railway Technologies, Inc.</strong> — Infraestructura de servidores (cloud hosting). Los servidores están ubicados en EE. UU.; el tratamiento se rige por el Privacy Shield / Cláusulas Contractuales Tipo de la UE como referencia de adecuación.</li>
   </ul>
 
-  <h2>3. Uso de la Información</h2>
-  <p>Utilizamos los datos exclusivamente para procesar los pedidos, gestionar reservaciones, responder preguntas sobre el menú, mejorar la experiencia de inteligencia artificial y, con el consentimiento del restaurante, sincronizar las ventas con su sistema contable.</p>
+  <h2>6. Conservación de los Datos</h2>
+  <p>Los datos del restaurante y sus operaciones se conservan durante la vigencia de la suscripción y por <strong>12 meses adicionales</strong> tras la cancelación, con el fin de cumplir obligaciones fiscales y permitir la exportación de información histórica.</p>
+  <p>Los datos de comensales (historial de mensajes y pedidos) se conservan mientras el restaurante sea cliente activo. Tras la cancelación, se eliminan dentro del mismo período de 12 meses.</p>
+  <p>Los datos de nómina y contratos laborales se conservan por <strong>5 años</strong> conforme al Código Sustantivo del Trabajo colombiano.</p>
 
-  <h2>4. Proveedores de Terceros</h2>
-  <p>Para brindar nuestro servicio, compartimos datos estrictamente necesarios con proveedores tecnológicos como Meta (para el servicio de WhatsApp Business API) y proveedores de Inteligencia Artificial. Todos operan bajo estrictas normativas de confidencialidad.</p>
+  <h2>7. Derechos del Titular de los Datos (Hábeas Data)</h2>
+  <p>Conforme a la Ley 1581 de 2012, usted tiene derecho a:</p>
+  <ul>
+    <li><strong>Conocer</strong> los datos personales que Mesio tiene sobre usted.</li>
+    <li><strong>Actualizar o corregir</strong> datos inexactos, incompletos o desactualizados.</li>
+    <li><strong>Solicitar la supresión</strong> de sus datos cuando no exista obligación legal de conservarlos.</li>
+    <li><strong>Revocar la autorización</strong> para el tratamiento de sus datos.</li>
+    <li><strong>Acceder gratuitamente</strong> a sus datos al menos una vez al mes.</li>
+    <li><strong>Presentar quejas</strong> ante la Superintendencia de Industria y Comercio (SIC) si considera que sus derechos han sido vulnerados.</li>
+  </ul>
 
-  <h2 id="eliminacion-datos">5. Instrucciones para la Eliminación de Datos (Data Deletion)</h2>
-  <p>De acuerdo con las normativas de privacidad y las políticas de Meta, usted tiene derecho a solicitar la eliminación de todos sus datos personales de nuestros servidores.</p>
-  <p>Para solicitar la eliminación inmediata de sus datos (ya sea usted un restaurante o un comensal), envíe un correo electrónico a <strong>miguel@mesioai.com</strong> con el asunto "Solicitud de Eliminación de Datos" e incluya el número de teléfono asociado. Sus datos serán eliminados permanentemente de nuestra base de datos en un plazo máximo de 7 días hábiles.</p>
+  <h2 id="eliminacion-datos">8. Cómo Ejercer sus Derechos (Habeas Data / Solicitud de Eliminación)</h2>
+  <p>Para ejercer cualquier derecho descrito en la sección anterior, envíe un correo a <a href="mailto:legal@mesio.app">legal@mesio.app</a> con:</p>
+  <ul>
+    <li>Asunto: <strong>"Solicitud de Datos — [tipo de solicitud]"</strong> (p.ej. "Solicitud de Datos — Eliminación").</li>
+    <li>Nombre completo o nombre del restaurante.</li>
+    <li>Número de teléfono WhatsApp asociado a su cuenta.</li>
+    <li>Descripción detallada de su solicitud.</li>
+  </ul>
+  <p>Responderemos en un plazo máximo de <strong>10 días hábiles</strong> para confirmar recepción, y resolveremos la solicitud en los plazos establecidos por la Ley 1581 (máximo 15 días hábiles para consultas y 15 días hábiles para reclamos, prorrogables conforme a la ley).</p>
 
-  <h2>6. Contacto</h2>
-  <p>Si tiene alguna duda sobre esta política, contáctenos en <a href="mailto:miguel@mesioai.com">miguel@mesioai.com</a>.</p>
+  <h2>9. Seguridad de los Datos</h2>
+  <p>Implementamos medidas técnicas y organizativas para proteger sus datos: cifrado de contraseñas con bcrypt, tokens de sesión almacenados como hashes SHA-256, transmisión por HTTPS/TLS, aislamiento multi-tenant por registro de base de datos (Row-Level Security en PostgreSQL), y acceso con principio de mínimo privilegio.</p>
+
+  <h2>10. Cookies y Tecnologías de Rastreo</h2>
+  <p>El panel de administración de Mesio utiliza cookies de sesión estrictamente necesarias para mantener la autenticación del usuario. No utilizamos cookies de seguimiento de terceros, píxeles de publicidad ni herramientas de analítica de comportamiento con fines comerciales. Las cookies de sesión expiran al cerrar el navegador o tras 72 horas de inactividad.</p>
+
+  <h2>11. Transferencias Internacionales de Datos</h2>
+  <p>Algunos de nuestros proveedores tecnológicos (Anthropic, OpenAI, Railway) procesan datos en servidores ubicados en los Estados Unidos. Estas transferencias se realizan bajo contratos que garantizan niveles de protección equivalentes a los exigidos por la Ley 1581 de 2012. Al utilizar el servicio, usted autoriza expresamente estas transferencias internacionales cuando sean necesarias para prestar el servicio.</p>
+
+  <h2>12. Modificaciones a esta Política</h2>
+  <p>Podemos actualizar esta política para reflejar cambios en el servicio o en la regulación aplicable. Publicaremos la nueva versión en esta página con la fecha de actualización. Si los cambios son sustanciales, notificaremos al correo electrónico registrado en su cuenta con al menos 15 días de anticipación.</p>
+
+  <div class="legal-footer-note">
+    <strong>¿Tienes preguntas sobre esta política?</strong><br>
+    Escríbenos a <a href="mailto:legal@mesio.app">legal@mesio.app</a> — respondemos en máximo 2 días hábiles.<br><br>
+    También puedes contactarnos vía WhatsApp: <a href="https://wa.me/573144914554">+57 314 491 4554</a>
+  </div>
 </div>
 
-<footer><p>© 2026 Mesio · Bogotá, Colombia</p></footer>
+<footer class="footer" style="background:#111; color:#aaa; padding: 24px 40px; text-align:center; font-size:0.9rem;">
+  <p>© 2026 Mesio · Bogotá, Colombia &nbsp;·&nbsp;
+  <a href="/terminos" style="color:#1D9E75;">Términos y Condiciones</a> &nbsp;·&nbsp;
+  <a href="/privacidad" style="color:#1D9E75;">Política de Privacidad</a> &nbsp;·&nbsp;
+  <a href="https://wa.me/573144914554" style="color:#1D9E75;">Soporte</a>
+  </p>
+</footer>
 </body>
 </html>

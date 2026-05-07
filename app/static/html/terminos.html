@@ -3,30 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Términos y Condiciones - Mesio</title>
+<title>Términos y Condiciones de Servicio - Mesio</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/landing.css">
 <style>
- /* NUEVO: Fondo blanco y textos oscuros */
- body { background: #fff; color: #333; padding-bottom: 100px; }
-  
-  .legal-container { 
-    max-width: 800px; margin: 100px auto 50px; padding: 0 20px; 
-    line-height: 1.6; font-family: 'Instrument Sans', sans-serif; 
+  body { background: #fff; color: #333; padding-bottom: 100px; }
+  .legal-container {
+    max-width: 800px; margin: 100px auto 50px; padding: 0 20px;
+    line-height: 1.7; font-family: 'Instrument Sans', sans-serif;
   }
-  
-  /* NUEVO: Textos limpios y color verde Mesio para títulos */
-  .legal-container h1 { font-family: 'Fraunces', serif; font-size: 2.5rem; margin-bottom: 10px; color: #111; }
-  .legal-container h2 { font-family: 'Fraunces', serif; font-size: 1.5rem; margin-top: 30px; margin-bottom: 15px; color: #222; }
-  
-  .legal-container p, .legal-container ul { margin-bottom: 15px; font-size: 1.05rem; }
-  .legal-container ul { padding-left: 20px; }
-  
-  /* NUEVO: Enlaces en verde Mesio */
+  .legal-container h1 { font-family: 'Fraunces', serif; font-size: 2.5rem; margin-bottom: 8px; color: #111; }
+  .legal-container h2 { font-family: 'Fraunces', serif; font-size: 1.4rem; margin-top: 36px; margin-bottom: 12px; color: #222; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+  .legal-container p, .legal-container ul, .legal-container ol { margin-bottom: 14px; font-size: 1rem; }
+  .legal-container ul, .legal-container ol { padding-left: 22px; }
+  .legal-container li { margin-bottom: 6px; }
   .legal-container a { color: var(--brand, #1D9E75); text-decoration: none; font-weight: 600; } /* lint-allow: legal page has no tokens.css, fallback needed */
   .legal-container a:hover { text-decoration: underline; }
-  
+  .legal-meta { background: #f9f9f9; border-left: 4px solid #1D9E75; padding: 12px 16px; margin-bottom: 28px; border-radius: 4px; font-size: 0.95rem; }
+  .legal-footer-note { margin-top: 48px; padding: 20px; background: #f9f9f9; border-radius: 8px; font-size: 0.95rem; }
+  .plan-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.95rem; }
+  .plan-table th { background: #111; color: #fff; padding: 10px 12px; text-align: left; }
+  .plan-table td { padding: 9px 12px; border-bottom: 1px solid #eee; }
+  .plan-table tr:last-child td { border-bottom: none; }
 </style>
 </head>
 <body>
@@ -37,27 +36,124 @@
 
 <div class="legal-container">
   <h1>Términos y Condiciones de Servicio</h1>
-  <p><strong>Última actualización:</strong> Marzo de 2026</p>
+  <div class="legal-meta">
+    <strong>Última actualización:</strong> 7 de mayo de 2026 &nbsp;·&nbsp;
+    <strong>Versión:</strong> 2.0 &nbsp;·&nbsp;
+    Aplica a todos los suscriptores activos e históricos de la plataforma Mesio.
+  </div>
 
   <h2>1. Aceptación de los Términos</h2>
-  <p>Al acceder y utilizar la plataforma Mesio, usted acepta estar sujeto a estos Términos y Condiciones. Si no está de acuerdo con alguna parte, no debe utilizar nuestros servicios.</p>
+  <p>Al crear una cuenta, acceder o usar la plataforma Mesio, usted (en adelante el <strong>"Cliente"</strong>) acepta estar sujeto a estos Términos y Condiciones en su totalidad. Si actúa en nombre de una empresa, declara tener facultades para vincular a dicha empresa. Si no está de acuerdo con alguna parte de estos términos, no debe utilizar el servicio.</p>
+  <p>El proveedor del servicio es <strong>{NOMBRE_LEGAL}</strong>, NIT <strong>{NIT}</strong>, domiciliada en <strong>{DIRECCION_REGISTRADA}</strong>, Bogotá D.C., Colombia (en adelante <strong>"Mesio"</strong>).</p>
 
   <h2>2. Descripción del Servicio</h2>
-  <p>Mesio provee una plataforma de software como servicio (SaaS) que permite a los restaurantes gestionar pedidos, atención al cliente y reservaciones mediante un bot impulsado por Inteligencia Artificial en WhatsApp, así como catálogos web vía códigos QR.</p>
+  <p>Mesio es una plataforma de software como servicio (SaaS) que permite a restaurantes y negocios de alimentos gestionar, a través de un número de WhatsApp Business propio:</p>
+  <ul>
+    <li>Atención al cliente e inteligencia artificial conversacional (bot).</li>
+    <li>Pedidos a domicilio, para recoger y en mesa (punto de venta).</li>
+    <li>Reservaciones y gestión de capacidad del salón.</li>
+    <li>Catálogo digital con código QR.</li>
+    <li>Gestión de personal, nómina y propinas.</li>
+    <li>Facturación electrónica DIAN (módulo complementario).</li>
+    <li>Programa de fidelización (puntos y recompensas).</li>
+    <li>Panel de análisis y estadísticas de operación.</li>
+  </ul>
+  <p>Las funcionalidades disponibles dependen del plan de suscripción contratado y de los módulos adicionales activados.</p>
 
-  <h2>3. Uso de la API de WhatsApp</h2>
-  <p>Al utilizar Mesio, usted acepta cumplir con las <a href="https://www.whatsapp.com/legal/business-policy/" target="_blank">Políticas de Comercio de WhatsApp</a>. Mesio no se hace responsable por bloqueos o suspensiones de números de WhatsApp por parte de Meta debido al mal uso, spam o incumplimiento de sus políticas por parte del restaurante.</p>
+  <h2>3. Planes de Suscripción y Precios</h2>
+  <p>Mesio ofrece los siguientes planes mensuales (precios en COP, más IVA según la tarifa vigente):</p>
+  <table class="plan-table">
+    <thead>
+      <tr><th>Plan</th><th>Precio mensual</th><th>Conversaciones incluidas</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Pulso</strong></td><td>$149.000 COP</td><td>Según límite del plan</td></tr>
+      <tr><td><strong>Restaurante</strong></td><td>$299.000 COP</td><td>Según límite del plan</td></tr>
+      <tr><td><strong>Pro</strong></td><td>$549.000 COP</td><td>Según límite del plan</td></tr>
+      <tr><td><strong>Cadena</strong></td><td>$899.000 COP</td><td>Multi-sede, según límite</td></tr>
+    </tbody>
+  </table>
+  <p>Los detalles actualizados de cada plan (conversaciones incluidas, módulos disponibles, límites de sucursales) están publicados en <a href="/#precios">la página de precios</a>. Mesio se reserva el derecho de ajustar los precios con previo aviso de 30 días al correo registrado.</p>
+  <p><strong>Paquetes de conversaciones adicionales (Auto-recarga):</strong> Cuando el Cliente agota las conversaciones de su plan, puede activar la recarga automática de paquetes de 100 conversaciones por $50.000 COP cada uno, con un máximo de 5 recargas por período de facturación. El Cliente puede desactivar la auto-recarga en cualquier momento desde el panel de configuración.</p>
 
-  <h2>4. Pagos y Suscripciones</h2>
-  <p>Nuestros servicios se ofrecen bajo un modelo de suscripción mensual. Mesio no cobra comisiones por transacción sobre las ventas del restaurante. Las suscripciones pueden ser canceladas en cualquier momento, pero no ofrecemos reembolsos por períodos ya facturados.</p>
+  <h2>4. Facturación y Pagos</h2>
+  <p>Las suscripciones se facturan mensualmente por adelantado al inicio de cada período. El cobro se realiza a través del método de pago registrado en la cuenta. El Cliente es responsable de mantener información de pago válida y actualizada.</p>
+  <p>En caso de que el cobro falle, Mesio realizará hasta 3 intentos adicionales en los siguientes 7 días hábiles. Si el pago no se completa, el servicio se suspenderá temporalmente hasta regularizar el saldo.</p>
 
-  <h2>5. Disponibilidad del Servicio</h2>
-  <p>Nos esforzamos por mantener una disponibilidad del 99.9%, sin embargo, el servicio puede estar sujeto a interrupciones por mantenimiento de nuestros servidores o caídas en los servicios de terceros (Meta, proveedores de IA, pasarelas de pago).</p>
+  <h2>5. Cancelación de la Suscripción</h2>
+  <p>El Cliente puede cancelar su suscripción en cualquier momento desde el panel de configuración o enviando un correo a <a href="mailto:legal@mesio.app">legal@mesio.app</a>. La cancelación tiene efecto al final del período de facturación vigente; el servicio permanecerá activo hasta esa fecha.</p>
+  <p>Mesio también puede cancelar el plan en caso de incumplimiento de estos términos, con notificación previa de 5 días hábiles excepto en casos de uso fraudulento o ilegal, donde la cancelación es inmediata.</p>
 
-  <h2>6. Modificaciones</h2>
-  <p>Nos reservamos el derecho de modificar estos términos en cualquier momento. Notificaremos a los usuarios activos sobre cambios significativos a través del correo electrónico registrado en su cuenta.</p>
+  <h2>6. Política de Reembolsos</h2>
+  <p>Los períodos de suscripción ya facturados <strong>no son reembolsables</strong>, salvo que la interrupción del servicio sea imputable exclusivamente a Mesio y supere el umbral de disponibilidad pactado (ver sección 8).</p>
+  <p><strong>Paquetes de conversaciones (auto-recarga):</strong> Los paquetes debitados y parcialmente consumidos no son reembolsables. Los paquetes debitados y no consumidos en absoluto (0 conversaciones usadas) pueden solicitarse como crédito a cuenta en los 15 días siguientes al cargo, enviando un correo a <a href="mailto:legal@mesio.app">legal@mesio.app</a>. No se otorgan créditos en efectivo; el crédito se aplica al siguiente período de facturación.</p>
+  <p>Si el Cliente disputa un cargo con su banco o pasarela de pago sin haber solicitado previamente resolución a Mesio, la cuenta puede suspenderse mientras se resuelve la disputa.</p>
+
+  <h2>7. Uso Aceptable del Servicio</h2>
+  <p>El Cliente se compromete a no utilizar Mesio para:</p>
+  <ul>
+    <li>Enviar mensajes no solicitados (spam) o mensajes masivos no autorizados por Meta.</li>
+    <li>Distribuir contenido ilegal, difamatorio, obsceno o que infrinja derechos de terceros.</li>
+    <li>Realizar actividades fraudulentas, lavado de activos u otras conductas ilícitas.</li>
+    <li>Intentar acceder a cuentas o datos de otros clientes de Mesio.</li>
+    <li>Realizar ingeniería inversa, descompilar o intentar extraer el código fuente de la plataforma.</li>
+    <li>Incumplir las <a href="https://www.whatsapp.com/legal/business-policy/" target="_blank" rel="noopener">Políticas de WhatsApp Business</a> de Meta.</li>
+  </ul>
+  <p>El incumplimiento puede resultar en suspensión o cancelación inmediata de la cuenta, sin derecho a reembolso.</p>
+
+  <h2>8. Disponibilidad del Servicio (SLA)</h2>
+  <p>Mesio se compromete a mantener una disponibilidad de la plataforma del <strong>99% mensual</strong> (equivalente a un máximo de ~7.3 horas de inactividad no planificada por mes). Este compromiso excluye:</p>
+  <ul>
+    <li>Mantenimientos programados anunciados con al menos 24 horas de anticipación.</li>
+    <li>Interrupciones causadas por proveedores externos (Meta/WhatsApp, Anthropic, pasarelas de pago).</li>
+    <li>Fuerza mayor (desastres naturales, ataques DDoS de magnitud extraordinaria, cortes de internet masivos).</li>
+  </ul>
+  <p>Si la disponibilidad mensual medida cae por debajo del 99% por causas imputables a Mesio, el Cliente tendrá derecho a solicitar un crédito proporcional a los días de interrupción sobre el valor mensual del plan, hasta un máximo del 30% del valor de la mensualidad.</p>
+
+  <h2>9. Uso de la API de WhatsApp (Meta)</h2>
+  <p>El servicio de bot de Mesio opera sobre la WhatsApp Business API proporcionada por Meta Platforms, Inc. El Cliente reconoce y acepta que:</p>
+  <ul>
+    <li>El número de WhatsApp Business es propiedad o está bajo la responsabilidad del Cliente.</li>
+    <li>Meta puede suspender o bloquear el número si detecta incumplimiento de sus políticas, sin que Mesio tenga control sobre dicha decisión.</li>
+    <li>Mesio no se hace responsable por bloqueos originados en el comportamiento del Cliente o sus clientes finales.</li>
+    <li>Las conversaciones de WhatsApp están sujetas al cifrado de extremo a extremo de Meta para los mensajes del usuario; Mesio recibe el contenido a través de la API oficial de Meta.</li>
+  </ul>
+
+  <h2>10. Propiedad Intelectual</h2>
+  <p>La plataforma Mesio, su código fuente, diseño, marcas, logotipos y documentación son propiedad exclusiva de {NOMBRE_LEGAL} y están protegidos por las leyes de propiedad intelectual colombianas e internacionales aplicables. El Cliente recibe una licencia limitada, no exclusiva, intransferible y revocable para usar el servicio exclusivamente para los fines descritos en estos términos.</p>
+  <p>El Cliente conserva todos los derechos sobre sus propios datos (menú, base de clientes, historial de operaciones). Mesio no adquiere derechos de propiedad sobre esos datos.</p>
+
+  <h2>11. Limitación de Responsabilidad</h2>
+  <p>En la máxima medida permitida por la ley colombiana, la responsabilidad total acumulada de Mesio frente al Cliente por cualquier reclamación derivada de estos términos o del uso del servicio estará limitada al <strong>valor pagado por el Cliente en los 3 meses inmediatamente anteriores al evento que originó la reclamación</strong>.</p>
+  <p>Mesio no será responsable por daños indirectos, incidentales, especiales, consecuentes ni lucro cesante, incluyendo pérdida de ventas, datos o reputación, aun cuando Mesio haya sido informada de la posibilidad de tales daños.</p>
+  <p>Esta limitación no aplica en casos de dolo o culpa grave de Mesio, ni en situaciones donde la ley colombiana prohíba expresamente dicha limitación.</p>
+
+  <h2>12. Confidencialidad</h2>
+  <p>Ambas partes se comprometen a mantener confidencialidad sobre la información no pública del otro que sea designada como confidencial o que razonablemente debería entenderse como tal. Esta obligación subsiste por 3 años tras la terminación del contrato.</p>
+
+  <h2>13. Modificaciones al Servicio y a estos Términos</h2>
+  <p>Mesio puede modificar las funcionalidades del servicio o estos términos en cualquier momento. Para cambios sustanciales, notificaremos por correo electrónico con al menos <strong>15 días de anticipación</strong>. El uso continuado del servicio tras la fecha de vigencia de los nuevos términos constituye aceptación. Si el Cliente no acepta los cambios, puede cancelar su suscripción sin penalidad antes de la fecha de vigencia.</p>
+
+  <h2>14. Ley Aplicable y Resolución de Disputas</h2>
+  <p>Estos términos se rigen por las leyes de la <strong>República de Colombia</strong>. Cualquier controversia se resolverá inicialmente mediante negociación directa entre las partes (plazo: 30 días). Si no se llega a un acuerdo, las partes se someterán a la jurisdicción de los <strong>jueces civiles del Circuito de Bogotá D.C.</strong>, renunciando a cualquier otro fuero que pudiera corresponderles.</p>
+  <p>Para reclamaciones menores (hasta 40 SMMLV), el Cliente puede acudir previamente al Centro de Conciliación de la Cámara de Comercio de Bogotá.</p>
+
+  <h2>15. Vigencia</h2>
+  <p>Estos términos entran en vigencia el <strong>7 de mayo de 2026</strong> y permanecerán en vigor hasta que sean reemplazados por una versión posterior publicada en esta misma URL.</p>
+
+  <div class="legal-footer-note">
+    <strong>¿Tienes preguntas sobre estos términos?</strong><br>
+    Escríbenos a <a href="mailto:legal@mesio.app">legal@mesio.app</a> — respondemos en máximo 2 días hábiles.<br><br>
+    También puedes contactarnos vía WhatsApp: <a href="https://wa.me/573144914554">+57 314 491 4554</a>
+  </div>
 </div>
 
-<footer><p>© 2026 Mesio · Bogotá, Colombia</p></footer>
+<footer class="footer" style="background:#111; color:#aaa; padding: 24px 40px; text-align:center; font-size:0.9rem;">
+  <p>© 2026 Mesio · Bogotá, Colombia &nbsp;·&nbsp;
+  <a href="/terminos" style="color:#1D9E75;">Términos y Condiciones</a> &nbsp;·&nbsp;
+  <a href="/privacidad" style="color:#1D9E75;">Política de Privacidad</a> &nbsp;·&nbsp;
+  <a href="https://wa.me/573144914554" style="color:#1D9E75;">Soporte</a>
+  </p>
+</footer>
 </body>
 </html>
