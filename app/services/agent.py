@@ -2133,6 +2133,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
     except InsufficientStockError as e:
         log.warning("execute_action.insufficient_stock", sku=str(e), phone=_ofuscar_phone(phone), bot_number=bot_number)
         return f"Lo siento, '{e}' ya no está disponible en el inventario. ¿Te gustaría elegir otra opción?"
+    except OrderCommitError as e:
+        log.exception("execute_action.order_commit_failed", action=action, phone=_ofuscar_phone(phone), bot_number=bot_number)
+        return "No pudimos confirmar tu pedido. Por favor intenta de nuevo o avísale a un mesero."
     except Exception:
         log.exception("execute_action_failed", action=action, phone=_ofuscar_phone(phone), bot_number=bot_number)
         # For order-creating actions, returning the hallucinated reply is worse than returning

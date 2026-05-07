@@ -347,39 +347,37 @@ async def db_consume_pack_credit(org_id: int, count: int = 1) -> int:
     Returns the actual number of credits consumed (may be less than `count` if not
     enough credits are available).
 
+    Each credit consumed via an atomic single-statement UPDATE with FOR UPDATE SKIP LOCKED
+    to prevent TOCTOU races between concurrent workers (P0 revenue leak fix).
+
     # Requires active tenant_scope(org_id).
     """
     consumed = 0
     remaining_to_consume = count
 
     async with tenant_connection() as conn:
-        # Fetch eligible packs FIFO — oldest first
-        packs = await conn.fetch(
-            """
-            SELECT id, credits_remaining
-            FROM usage_packs
-            WHERE org_id = $1
-              AND credits_remaining > 0
-              AND expires_at > NOW()
-            ORDER BY fired_at ASC
-            """,
-            org_id,
-        )
-
-        for pack in packs:
-            if remaining_to_consume <= 0:
-                break
-            pack_id = pack["id"]
-            available = pack["credits_remaining"]
-            to_take = min(available, remaining_to_consume)
-            new_remaining = available - to_take
-
-            await conn.execute(
-                "UPDATE usage_packs SET credits_remaining = $2 WHERE id = $1",
-                pack_id, new_remaining,
-            )
-            consumed += to_take
-            remaining_to_consume -= to_take
+        for _ in range(remaining_to_consume):
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """
+                    UPDATE usage_packs
+                    SET credits_remaining = credits_remaining - 1
+                    WHERE id = (
+                        SELECT id FROM usage_packs
+                        WHERE org_id = $1
+                          AND credits_remaining > 0
+                          AND expires_at > NOW()
+                        ORDER BY fired_at ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING id, credits_remaining
+                    """,
+                    org_id,
+                )
+            if row is None:
+                break  # No eligible pack — stop consuming
+            consumed += 1
 
     if consumed > 0:
         log.info("plan_limits.pack_credits_consumed", org_id=org_id, consumed=consumed, requested=count)

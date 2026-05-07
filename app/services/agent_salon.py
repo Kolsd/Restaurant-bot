@@ -1191,15 +1191,22 @@ async def execute_salon_action(
         except Exception:
             log.exception("checkout_start_failed_fallback_waiter", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
-        # Fallback: waiter_alert
+        # Fallback: waiter_alert — best-effort, must not crash checkout
         payment_info = parsed.get("payment_method", "") or parsed.get("notes", "")
         payment_str  = f" Método de pago: {payment_info}." if payment_info else ""
         alert_message = f"La mesa {table_name} necesita la cuenta.{payment_str}"
-        await db.db_create_waiter_alert(
-            phone=phone, bot_number=bot_number, alert_type="bill",
-            message=alert_message, table_id=table_id, table_name=table_name,
-        )
-        log.info("waiter_alert_bill", table=table_name)
+        try:
+            await db.db_create_waiter_alert(
+                phone=phone, bot_number=bot_number, alert_type="bill",
+                message=alert_message, table_id=table_id, table_name=table_name,
+            )
+            log.info("waiter_alert_bill", table=table_name)
+        except Exception:
+            log.exception(
+                "waiter_alert.fallback_failed",
+                restaurant_id=parsed.get("restaurant_id"),
+                table_id=table_id,
+            )
         return reply
 
     if action == "waiter":
