@@ -12,6 +12,11 @@ import os
 import time
 from datetime import datetime, date, timezone
 
+# Churn risk alert: runs on every check_alerts() call; per-(org, date) cooldown
+# in _fire_alert (keyed as churn_risk:{org_id}:{date_str}) ensures once-per-day.
+_CHURN_RATIO_THRESHOLD = 0.5       # recent < 50% of baseline → at risk
+_CHURN_BASELINE_MIN = 3.0          # skip noise-floor tenants with < 3 conv/day
+
 import httpx
 
 from app.services.logging import get_logger
@@ -68,6 +73,11 @@ async def check_alerts() -> None:
         await _check_cost_runaway()
     except Exception:
         log.exception("alerts.check_cost_runaway_failed")
+
+    try:
+        await _check_churn_risk()
+    except Exception:
+        log.exception("alerts.check_churn_risk_failed")
 
 
 # ── Individual checks ─────────────────────────────────────────────────────────
@@ -228,6 +238,90 @@ async def _check_cost_runaway() -> None:
                 f"Org #{org_id} ({plan}) used {tokens_today:,} tokens today "
                 f"({pct}% of {daily_limit:,} daily limit). "
                 f"Projected cost: {projected_str}."
+            ),
+        )
+
+
+async def _check_churn_risk() -> None:
+    """Alert when a tenant's last-7d avg conversation volume < 50% of prior 14-day baseline.
+
+    Runs cross-tenant (scheduler already holds bypass_tenant_scope).
+    Cooldown: once per (org_id, calendar day) — keyed as churn_risk:{org_id}:{YYYY-MM-DD}.
+    Tenants with baseline < 3 conv/day are skipped (noise floor).
+
+    Uses the per-org cooldown via _fire_alert so duplicate alerts within the same
+    calendar day are suppressed even if check_alerts() runs every 60s.
+    """
+    from app.services.database import get_pool  # late import — avoids circular
+
+    today_str = date.today().isoformat()
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH daily AS (
+                    SELECT
+                        l.org_id,
+                        o.name                  AS org_name,
+                        (c.created_at::date)    AS day,
+                        COUNT(*)                AS cnt
+                    FROM conversations c
+                    JOIN locations l ON l.bot_number = c.bot_number
+                    JOIN organizations o ON o.id = l.org_id
+                    WHERE c.created_at >= CURRENT_DATE - INTERVAL '21 days'
+                    GROUP BY l.org_id, o.name, c.created_at::date
+                ),
+                baseline AS (
+                    SELECT org_id, org_name,
+                        AVG(cnt)::float AS baseline_avg
+                    FROM daily
+                    WHERE day < CURRENT_DATE - INTERVAL '7 days'
+                    GROUP BY org_id, org_name
+                ),
+                recent AS (
+                    SELECT org_id,
+                        AVG(cnt)::float AS recent_avg
+                    FROM daily
+                    WHERE day >= CURRENT_DATE - INTERVAL '7 days'
+                    GROUP BY org_id
+                )
+                SELECT
+                    b.org_id,
+                    b.org_name,
+                    b.baseline_avg,
+                    COALESCE(r.recent_avg, 0) AS recent_avg
+                FROM baseline b
+                LEFT JOIN recent r ON r.org_id = b.org_id
+                WHERE b.baseline_avg >= $1
+                  AND COALESCE(r.recent_avg, 0) < $2 * b.baseline_avg
+                ORDER BY (COALESCE(r.recent_avg, 0) / NULLIF(b.baseline_avg, 0)) ASC NULLS LAST
+                """,
+                _CHURN_BASELINE_MIN,
+                _CHURN_RATIO_THRESHOLD,
+            )
+    except Exception as exc:
+        log.exception("alerts.churn_risk.query_error", exc_type=type(exc).__name__)
+        return
+
+    for row in rows:
+        org_id = row["org_id"]
+        org_name = row["org_name"] or f"Org #{org_id}"
+        baseline = float(row["baseline_avg"])
+        recent = float(row["recent_avg"])
+        ratio = recent / baseline if baseline > 0 else 0.0
+        drop_pct = round((1.0 - ratio) * 100, 1)
+
+        alert_key = f"churn_risk:{org_id}:{today_str}"
+        await _fire_alert(
+            key=alert_key,
+            severity="MEDIUM",
+            title=f"Tenant {org_name} muestra señal de churn",
+            detail=(
+                f"Org #{org_id} ({org_name}): baseline 14d = {baseline:.1f} conv/día, "
+                f"últimos 7d = {recent:.1f} conv/día. "
+                f"Caída del {drop_pct}% (umbral: 50%)."
             ),
         )
 

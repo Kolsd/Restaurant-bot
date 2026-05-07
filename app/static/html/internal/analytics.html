@@ -183,6 +183,71 @@
     }
     @media (max-width: 700px) { .charts-row { grid-template-columns: 1fr; } }
 
+    /* ── Activation funnel ── */
+    .funnel-wrap {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg);
+      padding: var(--s-5);
+    }
+    .funnel-title { font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: var(--s-4); }
+    .funnel-stage {
+      display: flex; align-items: center; gap: var(--s-3);
+      margin-bottom: var(--s-3);
+    }
+    .funnel-label {
+      font-size: 0.78rem; color: var(--text-4);
+      width: 130px; flex-shrink: 0;
+    }
+    .funnel-bar-outer {
+      flex: 1; height: 18px;
+      background: var(--dark-3);
+      border-radius: 4px; overflow: hidden;
+    }
+    .funnel-bar-inner {
+      height: 100%;
+      background: var(--brand);
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+    .funnel-bar-inner.stage2 { background: #6366f1; }
+    .funnel-bar-inner.stage3 { background: #f59e0b; }
+    .funnel-bar-inner.stage4 { background: #10b981; }
+    .funnel-count { font-size: 0.78rem; color: #fff; width: 80px; text-align: right; flex-shrink: 0; }
+    .funnel-pct { font-size: 0.72rem; color: var(--text-4); width: 45px; text-align: right; flex-shrink: 0; }
+    .funnel-time-row {
+      display: flex; gap: var(--s-5); margin-top: var(--s-4);
+      flex-wrap: wrap;
+    }
+    .funnel-time-item { font-size: 0.75rem; color: var(--text-4); }
+    .funnel-time-val { color: #fff; font-weight: 600; }
+
+    /* ── Churn risk table ── */
+    .churn-wrap {
+      background: var(--dark-2);
+      border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .churn-header {
+      padding: var(--s-4) var(--s-5);
+      font-size: 0.85rem; font-weight: 600; color: #fff;
+      background: var(--dark-3);
+    }
+    .churn-table { width: 100%; border-collapse: collapse; }
+    .churn-table th {
+      padding: var(--s-3) var(--s-4);
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--text-4);
+      text-align: left; background: var(--dark-3);
+    }
+    .churn-table td {
+      padding: var(--s-3) var(--s-4);
+      font-size: 0.85rem; color: var(--text);
+      border-top: 1px solid var(--dark-3);
+    }
+    .churn-drop { color: #ef4444; font-weight: 600; }
+
     /* ── Loading / empty states ── */
     .loading-text { color: var(--text-4); font-size: 0.85rem; padding: var(--s-4) 0; }
     .empty-row td { color: var(--text-4); font-size: 0.85rem; text-align: center; padding: var(--s-6) !important; }
@@ -248,6 +313,37 @@
           <div class="chart-title">Daily Conversations</div>
           <div class="bar-chart" id="chart-convs"><p class="loading-text">Loading…</p></div>
         </div>
+      </div>
+    </section>
+
+    <!-- Activation funnel -->
+    <section>
+      <div class="section-title">Activation Funnel</div>
+      <div class="funnel-wrap" id="funnel-wrap">
+        <div class="funnel-title">Signup → Menu → First Message → First Order</div>
+        <div id="funnel-stages"><p class="loading-text">Loading…</p></div>
+        <div class="funnel-time-row" id="funnel-times"></div>
+      </div>
+    </section>
+
+    <!-- Churn risk -->
+    <section>
+      <div class="section-title">Churn Early Warning</div>
+      <div class="churn-wrap">
+        <div class="churn-header">Tenants with &gt;50% drop in conversation volume (last 7d vs prior 14d)</div>
+        <table class="churn-table">
+          <thead>
+            <tr>
+              <th>Tenant</th>
+              <th>Baseline (conv/day)</th>
+              <th>Recent 7d (conv/day)</th>
+              <th>Drop</th>
+            </tr>
+          </thead>
+          <tbody id="churn-tbody">
+            <tr><td colspan="4" class="loading-text" style="text-align:center;padding:1.5rem">Loading…</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -525,6 +621,111 @@
     });
   }
 
+  // ── Activation funnel ───────────────────────────────────────────────────────
+  function renderFunnel(data) {
+    const stagesEl = document.getElementById('funnel-stages');
+    const timesEl  = document.getElementById('funnel-times');
+    const f   = data.funnel     || {};
+    const pct = data.funnel_pct || {};
+    const tts = data.time_to_stage || {};
+
+    const stages = [
+      { key: 'signed_up',    label: 'Stage 1: Signed up',      cls: '' },
+      { key: 'menu_loaded',  label: 'Stage 2: Menu loaded',     cls: 'stage2' },
+      { key: 'first_message',label: 'Stage 3: First message',   cls: 'stage3' },
+      { key: 'first_order',  label: 'Stage 4: First order',     cls: 'stage4' },
+    ];
+
+    stagesEl.innerHTML = '';
+    stages.forEach(s => {
+      const count = f[s.key] ?? 0;
+      const p     = pct[s.key] ?? 0;
+
+      const row = document.createElement('div');
+      row.className = 'funnel-stage';
+
+      const lbl = document.createElement('div');
+      lbl.className = 'funnel-label';
+      lbl.textContent = s.label;
+
+      const outer = document.createElement('div');
+      outer.className = 'funnel-bar-outer';
+      const inner = document.createElement('div');
+      inner.className = 'funnel-bar-inner ' + s.cls;
+      inner.style.width = p + '%';
+      outer.appendChild(inner);
+
+      const cnt = document.createElement('div');
+      cnt.className = 'funnel-count';
+      cnt.textContent = count.toLocaleString();
+
+      const pctEl = document.createElement('div');
+      pctEl.className = 'funnel-pct';
+      pctEl.textContent = p + '%';
+
+      row.append(lbl, outer, cnt, pctEl);
+      stagesEl.appendChild(row);
+    });
+
+    // Time-to-stage summary
+    timesEl.innerHTML = '';
+    const timeItems = [
+      { label: 'Median time → 1st msg', val: tts.first_message_median_h, unit: 'h' },
+      { label: 'P75 time → 1st msg',    val: tts.first_message_p75_h,    unit: 'h' },
+      { label: 'Median time → 1st order',val: tts.first_order_median_h,  unit: 'h' },
+      { label: 'P75 time → 1st order',  val: tts.first_order_p75_h,      unit: 'h' },
+    ];
+    timeItems.forEach(t => {
+      const el = document.createElement('div');
+      el.className = 'funnel-time-item';
+      el.innerHTML = t.label + ': <span class="funnel-time-val">' +
+        (t.val != null ? t.val + t.unit : '—') + '</span>';
+      timesEl.appendChild(el);
+    });
+  }
+
+  function loadActivation() {
+    return apiGet('/api/internal/analytics/activation').then(data => {
+      renderFunnel(data);
+    }).catch(() => {
+      document.getElementById('funnel-stages').innerHTML =
+        '<p class="loading-text">Failed to load funnel data.</p>';
+    });
+  }
+
+  // ── Churn risk ──────────────────────────────────────────────────────────────
+  function renderChurnTable(atRisk) {
+    const tbody = document.getElementById('churn-tbody');
+    tbody.innerHTML = '';
+    if (!atRisk || !atRisk.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:1.5rem;color:var(--text-4)">No churn signals detected</td></tr>';
+      return;
+    }
+    atRisk.slice(0, 10).forEach(row => {
+      const tr = document.createElement('tr');
+      const nameTd = document.createElement('td');
+      nameTd.textContent = row.org_name || '—';
+      const baseTd = document.createElement('td');
+      baseTd.textContent = row.baseline_avg_daily != null ? row.baseline_avg_daily.toFixed(1) : '—';
+      const recTd = document.createElement('td');
+      recTd.textContent = row.recent_avg_daily != null ? row.recent_avg_daily.toFixed(1) : '—';
+      const dropTd = document.createElement('td');
+      dropTd.className = 'churn-drop';
+      dropTd.textContent = row.drop_pct != null ? '-' + row.drop_pct + '%' : '—';
+      tr.append(nameTd, baseTd, recTd, dropTd);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function loadChurnRisk() {
+    return apiGet('/api/internal/analytics/churn-risk').then(data => {
+      renderChurnTable(data.at_risk || []);
+    }).catch(() => {
+      document.getElementById('churn-tbody').innerHTML =
+        '<tr><td colspan="4" style="text-align:center;padding:1.5rem;color:var(--text-4)">Failed to load churn data.</td></tr>';
+    });
+  }
+
   // ── Refresh loop ────────────────────────────────────────────────────────────
   function updateTimestamp() {
     const el = document.getElementById('last-update');
@@ -536,6 +737,8 @@
       loadOverview(),
       loadTrends(),
       loadRestaurants(),
+      loadActivation(),
+      loadChurnRisk(),
     ]).then(() => updateTimestamp());
   }
 

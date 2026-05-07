@@ -379,3 +379,260 @@ async def analytics_trends(_: None = Depends(verify_superadmin)):
             result["daily_conversations"] = []
 
     return result
+
+
+# ── Activation funnel ─────────────────────────────────────────────────────────
+
+@router.get("/api/internal/analytics/activation")
+async def analytics_activation(_: None = Depends(verify_superadmin)):
+    """Return activation funnel: signed_up → menu_loaded → first_message → first_order.
+
+    Aggregate counts + conversion percentages + median/p75 time-to-stage in hours
+    + per-org breakdown with stage timestamps.
+    """
+    pool = await get_pool()
+
+    with bypass_tenant_scope("internal_activation_funnel_cross_tenant"):
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    WITH org_menu AS (
+                        -- Stage 2: org has at least one dish in any category
+                        SELECT DISTINCT l.org_id
+                        FROM locations l
+                        WHERE
+                            l.menu IS NOT NULL
+                            AND l.menu != '{}'::jsonb
+                            AND jsonb_typeof(l.menu) = 'object'
+                            AND (SELECT COUNT(*) FROM jsonb_each(l.menu)) > 0
+                    ),
+                    org_first_message AS (
+                        -- Stage 3: first real customer conversation per org
+                        SELECT
+                            l.org_id,
+                            MIN(c.created_at) AS first_message_at
+                        FROM conversations c
+                        JOIN locations l ON l.bot_number = c.bot_number
+                        GROUP BY l.org_id
+                    ),
+                    org_first_order AS (
+                        -- Stage 4: first closed delivery order per org
+                        SELECT
+                            l.org_id,
+                            MIN(o.created_at) AS first_order_at
+                        FROM orders o
+                        JOIN locations l ON l.bot_number = o.bot_number
+                        WHERE o.status IN ('entregado', 'factura_entregada')
+                        GROUP BY l.org_id
+                    ),
+                    org_first_table_order AS (
+                        -- Stage 4 (salon path): first closed table order per org
+                        SELECT
+                            ts.org_id,
+                            MIN(to2.created_at) AS first_order_at
+                        FROM table_orders to2
+                        JOIN table_sessions ts ON ts.id = to2.session_id
+                        WHERE to2.status IN ('entregado', 'factura_entregada')
+                        GROUP BY ts.org_id
+                    ),
+                    org_first_any_order AS (
+                        SELECT org_id, MIN(first_order_at) AS first_order_at
+                        FROM (
+                            SELECT org_id, first_order_at FROM org_first_order
+                            UNION ALL
+                            SELECT org_id, first_order_at FROM org_first_table_order
+                        ) combined
+                        GROUP BY org_id
+                    )
+                    SELECT
+                        o.id                                              AS org_id,
+                        o.name                                            AS org_name,
+                        o.created_at                                      AS signed_up_at,
+                        CASE WHEN om.org_id IS NOT NULL THEN TRUE ELSE FALSE END AS has_menu,
+                        ofm.first_message_at,
+                        ofao.first_order_at,
+                        -- hours to stage
+                        CASE WHEN ofm.first_message_at IS NOT NULL
+                             THEN EXTRACT(EPOCH FROM (ofm.first_message_at - o.created_at)) / 3600.0
+                        END                                               AS hours_to_message,
+                        CASE WHEN ofao.first_order_at IS NOT NULL
+                             THEN EXTRACT(EPOCH FROM (ofao.first_order_at - o.created_at)) / 3600.0
+                        END                                               AS hours_to_order
+                    FROM organizations o
+                    LEFT JOIN org_menu          om   ON om.org_id  = o.id
+                    LEFT JOIN org_first_message ofm  ON ofm.org_id = o.id
+                    LEFT JOIN org_first_any_order ofao ON ofao.org_id = o.id
+                    ORDER BY o.created_at DESC
+                    """
+                )
+        except Exception as exc:
+            log.exception("analytics.activation.query_error", exc_type=type(exc).__name__)
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Failed to fetch activation funnel data"}
+            )
+
+    # Build per-org list and aggregate counts
+    signed_up = 0
+    menu_loaded = 0
+    first_message = 0
+    first_order = 0
+
+    hours_to_message_vals: list[float] = []
+    hours_to_order_vals: list[float] = []
+
+    per_org = []
+    for row in rows:
+        signed_up += 1
+        has_menu = bool(row["has_menu"])
+        has_msg = row["first_message_at"] is not None
+        has_ord = row["first_order_at"] is not None
+
+        if has_menu:
+            menu_loaded += 1
+        if has_msg:
+            first_message += 1
+        if has_ord:
+            first_order += 1
+
+        if row["hours_to_message"] is not None:
+            hours_to_message_vals.append(float(row["hours_to_message"]))
+        if row["hours_to_order"] is not None:
+            hours_to_order_vals.append(float(row["hours_to_order"]))
+
+        # Current stage: highest stage reached
+        if has_ord:
+            stage = 4
+        elif has_msg:
+            stage = 3
+        elif has_menu:
+            stage = 2
+        else:
+            stage = 1
+
+        per_org.append({
+            "org_id": row["org_id"],
+            "org_name": row["org_name"] or f"Org #{row['org_id']}",
+            "stage": stage,
+            "signed_up_at": str(row["signed_up_at"].date()) if row["signed_up_at"] else None,
+            "has_menu": has_menu,
+            "first_message_at": str(row["first_message_at"].date()) if row["first_message_at"] else None,
+            "first_order_at": str(row["first_order_at"].date()) if row["first_order_at"] else None,
+        })
+
+    def _percentile(vals: list[float], pct: float) -> float | None:
+        if not vals:
+            return None
+        s = sorted(vals)
+        idx = int(len(s) * pct / 100)
+        idx = min(idx, len(s) - 1)
+        return round(s[idx], 1)
+
+    base = signed_up or 1  # avoid divide-by-zero
+
+    funnel = {
+        "signed_up": signed_up,
+        "menu_loaded": menu_loaded,
+        "first_message": first_message,
+        "first_order": first_order,
+    }
+    funnel_pct = {
+        "signed_up": 100.0,
+        "menu_loaded": round(menu_loaded / base * 100, 1),
+        "first_message": round(first_message / base * 100, 1),
+        "first_order": round(first_order / base * 100, 1),
+    }
+    time_to_stage = {
+        "first_message_median_h": _percentile(hours_to_message_vals, 50),
+        "first_message_p75_h": _percentile(hours_to_message_vals, 75),
+        "first_order_median_h": _percentile(hours_to_order_vals, 50),
+        "first_order_p75_h": _percentile(hours_to_order_vals, 75),
+    }
+
+    return {
+        "funnel": funnel,
+        "funnel_pct": funnel_pct,
+        "time_to_stage": time_to_stage,
+        "per_org": per_org,
+    }
+
+
+# ── Churn risk ────────────────────────────────────────────────────────────────
+
+@router.get("/api/internal/analytics/churn-risk")
+async def analytics_churn_risk(_: None = Depends(verify_superadmin)):
+    """Return tenants at churn risk: last-7d avg < 50% of 14d baseline."""
+    pool = await get_pool()
+
+    with bypass_tenant_scope("internal_churn_risk_cross_tenant"):
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    WITH daily AS (
+                        SELECT
+                            l.org_id,
+                            o.name                      AS org_name,
+                            (c.created_at::date)        AS day,
+                            COUNT(*)                    AS cnt
+                        FROM conversations c
+                        JOIN locations l ON l.bot_number = c.bot_number
+                        JOIN organizations o ON o.id = l.org_id
+                        WHERE c.created_at >= CURRENT_DATE - INTERVAL '21 days'
+                        GROUP BY l.org_id, o.name, c.created_at::date
+                    ),
+                    baseline AS (
+                        SELECT org_id, org_name,
+                            AVG(cnt)::float AS baseline_avg
+                        FROM daily
+                        WHERE day < CURRENT_DATE - INTERVAL '7 days'
+                        GROUP BY org_id, org_name
+                    ),
+                    recent AS (
+                        SELECT org_id,
+                            AVG(cnt)::float AS recent_avg
+                        FROM daily
+                        WHERE day >= CURRENT_DATE - INTERVAL '7 days'
+                        GROUP BY org_id
+                    )
+                    SELECT
+                        b.org_id,
+                        b.org_name,
+                        ROUND(b.baseline_avg::numeric, 2) AS baseline_avg,
+                        ROUND(COALESCE(r.recent_avg, 0)::numeric, 2) AS recent_avg,
+                        ROUND(
+                            (COALESCE(r.recent_avg, 0) / NULLIF(b.baseline_avg, 0))::numeric,
+                            3
+                        )                               AS ratio
+                    FROM baseline b
+                    LEFT JOIN recent r ON r.org_id = b.org_id
+                    WHERE b.baseline_avg >= 3
+                      AND COALESCE(r.recent_avg, 0) < 0.5 * b.baseline_avg
+                    ORDER BY ratio ASC NULLS LAST
+                    LIMIT 20
+                    """
+                )
+        except Exception as exc:
+            log.exception("analytics.churn_risk.query_error", exc_type=type(exc).__name__)
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Failed to fetch churn risk data"}
+            )
+
+    at_risk = []
+    for row in rows:
+        baseline = float(row["baseline_avg"])
+        recent = float(row["recent_avg"])
+        ratio = float(row["ratio"]) if row["ratio"] is not None else 0.0
+        drop_pct = round((1.0 - ratio) * 100, 1)
+        at_risk.append({
+            "org_id": row["org_id"],
+            "org_name": row["org_name"] or f"Org #{row['org_id']}",
+            "baseline_avg_daily": baseline,
+            "recent_avg_daily": recent,
+            "ratio": ratio,
+            "drop_pct": drop_pct,
+        })
+
+    return {"at_risk": at_risk}
