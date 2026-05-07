@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Registro — Mesio</title>
+<meta name="description" content="Regístrate en Mesio y empieza tu prueba gratis de 14 días. Sin tarjeta de crédito.">
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/landing.css">
+<style>
+.signup-wrap {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.signup-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 16px;
+}
+.signup-card {
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--radius-xl, 20px);
+  padding: 48px 40px;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: var(--shadow-card, 0 4px 24px rgba(0,0,0,.08));
+}
+.signup-card h1 {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0 0 8px;
+}
+.signup-card .sub {
+  color: var(--text-3);
+  font-size: 15px;
+  margin: 0 0 32px;
+}
+.form-group {
+  margin-bottom: 20px;
+}
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: var(--radius-md, 10px);
+  font-size: 15px;
+  font-family: var(--sans);
+  color: var(--text-1);
+  background: var(--surface-raised, #fff);
+  outline: none;
+  transition: border-color .15s;
+  box-sizing: border-box;
+}
+.form-group input:focus,
+.form-group select:focus {
+  border-color: var(--brand);
+}
+.form-group .field-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.signup-submit {
+  width: 100%;
+  padding: 14px;
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: opacity .15s;
+  margin-top: 8px;
+}
+.signup-submit:hover { opacity: .88; }
+.signup-submit:disabled { opacity: .55; cursor: not-allowed; }
+.signup-legal {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 16px;
+}
+.signup-legal a { color: var(--text-2); }
+.signup-success {
+  display: none;
+  text-align: center;
+  padding: 16px 0;
+}
+.signup-success .check-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+.signup-success h2 {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0 0 12px;
+}
+.signup-success p {
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 0 0 24px;
+}
+.field-error {
+  color: #d33;
+  font-size: 12px;
+  margin-top: 4px;
+  display: none;
+}
+@media (max-width: 540px) {
+  .signup-card { padding: 32px 20px; }
+  .form-row { grid-template-columns: 1fr; gap: 0; }
+}
+</style>
+</head>
+<body class="signup-wrap">
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark">M</span>
+      <span class="brand-word">Mesio<span class="dot">.</span></span>
+    </a>
+    <div class="nav-right">
+      <a class="btn btn-ghost btn-sm" href="/login">Iniciar sesión</a>
+    </div>
+  </div>
+</header>
+
+<main class="signup-main">
+  <div class="signup-card">
+
+    <div id="signup-form-section">
+      <h1>Prueba Mesio gratis</h1>
+      <p class="sub">14 días sin costo ni tarjeta de crédito. Te contactamos en menos de 24 h.</p>
+
+      <form id="signup-form" novalidate>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sg-nombre">Tu nombre</label>
+            <input type="text" id="sg-nombre" name="nombre" placeholder="María García" autocomplete="name" required maxlength="200">
+            <div class="field-error" id="err-nombre"></div>
+          </div>
+          <div class="form-group">
+            <label for="sg-restaurante">Nombre del restaurante</label>
+            <input type="text" id="sg-restaurante" name="restaurante" placeholder="La Parrilla de Don Jorge" required maxlength="200">
+            <div class="field-error" id="err-restaurante"></div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="sg-email">Correo electrónico</label>
+          <input type="email" id="sg-email" name="email" placeholder="maria@restaurante.com" autocomplete="email" required maxlength="320">
+          <div class="field-error" id="err-email"></div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sg-telefono">WhatsApp</label>
+            <input type="tel" id="sg-telefono" name="telefono" placeholder="+57 321 000 0000" autocomplete="tel" required maxlength="30">
+            <div class="field-error" id="err-telefono"></div>
+          </div>
+          <div class="form-group">
+            <label for="sg-ciudad">Ciudad</label>
+            <input type="text" id="sg-ciudad" name="ciudad" placeholder="Bogotá" required maxlength="100">
+            <div class="field-error" id="err-ciudad"></div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="sg-plan">Plan de interés</label>
+          <select id="sg-plan" name="plan" required>
+            <option value="">Selecciona un plan...</option>
+            <option value="Pulso">Pulso — $149.000/mes · 1 sede, hasta 500 conv/mes</option>
+            <option value="Restaurante">Restaurante — $299.000/mes · 1 sede, hasta 1.500 conv/mes</option>
+            <option value="Pro">Pro — $549.000/mes · hasta 3 sedes, conv ilimitadas</option>
+            <option value="Cadena">Cadena — $899.000/mes · sedes ilimitadas, todos los módulos</option>
+          </select>
+          <div class="field-error" id="err-plan"></div>
+          <div class="field-hint">Todos los precios + IVA. Puedes cambiar de plan en cualquier momento.</div>
+        </div>
+
+        <button type="submit" class="signup-submit" id="signup-btn">Solicitar acceso gratis</button>
+        <p class="signup-legal">
+          Al registrarte aceptas los <a href="/terminos">Términos de servicio</a> y la
+          <a href="/privacidad">Política de privacidad</a> de Mesio.
+        </p>
+      </form>
+    </div>
+
+    <div class="signup-success" id="signup-success">
+      <div class="check-icon">✅</div>
+      <h2>¡Listo! Te contactamos pronto</h2>
+      <p>Recibimos tu solicitud. Un asesor de Mesio te escribirá por WhatsApp en menos de 24 horas para activar tu prueba gratuita.</p>
+      <a href="/" class="btn btn-primary btn-sm">Volver al inicio</a>
+    </div>
+
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="foot-bot">
+      <div>© 2026 Mesio · Bogotá, Colombia · NIT en trámite</div>
+      <div class="foot-legal">
+        <a href="/terminos">Términos</a>
+        <a href="/privacidad">Privacidad</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+'use strict';
+
+const form   = document.getElementById('signup-form');
+const btn    = document.getElementById('signup-btn');
+const successEl = document.getElementById('signup-success');
+const formSection = document.getElementById('signup-form-section');
+
+function _showFieldError(fieldId, msg) {
+  const el = document.getElementById('err-' + fieldId);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+function _clearErrors() {
+  ['nombre','restaurante','email','telefono','ciudad','plan'].forEach(function(f) {
+    _showFieldError(f, '');
+  });
+}
+
+function _validate(payload) {
+  let ok = true;
+  if (!payload.nombre.trim()) { _showFieldError('nombre', 'Campo requerido'); ok = false; }
+  if (!payload.restaurante.trim()) { _showFieldError('restaurante', 'Campo requerido'); ok = false; }
+  if (!payload.email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(payload.email)) {
+    _showFieldError('email', 'Ingresa un correo válido'); ok = false;
+  }
+  if (!payload.telefono.trim() || !/^\+?[\d\s\-]{7,20}$/.test(payload.telefono)) {
+    _showFieldError('telefono', 'Ingresa un número válido'); ok = false;
+  }
+  if (!payload.ciudad.trim()) { _showFieldError('ciudad', 'Campo requerido'); ok = false; }
+  if (!payload.plan) { _showFieldError('plan', 'Selecciona un plan'); ok = false; }
+  return ok;
+}
+
+form.addEventListener('submit', async function(e) {
+  e.preventDefault();
+  _clearErrors();
+
+  const payload = {
+    nombre:      document.getElementById('sg-nombre').value.trim(),
+    email:       document.getElementById('sg-email').value.trim().toLowerCase(),
+    telefono:    document.getElementById('sg-telefono').value.trim(),
+    restaurante: document.getElementById('sg-restaurante').value.trim(),
+    ciudad:      document.getElementById('sg-ciudad').value.trim(),
+    plan:        document.getElementById('sg-plan').value,
+  };
+
+  if (!_validate(payload)) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+
+  try {
+    const r = await fetch('/api/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(function() { return {}; });
+    if (r.status === 429) {
+      btn.disabled = false;
+      btn.textContent = 'Solicitar acceso gratis';
+      alert('Demasiados intentos. Por favor espera 15 minutos e intenta de nuevo.');
+      return;
+    }
+    if (!r.ok) {
+      btn.disabled = false;
+      btn.textContent = 'Solicitar acceso gratis';
+      alert(data.detail || 'Error al registrar. Por favor intenta de nuevo.');
+      return;
+    }
+    formSection.style.display = 'none';
+    successEl.style.display   = 'block';
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Solicitar acceso gratis';
+    alert('Error de conexión. Por favor verifica tu internet e intenta de nuevo.');
+  }
+});
+}());
+</script>
+</body>
+</html>
