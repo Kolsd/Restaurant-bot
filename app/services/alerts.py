@@ -261,17 +261,28 @@ async def _check_churn_risk() -> None:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                WITH daily AS (
+                WITH bot_orgs AS (
+                    -- Resolve bot_number → org via locations override OR org fallback
+                    -- (locations.whatsapp_number can be NULL; restaurants VIEW uses
+                    -- COALESCE(l.whatsapp_number, o.whatsapp_number)).
                     SELECT
                         l.org_id,
-                        o.name                  AS org_name,
+                        o.name AS org_name,
+                        COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                    FROM locations l
+                    JOIN organizations o ON o.id = l.org_id
+                    WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                ),
+                daily AS (
+                    SELECT
+                        bo.org_id,
+                        bo.org_name,
                         (c.created_at::date)    AS day,
                         COUNT(*)                AS cnt
                     FROM conversations c
-                    JOIN locations l ON l.bot_number = c.bot_number
-                    JOIN organizations o ON o.id = l.org_id
+                    JOIN bot_orgs bo ON bo.bot_number = c.bot_number
                     WHERE c.created_at >= CURRENT_DATE - INTERVAL '21 days'
-                    GROUP BY l.org_id, o.name, c.created_at::date
+                    GROUP BY bo.org_id, bo.org_name, c.created_at::date
                 ),
                 baseline AS (
                     SELECT org_id, org_name,

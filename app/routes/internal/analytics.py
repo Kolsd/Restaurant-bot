@@ -57,9 +57,17 @@ async def analytics_overview(_: None = Depends(verify_superadmin)):
                 # A multi-sede org should count once, not once per location.
                 restaurants["active_7d"] = await conn.fetchval(
                     """
-                    SELECT COUNT(DISTINCT l.org_id)
+                    WITH bot_orgs AS (
+                        SELECT
+                            l.org_id,
+                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                        FROM locations l
+                        JOIN organizations o ON o.id = l.org_id
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                    )
+                    SELECT COUNT(DISTINCT bo.org_id)
                     FROM conversations c
-                    JOIN locations l ON l.bot_number = c.bot_number
+                    JOIN bot_orgs bo ON bo.bot_number = c.bot_number
                     WHERE c.updated_at > NOW() - INTERVAL '7 days'
                     """
                 )
@@ -72,9 +80,17 @@ async def analytics_overview(_: None = Depends(verify_superadmin)):
                 # Same org-level dedup for 30-day window.
                 restaurants["active_30d"] = await conn.fetchval(
                     """
-                    SELECT COUNT(DISTINCT l.org_id)
+                    WITH bot_orgs AS (
+                        SELECT
+                            l.org_id,
+                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                        FROM locations l
+                        JOIN organizations o ON o.id = l.org_id
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                    )
+                    SELECT COUNT(DISTINCT bo.org_id)
                     FROM conversations c
-                    JOIN locations l ON l.bot_number = c.bot_number
+                    JOIN bot_orgs bo ON bo.bot_number = c.bot_number
                     WHERE c.updated_at > NOW() - INTERVAL '30 days'
                     """
                 )
@@ -397,34 +413,45 @@ async def analytics_activation(_: None = Depends(verify_superadmin)):
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    WITH org_menu AS (
-                        -- Stage 2: org has at least one dish in any category
-                        SELECT DISTINCT l.org_id
+                    bot_orgs AS (
+                        -- Resolve bot_number → org via locations override OR org fallback
+                        -- (locations.whatsapp_number can be NULL; menu lives on organizations).
+                        SELECT
+                            l.org_id,
+                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
                         FROM locations l
+                        JOIN organizations o ON o.id = l.org_id
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                    ),
+                    org_menu AS (
+                        -- Stage 2: org has at least one dish in any category
+                        -- (menu is on organizations, not locations)
+                        SELECT id AS org_id
+                        FROM organizations
                         WHERE
-                            l.menu IS NOT NULL
-                            AND l.menu != '{}'::jsonb
-                            AND jsonb_typeof(l.menu) = 'object'
-                            AND (SELECT COUNT(*) FROM jsonb_each(l.menu)) > 0
+                            menu IS NOT NULL
+                            AND menu != '{}'::jsonb
+                            AND jsonb_typeof(menu) = 'object'
+                            AND (SELECT COUNT(*) FROM jsonb_each(menu)) > 0
                     ),
                     org_first_message AS (
                         -- Stage 3: first real customer conversation per org
                         SELECT
-                            l.org_id,
+                            bo.org_id,
                             MIN(c.created_at) AS first_message_at
                         FROM conversations c
-                        JOIN locations l ON l.bot_number = c.bot_number
-                        GROUP BY l.org_id
+                        JOIN bot_orgs bo ON bo.bot_number = c.bot_number
+                        GROUP BY bo.org_id
                     ),
                     org_first_order AS (
                         -- Stage 4: first closed delivery order per org
                         SELECT
-                            l.org_id,
+                            bo.org_id,
                             MIN(o.created_at) AS first_order_at
                         FROM orders o
-                        JOIN locations l ON l.bot_number = o.bot_number
+                        JOIN bot_orgs bo ON bo.bot_number = o.bot_number
                         WHERE o.status IN ('entregado', 'factura_entregada')
-                        GROUP BY l.org_id
+                        GROUP BY bo.org_id
                     ),
                     org_first_table_order AS (
                         -- Stage 4 (salon path): first closed table order per org
@@ -570,17 +597,25 @@ async def analytics_churn_risk(_: None = Depends(verify_superadmin)):
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    WITH daily AS (
+                    WITH bot_orgs AS (
                         SELECT
                             l.org_id,
-                            o.name                      AS org_name,
+                            o.name AS org_name,
+                            COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number
+                        FROM locations l
+                        JOIN organizations o ON o.id = l.org_id
+                        WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                    ),
+                    daily AS (
+                        SELECT
+                            bo.org_id,
+                            bo.org_name,
                             (c.created_at::date)        AS day,
                             COUNT(*)                    AS cnt
                         FROM conversations c
-                        JOIN locations l ON l.bot_number = c.bot_number
-                        JOIN organizations o ON o.id = l.org_id
+                        JOIN bot_orgs bo ON bo.bot_number = c.bot_number
                         WHERE c.created_at >= CURRENT_DATE - INTERVAL '21 days'
-                        GROUP BY l.org_id, o.name, c.created_at::date
+                        GROUP BY bo.org_id, bo.org_name, c.created_at::date
                     ),
                     baseline AS (
                         SELECT org_id, org_name,
