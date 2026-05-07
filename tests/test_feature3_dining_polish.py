@@ -255,7 +255,7 @@ class TestFeature3DiningPolish:
         import json
         recent_row = make_row({
             "items": json.dumps(dup_key_items),
-            "created_at": __import__("datetime").datetime.utcnow(),
+            "created_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).replace(tzinfo=None),
         })
         # All previous rows (for layer 2 check)
         prev_row = make_row({"items": json.dumps(dup_key_items)})

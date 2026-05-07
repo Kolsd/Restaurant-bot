@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from app.services.database import get_pool
 from app.services.logging import get_logger
 from app.routes.deps import verify_superadmin
+from app.services.tenant_context import bypass_tenant_scope
 
 log = get_logger(__name__)
 
@@ -73,59 +74,60 @@ async def health_metrics(_: None = Depends(verify_superadmin)):
     except Exception as exc:
         log.exception("ops.metrics.worker_metrics_error", exc_type=type(exc).__name__)
 
-    # Orders created today
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            metrics["orders_today"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM orders WHERE created_at::date = CURRENT_DATE"
-            )
-    except Exception as exc:
-        log.exception("ops.metrics.orders_today_error", exc_type=type(exc).__name__)
-        metrics["orders_today"] = None
+    with bypass_tenant_scope("internal_ops_metrics_cross_tenant"):
+        # Orders created today
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                metrics["orders_today"] = await conn.fetchval(
+                    "SELECT COUNT(*) FROM orders WHERE created_at::date = CURRENT_DATE"
+                )
+        except Exception as exc:
+            log.exception("ops.metrics.orders_today_error", exc_type=type(exc).__name__)
+            metrics["orders_today"] = None
 
-    # Open table sessions right now
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            metrics["active_table_sessions"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM table_sessions WHERE closed_at IS NULL"
-            )
-    except Exception as exc:
-        log.exception("ops.metrics.active_table_sessions_error", exc_type=type(exc).__name__)
-        metrics["active_table_sessions"] = None
+        # Open table sessions right now
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                metrics["active_table_sessions"] = await conn.fetchval(
+                    "SELECT COUNT(*) FROM table_sessions WHERE closed_at IS NULL"
+                )
+        except Exception as exc:
+            log.exception("ops.metrics.active_table_sessions_error", exc_type=type(exc).__name__)
+            metrics["active_table_sessions"] = None
 
-    # Conversations with activity in last 30 minutes
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            metrics["active_conversations"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM conversations WHERE updated_at > NOW() - INTERVAL '30 minutes'"
-            )
-    except Exception as exc:
-        log.exception("ops.metrics.active_conversations_error", exc_type=type(exc).__name__)
-        metrics["active_conversations"] = None
+        # Conversations with activity in last 30 minutes
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                metrics["active_conversations"] = await conn.fetchval(
+                    "SELECT COUNT(*) FROM conversations WHERE updated_at > NOW() - INTERVAL '30 minutes'"
+                )
+        except Exception as exc:
+            log.exception("ops.metrics.active_conversations_error", exc_type=type(exc).__name__)
+            metrics["active_conversations"] = None
 
-    # Total restaurant count
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            metrics["restaurants_total"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM restaurants"
-            )
-    except Exception as exc:
-        log.exception("ops.metrics.restaurants_total_error", exc_type=type(exc).__name__)
-        metrics["restaurants_total"] = None
+        # Total restaurant count
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                metrics["restaurants_total"] = await conn.fetchval(
+                    "SELECT COUNT(*) FROM restaurants"
+                )
+        except Exception as exc:
+            log.exception("ops.metrics.restaurants_total_error", exc_type=type(exc).__name__)
+            metrics["restaurants_total"] = None
 
-    # Staff currently on shift
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            metrics["staff_clocked_in"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM staff_shifts WHERE clock_out IS NULL"
-            )
-    except Exception as exc:
-        log.exception("ops.metrics.staff_clocked_in_error", exc_type=type(exc).__name__)
-        metrics["staff_clocked_in"] = None
+        # Staff currently on shift
+        try:
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                metrics["staff_clocked_in"] = await conn.fetchval(
+                    "SELECT COUNT(*) FROM staff_shifts WHERE clock_out IS NULL"
+                )
+        except Exception as exc:
+            log.exception("ops.metrics.staff_clocked_in_error", exc_type=type(exc).__name__)
+            metrics["staff_clocked_in"] = None
 
     return metrics

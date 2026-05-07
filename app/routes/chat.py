@@ -8,8 +8,7 @@ import traceback
 from fastapi import APIRouter, BackgroundTasks, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
-from anthropic import AsyncAnthropic
-from app.services.agent import chat, reset_conversation
+from app.services.agent import chat, reset_conversation, _get_anthropic_client
 from app.services import database as db
 from app.repositories import inbox_repo, conversations_repo
 from app.services.logging import get_logger
@@ -246,7 +245,7 @@ async def _is_image_safe(image_id: str, access_token: str) -> bool:
             mime_type = data.get("mime_type", "image/jpeg")
 
         image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-        haiku_client = AsyncAnthropic()
+        haiku_client = _get_anthropic_client()  # raises RuntimeError if key absent; caught by outer try/except → fail-open
         response = await haiku_client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=5,

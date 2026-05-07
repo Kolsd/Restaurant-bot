@@ -251,11 +251,15 @@ async def db_restaurant_cost_detail(
 _TOKENS_PER_CONV_ESTIMATE = 2_000
 
 # Plan conv caps (daily limit analogue — we use daily_tokens / tokens_per_conv).
+# Plan codes mirror migration 0070 (Pricing v1): pulso/restaurante/pro/cadena/comp.
+# "free" kept as fallback for pre-pricing orgs; "basic"/"enterprise" removed (not real plans).
 _PLAN_DAILY_TOKEN_LIMITS = {
-    "free":       5_000,
-    "basic":      50_000,
-    "pro":        200_000,
-    "enterprise": -1,       # unlimited — excluded from outlier detection
+    "free":        5_000,
+    "pulso":       50_000,
+    "restaurante": 200_000,
+    "pro":         600_000,
+    "cadena":      -1,    # unlimited — excluded from outlier detection
+    "comp":        -1,    # Mesio comp accounts — excluded from outlier detection
 }
 
 
@@ -311,10 +315,8 @@ async def db_cost_outliers(
     outliers = []
     for row in rows:
         plan = (row["plan_code"] or "free").lower()
-        if plan == "enterprise":
-            continue  # unlimited plan — skip
-
-        plan_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS["basic"])
+        # -1 means unlimited (cadena, comp) — exclude from outlier detection.
+        plan_limit = _PLAN_DAILY_TOKEN_LIMITS.get(plan, _PLAN_DAILY_TOKEN_LIMITS["pulso"])
         if plan_limit <= 0:
             continue
 

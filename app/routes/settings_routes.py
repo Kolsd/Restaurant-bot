@@ -4,7 +4,7 @@ Also includes the order-status update and table-session helpers that power the d
 """
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Request, HTTPException, Depends
@@ -258,7 +258,7 @@ async def pause_restaurant(body: _PauseBody, request: Request):
     restaurant_id = restaurant["id"]
 
     if body.paused:
-        now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         patch = {
             "bot_active": False,
             "paused_at": now_iso,
@@ -706,7 +706,7 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
         if r:
             bot_number = r.get("whatsapp_number")
 
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     now_local = now_utc - timedelta(minutes=tz_offset)
     end_local = now_local + timedelta(days=1)
     end_local = end_local.replace(hour=0, minute=0, second=0, microsecond=0)

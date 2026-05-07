@@ -17,6 +17,7 @@ from app.services.billing import (
     emit_invoice,
     get_adapter,
 )
+from app.services.tenant_context import tenant_scope
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
@@ -27,21 +28,13 @@ async def _get_restaurant_id(user: dict) -> int:
     # 1. Si es un empleado (Staff con PIN), ya tiene el ID directo
     if "restaurant_id" in user:
         return user["restaurant_id"]
-        
+
     # 2. Si es un Admin/Dueño, usamos su branch_id
     if user.get("branch_id"):
         return user["branch_id"]
-        
-    # 3. Fallback original (por si es una cuenta muy vieja sin branch_id)
-    restaurant_name = user.get("restaurant_name")
-    if not restaurant_name:
-        raise HTTPException(status_code=400, detail="Usuario sin restaurante asignado")
 
-    from app.repositories import restaurant_repo
-    rid = await restaurant_repo.db_find_restaurant_id_by_name(restaurant_name)
-    if rid is None:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-    return rid
+    # Name-based fallback removed: IDOR risk — trust only the JWT claims.
+    raise HTTPException(status_code=401, detail="Token no contiene restaurante asignado")
 
 # ── MODELOS ──────────────────────────────────────────────────────────
 
@@ -99,7 +92,8 @@ class EmitInvoicePayload(BaseModel):
 async def get_config(request: Request):
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
-    config        = await get_billing_config(restaurant_id)
+    with tenant_scope(restaurant_id):
+        config = await get_billing_config(restaurant_id)
     if not config:
         return {"configured": False}
     # Ocultar secretos en la respuesta
@@ -118,7 +112,8 @@ async def set_config(request: Request, payload: BillingConfigPayload):
         raise HTTPException(status_code=400, detail=f"Proveedor debe ser uno de: {allowed}")
 
     config = payload.model_dump(exclude_none=True)
-    await save_billing_config(restaurant_id, config)
+    with tenant_scope(restaurant_id):
+        await save_billing_config(restaurant_id, config)
     return {"success": True, "provider": payload.provider}
 
 
@@ -129,12 +124,13 @@ async def emit(request: Request, payload: EmitInvoicePayload):
 
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
-    try:
-        result = await emit_invoice(payload.order_id, restaurant_id, payload.customer)
-    except UsageLimitExceeded as exc:
-        # Plan-limit guard fired; surface as HTTP 429 so the UI can show
-        # "upgrade your plan" instead of a generic technical error.
-        raise HTTPException(status_code=429, detail=str(exc))
+    with tenant_scope(restaurant_id):
+        try:
+            result = await emit_invoice(payload.order_id, restaurant_id, payload.customer)
+        except UsageLimitExceeded as exc:
+            # Plan-limit guard fired; surface as HTTP 429 so the UI can show
+            # "upgrade your plan" instead of a generic technical error.
+            raise HTTPException(status_code=429, detail=str(exc))
     if not result["success"]:
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -144,7 +140,8 @@ async def emit(request: Request, payload: EmitInvoicePayload):
 async def billing_log(request: Request, limit: int = 50):
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
-    log           = await get_billing_log(restaurant_id, limit)
+    with tenant_scope(restaurant_id):
+        log = await get_billing_log(restaurant_id, limit)
     return {"log": log}
 
 
@@ -153,7 +150,8 @@ async def test_connection(request: Request):
     """Prueba las credenciales sin emitir factura real."""
     user          = await get_current_user(request)
     restaurant_id = await _get_restaurant_id(user)
-    config        = await get_billing_config(restaurant_id)
+    with tenant_scope(restaurant_id):
+        config = await get_billing_config(restaurant_id)
 
     if not config:
         raise HTTPException(status_code=400, detail="Billing no configurado")

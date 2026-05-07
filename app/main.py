@@ -56,6 +56,7 @@ from app.routes.marketing import router as marketing_router
 from app.routes.subscription import router as subscription_router
 from app.routes.billing_subscription import router as billing_subscription_router
 from app.routes.demo import router as demo_router
+from app.routes.signup_routes import router as signup_router
 # ── Internal tools (Mesio team only — NOT restaurant-facing features) ─────────
 from app.routes.internal.crm import router as internal_crm_router
 from app.routes.internal.admin import router as internal_admin_router
@@ -262,14 +263,10 @@ app.mount("/static", _CachedStaticFiles(directory=str(STATIC_DIR)), name="static
 
 # ── Feature gating (MVP scope: bot + operational flows) ──────────────────────
 # DISABLED_MODULES env var is a comma-separated list of module keys to skip.
-# Default list disables non-bot features (loyalty, payroll/staff, biometric,
-# staff comms, dynamic discounts, reviews, marketing). To re-enable all, set
-# DISABLED_MODULES="" (empty). To disable more, add keys: "loyalty,staff,...".
-# staff + staff_comms KEEP ON — dashboard "Equipo" page needs /api/staff/*
-# and /api/staff-comms/* endpoints to render. Payroll sub-routes live inside
-# staff router but are not called by the MVP bot user surface. webauthn stays
-# off per user scope (no biometric in MVP).
-_DEFAULT_DISABLED = "loyalty,staff_webauthn,discounts,reviews,marketing"
+# Default is empty — all revenue-bearing modules are ON. Per-plan enforcement
+# comes from plan_limits (db_check_caps in agent.py), not from this gate.
+# To disable specific modules, set: DISABLED_MODULES="loyalty,staff_webauthn"
+_DEFAULT_DISABLED = ""
 _disabled_modules = {
     m.strip()
     for m in os.getenv("DISABLED_MODULES", _DEFAULT_DISABLED).split(",")
@@ -300,6 +297,7 @@ app.include_router(health_router)
 app.include_router(subscription_router)
 app.include_router(billing_subscription_router)
 app.include_router(demo_router)
+app.include_router(signup_router)
 
 # Feature-gated (disabled by default for MVP bot scope)
 _maybe_include("staff", staff_router)

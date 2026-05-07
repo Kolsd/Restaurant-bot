@@ -2349,7 +2349,7 @@ async def db_get_staff_upcoming_shifts(
         tz = zoneinfo.ZoneInfo(timezone_name)
         today = datetime.now(tz).date()
     except Exception:
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
 
     occurrences: list[dict] = []
     scan_days = 28  # look ahead window — enough to cover 4 full weeks

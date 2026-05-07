@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
@@ -47,9 +47,9 @@ def _local_now(tz_name: str) -> datetime:
         return datetime.now(ZoneInfo(tz_name or "America/Bogota"))
     except Exception:
         try:
-            return datetime.now(ZoneInfo("America/Bogota")) if ZoneInfo else datetime.utcnow()
+            return datetime.now(ZoneInfo("America/Bogota")) if ZoneInfo else datetime.now(timezone.utc)
         except Exception:
-            return datetime.utcnow()
+            return datetime.now(timezone.utc)
 
 META_API_VERSION = os.getenv("META_API_VERSION", "v20.0")
 
@@ -215,18 +215,26 @@ async def _run_deposit_expiry():
     Cancel reservations whose deposit was never paid within 2 hours.
     Runs every 10 minutes via the scheduler loop counter.
     """
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
+
     try:
         from app.repositories import reservation_deposits_repo as deposits_repo  # noqa: PLC0415
-        expired = await deposits_repo.db_get_pending_deposits(older_than_hours=2)
+        # Cross-tenant scan: enumerate pending deposits across all orgs.
+        # bypass_tenant_scope mirrors _run_reservation_reminders pattern (Rule 14).
+        with bypass_tenant_scope("scheduler_deposit_expiry_cross_tenant"):
+            expired = await deposits_repo.db_get_pending_deposits(older_than_hours=2)
         for deposit in expired:
             reservation_id = deposit.get("reservation_id")
-            if not reservation_id:
+            org_id = deposit.get("org_id")
+            if not reservation_id or not org_id:
                 continue
             try:
-                await db.db_cancel_reservation(reservation_id, "deposit_expired")
-                log.info("scheduler.reservation_deposit_expired", reservation_id=reservation_id)
+                # Enter per-org tenant scope before touching tenant-scoped repos.
+                with tenant_scope(int(org_id)):
+                    await db.db_cancel_reservation(reservation_id, "deposit_expired")
+                log.info("scheduler.reservation_deposit_expired", reservation_id=reservation_id, org_id=org_id)
             except Exception as e:
-                log.error("scheduler.reservation_cancel_failed", reservation_id=reservation_id, error=str(e))
+                log.error("scheduler.reservation_cancel_failed", reservation_id=reservation_id, org_id=org_id, error=str(e))
     except Exception:
         log.exception("scheduler.deposit_expiry_failed")
 
@@ -245,7 +253,6 @@ async def _run_occupancy_snapshot():
         # The old loop relied on the Matriz invariant (rid == location_id of
         # the primary sede) and silently dropped data for sub-sucursales.
         orgs = await db.db_get_all_orgs(active_only=True)
-        pool = await db.get_pool()
         for org in orgs:
             org_id = org["id"]
             try:
@@ -257,25 +264,27 @@ async def _run_occupancy_snapshot():
 
             for loc in locations:
                 location_id = loc["id"]
-                async with pool.acquire() as conn:
-                    tables_row = await conn.fetchrow(
-                        """
-                        SELECT
-                            COUNT(rt.id)::int AS total_tables,
-                            COUNT(rt.id) FILTER (
-                                WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
-                            )::int AS occupied_tables,
-                            COALESCE(SUM(rt.capacity), 0)::int AS total_capacity,
-                            COALESCE(SUM(rt.capacity) FILTER (
-                                WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
-                            ), 0)::int AS seated_guests
-                        FROM restaurant_tables rt
-                        LEFT JOIN table_sessions ts
-                            ON ts.table_id = rt.id AND ts.closed_at IS NULL
-                        WHERE rt.branch_id = $1 AND rt.active = TRUE
-                        """,
-                        location_id,
-                    )
+                with tenant_scope(org_id):
+                    from app.services.tenant_db import tenant_connection  # noqa: PLC0415
+                    async with tenant_connection() as conn:
+                        tables_row = await conn.fetchrow(
+                            """
+                            SELECT
+                                COUNT(rt.id)::int AS total_tables,
+                                COUNT(rt.id) FILTER (
+                                    WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
+                                )::int AS occupied_tables,
+                                COALESCE(SUM(rt.capacity), 0)::int AS total_capacity,
+                                COALESCE(SUM(rt.capacity) FILTER (
+                                    WHERE ts.id IS NOT NULL AND ts.closed_at IS NULL
+                                ), 0)::int AS seated_guests
+                            FROM restaurant_tables rt
+                            LEFT JOIN table_sessions ts
+                                ON ts.table_id = rt.id AND ts.closed_at IS NULL
+                            WHERE rt.branch_id = $1 AND rt.active = TRUE
+                            """,
+                            location_id,
+                        )
                 if tables_row:
                     with tenant_scope(org_id):
                         await rr.db_save_occupancy_snapshot(
@@ -394,7 +403,7 @@ async def _run_weekly_owner_reports():
     time is Monday 09:xx AND no report has been sent yet for the current week.
     Dry-run mode: set WEEKLY_REPORT_DRY_RUN=1 to skip actual WhatsApp send.
     """
-    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
 
     dry_run = os.getenv("WEEKLY_REPORT_DRY_RUN", "0") == "1"
     dashboard_url = os.getenv("APP_DOMAIN", "https://mesio.com").rstrip("/") + "/dashboard"
@@ -404,7 +413,10 @@ async def _run_weekly_owner_reports():
         # Use the org-level enumeration primitive (db_get_all_orgs) instead of
         # db_get_all_restaurants which returns one row per location.
         # db_get_all_orgs returns active orgs only.
-        restaurants = await db.db_get_all_orgs(active_only=True)
+        # db_get_all_orgs is GLOBAL (no tenant scope), but wrap in bypass so that
+        # if it ever gains tenant_connection usage this code stays correct (Rule 14).
+        with bypass_tenant_scope("scheduler_weekly_reports_enumerate"):
+            restaurants = await db.db_get_all_orgs(active_only=True)
     except Exception:
         log.exception("scheduler.weekly_reports.fetch_restaurants_failed")
         return
@@ -426,123 +438,129 @@ async def _run_weekly_owner_reports():
             week_start: date = local_now.date() - timedelta(days=7)
             week_end: date = week_start + timedelta(days=7)
 
-            # ── 4. Skip if already sent this week ─────────────────────────────
-            if await weekly_reports_repo.already_sent_for_week(rid, week_start):
-                log.info(
-                    "scheduler.weekly_reports.already_sent",
-                    restaurant_id=rid,
-                    week_start=week_start.isoformat(),
-                )
-                continue
-
-            # ── 5. Check feature flag (default True, skip if explicitly False) ─
-            features = restaurant.get("features") or {}
-            if isinstance(features, str):
-                try:
-                    features = json.loads(features)
-                except Exception:
-                    features = {}
-            if features.get("weekly_report_enabled") is False:
-                log.info(
-                    "scheduler.weekly_reports.feature_disabled",
-                    restaurant_id=rid,
-                )
-                continue
-
-            # ── 6. Compute stats ──────────────────────────────────────────────
-            stats = await weekly_reports_repo.compute_weekly_stats(rid, week_start, week_end)
-
-            # ── 7. Skip dormant / new restaurants with no signal ──────────────
-            if not stats["has_signal"]:
-                log.info(
-                    "scheduler.weekly_reports.no_signal_skip",
-                    restaurant_id=rid,
-                    week_start=week_start.isoformat(),
-                )
-                continue
-
-            # ── 8. Format message ─────────────────────────────────────────────
-            msg = weekly_reports_repo.format_report_message(
-                stats, restaurant_name, week_start, week_end, dashboard_url
-            )
-            if not msg:
-                log.info(
-                    "scheduler.weekly_reports.empty_message_skip",
-                    restaurant_id=rid,
-                )
-                continue
-
-            # ── 9. Resolve owner phone ────────────────────────────────────────
-            owner_phone = _features_dict(restaurant).get("owner_phone")
-
-            # ── 10. Build payload and persist the report row ──────────────────
-            payload = weekly_reports_repo.build_payload(stats, week_start, week_end)
-
-            if dry_run:
-                initial_status = "dry_run"
-            elif owner_phone:
-                initial_status = "pending"
-            else:
-                initial_status = "skipped"
-
-            report_row = await weekly_reports_repo.save_report(
-                restaurant_id=rid,
-                week_start=week_start,
-                payload=payload,
-                message_text=msg,
-                owner_phone=owner_phone,
-                delivery_status=initial_status,
-                error_message=None if owner_phone else "missing_owner_phone",
-            )
-
-            # ON CONFLICT DO NOTHING → row exists for this week. If it's a
-            # failed row with attempts < MAX, retry; otherwise skip.
-            if report_row is None:
-                retriable = await weekly_reports_repo.get_retriable_report(
-                    rid, week_start,
-                )
-                if retriable is None:
+            # Steps 4-10 use weekly_reports_repo which calls tenant_connection().
+            # Must be inside tenant_scope(rid) — without this, TenantNotSetError
+            # was silently swallowed by the outer except, so reports never ran (Fix 3).
+            with tenant_scope(int(rid)):
+                # ── 4. Skip if already sent this week ─────────────────────────────
+                if await weekly_reports_repo.already_sent_for_week(rid, week_start):
                     log.info(
-                        "scheduler.weekly_reports.conflict_skip",
+                        "scheduler.weekly_reports.already_sent",
                         restaurant_id=rid,
                         week_start=week_start.isoformat(),
                     )
                     continue
-                report_row = retriable
-                log.info(
-                    "scheduler.weekly_reports.retry",
-                    restaurant_id=rid,
-                    week_start=week_start.isoformat(),
-                    attempts=report_row.get("attempts", 0),
+
+                # ── 5. Check feature flag (default True, skip if explicitly False) ─
+                features = restaurant.get("features") or {}
+                if isinstance(features, str):
+                    try:
+                        features = json.loads(features)
+                    except Exception:
+                        features = {}
+                if features.get("weekly_report_enabled") is False:
+                    log.info(
+                        "scheduler.weekly_reports.feature_disabled",
+                        restaurant_id=rid,
+                    )
+                    continue
+
+                # ── 6. Compute stats ──────────────────────────────────────────────
+                stats = await weekly_reports_repo.compute_weekly_stats(rid, week_start, week_end)
+
+                # ── 7. Skip dormant / new restaurants with no signal ──────────────
+                if not stats["has_signal"]:
+                    log.info(
+                        "scheduler.weekly_reports.no_signal_skip",
+                        restaurant_id=rid,
+                        week_start=week_start.isoformat(),
+                    )
+                    continue
+
+                # ── 8. Format message ─────────────────────────────────────────────
+                msg = weekly_reports_repo.format_report_message(
+                    stats, restaurant_name, week_start, week_end, dashboard_url
                 )
+                if not msg:
+                    log.info(
+                        "scheduler.weekly_reports.empty_message_skip",
+                        restaurant_id=rid,
+                    )
+                    continue
 
-            report_id = report_row["id"]
+                # ── 9. Resolve owner phone ────────────────────────────────────────
+                owner_phone = _features_dict(restaurant).get("owner_phone")
 
-            # ── 11. Send (or dry-run) ─────────────────────────────────────────
-            if dry_run:
-                log.info(
-                    "scheduler.weekly_reports.dry_run",
+                # ── 10. Build payload and persist the report row ──────────────────
+                payload = weekly_reports_repo.build_payload(stats, week_start, week_end)
+
+                if dry_run:
+                    initial_status = "dry_run"
+                elif owner_phone:
+                    initial_status = "pending"
+                else:
+                    initial_status = "skipped"
+
+                report_row = await weekly_reports_repo.save_report(
                     restaurant_id=rid,
+                    week_start=week_start,
+                    payload=payload,
+                    message_text=msg,
                     owner_phone=owner_phone,
-                    week_start=week_start.isoformat(),
+                    delivery_status=initial_status,
+                    error_message=None if owner_phone else "missing_owner_phone",
                 )
-                continue
 
-            if not owner_phone:
-                log.info(
-                    "scheduler.weekly_reports.no_owner_phone",
-                    restaurant_id=rid,
-                    week_start=week_start.isoformat(),
-                )
-                continue
+                # ON CONFLICT DO NOTHING → row exists for this week. If it's a
+                # failed row with attempts < MAX, retry; otherwise skip.
+                if report_row is None:
+                    retriable = await weekly_reports_repo.get_retriable_report(
+                        rid, week_start,
+                    )
+                    if retriable is None:
+                        log.info(
+                            "scheduler.weekly_reports.conflict_skip",
+                            restaurant_id=rid,
+                            week_start=week_start.isoformat(),
+                        )
+                        continue
+                    report_row = retriable
+                    log.info(
+                        "scheduler.weekly_reports.retry",
+                        restaurant_id=rid,
+                        week_start=week_start.isoformat(),
+                        attempts=report_row.get("attempts", 0),
+                    )
 
-            bot_number = restaurant.get("whatsapp_number", "")
-            phone_id = restaurant.get("wa_phone_id")
+                report_id = report_row["id"]
 
+                # ── 11. Send (or dry-run) ─────────────────────────────────────────
+                if dry_run:
+                    log.info(
+                        "scheduler.weekly_reports.dry_run",
+                        restaurant_id=rid,
+                        owner_phone=owner_phone,
+                        week_start=week_start.isoformat(),
+                    )
+                    continue
+
+                if not owner_phone:
+                    log.info(
+                        "scheduler.weekly_reports.no_owner_phone",
+                        restaurant_id=rid,
+                        week_start=week_start.isoformat(),
+                    )
+                    continue
+
+                bot_number = restaurant.get("whatsapp_number", "")
+                phone_id = restaurant.get("wa_phone_id")
+
+            # Send happens outside tenant_scope — _send_whatsapp is pure HTTP (no DB).
             try:
                 ok = await _send_whatsapp(owner_phone, msg, bot_number, phone_id)
                 if ok:
-                    await weekly_reports_repo.mark_sent(report_id)
+                    with tenant_scope(int(rid)):
+                        await weekly_reports_repo.mark_sent(report_id)
                     log.info(
                         "scheduler.weekly_reports.sent",
                         restaurant_id=rid,
@@ -551,7 +569,8 @@ async def _run_weekly_owner_reports():
                     )
                 else:
                     error_msg = "whatsapp_send_returned_false"
-                    await weekly_reports_repo.mark_failed(report_id, error_msg)
+                    with tenant_scope(int(rid)):
+                        await weekly_reports_repo.mark_failed(report_id, error_msg)
                     log.warning(
                         "scheduler.weekly_reports.send_failed",
                         restaurant_id=rid,
@@ -561,7 +580,8 @@ async def _run_weekly_owner_reports():
                     )
             except Exception as exc:
                 error_str = str(exc)[:500]
-                await weekly_reports_repo.mark_failed(report_id, error_str)
+                with tenant_scope(int(rid)):
+                    await weekly_reports_repo.mark_failed(report_id, error_str)
                 log.exception(
                     "scheduler.weekly_reports.send_exception",
                     restaurant_id=rid,

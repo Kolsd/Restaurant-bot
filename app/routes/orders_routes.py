@@ -424,7 +424,7 @@ async def validate_delivery_order(order_id: str, body: ValidateDeliveryBody, req
     confirmation. Loyalty accrual fires once (handled by db_confirm_payment
     returning None on replay).
     """
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timezone as _tz
     user = await get_current_user(request)
 
     # 1. Pre-resolve order (cross-tenant) to obtain its org_id.
@@ -468,7 +468,7 @@ async def validate_delivery_order(order_id: str, body: ValidateDeliveryBody, req
 
     # 3. Mark paid + confirmed. Synthetic transaction_id lets us distinguish
     #    manual validations from Wompi callbacks in audit logs and reports.
-    manual_tx_id = f"manual:{user.get('id', 'unknown')}:{_dt.utcnow().isoformat()}Z"
+    manual_tx_id = f"manual:{user.get('id', 'unknown')}:{_dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S')}Z"
 
     with tenant_scope(scope_rid):
         result = await db.db_confirm_payment(order_id, manual_tx_id)

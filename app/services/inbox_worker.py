@@ -349,11 +349,25 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
         EmptyTranscriptionError,
     )
 
-    from app.services.tenant_context import tenant_scope  # noqa: PLC0415
+    from app.services.tenant_context import tenant_scope, bypass_tenant_scope as _bypass_ts  # noqa: PLC0415
 
     bot_number = payload["bot_number"]
     user_phone = payload["user_phone"]
     phone_id   = payload["phone_id"]
+
+    # ── Dedup guard: skip re-dispatch of already-processed wam_ids (Fix 4) ─────
+    # Inbox rows can be re-claimed after the 3-min claim window expires (crash/retry).
+    # Without this guard, each re-dispatch charges a subscription credit at agent.py
+    # check_and_consume_conv_slot, double-billing the restaurant.
+    # Uses bypass_tenant_scope (cross-tenant lookup, same as webhook entry path).
+    wam_id = payload.get("wam_id")
+    if wam_id:
+        from app.services import database as _db_mod  # noqa: PLC0415
+        with _bypass_ts("inbox_worker_wam_dedup"):
+            already_seen = await _db_mod.db_is_duplicate_wam(wam_id)
+        if already_seen:
+            log.info("inbox.duplicate_wam_skipped", wam_id=wam_id, bot_number=bot_number, user_phone=user_phone)
+            return  # ack the row — idempotent, no retry needed
 
     # ── Resolve Org from bot_number (Rule 4: short connection, released before dispatch)
     org = await db_get_org_by_phone(bot_number)

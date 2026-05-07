@@ -15,6 +15,7 @@ from app.services import state_store
 from app.services.agent import trigger_nps
 from app.routes.deps import require_auth, get_current_user, get_current_restaurant, get_current_restaurant_scoped
 from app.services.tenant_context import tenant_scope, bypass_tenant_scope
+from app.services.tenant_db import tenant_connection
 from app.services import loyalty as loyalty_svc
 from app.services.money import to_decimal, money_mul, quantize_money, money_sum
 from app.services.logging import get_logger
@@ -48,8 +49,7 @@ async def _get_active_session_for_table(table_id: str, org_id: int) -> dict | No
     Requires caller to be inside tenant_scope(org_id) already.
     Returns None if no active session exists.
     """
-    pool = await db.get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         row = await conn.fetchrow(
             """SELECT assigned_staff_id
                FROM table_sessions
@@ -591,19 +591,6 @@ async def get_delivery_orders(request: Request):
         })
     return {"orders": orders}
 
-@router.get("/api/delivery/check-updates")
-async def delivery_check_updates(request: Request):
-    await require_auth(request)
-    import hashlib as _hashlib
-    # Tenant-scoped: only return hash of THIS org's orders. The unscoped
-    # variant (db_get_delivery_status_hash) leaked order IDs across
-    # tenants — every kitchen page polled it every 10s. Use the
-    # _for_restaurant variant always when called from a tenant-auth route.
-    restaurant = await get_current_restaurant(request)
-    with tenant_scope(restaurant["id"]):
-        rows = await tr.db_get_delivery_status_hash_for_restaurant(restaurant["id"])
-    h = _hashlib.md5(str([(r["id"], r["status"]) for r in rows]).encode()).hexdigest()
-    return {"hash": h}
 
 @router.patch("/api/kitchen/delivery-orders/{order_id}/status")
 async def update_delivery_order_status(request: Request, order_id: str):

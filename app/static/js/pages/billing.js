@@ -52,7 +52,7 @@
       _renderUsageRow(card, 'tokens',   today.tokens_used   || 0, limits.daily_tokens);
       _renderUsageRow(card, 'invoices', today.invoices_used || 0, limits.daily_invoices);
       _renderUsageRow(card, 'orders',   month.orders_count  || 0, limits.monthly_orders);
-    } catch (e) { console.error('plan usage load failed', e); }
+    } catch (e) { console.error('plan usage load failed', e); mesioToast('No se pudo cargar la información de plan', 'error'); }
   }
 
   function _renderUsageRow(card, rowKey, used, limit) {
@@ -78,7 +78,7 @@
       const r = await fetch('/api/billing/providers', { headers: hdr });
       const d = await r.json();
       d.providers.forEach(function (p) { PROVIDERS[p.id] = p; });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); mesioToast('No se pudo cargar la información de plan', 'error'); }
   }
 
   async function loadCurrentConfig() {
@@ -94,7 +94,7 @@
         showStatusCard(prov, d.config.auto_emit);
         loadMetrics();
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); mesioToast('No se pudo cargar la información de plan', 'error'); }
   }
 
   function showStatusCard(prov, autoEmit) {
@@ -122,7 +122,7 @@
       document.getElementById('m-ok').textContent  = ok;
       document.getElementById('m-err').textContent = err;
       document.getElementById('m-auto').textContent = existingConfig && existingConfig.auto_emit ? 'Activa' : 'Inactiva';
-    } catch (e) {}
+    } catch (e) { console.error(e); mesioToast('No se pudo cargar la información de plan', 'error'); }
   }
 
   function selectProvider(provId, skipHighlight) {

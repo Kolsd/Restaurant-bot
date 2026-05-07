@@ -44,7 +44,7 @@
 'use strict';
 
 /* ── Constants ─────────────────────────────────────────────────── */
-const SC_TOKEN  = localStorage.getItem('rb_token');
+const SC_TOKEN  = localStorage.getItem('rb_token') || localStorage.getItem('rb_staff_token');
 const SC_REST   = (() => {
   try { return JSON.parse(localStorage.getItem('rb_restaurant') || '{}'); }
   catch(_) { return {}; }

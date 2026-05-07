@@ -289,10 +289,14 @@ def generate_wompi_payment_link(
             "WOMPI_PUBLIC_KEY is not configured. Cannot generate payment link."
         )
 
+    from app.services.money import to_decimal, quantize_money  # noqa: PLC0415
     if currency in _ZERO_DECIMAL_CURRENCIES:
-        amount_cents = int(amount)
+        # Zero-decimal currencies (COP, CLP…): amount is already in the base unit.
+        # Coerce via Decimal to avoid float precision bugs (e.g. int(28000.0 * 100)).
+        amount_cents = int(quantize_money(to_decimal(amount), currency))
     else:
-        amount_cents = int(amount * 100)
+        # Standard 2-decimal currencies: multiply by 100 to get cents.
+        amount_cents = int(quantize_money(to_decimal(amount), currency) * 100)  # JSON boundary
     signature_string = f"{order_id}{amount_cents}{currency}{integrity}"
     signature = hashlib.sha256(signature_string.encode()).hexdigest()
     redirect_base = f"https://{APP_DOMAIN}" if APP_DOMAIN else ""
