@@ -120,7 +120,7 @@ def test_create_staff_inserts_with_org_id_not_location_id(client):
             headers={"X-Branch-ID": str(LOCATION), "Authorization": "Bearer test"},
             json={
                 "name": "Carlos", "last_name": "Pérez", "phone": "+573009999999",
-                "role": "mesero", "password": "1234",
+                "role": "mesero", "password": "123456",  # Fix #2: min 6 digits
             },
         )
 

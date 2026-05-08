@@ -175,8 +175,9 @@ _PIN_WINDOW = 900  # 15 minutes
 # many (restaurant_id, name) tuples. Without this an attacker iterating
 # restaurant_id=1..1000 with name="Pedro"+pin="1234" gets 10 attempts per
 # bucket — 10K total before any single bucket triggers. The global cap
-# kicks in after 30 attempts per IP per 15min regardless of target.
-_PIN_GLOBAL_MAX_ATTEMPTS = 30
+# kicks in after 10 attempts per IP per 15min regardless of target.
+# L-1: Reduced from 30 → 10; a legitimate user needs at most 2-3 tries.
+_PIN_GLOBAL_MAX_ATTEMPTS = 10
 _PIN_GLOBAL_WINDOW = 900  # 15 minutes
 
 

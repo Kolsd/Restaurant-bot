@@ -1,5 +1,6 @@
-﻿import json as _json
-from passlib.context import CryptContext
+import json as _json
+# Fix #12: passlib removed — bcrypt direct API via password_hash module (rounds=12 pinned)
+from app.services.password_hash import hash_password, verify_password, is_legacy_hash
 from app.services import database as db
 from app.repositories import sessions_repo
 from app.services.logging import get_logger
@@ -38,34 +39,15 @@ async def _build_org_shape(org: dict) -> dict:
         "currency":           feats.get("currency", "COP"),
     }
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+# Pre-computed bcrypt hash used to equalize timing when a username does not
+# exist (Fix #1 — login timing oracle mitigation). Generated with rounds=12.
+_DUMMY_HASH = "$2b$12$CGrQL8okZSh9O2uDzZqkMu3hZLUK8vYoU1O./GGLu4ZzHMN3CrH/G"
 
-def _is_legacy_hash(hashed_password: str) -> bool:
-    """Bcrypt hashes always start with $2 ($2a$, $2b$, $2y$). Anything else
-    we treat as legacy (currently: sha256 plain hex). Used by login() to
-    decide whether to opportunistically rehash on successful verification.
-    """
-    return not (hashed_password or "").startswith("$2")
+# Unified error string — same for "user not found" and "wrong password" so
+# callers cannot distinguish the two failure modes (Fix #1).
+_INVALID_CREDS = "Credenciales inválidas"
 
-def verify_password(plain_password: str, hashed_password: str, _username: str = "") -> bool:
-    try:
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception:
-        # Fallback para usuarios viejos con sha256 (legacy hash — not bcrypt).
-        # Log as warning so we can measure how many legacy users remain before
-        # dropping the fallback.  Username is obfuscated to 3 chars for privacy.
-        import hashlib
-        result = hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
-        if result:
-            obfuscated = (_username[:3] + "***") if _username else "***"
-            _log.warning(
-                "auth.password.sha256_fallback_used",
-                username_prefix=obfuscated,
-            )
-        return result
 
 async def login(username: str, password: str) -> dict:
     # ── Intento 1: tabla users (admin / gerente / owner) ──────────────────────
@@ -75,12 +57,15 @@ async def login(username: str, password: str) -> dict:
         candidates = await db.db_get_staff_candidates_by_name(username)
         member = next((c for c in candidates if verify_password(password, c["pin"], c.get("name", ""))), None)
         if not member:
-            return {"success": False, "error": "Usuario o contraseña incorrectos"}
+            # Equalise timing: run a dummy bcrypt verify so "user not found"
+            # takes the same wall time as "wrong password" (Fix #1).
+            verify_password(password, _DUMMY_HASH)
+            return {"success": False, "error": _INVALID_CREDS}
 
         # Opportunistic legacy → bcrypt upgrade. We hold the plaintext only
         # here; rehash + persist before continuing. Failure to upgrade must
         # NOT block the login (best-effort, logged for observability).
-        if _is_legacy_hash(member.get("pin", "")) and member.get("org_id"):
+        if is_legacy_hash(member.get("pin", "")) and member.get("org_id"):
             try:
                 from app.repositories.staff_repo import db_update_staff_pin_hash  # noqa: PLC0415
                 await db_update_staff_pin_hash(
@@ -167,11 +152,11 @@ async def login(username: str, password: str) -> dict:
         return response
 
     if not verify_password(password, user["password_hash"], username):
-        return {"success": False, "error": "Contraseña incorrecta"}
+        return {"success": False, "error": _INVALID_CREDS}
 
     # Opportunistic legacy → bcrypt upgrade for admin/owner users.
     # Best-effort: rehash failure must not block the login.
-    if _is_legacy_hash(user.get("password_hash", "")):
+    if is_legacy_hash(user.get("password_hash", "")):
         try:
             await db.db_update_user_password(username, hash_password(password))
             _log.info("auth.password.legacy_upgraded", scope="user", username_prefix=(username[:3] + "***"))

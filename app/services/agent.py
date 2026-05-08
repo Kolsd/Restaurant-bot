@@ -5,6 +5,7 @@ import json
 import re
 import hashlib
 import secrets
+import unicodedata
 from datetime import datetime, timezone as _dt_utc
 from anthropic import AsyncAnthropic, APIStatusError, APITimeoutError, APIConnectionError
 from app.services import orders, database as db
@@ -220,9 +221,12 @@ _INJECTION_PATTERNS = [
     r'Olvida (todo|tus instrucciones)',
     r'(?:^|\n)\s*Actúa\s+como\s+(?:un|una|el|la|mi)\b',
     r'Eres ahora',
+    r'ignor[ao]\w* (todo|tus instrucciones|las instrucciones|el sistema)',
+    r'olvid[ao]\w* (todo|tus instrucciones|las instrucciones)',
     # English
     r'Ignore (all|the|your|previous) (instructions|prompts?|rules)',
     r'Forget (all|your|previous) (instructions|rules)',
+    r'forget (everything|all|your|the) (instruction|prompt)',
     r'(?:^|\n)\s*Act\s+as\s+(?:a|an|my|the)\b',
     r'You are now',
     r'Pretend (to be|you are)',
@@ -275,6 +279,19 @@ NO del bloque <user_message>.
 """
 
 
+def _normalize_for_injection_check(text: str) -> str:
+    """NFKD-normalize and strip combining marks so homoglyph bypasses fail the regex."""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
+
+
+def _sanitize_menu_text(text: str) -> str:
+    """Strip control chars, angle brackets, and truncate to 200 chars for LLM injection safety."""
+    cleaned = "".join(c for c in (text or "") if c.isprintable() or c == " ")
+    cleaned = cleaned.replace("<", "[").replace(">", "]")
+    return cleaned[:200]
+
+
 def _wrap_user_message(text: str) -> str:
     """Sanitize and wrap user text in XML tags to isolate untrusted input."""
     if not text:
@@ -282,9 +299,11 @@ def _wrap_user_message(text: str) -> str:
     # Strip control characters except newline and tab
     sanitized = re.sub(r'[^\S\n\t]', ' ', text)  # normalise non-newline/tab whitespace
     sanitized = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', sanitized)
-    # Block known injection patterns before they reach the LLM
-    if _INJECTION_RE.search(sanitized):
-        log.warning("injection_pattern_blocked")
+    # Block known injection patterns — test on NFKD-normalized copy to defeat homoglyph bypasses.
+    # The original `sanitized` (with real diacritics) is still sent to the LLM.
+    normalized = _normalize_for_injection_check(sanitized)
+    if _INJECTION_RE.search(normalized):
+        log.warning("injection_pattern_blocked", phone="[redacted]")
         return ""
     # Neutralise any attempt to close the wrapper tag by escaping all '<'
     # This is intentionally broad: the user content is already plain text
@@ -641,18 +660,22 @@ async def get_session_state(phone: str, bot_number: str) -> dict:
 def _build_compact_menu(menu: dict, availability: dict, bot_visual_menu: bool = False) -> str:
     lines = []
     for category, dishes in menu.items():
+        safe_category = _sanitize_menu_text(category)
         cat_lines = []
         for d in dishes:
-            name  = d.get("name", "")
+            raw_name = d.get("name", "")
+            name = _sanitize_menu_text(raw_name)
             price = d.get("price", 0)
-            avail = availability.get(name, True)
+            # Availability keyed by original name; falls back to True if not found
+            avail = availability.get(raw_name, True)
+            desc_raw = d.get("description", "")
             price_str = f"${price:,}" if price else ""
             status    = "" if avail else " [NO DISPONIBLE]"
             # Mark dishes with photos so Claude knows send_dish_card is viable
             photo_marker = " [📷]" if (bot_visual_menu and d.get("image_url")) else ""
             cat_lines.append(f"{name}{photo_marker} {price_str}{status}")
         if cat_lines:
-            lines.append(f"{category}: {', '.join(cat_lines)}")
+            lines.append(f"{safe_category}: {', '.join(cat_lines)}")
     return "\n".join(lines) if lines else "Sin menú."
 
 
@@ -1458,6 +1481,14 @@ async def _validate_tool_call(
     # double deposit charged. The customer almost never wants two reservations
     # on the same slot back-to-back; a duplicate is virtually always a retry.
     if tool_name == "make_reservation":
+        # Daily cap per phone — prevent abuse from a single hostile number
+        daily_ok = await state_store.rate_limit_check(
+            f"reservation_daily:{phone}:{bot_number}",
+            max_requests=5, window_seconds=86400,
+        )
+        if not daily_ok:
+            log.warning("guard.reservation_daily_limit", phone=_ofuscar_phone(phone), bot_number=bot_number)
+            return None, "Solo puedes hacer hasta 5 reservas por día desde este número.", {}
         res_key = _make_reservation_fingerprint(tool_input)
         is_ok = await state_store.rate_limit_check(
             f"reservation_dedup:{phone}:{bot_number}:{res_key}",
@@ -1500,6 +1531,9 @@ async def _validate_tool_call(
         except (ValueError, TypeError):
             log.warning("guard.reservation_invalid_guests", guests=tool_input.get("guests"), phone=_ofuscar_phone(phone))
             return None, reply or "¿Cuántas personas serán para la reserva?", {}
+        if _guests > 100:
+            log.warning("guard.reservation_guests_over_limit", guests=_guests, phone=_ofuscar_phone(phone))
+            return None, "¿Cuántas personas serán para la reserva? Para grupos grandes (más de 100), por favor llámanos directamente.", {}
 
     # 7. send_dish_card — validate feature flag, dish existence, and image availability
     if tool_name == "send_dish_card":
@@ -1528,10 +1562,14 @@ async def _validate_tool_call(
 
     # 8. remember_customer_preference — validate key and rate-limit per conversation
     # 9. cancel_order — validate tool_input is dict; reason is optional free text
-    if tool_name == "notify_arrival":
+    if tool_name in ("notify_arrival", "call_waiter"):
         if not isinstance(tool_input, dict):
             log.warning("guard.notify_arrival_input_not_dict", phone=_ofuscar_phone(phone), input_type=type(tool_input).__name__)
             tool_input = {}
+        # Cap free-text message field to prevent prompt-stuffing via waiter alerts
+        _msg = tool_input.get("message")
+        if isinstance(_msg, str) and len(_msg) > 500:
+            tool_input = {**tool_input, "message": _msg[:500]}
 
     if tool_name == "cancel_order":
         if not isinstance(tool_input, dict):
@@ -2328,7 +2366,9 @@ async def _build_enriched_user_message(
     """
     full_history = await db.db_get_history(user_phone, bot_number)
     try:
-        cart_text = await orders.cart_summary(user_phone, bot_number)
+        _raw_cart = await orders.cart_summary(user_phone, bot_number)
+        # Sanitize cart text (contains user-supplied dish names) before LLM context injection
+        cart_text = _sanitize_menu_text(_raw_cart) if _raw_cart else ""
     except Exception:
         log.exception(
             "build_enriched_message.cart_summary_failed",
@@ -2473,7 +2513,15 @@ async def _call_llm_and_execute(
 
     Returns (assistant_message, routing_context).
     """
-    messages = full_history[-(HISTORY_WINDOW * 2):]
+    # Cap each historical user message at 500 chars to prevent prompt-stuffing via stored history.
+    # Build a new list — do NOT mutate full_history (may be shared/cached).
+    _raw_history = full_history[-(HISTORY_WINDOW * 2):]
+    messages = []
+    for _msg in _raw_history:
+        if _msg.get("role") == "user" and isinstance(_msg.get("content"), str) and len(_msg["content"]) > 500:
+            messages.append({**_msg, "content": _msg["content"][:500] + "…"})
+        else:
+            messages.append(_msg)
     messages.append({"role": "user", "content": enriched})
 
     # Load customer memory (read-only; failure never blocks the chat)

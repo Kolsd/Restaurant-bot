@@ -5,7 +5,7 @@ The superadmin CRUD endpoints (/api/admin/*) have been moved to
 app/routes/internal/admin.py under /api/internal/admin/*.
 """
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.services.auth import login, logout, hash_password
 from app.services import state_store
@@ -34,7 +34,9 @@ async def _check_login_rate_limit(ip: str) -> None:
 
 
 # ── Pydantic models ──────────────────────────────────────────────────
-class LoginRequest(BaseModel): username: str; password: str
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=254)
+    password: str = Field(..., min_length=1, max_length=1024)
 
 
 # ── AUTH ──────────────────────────────────────────────────────────────

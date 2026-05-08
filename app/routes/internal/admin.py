@@ -451,8 +451,12 @@ async def admin_parse_menu(file: UploadFile = File(...), _: None = Depends(verif
         return {"success": True, "json_menu": json.loads(response.content[0].text.replace("```json","").replace("```","").strip())}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    except json.JSONDecodeError:
+        log.warning("admin.parse_menu.json_decode_error")
+        raise HTTPException(status_code=422, detail="El modelo no devolvió JSON válido. Intenta con otra imagen o PDF.")
+    except Exception:
+        log.exception("admin.parse_menu.unexpected_error")
+        raise HTTPException(status_code=500, detail="Error interno al procesar el menú")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Organizations  (new model — S7)

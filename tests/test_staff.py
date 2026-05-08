@@ -107,14 +107,15 @@ def test_create_staff_pin_not_in_response(client, monkeypatch):
     created_row = dict(_STAFF_ROW)  # pin column not in RETURNING clause
     monkeypatch.setattr(db_mod, "db_create_staff", AsyncMock(return_value=created_row))
 
+    # Fix #2: PIN must be ≥6 digits (was 4). Updated test fixture to match.
     r = client.post(
         "/api/staff",
-        json={"name": "Ana García", "role": "mesero", "password": "1234", "phone": "+573001111111"},
+        json={"name": "Ana García", "role": "mesero", "password": "123456", "phone": "+573001111111"},
         headers=_HEADERS,
     )
     assert r.status_code == 201
     body = r.text
-    assert "1234" not in body, "Raw PIN must never appear in the response"
+    assert "123456" not in body, "Raw PIN must never appear in the response"
     assert r.json()["staff"]["name"] == "Ana García"
 
 
