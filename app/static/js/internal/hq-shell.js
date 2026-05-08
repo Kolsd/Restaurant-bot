@@ -70,12 +70,12 @@
       '<div id="hq-logo-text">Mesio <span>HQ</span></div>';
     bar.appendChild(logo);
 
-    // Search
+    // Search — clicking/focusing routes through the Cmd+K palette
     const searchWrap = document.createElement('div');
     searchWrap.id = 'hq-search-wrap';
     searchWrap.innerHTML =
       '<span id="hq-search-icon">🔍</span>' +
-      '<input id="hq-search" type="search" placeholder="Buscar tenant, prospecto…" autocomplete="off">' +
+      '<input id="hq-search" type="search" placeholder="Buscar… (⌘K)" autocomplete="off" readonly>' +
       '<div id="hq-search-dropdown"></div>';
     bar.appendChild(searchWrap);
 
@@ -123,82 +123,36 @@
     if (overlay) overlay.classList.toggle('open');
   }
 
-  // ── Global search ─────────────────────────────────────────────────────────────
-  let _searchTimer = null;
-
+  // ── Global search — routes topbar input through Cmd+K palette ────────────────
   function _setupSearch() {
     const input = document.getElementById('hq-search');
-    const dropdown = document.getElementById('hq-search-dropdown');
-    if (!input || !dropdown) return;
+    if (!input) return;
 
+    // Focus or click on the topbar search → open the palette
     input.addEventListener('focus', () => {
-      _showSearchDropdown('');
+      input.blur(); // prevent input from keeping focus; palette has its own input
+      _openPalette();
+    });
+    input.addEventListener('click', e => {
+      e.preventDefault();
+      _openPalette();
     });
 
-    input.addEventListener('input', () => {
-      clearTimeout(_searchTimer);
-      _searchTimer = setTimeout(() => _showSearchDropdown(input.value.trim()), 300);
-    });
-
-    // Close on outside click
-    document.addEventListener('click', e => {
-      if (!document.getElementById('hq-search-wrap').contains(e.target)) {
-        dropdown.classList.remove('open');
-      }
-    });
-
+    // Any keypress while topbar input is somehow focused → open palette
     input.addEventListener('keydown', e => {
-      if (e.key === 'Escape') {
-        dropdown.classList.remove('open');
-        input.blur();
-      }
+      if (e.key !== 'Tab') e.preventDefault();
+      _openPalette();
     });
   }
 
-  function _showSearchDropdown(query) {
-    const dropdown = document.getElementById('hq-search-dropdown');
-    if (!dropdown) return;
-    dropdown.classList.add('open');
-
-    if (!query) {
-      // Quick nav shortcuts
-      dropdown.innerHTML = NAV_ITEMS.map(item =>
-        '<div class="hq-search-item" onclick="window.location.href=\'' + item.href + '\'">' +
-          '<span>' + item.icon + '</span>' +
-          '<span class="hq-si-label">' + item.label + '</span>' +
-          '<span class="hq-si-type">Módulo</span>' +
-        '</div>'
-      ).join('');
-      return;
+  function _openPalette() {
+    if (window.MesioCmdPalette) {
+      window.MesioCmdPalette.open();
+    } else {
+      // Palette script not yet loaded (should not normally happen since we inject
+      // it below, but guard anyway). Dispatch custom event as fallback.
+      document.dispatchEvent(new CustomEvent('mesio:palette-open'));
     }
-
-    const token = _getToken();
-    dropdown.innerHTML = '<div class="hq-search-empty">Buscando…</div>';
-
-    fetch('/api/internal/search?q=' + encodeURIComponent(query), { // lint-allow: /api/internal/search endpoint will be added in hq-shell sprint
-      headers: { 'Authorization': 'Bearer ' + token }
-    })
-      .then(r => {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(data => {
-        const results = (data.results || []).slice(0, 8);
-        if (!results.length) {
-          dropdown.innerHTML = '<div class="hq-search-empty">Sin resultados para "' +
-            _escHtmlShell(query) + '"</div>';
-          return;
-        }
-        dropdown.innerHTML = results.map(item =>
-          '<div class="hq-search-item" onclick="window.location.href=\'' + _escHtmlShell(item.href || '#') + '\'">' +
-            '<span class="hq-si-label">' + _escHtmlShell(item.label || '') + '</span>' +
-            '<span class="hq-si-type">' + _escHtmlShell(item.type || '') + '</span>' +
-          '</div>'
-        ).join('');
-      })
-      .catch(() => {
-        dropdown.innerHTML = '<div class="hq-search-empty">Búsqueda próximamente</div>';
-      });
   }
 
   // Minimal XSS escape (mesio-utils.js may not be loaded yet)
@@ -227,6 +181,20 @@
       sessionStorage.removeItem('mesio_admin_key');
       window.location.href = '/internal/superadmin';
     });
+  }
+
+  // ── Load cmd-palette.js ───────────────────────────────────────────────────────
+  function _loadCmdPalette() {
+    const s = document.createElement('script');
+    s.src = '/static/js/internal/cmd-palette.js';
+    s.defer = true;
+    // Once loaded, wire the custom fallback event
+    s.addEventListener('load', () => {
+      document.addEventListener('mesio:palette-open', () => {
+        if (window.MesioCmdPalette) window.MesioCmdPalette.open();
+      });
+    });
+    document.head.appendChild(s);
   }
 
   // ── Main injection ────────────────────────────────────────────────────────────
@@ -274,6 +242,9 @@
     // Wire up interactions
     _setupSearch();
     _setupLogout();
+
+    // Load the Cmd+K palette script
+    _loadCmdPalette();
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────────

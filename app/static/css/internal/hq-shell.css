@@ -337,3 +337,251 @@ body.hq-ready.hq-no-sidebar {
     max-width: 140px;
   }
 }
+
+/* ══ Cmd+K Palette ═══════════════════════════════════════════════════
+   Injected lazily by cmd-palette.js on first Cmd+K press.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Prevent body scroll when palette is open */
+body.cmd-palette-open {
+  overflow: hidden;
+}
+
+/* Full-screen translucent overlay */
+#cmd-palette-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 9000;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+}
+
+#cmd-palette-overlay.open {
+  display: flex;
+}
+
+/* Centered modal */
+#cmd-palette-modal {
+  width: 100%;
+  max-width: 600px;
+  background: #1a2236;
+  border: 1px solid #2d3a4e;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 120px);
+  animation: cmd-palette-in 0.15s ease;
+}
+
+@keyframes cmd-palette-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+
+/* ── Input row ── */
+#cmd-palette-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2d3a4e;
+  flex-shrink: 0;
+}
+
+#cmd-palette-search-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+#cmd-palette-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f1f5f9;
+  font-size: 16px;
+  font-weight: 400;
+  min-width: 0;
+}
+
+#cmd-palette-input::placeholder {
+  color: #4b5e78;
+}
+
+/* Remove default search input clear button */
+#cmd-palette-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+#cmd-palette-esc-hint {
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  background: #2d3a4e;
+  border: 1px solid #3d4e62;
+  border-radius: 4px;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+/* ── Results list ── */
+#cmd-palette-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 48px;
+  overscroll-behavior: contain;
+}
+
+.cmd-palette-empty {
+  padding: 20px 16px;
+  color: #4b5e78;
+  font-size: 14px;
+  text-align: center;
+}
+
+.cmd-palette-empty strong {
+  color: #8899aa;
+}
+
+.cmd-palette-section-header {
+  padding: 8px 16px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4b5e78;
+  background: #141d2e;
+  border-bottom: 1px solid #1e2c3e;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.cmd-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.cmd-palette-item:hover,
+.cmd-palette-item.selected {
+  background: rgba(29, 158, 117, 0.12);
+}
+
+.cmd-palette-item.selected {
+  background: rgba(29, 158, 117, 0.18);
+}
+
+.cmd-palette-item-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  line-height: 1;
+}
+
+.cmd-palette-item-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cmd-palette-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmd-palette-item-sub {
+  font-size: 11px;
+  color: #4b5e78;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmd-palette-item.selected .cmd-palette-item-sub {
+  color: #6b8099;
+}
+
+.cmd-palette-item-type {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #2d3a4e;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.cmd-palette-item.selected .cmd-palette-item-type {
+  background: rgba(29, 158, 117, 0.25);
+  color: var(--brand); /* lint-allow: fallback for pages without tokens.css */
+}
+
+/* ── Footer hint ── */
+#cmd-palette-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: #141d2e;
+  border-top: 1px solid #1e2c3e;
+  font-size: 11px;
+  color: #4b5e78;
+  flex-shrink: 0;
+}
+
+#cmd-palette-footer span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#cmd-palette-footer kbd {
+  font-family: inherit;
+  font-size: 10px;
+  padding: 1px 5px;
+  background: #2d3a4e;
+  border: 1px solid #3d4e62;
+  border-radius: 3px;
+  color: #8899aa;
+}
+
+/* ── Mobile adjustments ── */
+@media (max-width: 640px) {
+  #cmd-palette-overlay {
+    padding-top: 0;
+    align-items: flex-start;
+  }
+
+  #cmd-palette-modal {
+    max-width: 100%;
+    border-radius: 0 0 12px 12px;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    max-height: 75vh;
+  }
+
+  #cmd-palette-footer {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+}
