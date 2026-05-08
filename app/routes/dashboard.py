@@ -107,6 +107,12 @@ async def superadmin_page():
     p = STATIC / "html" / "internal" / "superadmin.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
 
+@router.get("/internal", response_class=HTMLResponse)
+async def internal_hq_landing():
+    """Mesio HQ landing page — morning ritual dashboard for the founder."""
+    p = STATIC / "html" / "internal" / "index.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>No disponible</h1>", status_code=404)
+
 @router.get("/internal/superadmin", response_class=HTMLResponse)
 async def superadmin_internal_alias():
     """Canonical URL for superadmin page — matches /api/internal/* namespace."""

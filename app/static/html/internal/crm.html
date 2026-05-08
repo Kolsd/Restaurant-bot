@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
 <title>Mesio CRM</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
 <link rel="stylesheet" href="/static/css/crm.css?v=3">
 </head>
-<body>
+<body data-page="crm" data-hq-sidebar="true">
 <!-- Removed third-party Pixabay audio asset (dead code, was unreferenced) -->
 <input type="file" id="csv-input" accept=".csv" style="display:none" onchange="handleCSVUpload(event)">
 
@@ -366,5 +367,6 @@
 <div class="mob-overlay" id="mob-overlay" onclick="closeSidebar()"></div>
 
 <script src="/static/js/internal/crm.js?v=3"></script>
+<script src="/static/js/internal/hq-shell.js" defer></script>
 </body>
 </html>

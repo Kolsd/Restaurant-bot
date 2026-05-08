@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Mesio HQ — Resumen</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/internal/hq-shell.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--dark, #111827);
+      color: var(--text, #e5e7eb);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Page wrapper ── */
+    .hq-page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .hq-page-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .hq-page-sub {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+
+    /* ── Card base ── */
+    .hq-card {
+      background: var(--dark-2, #1F2937);
+      border: 1px solid var(--dark-3, #374151);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .hq-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6b7280;
+      margin-bottom: 14px;
+    }
+
+    /* ── Hero MRR card ── */
+    .hq-hero {
+      background: linear-gradient(135deg, rgba(29,158,117,.12), rgba(29,158,117,.04));
+      border-color: rgba(29,158,117,.3);
+    }
+
+    .hq-hero-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--brand);
+      margin-bottom: 8px;
+    }
+
+    .hq-hero-value {
+      font-size: 42px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+
+    .hq-hero-value.placeholder {
+      color: #4b5563;
+    }
+
+    .hq-hero-sub {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 6px;
+    }
+
+    /* ── KPI row ── */
+    .hq-kpi-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+    }
+
+    @media (max-width: 900px) {
+      .hq-kpi-row { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 600px) {
+      .hq-kpi-row { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .hq-kpi {
+      background: var(--dark-2, #1F2937);
+      border: 1px solid var(--dark-3, #374151);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+
+    .hq-kpi-label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+
+    .hq-kpi-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .hq-kpi-value.brand { color: var(--brand); }
+    .hq-kpi-value.warn  { color: #f59e0b; }
+    .hq-kpi-value.danger { color: #ef4444; }
+    .hq-kpi-value.placeholder { color: #4b5563; }
+
+    .hq-kpi-sub {
+      font-size: 11px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+
+    /* skeleton */
+    .hq-skel {
+      height: 28px;
+      width: 60%;
+      background: linear-gradient(90deg, #374151 25%, #4b5563 50%, #374151 75%);
+      background-size: 200% 100%;
+      animation: hq-shimmer 1.4s infinite;
+      border-radius: 4px;
+      margin-top: 4px;
+    }
+    @keyframes hq-shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ── Action queue card ── */
+    .hq-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .hq-action-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--dark-3, #374151);
+      border-radius: 8px;
+      text-decoration: none;
+      color: inherit;
+      transition: background 0.15s ease;
+    }
+
+    .hq-action-item:hover {
+      background: #4b5563;
+    }
+
+    .hq-action-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .hq-action-dot.ok     { background: var(--brand); }
+    .hq-action-dot.warn   { background: #f59e0b; }
+    .hq-action-dot.danger { background: #ef4444; }
+
+    .hq-action-text {
+      flex: 1;
+      font-size: 13px;
+      color: #d1d5db;
+    }
+
+    .hq-action-count {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .hq-action-arrow {
+      font-size: 14px;
+      color: #6b7280;
+    }
+
+    .hq-action-placeholder {
+      font-size: 12px;
+      color: #4b5563;
+    }
+
+    /* ── Quick links card ── */
+    .hq-quicklinks {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .hq-ql-btn {
+      padding: 8px 14px;
+      background: var(--dark-3, #374151);
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: #d1d5db;
+      font-size: 13px;
+      font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .hq-ql-btn:hover {
+      background: #4b5563;
+      border-color: var(--brand);
+      color: #fff;
+    }
+
+    .hq-ql-btn.primary {
+      background: var(--brand);
+      color: #fff;
+    }
+
+    .hq-ql-btn.primary:hover {
+      background: var(--brand-dark, #0F6E56);
+      border-color: transparent;
+    }
+
+    /* ── Two-col layout ── */
+    .hq-two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    @media (max-width: 700px) {
+      .hq-two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body data-page="index" data-hq-sidebar="true">
+
+<!-- Page content — hq-shell.js wraps this into #hq-content -->
+<div class="hq-page">
+
+  <!-- Page header -->
+  <div>
+    <div class="hq-page-title">Buenos días ☀️</div>
+    <div class="hq-page-sub" id="hq-dateline">Cargando…</div>
+  </div>
+
+  <!-- Hero MRR -->
+  <div class="hq-card hq-hero">
+    <div class="hq-hero-label">MRR este mes</div>
+    <div class="hq-hero-value placeholder" id="hq-mrr">--</div>
+    <div class="hq-hero-sub">Facturación mensual recurrente — disponible en Wave 1B</div>
+  </div>
+
+  <!-- KPI row -->
+  <div>
+    <div class="hq-card-title" style="padding:0 0 4px">KPIs de hoy</div>
+    <div class="hq-kpi-row">
+      <div class="hq-kpi">
+        <div class="hq-kpi-label">Pedidos rescatados (mes)</div>
+        <div class="hq-skel" id="kpi-rescued-skel"></div>
+        <div class="hq-kpi-value brand" id="kpi-rescued" style="display:none"></div>
+        <div class="hq-kpi-sub">vs 0 ayer</div>
+      </div>
+      <div class="hq-kpi">
+        <div class="hq-kpi-label">Tenants activos hoy</div>
+        <div class="hq-skel" id="kpi-active-skel"></div>
+        <div class="hq-kpi-value" id="kpi-active" style="display:none"></div>
+        <div class="hq-kpi-sub">con al menos 1 conv</div>
+      </div>
+      <div class="hq-kpi">
+        <div class="hq-kpi-label">Prospects nuevos (48h)</div>
+        <div class="hq-skel" id="kpi-prospects-skel"></div>
+        <div class="hq-kpi-value" id="kpi-prospects" style="display:none"></div>
+        <div class="hq-kpi-sub">en el pipeline CRM</div>
+      </div>
+      <div class="hq-kpi">
+        <div class="hq-kpi-label">Dead letters</div>
+        <div class="hq-skel" id="kpi-dead-skel"></div>
+        <div class="hq-kpi-value" id="kpi-dead" style="display:none"></div>
+        <div class="hq-kpi-sub">mensajes fallidos</div>
+      </div>
+      <div class="hq-kpi">
+        <div class="hq-kpi-label">Latencia p95 inbox</div>
+        <div class="hq-skel" id="kpi-p95-skel"></div>
+        <div class="hq-kpi-value" id="kpi-p95" style="display:none"></div>
+        <div class="hq-kpi-sub">ms</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Two-column section: Action queue + Quick links -->
+  <div class="hq-two-col">
+
+    <!-- Action queue -->
+    <div class="hq-card">
+      <div class="hq-card-title">Cola de acciones</div>
+      <div class="hq-actions" id="hq-actions">
+        <div class="hq-action-placeholder">Cargando…</div>
+      </div>
+    </div>
+
+    <!-- Quick links -->
+    <div class="hq-card">
+      <div class="hq-card-title">Acceso rápido</div>
+      <div class="hq-quicklinks">
+        <a href="/internal/superadmin#new-org" class="hq-ql-btn primary">+ Nuevo cliente</a>
+        <a href="/internal/crm" class="hq-ql-btn">Ver pipeline CRM</a>
+        <a href="/internal/analytics" class="hq-ql-btn">Analytics</a>
+        <a href="/internal/superadmin" class="hq-ql-btn">Buscar tenant</a>
+        <a href="/internal/monitoring" class="hq-ql-btn">Monitoreo</a>
+        <a href="/internal/costs" class="hq-ql-btn">Costos</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script>
+  // ── Auth & helpers ────────────────────────────────────────────────────────────
+  const SESSION_KEY = 'hq_session';
+  let _token = sessionStorage.getItem(SESSION_KEY) || sessionStorage.getItem('mesio_admin_key') || '';
+
+  if (!_token) {
+    window.location.href = '/internal/superadmin';
+  }
+
+  function _apiGet(path) {
+    return fetch(path, { headers: { 'Authorization': 'Bearer ' + _token } })
+      .then(r => {
+        if (r.status === 401) {
+          sessionStorage.removeItem(SESSION_KEY);
+          window.location.href = '/internal/superadmin';
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      });
+  }
+
+  function _setSkel(skelId, valId, text, cls) {
+    const skel = document.getElementById(skelId);
+    const val  = document.getElementById(valId);
+    if (skel) skel.style.display = 'none';
+    if (val) {
+      val.style.display = '';
+      val.textContent = text != null ? String(text) : '—';
+      if (cls) val.className = 'hq-kpi-value ' + cls;
+    }
+  }
+
+  // ── Dateline ─────────────────────────────────────────────────────────────────
+  function _setDateline() {
+    const el = document.getElementById('hq-dateline');
+    if (!el) return;
+    const now = new Date();
+    el.textContent = now.toLocaleDateString('es-CO', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+  }
+  _setDateline();
+
+  // ── KPI: pedidos rescatados ───────────────────────────────────────────────────
+  function _loadRescatados() {
+    return _apiGet('/api/internal/analytics/pedidos-rescatados?period=mtd')
+      .then(data => {
+        const total = data.total != null ? (data.total).toLocaleString('es-CO') : '—';
+        _setSkel('kpi-rescued-skel', 'kpi-rescued', total, 'brand');
+      })
+      .catch(() => _setSkel('kpi-rescued-skel', 'kpi-rescued', '—', ''));
+  }
+
+  // ── KPI: tenants activos ──────────────────────────────────────────────────────
+  function _loadActiveToday() {
+    return _apiGet('/api/internal/analytics/overview')
+      .then(data => {
+        const v = (data.restaurants || {}).active_today ??
+                  (data.restaurants || {}).active_7d ??
+                  null;
+        _setSkel('kpi-active-skel', 'kpi-active', v != null ? v : '—', '');
+      })
+      .catch(() => _setSkel('kpi-active-skel', 'kpi-active', '—', ''));
+  }
+
+  // ── KPI: prospects nuevos ─────────────────────────────────────────────────────
+  function _loadProspects() {
+    return _apiGet('/api/internal/crm/stats')
+      .then(data => {
+        const v = (data.prospects || data).new_48h ?? (data.prospects || data).new_count ?? null;
+        _setSkel('kpi-prospects-skel', 'kpi-prospects', v != null ? v : '—', '');
+      })
+      .catch(() => _setSkel('kpi-prospects-skel', 'kpi-prospects', '—', ''));
+  }
+
+  // ── KPI: dead letters + p95 ───────────────────────────────────────────────────
+  function _loadOpsMetrics() {
+    return _apiGet('/api/internal/ops/metrics')
+      .then(data => {
+        const dead = data.inbox_dead_letters;
+        const p95  = data.inbox_latency_p95_ms;
+
+        const deadCls = dead > 0 ? 'danger' : '';
+        _setSkel('kpi-dead-skel', 'kpi-dead', dead != null ? dead : '—', deadCls);
+
+        const p95Cls = p95 != null && p95 > 500 ? 'warn' : '';
+        _setSkel('kpi-p95-skel', 'kpi-p95', p95 != null ? Math.round(p95) : '—', p95Cls);
+
+        return { dead, p95 };
+      })
+      .catch(() => {
+        _setSkel('kpi-dead-skel', 'kpi-dead', '—', '');
+        _setSkel('kpi-p95-skel', 'kpi-p95', '—', '');
+        return { dead: null, p95: null };
+      });
+  }
+
+  // ── Action queue ──────────────────────────────────────────────────────────────
+  function _renderActions(data) {
+    const container = document.getElementById('hq-actions');
+    if (!container) return;
+
+    const items = [];
+
+    // Prospects needing follow-up
+    const followUp = (data.prospects || {}).overdue_followup ?? null;
+    items.push({
+      href: '/internal/crm',
+      dot: followUp > 0 ? 'warn' : 'ok',
+      text: 'Prospects con follow-up vencido',
+      count: followUp != null ? followUp : '—',
+    });
+
+    // Tenants near cap (churn risk proxy via analytics)
+    const atRisk = (data.analytics_churn || []).length;
+    items.push({
+      href: '/internal/analytics',
+      dot: atRisk > 0 ? 'warn' : 'ok',
+      text: 'Tenants con riesgo de churn detectado',
+      count: atRisk > 0 ? atRisk : '0',
+    });
+
+    // Dead letters
+    const dead = data.dead ?? null;
+    items.push({
+      href: '/internal/monitoring',
+      dot: dead > 0 ? 'danger' : 'ok',
+      text: 'Dead letters en inbox worker',
+      count: dead != null ? dead : '—',
+    });
+
+    // Cost runaway (placeholder — will be wired in Wave 1B)
+    items.push({
+      href: '/internal/costs',
+      dot: 'ok',
+      text: 'Alertas de cost runaway',
+      count: '—',
+    });
+
+    container.innerHTML = items.map(item =>
+      '<a href="' + item.href + '" class="hq-action-item">' +
+        '<span class="hq-action-dot ' + item.dot + '"></span>' +
+        '<span class="hq-action-text">' + _escHtml(item.text) + '</span>' +
+        '<span class="hq-action-count">' + _escHtml(String(item.count)) + '</span>' +
+        '<span class="hq-action-arrow">→</span>' +
+      '</a>'
+    ).join('');
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────────
+  Promise.allSettled([
+    _loadRescatados(),
+    _loadActiveToday(),
+    _loadProspects(),
+    _loadOpsMetrics().then(opsData => opsData),
+  ]).then(results => {
+    // Build action queue from what we collected
+    const opsData = results[3].status === 'fulfilled' ? results[3].value : {};
+    // For now render with what we have (churn data would need extra fetch)
+    _renderActions({ dead: opsData.dead || 0 });
+  });
+</script>
+
+<script src="/static/js/internal/hq-shell.js" defer></script>
+</body>
+</html>

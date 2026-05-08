@@ -3,8 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
 <title>Mesio HQ</title>
 <link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="stylesheet" href="/static/css/internal/hq-shell.css">
 <style>
 :root{--brand:#1D9E75;--brand-dark:#0F6E56;--brand-light:#E1F5EE;} /* lint-allow: standalone page — tokens.css not loaded, inline token defs required */
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -151,7 +153,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 }
 </style>
 </head>
-<body>
+<body data-page="superadmin" data-hq-sidebar="false">
 
 <!-- ── LOGIN ───────────────────────────────────────────────────────── -->
 <div id="login-overlay">
@@ -253,6 +255,7 @@ input:checked+.slider:before{transform:translateX(18px);}
           <div class="detail-tab" onclick="switchDetailTab('modulos',this)">Módulos</div>
           <div class="detail-tab" onclick="switchDetailTab('credenciales',this)">Meta / WA</div>
           <div class="detail-tab" onclick="switchDetailTab('peligroso',this)">Peligroso</div>
+          <div class="detail-tab" onclick="switchDetailTab('auditlog',this);loadAuditLog()">Audit log</div>
         </div>
 
         <div class="detail-body">
@@ -322,6 +325,17 @@ input:checked+.slider:before{transform:translateX(18px);}
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn btn-primary" onclick="saveCredentials()">💾 Actualizar credenciales</button>
               <div class="feedback-msg" id="creds-feedback"></div>
+            </div>
+          </div>
+
+          <!-- Tab: Audit log -->
+          <div id="dtab-auditlog" class="detail-tab-panel">
+            <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+              <div style="font-size:13px;color:#888;">Últimas 50 acciones del equipo Mesio sobre este restaurante.</div>
+              <button class="btn btn-secondary btn-sm" onclick="loadAuditLog()">↻ Actualizar</button>
+            </div>
+            <div id="audit-log-wrap">
+              <div style="color:#aaa;font-size:13px;text-align:center;padding:24px;">Cargando…</div>
             </div>
           </div>
 
@@ -1050,6 +1064,49 @@ function switchDetailTab(id, btn) {
   $('dtab-'+id).classList.add('active');
 }
 
+// ── Audit log tab ─────────────────────────────────────────────────
+async function loadAuditLog() {
+  if(!_currentDetailId) return;
+  const wrap = $('audit-log-wrap');
+  if(!wrap) return;
+  wrap.innerHTML = '<div style="color:#aaa;font-size:13px;text-align:center;padding:24px;">Cargando…</div>';
+  try {
+    const r = await _hqFetch(`/api/internal/admin/audit-log?org_id=${_currentDetailId}&limit=50`);
+    if(!r.ok) { wrap.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:12px;">Error al cargar el audit log.</div>'; return; }
+    const d = await r.json();
+    const items = d.items || [];
+    if(!items.length) {
+      wrap.innerHTML = '<div style="color:#aaa;font-size:13px;text-align:center;padding:24px;">Sin eventos registrados aún.</div>';
+      return;
+    }
+    wrap.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead><tr style="border-bottom:1px solid #e0e0d8;color:#888;text-align:left;">
+        <th style="padding:6px 8px;font-weight:600;">Cuándo</th>
+        <th style="padding:6px 8px;font-weight:600;">Acción</th>
+        <th style="padding:6px 8px;font-weight:600;">Detalle</th>
+      </tr></thead>
+      <tbody>${items.map(ev=>{
+        const when = timeSince(ev.created_at);
+        const action = _escHtml(ev.action||'');
+        const detail = _escHtml([
+          ev.target_type ? ev.target_type : '',
+          ev.target_id   ? `#${ev.target_id}` : '',
+          ev.payload && ev.payload.method ? ev.payload.method : '',
+          ev.payload && ev.payload.status_code ? `HTTP ${ev.payload.status_code}` : '',
+        ].filter(Boolean).join(' · '));
+        return `<tr style="border-bottom:0.5px solid #f0f0ea;">
+          <td style="padding:6px 8px;color:#888;white-space:nowrap;">${_escHtml(when)}</td>
+          <td style="padding:6px 8px;font-family:monospace;color:#1D9E75;">${action}</td>
+          <td style="padding:6px 8px;color:#555;">${detail||'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <div style="font-size:11px;color:#bbb;text-align:right;margin-top:6px;">Total: ${d.total} eventos</div>`;
+  } catch(e) {
+    wrap.innerHTML = '<div style="color:#e74c3c;font-size:13px;padding:12px;">Error de conexión al cargar audit log.</div>';
+  }
+}
+
 function renderDetailModules(feats) {
   $('dp-modules-list').innerHTML = MODULES_CONFIG.map(m=>{
     const on = feats[m.key]===true || (feats[m.key]!==false && m.defaultOn);
@@ -1322,5 +1379,6 @@ async function deleteGlobalUser(username) {
 }
 
 </script>
+<script src="/static/js/internal/hq-shell.js" defer></script>
 </body>
 </html>

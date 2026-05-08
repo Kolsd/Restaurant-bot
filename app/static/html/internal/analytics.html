@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
   <title>Mesio — Analytics</title>
   <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/internal/hq-shell.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -263,7 +265,7 @@
     .skel-kpi { height: 2rem; width: 60%; margin-top: var(--s-2); }
   </style>
 </head>
-<body>
+<body data-page="analytics" data-hq-sidebar="true">
 
 <!-- ── Auth overlay ──────────────────────────────────────────────────────── -->
 <div id="auth-overlay">
@@ -817,5 +819,6 @@
     if (_token) loadAll();
   }, 60_000);
 </script>
+<script src="/static/js/internal/hq-shell.js" defer></script>
 </body>
 </html>

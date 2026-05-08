@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
   <title>Mesio — Cost Monitor</title>
   <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/internal/hq-shell.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -235,7 +237,7 @@
     }
   </style>
 </head>
-<body>
+<body data-page="costs" data-hq-sidebar="true">
 
 <!-- ── Auth overlay ──────────────────────────────────────────────────────── -->
 <div id="auth-overlay">
@@ -343,5 +345,6 @@
 
 <script src="/static/js/mesio-utils.js"></script>
 <script src="/static/js/internal/costs.js"></script>
+<script src="/static/js/internal/hq-shell.js" defer></script>
 </body>
 </html>
