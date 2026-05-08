@@ -113,6 +113,17 @@ async def lifespan(app):
 
     _redis_configured = bool(os.getenv("REDIS_URL"))
     _log.info("redis_url_configured", configured=_redis_configured)
+
+    # CRM env vars warning
+    crm_phone_id = os.getenv("CRM_PHONE_NUMBER_ID", "").strip()
+    if not crm_phone_id:
+        _log.warning(
+            "startup.crm_phone_id_unset",
+            message="CRM_PHONE_NUMBER_ID not set — inbound WA messages on the CRM support number will not be auto-captured into prospects.",
+        )
+    else:
+        _log.info("startup.crm_phone_id_configured", phone_id_prefix=crm_phone_id[:8])
+
     _log.info("app.started", version="6.0")
 
     yield
@@ -329,3 +340,10 @@ app.include_router(internal_analytics_router)
 app.include_router(internal_billing_admin_router)
 app.include_router(internal_ops_router)
 app.include_router(internal_costs_router)
+
+# ── Audit middleware (HQ compliance) ─────────────────────────────────────────
+# Records every state-changing /api/internal/* call to hq_audit_log.
+# Registered AFTER routers so it wraps all routes. Best-effort: errors in
+# audit writing never break the request that triggered the write.
+from app.services.audit_middleware import AuditMiddleware  # noqa: E402
+app.add_middleware(AuditMiddleware)

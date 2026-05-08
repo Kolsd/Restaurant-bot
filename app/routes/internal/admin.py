@@ -723,6 +723,45 @@ async def update_location(
     return _ok({"location": updated})
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Audit log  (HQ compliance — read-only endpoint)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/audit-log")
+async def get_audit_log(
+    actor: Optional[str] = None,
+    target_type: Optional[str] = None,
+    target_id: Optional[str] = None,
+    org_id: Optional[int] = None,
+    limit: int = 100,
+    offset: int = 0,
+    _: None = Depends(verify_superadmin),
+):
+    """Returns recent audit log entries. Filter by actor / target / org.
+
+    This endpoint is intentionally NOT wrapped by _bypass_internal_admin
+    (which yields inside a context manager). Instead we use bypass_tenant_scope
+    directly here — hq_audit_log is a GLOBAL table with no tenant scope.
+    """
+    from app.repositories.internal.audit_log_repo import (  # noqa: PLC0415
+        db_get_audit_log,
+        db_count_audit_log,
+    )
+
+    with bypass_tenant_scope("internal_audit_log_query"):
+        rows = await db_get_audit_log(
+            actor=actor,
+            target_type=target_type,
+            target_id=target_id,
+            org_id=org_id,
+            limit=min(limit, 500),
+            offset=offset,
+        )
+        total = await db_count_audit_log(actor=actor, org_id=org_id)
+
+    return {"items": rows, "total": total}
+
+
 @router.delete("/locations/{location_id}")
 async def delete_location(
     location_id: int,
