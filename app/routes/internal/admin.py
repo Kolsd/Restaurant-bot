@@ -1015,3 +1015,203 @@ async def reset_user_password(
 
     log.info("reset_user_password", username=username, sessions_deleted=sessions_deleted)
     return _ok({"username": username, "sessions_deleted": sessions_deleted})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Onboarding checklist  (per-org activation tracking)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_STALL_HOURS = {
+    "menu":         24,   # ⚠️ if menu not uploaded within 24h of creation
+    "staff":        48,   # ⚠️ if no staff within 48h
+    "billing":     168,   # ⚠️ if billing not configured within 7 days
+    "first_convo": 168,   # ⚠️ if no conversation within 7 days
+}
+
+
+@router.get("/organizations/{org_id}/onboarding")
+async def get_org_onboarding(
+    org_id: int,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Return onboarding checklist for an org — 5 stages with done/stalled flags.
+
+    All queries are cross-tenant (superadmin context). Best-effort: individual
+    stage queries that fail return done=False rather than crashing the whole call.
+
+    Stages:
+      1. created      — always done (org exists)
+      2. menu         — organizations.menu is non-empty
+      3. staff        — staff table has >= 1 row for this org
+      4. billing      — wompi public_key set OR dian_enabled=true in features
+      5. first_convo  — conversations table has >= 1 row for this org
+    """
+    from app.services.database import get_pool  # noqa: PLC0415
+
+    org = await restaurant_repo.db_get_org_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    created_at_raw = org.get("created_at")
+    # Normalize to datetime (asyncpg may return datetime directly or ISO str)
+    if isinstance(created_at_raw, str):
+        from datetime import datetime as _dt  # noqa: PLC0415
+        try:
+            created_at = _dt.fromisoformat(created_at_raw.rstrip("Z"))
+        except Exception:
+            created_at = None
+    else:
+        created_at = created_at_raw  # already datetime
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _stalled(done: bool, key: str) -> bool:
+        """True if not done AND enough hours have elapsed since creation."""
+        if done:
+            return False
+        if created_at is None:
+            return False
+        hours = _STALL_HOURS.get(key, 24)
+        elapsed = (now - created_at).total_seconds() / 3600
+        return elapsed > hours
+
+    pool = await get_pool()
+
+    # Stage 1 — always done
+    stages = [{
+        "key":     "created",
+        "name":    "Cuenta creada",
+        "done":    True,
+        "at":      created_at_raw if isinstance(created_at_raw, str) else (
+            created_at.isoformat() if created_at else None
+        ),
+        "stalled": False,
+    }]
+
+    # Stage 2 — menu
+    try:
+        with bypass_tenant_scope("onboarding_check_menu"):
+            async with pool.acquire() as conn:
+                menu_row = await conn.fetchrow(
+                    """
+                    SELECT menu, created_at FROM locations
+                    WHERE org_id = $1
+                    ORDER BY id ASC LIMIT 1
+                    """,
+                    org_id,
+                )
+        menu_done = False
+        menu_at = None
+        if menu_row:
+            raw_menu = menu_row["menu"]
+            if isinstance(raw_menu, dict):
+                menu_done = bool(raw_menu)
+            elif isinstance(raw_menu, str):
+                try:
+                    import json as _json  # noqa: PLC0415
+                    parsed = _json.loads(raw_menu)
+                    menu_done = bool(parsed)
+                except Exception:
+                    menu_done = False
+    except Exception:
+        log.exception("onboarding.menu_check_failed", org_id=org_id)
+        menu_done = False
+        menu_at = None
+
+    stages.append({
+        "key":     "menu",
+        "name":    "Menú cargado",
+        "done":    menu_done,
+        "at":      menu_at,
+        "stalled": _stalled(menu_done, "menu"),
+    })
+
+    # Stage 3 — staff
+    try:
+        with bypass_tenant_scope("onboarding_check_staff"):
+            async with pool.acquire() as conn:
+                staff_row = await conn.fetchrow(
+                    "SELECT MIN(created_at) AS first_at FROM staff WHERE org_id = $1",
+                    org_id,
+                )
+        staff_done = bool(staff_row and staff_row["first_at"])
+        staff_at = staff_row["first_at"].isoformat() if staff_done and staff_row["first_at"] else None
+    except Exception:
+        log.exception("onboarding.staff_check_failed", org_id=org_id)
+        staff_done = False
+        staff_at = None
+
+    stages.append({
+        "key":     "staff",
+        "name":    "Personal configurado",
+        "done":    staff_done,
+        "at":      staff_at,
+        "stalled": _stalled(staff_done, "staff"),
+    })
+
+    # Stage 4 — billing (Wompi OR DIAN)
+    try:
+        features_raw = org.get("features") or {}
+        if isinstance(features_raw, str):
+            import json as _json  # noqa: PLC0415
+            try:
+                features_raw = _json.loads(features_raw)
+            except Exception:
+                features_raw = {}
+        wompi_pk = (features_raw.get("wompi") or {}).get("public_key") or ""
+        dian_on  = bool(features_raw.get("dian_enabled"))
+        billing_done = bool(wompi_pk) or dian_on
+        billing_detail: dict = {
+            "wompi": bool(wompi_pk),
+            "dian":  dian_on,
+        }
+    except Exception:
+        log.exception("onboarding.billing_check_failed", org_id=org_id)
+        billing_done = False
+        billing_detail = {}
+
+    stages.append({
+        "key":     "billing",
+        "name":    "Billing configurado",
+        "done":    billing_done,
+        "at":      None,
+        "stalled": _stalled(billing_done, "billing"),
+        "detail":  billing_detail,
+    })
+
+    # Stage 5 — first conversation
+    try:
+        with bypass_tenant_scope("onboarding_check_convo"):
+            async with pool.acquire() as conn:
+                convo_row = await conn.fetchrow(
+                    "SELECT MIN(created_at) AS first_at FROM conversations WHERE org_id = $1",
+                    org_id,
+                )
+        convo_done = bool(convo_row and convo_row["first_at"])
+        convo_at = convo_row["first_at"].isoformat() if convo_done and convo_row["first_at"] else None
+    except Exception:
+        log.exception("onboarding.convo_check_failed", org_id=org_id)
+        convo_done = False
+        convo_at = None
+
+    stages.append({
+        "key":     "first_convo",
+        "name":    "Primera conversación",
+        "done":    convo_done,
+        "at":      convo_at,
+        "stalled": _stalled(convo_done, "first_convo"),
+    })
+
+    done_count   = sum(1 for s in stages if s["done"])
+    stalled_count = sum(1 for s in stages if s.get("stalled"))
+    score        = round(done_count / len(stages) * 100)
+
+    return _ok({
+        "org_id":        org_id,
+        "stages":        stages,
+        "score":         score,
+        "done_count":    done_count,
+        "total_stages":  len(stages),
+        "stalled_count": stalled_count,
+    })

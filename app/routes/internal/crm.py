@@ -196,8 +196,73 @@ class ConvertProspectBody(BaseModel):
     """Optional overrides when converting. Defaults pull from the prospect row."""
     name:            Optional[str] = None   # defaults to prospect.restaurant_name
     whatsapp_number: Optional[str] = None   # defaults to prospect.phone
-    subscription_plan: str = "free"
+    plan_code:       str = "restaurante"    # CEO decision: default to Restaurante plan
+    subscription_plan: str = "restaurante"  # legacy alias kept for compat
     features:        Optional[dict] = None
+    skip_welcome_message: bool = False      # founder option to skip WA on convert
+
+
+# ── Temp password generator ───────────────────────────────────────────────────
+import random
+import string as _string
+
+_SAFE_CHARS = (
+    _string.ascii_uppercase.replace("O", "").replace("I", "")
+    + _string.ascii_lowercase.replace("l", "").replace("o", "")
+    + _string.digits.replace("0", "").replace("1", "")
+)
+
+
+def _generate_temp_password(length: int = 8) -> str:
+    """Generate an 8-char alphanumeric password excluding confusable chars (0/O/l/1/I)."""
+    return "".join(random.SystemRandom().choice(_SAFE_CHARS) for _ in range(length))
+
+
+async def _send_welcome_whatsapp(phone: str, username: str, temp_password: str) -> bool:
+    """Send welcome WhatsApp to new admin user. Returns True on success, False on failure.
+
+    Best-effort: caller should NOT raise on False — log and continue.
+    Password is NOT passed to structlog.
+    """
+    token    = os.getenv("META_ACCESS_TOKEN", "")
+    phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")
+
+    if not token or not phone_id:
+        log.warning("crm.convert.welcome_wa_no_credentials", phone_suffix=phone[-4:])
+        return False
+
+    clean_phone = phone.lstrip("+").replace(" ", "")
+    body_text = (
+        f"¡Bienvenido a Mesio! 🎉 Tu cuenta ya está creada. "
+        f"Inicia sesión en https://mesio.app/login con usuario: {username} "
+        f"y contraseña: {temp_password}. "
+        f"Cámbiala en tu primer login."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": clean_phone,
+                    "type": "text",
+                    "text": {"body": body_text},
+                },
+            )
+            if resp.status_code == 200:
+                log.info("crm.convert.welcome_wa_sent", phone_suffix=clean_phone[-4:])
+                return True
+            log.warning(
+                "crm.convert.welcome_wa_failed",
+                phone_suffix=clean_phone[-4:],
+                status=resp.status_code,
+            )
+            return False
+    except Exception:
+        log.exception("crm.convert.welcome_wa_exception", phone_suffix=clean_phone[-4:])
+        return False
 
 
 @router.post("/prospects/{pid}/convert")
@@ -211,14 +276,12 @@ async def convert_prospect_to_restaurant(
     What this does:
       1. Reads the prospect row by id.
       2. Validates we have the minimum to create an org (name + whatsapp).
-      3. Calls restaurant_repo.db_create_organization (cross-tenant — uses the
-         existing internal-admin bypass already configured on those helpers).
+      3. Calls restaurant_repo.db_create_organization.
       4. Auto-creates the primary location named 'Principal'.
-      5. Marks the prospect stage='cerrado' and tags it with `org:<id>` so
-         future CRM views can show "this prospect was converted to org #42"
-         without needing a new column / migration.
-      6. Adds a system note to the prospect timeline with the new org_id for
-         audit traceability.
+      5. Creates the first owner/admin user with a generated temp password.
+      6. Optionally sends a welcome WhatsApp with login credentials.
+      7. Marks the prospect stage='cerrado' and tags it with `org:<id>`.
+      8. Adds a system note to the prospect timeline.
 
     Idempotency:
       Calling convert twice on the same prospect WILL fail at the org-create
@@ -226,10 +289,23 @@ async def convert_prospect_to_restaurant(
       check the prospect's tags for an existing `org:<id>` tag before retrying.
 
     Returns:
-      {"success": True, "org": {...}, "primary_location": {...}, "prospect_id": pid}
+      {
+        "ok": True,
+        "prospect_id": pid,
+        "org_id": int,
+        "location_id": int,
+        "org": {...},
+        "primary_location": {...},
+        "user": {"username": str, "temp_password": str},   # shown once to founder
+        "welcome_message_sent": bool,
+      }
+
+    Security note: temp_password is returned to the founder so they can relay
+    credentials if WhatsApp delivery fails. It is NOT logged to structlog or Sentry.
     """
     import asyncpg  # noqa: PLC0415
     from app.repositories import restaurant_repo  # noqa: PLC0415
+    from app.services.password_hash import hash_password as _hash_pw  # noqa: PLC0415
 
     prospect = await crm_repo.db_get_prospect_by_id(pid)
     if not prospect:
@@ -253,13 +329,15 @@ async def convert_prospect_to_restaurant(
             detail="Faltan datos: el prospecto debe tener restaurant_name y phone (o pasarlos en el body).",
         )
 
+    plan = body.plan_code or body.subscription_plan or "restaurante"
+
     # 1. Create the organization
     try:
         org = await restaurant_repo.db_create_organization(
             name=name,
             whatsapp_number=wa,
             features=body.features or {},
-            subscription_plan=body.subscription_plan or "free",
+            subscription_plan=plan,
         )
     except asyncpg.UniqueViolationError as exc:
         log.warning("crm.convert.unique_violation", prospect_id=pid, detail=str(exc))
@@ -281,16 +359,62 @@ async def convert_prospect_to_restaurant(
         )
     except Exception:
         log.exception("crm.convert.location_create_failed", prospect_id=pid, org_id=org["id"])
-        # The org was created — surface that to the caller so they can decide
-        # whether to manually create the location via the orgs endpoints.
         raise HTTPException(
             status_code=500,
             detail=f"Org #{org['id']} creada, pero falló creación de sede Principal.",
         )
 
-    # 3. Update the prospect — stage + tag + audit note. All best-effort: if
-    #    any of these glitch the conversion already succeeded above and the
-    #    caller has the org id; we just lose the kanban marker.
+    # 3. Create the first admin/owner user
+    # Username = prospect email if available, else sanitized org name, else "owner"
+    prospect_email = (prospect.get("email") or "").strip().lower()
+    if prospect_email and "@" in prospect_email:
+        base_username = prospect_email.split("@")[0]
+    else:
+        # Sanitize name → slug-like username (alphanumeric + dots)
+        import re as _re  # noqa: PLC0415
+        base_username = _re.sub(r"[^a-z0-9.]", "", name.lower().replace(" ", "."))[:20] or "owner"
+
+    temp_password = _generate_temp_password()
+    # Hash the password — NEVER log temp_password
+    pw_hash = _hash_pw(temp_password)
+
+    user_created = False
+    final_username = base_username
+
+    try:
+        # Try the base username first; if it conflicts, append org_id suffix
+        created = await restaurant_repo.db_create_user(
+            username=base_username,
+            password_hash=pw_hash,
+            restaurant_name=name,
+            role="owner",
+            branch_id=org["id"],
+        )
+        if not created:
+            # Username collision — append org id to make unique
+            final_username = f"{base_username}.{org['id']}"
+            created = await restaurant_repo.db_create_user(
+                username=final_username,
+                password_hash=pw_hash,
+                restaurant_name=name,
+                role="owner",
+                branch_id=org["id"],
+            )
+        user_created = bool(created)
+    except Exception:
+        log.exception("crm.convert.user_create_failed", prospect_id=pid, org_id=org["id"])
+        # Non-fatal: org + location already created; surface error but don't block response
+
+    # 4. Send welcome WhatsApp (best-effort, skippable)
+    welcome_sent = False
+    if user_created and not body.skip_welcome_message:
+        welcome_sent = await _send_welcome_whatsapp(
+            phone=wa,
+            username=final_username,
+            temp_password=temp_password,
+        )
+
+    # 5. Update the prospect — stage + tag + audit note (best-effort)
     try:
         new_tags = list(existing_tags) + [f"org:{org['id']}"]
         await crm_repo.db_update_prospect(pid, {
@@ -302,26 +426,63 @@ async def convert_prospect_to_restaurant(
         log.exception("crm.convert.prospect_update_failed", prospect_id=pid, org_id=org["id"])
 
     try:
+        note_content = (
+            f"Convertido a org #{org['id']} ({name}). "
+            f"Usuario: {final_username}. "
+            f"Bienvenida WA: {'enviada' if welcome_sent else 'no enviada'}."
+        )
         await crm_repo.db_create_prospect_note(
             pid, author="system",
-            content=f"Convertido a org #{org['id']} ({name}).",
+            content=note_content,
             note_type="note",
         )
     except Exception:
         log.exception("crm.convert.note_create_failed", prospect_id=pid, org_id=org["id"])
+
+    # Audit log (best-effort, without password)
+    try:
+        from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+        from app.services.tenant_context import bypass_tenant_scope as _bypass  # noqa: PLC0415
+        with _bypass("crm_convert_audit_log"):
+            await db_log_audit_event(
+                actor="crm_convert",
+                action="prospect.converted_with_onboarding",
+                target_type="organization",
+                target_id=str(org["id"]),
+                org_id=org["id"],
+                payload={
+                    "prospect_id": pid,
+                    "org_id": org["id"],
+                    "user_username": final_username,
+                    "welcome_sent": welcome_sent,
+                },
+            )
+    except Exception:
+        log.exception("crm.convert.audit_log_failed", prospect_id=pid, org_id=org["id"])
 
     log.info(
         "crm.convert.success",
         prospect_id=pid,
         org_id=org["id"],
         location_id=primary_loc.get("id"),
+        user_created=user_created,
+        welcome_sent=welcome_sent,
+        # temp_password intentionally omitted from logs
     )
 
     return {
-        "success":           True,
-        "prospect_id":       pid,
-        "org":               org,
-        "primary_location":  primary_loc,
+        "ok":                   True,
+        "success":              True,   # backward compat
+        "prospect_id":          pid,
+        "org_id":               org["id"],
+        "location_id":          primary_loc.get("id"),
+        "org":                  org,
+        "primary_location":     primary_loc,
+        "user":                 {
+            "username":     final_username,
+            "temp_password": temp_password,   # shown once to founder; NOT logged
+        } if user_created else None,
+        "welcome_message_sent": welcome_sent,
     }
 
 

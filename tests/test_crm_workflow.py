@@ -119,10 +119,16 @@ class TestConvertProspect:
             restaurant_repo, "db_create_location",
             AsyncMock(return_value={"id": 23, "name": "Principal", "org_id": 12}),
         )
+        # New: db_create_user + audit log + WA send added by onboarding flow
+        monkeypatch.setattr(restaurant_repo, "db_create_user", AsyncMock(return_value=True))
+        monkeypatch.setattr(
+            "app.repositories.internal.audit_log_repo.db_log_audit_event",
+            AsyncMock(return_value=1),
+        )
 
         resp = super_client.post(
             "/api/internal/crm/prospects/99/convert",
-            json={},
+            json={"skip_welcome_message": True},
             headers=HEADERS,
         )
         assert resp.status_code == 200, resp.text
@@ -227,13 +233,20 @@ class TestConvertProspect:
             restaurant_repo, "db_create_location",
             AsyncMock(return_value={"id": 100, "name": "Principal"}),
         )
+        # New: db_create_user + audit log required since convert now creates a user
+        monkeypatch.setattr(restaurant_repo, "db_create_user", AsyncMock(return_value=True))
+        monkeypatch.setattr(
+            "app.repositories.internal.audit_log_repo.db_log_audit_event",
+            AsyncMock(return_value=1),
+        )
 
         resp = super_client.post(
             "/api/internal/crm/prospects/99/convert",
             json={
                 "name":            "Override Name",
                 "whatsapp_number": "573001112222",
-                "subscription_plan": "pro",
+                "plan_code":       "pro",
+                "skip_welcome_message": True,
             },
             headers=HEADERS,
         )

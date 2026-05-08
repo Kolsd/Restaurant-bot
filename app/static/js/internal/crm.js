@@ -1187,6 +1187,112 @@ function stageEmoji(s) {
   return map[s]||'•';
 }
 
+// ── CONVERT PROSPECT TO RESTAURANT ────────────────────────────────────
+async function convertProspect(pid, planCode, skipWelcome) {
+  const body = {
+    plan_code:            planCode || 'restaurante',
+    skip_welcome_message: !!skipWelcome,
+  };
+  const r = await fetch(`/api/internal/crm/prospects/${pid}/convert`, {
+    method:  'POST',
+    headers: H(),
+    body:    JSON.stringify(body),
+  });
+  if (r.status === 401) { window.location.href = '/superadmin?redirect=crm'; return null; }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    toast(data.detail || 'Error al convertir', 'err');
+    return null;
+  }
+  return data;
+}
+
+async function openConvertModal(pid) {
+  const p = S.prospects.find(x => x.id === pid);
+  if (!p) return;
+
+  // Build a simple inline modal
+  let existing = document.getElementById('convert-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'convert-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:1.75rem;width:440px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.2);">
+      <div style="font-size:16px;font-weight:700;margin-bottom:4px;">Convertir a restaurante</div>
+      <div style="font-size:13px;color:#888;margin-bottom:1.25rem;">${esc(p.restaurant_name)} · ${esc(p.phone||'—')}</div>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:11px;color:#888;font-weight:600;display:block;margin-bottom:4px;">Plan inicial</label>
+        <select id="cv-plan" style="width:100%;padding:9px 12px;border:1px solid #e0e0d8;border-radius:8px;font-size:13px;">
+          <option value="restaurante" selected>Restaurante ($299K/mes)</option>
+          <option value="pulso">Pulso ($149K/mes)</option>
+          <option value="pro">Pro ($549K/mes)</option>
+          <option value="cadena">Cadena ($899K/mes)</option>
+          <option value="comp">Comp (gratis)</option>
+          <option value="free">Free / Demo</option>
+        </select>
+      </div>
+      <div style="margin-bottom:1.25rem;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" id="cv-skip-wa"> Omitir mensaje de bienvenida por WhatsApp
+        </label>
+      </div>
+      <div id="cv-result" style="margin-bottom:1rem;display:none;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="document.getElementById('convert-modal').remove()" style="padding:8px 16px;border:1px solid #e0e0d8;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">Cancelar</button>
+        <button id="cv-btn" onclick="doConvert(${pid})" style="padding:8px 16px;border:none;border-radius:8px;background:#1D9E75;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Convertir</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function doConvert(pid) {
+  const btn    = document.getElementById('cv-btn');
+  const result = document.getElementById('cv-result');
+  const plan   = document.getElementById('cv-plan')?.value || 'restaurante';
+  const skip   = document.getElementById('cv-skip-wa')?.checked || false;
+
+  btn.disabled = true;
+  btn.textContent = 'Convirtiendo…';
+  result.style.display = 'none';
+
+  const data = await convertProspect(pid, plan, skip);
+
+  if (!data) {
+    btn.disabled = false;
+    btn.textContent = 'Convertir';
+    return;
+  }
+
+  // Success — show credentials to founder (shown once; not logged)
+  const user = data.user || {};
+  const waSent = data.welcome_message_sent;
+  result.style.display = 'block';
+  result.innerHTML = `
+    <div style="background:#E1F5EE;border-radius:8px;padding:12px 14px;font-size:13px;">
+      <div style="font-weight:600;color:#0F6E56;margin-bottom:6px;">✅ Restaurante creado · Org #${data.org_id}</div>
+      ${user.username ? `
+        <div style="margin-bottom:4px;"><span style="color:#555;">Usuario:</span> <code style="background:#fff;padding:2px 6px;border-radius:4px;">${esc(user.username)}</code></div>
+        <div style="margin-bottom:4px;"><span style="color:#555;">Contraseña temp:</span> <code style="background:#fff;padding:2px 6px;border-radius:4px;">${esc(user.temp_password||'—')}</code> <span style="font-size:11px;color:#888;">(cópiala ya — no se muestra de nuevo)</span></div>
+      ` : '<div style="color:#888;font-size:12px;">Usuario no creado — hacerlo manualmente en Superadmin.</div>'}
+      <div style="margin-top:4px;font-size:12px;color:#555;">WA bienvenida: ${waSent ? '✅ enviado' : '⚠️ no enviado (reenviar manualmente)'}</div>
+    </div>`;
+
+  btn.style.display = 'none';
+
+  // Update the prospect in local state
+  const p = S.prospects.find(x => x.id === pid);
+  if (p) {
+    p.stage = 'cerrado';
+    applyFilters();
+    if (S.view === 'pipeline') renderPipeline();
+    renderDetailHeader();
+    await loadStats(); renderFunnel(); renderStageDist();
+  }
+  toast('Restaurante creado correctamente', 'ok');
+}
+
 let _toastTimer = null;
 function toast(msg, type='') {
   const el = document.getElementById('toast');
