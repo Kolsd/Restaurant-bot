@@ -43,6 +43,10 @@ _log = get_logger(__name__)
 _PHONE_RE = re.compile(r"(?:\+?57)?[\s\-]?\d{10,13}")
 # Meta access tokens start with EAA followed by 20+ alphanumeric characters.
 _META_TOKEN_RE = re.compile(r"EAA[A-Za-z0-9]{20,}")
+# Key-name fragments that indicate the value is sensitive — redact regardless of content.
+_SENSITIVE_KEY_FRAGMENTS = frozenset(
+    {"phone", "email", "token", "password", "passwd", "pin", "secret", "key"}
+)
 
 
 def _scrub_string(value: str) -> str:
@@ -52,11 +56,26 @@ def _scrub_string(value: str) -> str:
     return value
 
 
+def _key_is_sensitive(key: str) -> bool:
+    """Return True if the key name (case-insensitive) contains a PII/secrets fragment."""
+    key_lower = key.lower()
+    return any(frag in key_lower for frag in _SENSITIVE_KEY_FRAGMENTS)
+
+
 def _scrub_dict_values(d: dict) -> None:
-    """Mutate a dict in-place, scrubbing string values."""
+    """Mutate a dict in-place, scrubbing string values.
+
+    Two-pass strategy:
+    1. Key-name: if the key signals PII/secrets (phone, email, token, password,
+       pin, secret, key), replace the value with "[redacted]" entirely.
+    2. Value-regex: scrub phone numbers and Meta tokens from remaining strings.
+    """
     for key in list(d):
         if isinstance(d[key], str):
-            d[key] = _scrub_string(d[key])
+            if _key_is_sensitive(key):
+                d[key] = "[redacted]"
+            else:
+                d[key] = _scrub_string(d[key])
 
 
 def _make_before_send(component: str):
@@ -86,6 +105,11 @@ def _make_before_send(component: str):
             extra = event.get("extra")
             if isinstance(extra, dict):
                 _scrub_dict_values(extra)
+
+            # ── Scrub event.request.data (POST body captured by FastAPI) ─────
+            request_data = event.get("request", {}).get("data")
+            if isinstance(request_data, dict):
+                _scrub_dict_values(request_data)
 
             # ── Scrub breadcrumb messages and data ────────────────────────────
             breadcrumbs = event.get("breadcrumbs", {})

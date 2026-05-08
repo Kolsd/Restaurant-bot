@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
 from pydantic import BaseModel
 from app.services import database as db
 from app.repositories.internal import crm_repo
-from app.services.logging import get_logger
+from app.services.logging import get_logger, mask_phone
 from app.routes.deps import verify_superadmin
 
 log = get_logger(__name__)
@@ -454,7 +454,7 @@ async def send_template(body: SendTemplatePayload, _: None = Depends(verify_supe
                         "components": components
                     }
                 }
-                log.info("crm.template_sending", phone=phone, template=tpl["wa_name"])
+                log.info("crm.template_sending", phone=mask_phone(phone), template=tpl["wa_name"])
 
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.post(
@@ -463,7 +463,7 @@ async def send_template(body: SendTemplatePayload, _: None = Depends(verify_supe
                         json=meta_payload
                     )
                     data = resp.json()
-                    log.info("crm.template_response", phone=phone, status=resp.status_code)
+                    log.info("crm.template_response", phone=mask_phone(phone), status=resp.status_code)
 
                     if resp.status_code == 200:
                         wa_msg_id = data.get("messages", [{}])[0].get("id", "")
@@ -473,7 +473,7 @@ async def send_template(body: SendTemplatePayload, _: None = Depends(verify_supe
             except Exception as e:
                 status    = "error"
                 error_msg = str(e)[:200]
-                log.error("crm.template_send_failed", phone=phone, error=error_msg)
+                log.error("crm.template_send_failed", phone=mask_phone(phone), error=error_msg)
         else:
             status    = "no_credentials"
             error_msg = "Credenciales Meta no configuradas"
@@ -527,8 +527,9 @@ async def create_template(body: TemplateCreate, _: None = Depends(verify_superad
             category=body.category, body=body.body, params=body.params,
         )
         return {"success": True, "template": template}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        log.exception("crm.create_template.unexpected_error")
+        raise HTTPException(status_code=400, detail="No se pudo crear la plantilla")
 
 @router.delete("/templates/{tid}")
 async def delete_template(tid: int, _: None = Depends(verify_superadmin)):

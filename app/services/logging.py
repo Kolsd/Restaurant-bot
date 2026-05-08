@@ -103,6 +103,20 @@ def _setup_structlog() -> None:
         cache_logger_on_first_use=True,
     )
 
+# ── PII helpers ─────────────────────────────────────────────────────────────
+
+
+def mask_phone(phone: "str | None") -> str:
+    """Return a masked phone for logs: '***' + last 4 digits.
+
+    Preserves enough signal to correlate log entries without exposing the full
+    number. Safe to call with None or short strings.
+    """
+    if not phone or len(phone) < 4:
+        return "***"
+    return "***" + phone[-4:]
+
+
 # ── Public factory ───────────────────────────────────────────────────────────
 
 def get_logger(name: str, **initial_ctx):

@@ -15,7 +15,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Optional
 
-from app.services.logging import get_logger
+from app.services.logging import get_logger, mask_phone
 from app.services.money import quantize_money
 from app.services.tenant_db import tenant_connection
 
@@ -118,7 +118,7 @@ async def update_preference(
         log.info(
             "customer_profiles.update_preference.creating_profile",
             restaurant_id=restaurant_id,
-            phone=phone,
+            phone=mask_phone(phone),
             key=key,
         )
         await upsert_profile_from_message(restaurant_id, phone, display_name=None)
@@ -171,7 +171,7 @@ async def increment_after_order(
         log.info(
             "customer_profiles.increment_after_order.creating_profile",
             restaurant_id=restaurant_id,
-            phone=phone,
+            phone=mask_phone(phone),
         )
         await upsert_profile_from_message(restaurant_id, phone, display_name=None)
 

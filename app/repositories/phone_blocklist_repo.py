@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.services.logging import get_logger
+from app.services.logging import get_logger, mask_phone
 from app.services.tenant_context import bypass_tenant_scope
 
 log = get_logger(__name__)
@@ -85,7 +85,7 @@ async def add_to_blocklist(
                 row_id = inserted["id"]
         log.info(
             "phone_blocklist.added",
-            phone=phone,
+            phone=mask_phone(phone),
             org_id=org_id,
             reason=reason,
             hours=hours,
@@ -186,7 +186,7 @@ async def remove_from_blocklist(phone: str, org_id: int) -> bool:
     if deleted_count > 0:
         log.info(
             "phone_blocklist.removed",
-            phone=phone,
+            phone=mask_phone(phone),
             org_id=org_id,
             deleted=deleted_count,
         )

@@ -1429,11 +1429,23 @@ function renderBranches(branches) {
           <div style="font-size:15px;font-weight:600;">${_escHtml(b.name)}</div>
           <div style="font-size:11px;color:#888;margin-top:2px;"><span style="background:#E1F5EE;color:#0F6E56;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;margin-right:6px;">WA: +${_escHtml(cleanWa)}</span>${_escHtml(b.address||'')}</div>
         </div>
-        <button onclick="openInviteModal(${b.id},'${b.name.replace(/'/g,"\\'")}')" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Añadir Admin</button>
+        <button class="invite-admin-btn" data-branch-id="${b.id}" data-branch-name="${_escHtml(b.name)}" style="background:#E1F5EE;color:#0F6E56;border:none;padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;">+ Añadir Admin</button>
       </div>
       <div id="users-branch-${b.id}" style="padding:.75rem 1.25rem;"><div style="font-size:11px;color:#aaa;">Cargando...</div></div>
     </div>`;
   }).join('');
+
+  // Click delegation for invite-admin buttons (avoids unsafe inline onclick with branch name)
+  const branchesContainer = document.getElementById('branches-list');
+  if (branchesContainer && !branchesContainer.dataset.delegated) {
+    branchesContainer.addEventListener('click', (e) => {
+      const btn = e.target.closest('.invite-admin-btn');
+      if (btn && typeof openInviteModal === 'function') {
+        openInviteModal(parseInt(btn.dataset.branchId, 10), btn.dataset.branchName || '');
+      }
+    });
+    branchesContainer.dataset.delegated = '1';
+  }
 
   branches.forEach(b => loadBranchUsers(b.id));
 

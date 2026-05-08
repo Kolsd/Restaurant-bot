@@ -813,6 +813,23 @@ async def _run_apply_due_downgrades():
         log.exception("scheduler.apply_due_downgrades_failed")
 
 
+async def _run_conversation_cleanup() -> None:
+    """Daily — delete conversations older than 425-day retention window.
+
+    425 days = ~14 months (Ley 1581 service tenure + 60-day grace period).
+    Cross-tenant: runs under bypass_tenant_scope to sweep all bots.
+    Fires once per day (counter % 1440 in the scheduler loop at 60s/tick).
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
+    try:
+        with bypass_tenant_scope("scheduler_conversation_cleanup_cross_tenant"):
+            deleted = await db.db_cleanup_old_conversations(days=425)
+        log.info("scheduler.conversation_cleanup_done", deleted=deleted)
+    except Exception:
+        log.exception("scheduler.conversation_cleanup_failed")
+
+
 async def _renew_or_abort(token: str, ttl_seconds: int = 90) -> bool:
     """
     Renew the scheduler leader lease.  Returns False if the lease was lost
@@ -917,6 +934,10 @@ async def _scheduler_loop():
                         log.info("scheduler.password_reset_cleanup", deleted=deleted)
                 except Exception:
                     log.exception("scheduler.password_reset_cleanup_failed")
+
+            # Purge conversations older than 425-day retention window (daily)
+            if _reminder_counter % 1440 == 0:
+                await _run_conversation_cleanup()
 
 
 async def start_scheduler():
