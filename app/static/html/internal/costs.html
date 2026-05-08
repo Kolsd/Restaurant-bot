@@ -206,6 +206,10 @@
     }
     .bar-label.hidden { visibility: hidden; }
 
+    /* ── Color helpers ── */
+    .text-ok     { color: var(--success) !important; }
+    .text-danger { color: var(--danger)  !important; }
+
     /* ── Loading / empty states ── */
     .loading-text { color: var(--text-4); font-size: 0.85rem; padding: var(--s-4) 0; }
     .empty-row td { color: var(--text-4); font-size: 0.85rem; text-align: center; padding: var(--s-6) !important; }
@@ -302,6 +306,30 @@
       </div>
     </section>
 
+    <!-- Platform margin KPI cards -->
+    <section>
+      <div class="section-title">Margen Plataforma</div>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Ingresos (paying orgs)</div>
+          <div class="skeleton skel-kpi" id="kpi-revenue-cop"></div>
+          <div class="kpi-sub" id="kpi-revenue-sub"></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Costo Total COP</div>
+          <div class="skeleton skel-kpi" id="kpi-margin-cost"></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Margen Neto COP</div>
+          <div class="skeleton skel-kpi" id="kpi-net-margin"></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Margen %</div>
+          <div class="skeleton skel-kpi" id="kpi-margin-pct"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- Daily token chart -->
     <section>
       <div class="section-title">Daily Token Spend</div>
@@ -324,11 +352,12 @@
               <th class="num-right" onclick="sortTable('total_tokens')">Tokens</th>
               <th class="num-right" onclick="sortTable('estimated_cost_usd')">Cost USD</th>
               <th class="num-right" onclick="sortTable('estimated_cost_cop')">Cost COP</th>
+              <th class="num-right" onclick="sortTable('margin_cop')">Margen</th>
               <th class="num-right" onclick="sortTable('orders_count')">Orders</th>
             </tr>
           </thead>
           <tbody id="rest-tbody">
-            <tr><td colspan="7" class="loading-text" style="text-align:center;padding:2rem">Loading…</td></tr>
+            <tr><td colspan="8" class="loading-text" style="text-align:center;padding:2rem">Loading…</td></tr>
           </tbody>
         </table>
       </div>

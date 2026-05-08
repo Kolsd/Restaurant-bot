@@ -171,13 +171,62 @@ async def db_delete_prospect(pid: int) -> None:
         await conn.execute("DELETE FROM prospects WHERE id=$1", pid)
 
 
-async def db_move_prospect_stage(pid: int, new_stage: str) -> None:
+async def db_move_prospect_stage(
+    pid: int,
+    new_stage: str,
+    lost_reason: Optional[str] = None,
+) -> None:
+    """Move prospect to new_stage.
+
+    When new_stage == 'perdido' and lost_reason is provided, also sets
+    lost_reason + lost_at = NOW().
+    When moving away from 'perdido', clears lost_reason + lost_at.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE prospects SET stage=$2, updated_at=NOW() WHERE id=$1",
-            pid, new_stage,
+        if new_stage == "perdido" and lost_reason:
+            await conn.execute(
+                """
+                UPDATE prospects
+                SET stage=$2, lost_reason=$3, lost_at=NOW(), updated_at=NOW()
+                WHERE id=$1
+                """,
+                pid, new_stage, lost_reason,
+            )
+        elif new_stage != "perdido":
+            # Moving away from perdido → clear loss fields
+            await conn.execute(
+                """
+                UPDATE prospects
+                SET stage=$2, lost_reason=NULL, lost_at=NULL, updated_at=NOW()
+                WHERE id=$1
+                """,
+                pid, new_stage,
+            )
+        else:
+            # new_stage == 'perdido' but no reason — just move, preserve existing reason if any
+            await conn.execute(
+                "UPDATE prospects SET stage=$2, updated_at=NOW() WHERE id=$1",
+                pid, new_stage,
+            )
+
+
+async def db_get_loss_reasons(limit: int = 10) -> list:
+    """Return top lost_reason counts for conversion analysis."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT lost_reason, COUNT(*) AS cnt
+            FROM prospects
+            WHERE stage = 'perdido' AND lost_reason IS NOT NULL
+            GROUP BY lost_reason
+            ORDER BY cnt DESC
+            LIMIT $1
+            """,
+            limit,
         )
+        return [{"lost_reason": r["lost_reason"], "count": int(r["cnt"])} for r in rows]
 
 
 # ── NOTES ─────────────────────────────────────────────────────────────────────

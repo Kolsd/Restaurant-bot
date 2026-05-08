@@ -112,6 +112,26 @@ async def costs_restaurant_detail(
     return result
 
 
+# ── Platform margin ──────────────────────────────────────────────────────────
+
+@router.get("/api/internal/costs/margin")
+async def costs_margin(
+    start: str | None = Query(default=None),
+    end:   str | None = Query(default=None),
+    _: None = Depends(verify_superadmin),
+):
+    from app.repositories.cost_metrics_repo import db_platform_margin_summary
+
+    d_start, d_end = _default_range()
+    d_start = _parse_date(start, d_start)
+    d_end   = _parse_date(end,   d_end)
+
+    with bypass_tenant_scope("internal_cost_endpoint"):
+        result = await db_platform_margin_summary(d_start, d_end)
+
+    return result
+
+
 # ── Outliers ──────────────────────────────────────────────────────────────────
 
 @router.get("/api/internal/costs/outliers")

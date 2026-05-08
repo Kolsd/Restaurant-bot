@@ -139,6 +139,12 @@
               <div class="card-hd">Por etapa</div>
               <div id="dash-stages" class="stage-dist"></div>
             </div>
+            <div class="card">
+              <div class="card-hd">Razones de pérdida</div>
+              <div id="dash-loss-reasons" class="stage-dist">
+                <div style="color:#6b7280;font-size:.82rem;padding:.5rem 0">Cargando…</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -359,6 +365,38 @@
     <div class="modal-ft">
       <button class="btn-secondary" onclick="closeModal('modal-bulk-stage')">Cancelar</button>
       <button class="btn-primary" onclick="doBulkStage()">Aplicar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: LOST REASON -->
+<div class="modal-ov" id="modal-lost-reason" onclick="closeModalBg(event,'modal-lost-reason')">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-hd">
+      <span class="modal-title">¿Por qué se perdió?</span>
+      <button class="modal-close" onclick="cancelLostReason()">✕</button>
+    </div>
+    <div class="modal-bd">
+      <div class="fg">
+        <label>Razón de pérdida</label>
+        <select id="lost-reason-sel" onchange="lostReasonSelChange()">
+          <option value="">— Selecciona una razón —</option>
+          <option value="Precio (muy caro)">Precio (muy caro)</option>
+          <option value="Funcionalidad faltante">Funcionalidad faltante</option>
+          <option value="Mal timing">Mal timing</option>
+          <option value="Eligió un competidor">Eligió un competidor</option>
+          <option value="No respondió">No respondió</option>
+          <option value="Otro">Otro</option>
+        </select>
+      </div>
+      <div class="fg" id="lost-reason-other-wrap" style="display:none">
+        <label>Especifica la razón (máx. 500 caracteres)</label>
+        <input type="text" id="lost-reason-other" maxlength="500" placeholder="Describe por qué se perdió…">
+      </div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn-secondary" onclick="cancelLostReason()">Cancelar</button>
+      <button class="btn-primary" id="lost-reason-confirm" onclick="confirmLostReason()">Confirmar pérdida</button>
     </div>
   </div>
 </div>

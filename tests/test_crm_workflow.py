@@ -71,7 +71,7 @@ class TestMoveStageValidation:
         )
         assert resp.status_code == 200
         # Verify lowercase + trimmed value was forwarded to the repo
-        crm_repo.db_move_prospect_stage.assert_awaited_once_with(42, "cerrado")
+        crm_repo.db_move_prospect_stage.assert_awaited_once_with(42, "cerrado", lost_reason=None)
 
 
 # ── Convert prospect to real organization ─────────────────────────────────────

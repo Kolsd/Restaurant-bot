@@ -188,6 +188,106 @@ function renderDashboard() {
   renderFollowups();
   renderStageDist();
   renderActivityFeed();
+  loadAndRenderLossReasons();
+}
+
+// ── LOSS REASONS ──────────────────────────────────────
+async function loadAndRenderLossReasons() {
+  const el = document.getElementById('dash-loss-reasons');
+  if (!el) return;
+  try {
+    const data = await api('GET', '/loss-reasons');
+    const reasons = data?.reasons || [];
+    if (!reasons.length) {
+      el.innerHTML = '<div style="color:#6b7280;font-size:.82rem;padding:.5rem 0">Sin pérdidas registradas con razón.</div>';
+      return;
+    }
+    const max = Math.max(...reasons.map(r => r.count), 1);
+    el.innerHTML = reasons.map(r => {
+      const pct = (r.count / max) * 100;
+      return `<div class="stage-dist-row">
+        <div class="stage-dist-label" style="min-width:120px">${esc(r.lost_reason)}</div>
+        <div class="stage-dist-bar"><div class="stage-dist-fill" style="width:${pct}%;background:#EF4444"></div></div>
+        <div class="stage-dist-cnt">${r.count}</div>
+      </div>`;
+    }).join('');
+  } catch (_) {
+    el.innerHTML = '<div style="color:#6b7280;font-size:.82rem">No disponible</div>';
+  }
+}
+
+// ── LOST REASON MODAL ─────────────────────────────────
+// _lostReasonCtx holds pending {prospectId, newStage, onCancel} while modal is open
+let _lostReasonCtx = null;
+
+function openLostReasonModal(prospectId, newStage, onCancel) {
+  _lostReasonCtx = { prospectId, newStage, onCancel };
+  const sel = document.getElementById('lost-reason-sel');
+  const otherInput = document.getElementById('lost-reason-other');
+  const otherWrap = document.getElementById('lost-reason-other-wrap');
+  if (sel) sel.value = '';
+  if (otherInput) otherInput.value = '';
+  if (otherWrap) otherWrap.style.display = 'none';
+  openModal('modal-lost-reason');
+}
+
+function lostReasonSelChange() {
+  const sel = document.getElementById('lost-reason-sel');
+  const wrap = document.getElementById('lost-reason-other-wrap');
+  if (wrap) wrap.style.display = sel?.value === 'Otro' ? '' : 'none';
+}
+
+function cancelLostReason() {
+  const ctx = _lostReasonCtx;
+  _lostReasonCtx = null;
+  closeModal('modal-lost-reason');
+  if (ctx?.onCancel) ctx.onCancel();
+}
+
+async function confirmLostReason() {
+  const ctx = _lostReasonCtx;
+  if (!ctx) return;
+  const sel = document.getElementById('lost-reason-sel');
+  const otherInput = document.getElementById('lost-reason-other');
+  let reason = sel?.value || '';
+  if (reason === 'Otro') {
+    reason = (otherInput?.value || '').trim();
+    if (!reason) { toast('Especifica la razón', 'err'); return; }
+  }
+  if (!reason) { toast('Selecciona una razón', 'err'); return; }
+
+  _lostReasonCtx = null;
+  closeModal('modal-lost-reason');
+
+  // Bulk mode
+  if (ctx._bulkIds) {
+    const ids = ctx._bulkIds;
+    await Promise.all(ids.map(id => api('PATCH', `/prospects/${id}/stage`, {
+      stage: ctx.newStage,
+      lost_reason: reason,
+    })));
+    ids.forEach(id => { const p = S.prospects.find(x => x.id === id); if (p) p.stage = ctx.newStage; });
+    applyFilters(); clearSelection();
+    await loadStats(); renderFunnel(); renderStageDist();
+    loadAndRenderLossReasons();
+    toast(`${ids.length} prospectos → Perdido — "${reason}"`, 'ok');
+    return;
+  }
+
+  // Single mode
+  const d = await api('PATCH', `/prospects/${ctx.prospectId}/stage`, {
+    stage: ctx.newStage,
+    lost_reason: reason,
+  });
+  if (d?.success) {
+    const p = S.prospects.find(x => x.id === ctx.prospectId);
+    if (p) p.stage = ctx.newStage;
+    applyFilters();
+    if (S.view === 'pipeline') renderPipeline();
+    await loadStats(); renderFunnel(); renderStageDist();
+    loadAndRenderLossReasons();
+    toast(`Movido a Perdido — "${reason}"`, 'ok');
+  }
 }
 
 function renderKPIs() {
@@ -449,6 +549,15 @@ async function kanbanDrop(e, el) {
   if (!S.dragSrcId || !newStage) return;
   const p = S.prospects.find(x => x.id === S.dragSrcId);
   if (!p || p.stage === newStage) return;
+  if (newStage === 'perdido') {
+    // Intercept: require lost reason before proceeding
+    openLostReasonModal(S.dragSrcId, newStage, () => {
+      // on cancel: re-render pipeline to revert visual drag
+      renderPipeline();
+    });
+    S.dragSrcId = null;
+    return;
+  }
   const d = await api('PATCH', `/prospects/${S.dragSrcId}/stage`, { stage: newStage });
   if (d?.success) {
     p.stage = newStage;
@@ -648,6 +757,16 @@ async function dpSave() {
 
 async function dpUpdateStage(stage) {
   if (!S.activeId) return;
+  if (stage === 'perdido') {
+    openLostReasonModal(S.activeId, stage, null);
+    // Revert the select to current stage visually — modal will update on confirm
+    const p = S.prospects.find(x => x.id === S.activeId);
+    if (p) {
+      const ss = document.getElementById('dp-stage-sel');
+      if (ss) ss.value = p.stage;
+    }
+    return;
+  }
   const d = await api('PATCH', `/prospects/${S.activeId}/stage`, { stage });
   if (d?.success) {
     const p = S.prospects.find(x => x.id === S.activeId);
@@ -809,6 +928,22 @@ function openBulkStage() {
 async function doBulkStage() {
   const stage = document.getElementById('bulk-stage-sel').value;
   const ids = [...S.selectedIds];
+  if (stage === 'perdido') {
+    // Require lost reason for bulk perdido — open modal for a single shared reason
+    closeModal('modal-bulk-stage');
+    openLostReasonModal(null, stage, () => {
+      // on cancel: reopen bulk stage modal
+      openModal('modal-bulk-stage');
+    });
+    // Override confirmLostReason to handle bulk
+    const origCtx = _lostReasonCtx;
+    _lostReasonCtx = {
+      ...origCtx,
+      prospectId: null,
+      _bulkIds: ids,
+    };
+    return;
+  }
   await Promise.all(ids.map(id => api('PATCH', `/prospects/${id}/stage`, { stage })));
   ids.forEach(id => { const p = S.prospects.find(x=>x.id===id); if(p) p.stage=stage; });
   applyFilters(); closeModal('modal-bulk-stage'); clearSelection();

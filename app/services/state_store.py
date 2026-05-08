@@ -594,3 +594,32 @@ async def join_code_pending_delete(phone: str, bot_number: str) -> None:
         return
     _maybe_warn("join_code_pending")
     _fb_delete(_fb_join_code_pending, key)
+
+
+# ── Scheduler heartbeat ───────────────────────────────────────────────────────
+
+_SCHEDULER_HEARTBEAT_KEY = "mesio:scheduler:heartbeat"
+_SCHEDULER_HEARTBEAT_TTL = 300  # 5 minutes — stale if no tick in >5 min
+
+
+async def set_scheduler_heartbeat() -> None:
+    """Write current UTC timestamp to scheduler heartbeat key. TTL 5 min. Best-effort."""
+    r = await _rc.get_redis()
+    if r is None:
+        return
+    try:
+        await r.set(_SCHEDULER_HEARTBEAT_KEY, str(int(time.time())), ex=_SCHEDULER_HEARTBEAT_TTL)
+    except Exception:
+        pass  # best-effort — do not crash the scheduler tick
+
+
+async def get_scheduler_heartbeat() -> int | None:
+    """Return last tick UNIX timestamp, or None if Redis unavailable or key expired."""
+    r = await _rc.get_redis()
+    if r is None:
+        return None
+    try:
+        val = await r.get(_SCHEDULER_HEARTBEAT_KEY)
+        return int(val) if val else None
+    except Exception:
+        return None

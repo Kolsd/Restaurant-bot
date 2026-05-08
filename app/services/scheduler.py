@@ -865,6 +865,9 @@ async def _scheduler_loop():
         # will have stolen the lease and renew returns False — we break out
         # immediately rather than double-executing the remaining phases.
         with bypass_tenant_scope("scheduler_leader_tick"):
+            # Heartbeat: signal that the scheduler is alive (Redis TTL 5 min)
+            await state_store.set_scheduler_heartbeat()
+
             await _run_inactivity_check()
 
             if not await _renew_or_abort(leader_token):

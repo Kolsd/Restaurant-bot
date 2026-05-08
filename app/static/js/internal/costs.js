@@ -203,6 +203,14 @@ function planClass(plan) {
   return 'plan-free';
 }
 
+function fmtMargin(cop, pct) {
+  if (cop == null) return '—';
+  const sign = cop >= 0 ? '+' : '';
+  const copStr = sign + '$' + Math.round(Math.abs(cop)).toLocaleString('es-CO') + ' COP';
+  const pctStr = pct != null ? ` (${pct > 0 ? '+' : ''}${pct}%)` : '';
+  return copStr + pctStr;
+}
+
 function renderRestTable() {
   const tbody = document.getElementById('rest-tbody');
   tbody.innerHTML = '';
@@ -210,7 +218,7 @@ function renderRestTable() {
   if (!_restaurants.length) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 7;
+    td.colSpan = 8;
     td.className = 'loading-text';
     td.style.textAlign = 'center';
     td.style.padding = '2rem';
@@ -258,11 +266,21 @@ function renderRestTable() {
     copTd.className = 'num-right';
     copTd.textContent = fmtCOP(rest.estimated_cost_cop);
 
+    const marginTd = document.createElement('td');
+    marginTd.className = 'num-right';
+    if (rest.margin_cop == null) {
+      marginTd.textContent = '—';
+      marginTd.style.color = 'var(--text-4)';
+    } else {
+      marginTd.textContent = fmtMargin(rest.margin_cop, rest.margin_pct);
+      marginTd.style.color = rest.margin_cop >= 0 ? 'var(--success)' : 'var(--danger)';
+    }
+
     const ordersTd = document.createElement('td');
     ordersTd.className = 'num-right';
     ordersTd.textContent = rest.orders_count != null ? rest.orders_count.toLocaleString() : '—';
 
-    tr.append(rankTd, nameTd, planTd, tokensTd, usdTd, copTd, ordersTd);
+    tr.append(rankTd, nameTd, planTd, tokensTd, usdTd, copTd, marginTd, ordersTd);
 
     tr.addEventListener('click', () => {
       _expandedId = _expandedId === rest.org_id ? null : rest.org_id;
@@ -277,7 +295,7 @@ function renderRestTable() {
       const dtr = document.createElement('tr');
       dtr.className = 'detail-row';
       const dtd = document.createElement('td');
-      dtd.colSpan = 7;
+      dtd.colSpan = 8;
       dtd.id = `detail-${rest.org_id}`;
       dtd.textContent = 'Loading daily breakdown…';
       dtr.appendChild(dtd);
@@ -446,6 +464,30 @@ function updateTimestamp() {
   if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
+// ── Platform margin KPIs ──────────────────────────────────────────────────────
+function loadMargin() {
+  return apiGet(`/api/internal/costs/margin?start=${_start}&end=${_end}`)
+    .then(data => {
+      const isPos = n => n != null && n >= 0;
+      setKpi('kpi-revenue-cop', fmtCOP(data.total_revenue_cop), 'brand');
+      const subEl = document.getElementById('kpi-revenue-sub');
+      if (subEl && data.paying_orgs != null) {
+        subEl.textContent = `${data.paying_orgs} paying orgs`;
+      }
+      setKpi('kpi-margin-cost', fmtCOP(data.total_cost_cop));
+      setKpi('kpi-net-margin', fmtCOP(data.net_margin_cop),
+        isPos(data.net_margin_cop) ? 'text-ok' : 'text-danger');
+      setKpi('kpi-margin-pct',
+        data.margin_pct != null ? (data.margin_pct > 0 ? '+' : '') + data.margin_pct + '%' : '—',
+        isPos(data.margin_pct) ? 'text-ok' : 'text-danger');
+    })
+    .catch(() => {
+      ['kpi-revenue-cop','kpi-margin-cost','kpi-net-margin','kpi-margin-pct'].forEach(id => {
+        setKpi(id, '—');
+      });
+    });
+}
+
 // ── Load all ──────────────────────────────────────────────────────────────────
 function loadAll() {
   _expandedId = null;
@@ -453,6 +495,7 @@ function loadAll() {
     loadSummary(),
     loadRestaurants(),
     loadOutliers(),
+    loadMargin(),
   ]).then(() => updateTimestamp());
 }
 

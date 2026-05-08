@@ -328,6 +328,31 @@
       min-height: 18px;
     }
 
+    /* ── Scheduler heartbeat card ── */
+    .heartbeat-row {
+      display: flex;
+      align-items: center;
+      gap: var(--s-3);
+      margin-top: var(--s-3);
+    }
+    .heartbeat-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--dark-3);
+      flex-shrink: 0;
+    }
+    .heartbeat-dot.alive { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .heartbeat-dot.stale {
+      background: var(--danger);
+      box-shadow: 0 0 8px var(--danger);
+      animation: pulse-red 1s infinite;
+    }
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.35; }
+    }
+
     /* ── Responsive ── */
     @media (max-width: 768px) {
       .header { padding: var(--s-3) var(--s-4); }
@@ -407,6 +432,16 @@
           <span class="badge badge-muted" id="deadLetterBadge">— dead</span>
         </div>
         <div class="card-sub" id="inboxProcessed">—</div>
+      </div>
+
+      <!-- Scheduler heartbeat -->
+      <div class="card">
+        <div class="card-label">Scheduler</div>
+        <div class="heartbeat-row">
+          <div class="heartbeat-dot" id="schedulerDot"></div>
+          <span class="card-value" style="font-size:1.4rem" id="schedulerAge">—</span>
+        </div>
+        <div class="card-sub" id="schedulerSub">Waiting for data…</div>
       </div>
 
       <!-- Error rate + latency -->
@@ -704,6 +739,25 @@
       samples !== null && samples !== undefined
         ? `${fmt(samples)} latency samples`
         : '—';
+
+    // Scheduler heartbeat
+    const sched = m.scheduler || {};
+    const schedDot = document.getElementById('schedulerDot');
+    const schedAge = document.getElementById('schedulerAge');
+    const schedSub = document.getElementById('schedulerSub');
+    if (sched.last_tick_at === null || sched.last_tick_at === undefined) {
+      schedDot.className = 'heartbeat-dot';
+      schedAge.textContent = '—';
+      schedSub.textContent = 'Redis unavailable — heartbeat requires Redis';
+    } else {
+      const age = sched.last_tick_age_seconds;
+      const healthy = sched.healthy;
+      schedDot.className = 'heartbeat-dot ' + (healthy ? 'alive' : 'stale');
+      schedAge.textContent = age !== null ? 'hace ' + age + 's' : '—';
+      schedAge.className = 'card-value ' + (healthy ? 'text-ok' : 'text-danger');
+      schedSub.textContent = healthy ? 'Scheduler activo' : 'ALERTA: scheduler inactivo >90s';
+      schedSub.className = 'card-sub ' + (healthy ? '' : 'text-danger');
+    }
 
     // Business metrics — populate when available, keep "--" until then
     renderBusiness('bizOrders',        'bizOrdersSub',        m.orders_today,           'orders today');

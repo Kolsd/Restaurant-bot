@@ -6,7 +6,7 @@ import io
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.services import database as db
 from app.repositories.internal import crm_repo
 from app.services.logging import get_logger, mask_phone
@@ -155,10 +155,18 @@ VALID_STAGES = frozenset({
 })
 
 
+class StageMoveRequest(BaseModel):
+    stage: str
+    lost_reason: Optional[str] = Field(None, max_length=500)
+
+
 @router.patch("/prospects/{pid}/stage")
-async def move_stage(request: Request, pid: int, _: None = Depends(verify_superadmin)):
-    body = await request.json()
-    new_stage = (body.get("stage") or "").strip().lower()
+async def move_stage(
+    pid: int,
+    body: StageMoveRequest,
+    _: None = Depends(verify_superadmin),
+):
+    new_stage = body.stage.strip().lower()
     if not new_stage:
         raise HTTPException(status_code=400, detail="stage requerido")
     if new_stage not in VALID_STAGES:
@@ -166,8 +174,19 @@ async def move_stage(request: Request, pid: int, _: None = Depends(verify_supera
             status_code=400,
             detail=f"stage inválido. Valores permitidos: {', '.join(sorted(VALID_STAGES))}",
         )
-    await crm_repo.db_move_prospect_stage(pid, new_stage)
+    if new_stage == "perdido" and not body.lost_reason:
+        raise HTTPException(
+            status_code=400,
+            detail="lost_reason requerido al mover a 'perdido'. Indica por qué se perdió el prospecto.",
+        )
+    await crm_repo.db_move_prospect_stage(pid, new_stage, lost_reason=body.lost_reason)
     return {"success": True, "stage": new_stage}
+
+
+@router.get("/loss-reasons")
+async def get_loss_reasons(_: None = Depends(verify_superadmin)):
+    """Top lost_reason counts — used by CRM dashboard analytics."""
+    return {"reasons": await crm_repo.db_get_loss_reasons(limit=10)}
 
 
 # ── CONVERT PROSPECT TO REAL RESTAURANT ───────────────────────────────────────

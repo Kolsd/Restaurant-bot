@@ -9,6 +9,8 @@ Endpoints:
   GET /api/internal/ops/metrics  → detailed operational metrics (requires ADMIN_KEY)
 """
 
+import time
+
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from app.services.database import get_pool
@@ -73,6 +75,21 @@ async def health_metrics(_: None = Depends(verify_superadmin)):
         metrics.update(_get_worker_metrics())
     except Exception as exc:
         log.exception("ops.metrics.worker_metrics_error", exc_type=type(exc).__name__)
+
+    # Scheduler heartbeat
+    try:
+        from app.services import state_store as _ss
+        last_tick = await _ss.get_scheduler_heartbeat()
+        now_ts = int(time.time())
+        age = (now_ts - last_tick) if last_tick is not None else None
+        metrics["scheduler"] = {
+            "last_tick_at": last_tick,
+            "last_tick_age_seconds": age,
+            "healthy": (age is not None and age < 90),
+        }
+    except Exception as exc:
+        log.exception("ops.metrics.scheduler_heartbeat_error", exc_type=type(exc).__name__)
+        metrics["scheduler"] = {"last_tick_at": None, "last_tick_age_seconds": None, "healthy": False}
 
     with bypass_tenant_scope("internal_ops_metrics_cross_tenant"):
         # Orders created today

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from app.services.logging import get_logger
@@ -116,10 +117,13 @@ async def db_per_restaurant_costs(
         "org_id": int,
         "org_name": str,
         "plan_code": str,
+        "monthly_price_cop": int,      # 0 for comp/free orgs
         "total_tokens": int,
         "estimated_cost_usd": float,   # JSON boundary
         "estimated_cost_cop": float,   # JSON boundary
         "orders_count": int,
+        "margin_cop": float | None,    # monthly_price - cost_cop; None for comp/free
+        "margin_pct": float | None,    # (margin / price) * 100; None if price == 0
     }
     """
     pool = await _get_pool()
@@ -130,13 +134,15 @@ async def db_per_restaurant_costs(
                 SELECT
                     su.org_id,
                     o.name                             AS org_name,
-                    COALESCE(o.subscription_plan, 'free') AS plan_code,
+                    COALESCE(o.plan_code, 'free')      AS plan_code,
+                    COALESCE(pl.monthly_price_cop, 0)  AS monthly_price_cop,
                     SUM(su.total_tokens)::BIGINT       AS total_tokens,
                     SUM(su.orders_count)::BIGINT       AS orders_count
                 FROM subscription_usage su
-                LEFT JOIN organizations o ON o.id = su.org_id
+                LEFT JOIN organizations o  ON o.id = su.org_id
+                LEFT JOIN plan_limits    pl ON pl.plan_code = COALESCE(o.plan_code, 'free')
                 WHERE su.usage_date BETWEEN $1 AND $2
-                GROUP BY su.org_id, o.name, o.subscription_plan
+                GROUP BY su.org_id, o.name, o.plan_code, pl.monthly_price_cop
                 ORDER BY total_tokens DESC
                 LIMIT $3
                 """,
@@ -152,16 +158,75 @@ async def db_per_restaurant_costs(
     for row in rows:
         tokens = int(row["total_tokens"] or 0)
         cost_usd, cost_cop = _estimate(tokens)
+        plan = (row["plan_code"] or "free").lower()
+        monthly_price = int(row["monthly_price_cop"] or 0)
+
+        # Margin only meaningful for paying plans (not comp/free)
+        if plan not in ("comp", "free") and monthly_price > 0:
+            margin_cop = float(Decimal(str(monthly_price)) - cost_cop)  # JSON boundary
+            margin_pct = round((margin_cop / monthly_price) * 100, 1)
+        else:
+            margin_cop = None
+            margin_pct = None
+
         result.append({
             "org_id": row["org_id"],
             "org_name": row["org_name"] or f"Org #{row['org_id']}",
-            "plan_code": row["plan_code"] or "free",
+            "plan_code": plan,
+            "monthly_price_cop": monthly_price,
             "total_tokens": tokens,
             "estimated_cost_usd": float(cost_usd),  # JSON boundary
             "estimated_cost_cop": float(cost_cop),  # JSON boundary
             "orders_count": int(row["orders_count"] or 0),
+            "margin_cop": margin_cop,
+            "margin_pct": margin_pct,
         })
     return result
+
+
+async def db_platform_margin_summary(
+    start_date: date,
+    end_date: date,
+) -> dict[str, Any]:
+    """Platform-wide revenue vs cost margin for [start_date, end_date].
+
+    Revenue = sum of monthly_price_cop for paying orgs that had spend in the period.
+    Cost    = sum of estimated_cost_cop for all orgs.
+    Requires bypass_tenant_scope("internal_cost_dashboard") at call site.
+
+    Returns:
+    {
+        "total_revenue_cop": float,
+        "total_cost_cop": float,
+        "net_margin_cop": float,
+        "margin_pct": float | None,
+        "paying_orgs": int,
+    }
+    """
+    rows = await db_per_restaurant_costs(start_date, end_date, limit=500)
+    total_revenue = Decimal("0")
+    total_cost = Decimal("0")
+    paying_orgs = 0
+
+    for r in rows:
+        cost_cop = Decimal(str(r["estimated_cost_cop"]))
+        total_cost += cost_cop
+        plan = r["plan_code"]
+        price = r["monthly_price_cop"]
+        if plan not in ("comp", "free") and price > 0:
+            total_revenue += Decimal(str(price))
+            paying_orgs += 1
+
+    net = total_revenue - total_cost
+    margin_pct = round(float(net / total_revenue) * 100, 1) if total_revenue > 0 else None
+
+    return {
+        "total_revenue_cop": float(total_revenue),  # JSON boundary
+        "total_cost_cop": float(total_cost),         # JSON boundary
+        "net_margin_cop": float(net),                # JSON boundary
+        "margin_pct": margin_pct,
+        "paying_orgs": paying_orgs,
+    }
 
 
 # ── Single restaurant detail ──────────────────────────────────────────────────
