@@ -250,6 +250,15 @@
     }
     .churn-drop { color: #ef4444; font-weight: 600; }
 
+    /* ── CSV export button ── */
+    .csv-btn {
+      padding: 4px 12px; font-size: 0.78rem; font-weight: 600;
+      background: var(--dark-3); color: var(--text-4);
+      border: 1px solid var(--dark-3); border-radius: var(--radius);
+      cursor: pointer; transition: all var(--ease);
+    }
+    .csv-btn:hover { border-color: var(--brand); color: var(--brand); }
+
     /* ── Loading / empty states ── */
     .loading-text { color: var(--text-4); font-size: 0.85rem; padding: var(--s-4) 0; }
     .empty-row td { color: var(--text-4); font-size: 0.85rem; text-align: center; padding: var(--s-6) !important; }
@@ -382,7 +391,10 @@
 
     <!-- Activation funnel -->
     <section>
-      <div class="section-title">Activation Funnel</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s-4);">
+        <div class="section-title" style="margin-bottom:0">Activation Funnel</div>
+        <button class="csv-btn" onclick="exportCSV('/api/internal/analytics/activation.csv','mesio_activation.csv')">&#128229; Exportar CSV</button>
+      </div>
       <div class="funnel-wrap" id="funnel-wrap">
         <div class="funnel-title">Signup → Menu → First Message → First Order</div>
         <div id="funnel-stages"><p class="loading-text">Loading…</p></div>
@@ -392,7 +404,10 @@
 
     <!-- Churn risk -->
     <section>
-      <div class="section-title">Churn Early Warning</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s-4);">
+        <div class="section-title" style="margin-bottom:0">Churn Early Warning</div>
+        <button class="csv-btn" onclick="exportCSV('/api/internal/analytics/churn-risk.csv','mesio_churn_risk.csv')">&#128229; Exportar CSV</button>
+      </div>
       <div class="churn-wrap">
         <div class="churn-header">Tenants with &gt;50% drop in conversation volume (last 7d vs prior 14d)</div>
         <table class="churn-table">
@@ -413,7 +428,10 @@
 
     <!-- Restaurant onboarding table -->
     <section>
-      <div class="section-title">Restaurant Onboarding</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s-4);">
+        <div class="section-title" style="margin-bottom:0">Restaurant Onboarding</div>
+        <button class="csv-btn" onclick="exportCSV('/api/internal/analytics/restaurants.csv','mesio_restaurants.csv')">&#128229; Exportar CSV</button>
+      </div>
       <div class="table-wrap">
         <table class="data-table" id="rest-table">
           <thead>
@@ -481,6 +499,22 @@
   });
 
   if (_token) applyToken(_token);
+
+  // ── CSV download helper ─────────────────────────────────────────────────────
+  async function exportCSV(url, filename) {
+    try {
+      const r = await fetch(url, { headers: { 'Authorization': `Bearer ${_token}` } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      console.error('[analytics] exportCSV failed', err);
+    }
+  }
 
   // ── Data helpers ────────────────────────────────────────────────────────────
   function apiGet(path) {

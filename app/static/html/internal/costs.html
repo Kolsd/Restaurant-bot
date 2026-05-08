@@ -163,10 +163,57 @@
       font-size: 0.72rem; font-weight: 600;
       text-transform: uppercase;
     }
-    .plan-free       { background: rgba(107,114,128,.2); color: #9ca3af; }
-    .plan-basic      { background: rgba(16,185,129,.15); color: #10b981; }
-    .plan-pro        { background: rgba(99,102,241,.2);  color: #818cf8; }
-    .plan-enterprise { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .plan-free        { background: rgba(107,114,128,.2);  color: #9ca3af; }
+    .plan-pulso       { background: rgba(6,182,212,.15);   color: #22d3ee; }
+    .plan-restaurante { background: rgba(29,158,117,.2);   color: #10b981; border: 1px solid rgba(29,158,117,.4); }
+    .plan-pro         { background: rgba(99,102,241,.2);   color: #818cf8; }
+    .plan-cadena      { background: rgba(245,158,11,.15);  color: #f59e0b; }
+    .plan-comp        { background: repeating-linear-gradient(45deg,rgba(107,114,128,.15) 0,rgba(107,114,128,.15) 4px,transparent 4px,transparent 8px); color: #9ca3af; border: 1px solid rgba(107,114,128,.3); }
+
+    /* ── CSV export button ── */
+    .csv-btn {
+      padding: 4px 12px; font-size: 0.78rem; font-weight: 600;
+      background: var(--dark-3); color: var(--text-4);
+      border: 1px solid var(--dark-3); border-radius: var(--radius);
+      cursor: pointer; transition: all var(--ease);
+    }
+    .csv-btn:hover { border-color: var(--brand); color: var(--brand); }
+
+    /* ── Drilldown modal ── */
+    #drilldown-modal {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,.6); align-items: center; justify-content: center;
+    }
+    #drilldown-modal.open { display: flex; }
+    .drilldown-box {
+      background: var(--dark-2); border: 1px solid var(--dark-3);
+      border-radius: var(--radius-lg); padding: var(--s-6);
+      width: 100%; max-width: 580px; max-height: 80vh; overflow-y: auto;
+      display: flex; flex-direction: column; gap: var(--s-4);
+    }
+    .drilldown-header {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .drilldown-title { font-size: 1rem; font-weight: 700; color: #fff; }
+    .drilldown-close {
+      background: none; border: none; color: var(--text-4);
+      font-size: 1.2rem; cursor: pointer; padding: 4px;
+      border-radius: var(--radius); transition: color var(--ease);
+    }
+    .drilldown-close:hover { color: #fff; }
+    .drilldown-kpis {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-3);
+    }
+    .drilldown-kpi {
+      background: var(--dark-3); border-radius: var(--radius);
+      padding: var(--s-3);
+    }
+    .drilldown-kpi-label { font-size: 0.7rem; color: var(--text-4); margin-bottom: 4px; }
+    .drilldown-kpi-value { font-size: 1.2rem; font-weight: 700; color: #fff; }
+    .drilldown-section-title {
+      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--text-4);
+    }
 
     /* ── Outlier badge ── */
     .outlier-pct {
@@ -341,7 +388,10 @@
 
     <!-- Top restaurants table -->
     <section>
-      <div class="section-title">Top Restaurants by Spend</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s-4);">
+        <div class="section-title" style="margin-bottom:0">Top Restaurants by Spend</div>
+        <button class="csv-btn" id="export-costs-btn">&#128229; Exportar CSV</button>
+      </div>
       <div class="table-wrap">
         <table class="data-table" id="rest-table">
           <thead>
@@ -354,10 +404,11 @@
               <th class="num-right" onclick="sortTable('estimated_cost_cop')">Cost COP</th>
               <th class="num-right" onclick="sortTable('margin_cop')">Margen</th>
               <th class="num-right" onclick="sortTable('orders_count')">Orders</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="rest-tbody">
-            <tr><td colspan="8" class="loading-text" style="text-align:center;padding:2rem">Loading…</td></tr>
+            <tr><td colspan="9" class="loading-text" style="text-align:center;padding:2rem">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -370,6 +421,35 @@
     </section>
 
   </main>
+</div>
+
+<!-- ── Drilldown modal ───────────────────────────────────────────────────── -->
+<div id="drilldown-modal" role="dialog" aria-modal="true">
+  <div class="drilldown-box">
+    <div class="drilldown-header">
+      <span class="drilldown-title" id="dd-title">Detalle de costos</span>
+      <button class="drilldown-close" id="dd-close" aria-label="Cerrar">&#x2715;</button>
+    </div>
+    <div class="drilldown-kpis" id="dd-kpis">
+      <!-- injected by costs.js -->
+    </div>
+    <div class="drilldown-section-title">Top 5 días por tokens</div>
+    <div class="table-wrap" style="overflow:hidden;">
+      <table class="data-table" id="dd-days-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th class="num-right">Tokens</th>
+            <th class="num-right">Costo USD</th>
+            <th class="num-right">Costo COP</th>
+          </tr>
+        </thead>
+        <tbody id="dd-days-tbody">
+          <tr><td colspan="4" class="loading-text" style="text-align:center;padding:1rem">Cargando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script src="/static/js/mesio-utils.js"></script>

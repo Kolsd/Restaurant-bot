@@ -197,9 +197,11 @@ let _expandedId  = null;
 
 function planClass(plan) {
   const p = (plan || '').toLowerCase();
-  if (p === 'enterprise') return 'plan-enterprise';
-  if (p === 'pro')        return 'plan-pro';
-  if (p === 'basic')      return 'plan-basic';
+  if (p === 'cadena')      return 'plan-cadena';
+  if (p === 'pro')         return 'plan-pro';
+  if (p === 'restaurante') return 'plan-restaurante';
+  if (p === 'pulso')       return 'plan-pulso';
+  if (p === 'comp')        return 'plan-comp';
   return 'plan-free';
 }
 
@@ -280,7 +282,17 @@ function renderRestTable() {
     ordersTd.className = 'num-right';
     ordersTd.textContent = rest.orders_count != null ? rest.orders_count.toLocaleString() : '—';
 
-    tr.append(rankTd, nameTd, planTd, tokensTd, usdTd, copTd, marginTd, ordersTd);
+    const inspectTd = document.createElement('td');
+    inspectTd.style.cssText = 'text-align:right;white-space:nowrap;';
+    const inspectBtn = document.createElement('button');
+    inspectBtn.textContent = 'Inspeccionar →';
+    inspectBtn.style.cssText = 'font-size:0.75rem;padding:3px 8px;background:var(--dark-3);color:var(--text-4);border:1px solid var(--dark-3);border-radius:var(--radius);cursor:pointer;';
+    inspectBtn.addEventListener('mouseenter', () => { inspectBtn.style.borderColor = 'var(--brand)'; inspectBtn.style.color = 'var(--brand)'; });
+    inspectBtn.addEventListener('mouseleave', () => { inspectBtn.style.borderColor = 'var(--dark-3)'; inspectBtn.style.color = 'var(--text-4)'; });
+    inspectBtn.addEventListener('click', e => { e.stopPropagation(); openDrilldown(rest.org_id, rest.org_name, rest.plan_code); });
+    inspectTd.appendChild(inspectBtn);
+
+    tr.append(rankTd, nameTd, planTd, tokensTd, usdTd, copTd, marginTd, ordersTd, inspectTd);
 
     tr.addEventListener('click', () => {
       _expandedId = _expandedId === rest.org_id ? null : rest.org_id;
@@ -485,6 +497,100 @@ function loadMargin() {
       ['kpi-revenue-cop','kpi-margin-cost','kpi-net-margin','kpi-margin-pct'].forEach(id => {
         setKpi(id, '—');
       });
+    });
+}
+
+// ── CSV export helper ─────────────────────────────────────────────────────────
+async function exportCSV(url, filename) {
+  try {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${_token}` } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) {
+    console.error('[costs] exportCSV failed', err);
+  }
+}
+
+// Wire up export button once DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  const exportBtn = document.getElementById('export-costs-btn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      exportCSV(`/api/internal/costs/per-restaurant.csv?start=${_start}&end=${_end}`,
+        `mesio_costs_${_start}_${_end}.csv`);
+    });
+  }
+});
+
+// ── Drilldown modal ───────────────────────────────────────────────────────────
+const _ddModal = document.getElementById('drilldown-modal');
+const _ddClose = document.getElementById('dd-close');
+if (_ddClose) _ddClose.addEventListener('click', closeDrilldown);
+if (_ddModal) _ddModal.addEventListener('click', e => { if (e.target === _ddModal) closeDrilldown(); });
+
+function closeDrilldown() {
+  if (_ddModal) _ddModal.classList.remove('open');
+}
+
+function openDrilldown(orgId, orgName, planCode) {
+  if (!_ddModal) return;
+  const titleEl = document.getElementById('dd-title');
+  if (titleEl) titleEl.textContent = orgName || `Org #${orgId}`;
+
+  const kpisEl = document.getElementById('dd-kpis');
+  if (kpisEl) kpisEl.innerHTML = '<div class="drilldown-kpi"><div class="drilldown-kpi-label">Cargando…</div></div>';
+
+  const tbody = document.getElementById('dd-days-tbody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--text-4)">Cargando…</td></tr>';
+
+  _ddModal.classList.add('open');
+
+  const preset = document.querySelector('.preset-btn.active');
+  const period = preset ? preset.dataset.preset : 'mtd';
+
+  apiGet(`/api/internal/costs/${orgId}/drilldown?period=${period}`)
+    .then(data => {
+      // KPI cards
+      if (kpisEl) {
+        const kpis = [
+          { label: 'Total Tokens', value: fmtTokens(data.totals?.tokens) },
+          { label: 'Costo USD',    value: fmtUSD(data.totals?.cost_usd) },
+          { label: 'Costo COP',    value: fmtCOP(data.totals?.cost_cop) },
+          { label: 'Costo/Conv',   value: data.cost_per_conversation != null ? fmtUSD(data.cost_per_conversation) : '—' },
+          { label: 'Conversaciones', value: data.conversations_count != null ? String(data.conversations_count) : '—' },
+          { label: 'Margen',       value: data.totals?.margin_cop != null ? fmtCOP(data.totals.margin_cop) : '—' },
+        ];
+        kpisEl.innerHTML = kpis.map(k =>
+          `<div class="drilldown-kpi"><div class="drilldown-kpi-label">${_escHtml(k.label)}</div><div class="drilldown-kpi-value">${_escHtml(k.value)}</div></div>`
+        ).join('');
+      }
+
+      // Top 5 days table
+      if (tbody) {
+        const days = data.top5_days || [];
+        if (!days.length) {
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:1rem;color:var(--text-4)">Sin datos</td></tr>';
+          return;
+        }
+        tbody.innerHTML = '';
+        days.forEach(d => {
+          const tr = document.createElement('tr');
+          const dateTd = document.createElement('td'); dateTd.textContent = d.date || '—';
+          const tokTd  = document.createElement('td'); tokTd.className = 'num-right'; tokTd.textContent = fmtTokens(d.tokens);
+          const usdTd  = document.createElement('td'); usdTd.className = 'num-right'; usdTd.textContent = fmtUSD(d.cost_usd);
+          const copTd  = document.createElement('td'); copTd.className = 'num-right'; copTd.textContent = fmtCOP(d.cost_cop);
+          tr.append(dateTd, tokTd, usdTd, copTd);
+          tbody.appendChild(tr);
+        });
+      }
+    })
+    .catch(() => {
+      if (kpisEl) kpisEl.innerHTML = '<div style="color:var(--danger);font-size:.85rem;">Error al cargar datos.</div>';
     });
 }
 

@@ -505,6 +505,24 @@
     </div>
   </section>
 
+  <!-- Top tenants by queue depth (hidden when queue is empty) -->
+  <section id="queue-tenants-section" style="display:none;">
+    <div class="section-title">Top Tenants por Cola</div>
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="history-table" id="queueTenantsTable">
+        <thead>
+          <tr>
+            <th>Restaurante</th>
+            <th>Bot Number</th>
+            <th style="text-align:right;">Mensajes Pendientes</th>
+          </tr>
+        </thead>
+        <tbody id="queueTenantBody">
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- History section -->
   <section>
     <div class="section-title">Poll History (last 20)</div>
@@ -757,6 +775,31 @@
       schedAge.className = 'card-value ' + (healthy ? 'text-ok' : 'text-danger');
       schedSub.textContent = healthy ? 'Scheduler activo' : 'ALERTA: scheduler inactivo >90s';
       schedSub.className = 'card-sub ' + (healthy ? '' : 'text-danger');
+    }
+
+    // Top tenants by queue depth
+    const topTenants = m.queue_top_tenants || [];
+    const tenantSection = document.getElementById('queue-tenants-section');
+    if (tenantSection) {
+      if (topTenants.length > 0) {
+        tenantSection.style.display = '';
+        const tbody = document.getElementById('queueTenantBody');
+        if (tbody) {
+          tbody.innerHTML = '';
+          topTenants.forEach(t => {
+            const tr = document.createElement('tr');
+            const nameTd = document.createElement('td'); nameTd.textContent = t.org_name || '—';
+            const botTd  = document.createElement('td'); botTd.style.fontFamily = 'monospace'; botTd.textContent = t.bot_number || '—';
+            const depthTd = document.createElement('td'); depthTd.style.textAlign = 'right';
+            depthTd.textContent = fmt(t.depth);
+            depthTd.className = t.depth > 5 ? 'text-warn' : '';
+            tr.append(nameTd, botTd, depthTd);
+            tbody.appendChild(tr);
+          });
+        }
+      } else {
+        tenantSection.style.display = 'none';
+      }
     }
 
     // Business metrics — populate when available, keep "--" until then

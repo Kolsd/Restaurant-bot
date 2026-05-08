@@ -10,8 +10,12 @@ Endpoints (all require Authorization: Bearer <ADMIN_KEY>):
   GET /api/analytics/trends    → daily order & conversation counts (last 30 days)
 """
 
+import csv
+import io
+from datetime import date
+
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from app.services.database import get_pool
 from app.services.logging import get_logger
@@ -345,6 +349,65 @@ async def analytics_restaurants(_: None = Depends(verify_superadmin)):
             })
 
     return {"restaurants": restaurants_list}
+
+
+# ── CSV export: restaurants onboarding ───────────────────────────────────────
+
+@router.get("/api/internal/analytics/restaurants.csv")
+async def export_restaurants_csv(_: None = Depends(verify_superadmin)):
+    data = await analytics_restaurants(_)
+    rows = data.get("restaurants", [])
+    buf = io.StringIO()
+    fieldnames = [
+        "id", "name", "whatsapp_number", "created_at",
+        "orders_30d", "conversations_30d", "last_order_at",
+        "last_conversation_at", "has_billing", "has_menu",
+        "staff_count", "onboarding_score",
+    ]
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=mesio_restaurants_{date.today()}.csv"},
+    )
+
+
+# ── CSV export: churn risk ────────────────────────────────────────────────────
+
+@router.get("/api/internal/analytics/churn-risk.csv")
+async def export_churn_risk_csv(_: None = Depends(verify_superadmin)):
+    data = await analytics_churn_risk(_)
+    rows = data.get("at_risk", [])
+    buf = io.StringIO()
+    fieldnames = ["org_id", "org_name", "baseline_avg_daily", "recent_avg_daily", "ratio", "drop_pct"]
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=mesio_churn_risk_{date.today()}.csv"},
+    )
+
+
+# ── CSV export: activation funnel per-org ────────────────────────────────────
+
+@router.get("/api/internal/analytics/activation.csv")
+async def export_activation_csv(_: None = Depends(verify_superadmin)):
+    data = await analytics_activation(_)
+    rows = data.get("per_org", [])
+    buf = io.StringIO()
+    fieldnames = ["org_id", "org_name", "stage", "signed_up_at", "has_menu", "first_message_at", "first_order_at"]
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=mesio_activation_{date.today()}.csv"},
+    )
 
 
 # ── Trends ────────────────────────────────────────────────────────────────────

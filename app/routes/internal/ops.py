@@ -147,4 +147,47 @@ async def health_metrics(_: None = Depends(verify_superadmin)):
             log.exception("ops.metrics.staff_clocked_in_error", exc_type=type(exc).__name__)
             metrics["staff_clocked_in"] = None
 
+        # Top tenants by queue depth (only populated when global depth > 0)
+        try:
+            queue_depth = metrics.get("inbox_queue_depth") or 0
+            if queue_depth > 0:
+                pool = await get_pool()
+                async with pool.acquire() as conn:
+                    top_rows = await conn.fetch(
+                        """
+                        WITH pending AS (
+                            SELECT bot_number, COUNT(*) AS depth
+                            FROM webhook_inbox
+                            WHERE processed_at IS NULL
+                              AND bot_number IS NOT NULL
+                            GROUP BY bot_number
+                            ORDER BY 2 DESC
+                            LIMIT 5
+                        ),
+                        bot_orgs AS (
+                            SELECT
+                                COALESCE(l.whatsapp_number, o.whatsapp_number) AS bot_number,
+                                o.name AS org_name
+                            FROM locations l
+                            JOIN organizations o ON o.id = l.org_id
+                            WHERE COALESCE(l.whatsapp_number, o.whatsapp_number) IS NOT NULL
+                        )
+                        SELECT p.bot_number,
+                               COALESCE(bo.org_name, p.bot_number) AS org_name,
+                               p.depth
+                        FROM pending p
+                        LEFT JOIN bot_orgs bo ON bo.bot_number = p.bot_number
+                        ORDER BY p.depth DESC
+                        """
+                    )
+                metrics["queue_top_tenants"] = [
+                    {"bot_number": r["bot_number"], "org_name": r["org_name"], "depth": r["depth"]}
+                    for r in top_rows
+                ]
+            else:
+                metrics["queue_top_tenants"] = []
+        except Exception as exc:
+            log.exception("ops.metrics.queue_top_tenants_error", exc_type=type(exc).__name__)
+            metrics["queue_top_tenants"] = []
+
     return metrics
