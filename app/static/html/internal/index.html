@@ -315,7 +315,10 @@
 
     <!-- Action queue -->
     <div class="hq-card">
-      <div class="hq-card-title">Cola de acciones</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div class="hq-card-title" style="margin-bottom:0">Cola de acciones</div>
+        <div id="hq-severity-counts" style="font-size:11px;color:#6b7280;display:none"></div>
+      </div>
       <div class="hq-actions" id="hq-actions">
         <div class="hq-action-placeholder">Cargando…</div>
       </div>
@@ -457,56 +460,64 @@
       });
   }
 
-  // ── Action queue ──────────────────────────────────────────────────────────────
-  function _renderActions(data) {
+  // ── Action queue — live from /api/internal/notifications ─────────────────────
+  const _SEV_DOT = { critical: 'danger', high: 'danger', medium: 'warn', low: 'ok' };
+  const _SEV_LABEL = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' };
+
+  function _renderNotifications(data) {
     const container = document.getElementById('hq-actions');
+    const countsEl  = document.getElementById('hq-severity-counts');
     if (!container) return;
 
-    const items = [];
+    const items = data.items || [];
+    const counts = data.count_by_severity || {};
 
-    // Prospects needing follow-up
-    const followUp = (data.prospects || {}).overdue_followup ?? null;
-    items.push({
-      href: '/internal/crm',
-      dot: followUp > 0 ? 'warn' : 'ok',
-      text: 'Prospects con follow-up vencido',
-      count: followUp != null ? followUp : '—',
-    });
+    // Severity summary bar
+    if (countsEl) {
+      const parts = [];
+      if (counts.critical > 0) parts.push(_SEV_LABEL.critical + ' ' + counts.critical + ' crítico' + (counts.critical !== 1 ? 's' : ''));
+      if (counts.high     > 0) parts.push(_SEV_LABEL.high     + ' ' + counts.high     + ' alto'    + (counts.high     !== 1 ? 's' : ''));
+      if (counts.medium   > 0) parts.push(_SEV_LABEL.medium   + ' ' + counts.medium   + ' medio'   + (counts.medium   !== 1 ? 's' : ''));
+      if (counts.low      > 0) parts.push(_SEV_LABEL.low      + ' ' + counts.low      + ' bajo'    + (counts.low      !== 1 ? 's' : ''));
+      countsEl.textContent = parts.join(' · ') || 'Sin alertas';
+      countsEl.style.display = '';
+    }
 
-    // Tenants near cap (churn risk proxy via analytics)
-    const atRisk = (data.analytics_churn || []).length;
-    items.push({
-      href: '/internal/analytics',
-      dot: atRisk > 0 ? 'warn' : 'ok',
-      text: 'Tenants con riesgo de churn detectado',
-      count: atRisk > 0 ? atRisk : '0',
-    });
+    if (items.length === 0) {
+      container.innerHTML =
+        '<div style="text-align:center;padding:24px 0;color:#6b7280;font-size:13px;">' +
+        '✓ Todo en orden</div>';
+      return;
+    }
 
-    // Dead letters
-    const dead = data.dead ?? null;
-    items.push({
-      href: '/internal/monitoring',
-      dot: dead > 0 ? 'danger' : 'ok',
-      text: 'Dead letters en inbox worker',
-      count: dead != null ? dead : '—',
-    });
-
-    // Cost runaway (placeholder — will be wired in Wave 1B)
-    items.push({
-      href: '/internal/costs',
-      dot: 'ok',
-      text: 'Alertas de cost runaway',
-      count: '—',
-    });
-
-    container.innerHTML = items.map(item =>
-      '<a href="' + item.href + '" class="hq-action-item">' +
-        '<span class="hq-action-dot ' + item.dot + '"></span>' +
-        '<span class="hq-action-text">' + _escHtml(item.text) + '</span>' +
-        '<span class="hq-action-count">' + _escHtml(String(item.count)) + '</span>' +
+    container.innerHTML = items.map(function(item) {
+      const dot   = _SEV_DOT[item.severity] || 'ok';
+      const count = item.count != null ? String(item.count) : '1';
+      return '<a href="' + _escHtml(item.url || '#') + '" class="hq-action-item">' +
+        '<span class="hq-action-dot ' + dot + '"></span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div class="hq-action-text" style="font-weight:500;">' + _escHtml(item.title) + '</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+            _escHtml(item.detail || '') +
+          '</div>' +
+        '</div>' +
+        '<span class="hq-action-count">' + _escHtml(count) + '</span>' +
         '<span class="hq-action-arrow">→</span>' +
-      '</a>'
-    ).join('');
+      '</a>';
+    }).join('');
+  }
+
+  function _loadNotifications() {
+    return _apiGet('/api/internal/notifications')
+      .then(function(data) { _renderNotifications(data); })
+      .catch(function() {
+        const container = document.getElementById('hq-actions');
+        if (container) {
+          container.innerHTML =
+            '<div style="text-align:center;padding:24px 0;color:#6b7280;font-size:13px;">' +
+            '✓ Sin alertas <span style="font-size:11px;">(no se pudieron cargar)</span></div>';
+        }
+      });
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -515,13 +526,9 @@
     _loadRescatados(),
     _loadActiveToday(),
     _loadProspects(),
-    _loadOpsMetrics().then(opsData => opsData),
-  ]).then(results => {
-    // Build action queue from what we collected
-    const opsData = results[3].status === 'fulfilled' ? results[3].value : {};
-    // For now render with what we have (churn data would need extra fetch)
-    _renderActions({ dead: opsData.dead || 0 });
-  });
+    _loadOpsMetrics(),
+    _loadNotifications(),
+  ]);
 </script>
 
 <script src="/static/js/internal/hq-shell.js" defer></script>
