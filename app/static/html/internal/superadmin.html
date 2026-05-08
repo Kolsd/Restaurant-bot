@@ -136,9 +136,23 @@ input:checked+.slider:before{transform:translateX(18px);}
 .feedback-msg.err{background:#FDE8E8;color:#C0392B;}
 
 /* ── PLAN BADGES ── */
+.plan-free{background:#f0f0e8;color:#555;}
 .plan-basic{background:#f0f0e8;color:#555;}
-.plan-pro{background:#E6F1FB;color:#185FA5;}
+.plan-pulso{background:#E6F1FB;color:#185FA5;}
+.plan-restaurante{background:#E1F5EE;color:#0F6E56;}
+.plan-pro{background:#EEE8FD;color:#5B21B6;}
+.plan-cadena{background:#FEF3C7;color:#92400E;}
+.plan-comp{background:#FDE8E8;color:#C0392B;}
 .plan-premium{background:#EEE8FD;color:#5B21B6;}
+
+/* ── QUICK ACTIONS ROW ── */
+.quick-actions{display:flex;gap:8px;padding:0.75rem 1.5rem;border-bottom:0.5px solid #e0e0d8;flex-wrap:wrap;}
+.btn-ghost{background:none;border:1px solid #e0e0d8;color:#555;padding:5px 12px;border-radius:8px;font-size:12px;cursor:pointer;}
+.btn-ghost:hover{background:#f5f5f0;}
+
+/* ── MODAL OVERLAY ── */
+.hq-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:3000;align-items:center;justify-content:center;}
+.hq-modal-box{background:#fff;border-radius:16px;padding:2rem;width:440px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.2);}
 
 /* ── Org/Location tabs ── */
 .org-tab-btn{padding:10px 20px;font-size:13px;font-weight:500;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;color:#888;transition:color .15s,border-color .15s;}
@@ -244,6 +258,14 @@ input:checked+.slider:before{transform:translateX(18px);}
           <button class="btn btn-secondary btn-sm" onclick="closeDetail()" style="margin-left:12px;">✕ Cerrar</button>
         </div>
 
+        <!-- Quick actions -->
+        <div class="quick-actions" id="dp-quick-actions">
+          <button class="btn-ghost" onclick="openPlanModal()">🏷️ Cambiar plan</button>
+          <button class="btn-ghost" id="dp-analytics-btn" onclick="">📈 Ver analytics →</button>
+          <button class="btn-ghost" id="dp-costs-btn" onclick="">💰 Ver costos →</button>
+          <button class="btn-ghost" id="dp-whatsapp-btn" onclick="" target="_blank">💬 Abrir WhatsApp →</button>
+        </div>
+
         <!-- Mini stats -->
         <div style="padding:1rem 1.5rem 0;" id="dp-stats-row">
           <div class="stat-mini" id="dp-stats"></div>
@@ -252,6 +274,7 @@ input:checked+.slider:before{transform:translateX(18px);}
         <!-- Tabs -->
         <div class="detail-tabs">
           <div class="detail-tab active" onclick="switchDetailTab('info',this)">Info</div>
+          <div class="detail-tab" onclick="switchDetailTab('plan',this)">Plan</div>
           <div class="detail-tab" onclick="switchDetailTab('modulos',this)">Módulos</div>
           <div class="detail-tab" onclick="switchDetailTab('credenciales',this)">Meta / WA</div>
           <div class="detail-tab" onclick="switchDetailTab('peligroso',this)">Peligroso</div>
@@ -300,6 +323,46 @@ input:checked+.slider:before{transform:translateX(18px);}
             <div style="display:flex;gap:8px;align-items:center;">
               <button class="btn btn-primary" onclick="saveRestaurantInfo()">💾 Guardar cambios</button>
               <div class="feedback-msg" id="info-feedback"></div>
+            </div>
+          </div>
+
+          <!-- Tab: Plan -->
+          <div id="dtab-plan" class="detail-tab-panel">
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:1.25rem;">
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Plan actual</div>
+                <span id="dp-plan-badge" class="badge badge-chip">—</span>
+              </div>
+              <div>
+                <div style="font-size:12px;color:#888;margin-bottom:4px;">Comp hasta</div>
+                <span id="dp-comp-until-display" style="font-size:13px;">—</span>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div style="padding:12px;background:#f5f5f0;border-radius:10px;">
+                <div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600;">Cambiar plan</div>
+                <div class="form-grid" style="margin-bottom:10px;">
+                  <div>
+                    <label class="field-label">Nuevo plan</label>
+                    <select id="dp-new-plan" class="field-input" onchange="onPlanSelectChange()">
+                      <option value="free">Free / Demo</option>
+                      <option value="pulso">Pulso ($149K/mes)</option>
+                      <option value="restaurante">Restaurante ($299K/mes)</option>
+                      <option value="pro">Pro ($549K/mes)</option>
+                      <option value="cadena">Cadena ($899K/mes)</option>
+                      <option value="comp">Comp (gratis)</option>
+                    </select>
+                  </div>
+                  <div id="dp-comp-until-wrap" style="display:none;">
+                    <label class="field-label">Comp hasta (fecha)</label>
+                    <input type="date" id="dp-comp-until-input" class="field-input">
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <button class="btn btn-primary btn-sm" onclick="savePlanChange()">Guardar plan</button>
+                  <div class="feedback-msg" id="plan-feedback"></div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -527,8 +590,8 @@ input:checked+.slider:before{transform:translateX(18px);}
             <button class="btn btn-secondary btn-sm" onclick="loadUsers()">↻ Actualizar</button>
           </div>
           <table>
-            <thead><tr><th>Usuario</th><th>Restaurante</th><th>Rol</th><th>Sucursal ID</th></tr></thead>
-            <tbody id="users-tbody"><tr><td colspan="4" class="empty-state">Cargando...</td></tr></tbody>
+            <thead><tr><th>Usuario</th><th>Restaurante</th><th>Rol</th><th>Sucursal ID</th><th></th></tr></thead>
+            <tbody id="users-tbody"><tr><td colspan="5" class="empty-state">Cargando...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -666,10 +729,12 @@ input:checked+.slider:before{transform:translateX(18px);}
       <div>
         <label class="field-label">Plan</label>
         <select id="om-plan" class="field-input">
-          <option value="free">Free</option>
-          <option value="basic">Basic</option>
-          <option value="pro">Pro</option>
-          <option value="premium">Premium</option>
+          <option value="free">Free / Demo</option>
+          <option value="pulso">Pulso ($149K/mes)</option>
+          <option value="restaurante" selected>Restaurante ($299K/mes)</option>
+          <option value="pro">Pro ($549K/mes)</option>
+          <option value="cadena">Cadena ($899K/mes)</option>
+          <option value="comp">Comp (gratis)</option>
         </select>
       </div>
     </div>
@@ -1028,6 +1093,12 @@ async function openDetail(id) {
   // Stats
   $('dp-stats').innerHTML = '<div class="stat-mini-item"><div class="stat-mini-label">Cargando stats...</div></div>';
 
+  // Plan tab
+  _populatePlanTab(r);
+
+  // Deep-link buttons
+  _wireDeepLinks(r);
+
   // Show panel, reset to info tab
   $('detail-panel').style.display = 'block';
   switchDetailTab('info', document.querySelector('.detail-tab'));
@@ -1258,7 +1329,7 @@ async function loadUsers() {
   } catch(e){}
 }
 
-// Actualizamos la tabla para añadir el botón eliminar
+// Actualizamos la tabla para añadir los botones Reset y Eliminar
 function renderUsersTable(users) {
   const tbody = $('users-tbody');
   if(!users.length){ tbody.innerHTML=`<tr><td colspan="5" class="empty-state">Sin usuarios</td></tr>`; return; }
@@ -1267,8 +1338,9 @@ function renderUsersTable(users) {
     <td style="font-size:12px;">${escHtml(u.restaurant_name||'—')}</td>
     <td><span class="badge-chip">${escHtml(u.role||'owner')}</span></td>
     <td style="color:#aaa;font-size:12px;">#${u.branch_id||'—'}</td>
-    <td style="text-align:right;">
-      <button class="btn btn-danger btn-sm" onclick="deleteGlobalUser('${u.username}')">Eliminar</button>
+    <td style="text-align:right;white-space:nowrap;display:flex;gap:6px;justify-content:flex-end;">
+      <button class="btn btn-secondary btn-sm" onclick="openResetPwModal('${escHtml(u.username)}')">Reset</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteGlobalUser('${escHtml(u.username)}')">Eliminar</button>
     </td>
   </tr>`).join('');
 }
@@ -1360,6 +1432,129 @@ function renderDIAN(stats) {
   </tr>`).join('');
 }
 
+// ── Plan change ───────────────────────────────────────────────────
+function onPlanSelectChange() {
+  const plan = $('dp-new-plan').value;
+  const wrap = $('dp-comp-until-wrap');
+  if(wrap) wrap.style.display = plan === 'comp' ? 'block' : 'none';
+  if(plan === 'comp') {
+    const inp = $('dp-comp-until-input');
+    if(inp && !inp.value) {
+      const d = new Date(); d.setDate(d.getDate()+30);
+      inp.value = d.toISOString().slice(0,10);
+    }
+  }
+}
+
+// Called from "Cambiar plan" quick-action button
+function openPlanModal() {
+  switchDetailTab('plan', null);
+  // Find and click the Plan tab button
+  const tabs = document.querySelectorAll('.detail-tab');
+  tabs.forEach(t => { if(t.textContent.trim() === 'Plan') t.click(); });
+}
+
+async function savePlanChange() {
+  if(!_currentDetailId) return;
+  const plan = $('dp-new-plan').value;
+  if(!plan) return;
+  const body = { plan_code: plan };
+  if(plan === 'comp') {
+    const compUntil = $('dp-comp-until-input').value;
+    if(compUntil) body.comp_until = compUntil;
+  }
+  try {
+    const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}/plan`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if(r.ok) {
+      const d = await r.json();
+      showFeedback('plan-feedback', '✅ Plan actualizado a ' + plan, true);
+      // Refresh plan display
+      $('dp-plan-badge').textContent = plan;
+      $('dp-plan-badge').className = 'badge badge-chip plan-' + plan;
+      $('dp-comp-until-display').textContent = d.data && d.data.comp_until ? d.data.comp_until : '—';
+      await loadRestaurants();
+    } else {
+      const e = await r.json().catch(()=>({}));
+      showFeedback('plan-feedback', '❌ ' + (e.detail || 'Error'), false);
+    }
+  } catch(e) {
+    showFeedback('plan-feedback', '❌ Error de conexión', false);
+  }
+}
+
+// Populate plan tab when opening detail
+function _populatePlanTab(r) {
+  const plan = r.plan_code || r.subscription_plan || 'free';
+  const badge = $('dp-plan-badge');
+  if(badge) {
+    badge.textContent = plan;
+    badge.className = 'badge badge-chip plan-' + plan;
+  }
+  const compDisplay = $('dp-comp-until-display');
+  if(compDisplay) compDisplay.textContent = r.comp_until ? r.comp_until.slice(0,10) : '—';
+  const sel = $('dp-new-plan');
+  if(sel) sel.value = plan;
+  onPlanSelectChange();
+}
+
+// ── Deep-link wiring ──────────────────────────────────────────────
+function _wireDeepLinks(r) {
+  const analyticsBtn = $('dp-analytics-btn');
+  if(analyticsBtn) analyticsBtn.onclick = () => window.open('/internal/analytics?org_id=' + r.id, '_blank');
+  const costsBtn = $('dp-costs-btn');
+  if(costsBtn) costsBtn.onclick = () => window.open('/internal/costs?org_id=' + r.id, '_blank');
+  const waBtn = $('dp-whatsapp-btn');
+  if(waBtn) {
+    const wa = (r.whatsapp_number||'').replace(/\D/g,'');
+    waBtn.onclick = wa ? () => window.open('https://wa.me/' + wa, '_blank') : null;
+    waBtn.style.opacity = wa ? '1' : '0.4';
+    waBtn.disabled = !wa;
+  }
+}
+
+// ── Reset password modal ──────────────────────────────────────────
+function openResetPwModal(username) {
+  const modal = $('reset-pw-modal');
+  if(!modal) return;
+  $('reset-pw-username').value = username;
+  $('reset-pw-display').textContent = username;
+  $('reset-pw-input').value = '';
+  $('reset-pw-error').textContent = '';
+  modal.style.display = 'flex';
+}
+
+function closeResetPwModal() {
+  const modal = $('reset-pw-modal');
+  if(modal) modal.style.display = 'none';
+}
+
+async function submitResetPw() {
+  const username = $('reset-pw-username').value;
+  const newPw = $('reset-pw-input').value;
+  const errEl = $('reset-pw-error');
+  if(!newPw || newPw.length < 8) { errEl.textContent = 'Mínimo 8 caracteres.'; return; }
+  try {
+    const r = await _hqFetch(`/api/internal/admin/users/${encodeURIComponent(username)}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPw }),
+    });
+    if(r.ok) {
+      closeResetPwModal();
+      alert(`✅ Contraseña actualizada. Sesiones existentes cerradas.`);
+    } else {
+      const e = await r.json().catch(()=>({}));
+      errEl.textContent = e.detail || 'Error al actualizar.';
+    }
+  } catch(e) {
+    errEl.textContent = 'Error de conexión.';
+  }
+}
+
 // Nueva función para borrar usuarios
 async function deleteGlobalUser(username) {
   if(!confirm(`¿Estás seguro de eliminar permanentemente al usuario ${username}?`)) return;
@@ -1380,5 +1575,33 @@ async function deleteGlobalUser(username) {
 
 </script>
 <script src="/static/js/internal/hq-shell.js" defer></script>
+
+<!-- ══ MODAL: Reset contraseña ════════════════════════════════════════════════ -->
+<div id="reset-pw-modal" class="hq-modal-overlay" style="display:none;">
+  <div class="hq-modal-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+      <strong style="font-size:16px;">Resetear contraseña</strong>
+      <button onclick="closeResetPwModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&#x2715;</button>
+    </div>
+    <input type="hidden" id="reset-pw-username">
+    <div style="font-size:13px;color:#555;margin-bottom:1rem;">
+      Usuario: <strong id="reset-pw-display">—</strong>
+    </div>
+    <div style="background:#FFF8E6;border:1px solid #F0A500;border-radius:8px;padding:10px 14px;font-size:12px;color:#7A4F00;margin-bottom:1rem;">
+      ⚠️ Todas las sesiones activas de este usuario serán cerradas al guardar.
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label class="field-label">Nueva contraseña (mín. 8 caracteres)</label>
+      <input id="reset-pw-input" class="field-input" type="password" placeholder="Nueva contraseña"
+             onkeydown="if(event.key==='Enter')submitResetPw()">
+    </div>
+    <div id="reset-pw-error" style="color:#C0392B;font-size:12px;margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeResetPwModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="submitResetPw()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

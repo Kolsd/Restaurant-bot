@@ -37,6 +37,7 @@ import io
 import base64
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, File, UploadFile, Depends, Query
 from pydantic import BaseModel, field_validator
@@ -50,6 +51,7 @@ from app.services.logging import get_logger
 from app.services.tenant_context import bypass_tenant_scope
 from app.services.security import compare_secret
 from app.services.state_store import rate_limit_check
+from app.services.password_hash import hash_password as hash_pw
 
 log = get_logger(__name__)
 
@@ -210,6 +212,36 @@ class UpdateRestaurantRequest(BaseModel):
     name: str = None; address: str = None; whatsapp_number: str = None
     wa_phone_id: str = None; wa_access_token: str = None
     features: dict = None; menu: str = None
+
+
+_VALID_PLANS = {"pulso", "restaurante", "pro", "cadena", "comp", "free"}
+
+
+class ChangePlanRequest(BaseModel):
+    plan_code: str
+    comp_until: Optional[str] = None  # ISO date "YYYY-MM-DD", only meaningful when plan_code == "comp"
+
+    @field_validator("plan_code")
+    @classmethod
+    def plan_valid(cls, v: str) -> str:
+        if v not in _VALID_PLANS:
+            raise ValueError(f"plan_code must be one of {sorted(_VALID_PLANS)}")
+        return v
+
+
+class SetCompRequest(BaseModel):
+    comp_until: Optional[str] = None  # ISO date "YYYY-MM-DD" or null to clear
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def pw_min_len(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("new_password must be at least 8 characters")
+        return v
 
 
 # ── SUPER ADMIN SESSION ──────────────────────────────────────────────────────
@@ -803,3 +835,183 @@ async def delete_location(
     updated = await restaurant_repo.db_update_location(location_id, active=False)
     log.info("delete_location.soft", location_id=location_id)
     return _ok({"deleted": True, "hard": False, "location": updated})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Plan management  (Pricing v1)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.patch("/organizations/{org_id}/plan")
+async def change_org_plan(
+    org_id: int,
+    body: ChangePlanRequest,
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Change an org's plan_code.
+
+    - Switching to 'comp': optionally sets comp_until (default = today + 30 days).
+    - Switching FROM 'comp' to a paying plan: clears comp_until.
+    """
+    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+
+    org = await restaurant_repo.db_get_org_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    old_plan = org.get("plan_code") or org.get("subscription_plan") or "free"
+    new_plan = body.plan_code
+
+    # Resolve comp_until
+    comp_until_val: Optional[str] = None
+    if new_plan == "comp":
+        if body.comp_until:
+            comp_until_val = body.comp_until
+        else:
+            comp_until_val = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    updates: dict = {"plan_code": new_plan}
+    if new_plan == "comp":
+        updates["comp_until"] = comp_until_val
+    else:
+        # Switching away from comp — clear comp_until
+        updates["comp_until"] = None
+
+    # Execute the update via raw SQL (plan_code and comp_until are not in the
+    # whitelisted _ALLOWED_ORG_FIELDS of db_update_organization — keep it direct here)
+    from app.services.database import get_pool  # noqa: PLC0415
+    pool = await get_pool()
+    with bypass_tenant_scope("change_org_plan_superadmin"):
+        async with pool.acquire() as conn:
+            if new_plan == "comp":
+                await conn.execute(
+                    "UPDATE organizations SET plan_code=$1, comp_until=$2::timestamptz, updated_at=NOW() WHERE id=$3",
+                    new_plan, comp_until_val, org_id,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE organizations SET plan_code=$1, comp_until=NULL, updated_at=NOW() WHERE id=$2",
+                    new_plan, org_id,
+                )
+
+    actor = request.headers.get("X-Superadmin-User", "superadmin")
+    ip = request.client.host if request.client else None
+    with bypass_tenant_scope("change_org_plan_audit"):
+        await db_log_audit_event(
+            actor=actor,
+            action="org.plan_changed",
+            target_type="organization",
+            target_id=str(org_id),
+            org_id=org_id,
+            payload={"old_plan": old_plan, "new_plan": new_plan, "comp_until": comp_until_val},
+            request_ip=ip,
+        )
+
+    log.info("change_org_plan", org_id=org_id, old=old_plan, new=new_plan, comp_until=comp_until_val)
+    return _ok({"org_id": org_id, "old_plan": old_plan, "new_plan": new_plan, "comp_until": comp_until_val})
+
+
+@router.patch("/organizations/{org_id}/comp")
+async def set_org_comp(
+    org_id: int,
+    body: SetCompRequest,
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Set or clear comp_until for an org.
+
+    Body: {"comp_until": "YYYY-MM-DD"} → sets plan_code='comp' + comp_until.
+    Body: {"comp_until": null}         → clears comp_until + reverts plan_code to 'free'.
+    """
+    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+
+    org = await restaurant_repo.db_get_org_by_id(org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organizacion no encontrada")
+
+    old_plan = org.get("plan_code") or "free"
+    from app.services.database import get_pool  # noqa: PLC0415
+    pool = await get_pool()
+
+    if body.comp_until is not None:
+        new_plan = "comp"
+        with bypass_tenant_scope("set_org_comp_superadmin"):
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE organizations SET plan_code='comp', comp_until=$1::timestamptz, updated_at=NOW() WHERE id=$2",
+                    body.comp_until, org_id,
+                )
+    else:
+        # Clearing comp — revert to free unless they had a paid plan before
+        revert_plan = old_plan if old_plan != "comp" else "free"
+        new_plan = revert_plan
+        with bypass_tenant_scope("clear_org_comp_superadmin"):
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE organizations SET plan_code=$1, comp_until=NULL, updated_at=NOW() WHERE id=$2",
+                    revert_plan, org_id,
+                )
+
+    actor = request.headers.get("X-Superadmin-User", "superadmin")
+    ip = request.client.host if request.client else None
+    with bypass_tenant_scope("set_org_comp_audit"):
+        await db_log_audit_event(
+            actor=actor,
+            action="org.comp_changed",
+            target_type="organization",
+            target_id=str(org_id),
+            org_id=org_id,
+            payload={"old_plan": old_plan, "new_plan": new_plan, "comp_until": body.comp_until},
+            request_ip=ip,
+        )
+
+    log.info("set_org_comp", org_id=org_id, comp_until=body.comp_until, new_plan=new_plan)
+    return _ok({"org_id": org_id, "new_plan": new_plan, "comp_until": body.comp_until})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# User password reset
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/users/{username}/reset-password")
+async def reset_user_password(
+    username: str,
+    body: ResetPasswordRequest,
+    request: Request,
+    _: None = Depends(verify_superadmin),
+    _bypass: None = Depends(_bypass_internal_admin),
+):
+    """Reset a user's password and invalidate all their existing sessions.
+
+    Uses username as the path parameter (it is the PK on the users table).
+    """
+    from app.repositories.internal.audit_log_repo import db_log_audit_event  # noqa: PLC0415
+
+    # Verify user exists
+    user = await restaurant_repo.db_get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    new_hash = hash_pw(body.new_password)
+    updated = await restaurant_repo.db_update_user_password(username, new_hash)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Error al actualizar contraseña")
+
+    sessions_deleted = await sessions_repo.delete_sessions_for_user(username)
+
+    actor = request.headers.get("X-Superadmin-User", "superadmin")
+    ip = request.client.host if request.client else None
+    with bypass_tenant_scope("reset_user_password_audit"):
+        await db_log_audit_event(
+            actor=actor,
+            action="user.password_reset",
+            target_type="user",
+            target_id=username,
+            payload={"sessions_deleted": sessions_deleted},
+            request_ip=ip,
+        )
+
+    log.info("reset_user_password", username=username, sessions_deleted=sessions_deleted)
+    return _ok({"username": username, "sessions_deleted": sessions_deleted})

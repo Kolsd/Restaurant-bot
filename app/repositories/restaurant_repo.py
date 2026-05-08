@@ -1701,6 +1701,7 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
                 """
                 SELECT id, name, slug, whatsapp_number, wa_phone_id, wa_access_token,
                        menu, features, subscription_plan, subscription_status,
+                       plan_code, comp_until,
                        created_at, updated_at
                 FROM organizations
                 WHERE id = $1
