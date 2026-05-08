@@ -43,8 +43,33 @@ def _is_dian_enabled(restaurant_features) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# MATIAS API — token cache (module-level, compartido entre llamadas)
+# MATIAS API — allowlist + token cache
 # ══════════════════════════════════════════════════════════════════════
+
+# H3: URL allowlist prevents SSRF if MATIAS_API_URL / MATIAS_AUTH_URL are
+# ever supplied via a misconfigured or attacker-controlled env var.
+# Only HTTPS requests to api-v2.matias-api.com are permitted.
+_ALLOWED_MATIAS_HOSTS = {"api-v2.matias-api.com"}
+
+
+def _validate_matias_url(url: str, var_name: str) -> str:
+    """Validate that a Matias API URL is HTTPS and targets an allowed host.
+
+    Raises RuntimeError if the URL is not allowed. Called at runtime (not module
+    import) so failures surface with full context when the bad URL is first used.
+    """
+    from urllib.parse import urlparse  # noqa: PLC0415
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:
+        raise RuntimeError(f"{var_name}={url!r} could not be parsed: {exc}") from exc
+    if parsed.scheme != "https" or parsed.netloc not in _ALLOWED_MATIAS_HOSTS:
+        raise RuntimeError(
+            f"{var_name}={url!r} is not an allowed Matias endpoint. "
+            f"Expected https://<host> where host in {_ALLOWED_MATIAS_HOSTS}"
+        )
+    return url
+
 
 _matias_token_cache: dict = {"token": None, "expires_at": 0.0}
 
@@ -66,8 +91,9 @@ async def _get_matias_token() -> str:
 
     email    = os.getenv("MATIAS_API_USER", "").strip()
     password = os.getenv("MATIAS_API_PASS", "").strip()
-    auth_url = os.getenv(
-        "MATIAS_AUTH_URL", "https://api-v2.matias-api.com/api/ubl2.1/login"
+    auth_url = _validate_matias_url(  # H3: allowlist check
+        os.getenv("MATIAS_AUTH_URL", "https://api-v2.matias-api.com/api/ubl2.1/login"),
+        "MATIAS_AUTH_URL",
     )
 
     if not email or not password:
@@ -1060,8 +1086,9 @@ class MesioNativeAdapter(BillingAdapter):
 
         # MATIAS_API_URL debe apuntar a la base sin /invoice
         # Ej: https://api-v2.matias-api.com/api/ubl2.1
-        api_base = os.getenv(
-            "MATIAS_API_URL", "https://api-v2.matias-api.com/api/ubl2.1"
+        api_base = _validate_matias_url(  # H3: allowlist check
+            os.getenv("MATIAS_API_URL", "https://api-v2.matias-api.com/api/ubl2.1"),
+            "MATIAS_API_URL",
         ).rstrip("/")
         endpoint = f"{api_base}/invoice"
 
@@ -1071,7 +1098,8 @@ class MesioNativeAdapter(BillingAdapter):
             "Accept":        "application/json",
         }
 
-        log.info("billing.matias_invoice_request", endpoint=endpoint, token_prefix=bearer_token[:16])
+        # M3: Removed token_prefix — logging bearer token fragments is sensitive.
+        log.info("billing.matias_invoice_request", endpoint=endpoint, has_token=bool(bearer_token))
 
         async with httpx.AsyncClient(
             timeout=30,

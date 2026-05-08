@@ -5,6 +5,7 @@ import os
 import httpx
 import asyncio
 from fastapi import APIRouter, Request, HTTPException
+from typing import Literal
 from pydantic import BaseModel
 from app.services import database as db
 from app.services.orders import cart_summary
@@ -71,6 +72,15 @@ async def view_cart(request: Request, phone: str, bot_number: str):
 
 @router.post("/payment/wompi-webhook")
 async def wompi_webhook(request: Request):
+    # H1: Global rate limit 50 req/s. Return 200 (not 429) — Wompi retries on
+    # any non-2xx, so a 429 would create a retry flood. 200 silently drops the
+    # excess and lets the legitimate spike drain naturally.
+    from app.services import state_store as _ss  # noqa: PLC0415
+    allowed = await _ss.rate_limit_check("wompi_webhook_global", max_requests=50, window_seconds=1)
+    if not allowed:
+        log.warning("wompi.webhook.rate_limited_global")
+        return {"status": "ok"}  # 200 to prevent Wompi retry storm
+
     if not WOMPI_EVENTS_SECRET:
         log.error("orders.wompi_secret_not_configured")
         raise HTTPException(status_code=500, detail="Configuración de pasarela de pagos incompleta")
@@ -83,11 +93,15 @@ async def wompi_webhook(request: Request):
         (body_bytes.decode() + WOMPI_EVENTS_SECRET).encode()
     ).hexdigest()
 
-    # Bug 3 fix: timing-safe comparison to prevent timing-oracle attacks
+    # H2: Return 200 (not 401) on invalid signature — a 401 causes Wompi to
+    # retry indefinitely. Return 200 with status=invalid_signature so the
+    # rejection is visible in logs but Wompi stops retrying.
+    # Bug 3 fix: timing-safe comparison to prevent timing-oracle attacks.
     if not signature_header or not hmac.compare_digest(
         signature_header.encode(), expected_sig.encode()
     ):
-        raise HTTPException(status_code=401, detail="Firma inválida")
+        log.warning("wompi.webhook.invalid_signature", has_header=bool(signature_header))
+        return {"status": "invalid_signature"}  # 200 to suppress Wompi retries
 
     event = body.get("event", "")
     data = body.get("data", {})
@@ -248,21 +262,25 @@ async def payment_confirm(request: Request):
     else:
         order = None
 
+    # H4: Public unauthenticated return URL from Wompi — never expose financial
+    # fields (total, phone, items). Return only {order_id, status, message}.
     if status == "APPROVED" and order:
         return {
-            "message": "Payment successful",
             "order_id": order_id,
-            "total": order['total'],
-            "status": "Your order is being prepared"
+            "status": "approved",
+            "message": "Payment successful. Your order is being prepared.",
         }
     return {
-        "message": "Payment not completed",
         "order_id": order_id,
-        "status": status
+        "status": status.lower() if status else "pending",
+        "message": "Payment not completed.",
     }
 
 class UpdateOrderStatusRequest(BaseModel):
-    status: str
+    status: Literal[
+        "pendiente", "confirmado", "en_preparacion", "listo",
+        "en_camino", "en_puerta", "entregado", "cancelado"
+    ]
 
 # --- FUNCIONES Y ENDPOINTS DEL DOMICILIARIO ---
 

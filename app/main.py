@@ -102,6 +102,15 @@ async def lifespan(app):
     else:
         _log.info("inbox_worker_disabled", reason="DISABLE_EMBEDDED_WORKER is set")
 
+    # Warn loudly if ANTHROPIC_API_KEY is missing — the bot will fail silently
+    # on every incoming WhatsApp message without it.
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        _log.error(
+            "startup.missing_critical_key",
+            key="ANTHROPIC_API_KEY",
+            hint="Bot will not respond to any WhatsApp message until this is set",
+        )
+
     _redis_configured = bool(os.getenv("REDIS_URL"))
     _log.info("redis_url_configured", configured=_redis_configured)
     _log.info("app.started", version="6.0")
@@ -149,9 +158,15 @@ async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # X-XSS-Protection deprecated (and harmful on legacy browsers in 'mode=block').
+    # Modern browsers ignore this header; explicitly disable to avoid edge-case bugs.
+    response.headers["X-XSS-Protection"] = "0"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # WebAuthn (publickey-credentials-*) required for biometric staff clock-in.
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), "
+        "publickey-credentials-get=*, publickey-credentials-create=*"
+    )
     # HSTS — only set over HTTPS to avoid breaking local dev over plain HTTP
     if request.url.scheme == "https":
         response.headers.setdefault(
@@ -215,8 +230,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Branch-ID", "X-Location-ID"],
 )
 
 # Gzip-compress all responses ≥ 500 bytes. Browsers send Accept-Encoding: gzip

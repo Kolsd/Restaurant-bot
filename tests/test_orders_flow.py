@@ -284,15 +284,17 @@ def test_wompi_valid_approved_transaction(client, monkeypatch):
 
 
 def test_wompi_invalid_signature(client, monkeypatch):
-    """Firma inválida → 401."""
+    """Firma inválida → 200 con status=invalid_signature (H2: prevent Wompi retry flood)."""
     secret = "real_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
+    monkeypatch.setattr("app.services.state_store.rate_limit_check", AsyncMock(return_value=True))
     payload = {"event": "transaction.updated", "data": {}}
     body_bytes = json.dumps(payload).encode()
     r = client.post("/api/payment/wompi-webhook", content=body_bytes,
                     headers={"x-event-checksum": "invalidsig",
                              "Content-Type": "application/json"})
-    assert r.status_code == 401
+    assert r.status_code == 200
+    assert r.json().get("status") == "invalid_signature"
 
 
 def test_wompi_declined_transaction(client, monkeypatch):
@@ -350,14 +352,16 @@ def test_wompi_no_reference(client, monkeypatch):
 
 
 def test_wompi_no_signature_header(client, monkeypatch):
-    """Sin header x-event-checksum → se rechaza con 401 (firma requerida)."""
+    """Sin header x-event-checksum → 200 con status=invalid_signature (H2: prevent Wompi retry flood)."""
     secret = "test_secret"
     monkeypatch.setattr("app.routes.orders_routes.WOMPI_EVENTS_SECRET", secret)
+    monkeypatch.setattr("app.services.state_store.rate_limit_check", AsyncMock(return_value=True))
     payload = {"event": "transaction.updated", "data": {}}
     body_bytes = json.dumps(payload).encode()
     r = client.post("/api/payment/wompi-webhook", content=body_bytes,
                     headers={"Content-Type": "application/json"})
-    assert r.status_code == 401  # sin header → firma faltante → rechazado
+    assert r.status_code == 200  # H2: 200 to prevent Wompi retry storm
+    assert r.json().get("status") == "invalid_signature"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

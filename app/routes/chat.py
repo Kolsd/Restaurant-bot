@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.services.agent import chat, reset_conversation, _get_anthropic_client
 from app.services import database as db
 from app.repositories import inbox_repo, conversations_repo
-from app.services.logging import get_logger
+from app.services.logging import get_logger, mask_phone
 from app.services.state_store import rate_limit_check
 from app.routes.deps import get_current_user
 from app.services.tenant_db import PoolAcquireTimeout
@@ -192,7 +192,7 @@ async def _process_message(
             meta_phone_id=phone_id,
             location_id=location_id,
         )
-        log.info("chat.ai_result", phone=user_phone, has_message=bool(result and result.get("message")))
+        log.info("chat.ai_result", phone=mask_phone(user_phone), has_message=bool(result and result.get("message")))
 
         if result and result.get("message"):
             url = f"https://graph.facebook.com/{META_API_VERSION}/{phone_id}/messages"
@@ -214,11 +214,11 @@ async def _process_message(
                         "text": {"body": result["message"]}
                     }
                 res = await client.post(url, headers=headers, json=wa_payload)
-                log.info("chat.meta_send", phone=user_phone, status=res.status_code)
+                log.info("chat.meta_send", phone=mask_phone(user_phone), status=res.status_code)
                 if res.status_code != 200:
-                    log.error("chat.meta_send_failed", phone=user_phone, status=res.status_code, body=res.text[:200])
+                    log.error("chat.meta_send_failed", phone=mask_phone(user_phone), status=res.status_code, body=res.text[:200])
     except Exception:
-        log.exception("chat.process_message_failed", phone=user_phone)
+        log.exception("chat.process_message_failed", phone=mask_phone(user_phone))
 
 
 async def _is_image_safe(image_id: str, access_token: str) -> bool:
@@ -409,15 +409,15 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     else:
                         user_text = message.get("text", {}).get("body", "")
                     if user_text and user_phone:
-                        log.info("chat.crm_inbound", phone=user_phone, phone_id=phone_id)
+                        log.info("chat.crm_inbound", phone=mask_phone(user_phone), phone_id=phone_id)
                         await register_inbound_from_prospect(user_phone, user_text, wam_id)
-                        log.info("chat.crm_message_saved", phone=user_phone)
+                        log.info("chat.crm_message_saved", phone=mask_phone(user_phone))
                     continue
 
                 # 6. Rate limiting
                 is_limited = await _is_rate_limited(user_phone)
                 if user_phone and is_limited:
-                    log.warning("chat.rate_limited", phone=user_phone, bot_number=bot_number)
+                    log.warning("chat.rate_limited", phone=mask_phone(user_phone), bot_number=bot_number)
                     try:
                         from app.services.meta_api import send_text as _meta_send  # noqa: PLC0415
                         await _meta_send(
@@ -426,7 +426,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                             phone_id=phone_id,
                         )
                     except Exception:
-                        log.exception("chat.send_ratelimit_msg_failed", phone=user_phone)
+                        log.exception("chat.send_ratelimit_msg_failed", phone=mask_phone(user_phone))
                     continue
 
                 # 7. Extraer texto del mensaje
@@ -441,7 +441,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         maps_url = f"https://maps.google.com/?q={lat},{lon}"
                         user_text = f"Mi ubicación es: {maps_url} (lat:{lat}, lon:{lon})."
                     else:
-                        log.warning("chat.gps_missing_coordinates", phone=user_phone)
+                        log.warning("chat.gps_missing_coordinates", phone=mask_phone(user_phone))
                         user_text = ""
                 elif msg_type == "interactive":
                     button_reply = message.get("interactive", {}).get("button_reply", {})
@@ -518,12 +518,12 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                                 )
                                 log.info(
                                     "chat.delivery_proof_attached",
-                                    phone=user_phone,
+                                    phone=mask_phone(user_phone),
                                     order_id=attached_order_id,
                                 )
                                 continue
                     except Exception as e:
-                        log.error("chat.proof_shortcut_failed", phone=user_phone, error=str(e))
+                        log.error("chat.proof_shortcut_failed", phone=mask_phone(user_phone), error=str(e))
 
                     user_text = f"📸 [IMAGEN RECIBIDA] Link del comprobante: {media_url}"
                 elif msg_type == "audio":
@@ -532,11 +532,11 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                     # so the webhook returns fast to Meta (Rule 6).
                     audio_id = (message.get("audio") or {}).get("id")
                     if not audio_id:
-                        log.warning("audio.no_id", wam_id=wam_id, phone=user_phone)
+                        log.warning("audio.no_id", wam_id=wam_id, phone=mask_phone(user_phone))
                         continue
                     if not user_phone:
                         continue
-                    log.info("chat.audio_inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, audio_id=audio_id)
+                    log.info("chat.audio_inbound", phone=mask_phone(user_phone), bot_number=bot_number, wam_id=wam_id, audio_id=audio_id)
                     try:
                         pool = await db.get_pool()
                         external_id = wam_id or None
@@ -558,18 +558,18 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                             payload=enqueue_payload,
                         )
                         if not inserted:
-                            log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
+                            log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=mask_phone(user_phone))
                     except (PoolAcquireTimeout, ConnectionError) as _db_exc:
                         log.error(
                             "chat.enqueue_failed_db_down",
                             wam_id=wam_id,
-                            user_phone=user_phone,
+                            user_phone=mask_phone(user_phone),
                             exc=str(_db_exc),
                         )
                         any_enqueue_failed = True
                         # DB-connectivity failure — classified as db_down
                     except Exception:
-                        log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
+                        log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=mask_phone(user_phone))
                         any_enqueue_failed = True
                         all_failures_are_db_down = False  # non-DB failure
                     continue  # audio path is fully handled above; skip text guard
@@ -579,7 +579,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                 if not user_text or not user_phone:
                     continue
 
-                log.info("chat.inbound", phone=user_phone, bot_number=bot_number, wam_id=wam_id, text_preview=user_text[:200])
+                log.info("chat.inbound", phone=mask_phone(user_phone), bot_number=bot_number, wam_id=wam_id, text_len=len(user_text))
 
                 # 7b. Atajo no-LLM: si el cliente responde CONFIRMAR/CANCELAR a un
                 # recordatorio reciente de reserva, actualizar la reserva directamente
@@ -626,7 +626,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                                     )
                                     log.info(
                                         "chat.reservation_keyword_processed",
-                                        phone=user_phone,
+                                        phone=mask_phone(user_phone),
                                         action="confirmed" if is_confirm else "cancelled",
                                         reservation_id=pending["id"],
                                     )
@@ -634,7 +634,7 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         except Exception:
                             log.exception(
                                 "chat.reservation_keyword_failed",
-                                phone=user_phone,
+                                phone=mask_phone(user_phone),
                             )
 
                 # 8. Persist to webhook_inbox — durable processing survives worker restarts.
@@ -669,19 +669,19 @@ async def meta_webhook(request: Request, background_tasks: BackgroundTasks):
                         payload=enqueue_payload,
                     )
                     if not inserted:
-                        log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=user_phone)
+                        log.info("inbox_dedup_skipped", wam_id=wam_id, user_phone=mask_phone(user_phone))
                 except (PoolAcquireTimeout, ConnectionError) as _db_exc:
                     log.error(
                         "chat.enqueue_failed_db_down",
                         wam_id=wam_id,
-                        user_phone=user_phone,
+                        user_phone=mask_phone(user_phone),
                         exc=str(_db_exc),
                     )
                     any_enqueue_failed = True
                     # DB-connectivity failure — classified as db_down
                     continue
                 except Exception:
-                    log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=user_phone)
+                    log.exception("chat.enqueue_failed", wam_id=wam_id, user_phone=mask_phone(user_phone))
                     any_enqueue_failed = True
                     all_failures_are_db_down = False  # non-DB failure
                     continue

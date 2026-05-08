@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.services import database as db
 from app.services import billing
 from app.services import state_store
@@ -1378,11 +1378,19 @@ class PaymentMethod(BaseModel):
 
 class PayCheckBody(BaseModel):
     payments: list[PaymentMethod] = []
-    customer_name: str = "Consumidor Final"
-    customer_nit:  str = "222222222"
-    customer_email: str = ""
+    customer_name: str = Field("Consumidor Final", max_length=200)
+    customer_nit: str = Field("222222222", max_length=30, pattern=r"^[\d\-]{6,30}$")
+    customer_email: str = Field("", max_length=254)
     service_charge: float = 0.0  # Cargo de servicio en valor absoluto (ej. 10% del subtotal)
     tip_amount: float = Field(0.0, ge=0.0)
+
+    @field_validator("customer_email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        import re as _re
+        if v and not _re.match(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{1,63}$", v):
+            raise ValueError("Dirección de email inválida")
+        return v
 
 
 @router.post("/api/table-orders/{base_order_id}/checks")
@@ -1866,12 +1874,20 @@ class QuickInvoiceBody(BaseModel):
     items: list[QuickInvoiceItem]
     tip_amount: float = Field(0.0, ge=0.0)
     payment_method: str = "efectivo"
-    customer_name: str = "Consumidor Final"
-    customer_nit: str = "222222222"
-    customer_email: str = ""
+    customer_name: str = Field("Consumidor Final", max_length=200)
+    customer_nit: str = Field("222222222", max_length=30, pattern=r"^[\d\-]{6,30}$")
+    customer_email: str = Field("", max_length=254)
     order_type: str = "salon"     # salon | domicilio
     table_name: str = "Caja"
     branch_id: int | None = None
+
+    @field_validator("customer_email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        import re as _re
+        if v and not _re.match(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{1,63}$", v):
+            raise ValueError("Dirección de email inválida")
+        return v
 
 
 @router.post("/api/pos/quick-invoice")

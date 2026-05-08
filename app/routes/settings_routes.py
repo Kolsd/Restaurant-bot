@@ -162,10 +162,22 @@ async def save_settings(request: Request):
         # Wompi per-restaurant credentials (handled with secret preservation below)
         "wompi",
     ]
+    _STR_FIELD_MAX = {
+        "welcome_message": 500,
+        "delivery_message": 500,
+        "pickup_message": 500,
+        "payment_instructions": 2000,
+    }
     features_patch: dict = {}
     for key in _features_updatable:
         if key in body:
-            features_patch[key] = body[key]
+            val = body[key]
+            if isinstance(val, str) and key in _STR_FIELD_MAX and len(val) > _STR_FIELD_MAX[key]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{key}: máximo {_STR_FIELD_MAX[key]} caracteres",
+                )
+            features_patch[key] = val
 
     # ── Wompi: preserve existing integrity_secret when client sends an empty
     # or masked value (form was loaded with masked placeholder and admin only
@@ -1192,7 +1204,9 @@ async def sign_image_upload(
     from app.services import image_host
 
     restaurant_id = restaurant["id"]
-    folder_suffix = (body.folder_suffix or "menu").strip() or "menu"
+    _FOLDER_SUFFIX_ALLOWLIST = {"menu", "gallery", "logo"}
+    _raw_suffix = (body.folder_suffix or "menu").strip() or "menu"
+    folder_suffix = _raw_suffix if _raw_suffix in _FOLDER_SUFFIX_ALLOWLIST else "menu"
 
     # ── Rate limit: 30 uploads/min por restaurante ────────────────────────────
     rl_key = f"menu_image_sign:{restaurant_id}"
