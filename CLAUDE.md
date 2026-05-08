@@ -1,4 +1,4 @@
-# Mesio Restaurant Bot — v11.2 (Pricing v1 + Demo widget shipped; 2026-05-06 Railway hot-fix chain: 0072 merge + sa.text() + CAST(:p AS jsonb) for 0071_demo_seed)
+# Mesio Restaurant Bot — v12.0 (HQ Wave 2 + Security Audit shipped 2026-05-08; head = 0078_crm_lost_reason; 1368 tests passing)
 
 ## Entorno y Comandos
 
@@ -41,6 +41,10 @@ Variables de entorno críticas:
   CLOUDINARY_CLOUD_NAME,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
   CLOUDINARY_API_KEY,           # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
   CLOUDINARY_API_SECRET,        # Catálogo visual v2 — Fase 1. MVP usa free tier 25 GB.
+  CRM_PHONE_NUMBER_ID,          # Meta Cloud API phone ID for the CRM support number (3144914554). Without it, inbound WA messages on the support number are NOT auto-captured into prospects. Startup logs WARN if unset.
+  OTP_PEPPER,                   # Server-side pepper prepended to OTP before SHA-256. Without it, password-reset OTPs are brute-forceable offline if the DB leaks. Must be 32+ chars random.
+  APP_DOMAIN,                   # Used as WebAuthn RP_ID. Production startup logs CRITICAL if unset (WebAuthn fallback to Host header is spoofable).
+  ADMIN_KEY,                    # Internal /api/internal/* gate. Must be ≥ 32 chars (startup warns if shorter).
 ```
 
 ## Configuración Wompi per-restaurant
@@ -195,7 +199,13 @@ Restaurant-bot/
 │   ├── 0049_loyalty_campaigns.py              # "No-v2" sprint — loyalty_campaigns table + RLS org_isolation + state machine (draft/active/paused)
 │   ├── 0070_plan_limits.py                    # Pricing v1 sprint — plan_limits + addon_modules (global) + usage_packs (RLS) + organizations.plan_code/auto_recharge_*/comp_until + seed 4 plans + 7 addons
 │   ├── 0071_demo_seed.py                      # Demo widget — seeds Demo Mesio org (slug=demo-mesio, bot=demo:0) with realistic Colombian menu + comp subscription. Idempotent (ON CONFLICT DO NOTHING). Uses sa.text() + CAST(:p AS jsonb) — see "Patrones Alembic" rule below.
-│   └── 0072_merge_plan_limits_demo_seed.py    # 2026-05-06 hot-fix — no-op merge migration. 0070 and 0071 both branched off 0069 in parallel sprints; Railway crashed with "Multiple head revisions are present". Joins the graph back to a single head.
+│   ├── 0072_merge_plan_limits_demo_seed.py    # 2026-05-06 hot-fix — no-op merge migration. 0070 and 0071 both branched off 0069 in parallel sprints; Railway crashed with "Multiple head revisions are present". Joins the graph back to a single head.
+│   ├── 0073_perf_idx_blocklist_check.py       # 2026-05-07 ultrareview — partial indexes on usage_packs (FIFO consumption hot path) + staff_shifts (open shifts ~100x smaller than full covering). Tightened phone_blocklist policy: WITH CHECK requires org_id = current scope (no nulls on tenant write). NOTE: rev id was 37 chars on first attempt → varchar(32) crash; renamed to 29 chars. Always count rev_id length.
+│   ├── 0074_conv_turns_without_progress.py    # 2026-05-07 wave 1 — conversations.turns_without_progress INTEGER for anti-conversational session close (turn 4 nudge → turn 6 farewell + waiter_alert handoff).
+│   ├── 0075_pending_plan_downgrade.py         # 2026-05-07 wave 2 — organizations.{pending_plan_code, pending_plan_effective_at, pending_kept_location_id} for plan downgrade flow with 7-day grace + sucursal selection.
+│   ├── 0076_rls_restaurant_tables.py          # 2026-05-07 security audit — restaurant_tables had NO RLS policy. Now ENABLE + FORCE + org_isolation. Closes X-Branch-ID injection cross-tenant write vector.
+│   ├── 0077_hq_audit_log.py                   # 2026-05-08 HQ wave 1 — global table hq_audit_log (no RLS — internal tooling). Captures every Mesio team mutation on /api/internal/*. Schema: actor, action, target_type, target_id, org_id, payload, request_ip, user_agent, created_at + 4 indexes.
+│   └── 0078_crm_lost_reason.py                # 2026-05-08 HQ wave 1 — prospects.lost_reason TEXT + lost_at TIMESTAMPTZ + partial index. Required when moving prospect to "perdido" stage in CRM.
 ```
 
 ## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
@@ -416,23 +426,25 @@ Detalle de sprints A-W del rediseño en [docs/history/sprints.md](docs/history/s
 `conversations`, `carts`, `staff`, `fiscal_invoices`, `inventory`, `dish_recipes`,
 `webhook_inbox`, `sessions` (con `token_hash`)
 
-### RLS (Row-Level Security) activo en 38 tablas (Fase 1 v11.0 + Sprints C/W + pre-launch 0044 + "No-v2" 0049 + post 0054 drop tip_distributions)
+### RLS (Row-Level Security) activo en 39 tablas (post-0076 + 0078; tightened phone_blocklist WITH CHECK in 0073)
 `attendance_deductions`, `billing_log`, `carts`, `contract_templates`, `conversations`,
 `customer_profiles`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
 `loyalty_campaigns`, `loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
 `menu_events`, `nps_responses`, `nps_waiting`, `occupancy_snapshots`, `orders`,
-`overtime_requests`, `payroll_runs`, `shift_swap_requests`, `staff`, `staff_announcements`,
-`staff_deduction_items`, `staff_schedules`, `staff_shifts`, `staff_task_completions`,
-`staff_tasks`, `subscription_usage`, `table_orders`, `table_sessions`, `time_slot_discounts`,
-`waiter_alerts`, `webauthn_challenges`, `weekly_reports`
+`overtime_requests`, `payroll_runs`, `phone_blocklist`, `restaurant_tables`, `shift_swap_requests`,
+`staff`, `staff_announcements`, `staff_deduction_items`, `staff_schedules`, `staff_shifts`,
+`staff_task_completions`, `staff_tasks`, `subscription_usage`, `table_orders`, `table_sessions`,
+`time_slot_discounts`, `waiter_alerts`, `webauthn_challenges`, `weekly_reports`
 
 Tablas nuevas agregadas por sprints recientes:
 - `staff_announcements`, `staff_tasks`, `staff_task_completions` (0042 — Sprint C, admin↔staff messaging)
 - `shift_swap_requests` (0043 — Sprint W, coworker shift-swap + admin approval)
 - `loyalty_campaigns` (0049 — "No-v2" sprint, WhatsApp automation campaigns with state machine)
 - `usage_packs` (0070 — Pricing v1, $50K auto-recharge packs of 100 conv credits with FIFO consumption + period expiry)
+- `restaurant_tables` (0076 — security audit hot-fix, was missing RLS — closed cross-tenant table-creation IDOR)
+- `phone_blocklist` WITH CHECK tightened (0073 — was permitting tenants to insert global blocks via NULL org_id)
 
-Todas con policy `tenant_isolation` + `ENABLE + FORCE ROW LEVEL SECURITY`. Tablas explícitamente GLOBAL (sin RLS por diseño): `users`, `sessions`, `webhook_inbox`, `processed_wam_ids`, `prospects*`, `crm_templates`, `sales_*`.
+Todas con policy `org_isolation` + `ENABLE + FORCE ROW LEVEL SECURITY`. Tablas explícitamente GLOBAL (sin RLS por diseño): `users`, `sessions`, `webhook_inbox`, `processed_wam_ids`, `prospects*`, `crm_templates`, `sales_*`, `hq_audit_log` (0077 — internal tooling), `password_reset_tokens` (0069), `plan_limits` + `addon_modules` (global price catalog), `prospect_notes`, `prospect_interactions`.
 
 ### Tablas del módulo Staff & Nómina
 | Tabla | Propósito |
@@ -1204,9 +1216,63 @@ Wrapper Cloudinary. Funciones clave:
 - **Checkout State Machine**: Antes de modificar `handle_checkout_flow`, dibujar mentalmente todos los steps y verificar que cada uno tiene branch. Un step sin branch = checkout roto.
 - **Regla "Si lo ves, lo arreglás" (PM 2026-04-29)**: Si durante una sesión encontrás algo roto, raro o sospechoso — aunque sea pre-existente, aunque no esté en el scope literal de la tarea — NO escribís en el reporte "es pre-existente", "no es mío", "fuera de scope", "deuda histórica". Lo arreglás o, si requiere decisión de producto (no técnica), preguntás al PM antes. Cada problema visto y no arreglado es deuda que reaparece. Excepción legítima: si arreglarlo expande el scope >50% del trabajo original, anotalo como sub-tarea concreta con archivo/líneas (no como handwave) y preguntás al PM si seguimos.
 
+## Mesio HQ — operations center unificado (post-2026-05-08)
+
+Las 5 secciones internas (analytics, monitoring, superadmin, crm, costs) ahora comparten un shell. El landing es `/internal` (homepage del HQ — "morning ritual" page con MRR + 5 KPIs + notification inbox + quick links). Detalle completo en [memory/project_hq_unified.md](C:\Users\miguel.diaz\.claude\projects\C--Users-miguel-diaz-Documents-Mesio-Restaurant-bot\memory\project_hq_unified.md).
+
+### Componentes compartidos
+
+- `app/static/js/internal/hq-shell.js` — sticky topbar + collapsible sidebar + global search input. Auto-inyecta en todas las páginas /internal/* (skip via `data-hq-shell="skip"` en body, sidebar opt-in via `data-hq-sidebar="true"`). Auth via `hq_session` en sessionStorage (un solo login).
+- `app/static/js/internal/cmd-palette.js` — Cmd+K (Mac) / Ctrl+K (Win) palette. Lazy-loaded por el shell. Debounced fetch a `/api/internal/search`. Keyboard nav (↑↓ Enter Esc). Resultados agrupados por tipo (Tenants / Prospectos / Acciones).
+- `app/static/css/internal/hq-shell.css` — design tokens compartidos.
+- `app/static/html/internal/index.html` — landing del HQ.
+- `app/services/audit_middleware.py` — captura toda mutación POST/PATCH/PUT/DELETE en `/api/internal/*` (status<400). 21 reglas de naming. Best-effort, lazy-import del repo, nunca rompe la API call.
+
+### Endpoints internos nuevos (post-HQ)
+
+| Endpoint | Propósito |
+|---|---|
+| `GET /api/internal/search?q=` | Cmd+K palette — busca tenants + prospects + acciones |
+| `GET /api/internal/notifications` | Aggregator de 6 fuentes (dead letters, cost runaway, churn risk, new prospects, suspended tenants, plan caps) sorted by severity |
+| `GET /api/internal/analytics/mrr` | MRR + paying/comp/free split + by_plan + MoM delta |
+| `GET /api/internal/analytics/restaurants.csv` (también churn-risk.csv, activation.csv) | CSV exports — blob download via fetch + Authorization header |
+| `GET /api/internal/costs/{org_id}/drilldown?period=` | Top-5 expensive days + cost-per-conv + margin recap por tenant |
+| `GET /api/internal/admin/organizations/{org_id}/onboarding` | 5-stage checklist score (created, menu, staff, billing, first_convo) |
+| `PATCH /api/internal/admin/organizations/{org_id}/plan` | Cambiar plan (Pricing v1) + comp_until opcional |
+| `POST /api/internal/admin/users/{username}/reset-password` | Bcrypt hash + delete all sessions for that user |
+| `GET /api/internal/admin/audit-log` | Filterable log de todas las mutaciones del equipo Mesio |
+| `POST /api/internal/crm/prospects/{id}/convert` | Onboarding automation — crea org + admin user + welcome WA en 1 click |
+| `GET /api/internal/crm/loss-reasons` | Top-10 razones de pérdida agregadas |
+
+### Helpers de seguridad (nuevos, post-audit 2026-05-07)
+
+- **`app/services/password_hash.py`** — bcrypt 4.x direct API. `hash_password()` pre-hashea long inputs con SHA-256+base64 para evitar truncation a 72 bytes. `verify_password()` es 3-path (nuevo pre-hashed, legacy passlib bcrypt, ancient SHA-256 hex) con upgrade oportunista al login. Reemplaza CryptContext/passlib en TODO el código.
+- **`mask_phone()` en `app/services/logging.py`** — `"***" + phone[-4:]`. Aplicar en TODO `log.{info,warning,error,exception}(phone=...)`. Sentry `before_send` también scrub por nombre de key (phone/email/token/password/pin/secret/key) además de regex en valores.
+- **NFKD injection check** — `_normalize_for_injection_check(text)` antes de testear `_INJECTION_RE`. El texto original sigue al LLM (no strip de acentos españoles); solo normaliza para el regex test. Cierra homoglyph bypass (`Ìgnora`, `Ꮖgnore`).
+- **`bypass_tenant_scope` reason ≥ 8 chars** — todas las rutas internas DEBEN entrar a bypass si tocan datos cross-tenant. Nunca usar `pool.acquire()` directo en endpoints serving cross-tenant data.
+
+### Patrones explícitamente prohibidos (post-audit)
+
+1. F-string SQL con user input (excepción documentada: dynamic SET col=$N column lists desde whitelist).
+2. `==` comparing secrets (usar `hmac.compare_digest`).
+3. `pool.acquire()` directo contra tabla tenant-scoped (usar `tenant_connection()` + scope).
+4. Logging `phone=user_phone` sin mask.
+5. `detail=str(e)` en exception handlers (typed catches → generic `"Error interno"`).
+6. `1; mode=block` en X-XSS-Protection (deprecated; usar `0`).
+7. JWT in localStorage SIN `_escHtml` en cada user-data render path (XSS = full token theft).
+
+### Migrations añadidas en HQ + audit
+
+- `0073_perf_idx_blocklist_check` — perf indexes + phone_blocklist WITH CHECK tightening
+- `0074_conv_turns_without_progress` — anti-conversational counter
+- `0075_pending_plan_downgrade` — plan downgrade with 7d grace
+- `0076_rls_restaurant_tables` — security audit RLS hot-fix
+- `0077_hq_audit_log` — global audit log table
+- `0078_crm_lost_reason` — sales analytics
+
 ## Separación Internal vs App
 
-Las herramientas del equipo Mesio (CRM de prospectos, Superadmin, Analytics de plataforma, Monitoring) viven en el namespace `internal/` bajo URLs `/internal/*` y `/api/internal/*`. Son herramientas para el equipo Mesio — NO son features vendibles a restaurantes.
+Las herramientas del equipo Mesio (CRM de prospectos, Superadmin, Analytics de plataforma, Monitoring, Costs) viven en el namespace `internal/` bajo URLs `/internal/*` y `/api/internal/*`. Son herramientas para el equipo Mesio — NO son features vendibles a restaurantes.
 
 ### Regla de separación
 **Las features de la app (catálogo, órdenes, mesas, staff, bot, billing, reservas, fidelidad) NO deben importar de `app/routes/internal/*` ni de `app/repositories/internal/*`.**
