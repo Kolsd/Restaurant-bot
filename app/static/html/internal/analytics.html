@@ -288,6 +288,43 @@
   </header>
 
   <main class="main">
+    <!-- MRR Executive Summary -->
+    <section id="section-mrr">
+      <div class="section-title">Resumen ejecutivo</div>
+      <div style="background:linear-gradient(135deg,rgba(29,158,117,.12),rgba(29,158,117,.04));border:1px solid rgba(29,158,117,.3);border-radius:var(--radius-lg);padding:var(--s-6);">
+        <!-- Primary MRR number -->
+        <div style="margin-bottom:var(--s-5);">
+          <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--brand);margin-bottom:var(--s-2);">MRR este mes</div>
+          <div style="font-size:2.8rem;font-weight:700;color:#fff;line-height:1;letter-spacing:-0.02em;" id="mrr-total">
+            <span class="skeleton skel-kpi" style="display:inline-block;width:280px;height:2.8rem;"></span>
+          </div>
+          <div style="font-size:0.8rem;margin-top:var(--s-2);" id="mrr-delta"><!-- injected --></div>
+        </div>
+        <!-- Paying / Comp / Demo counts -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s-4);margin-bottom:var(--s-5);">
+          <div style="background:rgba(0,0,0,.25);border-radius:var(--radius);padding:var(--s-4);">
+            <div style="font-size:0.72rem;color:var(--text-4);margin-bottom:var(--s-2);">Pagando</div>
+            <div style="font-size:1.8rem;font-weight:700;color:#10b981;" id="mrr-paying">—</div>
+          </div>
+          <div style="background:rgba(0,0,0,.25);border-radius:var(--radius);padding:var(--s-4);">
+            <div style="font-size:0.72rem;color:var(--text-4);margin-bottom:var(--s-2);">Comp</div>
+            <div style="font-size:1.8rem;font-weight:700;color:#f59e0b;" id="mrr-comp">—</div>
+          </div>
+          <div style="background:rgba(0,0,0,.25);border-radius:var(--radius);padding:var(--s-4);">
+            <div style="font-size:0.72rem;color:var(--text-4);margin-bottom:var(--s-2);">Demo / Free</div>
+            <div style="font-size:1.8rem;font-weight:700;color:var(--text-4);" id="mrr-free">—</div>
+          </div>
+        </div>
+        <!-- By-plan breakdown -->
+        <div>
+          <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-4);margin-bottom:var(--s-3);">Por plan</div>
+          <div id="mrr-by-plan" style="display:flex;flex-direction:column;gap:var(--s-2);">
+            <span class="loading-text">Cargando…</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- North-star: Pedidos Rescatados -->
     <section id="section-north-star">
       <div class="section-title">North-Star Metric</div>
@@ -753,6 +790,64 @@
     });
   }
 
+  // ── MRR card ────────────────────────────────────────────────────────────────
+  function _formatCOP(n) {
+    if (n == null) return '—';
+    return '$' + Math.round(n).toLocaleString('es-CO') + ' COP';
+  }
+
+  function loadMrr() {
+    return apiGet('/api/internal/analytics/mrr').then(data => {
+      // Primary value
+      const totalEl = document.getElementById('mrr-total');
+      if (totalEl) {
+        totalEl.innerHTML = '';
+        totalEl.textContent = _formatCOP(data.mrr_total_cop);
+      }
+
+      // MoM delta
+      const deltaEl = document.getElementById('mrr-delta');
+      if (deltaEl) {
+        const pct = data.delta_pct;
+        if (pct != null) {
+          const sign = pct >= 0 ? '↑' : '↓';
+          const color = pct >= 0 ? '#10b981' : '#ef4444';
+          const absPct = Math.abs(pct).toFixed(1);
+          deltaEl.innerHTML =
+            '<span style="color:' + color + ';font-weight:600;">' + sign + ' ' + absPct +
+            '% vs mes pasado</span>';
+        }
+      }
+
+      // Counts
+      const payEl = document.getElementById('mrr-paying');
+      if (payEl) payEl.textContent = data.paying_count != null ? data.paying_count : '—';
+      const compEl = document.getElementById('mrr-comp');
+      if (compEl) compEl.textContent = data.comp_count != null ? data.comp_count : '—';
+      const freeEl = document.getElementById('mrr-free');
+      if (freeEl) freeEl.textContent = data.free_count != null ? data.free_count : '—';
+
+      // By-plan breakdown
+      const planEl = document.getElementById('mrr-by-plan');
+      if (planEl && Array.isArray(data.by_plan)) {
+        const rows = data.by_plan.map(p => {
+          const priceK = Math.round(p.monthly_price_cop / 1000);
+          const mrrFmt = _formatCOP(p.mrr_cop);
+          return '<div style="display:flex;justify-content:space-between;align-items:center;' +
+            'font-size:0.82rem;padding:var(--s-2) 0;border-bottom:1px solid rgba(255,255,255,.06);">' +
+            '<span style="color:var(--text-4);text-transform:capitalize;">' + _escHtml(p.plan_code) + '</span>' +
+            '<span style="color:var(--text-4);">' + p.paying_count + ' × $' + priceK + 'K</span>' +
+            '<span style="color:#fff;font-weight:600;">' + mrrFmt + '</span>' +
+            '</div>';
+        });
+        planEl.innerHTML = rows.join('');
+      }
+    }).catch(() => {
+      const totalEl = document.getElementById('mrr-total');
+      if (totalEl) { totalEl.innerHTML = ''; totalEl.textContent = '--'; }
+    });
+  }
+
   // ── North-star: Pedidos Rescatados ─────────────────────────────────────────
   function _rankingRow(item) {
     const tr = document.createElement('tr');
@@ -805,6 +900,7 @@
 
   function loadAll() {
     Promise.allSettled([
+      loadMrr(),
       loadPedidosRescatados(),
       loadOverview(),
       loadTrends(),

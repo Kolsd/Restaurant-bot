@@ -673,6 +673,24 @@ async def analytics_churn_risk(_: None = Depends(verify_superadmin)):
     return {"at_risk": at_risk}
 
 
+# ── MRR ───────────────────────────────────────────────────────────────────────
+
+@router.get("/api/internal/analytics/mrr")
+async def analytics_mrr(_: None = Depends(verify_superadmin)):
+    """Current MRR + MoM delta. Cross-tenant — runs under bypass_tenant_scope."""
+    from app.repositories.internal import mrr_repo
+
+    with bypass_tenant_scope("internal_mrr_query"):
+        try:
+            current = await mrr_repo.db_compute_mrr()
+            delta = await mrr_repo.db_compute_mrr_delta()
+        except Exception as exc:
+            log.exception("analytics.mrr.error", exc_type=type(exc).__name__)
+            return JSONResponse(status_code=500, content={"detail": "Failed to compute MRR"})
+
+    return {**current, **delta}
+
+
 # ── North-star: Pedidos Rescatados ────────────────────────────────────────────
 
 @router.get("/api/internal/analytics/pedidos-rescatados")

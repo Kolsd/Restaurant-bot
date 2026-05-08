@@ -269,8 +269,8 @@
   <!-- Hero MRR -->
   <div class="hq-card hq-hero">
     <div class="hq-hero-label">MRR este mes</div>
-    <div class="hq-hero-value placeholder" id="hq-mrr">--</div>
-    <div class="hq-hero-sub">Facturación mensual recurrente — disponible en Wave 1B</div>
+    <div class="hq-hero-value" id="hq-mrr">--</div>
+    <div class="hq-hero-sub" id="hq-mrr-delta">Facturación mensual recurrente</div>
   </div>
 
   <!-- KPI row -->
@@ -381,6 +381,28 @@
   }
   _setDateline();
 
+  // ── Hero MRR ──────────────────────────────────────────────────────────────────
+  function _loadMrr() {
+    return _apiGet('/api/internal/analytics/mrr')
+      .then(data => {
+        const el = document.getElementById('hq-mrr');
+        const deltaEl = document.getElementById('hq-mrr-delta');
+        if (el) {
+          const n = data.mrr_total_cop;
+          el.textContent = n != null ? ('$' + Math.round(n).toLocaleString('es-CO') + ' COP') : '--';
+          el.classList.remove('placeholder');
+        }
+        if (deltaEl && data.delta_pct != null) {
+          const pct = data.delta_pct;
+          const sign = pct >= 0 ? '↑' : '↓';
+          const color = pct >= 0 ? '#10b981' : '#ef4444';
+          deltaEl.innerHTML = '<span style="color:' + color + ';font-weight:600;">' +
+            sign + ' ' + Math.abs(pct).toFixed(1) + '% vs mes pasado</span>';
+        }
+      })
+      .catch(() => { /* keep '--' on error */ });
+  }
+
   // ── KPI: pedidos rescatados ───────────────────────────────────────────────────
   function _loadRescatados() {
     return _apiGet('/api/internal/analytics/pedidos-rescatados?period=mtd')
@@ -489,6 +511,7 @@
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
   Promise.allSettled([
+    _loadMrr(),
     _loadRescatados(),
     _loadActiveToday(),
     _loadProspects(),
