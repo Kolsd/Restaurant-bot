@@ -413,7 +413,7 @@ async def analytics_activation(_: None = Depends(verify_superadmin)):
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    bot_orgs AS (
+                    WITH bot_orgs AS (
                         -- Resolve bot_number → org via locations override OR org fallback
                         -- (locations.whatsapp_number can be NULL; menu lives on organizations).
                         SELECT

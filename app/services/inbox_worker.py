@@ -408,6 +408,21 @@ async def _handle_meta_whatsapp(payload: dict) -> None:
 
     _tenant_id: int = org["id"]  # Wave 1: org_id == tenant scope key
 
+    # ── Suspension guard — skip LLM dispatch for suspended tenants ────────────
+    # CEO can suspend a tenant via /internal/superadmin (sets subscription_status='suspended').
+    # Without this guard, suspension is cosmetic — the bot keeps responding.
+    # Placed BEFORE blocklist check and before any conv-slot consumption in agent.py.
+    # The inbox row is acked normally (return without raise) so Meta never retries.
+    _sub_status = (org.get("subscription_status") or "").lower()
+    if _sub_status == "suspended":
+        log.info(
+            "inbox.suspended_tenant_skipped",
+            org_id=_tenant_id,
+            bot_number=bot_number,
+            user_phone=user_phone,
+        )
+        return  # ack — do not retry, suspension is intentional
+
     # ── Capa 3: Phone blocklist guard ─────────────────────────────────────────
     # Cross-tenant check: a phone blocked by ANY org is rejected here.
     # bypass_tenant_scope is required because the inbox_worker runs outside

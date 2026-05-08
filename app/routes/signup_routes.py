@@ -83,6 +83,12 @@ async def create_signup(payload: SignupPayload, request: Request):
         raise HTTPException(status_code=429, detail="Demasiados intentos. Intenta en 15 minutos.")
 
     try:
+        # Idempotency: if the same phone already has a prospect in the last hour, return silently.
+        existing = await crm_repo.db_get_prospect_by_phone(payload.telefono)
+        if existing:
+            log.info("signup.duplicate_phone_skipped", plan=payload.plan, city=payload.ciudad)
+            return {"ok": True}
+
         prospect = await crm_repo.db_create_prospect(
             restaurant_name=payload.restaurante,
             owner_name=payload.nombre,

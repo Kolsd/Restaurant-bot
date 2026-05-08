@@ -29,6 +29,13 @@ def _mock_rate_ok():
     return patch("app.routes.signup_routes.state_store.rate_limit_check", new=AsyncMock(return_value=True))
 
 
+def _mock_no_existing_prospect():
+    return patch(
+        "app.routes.signup_routes.crm_repo.db_get_prospect_by_phone",
+        new=AsyncMock(return_value=None),
+    )
+
+
 def _mock_prospect(prospect_id: int = 42):
     return patch(
         "app.routes.signup_routes.crm_repo.db_create_prospect",
@@ -43,7 +50,7 @@ class TestSignupEndpoint:
         assert "signup-form" in r.text
 
     def test_valid_payload_returns_ok(self, client):
-        with _mock_rate_ok(), _mock_prospect(99):
+        with _mock_rate_ok(), _mock_no_existing_prospect(), _mock_prospect(99):
             r = client.post("/api/signup", json=VALID_PAYLOAD)
         assert r.status_code == 200
         body = r.json()
@@ -77,6 +84,6 @@ class TestSignupEndpoint:
     def test_all_valid_plans_accepted(self, client):
         for plan in ("Pulso", "Restaurante", "Pro", "Cadena"):
             payload = {**VALID_PAYLOAD, "plan": plan}
-            with _mock_rate_ok(), _mock_prospect():
+            with _mock_rate_ok(), _mock_no_existing_prospect(), _mock_prospect():
                 r = client.post("/api/signup", json=payload)
             assert r.status_code == 200, f"Plan {plan} returned {r.status_code}"
