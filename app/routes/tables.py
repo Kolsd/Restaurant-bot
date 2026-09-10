@@ -1608,107 +1608,115 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
             raise HTTPException(status_code=429, detail="Demasiadas solicitudes de pago. Intenta de nuevo en unos segundos.")
         restaurant = await get_current_restaurant(request)
 
-        # Atomic claim: SELECT FOR UPDATE + transition open→paying. Two cashiers
-        # paying concurrently — only the first wins; the second gets None and
-        # the request fails with 409 BEFORE any DIAN invoice is generated.
+        # Ambient scope for the ENTIRE payment flow — this used to be 8 separate
+        # `with tenant_scope(...)` blocks sprinkled through the function, and the
+        # billing.get_billing_config() call below was accidentally left outside
+        # ALL of them, so every single table payment raised TenantNotSetError.
+        # A route with N manual scope blocks WILL eventually miss one — pin the
+        # scope once, for the whole handler, so a missed call site is structurally
+        # impossible. NOTE: `_farewell_and_nps(...)` below is deliberately called
+        # AFTER this block exits — it internally uses bypass_tenant_scope() for
+        # cross-tenant phone lookups (NPS/session cleanup are keyed by phone, not
+        # restaurant), and bypass_tenant_scope() raises TenantContextConflict if a
+        # tenant scope is already pinned. Do NOT move that call inside this block.
         with tenant_scope(restaurant["id"]):
+            # Atomic claim: SELECT FOR UPDATE + transition open→paying. Two cashiers
+            # paying concurrently — only the first wins; the second gets None and
+            # the request fails with 409 BEFORE any DIAN invoice is generated.
             check = await db.db_claim_check_for_payment(check_id, base_order_id)
 
-        if check is None:
-            # Could be: not found, wrong order, or already paying/invoiced/cancelled.
-            # We do a follow-up read to give a precise error message — it's not
-            # part of the race-protected path so it's fine to query unscoped here.
-            with tenant_scope(restaurant["id"]):
+            if check is None:
+                # Could be: not found, wrong order, or already paying/invoiced/cancelled.
+                # We do a follow-up read to give a precise error message.
                 existing = await db.db_get_check(check_id)
-            if not existing:
-                raise HTTPException(status_code=404, detail="Check no encontrado")
-            if existing["base_order_id"] != base_order_id:
-                raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
-            raise HTTPException(status_code=409, detail=f"Este check ya fue procesado (status: {existing['status']})")
-        _claimed = True
+                if not existing:
+                    raise HTTPException(status_code=404, detail="Check no encontrado")
+                if existing["base_order_id"] != base_order_id:
+                    raise HTTPException(status_code=400, detail="El check no pertenece a este ticket")
+                raise HTTPException(status_code=409, detail=f"Este check ya fue procesado (status: {existing['status']})")
+            _claimed = True
 
-        # Si no se enviaron pagos, usar proposed_payments del check (flujo bot)
-        if not body.payments:
-            proposed = check.get("proposed_payments")
-            if isinstance(proposed, str):
+            # Si no se enviaron pagos, usar proposed_payments del check (flujo bot)
+            if not body.payments:
+                proposed = check.get("proposed_payments")
+                if isinstance(proposed, str):
+                    import json as _json
+                    proposed = _json.loads(proposed)
+                if proposed:
+                    body.payments = [PaymentMethod(method=p["method"], amount=p["amount"]) for p in proposed]
+                else:
+                    raise HTTPException(status_code=400, detail="No se especificaron métodos de pago")
+
+            # También usar tip propuesto si no se envió tip explícito y hay uno guardado
+            if body.tip_amount == 0.0 and check.get("proposed_tip"):
+                body.tip_amount = float(to_decimal(check["proposed_tip"]))
+
+            total_pagado = to_decimal(sum(p.amount for p in body.payments))
+            check_total  = to_decimal(check["total"]) + to_decimal(body.service_charge)
+            if total_pagado < check_total:
+                raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_pagado):,.0f}")
+
+            # Resolve currency before quantizing change/tip so zero-decimal currencies (COP, CLP)
+            # are rounded correctly at this JSON boundary.
+            features = restaurant.get("features") or {}
+            if isinstance(features, str):
                 import json as _json
-                proposed = _json.loads(proposed)
-            if proposed:
-                body.payments = [PaymentMethod(method=p["method"], amount=p["amount"]) for p in proposed]
+                try:
+                    features = _json.loads(features)
+                except Exception:
+                    features = {}
+            _currency = features.get("currency") if isinstance(features, dict) else None
+
+            change = float(quantize_money(total_pagado - check_total, _currency))
+
+            tip_amount_d = to_decimal(body.tip_amount)
+            tip_cap_base = to_decimal(check["total"]) + to_decimal(body.service_charge)
+            if tip_amount_d > 0 and tip_amount_d > money_mul(tip_cap_base, Decimal("0.5")):
+                raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
+
+            config = await billing.get_billing_config(restaurant["id"])
+
+            items = check.get("items", [])
+            if isinstance(items, str):
+                import json as _json
+                items = _json.loads(items)
+
+            _check_total_d = to_decimal(check["total"])
+            _svc_charge_d  = to_decimal(body.service_charge)
+            order_for_billing = {
+                "id":             check_id,
+                "total":          float(_check_total_d + _svc_charge_d),  # JSON boundary
+                "subtotal":       float(_check_total_d),                   # JSON boundary
+                "service_charge": float(_svc_charge_d),
+                "items":          items,
+                "payment_method": body.payments[0].method if body.payments else "cash",
+                "order_ref":      base_order_id,
+                "customer": {
+                    "name":  body.customer_name,
+                    "nit":   body.customer_nit,
+                    "email": body.customer_email,
+                },
+            }
+
+            fiscal_invoice_id = None
+            if config and billing._is_dian_enabled(features):
+                config["_restaurant_id"] = restaurant["id"]
+                provider = config.get("provider", "mesio_native")
+                adapter  = billing.get_adapter(provider)
+                try:
+                    fiscal = await adapter.create_invoice(order_for_billing, config)
+                except Exception as exc:
+                    # DIAN failed AFTER we claimed the check. Release the claim so
+                    # the cashier can retry without waiting for the lock to expire.
+                    # The except below would also do this via the _claimed flag, but
+                    # being explicit here keeps the rollback close to the failure.
+                    raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
+                fiscal_invoice_id = fiscal["id"]
             else:
-                raise HTTPException(status_code=400, detail="No se especificaron métodos de pago")
+                fiscal = {"id": None, "local": True}
 
-        # También usar tip propuesto si no se envió tip explícito y hay uno guardado
-        if body.tip_amount == 0.0 and check.get("proposed_tip"):
-            body.tip_amount = float(to_decimal(check["proposed_tip"]))
+            payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
 
-        total_pagado = to_decimal(sum(p.amount for p in body.payments))
-        check_total  = to_decimal(check["total"]) + to_decimal(body.service_charge)
-        if total_pagado < check_total:
-            raise HTTPException(status_code=400, detail=f"Pago insuficiente: se requieren ${float(check_total):,.0f}, se recibieron ${float(total_pagado):,.0f}")
-
-        # Resolve currency before quantizing change/tip so zero-decimal currencies (COP, CLP)
-        # are rounded correctly at this JSON boundary.
-        features = restaurant.get("features") or {}
-        if isinstance(features, str):
-            import json as _json
-            try:
-                features = _json.loads(features)
-            except Exception:
-                features = {}
-        _currency = features.get("currency") if isinstance(features, dict) else None
-
-        change = float(quantize_money(total_pagado - check_total, _currency))
-
-        tip_amount_d = to_decimal(body.tip_amount)
-        tip_cap_base = to_decimal(check["total"]) + to_decimal(body.service_charge)
-        if tip_amount_d > 0 and tip_amount_d > money_mul(tip_cap_base, Decimal("0.5")):
-            raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
-
-        config = await billing.get_billing_config(restaurant["id"])
-
-        items = check.get("items", [])
-        if isinstance(items, str):
-            import json as _json
-            items = _json.loads(items)
-
-        _check_total_d = to_decimal(check["total"])
-        _svc_charge_d  = to_decimal(body.service_charge)
-        order_for_billing = {
-            "id":             check_id,
-            "total":          float(_check_total_d + _svc_charge_d),  # JSON boundary
-            "subtotal":       float(_check_total_d),                   # JSON boundary
-            "service_charge": float(_svc_charge_d),
-            "items":          items,
-            "payment_method": body.payments[0].method if body.payments else "cash",
-            "order_ref":      base_order_id,
-            "customer": {
-                "name":  body.customer_name,
-                "nit":   body.customer_nit,
-                "email": body.customer_email,
-            },
-        }
-
-        fiscal_invoice_id = None
-        if config and billing._is_dian_enabled(features):
-            config["_restaurant_id"] = restaurant["id"]
-            provider = config.get("provider", "mesio_native")
-            adapter  = billing.get_adapter(provider)
-            try:
-                fiscal = await adapter.create_invoice(order_for_billing, config)
-            except Exception as exc:
-                # DIAN failed AFTER we claimed the check. Release the claim so
-                # the cashier can retry without waiting for the lock to expire.
-                # The except below would also do this via the _claimed flag, but
-                # being explicit here keeps the rollback close to the failure.
-                raise HTTPException(status_code=500, detail=f"Error al emitir factura: {exc}")
-            fiscal_invoice_id = fiscal["id"]
-        else:
-            fiscal = {"id": None, "local": True}
-
-        payments_list = [{"method": p.method, "amount": p.amount} for p in body.payments]
-
-        with tenant_scope(restaurant["id"]):
             finalized = await db.db_finalize_check_payment(
                 check_id=check_id,
                 base_order_id=base_order_id,
@@ -1720,49 +1728,56 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 customer_email=body.customer_email,
                 tip_amount=body.tip_amount,
             )
-        if not finalized:
-            # The claim was lost between db_claim_check_for_payment and here
-            # (extremely unlikely — would require external state mutation).
-            # Treat as 409 and DO NOT proceed to loyalty accrual / NPS.
-            _claimed = False  # don't release a claim that's no longer ours
-            log.warning("tables.pay_check.finalize_no_op", check_id=check_id, base_order_id=base_order_id)
-            raise HTTPException(status_code=409, detail="El check fue modificado por otra operación. Refresca la pantalla.")
-        # From here on, the check is invoiced. No release on subsequent errors.
-        _claimed = False
+            if not finalized:
+                # The claim was lost between db_claim_check_for_payment and here
+                # (extremely unlikely — would require external state mutation).
+                # Treat as 409 and DO NOT proceed to loyalty accrual / NPS.
+                _claimed = False  # don't release a claim that's no longer ours
+                log.warning("tables.pay_check.finalize_no_op", check_id=check_id, base_order_id=base_order_id)
+                raise HTTPException(status_code=409, detail="El check fue modificado por otra operación. Refresca la pantalla.")
+            # From here on, the check is invoiced. No release on subsequent errors.
+            _claimed = False
 
-        if hasattr(loyalty_svc, "accrue_on_check"):
-            _loyalty_org_id = restaurant["id"]
-            _loyalty_bot    = restaurant.get("whatsapp_number", "")
-            _loyalty_boid   = base_order_id
-            _loyalty_cid    = check_id
-            _loyalty_total  = float(to_decimal(check["total"]) + to_decimal(body.service_charge))
+            if hasattr(loyalty_svc, "accrue_on_check"):
+                _loyalty_org_id = restaurant["id"]
+                _loyalty_bot    = restaurant.get("whatsapp_number", "")
+                _loyalty_boid   = base_order_id
+                _loyalty_cid    = check_id
+                _loyalty_total  = float(to_decimal(check["total"]) + to_decimal(body.service_charge))
 
-            async def _accrue_with_scope(
-                rid=_loyalty_org_id, bn=_loyalty_bot,
-                boid=_loyalty_boid, cid=_loyalty_cid, total=_loyalty_total,
-            ):
-                with tenant_scope(rid):
-                    await loyalty_svc.accrue_on_check(
-                        restaurant_id=rid,
-                        bot_number=bn,
-                        base_order_id=boid,
-                        check_id=cid,
-                        total_cop=total,
-                    )
+                async def _accrue_with_scope(
+                    rid=_loyalty_org_id, bn=_loyalty_bot,
+                    boid=_loyalty_boid, cid=_loyalty_cid, total=_loyalty_total,
+                ):
+                    # Explicit re-pin: this runs as a detached asyncio.Task which may
+                    # outlive this request's ambient scope above (context is copied
+                    # at task-creation time, but being explicit here is defensive and
+                    # keeps this coroutine correct if ever awaited directly instead).
+                    with tenant_scope(rid):
+                        await loyalty_svc.accrue_on_check(
+                            restaurant_id=rid,
+                            bot_number=bn,
+                            base_order_id=boid,
+                            check_id=cid,
+                            total_cop=total,
+                        )
 
-            asyncio.create_task(_accrue_with_scope())
-        else:
-            log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
+                asyncio.create_task(_accrue_with_scope())
+            else:
+                log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
 
-        with tenant_scope(restaurant["id"]):
             order_row = await db.db_get_first_table_order(base_order_id)
-        if order_row and order_row["status"] == "factura_entregada":
-            customer_phone = order_row.get("phone")
-            if customer_phone and customer_phone != "manual":
-                with tenant_scope(restaurant["id"]):
+            farewell_args = None
+            if order_row and order_row["status"] == "factura_entregada":
+                customer_phone = order_row.get("phone")
+                if customer_phone and customer_phone != "manual":
                     sess = await db.db_get_open_session_by_phone(customer_phone)
-                session_phone_id = sess.get("meta_phone_id") if sess else None
-                await _farewell_and_nps(customer_phone, order_row.get("table_id"), sess, session_phone_id, "caja")
+                    session_phone_id = sess.get("meta_phone_id") if sess else None
+                    farewell_args = (customer_phone, order_row.get("table_id"), sess, session_phone_id)
+
+        # Outside the ambient scope on purpose — see comment above the `with` block.
+        if farewell_args is not None:
+            await _farewell_and_nps(*farewell_args, "caja")
 
         return {
             "success":  True,
@@ -1937,6 +1952,14 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
         "channel": "pos",
         "waiter_staff_id": user.get("staff_id") or None,
     }
+    # Ambient scope for the ENTIRE quick-invoice flow — same fix as pay_check()
+    # above. This handler used to have the create/finalize DB calls each in
+    # their own `with tenant_scope(...)` block with the DIAN billing calls
+    # (get_billing_config / adapter.create_invoice) left unscoped in between.
+    # Both are tenant_connection()-backed repo calls (fiscal_repo), so any
+    # restaurant with DIAN enabled would 500 on quick-invoice exactly like
+    # pay_check did. Pinning the scope once for the whole block makes that
+    # class of bug structurally impossible here too.
     with tenant_scope(restaurant["id"]):
         await db.db_save_table_order(order)
 
@@ -1949,50 +1972,49 @@ async def pos_quick_invoice(request: Request, body: QuickInvoiceBody):
             "total": float(to_decimal(subtotal)),
         }]
         created = await db.db_create_checks(base_order_id, check_payload)
-    if not created:
-        raise HTTPException(status_code=500, detail="No se pudo crear el check")
-    check_id = created[0]["id"]
+        if not created:
+            raise HTTPException(status_code=500, detail="No se pudo crear el check")
+        check_id = created[0]["id"]
 
-    # Billing / DIAN (opcional)
-    features = restaurant.get("features") or {}
-    if isinstance(features, str):
-        import json as _json
-        try:
-            features = _json.loads(features)
-        except Exception:
-            features = {}
-    _currency = features.get("currency") if isinstance(features, dict) else None
-
-    fiscal_invoice_id = None
-    if billing._is_dian_enabled(features):
-        config = await billing.get_billing_config(restaurant["id"])
-        if config:
-            config["_restaurant_id"] = restaurant["id"]
-            provider = config.get("provider", "mesio_native")
-            adapter = billing.get_adapter(provider)
-            order_for_billing = {
-                "id": check_id,
-                "total": float(total_d),
-                "subtotal": float(to_decimal(subtotal)),
-                "service_charge": 0.0,
-                "items": items_payload,
-                "payment_method": body.payment_method,
-                "order_ref": base_order_id,
-                "customer": {
-                    "name": body.customer_name,
-                    "nit": body.customer_nit,
-                    "email": body.customer_email,
-                },
-            }
+        # Billing / DIAN (opcional)
+        features = restaurant.get("features") or {}
+        if isinstance(features, str):
+            import json as _json
             try:
-                fiscal = await adapter.create_invoice(order_for_billing, config)
-                fiscal_invoice_id = fiscal["id"]
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Error al emitir factura DIAN: {exc}")
+                features = _json.loads(features)
+            except Exception:
+                features = {}
+        _currency = features.get("currency") if isinstance(features, dict) else None
 
-    payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
+        fiscal_invoice_id = None
+        if billing._is_dian_enabled(features):
+            config = await billing.get_billing_config(restaurant["id"])
+            if config:
+                config["_restaurant_id"] = restaurant["id"]
+                provider = config.get("provider", "mesio_native")
+                adapter = billing.get_adapter(provider)
+                order_for_billing = {
+                    "id": check_id,
+                    "total": float(total_d),
+                    "subtotal": float(to_decimal(subtotal)),
+                    "service_charge": 0.0,
+                    "items": items_payload,
+                    "payment_method": body.payment_method,
+                    "order_ref": base_order_id,
+                    "customer": {
+                        "name": body.customer_name,
+                        "nit": body.customer_nit,
+                        "email": body.customer_email,
+                    },
+                }
+                try:
+                    fiscal = await adapter.create_invoice(order_for_billing, config)
+                    fiscal_invoice_id = fiscal["id"]
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=f"Error al emitir factura DIAN: {exc}")
 
-    with tenant_scope(restaurant["id"]):
+        payments_list = [{"method": body.payment_method, "amount": float(total_d)}]
+
         await db.db_finalize_check_payment(
             check_id=check_id,
             base_order_id=base_order_id,
