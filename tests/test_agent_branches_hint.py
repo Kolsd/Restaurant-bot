@@ -13,6 +13,7 @@ Locks down the behavior introduced in commit 45ff590:
 CLAUDE.md Regla #16 mandates these stay.
 """
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 
@@ -34,8 +35,37 @@ def _branch(rid: int, parent: int) -> dict:
     }
 
 
+class _FakeTransitConn:
+    """Stand-in for the connection yielded by tenant_connection()."""
+
+    async def fetchrow(self, *a, **kw):
+        return None
+
+
+@asynccontextmanager
+async def _fake_tenant_conn():
+    yield _FakeTransitConn()
+
+
 def _build_patches(branches_return):
-    """Patch all DB / orders deps inside _build_enriched_user_message."""
+    """Patch all DB / orders deps inside _build_enriched_user_message.
+
+    IMPORTANT: _build_enriched_user_message's in-transit-order check (agent.py,
+    "Check for in-transit delivery order") calls `async with _tenant_conn() as
+    conn:` directly — it is NOT routed through app.services.database, so
+    mocking agent.db.* alone does not cover it. Without patching agent._tenant_conn
+    too, this "unit test" silently opens a REAL asyncpg connection pool whenever
+    a real DATABASE_URL/TEST_DATABASE_URL is exported (the whole in-transit block
+    is wrapped in try/except Exception, so the resulting error is swallowed and
+    logged — the test still "passes", but it leaves a REAL pool cached in the
+    process-global app.services.database._pool, bound to THIS test's short-lived
+    pytest-asyncio event loop. Once that loop closes, the pool is permanently
+    broken ("Event loop is closed") for every later test in the same session
+    that reaches the real get_pool() path — e.g.
+    tests/test_billing_subscription_routes.py::test_get_plans_real_db, which
+    fails nondeterministically depending on suite ordering. Patching
+    agent._tenant_conn keeps this test fully isolated, as intended.
+    """
     from app.services import agent
     return [
         patch.object(agent.db, "db_get_history", AsyncMock(return_value=[])),
@@ -44,6 +74,7 @@ def _build_patches(branches_return):
         patch.object(agent.db, "db_get_menu", AsyncMock(return_value={"Pizzas": [{"name": "Margarita", "price": 10000}]})),
         patch.object(agent.db, "db_get_branches", AsyncMock(return_value=branches_return)),
         patch.object(agent.db, "db_get_loyalty_balance", AsyncMock(return_value=None)),
+        patch.object(agent, "_tenant_conn", _fake_tenant_conn),
     ]
 
 
@@ -164,6 +195,7 @@ async def test_branches_db_error_does_not_crash_builder():
         patch.object(agent.db, "db_get_menu", AsyncMock(return_value={"Pizzas": [{"name": "X", "price": 1}]})),
         patch.object(agent.db, "db_get_branches", AsyncMock(side_effect=RuntimeError("boom"))),
         patch.object(agent.db, "db_get_loyalty_balance", AsyncMock(return_value=None)),
+        patch.object(agent, "_tenant_conn", _fake_tenant_conn),
     ]
     for p in patches:
         p.start()

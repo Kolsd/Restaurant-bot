@@ -516,18 +516,28 @@ async def test_multiple_checks_accumulate(db_conn):
         paid_at="2024-01-01T15:00:00+00:00",
     )
 
-    # Reuse base_a for a second check: check_number must differ
+    # Reuse base_a for a second check: check_number must differ.
+    # IMPORTANT: paid_at must go through _dt_naive(), NOT a raw '::timestamptz'
+    # literal. table_checks.paid_at is TIMESTAMP WITHOUT TIME ZONE — casting a
+    # string with an explicit UTC offset to ::timestamptz and then assigning it
+    # to a naive column makes Postgres convert through the SESSION timezone.
+    # In a non-UTC session (e.g. America/Bogota, UTC-5) '10:30:00+00:00' would
+    # be stored as 05:30 local — landing before the 08:00 shift start and
+    # silently moving this tip into "unallocated". _dt_naive() strips tzinfo
+    # in Python instead, so the stored wall-clock value is timezone-independent
+    # (matches the pattern already used by _insert_check() above).
     check_c_id = _uid()
     await db_conn.execute(
         """
         INSERT INTO table_checks
             (id, base_order_id, check_number, tip_amount, status, paid_at,
              subtotal, tax_amount, total, items, payments)
-        VALUES ($1, $2, 2, 20000, 'invoiced', '2024-01-01T10:30:00+00:00'::timestamptz,
+        VALUES ($1, $2, 2, 20000, 'invoiced', $3,
                 0, 0, 20000, '[]'::jsonb, '[]'::jsonb)
         """,
         check_c_id,
         base_a,
+        _dt_naive("2024-01-01T10:30:00+00:00"),
     )
 
     pool = _make_pool_for_conn(db_conn)

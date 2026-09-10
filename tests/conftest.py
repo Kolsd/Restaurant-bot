@@ -69,6 +69,44 @@ def _clear_rate_limit_state():
     state_store._fb_rate_limits.clear()
 
 
+# ── Reset the real DB pool singleton between tests ────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _reset_real_db_pool():
+    """Discard app.services.database._pool after every test.
+
+    ROOT CAUSE this guards against (confirmed 2026-09-10): app.services.database
+    keeps a single process-global asyncpg.Pool in `_pool`, lazily created by the
+    real (unmocked) get_pool(). pytest-asyncio gives each async test its own
+    short-lived event loop. If ANY test — even a "fully mocked" unit test that
+    forgot to patch one internal DB call (e.g. agent.py's in-transit-order check,
+    which calls tenant_connection() directly and is wrapped in a broad
+    try/except that silently swallows the resulting error) — reaches the real
+    get_pool() path while a real DATABASE_URL/TEST_DATABASE_URL is configured,
+    a genuine asyncpg.Pool gets created and cached in `_pool`, bound to THAT
+    test's event loop. Once that loop closes, the cached pool is permanently
+    broken ("RuntimeError: Event loop is closed") — and because `_pool` is a
+    module global, EVERY later test in the same session that reaches the real
+    get_pool() path (e.g. tests hitting a real endpoint without mocking the
+    repo call) inherits the dead pool and fails, nondeterministically, based on
+    suite ordering. This does not happen with no DB configured at all, which is
+    exactly why it went unnoticed: the failure is invisible unless a real
+    Postgres is attached AND some earlier test happens to leak a real
+    connection first.
+
+    This mirrors the existing reset pattern in test_db_circuit_breaker.py and
+    test_health.py::TestHealthIntegration (both discard `_pool` without an
+    explicit .close() — acceptable in a test process; connections are cleaned
+    up by the OS/Postgres when the leftover Pool object is garbage collected or
+    the process exits) but applies it universally so a missing mock in any one
+    test can no longer poison every other real-DB test that runs after it.
+    """
+    from app.services import database as _db
+    _db._pool = None
+    yield
+    _db._pool = None
+
+
 # ── DB row / pool factory helpers (reused across async suites) ───────────────
 
 def make_row(d: dict):

@@ -141,27 +141,47 @@ if TEST_DB_URL:
 @_db_mark
 @pytest.mark.asyncio
 async def test_zero_paying_orgs(db_conn):
-    """Only free orgs in the test transaction → mrr_total_cop = 0, paying_count = 0."""
+    """A 'free' org must not inflate MRR.
+
+    PRODUCT GAP (verified 2026-09-10, do not silently paper over):
+    plan_code='free' as originally written here CANNOT be constructed on the
+    current schema. organizations.plan_code is `NOT NULL DEFAULT 'pulso'` and
+    carries `fk_orgs_plan_code -> plan_limits(plan_code)` (migration 0070),
+    whose only seeded rows are pulso/restaurante/pro/cadena — inserting
+    plan_code='free' raises ForeignKeyViolationError. NULL is also impossible
+    (NOT NULL). So the "free" branch in
+    app/repositories/internal/mrr_repo.py::db_compute_mrr()
+    (`o.plan_code IS NULL OR o.plan_code IN ('free', '')`) is dead code today:
+    no organization row can ever land in that branch. If a genuine free tier
+    is wanted, `plan_limits` needs a seeded 'free' row (monthly_price_cop=0)
+    via a migration — out of scope here (migrations are owned elsewhere).
+
+    Until that's decided, this test verifies the only thing that IS true on
+    the current schema: with no new orgs inserted, db_compute_mrr() is a pure
+    read (calling it twice yields identical results — no side effects), the
+    shape is well-formed, mrr_total_cop is never negative, and free_count is
+    always exactly 0 (since no org can structurally be 'free').
+    """
     from app.services.tenant_context import bypass_tenant_scope
     from app.repositories.internal import mrr_repo
 
-    # Create a couple of free orgs to verify they don't inflate MRR
-    org_id = await _create_org(db_conn, plan_code="free")
-    await _set_org_scope(db_conn, org_id)
+    with bypass_tenant_scope("test_mrr_zero_paying_before"):
+        before = await mrr_repo.db_compute_mrr()
+    with bypass_tenant_scope("test_mrr_zero_paying_after"):
+        after = await mrr_repo.db_compute_mrr()
 
-    with bypass_tenant_scope("test_mrr_zero_paying"):
-        result = await mrr_repo.db_compute_mrr()
-
-    # paying_count may be 0 or more depending on existing prod data in the test tx,
-    # but the free orgs we inserted must NOT contribute to MRR.
-    # The safest assertion in a shared test DB: mrr_total_cop is a non-negative int.
-    assert isinstance(result["mrr_total_cop"], int)
-    assert result["mrr_total_cop"] >= 0
-    assert "by_plan" in result
-    assert "paying_count" in result
-    assert "comp_count" in result
-    assert "free_count" in result
-    assert "total_orgs" in result
+    assert before == after, "db_compute_mrr() must be a pure read with no new orgs inserted"
+    assert isinstance(after["mrr_total_cop"], int)
+    assert after["mrr_total_cop"] >= 0
+    assert after["free_count"] == 0, (
+        "no organization can structurally have plan_code='free' or NULL given "
+        "fk_orgs_plan_code + NOT NULL — if this ever fails, a free plan_code "
+        "was seeded and the dead-code assumption above is stale"
+    )
+    assert "by_plan" in after
+    assert "paying_count" in after
+    assert "comp_count" in after
+    assert "total_orgs" in after
 
 
 @_db_mark

@@ -142,7 +142,7 @@ async def two_orgs(db_conn):
 
     await _set_scope(db_conn, org_a)
     loc_a = await db_conn.fetchval(
-        "INSERT INTO locations (org_id, name, slug) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO locations (org_id, name, code) VALUES ($1, $2, $3) RETURNING id",
         org_a, "Sede Principal A", "sede-a",
     )
 
@@ -156,7 +156,7 @@ async def two_orgs(db_conn):
 
     await _set_scope(db_conn, org_b)
     loc_b = await db_conn.fetchval(
-        "INSERT INTO locations (org_id, name, slug) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO locations (org_id, name, code) VALUES ($1, $2, $3) RETURNING id",
         org_b, "Sede Principal B", "sede-b",
     )
 

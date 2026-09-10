@@ -183,8 +183,14 @@ async def _insert_table_order(
     """Insert a minimal table_order; returns the order id."""
     oid = _order_id()
     ts = created_at or datetime.utcnow().replace(tzinfo=None)
-    # table_orders requires a table_id that references restaurant_tables — we
-    # skip the FK by inserting a restaurant_table row first.
+    # table_orders requires a table_id that references restaurant_tables, which
+    # itself has a real FK (fk_restaurant_tables_location) to locations(id) — a
+    # bare org_id is NOT a valid location_id, so create the parent location row
+    # first.
+    location_id = await conn.fetchval(
+        "INSERT INTO locations (org_id, name) VALUES ($1, $2) RETURNING id",
+        org_id, "Sede Test",
+    )
     table_id = f"t-{uuid.uuid4().hex[:8]}"
     await conn.execute(
         """
@@ -193,7 +199,7 @@ async def _insert_table_order(
         VALUES ($1, $2, $3, $4, $5, $6, TRUE)
         ON CONFLICT (id) DO NOTHING
         """,
-        table_id, 99, "Mesa Test", org_id, org_id, org_id,
+        table_id, 99, "Mesa Test", org_id, location_id, org_id,
     )
     await conn.execute(
         """
