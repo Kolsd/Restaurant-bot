@@ -189,73 +189,111 @@ DEMO_FEATURES = {
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # ── Self-sufficient grant for mesio_superadmin ────────────────────────────
+    # Migration 0029 creates mesio_superadmin (BYPASSRLS) but never grants it
+    # any table/sequence privileges — BYPASSRLS only skips RLS *policy*
+    # filtering, Postgres still enforces the base GRANT system underneath. On
+    # a freshly-built database this migration is the FIRST one in the whole
+    # history to actually exercise `SET LOCAL ROLE mesio_superadmin`, so
+    # without this grant the INSERT below fails immediately with "permission
+    # denied for table organizations". 0079_bootstrap_role_grants closes this
+    # gap for every table for RUNTIME use (bypass_tenant_scope in the app),
+    # but that migration necessarily runs AFTER this one in the alembic
+    # chain — it cannot help a migration that runs before it. This migration
+    # must be self-sufficient, so it grants exactly what it needs here.
+    conn.execute(sa.text(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mesio_superadmin') THEN
+                GRANT SELECT, INSERT, UPDATE, DELETE ON organizations, locations TO mesio_superadmin;
+                GRANT USAGE, SELECT ON SEQUENCE organizations_id_seq, locations_id_seq TO mesio_superadmin;
+            END IF;
+        END $$;
+        """
+    ))
+
     # ── Switch to mesio_superadmin to bypass RLS ──────────────────────────────
     # organizations and locations have RLS + FORCE, so we need the bypass role
     # for the INSERT statements.
+    #
+    # try/finally + RESET ROLE: without this, the session stays as
+    # mesio_superadmin for the rest of the migration run. Under the old
+    # single-outer-transaction env.py this meant EVERY migration after 0071
+    # (e.g. 0070/0072+ CREATE TABLE) ran as mesio_superadmin instead of the
+    # admin/superuser connection — which lacks CREATE on schema public and
+    # fails. RESET ROLE here is defense-in-depth even after env.py moved to
+    # transaction_per_migration=True (which already scopes SET LOCAL to this
+    # migration's own transaction) — belt and suspenders, and correct even if
+    # someone reverts that env.py change later.
     conn.execute(sa.text("SET LOCAL ROLE mesio_superadmin"))
+    try:
+        logger.info("0071 upgrade: seeding Demo Mesio org")
 
-    logger.info("0071 upgrade: seeding Demo Mesio org")
-
-    # ── 1. Organization ───────────────────────────────────────────────────────
-    org_id = conn.execute(
-        sa.text("""
-            INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
-            VALUES (:name, :wanum, CAST(:menu AS jsonb), CAST(:features AS jsonb), :slug)
-            ON CONFLICT (slug) DO NOTHING
-            RETURNING id
-        """),
-        {
-            "name": DEMO_ORG_NAME,
-            "wanum": DEMO_BOT_NUMBER,
-            "menu": json.dumps(DEMO_MENU),
-            "features": json.dumps(DEMO_FEATURES),
-            "slug": DEMO_SLUG,
-        },
-    ).scalar()
-
-    if org_id is None:
-        # Already exists — look up the id for the location step
+        # ── 1. Organization ───────────────────────────────────────────────────
         org_id = conn.execute(
-            sa.text("SELECT id FROM organizations WHERE slug = :slug"),
-            {"slug": DEMO_SLUG},
-        ).scalar()
-        logger.info("0071 upgrade: Demo org already exists, org_id=%s", org_id)
-    else:
-        logger.info("0071 upgrade: Demo org created, org_id=%s", org_id)
-
-    # ── 2. Location ───────────────────────────────────────────────────────────
-    loc_exists = conn.execute(
-        sa.text("SELECT 1 FROM locations WHERE org_id = :oid LIMIT 1"),
-        {"oid": org_id},
-    ).scalar()
-
-    if not loc_exists:
-        loc_id = conn.execute(
             sa.text("""
-                INSERT INTO locations (org_id, name, code, address, active, timezone)
-                VALUES (:oid, :name, 'principal', :addr, true, 'America/Bogota')
+                INSERT INTO organizations (name, whatsapp_number, menu, features, slug)
+                VALUES (:name, :wanum, CAST(:menu AS jsonb), CAST(:features AS jsonb), :slug)
+                ON CONFLICT (slug) DO NOTHING
                 RETURNING id
             """),
-            {"oid": org_id, "name": DEMO_ORG_NAME, "addr": DEMO_ADDRESS},
+            {
+                "name": DEMO_ORG_NAME,
+                "wanum": DEMO_BOT_NUMBER,
+                "menu": json.dumps(DEMO_MENU),
+                "features": json.dumps(DEMO_FEATURES),
+                "slug": DEMO_SLUG,
+            },
         ).scalar()
-        logger.info("0071 upgrade: Demo location created, loc_id=%s", loc_id)
-    else:
-        logger.info("0071 upgrade: Demo location already exists")
 
-    logger.info("0071 upgrade: done")
+        if org_id is None:
+            # Already exists — look up the id for the location step
+            org_id = conn.execute(
+                sa.text("SELECT id FROM organizations WHERE slug = :slug"),
+                {"slug": DEMO_SLUG},
+            ).scalar()
+            logger.info("0071 upgrade: Demo org already exists, org_id=%s", org_id)
+        else:
+            logger.info("0071 upgrade: Demo org created, org_id=%s", org_id)
+
+        # ── 2. Location ───────────────────────────────────────────────────────
+        loc_exists = conn.execute(
+            sa.text("SELECT 1 FROM locations WHERE org_id = :oid LIMIT 1"),
+            {"oid": org_id},
+        ).scalar()
+
+        if not loc_exists:
+            loc_id = conn.execute(
+                sa.text("""
+                    INSERT INTO locations (org_id, name, code, address, active, timezone)
+                    VALUES (:oid, :name, 'principal', :addr, true, 'America/Bogota')
+                    RETURNING id
+                """),
+                {"oid": org_id, "name": DEMO_ORG_NAME, "addr": DEMO_ADDRESS},
+            ).scalar()
+            logger.info("0071 upgrade: Demo location created, loc_id=%s", loc_id)
+        else:
+            logger.info("0071 upgrade: Demo location already exists")
+
+        logger.info("0071 upgrade: done")
+    finally:
+        conn.execute(sa.text("RESET ROLE"))
 
 
 def downgrade() -> None:
     conn = op.get_bind()
     conn.execute(sa.text("SET LOCAL ROLE mesio_superadmin"))
-
-    # Remove Demo org and its location (CASCADE takes the location if FK exists)
-    conn.execute(
-        sa.text("DELETE FROM locations WHERE org_id = (SELECT id FROM organizations WHERE slug = :slug)"),
-        {"slug": DEMO_SLUG},
-    )
-    conn.execute(
-        sa.text("DELETE FROM organizations WHERE slug = :slug"),
-        {"slug": DEMO_SLUG},
-    )
-    logger.info("0071 downgrade: Demo Mesio org removed")
+    try:
+        # Remove Demo org and its location (CASCADE takes the location if FK exists)
+        conn.execute(
+            sa.text("DELETE FROM locations WHERE org_id = (SELECT id FROM organizations WHERE slug = :slug)"),
+            {"slug": DEMO_SLUG},
+        )
+        conn.execute(
+            sa.text("DELETE FROM organizations WHERE slug = :slug"),
+            {"slug": DEMO_SLUG},
+        )
+        logger.info("0071 downgrade: Demo Mesio org removed")
+    finally:
+        conn.execute(sa.text("RESET ROLE"))
