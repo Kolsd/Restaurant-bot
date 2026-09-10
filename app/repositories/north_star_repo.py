@@ -82,14 +82,13 @@ async def db_count_pedidos_rescatados_global(
     Returns a list sorted descending by total count:
       [{"org_id": int, "org_name": str, "count": int, "delivery": int, "table": int}, ...]
 
-    MUST be called under bypass_tenant_scope (uses get_pool directly — cross-tenant query).
+    MUST be called under bypass_tenant_scope. Uses tenant_connection() (never
+    pool.acquire() directly) so the bypass actually executes
+    `SET LOCAL ROLE mesio_superadmin` — orders/table_orders are RLS tables
+    (migration 0029); without that role switch a pooled connection would read
+    under whatever org_id scope it last had set, not a real cross-tenant view.
     """
-    def _get_pool():
-        from app.services.database import get_pool
-        return get_pool()
-
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with tenant_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT

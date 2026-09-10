@@ -5,6 +5,13 @@ Cross-tenant cost analytics for the Mesio internal team.
 All functions here require bypass_tenant_scope("internal_cost_dashboard")
 at the call site — they intentionally read across ALL organizations.
 
+All queries go through tenant_connection() (never pool.acquire() directly).
+tenant_connection() is what actually executes `SET LOCAL ROLE mesio_superadmin`
+for the duration of the query when bypass is active — without it, RLS on
+subscription_usage (migration 0029) filters by whatever app.org_id happens to
+be left on the pooled connection from a previous request, i.e. the result is
+non-deterministic connection-reuse garbage, not a real cross-tenant read.
+
 Schema read from:
   subscription_usage: org_id, usage_date, total_tokens, orders_count, updated_at
   organizations: id, name, subscription_plan, subscription_status
@@ -21,13 +28,9 @@ from decimal import Decimal
 from typing import Any
 
 from app.services.logging import get_logger
+from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
-
-
-def _get_pool():
-    from app.services.database import get_pool
-    return get_pool()
 
 
 def _estimate(tokens: int):
@@ -56,9 +59,8 @@ async def db_platform_cost_summary(
         "by_day": [{"date": "YYYY-MM-DD", "tokens": int, "cost_usd": float}]
     }
     """
-    pool = await _get_pool()
     try:
-        async with pool.acquire() as conn:
+        async with tenant_connection() as conn:
             rows = await conn.fetch(
                 """
                 SELECT
@@ -126,9 +128,8 @@ async def db_per_restaurant_costs(
         "margin_pct": float | None,    # (margin / price) * 100; None if price == 0
     }
     """
-    pool = await _get_pool()
     try:
-        async with pool.acquire() as conn:
+        async with tenant_connection() as conn:
             rows = await conn.fetch(
                 """
                 SELECT
@@ -250,9 +251,8 @@ async def db_restaurant_cost_detail(
         "totals": {"tokens": int, "cost_usd": float, "cost_cop": float, "orders_count": int},
     }
     """
-    pool = await _get_pool()
     try:
-        async with pool.acquire() as conn:
+        async with tenant_connection() as conn:
             org_row = await conn.fetchrow(
                 "SELECT name, COALESCE(subscription_plan, 'free') AS plan FROM organizations WHERE id = $1",
                 org_id,
@@ -352,10 +352,9 @@ async def db_cost_outliers(
         "estimated_cost_usd": float,   # JSON boundary
     }
     """
-    pool = await _get_pool()
     days = max((end_date - start_date).days + 1, 1)
     try:
-        async with pool.acquire() as conn:
+        async with tenant_connection() as conn:
             rows = await conn.fetch(
                 """
                 SELECT

@@ -175,13 +175,29 @@ def normalize_menu_shape(menu):
 # ── Superadmin global stats ───────────────────────────────────────────────────
 
 async def db_get_admin_stats() -> dict:
-    """Return global platform counts: restaurants, users, orders, MRR."""
+    """Return global platform counts: restaurants, users, orders, MRR.
+
+    restaurants/users have no RLS policy (they live on organizations/locations/
+    users, none of which are in the RLS table set) so a plain pool connection
+    is fine for those. `orders` DOES have RLS + FORCE (migration 0029) — the
+    pool connects as mesio_app in production, so a bare pool.acquire() with no
+    app.org_id GUC set fails RLS closed and would silently return 0 here
+    instead of the real cross-tenant total. Route that one count through
+    tenant_connection() under bypass_tenant_scope so it actually executes
+    `SET LOCAL ROLE mesio_superadmin` for the query.
+    """
+    from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
+
     pool = await _get_pool()
     async with pool.acquire() as conn:
         total_rest   = await conn.fetchval("SELECT COUNT(*) FROM restaurants")
         active_rest  = await conn.fetchval("SELECT COUNT(*) FROM restaurants WHERE subscription_status='active'")
         total_users  = await conn.fetchval("SELECT COUNT(*) FROM users")
-        total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders")
+
+    with bypass_tenant_scope("admin_stats_orders_cross_tenant"):
+        async with _tenant_connection() as conn:
+            total_orders = await conn.fetchval("SELECT COUNT(*) FROM orders")
+
     mrr = (active_rest or 0) * 99
     return {
         "total_restaurants":  int(total_rest or 0),

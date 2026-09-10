@@ -30,7 +30,7 @@ from typing import Any
 
 from app.services.logging import get_logger
 from app.services.money import to_decimal, quantize_money
-from app.services.tenant_context import bypass_tenant_scope
+from app.services.tenant_context import bypass_tenant_scope, bypass_tenant_scope_if_unset
 from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
@@ -81,9 +81,17 @@ def _cap_status(used: int | Decimal, cap: int) -> str:
 async def db_get_plan(plan_code: str) -> dict | None:
     """Fetch a single plan by code. Global — no tenant required.
 
-    Uses bypass_tenant_scope("global_lookup_plans").
+    Uses bypass_tenant_scope_if_unset("global_lookup_plans") — the SOFT variant.
+    This function is called both standalone (no scope active) AND from within
+    tenant-scoped call paths (db_set_plan, db_request_downgrade are both
+    "Requires active tenant_scope(org_id)" and both call db_get_plan to validate
+    the target plan exists). A strict bypass_tenant_scope() would raise
+    TenantContextConflict whenever a tenant is already pinned — plan_limits has
+    no RLS policy at all, so there is nothing to bypass in that case; the soft
+    variant simply no-ops and lets the existing scope's connection read the
+    (unfiltered) global table.
     """
-    with bypass_tenant_scope("global_lookup_plans"):
+    with bypass_tenant_scope_if_unset("global_lookup_plans"):
         async with tenant_connection() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM plan_limits WHERE plan_code = $1",
@@ -95,9 +103,11 @@ async def db_get_plan(plan_code: str) -> dict | None:
 async def db_list_plans() -> list[dict]:
     """List all plans ordered by sort_order. Global — no tenant required.
 
-    Uses bypass_tenant_scope("global_lookup_plans").
+    Uses bypass_tenant_scope_if_unset("global_lookup_plans") — see db_get_plan
+    docstring. Called both from unauthenticated routes (no scope) and from
+    scoped routes such as GET /api/billing/plan-options.
     """
-    with bypass_tenant_scope("global_lookup_plans"):
+    with bypass_tenant_scope_if_unset("global_lookup_plans"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM plan_limits ORDER BY sort_order ASC, plan_code ASC"
@@ -108,9 +118,10 @@ async def db_list_plans() -> list[dict]:
 async def db_list_addons() -> list[dict]:
     """List all addon modules ordered by sort_order. Global — no tenant required.
 
-    Uses bypass_tenant_scope("global_lookup_plans").
+    Uses bypass_tenant_scope_if_unset("global_lookup_plans") — see db_get_plan
+    docstring.
     """
-    with bypass_tenant_scope("global_lookup_plans"):
+    with bypass_tenant_scope_if_unset("global_lookup_plans"):
         async with tenant_connection() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM addon_modules ORDER BY sort_order ASC, module_code ASC"
