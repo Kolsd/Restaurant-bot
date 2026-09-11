@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -282,7 +282,11 @@ async def test_staff_clock_full_cycle(
     )
 
     # ── Step 7: GET /api/staff/self/timecard ────────────────────────────────────
-    today = date.today()
+    # UTC, not date.today(): the shift rows this test just created are stamped
+    # server-side in UTC, and the timecard groups them by that UTC work_date.
+    # With a local date, between 19:00 and midnight in UTC-5 the entry comes
+    # back dated tomorrow and the per-day assertion below finds nothing.
+    today = datetime.utcnow().date()
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     timecard_resp = await e2e_app.get(
