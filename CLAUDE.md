@@ -77,6 +77,20 @@ Cada restaurante guarda sus propias credenciales Wompi en `organizations.feature
 
 **Migración:** las env vars `WOMPI_PUBLIC_KEY` y `WOMPI_INTEGRITY_SECRET` siguen siendo válidas como fallback durante la transición. Se pueden remover de Railway una vez que TODOS los restaurantes activos hayan configurado sus credenciales en `/settings`. Hasta entonces, los restaurantes sin config explícita seguirán cobrando a la cuenta global.
 
+### ⚠️ Estado (2026-09-11): Wompi APAGADO al lanzamiento + webhook roto (P0 pendiente)
+
+**Decisión PM:** Wompi queda OFF al inicio. El PM no tiene RUT para abrir cuenta (ni siquiera sandbox). Recordar que en el modelo per-restaurant **el comercio es cada restaurante** (su RUT, su cuenta, sus llaves), no Mesio — la falta de RUT del PM bloquea *probar*, no el producto. El cobro al lanzamiento es datáfono/efectivo vía mesero ("traer datáfono"). Bold es la alternativa en evaluación (muchos restaurantes ya tienen su portal/QR de Bold).
+
+**Mientras Wompi esté OFF:** confirmar en Railway que `WOMPI_PUBLIC_KEY` / `WOMPI_INTEGRITY_SECRET` NO estén seteadas. Si lo están, el bot genera links de pago contra la cuenta global, el cliente paga, y el pago nunca se confirma (ver bug abajo) — el cliente pagó y el restaurante no se entera.
+
+**Bug P0 del webhook — arreglar ANTES de reactivar Wompi.** `POST /payment/wompi-webhook` (`app/routes/orders_routes.py`) nunca puede verificar un evento real de Wompi:
+1. **Fórmula equivocada.** El código calcula `sha256(cuerpo_crudo + WOMPI_EVENTS_SECRET)`. Wompi firma con SHA256 de: los valores de los campos listados en `signature.properties` (rutas tipo `transaction.id` dentro de `data`, en ese orden) + `timestamp` + el **secreto de eventos** del comercio; se compara contra `signature.checksum` (también viene en el header `X-Event-Checksum`). Prueba lógica: el cuerpo del evento *contiene* `signature.checksum`, así que no puede ser el hash del cuerpo. Confirmado por la doc oficial (https://docs.wompi.co/en/docs/colombia/eventos/) y por una integración de terceros en producción.
+2. **Secreto único global.** `WOMPI_EVENTS_SECRET` es una sola env var, pero el secreto de eventos es **por cuenta de comercio**. `features.wompi` solo guarda `public_key` + `integrity_secret`.
+3. **Por qué los tests pasan:** `tests/e2e/test_delivery_wompi_callback_lifecycle.py` firma sus payloads con la misma fórmula equivocada — el código se prueba contra sí mismo.
+
+**Especificación del arreglo:** implementar el algoritmo documentado iterando `signature.properties` del payload en cada evento (la doc advierte que las propiedades cambian: NUNCA fijar la lista en el código); agregar `events_secret` a `features.wompi` (enmascarado en `GET /api/settings` igual que `integrity_secret`); resolver el restaurante del evento vía `data.transaction.reference` → pedido / check de mesa / depósito `dep_` → org, verificar con el secreto de ese org y caer al env global solo como fallback; no actuar sobre el payload antes de verificar; reescribir el firmador del e2e con el algoritmo real. **El ejemplo resuelto de la doc NO sirve como test ancla**: su checksum (`3476DDA5…`) es decorativo — la concatenación documentada da `5A18EC5E…` y ningún orden alternativo lo reproduce. El ancla real es capturar un evento de una cuenta sandbox (requiere RUT de algún comercio de prueba).
+
+
 ## Roles Postgres (Fase 1 RLS)
 
 - **`postgres`** (superuser) — usado SOLO por Alembic vía `DATABASE_URL_ADMIN`. Bypass implícito de RLS.
