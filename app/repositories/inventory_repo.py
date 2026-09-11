@@ -385,13 +385,24 @@ async def db_deduct_inventory_for_order(bot_number: str, items: list):
 
                 else:
                     # ── 2. Fallback legacy: linked_dishes ────────────────
+                    # NOTE (P0 found 2026-09, fixed here): the pool's jsonb
+                    # codec (app/services/database.py get_pool(), encoder=
+                    # json.dumps) already serializes a Python list into the
+                    # $N::jsonb parameter. Passing a PRE-dumped json.dumps()
+                    # string here double-encoded it into a jsonb STRING
+                    # SCALAR wrapping the array text, so `linked_dishes @>
+                    # $2::jsonb` (array containment) silently NEVER matched
+                    # any row — restaurants using legacy linked_dishes
+                    # (no dish_recipes escandallo) never had stock enforced
+                    # or decremented for their orders. Pass the raw list so
+                    # the codec encodes it exactly once.
                     rows = await conn.fetch(
                         """SELECT id, current_stock, linked_dishes, min_stock
                            FROM inventory
                            WHERE org_id = $1
                              AND linked_dishes @> $2::jsonb
                            FOR UPDATE""",
-                        restaurant_id, json.dumps([dish_name])
+                        restaurant_id, [dish_name]
                     )
                     for row in rows:
                         available = float(row["current_stock"])
