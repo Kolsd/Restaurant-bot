@@ -27,6 +27,22 @@ from datetime import date, datetime, timedelta
 import pytest
 import asyncpg
 
+
+def _utc_today() -> date:
+    """Today's date in UTC — deliberately NOT date.today().
+
+    The insert helpers below stamp created_at with datetime.utcnow(), and
+    north_star_repo filters on created_at::date inside Postgres, which runs in
+    UTC. Using date.today() (machine-local) silently broke every
+    period-bounded assertion in this file between 19:00 and midnight in a
+    UTC-5 timezone: the seeded row was dated "tomorrow" relative to the period
+    end, so it fell outside the window and every count came back 0.
+
+    Passing in the morning and failing at night is the worst failure mode a
+    test can have. Keep both sides of the comparison on the same clock.
+    """
+    return datetime.utcnow().date()
+
 # ── Skip entire module if no test DB ─────────────────────────────────────────
 
 TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
@@ -230,7 +246,7 @@ async def test_empty_tenant_returns_zeros(db_conn, org_ids):
     org_a, _ = org_ids
     await _set_org_scope(db_conn, org_a)
 
-    today = date.today()
+    today = _utc_today()
     with tenant_scope(org_a):
         result = await db_count_pedidos_rescatados(today.replace(day=1), today)
 
@@ -253,7 +269,7 @@ async def test_delivery_bot_orders_counted(db_conn, org_ids):
         await _insert_delivery_order(db_conn, org_a, channel="whatsapp_bot")
     await _insert_delivery_order(db_conn, org_a, channel="manual")
 
-    today = date.today()
+    today = _utc_today()
     with tenant_scope(org_a):
         result = await db_count_pedidos_rescatados(today.replace(day=1), today)
 
@@ -275,7 +291,7 @@ async def test_table_bot_orders_counted(db_conn, org_ids):
         await _insert_table_order(db_conn, org_a, channel="whatsapp_bot")
     await _insert_table_order(db_conn, org_a, channel="pos")
 
-    today = date.today()
+    today = _utc_today()
     with tenant_scope(org_a):
         result = await db_count_pedidos_rescatados(today.replace(day=1), today)
 
@@ -297,7 +313,7 @@ async def test_manual_orders_excluded(db_conn, org_ids):
     await _insert_delivery_order(db_conn, org_a, channel=None)
     await _insert_table_order(db_conn, org_a, channel="pos")
 
-    today = date.today()
+    today = _utc_today()
     with tenant_scope(org_a):
         result = await db_count_pedidos_rescatados(today.replace(day=1), today)
 
@@ -317,7 +333,7 @@ async def test_cancelled_orders_counted(db_conn, org_ids):
         db_conn, org_a, channel="whatsapp_bot", status="cancelado"
     )
 
-    today = date.today()
+    today = _utc_today()
     with tenant_scope(org_a):
         result = await db_count_pedidos_rescatados(today.replace(day=1), today)
 
@@ -340,7 +356,7 @@ async def test_period_filter_excludes_old_orders(db_conn, org_ids):
     # Also one recent order
     await _insert_delivery_order(db_conn, org_a, channel="whatsapp_bot")
 
-    today = date.today()
+    today = _utc_today()
     period_start = today - timedelta(days=29)
     with tenant_scope(org_a):
         result = await db_count_pedidos_rescatados(period_start, today)
@@ -364,7 +380,7 @@ async def test_delivery_and_table_split(db_conn, org_ids):
     for _ in range(3):
         await _insert_table_order(db_conn, org_a, channel="whatsapp_bot")
 
-    today = date.today()
+    today = _utc_today()
     with tenant_scope(org_a):
         result = await db_count_pedidos_rescatados(today.replace(day=1), today)
 
@@ -386,7 +402,7 @@ async def test_tenant_isolation(db_conn, org_ids):
     for _ in range(5):
         await _insert_delivery_order(db_conn, org_a, channel="whatsapp_bot")
 
-    today = date.today()
+    today = _utc_today()
     # Query scoped to org B — must see 0
     await _set_org_scope(db_conn, org_b)
     with tenant_scope(org_b):
@@ -416,7 +432,7 @@ async def test_global_cross_tenant_aggregation(db_conn, org_ids):
         await _insert_delivery_order(db_conn, org_b, channel="whatsapp_bot")
     await _insert_table_order(db_conn, org_b, channel="pos")
 
-    today = date.today()
+    today = _utc_today()
     period_start = today.replace(day=1)
 
     with bypass_tenant_scope("test_global_cross_tenant"):
