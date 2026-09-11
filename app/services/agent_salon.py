@@ -722,70 +722,22 @@ async def execute_salon_action(
         items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
 
         # ── Enrutamiento multi-estación (Cocina vs. Bar) ──────────────
-        bar_enabled    = False
-        bar_categories: list = []
+        # Station split itself now lives in table_order_commit.resolve_station_split,
+        # called from save_table_order_round() below with these same `features` —
+        # always computed fresh against whatever cart_items end up being
+        # committed (Capa 3 below may filter cart_items before the actual save).
+        features: dict = {}
         try:
             restaurant = await db.db_get_restaurant_by_bot_number(bot_number)
             if restaurant:
                 features = restaurant.get("features") or {}
                 if isinstance(features, str):
                     features = json.loads(features)
-                bar_enabled    = bool(features.get("bar_enabled", False))
-                bar_categories = list(features.get("bar_categories", []))
         except Exception:
             log.exception("bar_routing_features_failed", phone=_ofuscar_phone(phone), bot_number=bot_number)
 
-        if bar_enabled and bar_categories:
-            kitchen_items = [i for i in cart_items if i.get("category", "") not in bar_categories]
-            bar_items     = [i for i in cart_items if i.get("category", "") in bar_categories]
-        else:
-            kitchen_items = cart_items
-            bar_items     = []
-
-        has_split       = bool(kitchen_items) and bool(bar_items)
-        kitchen_station = "kitchen" if has_split else "all"
-
-        def _station_total(item_list: list) -> Decimal:
-            return money_sum(
-                to_decimal(i.get("subtotal", money_mul(to_decimal(i.get("price", 0)), i.get("quantity", 1))))
-                for i in item_list
-            )
-
         base_order_id = await db.db_get_base_order_id(table_context["id"])
         sub_number    = 1
-
-        def _order_base(order_id: str, these_items: list, these_total: int,
-                        sub_num: int, station: str) -> dict:
-            # org_id is the tenant key (FK into organizations). Post-Wave-2,
-            # restaurant_obj["id"] is normalized to org_id. branch_id remains
-            # the location_id (sede) for operational scoping.
-            org_id_val = (
-                table_context.get("org_id")
-                or (restaurant_obj.get("org_id") if restaurant_obj else None)
-                or (restaurant_obj.get("id") if restaurant_obj else None)
-            )
-            branch_id_val = (
-                table_context.get("branch_id")
-                or table_context.get("location_id")
-                or (restaurant_obj.get("location_id") if restaurant_obj else None)
-            )
-            return {
-                "id":            order_id,
-                "table_id":      table_context["id"],
-                "table_name":    table_context["name"],
-                "phone":         phone,
-                "items":         these_items,
-                "notes":         extra_notes,
-                "total":         these_total,
-                "status":        "recibido",
-                "base_order_id": base_order_id,
-                "sub_number":    sub_num,
-                "station":       station,
-                "branch_id":     branch_id_val,
-                "org_id":        org_id_val,
-                "channel":       "whatsapp_bot",
-                "pending_table_validation": _needs_validation,
-            }
 
         # ── Capa 3: Anti-impostor — pending_table_validation ──────────
         # First order in an unverified session is held for waiter
@@ -814,38 +766,8 @@ async def execute_salon_action(
             _needs_validation = False
 
         _is_duplicate_order = False
-        if separate_bill or base_order_id is None:
-            order_id      = f"MESA-{uuid.uuid4().hex[:6].upper()}"
-            base_order_id = order_id
-            sub_number    = 1
-
-            k_items = kitchen_items if has_split else cart_items
-            k_total = _station_total(k_items) if has_split else cart_total
-            await db.db_save_table_order(
-                _order_base(order_id, k_items, k_total, sub_number, kitchen_station)
-            )
-
-            if has_split and bar_items:
-                sub_number = await db.db_get_next_sub_number(base_order_id)
-                bar_oid    = f"{base_order_id}-{sub_number}"
-                try:
-                    await db.db_save_table_order(
-                        _order_base(bar_oid, bar_items, _station_total(bar_items), sub_number, "bar")
-                    )
-                except Exception:
-                    log.exception("bar_order_save_failed", order_id=bar_oid, base_order_id=base_order_id)
-                    try:
-                        async with _tenant_conn() as _conn_cancel:
-                            await _conn_cancel.execute(
-                                "UPDATE table_orders SET status='cancelled' WHERE id=$1 OR base_order_id=$1",
-                                order_id,
-                            )
-                    except Exception:
-                        log.exception("table_order_cancel_failed_after_bar_save_error", order_id=order_id)
-                    return "Hubo un problema al registrar tu pedido. Por favor pide ayuda al mesero."
-                bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
-                log.info("bar_order_created", order_id=bar_oid, summary=bar_summary)
-        else:
+        is_new_group = separate_bill or base_order_id is None
+        if not is_new_group:
             # Sub-orden adicional — idempotencia en dos capas
             from datetime import timezone as _tz
             _dup_items_key = sorted(f"{i['quantity']}x{i.get('name','')}" for i in cart_items)
@@ -939,82 +861,54 @@ async def execute_salon_action(
                                     _q2 = 1
                                 if _n2:
                                     await orders.add_to_cart(phone, _n2, _q2, bot_number)
-                            # Refresh cart_items, cart, and totals from the updated cart
+                            # Refresh cart_items, cart, and totals from the updated cart.
+                            # Station split (kitchen vs bar) is recomputed fresh inside
+                            # save_table_order_round() below from these final cart_items.
                             cart = await db.db_get_cart(phone, bot_number)
                             cart_items = cart["items"] if cart and cart.get("items") else []
                             cart_total = await orders.get_cart_total(phone, bot_number)
                             items_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in cart_items)
-                            if bar_enabled and bar_categories:
-                                kitchen_items = [i for i in cart_items if i.get("category", "") not in bar_categories]
-                                bar_items     = [i for i in cart_items if i.get("category", "") in bar_categories]
-                            else:
-                                kitchen_items = cart_items
-                                bar_items     = []
-                            has_split = bool(kitchen_items) and bool(bar_items)
-                            kitchen_station = "kitchen" if has_split else "all"
             except Exception:
                 log.exception("duplicate_order_check_failed", base_order_id=base_order_id)
 
-            if not _is_duplicate_order:
-                sub_number = await db.db_get_next_sub_number(base_order_id)
-                order_id   = f"{base_order_id}-{sub_number}"
+        _commit: dict | None = None
+        if not _is_duplicate_order:
+            from app.services.table_order_commit import save_table_order_round  # noqa: PLC0415
 
-                k_items = kitchen_items if has_split else cart_items
-                k_total = _station_total(k_items) if has_split else cart_total
-                await db.db_save_table_order(
-                    _order_base(order_id, k_items, k_total, sub_number, kitchen_station)
-                )
+            _commit = await save_table_order_round(
+                is_new_group=is_new_group,
+                existing_base_order_id=None if is_new_group else base_order_id,
+                table_context=table_context,
+                restaurant_obj=restaurant_obj,
+                phone=phone,
+                cart_items=cart_items,
+                cart_total=cart_total,
+                extra_notes=extra_notes,
+                channel="whatsapp_bot",
+                pending_table_validation=_needs_validation,
+                features=features,
+            )
+            if not _commit["success"]:
+                return "Hubo un problema al registrar tu pedido. Por favor pide ayuda al mesero."
 
-                if has_split and bar_items:
-                    sub_number = await db.db_get_next_sub_number(base_order_id)
-                    bar_oid    = f"{base_order_id}-{sub_number}"
-                    try:
-                        await db.db_save_table_order(
-                            _order_base(bar_oid, bar_items, _station_total(bar_items), sub_number, "bar")
-                        )
-                    except Exception:
-                        log.exception("bar_order_save_failed", order_id=bar_oid, base_order_id=base_order_id)
-                        try:
-                            async with _tenant_conn() as _conn_cancel:
-                                await _conn_cancel.execute(
-                                    "UPDATE table_orders SET status='cancelled' WHERE id=$1",
-                                    order_id,
-                                )
-                        except Exception:
-                            log.exception("table_order_cancel_failed_after_bar_save_error", order_id=order_id)
-                        return "Hubo un problema al registrar tu pedido. Por favor pide ayuda al mesero."
-                    bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in bar_items)
-                    log.info("bar_order_created", order_id=bar_oid, summary=bar_summary)
+            order_id      = _commit["order_id"]
+            base_order_id = _commit["base_order_id"]
+            sub_number    = _commit["sub_number"]
+            if _commit["has_split"] and _commit["bar_items"]:
+                bar_summary = ", ".join(f"{i['quantity']}x {i['name']}" for i in _commit["bar_items"])
+                log.info("bar_order_created", order_id=order_id, base_order_id=base_order_id, summary=bar_summary)
 
         _skip_inventory = _is_duplicate_order
         if not _skip_inventory:
-            try:
-                await db.db_deduct_inventory_for_order(bot_number, cart_items)
-            except InsufficientStockError as e:
-                log.warning(
-                    "inventory_insufficient_table_order",
-                    sku=e.sku, requested=e.requested, available=e.available,
-                    phone=_ofuscar_phone(phone), bot_number=bot_number,
-                )
-                # Cancel the order(s) that were already saved so they do NOT reach the kitchen
-                _saved_order_id = locals().get("order_id")
-                if _saved_order_id:
-                    try:
-                        async with _tenant_conn() as _conn_cancel:
-                            await _conn_cancel.execute(
-                                "UPDATE table_orders SET status='cancelled' WHERE id=$1 OR base_order_id=$1",
-                                _saved_order_id,
-                            )
-                        log.info("table_order_cancelled_insufficient_stock", order_id=_saved_order_id)
-                    except Exception:
-                        log.exception("table_order_cancel_failed", order_id=_saved_order_id)
+            from app.services.table_order_commit import deduct_inventory_or_cancel  # noqa: PLC0415
+            _inv = await deduct_inventory_or_cancel(bot_number, cart_items, order_id)
+            if not _inv["success"]:
+                log.info("table_order_cancelled_insufficient_stock", order_id=order_id)
                 try:
                     await orders.clear_cart(phone, bot_number)
                 except Exception:
                     log.exception("cart_clear_failed_table_order", phone=_ofuscar_phone(phone), bot_number=bot_number)
-                return f"Lo siento, '{e.sku}' no está disponible en este momento. ¿Te gustaría ordenar algo diferente?"
-            except Exception:
-                log.exception("inventory_deduction_failed_table_order", phone=_ofuscar_phone(phone), bot_number=bot_number)
+                return f"{_inv['message']} ¿Te gustaría ordenar algo diferente?"
 
         try:
             await orders.clear_cart(phone, bot_number)

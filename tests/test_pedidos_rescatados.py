@@ -300,6 +300,31 @@ async def test_table_bot_orders_counted(db_conn, org_ids):
 
 
 @pytest.mark.asyncio
+async def test_web_chat_table_orders_counted(db_conn, org_ids):
+    """table_orders with channel='web_chat' (Mesio-native diner chat, added
+    2026-09) are counted exactly like 'whatsapp_bot' — both are bot-captured
+    demand, just via a different surface. Mixing both channels at the same
+    org must sum correctly."""
+    from app.repositories.north_star_repo import db_count_pedidos_rescatados
+    from app.services.tenant_context import tenant_scope
+
+    org_a, _ = org_ids
+    await _set_org_scope(db_conn, org_a)
+
+    await _insert_table_order(db_conn, org_a, channel="web_chat")
+    await _insert_table_order(db_conn, org_a, channel="web_chat")
+    await _insert_table_order(db_conn, org_a, channel="whatsapp_bot")
+    await _insert_table_order(db_conn, org_a, channel="pos")
+
+    today = _utc_today()
+    with tenant_scope(org_a):
+        result = await db_count_pedidos_rescatados(today.replace(day=1), today)
+
+    assert result["table"] == 3  # 2 web_chat + 1 whatsapp_bot; pos excluded
+    assert result["count"] == 3
+
+
+@pytest.mark.asyncio
 async def test_manual_orders_excluded(db_conn, org_ids):
     """channel='manual', 'pos', NULL — none of these count as rescatados."""
     from app.repositories.north_star_repo import db_count_pedidos_rescatados

@@ -532,3 +532,59 @@ body {
 @media (min-width: 420px) {
   .diner-menu-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ── Join code (Gap 1) ── */
+.diner-join-code-chip {
+  margin: 2px 0 0;
+  font-size: var(--caption);
+  font-weight: 600;
+  color: var(--brand-dark);
+}
+
+.diner-join-desc { margin: 0 0 var(--s-4); font-size: var(--body-sm); color: var(--text-3); }
+.diner-join-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text);
+  margin-bottom: var(--s-2);
+}
+.diner-join-input:focus { outline: none; border-color: var(--brand); }
+.diner-join-error { margin: 0 0 var(--s-4); font-size: var(--body-sm); color: var(--danger); }
+
+/* ── Cart summary card actions row (Gap 2 — "Enviar pedido") ── */
+.diner-cart-card-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.diner-cart-send-btn { width: 100%; margin-top: var(--s-3); }
+.diner-send-list { margin-bottom: var(--s-4); }
+
+/* ── Table view (Gap 3) — "Tú" vs "Otro comensal" ── */
+.diner-table-order-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+.diner-table-order-card--mine { border-color: var(--brand); background: var(--brand-bg); }
+.diner-table-order-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--s-2);
+}
+.diner-table-order-who { font-weight: 700; font-size: var(--body-sm); color: var(--text); }
+.diner-table-order-status {
+  font-size: var(--caption);
+  font-weight: 600;
+  color: var(--brand-dark);
+  background: var(--brand-light);
+  border-radius: var(--radius-pill);
+  padding: 2px 10px;
+}

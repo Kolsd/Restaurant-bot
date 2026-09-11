@@ -377,6 +377,12 @@ const CHANNEL_META = {
     svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="2" width="10" height="12" rx="1"/><path d="M6 5h4M6 8h4M6 11h2"/></svg>',
     barColor: 'var(--purple,#8b5cf6)',
   },
+  web_chat: {
+    label: 'Chat Mesio',
+    bg: '#E0F2FE', color: '#075985',
+    svg: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H5l-3 3V3z"/></svg>',
+    barColor: 'var(--info,#3b82f6)',
+  },
 };
 
 async function loadSalesByChannel() {

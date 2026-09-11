@@ -2181,6 +2181,29 @@ async def db_confirm_table_real(table_id: str, org_id: int, mesero_username: str
     return int(released or 0)
 
 
+async def db_mark_session_verified(session_id: int) -> None:
+    """Mark a single table_sessions row as verified (Capa 3 anti-impostor
+    bypass). Used by the Mesio-native diner web-chat flow: a diner who
+    scanned the physical table QR (or supplied the correct join_code to
+    join an already-open table) is, by construction, MORE certain to be at
+    the real table than the WhatsApp geo-claim flow db_confirm_table_real
+    guards against — so their first order should go straight to the
+    kitchen (product decision: no waiter-approval step for web orders).
+
+    Unlike db_confirm_table_real (which verifies every active session on a
+    table AND releases any already-held orders), this only flips the
+    `verified` flag on ONE session row — called once per diner session
+    (host or participant) right after it's created/linked.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        await conn.execute(
+            "UPDATE table_sessions SET verified = true WHERE id = $1",
+            session_id,
+        )
+
+
 async def db_mark_table_ghost(table_id: str, org_id: int, mesero_username: str) -> dict:
     """Waiter marks this table as a ghost (no real customer).
 

@@ -217,6 +217,40 @@ async def checkout_delete(phone: str, bot_number: str) -> None:
     _fb_delete(_fb_checkout, key)
 
 
+# ── Diner order-send idempotency ────────────────────────────────────────────
+# Keyed by (diner token, client-generated idempotency_key) — a double tap, a
+# retry, or a flaky-network resend of the SAME send-order action must return
+# the SAME cached result instead of committing a second table_order round.
+# Values are plain JSON-serializable dicts (Rule #1 — never Decimal).
+
+_fb_order_send: dict[str, tuple[float, Any]] = {}
+
+
+def _order_send_redis_key(cache_key: str) -> str:
+    return f"mesio:diner_order_sent:{cache_key}"
+
+
+async def order_send_result_get(cache_key: str) -> dict | None:
+    key = _order_send_redis_key(cache_key)
+    r = await _rc.get_redis()
+    if r is not None:
+        raw = await r.get(key)
+        return _rc.decode(raw)
+    _maybe_warn("order_send")
+    value = _fb_get(_fb_order_send, key)
+    return copy.deepcopy(value) if isinstance(value, dict) else value
+
+
+async def order_send_result_set(cache_key: str, result: dict, ttl_seconds: int = 300) -> None:
+    key = _order_send_redis_key(cache_key)
+    r = await _rc.get_redis()
+    if r is not None:
+        await r.set(key, _rc.encode(result), ex=ttl_seconds)
+        return
+    _maybe_warn("order_send")
+    _fb_set(_fb_order_send, key, result, ttl_seconds, family="order_send")
+
+
 # ── Table confirm cooldown ─────────────────────────────────────────────────────
 
 def _cooldown_redis_key(table_id: str, bot_number: str) -> str:

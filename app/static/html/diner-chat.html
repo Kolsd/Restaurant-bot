@@ -23,8 +23,10 @@
     <div class="diner-header-info">
       <p class="diner-header-restaurant" id="diner-restaurant-name">Mesio</p>
       <p class="diner-header-table" id="diner-table-label"></p>
+      <p class="diner-join-code-chip" id="diner-join-code-chip" hidden></p>
     </div>
     <div class="diner-header-actions">
+      <button type="button" id="btn-open-table" class="m-btn m-btn--ghost m-btn--sm diner-header-btn">Tu mesa</button>
       <button type="button" id="btn-open-menu" class="m-btn m-btn--ghost m-btn--sm diner-header-btn">Carta completa</button>
       <button type="button" id="cart-chip" class="diner-cart-chip" hidden aria-label="Ver tu pedido">
         <span aria-hidden="true">🛒</span>
@@ -36,6 +38,11 @@
   <div id="diner-error-banner" class="diner-error-banner" role="alert" hidden>
     <p id="diner-error-text" class="diner-error-text"></p>
     <button type="button" id="diner-retry-btn" class="m-btn m-btn--primary m-btn--sm">Reintentar</button>
+  </div>
+
+  <div id="diner-join-banner" class="diner-error-banner" role="alert" hidden>
+    <p class="diner-error-text">Esta mesa ya tiene un pedido activo. Ingresa el código para unirte.</p>
+    <button type="button" id="diner-join-open-btn" class="m-btn m-btn--primary m-btn--sm">Ingresar código</button>
   </div>
 
   <main id="diner-log" class="diner-log" role="log" aria-live="polite" aria-label="Conversación con el restaurante"></main>

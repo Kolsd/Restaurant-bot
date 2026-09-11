@@ -4,13 +4,16 @@ app/repositories/north_star_repo.py
 North-star metric — "Pedidos Rescatados" (bot-originated orders).
 
 Definition (CEO-confirmed 2026-05-07):
-  A "pedido rescatado" = any order created via the WhatsApp bot
-  (channel = 'whatsapp_bot') regardless of status, including cancelled.
-  It represents demand the restaurant captured via Mesio.
+  A "pedido rescatado" = any order created via the bot — WhatsApp
+  (channel = 'whatsapp_bot') OR Mesio's own diner web-chat
+  (channel = 'web_chat', added 2026-09 when WhatsApp stopped being the only
+  bot surface) — regardless of status, including cancelled. It represents
+  demand the restaurant captured via Mesio, independent of which channel
+  the diner happened to use.
 
 Sources:
-  - orders        (delivery / pickup external orders)  channel = 'whatsapp_bot'
-  - table_orders  (in-restaurant mesa orders)          channel = 'whatsapp_bot'
+  - orders        (delivery / pickup external orders)  channel IN _CHANNELS
+  - table_orders  (in-restaurant mesa orders)          channel IN _CHANNELS
 
 Functions:
   db_count_pedidos_rescatados       — single-tenant, requires active tenant_scope
@@ -25,7 +28,9 @@ from app.services.tenant_db import tenant_connection
 
 log = get_logger(__name__)
 
-_CHANNEL = "whatsapp_bot"
+# Every bot-originated channel counts as a "pedido rescatado" — the metric is
+# about demand captured BY THE BOT, not by any one messaging surface.
+_CHANNELS = ("whatsapp_bot", "web_chat")
 
 
 async def db_count_pedidos_rescatados(
@@ -46,21 +51,21 @@ async def db_count_pedidos_rescatados(
             """
             SELECT COUNT(*)
             FROM orders
-            WHERE channel = $1
+            WHERE channel = ANY($1)
               AND created_at::date >= $2
               AND created_at::date <= $3
             """,
-            _CHANNEL, period_start, period_end,
+            list(_CHANNELS), period_start, period_end,
         )
         table = await conn.fetchval(
             """
             SELECT COUNT(*)
             FROM table_orders
-            WHERE channel = $1
+            WHERE channel = ANY($1)
               AND created_at::date >= $2
               AND created_at::date <= $3
             """,
-            _CHANNEL, period_start, period_end,
+            list(_CHANNELS), period_start, period_end,
         )
 
     delivery = int(delivery or 0)
@@ -98,7 +103,7 @@ async def db_count_pedidos_rescatados_global(
                 0::bigint                               AS table_count
             FROM orders o
             JOIN organizations org ON org.id = o.org_id
-            WHERE o.channel = $1
+            WHERE o.channel = ANY($1)
               AND o.created_at::date >= $2
               AND o.created_at::date <= $3
             GROUP BY o.org_id, org.name
@@ -112,12 +117,12 @@ async def db_count_pedidos_rescatados_global(
                 COUNT(to2.id)
             FROM table_orders to2
             JOIN organizations org ON org.id = to2.org_id
-            WHERE to2.channel = $1
+            WHERE to2.channel = ANY($1)
               AND to2.created_at::date >= $2
               AND to2.created_at::date <= $3
             GROUP BY to2.org_id, org.name
             """,
-            _CHANNEL, period_start, period_end,
+            list(_CHANNELS), period_start, period_end,
         )
 
     # Aggregate UNION results per org_id

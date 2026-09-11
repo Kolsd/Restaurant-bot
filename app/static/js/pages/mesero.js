@@ -54,6 +54,7 @@ function _channelBadge(channel) {
   if (!channel) return '';
   const map = {
     whatsapp_bot: { icon: '💬', title: 'WhatsApp bot' },
+    web_chat:     { icon: '🗨️', title: 'Chat Mesio' },
     qr_pickup:    { icon: '📱', title: 'QR / pickup' },
     web:          { icon: '🌐', title: 'Web' },
     pos:          { icon: '🧾', title: 'POS' },

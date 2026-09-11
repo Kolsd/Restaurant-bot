@@ -74,6 +74,7 @@ function _srcBadge(order) {
   if (order._is_delivery) return '';   // type shown in metaPax already
   if (order.channel === 'whatsapp_bot') return `<span class="tag src">📱 WhatsApp</span>`;
   if (order.channel === 'whatsapp')     return `<span class="tag src">📱 WhatsApp</span>`;
+  if (order.channel === 'web_chat')     return `<span class="tag src">💬 Chat Mesio</span>`;
   return '';
 }
 

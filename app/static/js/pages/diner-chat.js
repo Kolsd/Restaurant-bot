@@ -52,13 +52,26 @@ var state = {
   locale: 'es-CO',
   cart: null,
   busy: false,
+  // joinCode: the host diner's own code, shown in the header so they can
+  // read it aloud. joined: false while a second diner is waiting on
+  // POST /api/diner/join — composer/send stay disabled until then (see
+  // setBusy()). Browsing the menu / adding to cart is still allowed.
+  joinCode: '',
+  joined: true,
 };
 
-function el(id) { return document.getElementById(id); }
+function dinerEl(id) { return document.getElementById(id); }
 
 function getToken() { return state.token; }
 
 function renderer() { return window.MesioCatalogRenderer; }
+
+function genIdempotencyKey() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return 'idem-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+}
 
 /* ── Chat log — bubbles ────────────────────────────────────────────── */
 
@@ -85,7 +98,7 @@ function createTextNode(text) {
 }
 
 function appendBubble(node) {
-  var log = el('diner-log');
+  var log = dinerEl('diner-log');
   if (!log || !node) return;
   log.appendChild(node);
   log.scrollTop = log.scrollHeight;
@@ -106,16 +119,17 @@ function showTyping() {
 }
 
 function hideTyping() {
-  var existing = el('diner-typing-indicator');
+  var existing = dinerEl('diner-typing-indicator');
   if (existing) existing.remove();
 }
 
 function setBusy(busy) {
   state.busy = busy;
-  var input = el('diner-input');
-  var sendBtn = el('diner-send-btn');
-  if (input) input.disabled = busy || !state.token;
-  if (sendBtn) sendBtn.disabled = busy || !state.token;
+  var input = dinerEl('diner-input');
+  var sendBtn = dinerEl('diner-send-btn');
+  var locked = busy || !state.token || !state.joined;
+  if (input) input.disabled = locked;
+  if (sendBtn) sendBtn.disabled = locked;
 }
 
 /* ── Dish card (shared between chat bubbles and the full carta panel) ─
@@ -321,12 +335,26 @@ function renderCartSummaryBlock(block) {
     card.appendChild(subtotalRow);
   }
 
+  var actionsRow = document.createElement('div');
+  actionsRow.className = 'diner-cart-card-actions';
+
   var viewBtn = document.createElement('button');
   viewBtn.type = 'button';
   viewBtn.className = 'm-btn m-btn--secondary m-btn--sm diner-cart-card-btn';
   viewBtn.textContent = 'Ver / editar pedido';
   viewBtn.addEventListener('click', function () { CartPanel.open(); });
-  card.appendChild(viewBtn);
+  actionsRow.appendChild(viewBtn);
+
+  if (items.length) {
+    var sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'm-btn m-btn--primary m-btn--sm diner-cart-card-btn';
+    sendBtn.textContent = 'Enviar pedido';
+    sendBtn.addEventListener('click', function () { SendOrderSheet.open(); });
+    actionsRow.appendChild(sendBtn);
+  }
+
+  card.appendChild(actionsRow);
 
   return card;
 }
@@ -463,7 +491,7 @@ async function sendMessage(text, opts) {
     mesioToast('Error de conexión', 'error', 3000);
   } finally {
     setBusy(false);
-    var input = el('diner-input');
+    var input = dinerEl('diner-input');
     if (input) input.focus();
   }
 }
@@ -471,15 +499,24 @@ async function sendMessage(text, opts) {
 /* ── Session bootstrap ────────────────────────────────────────────── */
 
 function renderHeader() {
-  var nameEl = el('diner-restaurant-name');
-  var tableEl = el('diner-table-label');
+  var nameEl = dinerEl('diner-restaurant-name');
+  var tableEl = dinerEl('diner-table-label');
+  var codeEl = dinerEl('diner-join-code-chip');
   if (nameEl) nameEl.textContent = state.restaurantName || 'Mesio';
   if (tableEl) tableEl.textContent = state.tableLabel || '';
+  if (codeEl) {
+    if (state.joinCode) {
+      codeEl.textContent = 'Código para invitar: ' + state.joinCode;
+      codeEl.hidden = false;
+    } else {
+      codeEl.hidden = true;
+    }
+  }
 }
 
 function showErrorBanner(msg) {
-  var banner = el('diner-error-banner');
-  var textEl = el('diner-error-text');
+  var banner = dinerEl('diner-error-banner');
+  var textEl = dinerEl('diner-error-text');
   if (!banner || !textEl) return;
   if (!msg) {
     banner.hidden = true;
@@ -487,6 +524,35 @@ function showErrorBanner(msg) {
   }
   textEl.textContent = msg;
   banner.hidden = false;
+}
+
+function showJoinBanner(show) {
+  var banner = dinerEl('diner-join-banner');
+  if (banner) banner.hidden = !show;
+}
+
+/* Occupied table (Gap 1): a second diner must supply the join_code shown on
+ * the first diner's screen before the greeting/carta ever appears. Entered
+ * this state either straight out of startSession() (fresh scan) or out of
+ * restoreSavedSession() (reload before ever joining). */
+function enterJoinRequiredState() {
+  state.joined = false;
+  setBusy(false);
+  renderHeader();
+  showJoinBanner(true);
+  JoinSheet.open();
+}
+
+function onJoinedSuccessfully(turn) {
+  state.joined = true;
+  state.joinCode = '';
+  var saved = DinerSession.load() || {};
+  saved.needsJoin = false;
+  DinerSession.save(saved);
+  showJoinBanner(false);
+  setBusy(false);
+  renderHeader();
+  processBotTurn(turn);
 }
 
 async function restoreSavedSession(tableId) {
@@ -503,6 +569,15 @@ async function restoreSavedSession(tableId) {
   state.tableLabel = saved.tableLabel || '';
   state.currency = saved.currency || 'COP';
   state.locale = saved.locale || 'es-CO';
+  state.joinCode = saved.joinCode || '';
+
+  if (saved.needsJoin) {
+    // Reloaded before ever entering the code — ask again. Never calls
+    // POST /api/diner/session again (that would mint a NEW token and could
+    // never re-detect "still occupied, still waiting" for THIS diner).
+    enterJoinRequiredState();
+    return true;
+  }
 
   try {
     var cartData = await cartLoad();
@@ -515,6 +590,7 @@ async function restoreSavedSession(tableId) {
     return false;
   }
 
+  state.joined = true;
   renderHeader();
   return true;
 }
@@ -551,6 +627,27 @@ async function startSession() {
     state.currency = data.currency || 'COP';
     state.locale = data.locale || 'es-CO';
     if (!state.token) throw new Error('missing session token');
+
+    if (data.requires_join_code) {
+      // Table occupied — never show the greeting/carta (PM decision). Save
+      // the token now (needed by POST /api/diner/join) with needsJoin=true
+      // so a reload before joining re-asks instead of losing the token.
+      DinerSession.save({
+        token: state.token,
+        tableId: tableId,
+        restaurantName: state.restaurantName,
+        tableLabel: state.tableLabel,
+        currency: state.currency,
+        locale: state.locale,
+        needsJoin: true,
+      });
+      setBusy(false);
+      enterJoinRequiredState();
+      return;
+    }
+
+    state.joinCode = data.join_code || '';
+    state.joined = true;
     DinerSession.save({
       token: state.token,
       tableId: tableId,
@@ -558,6 +655,8 @@ async function startSession() {
       tableLabel: state.tableLabel,
       currency: state.currency,
       locale: state.locale,
+      joinCode: state.joinCode,
+      needsJoin: false,
     });
     renderHeader();
     setBusy(false);
@@ -663,6 +762,126 @@ async function callWaiter(reasonObj) {
     mesioToast('No pudimos avisar al mesero. Intenta de nuevo o hazle señas a alguien del equipo.', 'error', 5000);
   }
 }
+
+/* ── Join sheet (Gap 1 — second diner enters the host's 4-digit code) ─
+ * POST /api/diner/join validates the code against the table's active
+ * session. Wrong code re-prompts (server also throttles brute force);
+ * right code hands back the SAME opening turn shape a free-table scan
+ * gets (message + category_chips), rendered via processBotTurn so the
+ * chat starts identically either way.
+ * ════════════════════════════════════════════════════════════════════ */
+
+var JoinSheet = (function () {
+  var overlay = null;
+  var box = null;
+  var input = null;
+  var errorEl = null;
+  var trap = null;
+
+  function ensureBuilt() {
+    if (overlay) return;
+
+    overlay = document.createElement('div');
+    overlay.className = 'diner-overlay';
+
+    box = document.createElement('div');
+    box.className = 'diner-sheet';
+
+    var title = document.createElement('h2');
+    title.id = 'join-sheet-title';
+    title.textContent = 'Únete a la mesa';
+    box.appendChild(title);
+
+    var desc = document.createElement('p');
+    desc.className = 'diner-join-desc';
+    desc.textContent = 'Esta mesa ya tiene un pedido activo. Pídele el código de 4 dígitos a quien la abrió.';
+    box.appendChild(desc);
+
+    input = document.createElement('input');
+    input.type = 'tel';
+    input.inputMode = 'numeric';
+    input.autocomplete = 'one-time-code';
+    input.maxLength = 4;
+    input.className = 'diner-join-input';
+    input.placeholder = '0000';
+    input.setAttribute('aria-label', 'Código de 4 dígitos de la mesa');
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    });
+    box.appendChild(input);
+
+    errorEl = document.createElement('p');
+    errorEl.className = 'diner-join-error';
+    errorEl.setAttribute('role', 'alert');
+    errorEl.hidden = true;
+    box.appendChild(errorEl);
+
+    var actions = document.createElement('div');
+    actions.className = 'diner-sheet-actions';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'm-btn m-btn--ghost';
+    cancelBtn.textContent = 'Ahora no';
+    cancelBtn.addEventListener('click', close);
+
+    var confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'm-btn m-btn--primary';
+    confirmBtn.textContent = 'Unirme';
+    confirmBtn.addEventListener('click', submit);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    box.appendChild(actions);
+
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function open() {
+    ensureBuilt();
+    input.value = '';
+    errorEl.hidden = true;
+    var confirmBtn = box.querySelector('.m-btn--primary');
+    if (confirmBtn) confirmBtn.disabled = false;
+    overlay.classList.add('open');
+    trap = mesioFocusTrap(box, { onEscape: close, labelledBy: 'join-sheet-title' });
+  }
+
+  function close() {
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    if (trap) { trap.deactivate(); trap = null; }
+  }
+
+  async function submit() {
+    var code = (input.value || '').trim();
+    if (!/^\d{4}$/.test(code)) {
+      errorEl.textContent = 'Ingresa los 4 dígitos del código.';
+      errorEl.hidden = false;
+      input.focus();
+      return;
+    }
+    var confirmBtn = box.querySelector('.m-btn--primary');
+    if (confirmBtn) confirmBtn.disabled = true;
+    errorEl.hidden = true;
+    try {
+      var data = await DinerSession.fetch('/api/diner/join', 'POST', { code: code }, getToken());
+      close();
+      onJoinedSuccessfully(data);
+    } catch (e) {
+      errorEl.textContent = (e && e.message) || 'Código incorrecto. Intenta de nuevo.';
+      errorEl.hidden = false;
+      input.select();
+    } finally {
+      if (confirmBtn) confirmBtn.disabled = false;
+    }
+  }
+
+  return { open: open, close: close };
+})();
 
 /* ── Add-to-cart sheet (qty + free-text note) ─────────────────────── */
 
@@ -885,6 +1104,13 @@ var CartPanel = (function () {
     footer.appendChild(subLabel);
     footer.appendChild(subValue);
     body.appendChild(footer);
+
+    var sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'm-btn m-btn--primary diner-cart-send-btn';
+    sendBtn.textContent = 'Enviar pedido';
+    sendBtn.addEventListener('click', function () { SendOrderSheet.open(); });
+    body.appendChild(sendBtn);
   }
 
   function buildCartRow(item) {
@@ -1016,8 +1242,8 @@ var CartPanel = (function () {
 })();
 
 function updateCartChip() {
-  var chip = el('cart-chip');
-  var label = el('cart-chip-label');
+  var chip = dinerEl('cart-chip');
+  var label = dinerEl('cart-chip-label');
   if (!chip || !label) return;
   var items = (state.cart && Array.isArray(state.cart.items)) ? state.cart.items : [];
   var count = items.reduce(function (a, it) { return a + (Number(it.qty) || 0); }, 0);
@@ -1166,11 +1392,306 @@ var MenuPanel = (function () {
   return { open: open, close: close };
 })();
 
+/* ── Send-order confirm sheet (Gap 2) ─────────────────────────────────
+ * "Enviar pedido" → summary → confirm, per the PM brief. Calls
+ * POST /api/diner/order/send with a fresh client-generated
+ * idempotency_key each time the sheet is opened and confirmed — a retry
+ * of the SAME tap (network hiccup, double submit before the button
+ * disables) reuses that same key so the server returns the identical
+ * result instead of creating a second order.
+ * ════════════════════════════════════════════════════════════════════ */
+
+var SendOrderSheet = (function () {
+  var overlay = null;
+  var box = null;
+  var listEl = null;
+  var totalEl = null;
+  var trap = null;
+  var pendingKey = null;
+
+  function ensureBuilt() {
+    if (overlay) return;
+
+    overlay = document.createElement('div');
+    overlay.className = 'diner-overlay';
+
+    box = document.createElement('div');
+    box.className = 'diner-sheet';
+
+    var title = document.createElement('h2');
+    title.id = 'send-sheet-title';
+    title.textContent = 'Confirmar pedido';
+    box.appendChild(title);
+
+    listEl = document.createElement('ul');
+    listEl.className = 'diner-cart-card-list diner-send-list';
+    box.appendChild(listEl);
+
+    totalEl = document.createElement('p');
+    totalEl.className = 'diner-cart-card-subtotal';
+    box.appendChild(totalEl);
+
+    var actions = document.createElement('div');
+    actions.className = 'diner-sheet-actions';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'm-btn m-btn--ghost';
+    cancelBtn.textContent = 'Seguir editando';
+    cancelBtn.addEventListener('click', close);
+
+    var confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'm-btn m-btn--primary';
+    confirmBtn.textContent = 'Enviar a cocina';
+    confirmBtn.addEventListener('click', confirmSend);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    box.appendChild(actions);
+
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function render() {
+    listEl.textContent = '';
+    var items = (state.cart && Array.isArray(state.cart.items)) ? state.cart.items : [];
+    items.forEach(function (item) {
+      var li = document.createElement('li');
+      var qty = document.createElement('span');
+      qty.className = 'diner-cart-card-qty';
+      qty.textContent = (item.qty != null ? item.qty : 1) + '×';
+      var name = document.createElement('span');
+      name.className = 'diner-cart-card-name';
+      name.textContent = item.name || '';
+      li.appendChild(qty);
+      li.appendChild(name);
+      if (item.note) {
+        var note = document.createElement('span');
+        note.className = 'diner-cart-row-note';
+        note.textContent = ' — ' + item.note;
+        li.appendChild(note);
+      }
+      listEl.appendChild(li);
+    });
+
+    totalEl.textContent = '';
+    var totalLabel = document.createElement('span');
+    totalLabel.textContent = 'Total: ';
+    var totalValue = document.createElement('strong');
+    totalValue.textContent = renderer().fmtPrice(
+      state.cart ? state.cart.subtotal : 0, state.locale, (state.cart && state.cart.currency) || state.currency
+    );
+    totalEl.appendChild(totalLabel);
+    totalEl.appendChild(totalValue);
+  }
+
+  function open() {
+    var items = (state.cart && Array.isArray(state.cart.items)) ? state.cart.items : [];
+    if (!items.length) {
+      mesioToast('Tu pedido está vacío. Agrega algo primero.', 'error', 3000);
+      return;
+    }
+    ensureBuilt();
+    render();
+    pendingKey = genIdempotencyKey();
+    var confirmBtn = box.querySelector('.m-btn--primary');
+    if (confirmBtn) confirmBtn.disabled = false;
+    overlay.classList.add('open');
+    trap = mesioFocusTrap(box, { onEscape: close, labelledBy: 'send-sheet-title' });
+  }
+
+  function close() {
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    if (trap) { trap.deactivate(); trap = null; }
+  }
+
+  async function confirmSend() {
+    var confirmBtn = box.querySelector('.m-btn--primary');
+    if (confirmBtn) confirmBtn.disabled = true;
+    try {
+      var data = await DinerSession.fetch('/api/diner/order/send', 'POST', {
+        idempotency_key: pendingKey,
+      }, getToken());
+      close();
+      state.cart = null;
+      updateCartChip();
+      CartPanel.refresh();
+      var bubble = createBotBubble();
+      bubble.appendChild(createTextNode(data.message || 'Listo, tu pedido ya va para la cocina.'));
+      appendBubble(bubble);
+      mesioToast('Pedido enviado a cocina', 'success', 3000);
+      TablePanel.refresh();
+    } catch (e) {
+      mesioToast((e && e.message) || 'No pudimos enviar tu pedido. Intenta de nuevo.', 'error', 4500);
+    } finally {
+      if (confirmBtn) confirmBtn.disabled = false;
+    }
+  }
+
+  return { open: open, close: close };
+})();
+
+/* ── Table view (Gap 3) — "Tú" vs "Otro comensal" ─────────────────────
+ * GET /api/diner/table. Polled every 8s while the panel is open (and once
+ * right after a successful send) via mesioInterval, mirroring the
+ * visibility-aware polling pattern used across the rest of the dashboard.
+ * ════════════════════════════════════════════════════════════════════ */
+
+var TABLE_STATUS_LABELS = {
+  recibido: 'Recibido',
+  en_preparacion: 'En preparación',
+  listo: 'Listo',
+  entregado: 'Entregado',
+};
+
+var TablePanel = (function () {
+  var overlay = null;
+  var box = null;
+  var body = null;
+  var trap = null;
+
+  function ensureBuilt() {
+    if (overlay) return;
+
+    overlay = document.createElement('div');
+    overlay.className = 'diner-overlay diner-overlay--full';
+
+    box = document.createElement('div');
+    box.className = 'diner-panel';
+
+    var header = document.createElement('div');
+    header.className = 'diner-panel-header';
+
+    var h2 = document.createElement('h2');
+    h2.id = 'table-panel-title';
+    h2.textContent = 'Tu mesa';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'diner-panel-close';
+    closeBtn.setAttribute('aria-label', 'Cerrar');
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', close);
+
+    header.appendChild(h2);
+    header.appendChild(closeBtn);
+
+    body = document.createElement('div');
+    body.className = 'diner-panel-body';
+
+    box.appendChild(header);
+    box.appendChild(body);
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function buildOrderCard(order) {
+    var card = document.createElement('div');
+    card.className = 'diner-table-order-card' + (order.mine ? ' diner-table-order-card--mine' : '');
+
+    var head = document.createElement('div');
+    head.className = 'diner-table-order-head';
+    var who = document.createElement('span');
+    who.className = 'diner-table-order-who';
+    who.textContent = order.diner_label || (order.mine ? 'Tú' : 'Otro comensal');
+    var status = document.createElement('span');
+    status.className = 'diner-table-order-status';
+    status.textContent = TABLE_STATUS_LABELS[order.status] || order.status || '';
+    head.appendChild(who);
+    head.appendChild(status);
+    card.appendChild(head);
+
+    var list = document.createElement('ul');
+    list.className = 'diner-cart-card-list';
+    var items = Array.isArray(order.items) ? order.items : [];
+    items.forEach(function (item) {
+      var li = document.createElement('li');
+      var qty = document.createElement('span');
+      qty.className = 'diner-cart-card-qty';
+      qty.textContent = (item.qty != null ? item.qty : 1) + '×';
+      var name = document.createElement('span');
+      name.className = 'diner-cart-card-name';
+      name.textContent = item.name || '';
+      li.appendChild(qty);
+      li.appendChild(name);
+      if (item.notes) {
+        var note = document.createElement('span');
+        note.className = 'diner-cart-row-note';
+        note.textContent = ' — ' + item.notes;
+        li.appendChild(note);
+      }
+      list.appendChild(li);
+    });
+    card.appendChild(list);
+
+    return card;
+  }
+
+  function renderOrders(data) {
+    body.textContent = '';
+    var orders = (data && Array.isArray(data.orders)) ? data.orders : [];
+    if (!orders.length) {
+      var empty = document.createElement('p');
+      empty.className = 'diner-panel-empty';
+      empty.textContent = 'Todavía no hay pedidos en esta mesa.';
+      body.appendChild(empty);
+      return;
+    }
+    orders.forEach(function (order) { body.appendChild(buildOrderCard(order)); });
+  }
+
+  function renderErrorState() {
+    body.textContent = '';
+    var p = document.createElement('p');
+    p.className = 'diner-panel-empty';
+    p.textContent = 'No pudimos cargar tu mesa.';
+    body.appendChild(p);
+  }
+
+  async function load() {
+    try {
+      var data = await DinerSession.fetch('/api/diner/table', 'GET', null, getToken());
+      renderOrders(data);
+    } catch (e) {
+      renderErrorState();
+    }
+  }
+
+  function open() {
+    ensureBuilt();
+    var loading = document.createElement('p');
+    loading.className = 'diner-panel-loading';
+    loading.textContent = 'Cargando tu mesa...';
+    body.textContent = '';
+    body.appendChild(loading);
+    overlay.classList.add('open');
+    trap = mesioFocusTrap(box, { onEscape: close, labelledBy: 'table-panel-title' });
+    load();
+  }
+
+  function close() {
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    if (trap) { trap.deactivate(); trap = null; }
+  }
+
+  function refresh() {
+    if (overlay && overlay.classList.contains('open')) load();
+  }
+
+  return { open: open, close: close, refresh: refresh };
+})();
+
 /* ── Wiring ────────────────────────────────────────────────────────── */
 
 function initComposer() {
-  var form = el('diner-composer');
-  var input = el('diner-input');
+  var form = dinerEl('diner-composer');
+  var input = dinerEl('diner-input');
   if (!form || !input) return;
   form.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -1181,27 +1702,42 @@ function initComposer() {
 }
 
 function initWaiterFab() {
-  var btn = el('waiter-fab');
+  var btn = dinerEl('waiter-fab');
   if (btn) btn.addEventListener('click', function () { WaiterSheet.open(); });
 }
 
 function initHeaderButtons() {
-  var menuBtn = el('btn-open-menu');
+  var menuBtn = dinerEl('btn-open-menu');
   if (menuBtn) menuBtn.addEventListener('click', function () { MenuPanel.open(); });
-  var cartChip = el('cart-chip');
+  var tableBtn = dinerEl('btn-open-table');
+  if (tableBtn) tableBtn.addEventListener('click', function () { TablePanel.open(); });
+  var cartChip = dinerEl('cart-chip');
   if (cartChip) cartChip.addEventListener('click', function () { CartPanel.open(); });
 }
 
+function initJoinBanner() {
+  var btn = dinerEl('diner-join-open-btn');
+  if (btn) btn.addEventListener('click', function () { JoinSheet.open(); });
+}
+
 function initErrorBanner() {
-  var retryBtn = el('diner-retry-btn');
+  var retryBtn = dinerEl('diner-retry-btn');
   if (retryBtn) retryBtn.addEventListener('click', startSession);
+}
+
+function initTablePolling() {
+  // Visibility-aware (mesioInterval skips ticks while the tab is hidden);
+  // TablePanel.refresh() itself is a no-op unless the panel is open.
+  mesioInterval(function () { TablePanel.refresh(); }, 8000);
 }
 
 function initDinerChat() {
   initComposer();
   initWaiterFab();
   initHeaderButtons();
+  initJoinBanner();
   initErrorBanner();
+  initTablePolling();
   startSession();
 }
 

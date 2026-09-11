@@ -65,6 +65,7 @@ def _prev_period(period_start: str, period_end: str) -> tuple[str, str]:
 
 _CHANNEL_LABELS: dict[str, str] = {
     "whatsapp_bot": "WhatsApp · Bot",
+    "web_chat":     "Chat Mesio",
     "pos":          "Salón · POS",
     "qr_table":     "QR de mesa",
     "delivery":     "Domicilios",
@@ -80,6 +81,8 @@ def _classify_channel(channel: str | None, order_type: str | None) -> str:
 
     if ch == "whatsapp_bot":
         return "whatsapp_bot"
+    if ch == "web_chat":
+        return "web_chat"
     if ch in ("pos", "salon"):
         return "pos"
     if ch == "qr_table":
