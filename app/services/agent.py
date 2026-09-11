@@ -2698,6 +2698,7 @@ async def _call_llm_and_execute(
                         ),
                         table_id=str(table_id),
                         table_name=table_name,
+                        location_id=(table_context or {}).get("location_id"),
                     )
                 except Exception:
                     log.exception(

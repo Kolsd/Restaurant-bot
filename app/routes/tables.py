@@ -507,9 +507,29 @@ async def get_waiter_alerts(request: Request):
     await require_auth(request)
     restaurant = await get_current_restaurant(request)
     bot_number = restaurant.get("whatsapp_number", "")
+
+    # X-Branch-ID carries a location_id (CLAUDE.md "Contexto Multi-Sucursal" —
+    # NEVER mix it with restaurant["id"], which is the org_id). Only apply a
+    # location filter when the header is present and actually belongs to this
+    # caller's org — otherwise keep today's behaviour (all sedes sharing this
+    # bot_number). This closes the bug where a multi-location restaurant
+    # sharing one WhatsApp number leaked location-2 alerts onto location-1's
+    # waiter screen.
+    location_id = None
+    branch_header = request.headers.get("X-Branch-ID", "").strip()
+    if branch_header and branch_header.isdigit():
+        target_location_id = int(branch_header)
+        try:
+            with tenant_scope(restaurant["id"]):
+                loc = await db.db_get_location_by_id(target_location_id)
+        except Exception:
+            loc = None
+        if loc and loc.get("org_id") == restaurant.get("id"):
+            location_id = target_location_id
+
     try:
         with tenant_scope(restaurant["id"]):
-            alerts = await tr.db_get_waiter_alerts(bot_number)
+            alerts = await tr.db_get_waiter_alerts(bot_number, location_id=location_id)
     except Exception as e:
         log.exception("tables.alerts_read_failed", restaurant_id=restaurant.get("id"), error=str(e))
         alerts = []
@@ -523,27 +543,52 @@ class AdminCallRequest(BaseModel):
 
 @router.post("/api/waiter-alerts/admin-call")
 async def admin_call_waiter(request: Request, body: AdminCallRequest):
-    """El administrador convoca a un mesero/empleado a caja o dashboard."""
+    """El administrador convoca a un mesero/empleado a caja o dashboard.
+
+    SECURITY (2026-09 audit): `bot_number` used to come straight from the
+    request BODY and the alert was written under bypass_tenant_scope — any
+    authenticated user (of ANY restaurant) could push an alert onto another
+    restaurant's waiter screen, and the row landed with org_id NULL (the
+    bypass has no tenant to stamp). We now resolve the caller's OWN
+    restaurant server-side and ignore whatever bot_number the body carries,
+    writing inside tenant_scope() so RLS stamps the correct org_id and a
+    cross-tenant bot_number in the body simply can't reach another org.
+    """
     await require_auth(request)
-    with bypass_tenant_scope("admin_call_waiter: cross-tenant waiter alert from dashboard"):
+    restaurant = await get_current_restaurant(request)
+    bot_number = restaurant.get("whatsapp_number", "")
+    with tenant_scope(restaurant["id"]):
         alert = await db.db_create_waiter_alert(
             phone=body.phone or "admin",
-            bot_number=body.bot_number,
+            bot_number=bot_number,
             alert_type="admin_call",
             message="El Administrador requiere verte en caja/dashboard",
             table_id=body.table_id,
             table_name=body.table_name,
+            location_id=restaurant.get("location_id"),
         )
     return {"success": True, "alert": alert}
 
 @router.post("/api/waiter-alerts/{alert_id}/dismiss")
 async def dismiss_waiter_alert(request: Request, alert_id: int):
+    """SECURITY (2026-09 audit): this used to run the UPDATE under
+    bypass_tenant_scope with NO ownership check — alert ids are sequential
+    integers, so any authenticated user of restaurant A could silence
+    restaurant B's alerts by guessing ids (IDOR). Running it inside the
+    caller's own tenant_scope() instead means RLS's org_isolation policy
+    (waiter_alerts IS RLS-protected) makes the UPDATE match zero rows for a
+    foreign or unknown id — we surface that as 404 and never touch the row.
+    """
     await require_auth(request)
+    restaurant = await get_current_restaurant(request)
     try:
-        with bypass_tenant_scope("dismiss_waiter_alert: global kitchen alert dismiss"):
-            await tr.db_dismiss_waiter_alert(alert_id)
+        with tenant_scope(restaurant["id"]):
+            dismissed = await tr.db_dismiss_waiter_alert(alert_id)
     except Exception:
-        log.warning("tables.dismiss_waiter_alert_failed", alert_id=alert_id)
+        log.exception("tables.dismiss_waiter_alert_failed", alert_id=alert_id, restaurant_id=restaurant.get("id"))
+        raise HTTPException(status_code=404, detail="Alerta no encontrada")
+    if not dismissed:
+        raise HTTPException(status_code=404, detail="Alerta no encontrada")
     return {"success": True}
 
 # ── ELIMINAR CONVERSACIONES (MANUAL) ─────────────────────────────────
@@ -981,6 +1026,7 @@ async def update_order_status(request: Request, order_id: str):
                             message=f"Pedido listo en pase — Mesa {table_name}",
                             table_id=order.get("table_id", ""),
                             table_name=table_name,
+                            location_id=order.get("location_id"),
                         )
                 except Exception:
                     log.exception(

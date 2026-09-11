@@ -562,29 +562,47 @@ def test_create_waiter_alert_success(client, monkeypatch):
 
 
 def test_dismiss_waiter_alert_success(client, monkeypatch):
-    """POST /api/waiter-alerts/{id}/dismiss → 200."""
+    """POST /api/waiter-alerts/{id}/dismiss → 200.
+
+    conn.execute must return the real asyncpg status string ("UPDATE 1") —
+    db_dismiss_waiter_alert checks `result == "UPDATE 1"` to know whether the
+    row actually matched (see the 2026-09 IDOR fix: dismiss now runs inside
+    the caller's own tenant_scope(), so a foreign/unknown id legitimately
+    matches zero rows and must 404 rather than silently reporting success).
+    """
     _auth(monkeypatch)
-    conn = MagicMock()
-    conn.execute = AsyncMock()
-    pool = make_pool(conn)
-    monkeypatch.setattr(db_mod, "get_pool", AsyncMock(return_value=pool))
+    conn = _mock_pool(monkeypatch)
+    conn.execute = AsyncMock(return_value="UPDATE 1")
     r = client.post("/api/waiter-alerts/1/dismiss", headers=_HEADERS)
     assert r.status_code == 200
     assert r.json()["success"] is True
 
 
-def test_dismiss_alert_calls_delete(client, monkeypatch):
-    """dismiss ejecuta DELETE en la DB con el ID correcto."""
+def test_dismiss_alert_sets_dismissed_flag_not_delete(client, monkeypatch):
+    """dismiss must UPDATE waiter_alerts.dismissed=TRUE, never DELETE the row.
+
+    BUG FOUND 2026-09 (security audit pass): app/repositories/tables_repo.py
+    used to define db_dismiss_waiter_alert TWICE — a real soft-dismiss
+    (UPDATE ... SET dismissed=TRUE) and, much later in the same file, a
+    same-named DELETE FROM waiter_alerts. Python keeps only the last
+    definition of a module-level name, so the DELETE version silently
+    shadowed the real one and every dismiss call — including this test,
+    which used to assert the DELETE happened — was permanently destroying
+    alert rows instead of just marking them dismissed. Fixed by renaming the
+    duplicate to db_delete_waiter_alert; this test now asserts the CORRECT
+    (UPDATE, not DELETE) behaviour.
+    """
     _auth(monkeypatch)
-    conn = MagicMock()
+    conn = _mock_pool(monkeypatch)
     executed = []
     async def capture(q, *args):
         executed.append((q, args))
+        return "UPDATE 1"
     conn.execute = capture
-    pool = make_pool(conn)
-    monkeypatch.setattr(db_mod, "get_pool", AsyncMock(return_value=pool))
-    client.post("/api/waiter-alerts/42/dismiss", headers=_HEADERS)
-    assert any("DELETE" in q for q, _ in executed)
+    r = client.post("/api/waiter-alerts/42/dismiss", headers=_HEADERS)
+    assert r.status_code == 200
+    assert any("UPDATE" in q and "dismissed" in q.lower() for q, _ in executed)
+    assert not any("DELETE" in q for q, _ in executed)
     assert any(42 in args for _, args in executed)
 
 

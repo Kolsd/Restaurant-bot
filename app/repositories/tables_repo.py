@@ -460,13 +460,21 @@ async def db_init_waiter_alerts():
     pass
 
 
-async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, message: str, table_id: str = "", table_name: str = "") -> dict:
+async def db_create_waiter_alert(
+    phone: str, bot_number: str, alert_type: str, message: str,
+    table_id: str = "", table_name: str = "", location_id: int | None = None,
+) -> dict:
     """
     Create a waiter alert. For non-billing alerts (alert_type='waiter'), if an
     open alert already exists for the same table within the last 60 seconds,
     append the new message to the existing alert instead of creating a duplicate.
     This prevents the waiter from receiving multiple pings when the customer
     mentions the same request across two consecutive turns.
+
+    location_id: the specific sede (branch) this alert belongs to, when known
+    by the caller. Optional and additive — many call sites predate Location
+    tracking and still pass None, which is why db_get_waiter_alerts also
+    matches legacy NULL-location rows (see that function's docstring).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -495,17 +503,40 @@ async def db_create_waiter_alert(phone: str, bot_number: str, alert_type: str, m
                 return _serialize(dict(row))
 
         row = await conn.fetchrow(
-            "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, org_id) "
-            "VALUES ($1, $2, $3, $4, $5, $6, NULLIF(current_setting('app.org_id', true), '')::bigint) RETURNING *",
-            table_id, table_name, phone, bot_number, alert_type, message,
+            "INSERT INTO waiter_alerts (table_id, table_name, phone, bot_number, alert_type, message, org_id, location_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, NULLIF(current_setting('app.org_id', true), '')::bigint, $7) RETURNING *",
+            table_id, table_name, phone, bot_number, alert_type, message, location_id,
         )
         return _serialize(dict(row))
 
 
-async def db_get_waiter_alerts(bot_number: str) -> list:
-    """# Requires active tenant_scope() or bypass_tenant_scope()."""
+async def db_get_waiter_alerts(bot_number: str, location_id: int | None = None) -> list:
+    """List active (non-dismissed, <2h old) waiter alerts for a bot_number.
+
+    location_id: when given, restricts to alerts for THAT sede plus legacy
+    rows with location_id IS NULL (created before this column was populated —
+    they must not vanish for tenants that had alerts before this change).
+    When omitted (None), no location filter is applied — every location
+    sharing this bot_number is returned (today's behaviour, e.g. an owner
+    viewing "all sedes").
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
     async with tenant_connection() as conn:
-        rows = await conn.fetch("SELECT * FROM waiter_alerts WHERE bot_number=$1 AND dismissed=FALSE AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC", bot_number)
+        if location_id is not None:
+            rows = await conn.fetch(
+                "SELECT * FROM waiter_alerts WHERE bot_number=$1 AND dismissed=FALSE "
+                "AND created_at > NOW() - INTERVAL '2 hours' "
+                "AND (location_id = $2 OR location_id IS NULL) "
+                "ORDER BY created_at DESC",
+                bot_number, location_id,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM waiter_alerts WHERE bot_number=$1 AND dismissed=FALSE "
+                "AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC",
+                bot_number,
+            )
         return [_serialize(dict(r)) for r in rows]
 
 
@@ -1618,8 +1649,23 @@ async def db_get_tables_status_enrichment(branch_id: int) -> dict:
     return result
 
 
-async def db_dismiss_waiter_alert(alert_id: int) -> None:
-    """Delete a waiter alert by id.
+async def db_delete_waiter_alert(alert_id: int) -> None:
+    """Hard-delete a waiter alert by id.
+
+    BUG FOUND 2026-09 (fixed in the same pass as the dismiss IDOR/admin-call
+    audit): this function used to be named `db_dismiss_waiter_alert`,
+    duplicating the name of the OTHER function earlier in this file (the
+    real soft-dismiss: `UPDATE waiter_alerts SET dismissed=TRUE ...`). Python
+    silently keeps only the LAST definition of a module-level name, so every
+    call to `db_dismiss_waiter_alert` — including the live
+    POST /api/waiter-alerts/{id}/dismiss endpoint — was actually HARD
+    DELETING the row instead of setting `dismissed=TRUE`, permanently losing
+    alert history and making the `dismissed` column effectively dead (no row
+    survives long enough to ever read `dismissed=TRUE`). Renamed here to
+    restore the real dismiss function's reachability; this delete variant
+    had zero callers under its old name (it never could — it was shadowed)
+    so it is kept as a distinct, explicitly-named utility rather than
+    removed outright.
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """

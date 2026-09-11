@@ -95,6 +95,7 @@ async def _create_inactivity_alert(session: dict):
             message=f"Cliente en {session.get('table_name', 'mesa')} sin actividad — posible cierre por inactividad.",
             table_id=session.get("table_id", ""),
             table_name=session.get("table_name", ""),
+            location_id=session.get("location_id"),
         )
     except Exception as e:
         log.error("scheduler.inactivity_alert_failed", phone=session.get("phone"), error=str(e))

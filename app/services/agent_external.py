@@ -169,7 +169,7 @@ async def execute_external_action(
             async with tenant_connection() as conn:
                 order_row = await conn.fetchrow(
                     """
-                    SELECT id, order_type, status
+                    SELECT id, order_type, status, location_id
                     FROM orders
                     WHERE phone = $1
                       AND bot_number = $2
@@ -231,6 +231,7 @@ async def execute_external_action(
                     message=f"El cliente llegó a recoger el pedido #{order_id}.",
                     table_id="",
                     table_name="",
+                    location_id=order_row.get("location_id"),
                 )
                 log.info(
                     "notify_arrival.alert_created",

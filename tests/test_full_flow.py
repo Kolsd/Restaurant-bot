@@ -352,11 +352,14 @@ class TestWaiterFlows:
         assert len(data["alerts"]) == 1
 
     def test_dismiss_alert_succeeds(self, client, monkeypatch):
-        """POST /api/waiter-alerts/{id}/dismiss deletes the alert."""
+        """POST /api/waiter-alerts/{id}/dismiss marks the alert dismissed
+        (soft — see the 2026-09 fix: this used to be shadowed by a duplicate
+        DELETE-based function of the same name; "UPDATE 1" is the real
+        asyncpg execute() status string a matching UPDATE returns)."""
         patch_auth(monkeypatch, role="mesero")
 
         conn = AsyncMock()
-        conn.execute = AsyncMock(return_value=None)
+        conn.execute = AsyncMock(return_value="UPDATE 1")
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
 
         resp = client.post(

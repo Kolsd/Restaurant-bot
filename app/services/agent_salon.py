@@ -1168,6 +1168,7 @@ async def execute_salon_action(
                             message=_bill_alert_msg,
                             table_id=table_id,
                             table_name=table_name,
+                            location_id=(table_context or {}).get("location_id"),
                         )
                         blocks.push_block(blocks.build_waiter_ack_block("bill", _bill_alert_msg))
                     except Exception:
@@ -1215,6 +1216,7 @@ async def execute_salon_action(
             await db.db_create_waiter_alert(
                 phone=phone, bot_number=bot_number, alert_type="bill",
                 message=alert_message, table_id=table_id, table_name=table_name,
+                location_id=(table_context or {}).get("location_id"),
             )
             log.info("waiter_alert_bill", table=table_name)
             blocks.push_block(blocks.build_waiter_ack_block("bill", alert_message))
@@ -1233,6 +1235,7 @@ async def execute_salon_action(
         await db.db_create_waiter_alert(
             phone=phone, bot_number=bot_number, alert_type="waiter",
             message=alert_message, table_id=table_id, table_name=table_name,
+            location_id=(table_context or {}).get("location_id"),
         )
         log.info("waiter_alert", table=table_name)
         blocks.push_block(blocks.build_waiter_ack_block("other", alert_message))
