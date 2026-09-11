@@ -1461,3 +1461,31 @@ if (document.readyState === 'loading') {
 } else {
   initCatalog();
 }
+
+/* ── Public renderer API (Mesio chat pivot) ──────────────────────────
+ * The diner chat surface (app/static/js/pages/diner-chat.js) reuses the
+ * dish-rendering primitives below — photo handling + fallback avatar,
+ * dietary/allergen icon set, badge rendering and price formatting —
+ * instead of re-implementing them. This block is additive only: it does
+ * not change initCatalog()/the standalone /menu page behavior (including
+ * its wa.me checkout path, which is legacy-only and untouched here).
+ * ════════════════════════════════════════════════════════════════════ */
+window.MesioCatalogRenderer = {
+  buildDishCard,
+  buildDishImage,
+  buildFallback,
+  buildBadge,
+  fmtPrice,
+  dishGradient,
+  slugify,
+  dishId,
+  getFilteredMenu,
+  getAvailableTags,
+  DietaryMeta: DIETARY_META,
+  BadgeSvg: BADGE_SVG,
+  CatIcons: CAT_ICONS,
+  SvgPlus: SVG_PLUS,
+  SvgClose: SVG_CLOSE,
+  SvgSearch: SVG_SEARCH,
+  SvgAllergen: SVG_ALLERGEN,
+};

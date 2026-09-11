@@ -151,6 +151,20 @@ async def catalog_page():
     p = STATIC / "html" / "catalog.html"
     return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Catálogo no disponible</h1>")
 
+@router.get("/chat/{table_id}", response_class=HTMLResponse)
+async def diner_chat_page(table_id: str):
+    """Diner-facing chat surface — opened via the QR code at the table.
+
+    Mirrors the existing /menu/{table_id} pattern (app/routes/tables.py):
+    the HTML is served verbatim and table_id is read client-side from the
+    URL path (see diner-session.js::dinerGetTableToken). The bot presents
+    the carta and takes the order INSIDE the conversation via the
+    /api/diner/* endpoints (app/routes/diner.py, blocks protocol) — this
+    is NOT a separate menu-browsing page.
+    """
+    p = STATIC / "html" / "diner-chat.html"
+    return p.read_text(encoding="utf-8") if p.exists() else HTMLResponse("<h1>Chat no disponible</h1>", status_code=404)
+
 @router.get("/privacidad", response_class=HTMLResponse)
 async def privacidad_page():
     return (STATIC / "html" / "privacidad.html").read_text(encoding="utf-8")

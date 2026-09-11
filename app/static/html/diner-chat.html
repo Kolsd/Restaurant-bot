@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<title>Chat — Mesio</title>
+<meta name="description" content="Pide desde tu mesa chateando con el restaurante">
+<meta name="theme-color" content="#1D9E75">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/png" href="/static/img/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/catalog-v2.css">
+<link rel="stylesheet" href="/static/css/pages/diner-chat.css">
+</head>
+<body>
+
+<div class="diner-page" id="diner-page">
+
+  <header class="diner-header">
+    <div class="diner-header-info">
+      <p class="diner-header-restaurant" id="diner-restaurant-name">Mesio</p>
+      <p class="diner-header-table" id="diner-table-label"></p>
+    </div>
+    <div class="diner-header-actions">
+      <button type="button" id="btn-open-menu" class="m-btn m-btn--ghost m-btn--sm diner-header-btn">Carta completa</button>
+      <button type="button" id="cart-chip" class="diner-cart-chip" hidden aria-label="Ver tu pedido">
+        <span aria-hidden="true">🛒</span>
+        <span id="cart-chip-label"></span>
+      </button>
+    </div>
+  </header>
+
+  <div id="diner-error-banner" class="diner-error-banner" role="alert" hidden>
+    <p id="diner-error-text" class="diner-error-text"></p>
+    <button type="button" id="diner-retry-btn" class="m-btn m-btn--primary m-btn--sm">Reintentar</button>
+  </div>
+
+  <main id="diner-log" class="diner-log" role="log" aria-live="polite" aria-label="Conversación con el restaurante"></main>
+
+  <button type="button" id="waiter-fab" class="diner-waiter-fab" aria-label="Llamar al mesero">
+    <span aria-hidden="true">🔔</span>
+    <span class="diner-waiter-fab-label">Mesero</span>
+  </button>
+
+  <form id="diner-composer" class="diner-composer" autocomplete="off">
+    <label for="diner-input" class="sr-only">Escribe tu mensaje</label>
+    <input
+      type="text"
+      id="diner-input"
+      class="diner-input"
+      placeholder="Escribe tu pedido o pregunta..."
+      maxlength="500"
+      disabled
+    >
+    <button type="submit" id="diner-send-btn" class="diner-send-btn" aria-label="Enviar mensaje" disabled>
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path d="M2 10L18 2L12 18L9 11L2 10Z" fill="currentColor"/>
+      </svg>
+    </button>
+  </form>
+
+</div>
+
+<script src="/static/js/mesio-utils.js"></script>
+<script src="/static/js/catalog-v2.js"></script>
+<script src="/static/js/diner-session.js"></script>
+<script src="/static/js/pages/diner-chat.js"></script>
+</body>
+</html>

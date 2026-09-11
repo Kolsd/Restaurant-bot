@@ -1,0 +1,534 @@
+/* ══ Diner Chat — Mesio-native diner chat surface ═══════════════════
+   A diner scans a QR at the table and lands here. Chat-first: the bot
+   IS the product, the carta lives inside the conversation. Mobile-first;
+   depends on tokens.css (design tokens) loaded first, and catalog-v2.css
+   for the dish photo/badge primitives (.dish-img-wrap / .dish-img-fallback
+   / .dish-badge*) that app/static/js/pages/diner-chat.js reuses via
+   window.MesioCatalogRenderer instead of re-implementing them. Only the
+   `diner-*` classes below are new for this page.
+   ═══════════════════════════════════════════════════════════════════ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  /* catalog-v2.css reserves 100px at the bottom for its own standalone
+     CartFooter — irrelevant here, this page has its own fixed composer. */
+  padding-bottom: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Reliable hidden toggling: an author `display` rule on the same class
+   would otherwise beat the UA's [hidden] rule at equal specificity. */
+[hidden] { display: none !important; }
+
+.diner-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  max-width: 560px;
+  margin: 0 auto;
+  background: var(--bg);
+  position: relative;
+  overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .diner-page {
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* ── Header ── */
+.diner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 10;
+}
+.diner-header-info { min-width: 0; }
+.diner-header-restaurant {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diner-header-table {
+  margin: 2px 0 0;
+  font-size: var(--caption);
+  color: var(--text-3);
+}
+.diner-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-shrink: 0;
+}
+.diner-header-btn { white-space: nowrap; }
+
+.diner-cart-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 0 14px;
+  min-height: 36px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.diner-cart-chip:hover { background: var(--brand-dark); }
+
+/* ── Error banner ── */
+.diner-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--warning-light);
+  color: var(--warning-text);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.diner-error-banner[hidden] { display: none; }
+.diner-error-text { margin: 0; font-size: var(--body-sm); }
+
+/* ── Chat log ── */
+.diner-log {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--s-4) var(--s-3) 96px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.diner-msg { display: flex; flex-direction: column; gap: var(--s-2); max-width: 92%; }
+.diner-msg--bot { align-self: flex-start; }
+.diner-msg--diner { align-self: flex-end; align-items: flex-end; }
+
+.diner-msg--diner p {
+  background: var(--brand);
+  color: #fff;
+  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+  padding: 10px 14px;
+  margin: 0;
+  font-size: var(--body);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+
+.diner-block-text {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+  padding: 10px 14px;
+  margin: 0;
+  font-size: var(--body);
+  line-height: var(--lh-normal);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* Typing indicator */
+.diner-typing {
+  display: flex;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+  width: fit-content;
+}
+.diner-typing-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-4);
+  animation: diner-typing-bounce 1.2s infinite ease-in-out;
+}
+.diner-typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.diner-typing-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes diner-typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* ── Dish cards — the compact variant scrolls inside a bot bubble,
+   the grid variant fills the full-carta panel. Image/fallback/badge
+   styling comes from catalog-v2.css (.dish-img-wrap, .dish-img-fallback,
+   .dish-badge*) — intentionally NOT redefined here. ── */
+.diner-dish-scroll {
+  display: flex;
+  gap: var(--s-3);
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+.diner-dish-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  scroll-snap-align: start;
+}
+.diner-dish-card--compact { width: 168px; flex-shrink: 0; }
+.diner-dish-card--grid { width: 100%; }
+
+.diner-dish-info { padding: var(--s-3); display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.diner-dish-name { margin: 0; font-size: var(--body); font-weight: 600; color: var(--text); line-height: var(--lh-snug); }
+.diner-dish-desc {
+  margin: 0;
+  font-size: var(--caption);
+  color: var(--text-3);
+  line-height: var(--lh-normal);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.diner-dish-icons { display: flex; flex-wrap: wrap; gap: 6px; }
+.diner-dish-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--surface-hover);
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+}
+.diner-dish-tag--allergen { color: var(--warning-text); background: var(--warning-light); }
+
+.diner-dish-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+}
+.diner-dish-price { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--text); }
+.diner-dish-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.diner-dish-add-btn:hover:not(:disabled) { background: var(--brand-dark); }
+.diner-dish-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.diner-dish-add-btn svg { width: 16px; height: 16px; display: block; }
+
+/* ── Chips (category suggestions / payment options) ── */
+.diner-chip-row { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.diner-chip {
+  background: var(--brand-light);
+  color: var(--brand-dark);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 0 14px;
+  min-height: 36px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.diner-chip:hover { background: #c8ede0; }
+.diner-pay-row .diner-chip--pay {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.diner-pay-row .diner-chip--pay:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+
+/* ── Cart summary card (inline in chat) ── */
+.diner-cart-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 220px;
+}
+.diner-cart-card-title { margin: 0; font-weight: 600; font-size: var(--body); }
+.diner-cart-card-empty { margin: 0; font-size: var(--body-sm); color: var(--text-3); }
+.diner-cart-card-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.diner-cart-card-list li { display: flex; gap: 8px; font-size: var(--body-sm); color: var(--text-2); }
+.diner-cart-card-qty { font-weight: 600; color: var(--brand-dark); flex-shrink: 0; }
+.diner-cart-card-more { margin: 0; font-size: var(--caption); color: var(--text-3); }
+.diner-cart-card-subtotal {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0 0;
+  font-size: var(--body-sm);
+  padding-top: var(--s-2);
+  border-top: 1px dashed var(--border);
+}
+.diner-cart-card-btn { align-self: flex-start; }
+
+/* ── Waiter acknowledgement card ── */
+.diner-ack-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  background: var(--brand-light);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3) var(--s-4);
+  color: var(--brand-dark);
+  font-size: var(--body-sm);
+  font-weight: 500;
+}
+.diner-ack-card p { margin: 0; }
+
+/* ── Composer (fixed bottom bar) ── */
+.diner-composer {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  padding-bottom: max(var(--s-3), env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.diner-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 10px 16px;
+  font-size: var(--body);
+  font-family: inherit;
+  min-height: 44px;
+  background: var(--bg);
+  color: var(--text);
+}
+.diner-input:focus { outline: none; border-color: var(--brand); background: var(--surface); }
+.diner-input:disabled { opacity: 0.6; }
+.diner-send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.diner-send-btn:hover:not(:disabled) { background: var(--brand-dark); }
+.diner-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.diner-send-btn svg { display: block; }
+
+/* ── Floating "llamar al mesero" button — always visible ── */
+.diner-waiter-fab {
+  position: absolute;
+  right: var(--s-4);
+  bottom: 88px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  z-index: 30;
+}
+.diner-waiter-fab:hover { background: var(--surface-hover); }
+.diner-waiter-fab-label { white-space: nowrap; }
+
+/* ── Overlays (bottom sheets + fullscreen panels) ── */
+.diner-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 2000;
+  display: none;
+  align-items: flex-end;
+  justify-content: center;
+}
+.diner-overlay.open { display: flex; }
+.diner-overlay--full { align-items: stretch; }
+
+.diner-sheet {
+  background: var(--surface);
+  width: 100%;
+  max-width: 560px;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: var(--s-5) var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));
+  box-shadow: var(--shadow-xl);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.diner-sheet h2 { margin: 0 0 var(--s-4); font-size: 17px; font-weight: 700; font-family: var(--font-display); }
+
+.diner-sheet-options { display: flex; flex-direction: column; gap: var(--s-2); margin-bottom: var(--s-4); }
+.diner-waiter-option {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--body);
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.diner-waiter-option:hover { border-color: var(--brand); background: var(--brand-bg); }
+.diner-waiter-option span:first-child { font-size: 20px; }
+
+.diner-sheet-cancel { width: 100%; }
+
+.diner-sheet-price { margin: 0 0 var(--s-4); font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--brand-dark); }
+
+.diner-sheet-qty-row { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-4); }
+.diner-sheet-qty-label { font-size: var(--body-sm); color: var(--text-3); margin-right: auto; }
+.diner-cart-qty-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text);
+}
+.diner-cart-qty-btn:hover { background: var(--surface-hover); }
+.diner-cart-qty-count { min-width: 24px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.diner-sheet-note-label { display: block; font-size: var(--body-sm); font-weight: 600; margin-bottom: 6px; color: var(--text-2); }
+.diner-sheet-note {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  font-family: inherit;
+  font-size: var(--body-sm);
+  resize: vertical;
+  margin-bottom: var(--s-4);
+  background: var(--bg);
+  color: var(--text);
+}
+.diner-sheet-note:focus { outline: none; border-color: var(--brand); }
+
+.diner-sheet-actions { display: flex; gap: var(--s-3); }
+.diner-sheet-actions .m-btn { flex: 1; }
+
+/* Fullscreen panels — cart / full carta */
+.diner-panel {
+  background: var(--bg);
+  width: 100%;
+  max-width: 560px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  margin: 0 auto;
+}
+.diner-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.diner-panel-header h2 { margin: 0; font-size: 17px; font-family: var(--font-display); font-weight: 700; }
+.diner-panel-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--surface-hover);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-2);
+}
+.diner-panel-close:hover { background: var(--border); }
+.diner-panel-body { flex: 1; overflow-y: auto; padding: var(--s-4); }
+.diner-panel-empty { text-align: center; color: var(--text-3); font-size: var(--body-sm); padding: var(--s-7) var(--s-4); }
+.diner-panel-loading { text-align: center; color: var(--text-3); font-size: var(--body-sm); padding: var(--s-7) var(--s-4); }
+
+/* Cart panel rows */
+.diner-cart-list { list-style: none; margin: 0 0 var(--s-4); padding: 0; display: flex; flex-direction: column; gap: var(--s-3); }
+.diner-cart-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+}
+.diner-cart-row-name { margin: 0; font-weight: 600; font-size: var(--body); }
+.diner-cart-row-note { margin: 2px 0 0; font-size: var(--caption); color: var(--text-3); font-style: italic; }
+.diner-cart-row-price { margin: 2px 0 0; font-size: var(--body-sm); color: var(--text-2); font-weight: 600; }
+.diner-cart-row-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); flex-wrap: wrap; }
+.diner-cart-row-qty { display: flex; align-items: center; gap: var(--s-2); }
+.diner-cart-remove-btn { color: var(--danger); }
+
+.diner-cart-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--body);
+}
+
+/* Full carta grid */
+.diner-menu-section { margin-bottom: var(--s-6); }
+.diner-menu-section h3 { font-family: var(--font-display); font-size: 16px; margin: 0 0 var(--s-3); }
+.diner-menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s-3); }
+
+@media (min-width: 420px) {
+  .diner-menu-grid { grid-template-columns: repeat(3, 1fr); }
+}

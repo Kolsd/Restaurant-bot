@@ -513,6 +513,23 @@ PAGE_CONTRACTS: dict[str, dict] = {
             "/api/loyalty/campaigns",
         ],
     },
+    "diner-chat.html": {
+        "js": "pages/diner-chat.js",
+        # Labels prove the core diner flows are wired: adding a dish (with a
+        # free-text note), opening/editing the cart, and the waiter-call sheet.
+        "required_button_labels": [
+            "Agregar",
+            "Ver / editar pedido",
+            "Quitar",
+            "¿En qué te ayudamos?",
+        ],
+        "required_fetches": [
+            "/api/diner/session",
+            "/api/diner/chat",
+            "/api/diner/menu",
+            "/api/diner/waiter-call",
+        ],
+    },
 }
 
 
