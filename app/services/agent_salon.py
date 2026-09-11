@@ -12,6 +12,7 @@ from decimal import Decimal
 from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
+from app.services import blocks
 from app.services.money import to_decimal, quantize_money, money_mul, money_sum, ZERO
 from app.repositories.orders_repo import InsufficientStockError
 from app.services.tenant_db import tenant_connection as _tenant_conn
@@ -1159,14 +1160,16 @@ async def execute_salon_action(
                     # pidió la cuenta" even if the checkout flow is still
                     # collecting tip/method/factura from the customer.
                     try:
+                        _bill_alert_msg = f"La mesa {table_name} pidió la cuenta (subtotal: {_fmt_cop(total)})."
                         await db.db_create_waiter_alert(
                             phone=phone,
                             bot_number=bot_number,
                             alert_type="bill",
-                            message=f"La mesa {table_name} pidió la cuenta (subtotal: {_fmt_cop(total)}).",
+                            message=_bill_alert_msg,
                             table_id=table_id,
                             table_name=table_name,
                         )
+                        blocks.push_block(blocks.build_waiter_ack_block("bill", _bill_alert_msg))
                     except Exception:
                         log.exception(
                             "checkout_start_bill_alert_failed",
@@ -1214,6 +1217,7 @@ async def execute_salon_action(
                 message=alert_message, table_id=table_id, table_name=table_name,
             )
             log.info("waiter_alert_bill", table=table_name)
+            blocks.push_block(blocks.build_waiter_ack_block("bill", alert_message))
         except Exception:
             log.exception(
                 "waiter_alert.fallback_failed",
@@ -1231,6 +1235,7 @@ async def execute_salon_action(
             message=alert_message, table_id=table_id, table_name=table_name,
         )
         log.info("waiter_alert", table=table_name)
+        blocks.push_block(blocks.build_waiter_ack_block("other", alert_message))
         return reply
 
     return None

@@ -81,7 +81,7 @@ class ToggleBody(BaseModel):
 
 @router.get("/balance", dependencies=[_module_dep])
 async def get_loyalty_balance(
-    phone:      str  = Query(..., min_length=7, max_length=15),
+    phone:      str  = Query(..., min_length=7, max_length=60),
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """
@@ -89,6 +89,16 @@ async def get_loyalty_balance(
     Respuesta O(1) desde loyalty_customers (sin joins, sin historial).
     Retorna 404 si el cliente aún no tiene registro de fidelización.
     """
+    # Synthetic diner web-chat identities ("web:<uuid4>", see diner_sessions_repo)
+    # are NOT phone numbers. Reject them explicitly instead of letting the
+    # digit-stripping below silently mangle a UUID's hex digits into a
+    # garbage "phone" that could coincidentally collide with a real customer.
+    # max_length is 60 (not 15) so this check is actually reachable — a
+    # "web:<uuid4>" token is ~40 chars and would otherwise be rejected by
+    # Pydantic's own length validation first, with a generic error shape
+    # instead of this explicit, clear one.
+    if phone.startswith("web:"):
+        raise HTTPException(status_code=422, detail="Número de teléfono inválido")
     clean = "".join(c for c in phone if c.isdigit())
     if len(clean) < 7:
         raise HTTPException(status_code=422, detail="Número de teléfono inválido")
@@ -104,11 +114,16 @@ async def get_loyalty_balance(
 
 @router.get("/ledger", dependencies=[_module_dep])
 async def get_loyalty_ledger(
-    phone:      str  = Query(..., min_length=7, max_length=15),
+    phone:      str  = Query(..., min_length=7, max_length=60),
     limit:      int  = Query(default=50, ge=1, le=200),
     restaurant: dict = Depends(get_current_restaurant_scoped),
 ):
     """Historial de movimientos de un cliente (para dashboard / POS)."""
+    # See get_loyalty_balance above — web:<uuid4> diner identities are not phones.
+    # max_length=60 (not 15) so this explicit check is reachable for a ~40-char
+    # "web:<uuid4>" token instead of being shadowed by Pydantic's own length gate.
+    if phone.startswith("web:"):
+        raise HTTPException(status_code=422, detail="Número de teléfono inválido")
     clean = "".join(c for c in phone if c.isdigit())
     if len(clean) < 7:
         raise HTTPException(status_code=422, detail="Número de teléfono inválido")

@@ -59,10 +59,23 @@ def _canonical_phone(raw: str) -> str:
     pass the org's default country code (or detect from bot_number prefix)
     so we don't hard-code '57'. For now, the assumption is safe because
     every restaurant on the platform is Colombian.
+
+    Synthetic diner identities (Mesio-native web chat, "web:<uuid4>") are
+    NOT phone numbers — never run them through digit-stripping/country-code
+    heuristics designed for real WhatsApp numbers. A UUID4's hex digits
+    would otherwise be silently mangled into a garbage "phone" that could,
+    in principle, coincidentally collide with a real pending claim's digits.
+    Pass web: identities through unchanged (as an opaque canonical key) so
+    the round-trip between create_claim/find_unclaimed_by_phone is stable
+    and lookups against real (digit-only) phones can never accidentally
+    match them.
     """
     if not raw:
         return ""
-    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    raw_str = str(raw)
+    if raw_str.startswith("web:"):
+        return raw_str
+    digits = "".join(ch for ch in raw_str if ch.isdigit())
     if len(digits) < 7:
         return ""
     if len(digits) == 10 and digits.startswith("3"):

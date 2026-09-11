@@ -11,6 +11,7 @@ from anthropic import AsyncAnthropic, APIStatusError, APITimeoutError, APIConnec
 from app.services import orders, database as db
 from app.services.logging import get_logger
 from app.services import state_store
+from app.services import blocks
 from app.services.money import to_decimal, money_mul, money_sum, ZERO
 from app.services.tenant_context import bypass_tenant_scope_if_unset as _bypass_tenant, tenant_scope
 from app.services.tenant_db import tenant_connection as _tenant_conn
@@ -1982,6 +1983,9 @@ async def execute_action(parsed: dict, phone: str, bot_number: str,
                     message=alert_message, table_id=table_id, table_name=table_name,
                 )
                 log.info("waiter_alert_no_table", alert_type=action, phone=_ofuscar_phone(phone))
+                blocks.push_block(blocks.build_waiter_ack_block(
+                    "bill" if action == "bill" else "other", alert_message,
+                ))
 
         # ── External actions (delivery, pickup, change_payment, cancel, notify_arrival) ──
         elif action in ("delivery", "pickup", "change_payment", "cancel", "notify_arrival"):
@@ -2269,6 +2273,22 @@ async def _try_nps_active_flow(user_phone: str, bot_number: str,
     return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
 
 
+async def _build_turn_blocks(user_phone: str, bot_number: str) -> list:
+    """Drain any block hints pushed during this turn (see app/services/blocks.py)
+    and append a cart_summary block when the cart is non-empty. Best-effort:
+    a failure here must never touch the reply text (Rule 8).
+    """
+    turn_blocks = blocks.drain_blocks()
+    try:
+        cart_now = await db.db_get_cart(user_phone, bot_number)
+        cart_block = blocks.build_cart_summary_block(cart_now)
+        if cart_block:
+            turn_blocks.append(cart_block)
+    except Exception:
+        log.exception("chat.cart_summary_block_failed", phone=_ofuscar_phone(user_phone))
+    return turn_blocks
+
+
 async def _try_checkout_flow(user_phone: str, bot_number: str,
                               user_message_clean: str,
                               table_context: dict | None) -> dict | None:
@@ -2288,7 +2308,11 @@ async def _try_checkout_flow(user_phone: str, bot_number: str,
              {"role": "assistant", "content": ck_reply}],
             branch_id=branch_id,
         )
-        return {"message": ck_reply}
+        result = {"message": ck_reply}
+        _attach_blocks = await _build_turn_blocks(user_phone, bot_number)
+        if _attach_blocks:
+            result["blocks"] = _attach_blocks
+        return result
     return None
 
 
@@ -2921,6 +2945,27 @@ async def chat(
     meta_phone_id: str = "",
     location_id: int | None = None,
 ) -> dict:
+    """Public entrypoint — thin wrapper around _chat_impl.
+
+    Owns the lifecycle of the per-turn block-hints bucket (app/services/blocks.py):
+    opens it before dispatch, guarantees it is torn down afterwards regardless of
+    which of _chat_impl's many early-return paths fires, so hints from one turn can
+    never leak into another. See blocks.begin_turn/end_turn docstrings.
+    """
+    _blocks_token = blocks.begin_turn()
+    try:
+        return await _chat_impl(user_phone, user_message, bot_number, meta_phone_id, location_id)
+    finally:
+        blocks.end_turn(_blocks_token)
+
+
+async def _chat_impl(
+    user_phone: str,
+    user_message: str,
+    bot_number: str,
+    meta_phone_id: str = "",
+    location_id: int | None = None,
+) -> dict:
     """Main chat orchestrator.
 
     location_id: resolved by the inbox worker before dispatch (from QR deep-link or
@@ -3063,6 +3108,11 @@ async def chat(
     result_payload = {"message": assistant_message}
     if nps_interactive:
         result_payload["interactive"] = nps_interactive
+
+    turn_blocks = await _build_turn_blocks(user_phone, bot_number)
+    if turn_blocks:
+        result_payload["blocks"] = turn_blocks
+
     return result_payload
 
 async def reset_conversation(user_phone: str):
