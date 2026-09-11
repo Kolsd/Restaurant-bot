@@ -117,6 +117,21 @@ def mask_phone(phone: "str | None") -> str:
     return "***" + phone[-4:]
 
 
+def mask_email(email: "str | None") -> str:
+    """Return a masked email for logs: first char of the local part + '***@domain'.
+
+    e.g. 'john.doe@example.com' -> 'j***@example.com'. Preserves enough signal
+    to correlate log entries (domain, first letter) without exposing the full
+    address. Safe to call with None, empty strings, or malformed input.
+    """
+    if not email or "@" not in email:
+        return "***"
+    local, _, domain = email.partition("@")
+    if not local:
+        return "***@" + domain
+    return local[0] + "***@" + domain
+
+
 # ── Public factory ───────────────────────────────────────────────────────────
 
 def get_logger(name: str, **initial_ctx):

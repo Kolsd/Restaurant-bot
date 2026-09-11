@@ -196,10 +196,15 @@ class ConvertProspectBody(BaseModel):
     """Optional overrides when converting. Defaults pull from the prospect row."""
     name:            Optional[str] = None   # defaults to prospect.restaurant_name
     whatsapp_number: Optional[str] = None   # defaults to prospect.phone
+    owner_email:     Optional[str] = None   # defaults to prospect.email — destination for
+                                             # the welcome email (WhatsApp is being retired;
+                                             # see _send_welcome_whatsapp docstring below).
+                                             # Lets the founder supply an address at convert
+                                             # time even when the CRM row never captured one.
     plan_code:       str = "restaurante"    # CEO decision: default to Restaurante plan
     subscription_plan: str = "restaurante"  # legacy alias kept for compat
     features:        Optional[dict] = None
-    skip_welcome_message: bool = False      # founder option to skip WA on convert
+    skip_welcome_message: bool = False      # founder option to skip the welcome send on convert
 
 
 # ── Temp password generator ───────────────────────────────────────────────────
@@ -223,6 +228,12 @@ async def _send_welcome_whatsapp(phone: str, username: str, temp_password: str) 
 
     Best-effort: caller should NOT raise on False — log and continue.
     Password is NOT passed to structlog.
+
+    UNUSED as of the email-channel migration — `convert_prospect_to_restaurant`
+    now sends the welcome message via `app.services.email.send_email` +
+    `render_welcome_email` instead (WhatsApp is being retired platform-wide).
+    Kept in place rather than deleted per the "don't delete features outright"
+    rule, for the wave that fully retires WhatsApp end to end.
     """
     token    = os.getenv("META_ACCESS_TOKEN", "")
     phone_id = os.getenv("CRM_PHONE_NUMBER_ID") or os.getenv("META_PHONE_NUMBER_ID", "")
@@ -279,7 +290,9 @@ async def convert_prospect_to_restaurant(
       3. Calls restaurant_repo.db_create_organization.
       4. Auto-creates the primary location named 'Principal'.
       5. Creates the first owner/admin user with a generated temp password.
-      6. Optionally sends a welcome WhatsApp with login credentials.
+      6. Optionally sends a welcome email with login credentials (to
+         body.owner_email or prospect.email — WhatsApp is being retired,
+         see _send_welcome_whatsapp docstring).
       7. Marks the prospect stage='cerrado' and tags it with `org:<id>`.
       8. Adds a system note to the prospect timeline.
 
@@ -405,14 +418,37 @@ async def convert_prospect_to_restaurant(
         log.exception("crm.convert.user_create_failed", prospect_id=pid, org_id=org["id"])
         # Non-fatal: org + location already created; surface error but don't block response
 
-    # 4. Send welcome WhatsApp (best-effort, skippable)
+    # 4. Send welcome email (best-effort, skippable). WhatsApp is being
+    #    retired — _send_welcome_whatsapp above is kept in place, unused, per
+    #    the "don't delete features outright" rule for the wave that fully
+    #    retires WhatsApp. body.owner_email lets the founder supply an
+    #    address at convert time even when the CRM row never captured one.
     welcome_sent = False
+    dest_email = (body.owner_email or prospect_email or "").strip().lower()
     if user_created and not body.skip_welcome_message:
-        welcome_sent = await _send_welcome_whatsapp(
-            phone=wa,
-            username=final_username,
-            temp_password=temp_password,
-        )
+        if dest_email and "@" in dest_email:
+            from app.services.email import send_email  # noqa: PLC0415
+            from app.services.email_templates import render_welcome_email  # noqa: PLC0415
+
+            app_domain = os.getenv("APP_DOMAIN", "").strip()
+            login_url = f"https://{app_domain}/login" if app_domain else "https://mesio.app/login"
+            subject, html, text = render_welcome_email(
+                restaurant_name=name,
+                username=final_username,
+                temp_password=temp_password,
+                login_url=login_url,
+            )
+            try:
+                welcome_sent = await send_email(to=dest_email, subject=subject, html=html, text=text)
+            except Exception:
+                log.exception(
+                    "crm.convert.welcome_email_exception", prospect_id=pid, org_id=org["id"]
+                )
+                welcome_sent = False
+        else:
+            log.info(
+                "crm.convert.welcome_email_no_address", prospect_id=pid, org_id=org["id"]
+            )
 
     # 5. Update the prospect — stage + tag + audit note (best-effort)
     try:
@@ -429,7 +465,7 @@ async def convert_prospect_to_restaurant(
         note_content = (
             f"Convertido a org #{org['id']} ({name}). "
             f"Usuario: {final_username}. "
-            f"Bienvenida WA: {'enviada' if welcome_sent else 'no enviada'}."
+            f"Bienvenida (email): {'enviada' if welcome_sent else 'no enviada'}."
         )
         await crm_repo.db_create_prospect_note(
             pid, author="system",

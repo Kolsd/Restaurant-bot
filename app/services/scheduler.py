@@ -9,7 +9,10 @@ from app.services import database as db
 from app.services import state_store
 from app.repositories import reviews_repo as rr
 from app.repositories import weekly_reports_repo
-from app.services.logging import get_logger
+from app.repositories import restaurant_repo
+from app.services.logging import get_logger, mask_email
+from app.services.email import send_email
+from app.services.email_templates import render_weekly_report_email
 
 try:
     from zoneinfo import ZoneInfo
@@ -396,17 +399,58 @@ async def _run_reservation_reminders():
             )
 
 
+async def _resolve_owner_email(restaurant: dict, org_id: int) -> "str | None":
+    """Resolve the destination email for weekly-report delivery.
+
+    WhatsApp is being retired; email is now the primary channel for the
+    weekly owner report. Preference order:
+      1. `features.owner_email` — explicit override an admin can set.
+      2. The org's registered owner/admin/gerente user — `users.username`
+         IS the login email in this schema (same convention relied on by
+         auth_routes.py's forgot-password flow).
+
+    `users` is a GLOBAL table (no restaurant_id/org_id, no RLS — see
+    CLAUDE.md "Blindaje Multi-tenant RLS"), so `db_get_team_users` uses the
+    global pool directly and does not need `tenant_scope`. Never raises —
+    any lookup failure just means "no destination", handled by the caller.
+    """
+    explicit = (_features_dict(restaurant).get("owner_email") or "").strip().lower()
+    if explicit and "@" in explicit:
+        return explicit
+
+    try:
+        team = await restaurant_repo.db_get_team_users(int(org_id))
+    except Exception:
+        log.exception("scheduler.weekly_reports.owner_lookup_failed", restaurant_id=org_id)
+        return None
+
+    role_priority = {"owner": 0, "admin": 1, "gerente": 2}
+    candidates = sorted(
+        (u for u in team if "@" in (u.get("username") or "")),
+        key=lambda u: role_priority.get(u.get("role"), 99),
+    )
+    if candidates:
+        return candidates[0]["username"].strip().lower()
+    return None
+
+
 async def _run_weekly_owner_reports():
     """
-    Send a weekly performance summary to each restaurant owner via WhatsApp.
+    Send a weekly performance summary to each restaurant owner via email.
     Runs every scheduler tick (60s) but only sends when the restaurant's local
     time is Monday 09:xx AND no report has been sent yet for the current week.
-    Dry-run mode: set WEEKLY_REPORT_DRY_RUN=1 to skip actual WhatsApp send.
+    Dry-run mode: set WEEKLY_REPORT_DRY_RUN=1 to skip actual email send.
     """
     from app.services.tenant_context import tenant_scope, bypass_tenant_scope  # noqa: PLC0415
 
     dry_run = os.getenv("WEEKLY_REPORT_DRY_RUN", "0") == "1"
-    dashboard_url = os.getenv("APP_DOMAIN", "https://mesio.com").rstrip("/") + "/dashboard"
+    # APP_DOMAIN is a bare domain (e.g. "mesioai.com"), not a URL — see the
+    # convention in orders.py/tables.py/dashboard.py (`f"https://{APP_DOMAIN}"`).
+    # A prior version of this line defaulted to a full URL ("https://mesio.com")
+    # but prepended nothing when APP_DOMAIN WAS set, producing a schemeless
+    # "mesioai.com/dashboard" link in the email button.
+    _app_domain = os.getenv("APP_DOMAIN", "").strip()
+    dashboard_url = f"https://{_app_domain}/dashboard" if _app_domain else "https://mesio.com/dashboard"
 
     try:
         # Wave-2 canonical: weekly reports are per-business (per-org), not per-sede.
@@ -488,15 +532,18 @@ async def _run_weekly_owner_reports():
                     )
                     continue
 
-                # ── 9. Resolve owner phone ────────────────────────────────────────
+                # ── 9. Resolve owner phone (kept for the row's audit history —
+                #        schema predates the email channel) and owner email
+                #        (the actual delivery destination now) ─────────────────
                 owner_phone = _features_dict(restaurant).get("owner_phone")
+                owner_email = await _resolve_owner_email(restaurant, rid)
 
                 # ── 10. Build payload and persist the report row ──────────────────
                 payload = weekly_reports_repo.build_payload(stats, week_start, week_end)
 
                 if dry_run:
                     initial_status = "dry_run"
-                elif owner_phone:
+                elif owner_email:
                     initial_status = "pending"
                 else:
                     initial_status = "skipped"
@@ -508,7 +555,7 @@ async def _run_weekly_owner_reports():
                     message_text=msg,
                     owner_phone=owner_phone,
                     delivery_status=initial_status,
-                    error_message=None if owner_phone else "missing_owner_phone",
+                    error_message=None if owner_email else "missing_owner_email",
                 )
 
                 # ON CONFLICT DO NOTHING → row exists for this week. If it's a
@@ -539,53 +586,53 @@ async def _run_weekly_owner_reports():
                     log.info(
                         "scheduler.weekly_reports.dry_run",
                         restaurant_id=rid,
-                        owner_phone=owner_phone,
+                        owner_email=mask_email(owner_email),
                         week_start=week_start.isoformat(),
                     )
                     continue
 
-                if not owner_phone:
+                if not owner_email:
                     log.info(
-                        "scheduler.weekly_reports.no_owner_phone",
+                        "scheduler.weekly_reports.no_owner_email",
                         restaurant_id=rid,
                         week_start=week_start.isoformat(),
                     )
                     continue
 
-                bot_number = restaurant.get("whatsapp_number", "")
-                phone_id = restaurant.get("wa_phone_id")
-
-            # Send happens outside tenant_scope — _send_whatsapp is pure HTTP (no DB).
+            # Send happens outside tenant_scope — send_email is pure HTTP (no DB).
             try:
-                ok = await _send_whatsapp(owner_phone, msg, bot_number, phone_id)
+                subject, html, text = render_weekly_report_email(
+                    restaurant_name, msg, dashboard_url, week_start, week_end
+                )
+                ok = await send_email(to=owner_email, subject=subject, html=html, text=text)
                 if ok:
                     with tenant_scope(int(rid)):
                         await weekly_reports_repo.mark_sent(report_id)
                     log.info(
                         "scheduler.weekly_reports.sent",
                         restaurant_id=rid,
-                        owner_phone=owner_phone,
+                        owner_email=mask_email(owner_email),
                         week_start=week_start.isoformat(),
                     )
                 else:
-                    error_msg = "whatsapp_send_returned_false"
+                    error_msg = "email_send_returned_false"
                     with tenant_scope(int(rid)):
                         await weekly_reports_repo.mark_failed(report_id, error_msg)
                     log.warning(
                         "scheduler.weekly_reports.send_failed",
                         restaurant_id=rid,
-                        owner_phone=owner_phone,
+                        owner_email=mask_email(owner_email),
                         week_start=week_start.isoformat(),
                         reason=error_msg,
                     )
-            except Exception as exc:
-                error_str = str(exc)[:500]
+            except Exception:
+                error_str = "email_send_exception"
                 with tenant_scope(int(rid)):
                     await weekly_reports_repo.mark_failed(report_id, error_str)
                 log.exception(
                     "scheduler.weekly_reports.send_exception",
                     restaurant_id=rid,
-                    owner_phone=owner_phone,
+                    owner_email=mask_email(owner_email),
                     week_start=week_start.isoformat(),
                 )
 

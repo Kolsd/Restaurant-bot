@@ -80,15 +80,33 @@ class ResetPasswordRequest(BaseModel):
 
 @router.post("/api/auth/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):
-    """Send a 6-digit OTP to the restaurant owner's WhatsApp.
+    """Send a 6-digit OTP to the restaurant owner's email.
 
-    ALWAYS returns HTTP 200 with { "sent": bool, "channel": "whatsapp" | null }
-    to prevent attacker enumeration of valid email addresses. Rate-limited to
-    3 requests per email per 15 minutes.
+    WhatsApp is being retired as a delivery channel; email replaces it here
+    (see app/services/email.py — `send_password_reset_code` in
+    whatsapp_messaging.py is left in place, unused, per the "don't delete
+    features outright" rule, for the wave that retires WhatsApp entirely).
+
+    ALWAYS returns HTTP 200 with the SAME generic
+    { "sent": true, "channel": "email" } response for any well-formed,
+    non-rate-limited request — regardless of whether the email belongs to a
+    real account, whether the lookup/token-creation succeeded, or whether
+    the email actually got delivered. This is intentional: the frontend
+    (app/static/js/pages/reset-password.js) already ignores these values and
+    always shows a generic "si el correo existe, te enviamos un código"
+    message, so returning anything that varies with account existence would
+    only create an enumeration oracle with no upside. Failures are logged
+    server-side (email-prefix only, never the full address or the code) so
+    support can investigate. Only the rate-limit branch differs, and it does
+    not leak existence either — it's keyed on the submitted string, not on
+    whether that string maps to a real user.
+
+    Rate-limited to 3 requests per email per 15 minutes.
     """
     from app.services import database as db  # noqa: PLC0415
     from app.repositories.password_reset_repo import db_create_password_reset  # noqa: PLC0415
-    from app.services.whatsapp_messaging import send_password_reset_code  # noqa: PLC0415
+    from app.services.email import send_email  # noqa: PLC0415
+    from app.services.email_templates import render_password_reset_email  # noqa: PLC0415
 
     email = (body.email or "").lower().strip()
     if not email:
@@ -103,66 +121,49 @@ async def forgot_password(body: ForgotPasswordRequest):
         log.warning("password_reset.rate_limited", email_prefix=email[:3] + "***")
         return {"sent": False, "channel": None}
 
+    # Everything below is best-effort. It MUST NOT change the response value —
+    # a lookup failure, an unknown email, a token-creation error, or a send
+    # failure all look identical to the caller (anti-enumeration + the
+    # frontend never branches on this anyway).
+    generic_response = {"sent": True, "channel": "email"}
+
     # Look up user by email (username = email in the users table).
     try:
         user = await db.db_get_user(email)
     except Exception:
         log.exception("password_reset.user_lookup_error")
-        return {"sent": False, "channel": None}
+        return generic_response
 
     if not user:
-        # Anti-enumeration: return the same shape as success.
         log.info("password_reset.user_not_found", email_prefix=email[:3] + "***")
-        return {"sent": False, "channel": None}
+        return generic_response
 
-    # Resolve the org's WhatsApp number (the owner's contact line).
-    whatsapp_number: str | None = None
-    restaurant_name: str = user.get("restaurant_name", "")
-    branch_id = user.get("branch_id")
+    restaurant_name: str = user.get("restaurant_name") or "tu restaurante"
 
-    try:
-        if branch_id:
-            restaurant = await db.db_get_restaurant_by_id(branch_id)
-            if restaurant:
-                whatsapp_number = restaurant.get("whatsapp_number") or None
-                restaurant_name = restaurant.get("name") or restaurant_name
-        else:
-            # No branch_id: attempt org lookup by restaurant_name.
-            target_name = restaurant_name.lower().strip()
-            if target_name:
-                all_orgs = await db.db_get_all_orgs(active_only=False)
-                for org in all_orgs:
-                    if (org.get("name") or "").lower().strip() == target_name:
-                        whatsapp_number = org.get("whatsapp_number") or None
-                        restaurant_name = org.get("name") or restaurant_name
-                        break
-    except Exception:
-        log.exception("password_reset.org_lookup_error", email_prefix=email[:3] + "***")
-        return {"sent": False, "channel": None}
-
-    if not whatsapp_number:
-        log.warning(
-            "password_reset.no_whatsapp_number",
-            email_prefix=email[:3] + "***",
-            restaurant_name=restaurant_name,
-        )
-        return {"sent": False, "channel": None}
-
-    # Generate and store the OTP.
+    # Generate and store the OTP (unchanged: OTP_PEPPER + SHA-256 hashing
+    # lives entirely in password_reset_repo.db_create_password_reset).
     try:
         code = await db_create_password_reset(email)
     except Exception:
         log.exception("password_reset.create_token_error", email_prefix=email[:3] + "***")
-        return {"sent": False, "channel": None}
+        return generic_response
 
-    # Send via WhatsApp (does not raise — returns bool).
-    sent = await send_password_reset_code(
-        whatsapp_number=whatsapp_number,
-        code=code,
-        restaurant_name=restaurant_name,
-    )
+    subject, html, text = render_password_reset_email(code=code, restaurant_name=restaurant_name)
 
-    return {"sent": sent, "channel": "whatsapp" if sent else None}
+    # Send via email (does not raise — returns bool).
+    try:
+        sent = await send_email(to=email, subject=subject, html=html, text=text)
+    except Exception:
+        log.exception("password_reset.email_send_error", email_prefix=email[:3] + "***")
+        sent = False
+
+    if not sent:
+        # The OTP is safely stored regardless — the user can retry, or
+        # support can look it up. Log server-side only; the response to the
+        # caller stays generic (see docstring).
+        log.warning("password_reset.email_send_failed", email_prefix=email[:3] + "***")
+
+    return generic_response
 
 
 @router.post("/api/auth/reset-password")

@@ -267,6 +267,12 @@ def _fake_restaurant(overrides: dict | None = None) -> dict:
     # Post-Wave-2: scheduler.py reads owner_phone + timezone from features
     # via _features_dict(). Top-level keys are kept for backwards-compat with
     # places that still inspect them, but the source of truth is features.
+    #
+    # `features.owner_email` is the email-channel replacement for
+    # `owner_phone` (see scheduler.py `_resolve_owner_email`, checked before
+    # falling back to a `restaurant_repo.db_get_team_users` DB lookup). Set a
+    # default here so unit tests resolve a destination without touching a
+    # real DB pool.
     r = {
         "id":               1,
         "name":             "El Restaurante",
@@ -277,16 +283,31 @@ def _fake_restaurant(overrides: dict | None = None) -> dict:
         "features":         {
             "weekly_report_enabled": True,
             "owner_phone":           "+573009999999",
+            "owner_email":           "owner@elrestaurante.com",
             "timezone":              "America/Bogota",
         },
     }
     if overrides:
-        # If the caller overrides owner_phone/timezone at top level, mirror
-        # the change into features so the scheduler reads the same value.
+        overrides = dict(overrides)  # don't mutate caller's dict
+        # If the caller overrides owner_phone/timezone/owner_email at top
+        # level, mirror the change into features so the scheduler reads the
+        # same value.
         if "owner_phone" in overrides:
             r["features"]["owner_phone"] = overrides["owner_phone"]
         if "timezone" in overrides:
             r["features"]["timezone"] = overrides["timezone"]
+        if "owner_email" in overrides:
+            r["features"]["owner_email"] = overrides["owner_email"]
+        # Caller may pass a full features dict override (e.g. to disable the
+        # weekly report flag) — merge rather than clobber so the
+        # owner_email/owner_phone/timezone defaults survive unless the
+        # caller explicitly sets them too. Pop it out of `overrides` first so
+        # the plain `r.update(overrides)` below doesn't clobber the merge.
+        features_override = overrides.pop("features", None)
+        if features_override is not None:
+            merged = dict(r["features"])
+            merged.update(features_override)
+            r["features"] = merged
         r.update(overrides)
     return r
 
@@ -297,14 +318,23 @@ _UNSET = object()  # sentinel — distinct from None so callers can pass None
 
 def _patch_scheduler_deps(monkeypatch, *, restaurants, local_now_dt,
                            already_sent=False, stats_override=None,
-                           save_report_return=_UNSET, send_whatsapp_return=True):
+                           save_report_return=_UNSET, send_email_return=True):
     """Monkeypatch all scheduler dependencies at the module-level symbols."""
     import app.services.scheduler as sched
     import app.services.database as db_module
     import app.repositories.weekly_reports_repo as wrr
+    import app.repositories.restaurant_repo as restaurant_repo_module
 
     # Monday 2026-04-13 09:30 in Bogota tz
     monkeypatch.setattr(sched, "_local_now", lambda tz: local_now_dt)
+    # `_resolve_owner_email` checks `features.owner_email` first (set by
+    # `_fake_restaurant` in every test fixture used here) and only falls back
+    # to this DB lookup when that's absent. Default to an empty roster so a
+    # fixture without an explicit owner_email resolves to None (skip) rather
+    # than reaching for a real DB pool in this no-DB unit test.
+    monkeypatch.setattr(
+        restaurant_repo_module, "db_get_team_users", AsyncMock(return_value=[])
+    )
     # Wave-2: scheduler now uses db_get_all_orgs (org-level enumeration) for
     # weekly reports. Patch both names so tests still drive the same fixture
     # whichever call path is taken.
@@ -334,11 +364,11 @@ def _patch_scheduler_deps(monkeypatch, *, restaurants, local_now_dt,
     monkeypatch.setattr(wrr, "mark_sent",   mark_sent_mock)
     monkeypatch.setattr(wrr, "mark_failed", mark_failed_mock)
 
-    if callable(send_whatsapp_return):
-        send_mock = AsyncMock(side_effect=send_whatsapp_return)
+    if callable(send_email_return):
+        send_mock = AsyncMock(side_effect=send_email_return)
     else:
-        send_mock = AsyncMock(return_value=send_whatsapp_return)
-    monkeypatch.setattr(sched, "_send_whatsapp", send_mock)
+        send_mock = AsyncMock(return_value=send_email_return)
+    monkeypatch.setattr(sched, "send_email", send_mock)
 
     return {
         "already_sent":    already_sent_mock,
@@ -347,7 +377,7 @@ def _patch_scheduler_deps(monkeypatch, *, restaurants, local_now_dt,
         "get_retriable":   retriable_mock,
         "mark_sent":       mark_sent_mock,
         "mark_failed":     mark_failed_mock,
-        "send_whatsapp":   send_mock,
+        "send_email":      send_mock,
     }
 
 
@@ -373,7 +403,7 @@ class TestSchedulerTick:
         assert call_kwargs.kwargs.get("delivery_status") == "pending" or \
                (call_kwargs.args and "pending" in str(call_kwargs.args))
 
-        mocks["send_whatsapp"].assert_awaited_once()
+        mocks["send_email"].assert_awaited_once()
         mocks["mark_sent"].assert_awaited_once()
         mocks["mark_failed"].assert_not_called()
 
@@ -391,7 +421,7 @@ class TestSchedulerTick:
         _run(sched._run_weekly_owner_reports())
 
         mocks["save_report"].assert_not_called()
-        mocks["send_whatsapp"].assert_not_called()
+        mocks["send_email"].assert_not_called()
 
     def test_C3_already_sent_skips(self, monkeypatch):
         """already_sent_for_week returns True → save_report and send not called."""
@@ -407,7 +437,7 @@ class TestSchedulerTick:
         _run(sched._run_weekly_owner_reports())
 
         mocks["save_report"].assert_not_called()
-        mocks["send_whatsapp"].assert_not_called()
+        mocks["send_email"].assert_not_called()
 
     def test_C4_no_signal_skips(self, monkeypatch):
         """has_signal False → save_report NOT called (silent skip per spec)."""
@@ -423,7 +453,7 @@ class TestSchedulerTick:
         _run(sched._run_weekly_owner_reports())
 
         mocks["save_report"].assert_not_called()
-        mocks["send_whatsapp"].assert_not_called()
+        mocks["send_email"].assert_not_called()
 
     def test_C5_feature_disabled_skips_that_restaurant(self, monkeypatch):
         """First restaurant has feature disabled; second still processes."""
@@ -443,27 +473,29 @@ class TestSchedulerTick:
 
         # save_report called exactly once (only for enabled restaurant)
         assert mocks["save_report"].await_count == 1
-        # send_whatsapp called once (for enabled restaurant)
-        assert mocks["send_whatsapp"].await_count == 1
+        # send_email called once (for enabled restaurant)
+        assert mocks["send_email"].await_count == 1
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Block D — WhatsApp failure handling
+# Block D — email send failure handling
 # ══════════════════════════════════════════════════════════════════════════════
 
-class TestWhatsAppFailures:
+class TestWhatsAppFailures:  # noqa: N801 — class name kept stable across sessions;
+                              # covers email-send failures now (WhatsApp retired
+                              # for weekly reports — see scheduler.py).
 
     _MONDAY_9AM = datetime(2026, 4, 13, 9, 30)
 
     def test_D1_send_returns_false_calls_mark_failed(self, monkeypatch):
-        """_send_whatsapp returns False → mark_failed called, mark_sent NOT called."""
+        """send_email returns False → mark_failed called, mark_sent NOT called."""
         import app.services.scheduler as sched
 
         mocks = _patch_scheduler_deps(
             monkeypatch,
             restaurants=[_fake_restaurant()],
             local_now_dt=self._MONDAY_9AM,
-            send_whatsapp_return=False,
+            send_email_return=False,
         )
 
         _run(sched._run_weekly_owner_reports())
@@ -475,14 +507,14 @@ class TestWhatsAppFailures:
 
     def test_D2_send_raises_loop_continues(self, monkeypatch):
         """
-        _send_whatsapp raises for restaurant 1 → mark_failed called once.
+        send_email raises for restaurant 1 → mark_failed called once.
         Loop continues to restaurant 2 (which succeeds) → send called twice total.
         """
         import app.services.scheduler as sched
 
         call_count = {"n": 0}
 
-        async def _flaky_send(phone, msg, bot, phone_id):
+        async def _flaky_send(to, subject, html, text=None):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise Exception("network down")
@@ -495,20 +527,20 @@ class TestWhatsAppFailures:
             monkeypatch,
             restaurants=[r1, r2],
             local_now_dt=self._MONDAY_9AM,
-            send_whatsapp_return=_flaky_send,
+            send_email_return=_flaky_send,
         )
 
         # No crash expected
         _run(sched._run_weekly_owner_reports())
 
-        assert mocks["send_whatsapp"].await_count == 2
+        assert mocks["send_email"].await_count == 2
         assert mocks["mark_failed"].await_count == 1
         assert mocks["mark_sent"].await_count == 1
 
     def test_D3_retry_picks_up_failed_row(self, monkeypatch):
         """save_report returns None (row exists already from prior failed send),
         get_retriable_report returns a row with attempts=1 → scheduler retries
-        the WhatsApp send on the existing row, marks_sent on success."""
+        the email send on the existing row, marks_sent on success."""
         import app.services.scheduler as sched
 
         mocks = _patch_scheduler_deps(
@@ -516,7 +548,7 @@ class TestWhatsAppFailures:
             restaurants=[_fake_restaurant()],
             local_now_dt=self._MONDAY_9AM,
             save_report_return=None,   # ON CONFLICT DO NOTHING returned no row
-            send_whatsapp_return=True,
+            send_email_return=True,
         )
         # Existing failed row, retriable
         mocks["get_retriable"].return_value = {
@@ -526,7 +558,7 @@ class TestWhatsAppFailures:
         _run(sched._run_weekly_owner_reports())
 
         mocks["get_retriable"].assert_awaited_once()
-        mocks["send_whatsapp"].assert_awaited_once()
+        mocks["send_email"].assert_awaited_once()
         mocks["mark_sent"].assert_awaited_once_with(99)
         mocks["mark_failed"].assert_not_called()
 
@@ -540,7 +572,7 @@ class TestWhatsAppFailures:
             restaurants=[_fake_restaurant()],
             local_now_dt=self._MONDAY_9AM,
             save_report_return=None,   # row exists
-            send_whatsapp_return=True,
+            send_email_return=True,
         )
         # No retriable row (attempts maxed out)
         mocks["get_retriable"].return_value = None
@@ -548,7 +580,7 @@ class TestWhatsAppFailures:
         _run(sched._run_weekly_owner_reports())
 
         mocks["get_retriable"].assert_awaited_once()
-        mocks["send_whatsapp"].assert_not_called()
+        mocks["send_email"].assert_not_called()
         mocks["mark_sent"].assert_not_called()
         mocks["mark_failed"].assert_not_called()
 
