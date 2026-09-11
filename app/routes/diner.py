@@ -60,6 +60,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.services import blocks
 from app.services import database as db
+from app.services import orders
 from app.services import state_store
 from app.services.agent import chat as agent_chat
 from app.services.logging import get_logger
@@ -118,6 +119,26 @@ class DinerWaiterCallRequest(BaseModel):
         return v
 
 
+class DinerCartAddRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=200)
+    sku: str | None = Field(default=None, max_length=200)
+    name: str | None = Field(default=None, max_length=200)
+    qty: int = Field(..., ge=1, le=50)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class DinerCartUpdateRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=200)
+    line_id: str = Field(..., min_length=1, max_length=64)
+    qty: int | None = Field(default=None, ge=0, le=50)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class DinerCartRemoveRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=200)
+    line_id: str = Field(..., min_length=1, max_length=64)
+
+
 # ── Shared helpers ───────────────────────────────────────────────────────────
 
 async def _resolve_session_or_404(token: str) -> dict:
@@ -138,6 +159,32 @@ def _dish_cards_for_category(dishes: list, availability: dict, currency: str) ->
     for d in dish_block["dishes"]:
         d["available"] = availability.get(d["name"], True)
     return dish_block
+
+
+async def _currency_for_org(org_id: int) -> str:
+    """Caller must already be inside tenant_scope(org_id)."""
+    restaurant = await db.db_get_restaurant_by_id(org_id)
+    feats = _features_dict((restaurant or {}).get("features"))
+    return feats.get("currency", "COP")
+
+
+def _cart_blocks_response(cart: dict, currency: str, message: str) -> dict:
+    """Every cart tap-endpoint returns the SAME shape: the updated cart as a
+    cart_summary block (even when empty — allow_empty=True — so the UI can
+    render the empty state / clear the cart chip) plus a short confirmation."""
+    block = blocks.build_cart_summary_block(cart, currency=currency, allow_empty=True)
+    return {"blocks": [block], "message": message}
+
+
+def _cart_error_to_http(error: str) -> HTTPException:
+    """Map an orders.py cart-mutation error string to the right HTTP status.
+    Never a 500 — NO-ROMPER #5 (cart lock contention must surface as a
+    friendly message, not a crash)."""
+    if error == "not_found":
+        return HTTPException(status_code=404, detail="No encontramos ese producto en tu pedido")
+    if "siendo procesado" in error:
+        return HTTPException(status_code=409, detail=error)
+    return HTTPException(status_code=422, detail=error or "No pudimos actualizar tu pedido")
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -357,6 +404,7 @@ async def diner_waiter_call(body: DinerWaiterCallRequest):
             message=message_text,
             table_id=session.get("table_id") or "",
             table_name=table_name,
+            location_id=session.get("location_id"),
         )
 
     log.info("diner.waiter_call", org_id=org_id, reason=reason)
@@ -365,3 +413,113 @@ async def diner_waiter_call(body: DinerWaiterCallRequest):
         "message": "Listo, ya avisamos al mesero.",
         "blocks": [blocks.build_waiter_ack_block(reason, message_text)],
     }
+
+
+# ── Cart endpoints (direct tap mutations — no LLM round-trip) ───────────────
+#
+# A tap on "+"/"-", a note edit, or a remove button has nothing for the LLM
+# to interpret: it's a deterministic (sku|name, qty, note) tuple. Routing it
+# through agent.chat() would cost tokens against the restaurant's plan caps,
+# add latency, and — with no ANTHROPIC_API_KEY configured — fail outright
+# (Rule 8 fallback). These four endpoints never call agent_chat / the
+# Anthropic client; the LLM path (typing "quiero una bandeja sin
+# chicharrón") still goes through agent.chat() → the place_order tool →
+# orders.add_to_cart(), which shares the same line_id/note-aware cart model.
+
+@router.post("/cart/add")
+async def diner_cart_add(request: Request, body: DinerCartAddRequest):
+    token = body.token.strip()
+    if not await state_store.rate_limit_check(f"diner_cart_add:{token}", max_requests=30, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Estás agregando platos muy rápido. Espera un momento.")
+
+    sku = (body.sku or "").strip() or None
+    name = (body.name or "").strip() or None
+    if not sku and not name:
+        raise HTTPException(status_code=422, detail="Falta indicar el plato a agregar")
+
+    session = await _resolve_session_or_404(token)
+    org_id = int(session["org_id"])
+    bot_number = session["bot_number"]
+
+    with tenant_scope(org_id):
+        await diner_sessions_repo.touch_last_seen(token, org_id)
+
+        dish = await orders.resolve_dish_for_cart(bot_number, org_id, sku=sku, name=name)
+        if dish is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No encontramos ese plato o no está disponible en este momento",
+            )
+
+        result = await orders.add_cart_line(token, bot_number, dish, body.qty, body.note)
+        if not result.get("success"):
+            raise _cart_error_to_http(result.get("error", ""))
+
+        currency = await _currency_for_org(org_id)
+        cart = result["cart"]
+
+    return _cart_blocks_response(cart, currency, f"Agregado: {dish['name']}")
+
+
+@router.post("/cart/update")
+async def diner_cart_update(request: Request, body: DinerCartUpdateRequest):
+    token = body.token.strip()
+    if not await state_store.rate_limit_check(f"diner_cart_update:{token}", max_requests=30, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Estás actualizando tu pedido muy rápido. Espera un momento.")
+
+    session = await _resolve_session_or_404(token)
+    org_id = int(session["org_id"])
+    bot_number = session["bot_number"]
+
+    with tenant_scope(org_id):
+        await diner_sessions_repo.touch_last_seen(token, org_id)
+
+        result = await orders.update_cart_line(token, bot_number, body.line_id, qty=body.qty, note=body.note)
+        if not result.get("success"):
+            raise _cart_error_to_http(result.get("error", ""))
+
+        currency = await _currency_for_org(org_id)
+        cart = result["cart"]
+
+    message = "Listo, quitamos ese producto de tu pedido." if body.qty == 0 else "Listo, actualizamos tu pedido."
+    return _cart_blocks_response(cart, currency, message)
+
+
+@router.post("/cart/remove")
+async def diner_cart_remove(request: Request, body: DinerCartRemoveRequest):
+    token = body.token.strip()
+    if not await state_store.rate_limit_check(f"diner_cart_remove:{token}", max_requests=30, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Espera un momento antes de seguir editando tu pedido.")
+
+    session = await _resolve_session_or_404(token)
+    org_id = int(session["org_id"])
+    bot_number = session["bot_number"]
+
+    with tenant_scope(org_id):
+        await diner_sessions_repo.touch_last_seen(token, org_id)
+
+        result = await orders.remove_cart_line(token, bot_number, body.line_id)
+        if not result.get("success"):
+            raise _cart_error_to_http(result.get("error", ""))
+
+        currency = await _currency_for_org(org_id)
+        cart = result["cart"]
+
+    return _cart_blocks_response(cart, currency, "Listo, quitamos ese producto de tu pedido.")
+
+
+@router.get("/cart")
+async def diner_cart_get(token: str = Query(..., min_length=1, max_length=200)):
+    if not await state_store.rate_limit_check(f"diner_cart_get:{token}", max_requests=60, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    session = await _resolve_session_or_404(token)
+    org_id = int(session["org_id"])
+    bot_number = session["bot_number"]
+
+    with tenant_scope(org_id):
+        await diner_sessions_repo.touch_last_seen(token, org_id)
+        cart = await orders.get_cart_with_line_ids(token, bot_number)
+        currency = await _currency_for_org(org_id)
+
+    return _cart_blocks_response(cart, currency, "")

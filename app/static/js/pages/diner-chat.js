@@ -13,6 +13,15 @@
      POST /api/diner/chat         → {token, message} → {message, blocks}
      GET  /api/diner/menu         → ?token= → full carta for the "Ver carta completa" panel
      POST /api/diner/waiter-call  → {token, reason: bill|cutlery|napkins|other}
+     POST /api/diner/cart/add     → {token, sku?, name?, qty, note?} → {message, blocks:[cart_summary]}
+     POST /api/diner/cart/update  → {token, line_id, qty?, note?} → {message, blocks:[cart_summary]} (qty=0 removes)
+     POST /api/diner/cart/remove  → {token, line_id} → {message, blocks:[cart_summary]}
+     GET  /api/diner/cart         → ?token= → {message, blocks:[cart_summary]}
+
+   A tap (add/change qty/remove/edit note) is a deterministic operation with
+   nothing for the LLM to interpret, so every cart mutation calls the
+   cart/* endpoints directly — NEVER sendMessage()/natural language. Only
+   free-text typed in the composer goes through POST /api/diner/chat.
 
    Depends on (loaded before this file):
      mesio-utils.js   → _escHtml, mesioToast, mesioConfirm, mesioPrompt, mesioFocusTrap
@@ -387,6 +396,52 @@ function processBotTurn(turn) {
   appendBubble(bubble);
 }
 
+/* ── Cart tap-mutations (deterministic — never sendMessage/LLM) ───────
+ * A tap on +/-/remove/note carries a known dish + qty + note already; there
+ * is nothing for the bot to interpret, so these call the /api/diner/cart/*
+ * endpoints directly. Every response carries the SAME shape:
+ * {message, blocks:[cart_summary]} — see app/routes/diner.py.
+ * ════════════════════════════════════════════════════════════════════ */
+
+function applyCartResult(data) {
+  var blocksArr = (data && Array.isArray(data.blocks)) ? data.blocks : [];
+  var cartBlock = null;
+  blocksArr.forEach(function (block) {
+    if (block && block.type === 'cart_summary') cartBlock = block;
+  });
+  if (cartBlock) {
+    state.cart = cartBlock;
+    updateCartChip();
+    CartPanel.refresh();
+  }
+  return cartBlock;
+}
+
+async function cartApiCall(path, body) {
+  return DinerSession.fetch(path, 'POST', body, getToken());
+}
+
+async function cartAdd(dish, qty, note) {
+  var payload = { qty: qty };
+  if (dish && dish.sku) payload.sku = dish.sku;
+  if (dish && dish.name) payload.name = dish.name;
+  if (note) payload.note = note;
+  return cartApiCall('/api/diner/cart/add', payload);
+}
+
+async function cartUpdate(lineId, changes) {
+  var payload = Object.assign({ line_id: lineId }, changes || {});
+  return cartApiCall('/api/diner/cart/update', payload);
+}
+
+async function cartRemove(lineId) {
+  return cartApiCall('/api/diner/cart/remove', { line_id: lineId });
+}
+
+async function cartLoad() {
+  return DinerSession.fetch('/api/diner/cart', 'GET', null, getToken());
+}
+
 /* ── Sending messages ─────────────────────────────────────────────── */
 
 async function sendMessage(text, opts) {
@@ -434,6 +489,36 @@ function showErrorBanner(msg) {
   banner.hidden = false;
 }
 
+async function restoreSavedSession(tableId) {
+  // A page reload must not lose the diner's cart: reuse the SAME session
+  // token (same `phone` slot everywhere — carts/conversations/NPS/waiter
+  // alerts all key off it) instead of minting a fresh one, as long as the
+  // saved session was for THIS same table (a different QR scan in the same
+  // tab starts fresh — see dinerGetTableToken()'s query/path resolution).
+  var saved = DinerSession.load();
+  if (!saved || !saved.token || saved.tableId !== tableId) return false;
+
+  state.token = saved.token;
+  state.restaurantName = saved.restaurantName || '';
+  state.tableLabel = saved.tableLabel || '';
+  state.currency = saved.currency || 'COP';
+  state.locale = saved.locale || 'es-CO';
+
+  try {
+    var cartData = await cartLoad();
+    applyCartResult(cartData);
+  } catch (e) {
+    // Saved token is gone/expired server-side (e.g. old session pruned) —
+    // fall through to minting a brand new session.
+    DinerSession.clear();
+    state.token = null;
+    return false;
+  }
+
+  renderHeader();
+  return true;
+}
+
 async function startSession() {
   setBusy(true);
   showTyping();
@@ -444,6 +529,12 @@ async function startSession() {
     hideTyping();
     setBusy(false);
     showErrorBanner('No pudimos identificar tu mesa. Escanea el código QR de nuevo.');
+    return;
+  }
+
+  if (await restoreSavedSession(tableId)) {
+    hideTyping();
+    setBusy(false);
     return;
   }
 
@@ -462,6 +553,7 @@ async function startSession() {
     if (!state.token) throw new Error('missing session token');
     DinerSession.save({
       token: state.token,
+      tableId: tableId,
       restaurantName: state.restaurantName,
       tableLabel: state.tableLabel,
       currency: state.currency,
@@ -683,6 +775,12 @@ var AddSheet = (function () {
     noteInput.value = '';
     titleEl.textContent = currentDish.name || 'Plato';
     priceEl.textContent = renderer().fmtPrice(currentDish.price, state.locale, state.currency);
+    // The sheet's DOM (including the confirm button) is built ONCE and
+    // reused across opens (see ensureBuilt()'s `if (overlay) return` guard).
+    // Always reset the disabled state here so a re-open after ANY prior
+    // outcome (success or error) starts with a clickable button.
+    var confirmBtn = box.querySelector('.m-btn--primary');
+    if (confirmBtn) confirmBtn.disabled = false;
     overlay.classList.add('open');
     trap = mesioFocusTrap(box, { onEscape: close, labelledBy: 'add-sheet-title' });
   }
@@ -694,13 +792,24 @@ var AddSheet = (function () {
     currentDish = null;
   }
 
-  function confirmAdd() {
+  async function confirmAdd() {
     if (!currentDish || !currentDish.name) { close(); return; }
+    var dish = currentDish;
+    var addedQty = qty;
     var note = (noteInput.value || '').trim();
-    var base = 'Agregar ' + qty + 'x ' + currentDish.name;
-    var text = note ? (base + ' — nota: ' + note) : base;
-    close();
-    sendMessage(text, { displayText: text });
+    var confirmBtn = box.querySelector('.m-btn--primary');
+    if (confirmBtn) confirmBtn.disabled = true;
+    try {
+      var data = await cartAdd(dish, addedQty, note);
+      close();
+      // Same {message, blocks:[cart_summary]} shape as a chat turn — render
+      // it as a bot bubble (confirmation text + mini cart card) so adding
+      // from a dish card feels identical to adding via typed chat.
+      processBotTurn(data);
+    } catch (e) {
+      if (confirmBtn) confirmBtn.disabled = false;
+      mesioToast((e && e.message) || 'No pudimos agregar el plato. Intenta de nuevo.', 'error', 4000);
+    }
   }
 
   return { open: open };
@@ -850,23 +959,28 @@ var CartPanel = (function () {
     return li;
   }
 
-  function changeQty(item, newQty) {
-    if (newQty < 0) return;
-    if (newQty === 0) { removeItem(item); return; }
-    var text = 'Cambia la cantidad de ' + item.name + ' a ' + newQty;
-    close();
-    sendMessage(text, { displayText: text });
+  async function changeQty(item, newQty) {
+    if (newQty < 0 || !item.line_id) return;
+    try {
+      await cartUpdate(item.line_id, { qty: newQty }).then(applyCartResult);
+    } catch (e) {
+      mesioToast((e && e.message) || 'No pudimos actualizar la cantidad.', 'error', 3500);
+    }
   }
 
   async function removeItem(item) {
+    if (!item.line_id) return;
     var ok = await mesioConfirm('¿Quitar "' + item.name + '" del pedido?', { confirmText: 'Quitar', danger: true });
     if (!ok) return;
-    var text = 'Quita ' + item.name + ' del pedido';
-    close();
-    sendMessage(text, { displayText: text });
+    try {
+      await cartRemove(item.line_id).then(applyCartResult);
+    } catch (e) {
+      mesioToast((e && e.message) || 'No pudimos quitar el producto.', 'error', 3500);
+    }
   }
 
   async function editNote(item) {
+    if (!item.line_id) return;
     var val = await mesioPrompt('Nota para ' + item.name, {
       title: 'Editar nota',
       defaultValue: item.note || '',
@@ -874,12 +988,11 @@ var CartPanel = (function () {
       confirmLabel: 'Guardar',
     });
     if (val === null) return;
-    var trimmed = val.trim();
-    var text = trimmed
-      ? ('Cambia la nota de ' + item.name + ' a: ' + trimmed)
-      : ('Quita la nota de ' + item.name);
-    close();
-    sendMessage(text, { displayText: text });
+    try {
+      await cartUpdate(item.line_id, { note: val.trim() }).then(applyCartResult);
+    } catch (e) {
+      mesioToast((e && e.message) || 'No pudimos guardar la nota.', 'error', 3500);
+    }
   }
 
   function open() {

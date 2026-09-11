@@ -31,6 +31,10 @@ async function loadMenu() {
             cat:             cat,
             price:           d.price           != null ? d.price : 0,
             desc:            d.description     || '',
+            // sku: stable id used by the diner-chat tap-to-cart flow
+            // (app/services/orders.py::resolve_dish_for_cart) — must
+            // round-trip through the editor or a re-save silently wipes it.
+            sku:             d.sku             || null,
             // Extended shape (catálogo v2)
             image_url:       d.image_url       || null,
             image_public_id: d.image_public_id || null,
@@ -263,6 +267,7 @@ function _normalizeDish(d) {
     name:           d.name         || '',
     description:    d.description  || '',
     price:          d.price        != null ? d.price : 0,
+    sku:            d.sku          || null,
     image_url:      d.image_url    || null,
     image_public_id: d.image_public_id || null,
     tags:           Array.isArray(d.tags)      ? d.tags      : [],
@@ -294,6 +299,7 @@ function openMenuEditor() {
       name: m.name,
       price: String(m.price).replace(/[^0-9.-]+/g, ''),
       description: m.desc || '',
+      sku: m.sku || null,
       // Extended fields may exist on MENU_ITEMS if loaded from extended endpoint
       image_url:       m.image_url       || null,
       image_public_id: m.image_public_id || null,
@@ -1233,6 +1239,7 @@ function _buildFinalMenu() {
         name:            name,
         description:     dish.description ? dish.description.trim() : '',
         price:           typeof dish.price === 'number' ? dish.price : parseFloat(dish.price) || 0,
+        sku:             dish.sku             || null,
         image_url:       dish.image_url       || null,
         image_public_id: dish.image_public_id || null,
         tags:            dish.tags            || [],

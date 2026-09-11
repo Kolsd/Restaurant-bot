@@ -14,7 +14,7 @@ or invent new block types:
     {"type":"dish_cards","dishes":[{"sku","name","description","price",
         "image_url","tags","badges","allergens","calories","prep_time_min"}]}
     {"type":"category_chips","chips":[{"label":"Pastas","value":"cat:Pastas"}]}
-    {"type":"cart_summary","items":[{"sku","name","qty","unit_price",
+    {"type":"cart_summary","items":[{"line_id","sku","name","qty","unit_price",
         "subtotal","note"}],"subtotal":<number>,"currency":"COP"}
     {"type":"payment_options","options":[{"label","value"}]}
     {"type":"waiter_ack","reason":"bill|cutlery|napkins|other","text":"..."}
@@ -148,14 +148,20 @@ def build_category_chips_block(categories: list) -> dict:
     return {"type": "category_chips", "chips": chips}
 
 
-def build_cart_summary_block(cart: dict, currency: str = "COP") -> Optional[dict]:
-    """Build from the `carts.cart_data` shape produced by orders.add_to_cart:
-    {"items":[{"name","price","quantity","subtotal","category"}], ...}.
+def build_cart_summary_block(cart: dict, currency: str = "COP", allow_empty: bool = False) -> Optional[dict]:
+    """Build from the `carts.cart_data` shape produced by orders.add_to_cart /
+    orders.add_cart_line: {"items":[{"line_id","name","price","quantity",
+    "subtotal","category","note","sku"}], ...}. `sku` and `line_id` may be
+    absent on a legacy item — this is purely additive over the original
+    shape (see CLAUDE.md "Part 1 — Cart mutations" / diner_sessions_repo).
 
-    Returns None for an empty/missing cart — nothing to show.
+    Returns None for an empty/missing cart UNLESS allow_empty=True, in which
+    case an empty cart_summary block (items=[], subtotal=0) is returned —
+    used by the diner cart tap-endpoints so the UI can render "cart is
+    empty" state and clear the cart chip after removing the last item.
     """
     items = (cart or {}).get("items") or []
-    if not items:
+    if not items and not allow_empty:
         return None
 
     out_items = []
@@ -175,7 +181,8 @@ def build_cart_summary_block(cart: dict, currency: str = "COP") -> Optional[dict
         )
         running_total = money_sum([running_total, line_subtotal])
         out_items.append({
-            "sku": it.get("name", ""),
+            "line_id": it.get("line_id") or "",
+            "sku": it.get("sku") or it.get("name", ""),
             "name": it.get("name", ""),
             "qty": qty,
             "unit_price": float(quantize_money(unit_price, currency)),  # JSON boundary

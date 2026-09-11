@@ -57,7 +57,9 @@ def normalize_dish_shape(dish: dict) -> dict:
         name (str), price (Decimal/int)
 
     Extended fields (with defaults):
-        description (str, ""), image_url (str|None), image_public_id (str|None),
+        description (str, ""), sku (str|None — stable id for direct cart-tap
+        resolution, see orders.resolve_dish_for_cart; most legacy dishes have
+        none), image_url (str|None), image_public_id (str|None),
         tags (list[str], []), badges (list[str], []), allergens (list[str], []),
         featured (bool, False), sort_order (int, 999),
         calories (int|None), prep_time_min (int|None), active (bool, True),
@@ -85,6 +87,7 @@ def normalize_dish_shape(dish: dict) -> dict:
         "name":               dish.get("name", ""),
         "description":        dish.get("description", ""),
         "price":              dish.get("price", 0),
+        "sku":                dish.get("sku"),               # None = no stable SKU set for this dish
         "image_url":          dish.get("image_url"),        # None = no image
         "image_public_id":    dish.get("image_public_id"),  # None = no Cloudinary asset
         "tags":               dish.get("tags") if isinstance(dish.get("tags"), list) else [],
