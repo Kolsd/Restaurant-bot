@@ -39,11 +39,15 @@ _ACTION_RULES: list[tuple[str, re.Pattern, str]] = [
     ("POST",   re.compile(r"^/api/internal/admin/create-user$"),                           "user.created"),
     ("POST",   re.compile(r"^/api/internal/admin/delete-user$"),                           "user.deleted"),
     # Subscriptions
-    ("POST",   re.compile(r"^/api/internal/admin/set-subscription$"),                      "subscription.updated"),
+    # NOTE (2026-09-12): POST /set-subscription rule REMOVED — the endpoint
+    # was deleted (P0 cross-tenant write, see admin.py module docstring).
+    # Subscription changes now go through PATCH /organizations/{id} above,
+    # which already maps to "org.updated".
     ("POST",   re.compile(r"^/api/internal/billing/[^/]+"),                                "billing.updated"),
     # Restaurants (legacy endpoints)
     ("POST",   re.compile(r"^/api/internal/admin/create-restaurant$"),                     "org.created"),
-    ("POST",   re.compile(r"^/api/internal/admin/update-restaurant$"),                     "org.updated"),
+    # NOTE (2026-09-12): POST /update-restaurant rule REMOVED along with the
+    # endpoint itself — same P0. Replaced by PATCH /organizations/{id}.
     # CRM prospects
     ("POST",   re.compile(r"^/api/internal/crm/prospects/\d+/convert"),                    "prospect.converted"),
     ("POST",   re.compile(r"^/api/internal/crm/prospects$"),                               "prospect.created"),

@@ -288,7 +288,7 @@ input:checked+.slider:before{transform:translateX(18px);}
             <div class="form-grid">
               <div><label class="field-label">Nombre del restaurante</label><input id="dp-name-input" class="field-input" placeholder="Nombre"></div>
               <div><label class="field-label">Número WhatsApp (bot)</label><input id="dp-wa-input" class="field-input" placeholder="+57300..."></div>
-              <div class="form-full"><label class="field-label">Dirección</label><input id="dp-addr-input" class="field-input" placeholder="Dirección completa"></div>
+              <div class="form-full" style="font-size:11px;color:#999;">La dirección es un dato por sede — se administra desde el panel del propio restaurante (Sucursales), no aquí.</div>
               <div>
                 <label class="field-label">Zona horaria</label>
                 <select id="dp-timezone" class="field-input">
@@ -861,6 +861,7 @@ input:checked+.slider:before{transform:translateX(18px);}
 let ALL_RESTAURANTS = [];
 let _currentRestFilter = 'all';
 let _currentDetailId = null;
+let _currentDetailWa = '';
 
 const MODULES_CONFIG = [
   { key:'module_orders',      label:'🛵 Pedidos WhatsApp',     desc:'Domicilios y para llevar por WA', defaultOn:true },
@@ -1115,12 +1116,23 @@ async function openDetail(id) {
   // Info tab
   $('dp-name-input').value    = r.name||'';
   $('dp-wa-input').value      = r.whatsapp_number||'';
-  $('dp-addr-input').value    = r.address||'';
+  // Remember the loaded value so saveRestaurantInfo only sends whatsapp_number
+  // when the admin actually changed it — some orgs (e.g. demo tenants) carry
+  // a non-phone-shaped bot id ("demo:0") that legitimately fails the
+  // PatchOrgRequest phone-format validator; resending it unchanged on every
+  // name/features save must not turn into a spurious 422.
+  _currentDetailWa = r.whatsapp_number || '';
   $('dp-timezone').value      = feats.timezone||'America/Bogota';
   $('dp-currency').value      = feats.currency||'COP';
   $('dp-locale').value        = feats.locale||'es-CO';
   $('dp-phoneid-input').value = r.wa_phone_id||'';
-  $('dp-token-input').value   = '';
+  // wa_access_token is never sent to the browser in plaintext (see
+  // _mask_wa_access_token server-side) — only a "is it set" hint + last4.
+  // Leave the field blank; a blank/untouched save preserves the stored secret.
+  $('dp-token-input').value       = '';
+  $('dp-token-input').placeholder = r.wa_access_token_set
+    ? `•••• ${r.wa_access_token_last4||''} (sin cambios si dejas vacío)`
+    : 'EAA... (sin configurar)';
 
   // Modules tab
   renderDetailModules(feats);
@@ -1305,22 +1317,32 @@ function renderDetailModules(feats) {
 }
 
 // ── Save detail ────────────────────────────────────────────────────
+// All saves below hit PATCH /api/internal/admin/organizations/{org_id} —
+// _currentDetailId IS an org id (ALL_RESTAURANTS comes from db_get_all_orgs).
+// The legacy POST /update-restaurant and /set-subscription endpoints were
+// REMOVED 2026-09-12: they resolved that same org id as though it were a
+// LOCATION id and could silently write to a completely different tenant
+// whenever the two ids collided. Address editing was removed from this
+// screen entirely (address is per-location, managed by each restaurant).
 async function saveRestaurantInfo() {
   if(!_currentDetailId) return;
   const feats = { timezone: $('dp-timezone').value, currency: $('dp-currency').value, locale: $('dp-locale').value };
+  const waInput = $('dp-wa-input').value.trim();
   const body = {
-    restaurant_id: _currentDetailId,
     name:    $('dp-name-input').value.trim() || undefined,
-    address: $('dp-addr-input').value.trim() || undefined,
-    whatsapp_number: $('dp-wa-input').value.trim() || undefined,
+    // Only send whatsapp_number when it actually changed — some orgs (demo
+    // tenants) carry a non-phone-shaped bot id that legitimately fails the
+    // PATCH endpoint's phone-format validator; resending it unchanged must
+    // not turn a name/features-only save into a 422.
+    whatsapp_number: (waInput && waInput !== _currentDetailWa) ? waInput : undefined,
     features: feats,
   };
-  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if(r.ok) {
     const d = await r.json();
     // Update local cache
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
-    if(idx>=0) ALL_RESTAURANTS[idx] = d.restaurant;
+    if(idx>=0) ALL_RESTAURANTS[idx] = d.data.org;
     renderRestaurantsTable(ALL_RESTAURANTS);
     showFeedback('info-feedback','✅ Guardado correctamente', true);
   } else {
@@ -1333,12 +1355,12 @@ async function saveModules() {
   if(!_currentDetailId) return;
   const features = {};
   MODULES_CONFIG.forEach(m=>{ features[m.key] = $('mod-'+m.key)?.checked; });
-  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({restaurant_id:_currentDetailId, features})});
+  const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({features})});
   if(r.ok) {
     const d = await r.json();
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
-    if(idx>=0) ALL_RESTAURANTS[idx] = d.restaurant;
+    if(idx>=0) ALL_RESTAURANTS[idx] = d.data.org;
     renderRestaurantsTable(ALL_RESTAURANTS);
     showFeedback('modules-feedback','✅ Módulos actualizados', true);
   } else showFeedback('modules-feedback','❌ Error al guardar', false);
@@ -1347,20 +1369,23 @@ async function saveModules() {
 async function saveCredentials() {
   if(!_currentDetailId) return;
   const body = {
-    restaurant_id: _currentDetailId,
     wa_phone_id:     $('dp-phoneid-input').value.trim() || undefined,
     wa_access_token: $('dp-token-input').value.trim()   || undefined,
   };
   if(!body.wa_phone_id && !body.wa_access_token) { showFeedback('creds-feedback','Sin cambios', true); return; }
-  const r = await _hqFetch('/api/internal/admin/update-restaurant', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  if(r.ok) showFeedback('creds-feedback','✅ Credenciales actualizadas', true);
-  else showFeedback('creds-feedback','❌ Error', false);
+  const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(r.ok) {
+    const d = await r.json();
+    const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
+    if(idx>=0) ALL_RESTAURANTS[idx] = d.data.org;
+    showFeedback('creds-feedback','✅ Credenciales actualizadas', true);
+  } else showFeedback('creds-feedback','❌ Error', false);
 }
 
 async function setSubStatus(status) {
   if(!_currentDetailId) return;
-  const r = await _hqFetch('/api/internal/admin/set-subscription', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({restaurant_id:_currentDetailId, status})});
+  const r = await _hqFetch(`/api/internal/admin/organizations/${_currentDetailId}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({subscription_status: status})});
   if(r.ok) {
     const idx = ALL_RESTAURANTS.findIndex(x=>x.id===_currentDetailId);
     if(idx>=0) ALL_RESTAURANTS[idx].subscription_status = status;

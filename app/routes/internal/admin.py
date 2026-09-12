@@ -13,10 +13,16 @@ Endpoints (all under /api/internal/admin, all require verify_superadmin):
   POST /delete-user      → Delete a user
   GET  /users            → List all users
   POST /create-restaurant → Create a new restaurant (legacy)
-  POST /set-subscription → Set subscription status (legacy)
   GET  /restaurant/{id}  → Detail + stats for one restaurant (legacy)
-  POST /update-restaurant → Update restaurant fields (legacy)
   GET  /billing-stats    → Billing aggregate stats
+
+  NOTE (2026-09-12): POST /set-subscription and POST /update-restaurant were
+  DELETED — both took an id the superadmin UI sent as an ORG id but resolved
+  it as a LOCATION id via a subquery against the locations table, a P0
+  cross-tenant write whenever the two ids collided (org ids and location ids
+  are independent sequences over the same integer range). superadmin.html
+  now calls PATCH /organizations/{org_id} directly — it is unambiguously
+  org-scoped. See tests/test_no_legacy_restaurant_field_writes.py.
   POST /fix-branch-ids   → Fix branch IDs (maintenance tool)
   POST /fix-conversations → Fix conversation bot numbers (maintenance tool)
   POST /parse-menu       → Parse PDF/image into JSON menu via Claude
@@ -206,12 +212,12 @@ async def _bypass_internal_admin():
 class AdminLoginRequest(BaseModel): key: str
 class CreateUserRequest(BaseModel): username: str; password: str; restaurant_id: int; admin_key: str = ""
 class CreateRestaurantRequest(BaseModel): admin_key: str = ""; name: str; whatsapp_number: str; address: str; menu: str; features: dict = {}; wa_phone_id: str = ""; wa_access_token: str = ""
-class SetSubscriptionRequest(BaseModel): admin_key: str = ""; restaurant_id: int; status: str
-class UpdateRestaurantRequest(BaseModel):
-    admin_key: str = ""; restaurant_id: int
-    name: str = None; address: str = None; whatsapp_number: str = None
-    wa_phone_id: str = None; wa_access_token: str = None
-    features: dict = None; menu: str = None
+# SetSubscriptionRequest / UpdateRestaurantRequest and the routes that used
+# them (POST /set-subscription, POST /update-restaurant) were DELETED
+# 2026-09-12 along with db_update_subscription/db_update_restaurant_fields —
+# see module docstring above for the P0 they carried. superadmin.html was
+# switched to PATCH /organizations/{org_id} (below), which is unambiguously
+# org-scoped.
 
 
 _VALID_PLANS = {"pulso", "restaurante", "pro", "cadena", "comp", "free"}
@@ -357,16 +363,6 @@ async def admin_create_restaurant(
     return {"success": True}
 
 
-@router.post("/set-subscription")
-async def admin_set_subscription(
-    request: SetSubscriptionRequest,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    await db.db_update_subscription(request.restaurant_id, request.status)
-    return {"success": True}
-
-
 @router.get("/restaurant/{restaurant_id}")
 async def admin_get_restaurant_detail(
     restaurant_id: int,
@@ -379,55 +375,6 @@ async def admin_get_restaurant_detail(
     wa = rest.get("whatsapp_number", "")
     stats = await restaurant_repo.db_get_restaurant_detail_stats(restaurant_id, wa)
     return {"restaurant": rest, "stats": stats}
-
-
-@router.post("/update-restaurant")
-async def admin_update_restaurant(
-    request: UpdateRestaurantRequest,
-    _: None = Depends(verify_superadmin),
-    _bypass: None = Depends(_bypass_internal_admin),
-):
-    from app.routes.dashboard import geocode_address
-    rest = await db.db_get_restaurant_by_org_id(request.restaurant_id)
-    if not rest:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
-    lat = lon = None
-    if request.address is not None:
-        lat, lon, _ = await geocode_address(request.address)
-
-    merged_features = None
-    if request.features is not None:
-        raw = rest.get("features") or {}
-        current = json.loads(raw) if isinstance(raw, str) else dict(raw)
-        if isinstance(current, str):
-            try:
-                current = json.loads(current)
-            except Exception:
-                current = {}
-        current.update(request.features)
-        merged_features = current
-
-    parsed_menu = None
-    if request.menu is not None:
-        try:
-            parsed_menu = json.loads(request.menu)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Menú no es JSON válido")
-
-    await restaurant_repo.db_update_restaurant_fields(
-        request.restaurant_id,
-        name=request.name,
-        address=request.address,
-        latitude=lat,
-        longitude=lon,
-        whatsapp_number=request.whatsapp_number,
-        wa_phone_id=request.wa_phone_id,
-        wa_access_token=request.wa_access_token,
-        features=merged_features,
-        menu=parsed_menu,
-    )
-    return {"success": True, "restaurant": await db.db_get_restaurant_by_org_id(request.restaurant_id)}
 
 
 @router.get("/billing-stats")
@@ -599,7 +546,17 @@ async def update_organization(
     if body.wa_phone_id is not None:
         updates["wa_phone_id"] = body.wa_phone_id or None
     if body.wa_access_token is not None:
-        updates["wa_access_token"] = body.wa_access_token or None
+        # wa_access_token is a secret: GET/PATCH responses only ever carry
+        # wa_access_token_set/_last4 (see _mask_wa_access_token), never the
+        # plaintext — so the UI cannot echo it back. An empty string or a
+        # masked placeholder (the UI would only ever send one it invented,
+        # never one we returned) means "admin didn't touch this field":
+        # simply omit the column from the UPDATE so the stored secret is
+        # preserved untouched, mirroring the Wompi integrity_secret pattern
+        # in app/routes/settings_routes.py.
+        token = body.wa_access_token.strip()
+        if token and not token.startswith(("•", "xxxx", "****")):
+            updates["wa_access_token"] = token
     if body.subscription_plan is not None:
         updates["subscription_plan"] = body.subscription_plan
     if body.subscription_status is not None:
@@ -616,6 +573,10 @@ async def update_organization(
         updated = await restaurant_repo.db_update_organization(org_id, **updates)
     except asyncpg.UniqueViolationError:
         raise HTTPException(status_code=409, detail="slug or whatsapp_number already exists")
+    except ValueError as exc:
+        # Cross-tenant dish image (validate_dish_image_ownership) — only
+        # reachable if a future caller adds `menu` to PatchOrgRequest.
+        raise HTTPException(status_code=400, detail=str(exc))
 
     return _ok({"org": updated})
 

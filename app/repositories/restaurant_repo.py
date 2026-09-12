@@ -116,6 +116,62 @@ def validate_dish_image_ownership(dish: dict, restaurant_id: int) -> bool:
     return str(public_id).startswith(expected_prefix)
 
 
+def _validate_and_normalize_menu(menu_data: dict, restaurant_id: int) -> dict:
+    """
+    Walk a {category: [dish, ...]} menu, run normalize_dish_shape on every dish,
+    and reject any dish whose image_public_id belongs to another restaurant/org.
+
+    Shared by every write path that can persist a full menu JSONB blob
+    (db_update_menu, db_update_organization(menu=...)) so none of them can
+    ever skip normalization or the cross-tenant image-ownership check.
+    Raises ValueError on the first offending dish.
+    """
+    if not isinstance(menu_data, dict):
+        return menu_data
+    result: dict = {}
+    for category, dishes in menu_data.items():
+        if not isinstance(dishes, list):
+            result[category] = dishes
+            continue
+        normalized: list = []
+        for dish in dishes:
+            if not isinstance(dish, dict):
+                normalized.append(dish)
+                continue
+            if not validate_dish_image_ownership(dish, restaurant_id):
+                bad_pid = dish.get("image_public_id")
+                log.warning(
+                    "restaurant_repo.menu_validation.cross_tenant_image",
+                    restaurant_id=restaurant_id,
+                    category=category,
+                    dish_name=dish.get("name"),
+                    image_public_id=bad_pid,
+                )
+                raise ValueError(
+                    f"Plato '{dish.get('name')}' tiene una imagen que no pertenece a "
+                    f"este restaurante (public_id='{bad_pid}'). "
+                    f"Solo se permiten imágenes bajo mesio/r_{restaurant_id}/."
+                )
+            normalized.append(normalize_dish_shape(dish))
+        result[category] = normalized
+    return result
+
+
+def _mask_wa_access_token(d: dict) -> dict:
+    """Replace a raw organizations.wa_access_token value with masked hints.
+
+    The Meta access token is a secret credential and must never leave the
+    server in a GET/list/PATCH response — mirrors the Wompi integrity_secret
+    convention (see app/routes/settings_routes.py::_mask_wompi_for_response).
+    Mutates and returns *d*: pops the plaintext key, adds `wa_access_token_set`
+    (bool) and `wa_access_token_last4` (str, "" if unset/too short).
+    """
+    token = (d.pop("wa_access_token", None) or "").strip()
+    d["wa_access_token_set"] = bool(token)
+    d["wa_access_token_last4"] = token[-4:] if len(token) >= 4 else ""
+    return d
+
+
 def _normalize_menu_dishes(menu: dict) -> dict:
     """
     Walk a {category: [dish, ...]} menu and run normalize_dish_shape on every dish.
@@ -249,74 +305,18 @@ async def db_set_restaurant_wa_credentials(
         )
 
 
-async def db_update_restaurant_fields(
-    restaurant_id: int,
-    *,
-    name: str | None = None,
-    address: str | None = None,
-    latitude: float | None = None,
-    longitude: float | None = None,
-    whatsapp_number: str | None = None,
-    wa_phone_id: str | None = None,
-    wa_access_token: str | None = None,
-    features: dict | None = None,
-    menu: dict | None = None,
-) -> None:
-    """
-    Update any subset of restaurant fields atomically.
-    Each non-None kwarg is routed to organizations or locations depending on column ownership.
-    restaurant_id is a Location id (via the VIEW); org-level fields resolve via subquery.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with _tenant_connection() as conn:
-        # --- Location-level fields ---
-        if address is not None and latitude is not None and longitude is not None:
-            await conn.execute(
-                "UPDATE locations SET address=$1, latitude=$2, longitude=$3 WHERE id=$4",
-                address, latitude, longitude, restaurant_id,
-            )
-        # --- Org-level name (update both: org.name for Matriz, loc.name for branches) ---
-        if name is not None:
-            await conn.execute("UPDATE locations SET name=$1 WHERE id=$2", name, restaurant_id)
-            await conn.execute(
-                """UPDATE organizations SET name=$1
-                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
-                name, restaurant_id,
-            )
-        # --- Org-level default credential fields ---
-        if whatsapp_number is not None:
-            await conn.execute(
-                """UPDATE organizations SET whatsapp_number=$1
-                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
-                whatsapp_number, restaurant_id,
-            )
-        if wa_phone_id is not None:
-            await conn.execute(
-                """UPDATE organizations SET wa_phone_id=$1
-                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
-                wa_phone_id, restaurant_id,
-            )
-        if wa_access_token is not None:
-            await conn.execute(
-                """UPDATE organizations SET wa_access_token=$1
-                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
-                wa_access_token, restaurant_id,
-            )
-        if features is not None:
-            await conn.execute(
-                """UPDATE organizations SET features=$1::jsonb
-                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
-                _json.dumps(features) if isinstance(features, dict) else features,
-                restaurant_id,
-            )
-        if menu is not None:
-            await conn.execute(
-                """UPDATE organizations SET menu=$1::jsonb
-                   WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
-                _json.dumps(menu) if isinstance(menu, dict) else menu,
-                restaurant_id,
-            )
+# db_update_restaurant_fields was DELETED 2026-09-12 — P0 cross-tenant write.
+# It took an id it assumed was a Location id and resolved the org via
+# `WHERE id = (SELECT org_id FROM locations WHERE id=$N)`. Its only caller,
+# the superadmin UI, actually sent an ORG id (db_get_all_orgs rows). Org ids
+# and location ids are independent sequences over the same integer range
+# (Wave-2), so whenever an org's id happened to equal a DIFFERENT org's
+# location id, the subquery silently resolved to — and wrote — the WRONG
+# TENANT (see memory/ambiguous-restaurant-lookup-p0.md-style incident,
+# same bug class as the deleted db_get_restaurant_by_id). Replaced by the
+# already-correct, org-scoped `db_update_organization(org_id, **fields)`,
+# called from `PATCH /api/internal/admin/organizations/{org_id}`.
+# See tests/test_no_legacy_restaurant_field_writes.py for the forward guard.
 
 
 # ── Restaurant detail stats (superadmin dashboard) ───────────────────────────
@@ -1257,7 +1257,7 @@ async def db_sync_menu_to_branches(parent_restaurant_id: int) -> int:
     This function is retained for backward compatibility.  It returns the number
     of sibling locations (branch count) so the caller can display a meaningful
     count, but no database write is performed (the org menu was already updated
-    by db_update_menu or db_update_restaurant_fields).
+    by db_update_menu or db_update_organization).
 
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
@@ -1285,31 +1285,7 @@ async def db_update_menu(restaurant_id: int, menu_data: dict) -> bool:
     # Requires active tenant_scope() or bypass_tenant_scope().
     """
     # ── Validate + normalize dishes ───────────────────────────────────────────
-    if isinstance(menu_data, dict):
-        for category, dishes in menu_data.items():
-            if not isinstance(dishes, list):
-                continue
-            normalized: list = []
-            for dish in dishes:
-                if not isinstance(dish, dict):
-                    normalized.append(dish)
-                    continue
-                if not validate_dish_image_ownership(dish, restaurant_id):
-                    bad_pid = dish.get("image_public_id")
-                    log.warning(
-                        "restaurant_repo.db_update_menu.cross_tenant_image",
-                        restaurant_id=restaurant_id,
-                        category=category,
-                        dish_name=dish.get("name"),
-                        image_public_id=bad_pid,
-                    )
-                    raise ValueError(
-                        f"Plato '{dish.get('name')}' tiene una imagen que no pertenece a "
-                        f"este restaurante (public_id='{bad_pid}'). "
-                        f"Solo se permiten imágenes bajo mesio/r_{restaurant_id}/."
-                    )
-                normalized.append(normalize_dish_shape(dish))
-            menu_data[category] = normalized
+    menu_data = _validate_and_normalize_menu(menu_data, restaurant_id)
 
     # Post-Wave-2: callers pass org_id (restaurant["id"] is normalized to
     # org_id in db_get_restaurant_by_phone). The historical subquery
@@ -1477,17 +1453,13 @@ async def db_get_top_dishes(whatsapp_number: str, top_n: int = 5):
     return all_dishes[:top_n]
 
 
-async def db_update_subscription(restaurant_id: int, new_status: str):
-    """Update subscription_status on the organizations table.
-
-    # Requires active tenant_scope() or bypass_tenant_scope().
-    """
-    async with _tenant_connection() as conn:
-        await conn.execute(
-            """UPDATE organizations SET subscription_status=$1
-               WHERE id = (SELECT org_id FROM locations WHERE id=$2)""",
-            new_status, restaurant_id,
-        )
+# db_update_subscription was DELETED 2026-09-12 — same P0 cross-tenant write
+# bug class as db_update_restaurant_fields above (ambiguous
+# `WHERE id = (SELECT org_id FROM locations WHERE id=$N)` fed an ORG id sent
+# by the superadmin UI, resolving to and writing an unrelated org whenever
+# ids collided). Replaced by `db_update_organization(org_id, subscription_status=...)`
+# via `PATCH /api/internal/admin/organizations/{org_id}`.
+# See tests/test_no_legacy_restaurant_field_writes.py for the forward guard.
 
 
 # ── Menu availability ─────────────────────────────────────────────────────────
@@ -1793,6 +1765,10 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
 
     organizations has no RLS policy (it IS the tenant container), so we use
     bypass_tenant_scope for audit-log consistency.  Safe from any call site.
+
+    wa_access_token is a secret and is NEVER returned in plaintext here — see
+    _mask_wa_access_token. The bot runtime reads the real token via
+    db_get_org_by_phone, not this function.
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
@@ -1823,7 +1799,7 @@ async def db_get_org_by_id(org_id: int) -> dict | None:
                 d[field] = {} if field == "features" else []
         elif val is None:
             d[field] = {} if field == "features" else []
-    return d
+    return _mask_wa_access_token(d)
 
 
 async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
@@ -1875,7 +1851,7 @@ async def db_get_all_orgs(active_only: bool = True) -> list[dict]:
                     d[field] = {} if field == "features" else []
             elif val is None:
                 d[field] = {} if field == "features" else []
-        result.append(d)
+        result.append(_mask_wa_access_token(d))
     return result
 
 
@@ -2200,6 +2176,15 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
 
     Called from authenticated admin routes; uses bypass_tenant_scope since
     organizations has no RLS and we need to update the container itself.
+
+    `menu`, when present, is routed through `_validate_and_normalize_menu`
+    (same normalization + cross-tenant image-ownership check as
+    db_update_menu) — never written as a raw, unvalidated blob.
+
+    `wa_access_token` is a secret: the returned dict never carries the
+    plaintext (see _mask_wa_access_token). Preserving vs. overwriting the
+    stored secret on an empty/masked input is the caller's responsibility
+    (simply omit the key from **fields to preserve).
     """
     from app.services.tenant_context import bypass_tenant_scope_if_unset  # noqa: PLC0415
 
@@ -2213,6 +2198,11 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
     if not updates:
         log.warning("db_update_organization.no_valid_fields", org_id=org_id)
         return await db_get_org_by_id(org_id)
+
+    if "menu" in updates and isinstance(updates["menu"], dict):
+        # Raises ValueError on a cross-tenant image — let it propagate so the
+        # route can turn it into a 400 instead of silently persisting it.
+        updates["menu"] = _validate_and_normalize_menu(updates["menu"], org_id)
 
     set_clauses = []
     params: list = []
@@ -2255,7 +2245,7 @@ async def db_update_organization(org_id: int, **fields) -> dict | None:
                 d[field] = {} if field == "features" else []
         elif val is None:
             d[field] = {} if field == "features" else []
-    return d
+    return _mask_wa_access_token(d)
 
 
 async def db_update_location(location_id: int, **fields) -> dict | None:

@@ -329,7 +329,6 @@ from app.repositories.restaurant_repo import (
     db_update_menu,
     db_get_menu,
     db_get_top_dishes,
-    db_update_subscription,
     db_get_branches,
     db_delete_branch,
     db_get_menu_availability,
