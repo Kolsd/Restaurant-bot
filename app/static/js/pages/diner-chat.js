@@ -372,6 +372,97 @@ function renderWaiterAckBlock(block) {
   return card;
 }
 
+/* ── NPS prompt block — backed by the SAME agent.py NPS state machine used
+ * on WhatsApp (see app/services/blocks.py build_nps_prompt_block). A star
+ * tap / skip / comment submit is just a normal POST /api/diner/chat message
+ * ("1".."5", "no calificar", or free text) — no separate NPS endpoint.
+ * ════════════════════════════════════════════════════════════════════ */
+function renderNpsPromptBlock(block) {
+  var scale = (block && block.scale) || 5;
+  var stage = (block && block.stage) === 'comment' ? 'comment' : 'score';
+  var card = document.createElement('div');
+  card.className = 'diner-nps-card';
+
+  var title = document.createElement('p');
+  title.className = 'diner-nps-title';
+  title.textContent = stage === 'comment'
+    ? '¿Qué podríamos mejorar? (opcional)'
+    : '¿Cómo calificarías tu experiencia?';
+  card.appendChild(title);
+
+  if (stage === 'comment') {
+    var row = document.createElement('div');
+    row.className = 'diner-nps-comment-row';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'diner-nps-comment-input';
+    input.maxLength = 500;
+    input.placeholder = 'Escribe tu comentario...';
+    row.appendChild(input);
+
+    var sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'm-btn m-btn--primary m-btn--sm';
+    sendBtn.textContent = 'Enviar';
+    sendBtn.addEventListener('click', function () {
+      var text = input.value.trim() || 'Sin comentario';
+      sendMessage(text, { displayText: text });
+    });
+    row.appendChild(sendBtn);
+    card.appendChild(row);
+  } else {
+    var stars = document.createElement('div');
+    stars.className = 'diner-nps-stars';
+    stars.setAttribute('role', 'group');
+    stars.setAttribute('aria-label', 'Calificación de 1 a ' + scale + ' estrellas');
+    for (var i = 1; i <= scale; i++) {
+      (function (score) {
+        var starBtn = document.createElement('button');
+        starBtn.type = 'button';
+        starBtn.className = 'diner-nps-star';
+        starBtn.setAttribute('aria-label', score + ' estrella' + (score > 1 ? 's' : ''));
+        starBtn.textContent = '★';
+        starBtn.addEventListener('mouseenter', function () {
+          Array.prototype.forEach.call(stars.children, function (el, idx) {
+            el.classList.toggle('diner-nps-star--filled', idx < score);
+          });
+        });
+        starBtn.addEventListener('click', function () {
+          sendMessage(String(score), { displayText: score + ' ★' });
+        });
+        stars.appendChild(starBtn);
+      })(i);
+    }
+    card.appendChild(stars);
+
+    var skipBtn = document.createElement('button');
+    skipBtn.type = 'button';
+    skipBtn.className = 'diner-nps-skip';
+    skipBtn.textContent = 'No calificar';
+    skipBtn.addEventListener('click', function () {
+      sendMessage('no calificar', { displayText: 'No calificar' });
+    });
+    card.appendChild(skipBtn);
+  }
+
+  return card;
+}
+
+function renderCheckoutStatusBlock(status) {
+  var card = document.createElement('div');
+  card.className = 'diner-checkout-status-card' + (status.status === 'paid' ? ' diner-checkout-status-card--paid' : '');
+  var icon = document.createElement('span');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = status.status === 'paid' ? '✅' : '🧾';
+  var p = document.createElement('p');
+  p.textContent = status.status === 'paid'
+    ? 'Tu cuenta ya fue pagada. ¡Gracias por tu visita!'
+    : 'Ya le avisamos al mesero, ya viene con tu cuenta.';
+  card.appendChild(icon);
+  card.appendChild(p);
+  return card;
+}
+
 function renderBlock(block) {
   if (!block || typeof block.type !== 'string') return null;
   switch (block.type) {
@@ -381,6 +472,7 @@ function renderBlock(block) {
     case 'cart_summary': return renderCartSummaryBlock(block);
     case 'payment_options': return renderPaymentOptionsBlock(block);
     case 'waiter_ack': return renderWaiterAckBlock(block);
+    case 'nps_prompt': return renderNpsPromptBlock(block);
     default: return null; // forward-compat: unrecognised block types are skipped, never crash
   }
 }
@@ -409,6 +501,12 @@ function processBotTurn(turn) {
       state.cart = block;
       updateCartChip();
       CartPanel.refresh();
+    }
+    if (block && block.type === 'nps_prompt') {
+      // Keep the status-poll's dedup in sync so the NEXT poll tick doesn't
+      // re-render a second copy of the same stage this turn already showed
+      // (see pollDinerStatus — it only appends on a STAGE CHANGE).
+      lastNpsStage = block.stage || 'score';
     }
     var node = renderBlock(block);
     if (node) {
@@ -748,6 +846,14 @@ function appendWaiterAck(text) {
 }
 
 async function callWaiter(reasonObj) {
+  // "La cuenta" needs scope/method/tip, not a bare ping — routes to the
+  // richer CheckoutSheet (POST /api/diner/checkout) instead of the plain
+  // waiter-call endpoint. Every other reason keeps the original direct ping.
+  if (reasonObj.value === 'bill') {
+    WaiterSheet.close();
+    CheckoutSheet.open();
+    return;
+  }
   WaiterSheet.setBusy(true);
   try {
     var data = await DinerSession.fetch('/api/diner/waiter-call', 'POST', { reason: reasonObj.value }, getToken());
@@ -1535,6 +1641,207 @@ var SendOrderSheet = (function () {
   return { open: open, close: close };
 })();
 
+/* ── Checkout sheet ("Pedir la cuenta") — waiter-mediated, no gateway ──
+ * PM decision (CLAUDE.md, 2026-09-11): no Wompi/Bold at launch. The diner
+ * only DECLARES scope ("lo mío" / "toda la mesa") and method (tarjeta /
+ * efectivo) [+ optional tip / name / phone] — the waiter physically charges
+ * on whatever datáfono the restaurant has, or takes cash. No card fields,
+ * no payment link, ever, anywhere in this sheet.
+ * POST /api/diner/checkout → {check_id, status:'pending_waiter', total, ...}
+ * ════════════════════════════════════════════════════════════════════ */
+var CheckoutSheet = (function () {
+  var overlay = null;
+  var box = null;
+  var trap = null;
+  var scope = 'mine';
+  var method = 'card';
+  var scopeBtns = [];
+  var methodBtns = [];
+  var tipInput = null;
+  var nameInput = null;
+  var phoneInput = null;
+  var confirmBtn = null;
+
+  function makeToggleRow(options, selected, onSelect) {
+    var row = document.createElement('div');
+    row.className = 'diner-toggle-row';
+    var btns = [];
+    options.forEach(function (opt) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'diner-toggle-btn' + (opt.value === selected ? ' diner-toggle-btn--active' : '');
+      btn.textContent = opt.label;
+      btn.addEventListener('click', function () {
+        onSelect(opt.value);
+        btns.forEach(function (b, idx) {
+          b.classList.toggle('diner-toggle-btn--active', options[idx].value === opt.value);
+        });
+      });
+      btns.push(btn);
+      row.appendChild(btn);
+    });
+    return { row: row, btns: btns };
+  }
+
+  function ensureBuilt() {
+    if (overlay) return;
+
+    overlay = document.createElement('div');
+    overlay.className = 'diner-overlay';
+
+    box = document.createElement('div');
+    box.className = 'diner-sheet';
+
+    var title = document.createElement('h2');
+    title.id = 'checkout-sheet-title';
+    title.textContent = 'Pedir la cuenta';
+    box.appendChild(title);
+
+    var scopeLabel = document.createElement('label');
+    scopeLabel.className = 'diner-sheet-note-label';
+    scopeLabel.textContent = '¿Qué quieres pagar?';
+    box.appendChild(scopeLabel);
+    var scopeToggle = makeToggleRow(
+      [{ value: 'mine', label: 'Solo lo mío' }, { value: 'table', label: 'Toda la mesa' }],
+      scope,
+      function (v) { scope = v; }
+    );
+    scopeBtns = scopeToggle.btns;
+    box.appendChild(scopeToggle.row);
+
+    var methodLabel = document.createElement('label');
+    methodLabel.className = 'diner-sheet-note-label';
+    methodLabel.textContent = '¿Cómo vas a pagar?';
+    box.appendChild(methodLabel);
+    var methodToggle = makeToggleRow(
+      [{ value: 'card', label: 'Tarjeta' }, { value: 'cash', label: 'Efectivo' }],
+      method,
+      function (v) { method = v; }
+    );
+    methodBtns = methodToggle.btns;
+    box.appendChild(methodToggle.row);
+
+    var tipField = document.createElement('div');
+    tipField.className = 'diner-sheet-field';
+    var tipLabel = document.createElement('label');
+    tipLabel.className = 'diner-sheet-note-label';
+    tipLabel.textContent = 'Propina (opcional)';
+    tipInput = document.createElement('input');
+    tipInput.type = 'number';
+    tipInput.min = '0';
+    tipInput.className = 'diner-sheet-input';
+    tipInput.placeholder = '0';
+    tipField.appendChild(tipLabel);
+    tipField.appendChild(tipInput);
+    box.appendChild(tipField);
+
+    var nameField = document.createElement('div');
+    nameField.className = 'diner-sheet-field';
+    var nameLabel = document.createElement('label');
+    nameLabel.className = 'diner-sheet-note-label';
+    nameLabel.textContent = 'Tu nombre (opcional)';
+    nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.maxLength = 100;
+    nameInput.className = 'diner-sheet-input';
+    nameField.appendChild(nameLabel);
+    nameField.appendChild(nameInput);
+    box.appendChild(nameField);
+
+    var phoneField = document.createElement('div');
+    phoneField.className = 'diner-sheet-field';
+    var phoneLabel = document.createElement('label');
+    phoneLabel.className = 'diner-sheet-note-label';
+    phoneLabel.textContent = 'Tu teléfono (opcional)';
+    phoneInput = document.createElement('input');
+    phoneInput.type = 'tel';
+    phoneInput.maxLength = 30;
+    phoneInput.className = 'diner-sheet-input';
+    phoneField.appendChild(phoneLabel);
+    phoneField.appendChild(phoneInput);
+    box.appendChild(phoneField);
+
+    var hint = document.createElement('p');
+    hint.className = 'diner-sheet-hint';
+    hint.textContent = 'El mesero te cobra en el datáfono del restaurante o en efectivo. Nunca vas a ingresar datos de tu tarjeta aquí.';
+    box.appendChild(hint);
+
+    var actions = document.createElement('div');
+    actions.className = 'diner-sheet-actions';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'm-btn m-btn--ghost';
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.addEventListener('click', close);
+
+    confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'm-btn m-btn--primary';
+    confirmBtn.textContent = 'Pedir la cuenta';
+    confirmBtn.addEventListener('click', confirmCheckout);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    box.appendChild(actions);
+
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function open() {
+    ensureBuilt();
+    scope = 'mine';
+    method = 'card';
+    scopeBtns.forEach(function (b, idx) { b.classList.toggle('diner-toggle-btn--active', idx === 0); });
+    methodBtns.forEach(function (b, idx) { b.classList.toggle('diner-toggle-btn--active', idx === 0); });
+    tipInput.value = '';
+    nameInput.value = '';
+    phoneInput.value = '';
+    confirmBtn.disabled = false;
+    overlay.classList.add('open');
+    trap = mesioFocusTrap(box, { onEscape: close, labelledBy: 'checkout-sheet-title' });
+  }
+
+  function close() {
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    if (trap) { trap.deactivate(); trap = null; }
+  }
+
+  async function confirmCheckout() {
+    confirmBtn.disabled = true;
+    try {
+      var tipRaw = tipInput.value.trim();
+      var tipAmount = tipRaw ? Number(tipRaw) : 0;
+      if (!isFinite(tipAmount) || tipAmount < 0) tipAmount = 0;
+
+      var body = { scope: scope, method: method, tip_amount: tipAmount };
+      var nameVal = nameInput.value.trim();
+      var phoneVal = phoneInput.value.trim();
+      if (nameVal) body.customer_name = nameVal;
+      if (phoneVal) body.customer_phone = phoneVal;
+
+      var data = await DinerSession.fetch('/api/diner/checkout', 'POST', body, getToken());
+      close();
+      var bubble = createBotBubble();
+      bubble.appendChild(createTextNode(data.message || 'Ya le avisamos al mesero.'));
+      bubble.appendChild(renderCheckoutStatusBlock({ status: data.status }));
+      appendBubble(bubble);
+      mesioToast('Ya avisamos al mesero', 'success', 4000);
+      lastCheckoutStatus = data.status;
+      TablePanel.refresh();
+    } catch (e) {
+      mesioToast((e && e.message) || 'No pudimos pedir la cuenta. Intenta de nuevo o hazle señas al mesero.', 'error', 5000);
+    } finally {
+      confirmBtn.disabled = false;
+    }
+  }
+
+  return { open: open, close: close };
+})();
+
 /* ── Table view (Gap 3) — "Tú" vs "Otro comensal" ─────────────────────
  * GET /api/diner/table. Polled every 8s while the panel is open (and once
  * right after a successful send) via mesioInterval, mirroring the
@@ -1731,6 +2038,51 @@ function initTablePolling() {
   mesioInterval(function () { TablePanel.refresh(); }, 8000);
 }
 
+/* ── Status polling — GET /api/diner/status ───────────────────────────
+ * Payment ('pending_waiter' → 'paid') and the NPS survey both start from
+ * something that happens OUTSIDE this tab (the waiter marking the check
+ * paid in caja, via the EXISTING pay_check flow) — nothing the diner types
+ * triggers them. Polls globally (not gated by any panel being open) so the
+ * diner sees "ya viene con tu cuenta" / "ya fue pagada" / the star survey
+ * show up in their own chat feed without having to do anything.
+ * ════════════════════════════════════════════════════════════════════ */
+var lastCheckoutStatus = null;
+var lastNpsStage = null;
+
+async function pollDinerStatus() {
+  if (!state.token) return;
+  var data;
+  try {
+    data = await DinerSession.fetch('/api/diner/status', 'GET', null, getToken());
+  } catch (e) {
+    return; // best-effort — a transient failure here must never surface to the diner
+  }
+  if (!data) return;
+
+  var checkout = data.checkout;
+  var checkoutStatus = checkout ? checkout.status : null;
+  if (checkoutStatus && checkoutStatus !== lastCheckoutStatus) {
+    var bubble = createBotBubble();
+    bubble.appendChild(renderCheckoutStatusBlock({ status: checkoutStatus }));
+    appendBubble(bubble);
+    TablePanel.refresh();
+  }
+  lastCheckoutStatus = checkoutStatus;
+
+  var nps = data.nps;
+  var npsStage = nps ? nps.stage : null;
+  if (npsStage && npsStage !== lastNpsStage) {
+    var npsBubble = createBotBubble();
+    npsBubble.appendChild(renderBlock(nps));
+    appendBubble(npsBubble);
+  }
+  lastNpsStage = npsStage;
+}
+
+function initStatusPolling() {
+  mesioInterval(function () { pollDinerStatus(); }, 6000);
+}
+
 function initDinerChat() {
   initComposer();
   initWaiterFab();
@@ -1738,6 +2090,7 @@ function initDinerChat() {
   initJoinBanner();
   initErrorBanner();
   initTablePolling();
+  initStatusPolling();
   startSession();
 }
 

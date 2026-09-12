@@ -39,6 +39,8 @@ _fb_checkout: dict[str, tuple[float, Any]] = {}
 _fb_cooldown: dict[str, float] = {}  # key → expire_at_monotonic
 _fb_cart_locks: dict[str, asyncio.Lock] = {}  # phone:bot_number → asyncio.Lock (fallback only)
 _fb_cart_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
+_fb_checkout_locks: dict[str, asyncio.Lock] = {}  # base_order_id → asyncio.Lock (fallback only)
+_fb_checkout_lock_tokens: dict[str, str] = {}  # key → owner token (fallback only)
 _fb_nps_transition_locks: dict[str, asyncio.Lock] = {}  # nps_lock key → asyncio.Lock (fallback only)
 _fb_nps_transition_owner: dict[str, str] = {}  # nps_lock key → owner token (fallback only)
 
@@ -392,6 +394,70 @@ async def cart_lock_release(phone: str, bot_number: str, token: str | None = Non
     if lock is not None and not lock.locked():
         _fb_cart_locks.pop(key, None)
         _fb_cart_lock_tokens.pop(key, None)
+
+
+# ── Table checkout distributed mutex ─────────────────────────────────────────
+# Serializes the diner web-checkout critical section (read existing checks,
+# figure out which table_orders rows are still unbilled, insert one new
+# check) per base_order_id — a WHOLE TABLE, not one diner's cart. Two diners
+# tapping "pagar" at the same instant (one "mine", one "toda la mesa") must
+# never both read the same "unbilled" snapshot and each create a check that
+# claims the same items. Same Redis SET-NX-EX primitive as cart_lock_*, just
+# keyed by base_order_id instead of (phone, bot_number).
+
+def _checkout_lock_redis_key(base_order_id: str) -> str:
+    return f"mesio:table_checkout_lock:{base_order_id}"
+
+
+async def table_checkout_lock_acquire(base_order_id: str, ttl_seconds: int = 15) -> str | None:
+    """Acquire a distributed lock for the checkout critical section on one
+    base_order_id (one table's whole ticket). Returns the lock token if
+    acquired, None if already held by another request.
+    """
+    key = _checkout_lock_redis_key(base_order_id)
+    token = str(uuid.uuid4())
+    r = await _rc.get_redis()
+    if r is not None:
+        result = await r.set(key, token, nx=True, ex=ttl_seconds)
+        return token if result is not None else None
+    _maybe_warn("table_checkout_lock")
+    if key not in _fb_checkout_locks:
+        _fb_checkout_locks[key] = asyncio.Lock()
+    lock = _fb_checkout_locks[key]
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=5.0)
+        _fb_checkout_lock_tokens[key] = token
+        return token
+    except asyncio.TimeoutError:
+        return None
+
+
+async def table_checkout_lock_release(base_order_id: str, token: str | None = None) -> None:
+    """Release a previously acquired table checkout lock (ownership-checked)."""
+    key = _checkout_lock_redis_key(base_order_id)
+    if token is None:
+        log.error("table_checkout_lock.release_without_token", key=key)
+        return
+    r = await _rc.get_redis()
+    if r is not None:
+        stored = await r.get(key)
+        if stored != token:
+            log.warning("table_checkout_lock.release_ownership_mismatch", key=key)
+            return
+        await r.delete(key)
+        return
+    _maybe_warn("table_checkout_lock")
+    if _fb_checkout_lock_tokens.get(key) != token:
+        log.warning("table_checkout_lock.release_ownership_mismatch_fallback", key=key)
+        return
+    _fb_checkout_lock_tokens.pop(key, None)
+    lock = _fb_checkout_locks.get(key)
+    if lock is not None and lock.locked():
+        lock.release()
+    lock = _fb_checkout_locks.get(key)
+    if lock is not None and not lock.locked():
+        _fb_checkout_locks.pop(key, None)
+        _fb_checkout_lock_tokens.pop(key, None)
 
 
 # ── NPS transition distributed lock ──────────────────────────────────────────

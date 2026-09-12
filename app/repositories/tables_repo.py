@@ -308,6 +308,36 @@ async def db_get_base_order_id(table_id: str) -> str | None:
         return row['base_id'] if row else None
 
 
+async def db_get_latest_base_order_id_for_table(table_id: str) -> str | None:
+    """Like db_get_base_order_id, but for READ-ONLY status views, not for
+    deciding whether a NEW round should attach to an existing group.
+
+    Two differences from db_get_base_order_id, both deliberate:
+      - Does NOT require an active table_sessions row — a diner polling
+        GET /api/diner/status right after their check is paid (which may
+        close out the whole table) must still be able to resolve the group
+        they just paid into.
+      - Does NOT exclude status='factura_entregada' — that status is
+        exactly the "already fully paid" state a payment-status view needs
+        to report, not hide. db_get_base_order_id excludes it because it
+        answers a different question ("what group should a NEW order round
+        attach to"), which is why this is a SEPARATE function rather than a
+        parameter on that one — changing that one's filter would change
+        order-grouping behaviour for the WhatsApp/diner order-send path,
+        governed by CLAUDE.md "Reglas del Bot — NO ROMPER".
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        row = await conn.fetchrow("""
+            SELECT COALESCE(base_order_id, id) as base_id
+            FROM table_orders
+            WHERE table_id=$1 AND status != 'cancelado'
+            ORDER BY created_at DESC LIMIT 1
+        """, table_id)
+        return row['base_id'] if row else None
+
+
 async def db_get_next_sub_number(base_order_id: str) -> int:
     """# Requires active tenant_scope() or bypass_tenant_scope()."""
     async with tenant_connection() as conn:
@@ -979,6 +1009,48 @@ async def db_create_checks(base_order_id: str, checks: list) -> list:
             base_order_id
         )
     return [_serialize(dict(r)) for r in rows]
+
+
+async def db_insert_check(
+    base_order_id: str, check_number: int, items: list, subtotal, tax_amount, total,
+) -> dict | None:
+    """Insert ONE new check for a base_order_id WITHOUT touching any other
+    check on the same ticket.
+
+    db_create_checks (above) REPLACES the whole 'open' set for a
+    base_order_id (DELETE + re-INSERT) — correct for a single caller that
+    computes the full split in one shot (the bot's checkout flow, caja's
+    split-checks editor), but destructive for an incremental caller: the
+    re-INSERT only carries the 7 columns db_create_checks passes, so any
+    OTHER already-open check silently loses its proposal_status/
+    proposed_payments/tip_amount/proposal_customer_phone (they reset to
+    NULL/default because the row was actually DELETED, not just matched by
+    ON CONFLICT). The diner web-checkout flow (app/routes/diner.py) needs
+    exactly that incremental behaviour — multiple diners can each request
+    their own check over the life of one table, and an earlier diner's
+    check may already carry a staff-visible pending proposal that must
+    survive a later diner's request untouched.
+
+    ON CONFLICT DO NOTHING (not DO UPDATE): a collision on (base_order_id,
+    check_number) must never silently overwrite another check. Returns None
+    on conflict — the caller (which computed check_number under its own
+    distributed lock) should treat that as "state changed under me" rather
+    than retry blindly.
+
+    # Requires active tenant_scope() or bypass_tenant_scope().
+    """
+    async with tenant_connection() as conn:
+        check_id = f"{base_order_id}-CHK-{check_number}"
+        row = await conn.fetchrow(
+            """INSERT INTO table_checks
+                   (id, base_order_id, check_number, items, subtotal, tax_amount, total)
+               VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+               ON CONFLICT (base_order_id, check_number) DO NOTHING
+               RETURNING *""",
+            check_id, base_order_id, check_number,
+            json.dumps(items), to_decimal(subtotal), to_decimal(tax_amount), to_decimal(total),
+        )
+    return _serialize(dict(row)) if row else None
 
 
 async def db_get_checks(base_order_id: str) -> list:

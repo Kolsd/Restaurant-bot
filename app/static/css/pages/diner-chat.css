@@ -588,3 +588,101 @@ body {
   border-radius: var(--radius-pill);
   padding: 2px 10px;
 }
+
+/* ── Checkout sheet ("Pedir la cuenta") ── */
+.diner-toggle-row { display: flex; gap: var(--s-2); margin-bottom: var(--s-4); }
+.diner-toggle-btn {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--body-sm);
+  font-weight: 600;
+  padding: 12px 8px;
+  cursor: pointer;
+  text-align: center;
+}
+.diner-toggle-btn:hover { border-color: var(--brand); }
+.diner-toggle-btn--active {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  color: var(--brand-dark);
+}
+.diner-sheet-field { margin-bottom: var(--s-4); }
+.diner-sheet-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px var(--s-3);
+  font-family: inherit;
+  font-size: var(--body-sm);
+  background: var(--bg);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.diner-sheet-input:focus { outline: none; border-color: var(--brand); }
+.diner-sheet-hint { margin: 0 0 var(--s-4); font-size: var(--caption); color: var(--text-3); }
+
+/* ── NPS prompt (inline chat card) ── */
+.diner-nps-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-width: 220px;
+}
+.diner-nps-title { margin: 0; font-weight: 600; font-size: var(--body-sm); }
+.diner-nps-stars { display: flex; gap: 4px; }
+.diner-nps-star {
+  background: none;
+  border: none;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px;
+  color: var(--border-strong);
+}
+.diner-nps-star:hover, .diner-nps-star--filled { color: #f5a623; }
+.diner-nps-skip {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: var(--caption);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.diner-nps-comment-row { display: flex; gap: var(--s-2); }
+.diner-nps-comment-input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px var(--s-3);
+  font-family: inherit;
+  font-size: var(--body-sm);
+  background: var(--bg);
+  color: var(--text);
+}
+.diner-nps-comment-input:focus { outline: none; border-color: var(--brand); }
+
+/* ── Checkout status card (inline chat) ── */
+.diner-checkout-status-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  background: var(--brand-light);
+  border-radius: var(--radius-lg);
+  padding: var(--s-3) var(--s-4);
+  color: var(--brand-dark);
+  font-size: var(--body-sm);
+  font-weight: 500;
+}
+.diner-checkout-status-card p { margin: 0; }
+.diner-checkout-status-card--paid { background: var(--surface); border: 1px solid var(--brand); }

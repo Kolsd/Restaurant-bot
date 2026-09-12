@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
@@ -64,7 +65,7 @@ from app.services import orders
 from app.services import state_store
 from app.services.agent import chat as agent_chat, _generate_join_code, _JOIN_CODE_RE
 from app.services.logging import get_logger
-from app.services.money import quantize_money, to_decimal
+from app.services.money import ZERO, currency_exponent, money_mul, money_sum, quantize_money, to_decimal
 from app.services.table_order_commit import deduct_inventory_or_cancel, save_table_order_round
 from app.services.tenant_context import bypass_tenant_scope, tenant_scope
 from app.repositories import diner_sessions_repo, tables_repo
@@ -110,6 +111,17 @@ def _features_dict(raw) -> dict:
         except (ValueError, TypeError):
             raw = {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _parse_items_list(raw) -> list:
+    """Normalise a JSONB `items` column that may arrive as a JSON string
+    (asyncpg driver variability) or already a list."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            raw = []
+    return raw if isinstance(raw, list) else []
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -163,6 +175,35 @@ class DinerJoinRequest(BaseModel):
 class DinerOrderSendRequest(BaseModel):
     token: str = Field(..., min_length=1, max_length=200)
     idempotency_key: str = Field(..., min_length=1, max_length=100)
+
+
+_CHECKOUT_SCOPES = ("mine", "table")
+_CHECKOUT_METHODS = ("card", "cash")
+_CHECKOUT_METHOD_LABELS = {"card": "tarjeta", "cash": "efectivo"}
+_CHECKOUT_METHOD_DISPLAY = {"card": "Tarjeta", "cash": "Efectivo"}
+
+
+class DinerCheckoutRequest(BaseModel):
+    token: str = Field(..., min_length=1, max_length=200)
+    scope: str = Field(..., max_length=10)
+    method: str = Field(..., max_length=10)
+    tip_amount: float = Field(default=0.0, ge=0)
+    customer_name: str | None = Field(default=None, max_length=100)
+    customer_phone: str | None = Field(default=None, max_length=30)
+
+    @field_validator("scope")
+    @classmethod
+    def _valid_scope(cls, v: str) -> str:
+        if v not in _CHECKOUT_SCOPES:
+            raise ValueError(f"scope must be one of {_CHECKOUT_SCOPES}")
+        return v
+
+    @field_validator("method")
+    @classmethod
+    def _valid_method(cls, v: str) -> str:
+        if v not in _CHECKOUT_METHODS:
+            raise ValueError(f"method must be one of {_CHECKOUT_METHODS}")
+        return v
 
 
 # ── Shared helpers ───────────────────────────────────────────────────────────
@@ -961,3 +1002,314 @@ async def diner_table_view(token: str = Query(..., min_length=1, max_length=200)
         "currency": currency,
         "orders": orders_out,
     }
+
+
+# ── Checkout — "Pedir la cuenta" mediated by the waiter (no gateway) ────────
+#
+# CLAUDE.md launch decision: no Wompi/Bold, no payment link. The diner
+# declares WHAT they want to pay (scope) and HOW (method); the waiter
+# charges on whatever datáfono the restaurant already has, or takes cash,
+# and caja/mesero marks it paid through the EXISTING pay_check flow
+# (app/routes/tables.py). This endpoint only creates the check + proposal +
+# waiter_alerts hint — it never touches money itself.
+#
+# Item-level dedup without a schema change: each item we copy into a check
+# carries an additive "order_id" key (the source table_orders row's id).
+# Nothing else in the codebase reads/writes that key, so this is purely
+# additive over the existing free-form table_checks.items JSONB shape. Any
+# table_orders row whose id already appears inside an open/paying/invoiced
+# check's items is "claimed" and can never be pulled into a second check —
+# this is what makes "an item can't be charged twice" hold even though
+# table_checks has no direct FK to table_orders.
+def _claimed_order_ids(checks: list) -> set:
+    claimed = set()
+    for c in checks:
+        if c.get("status") not in ("open", "paying", "invoiced"):
+            continue
+        for it in _parse_items_list(c.get("items")):
+            if isinstance(it, dict) and it.get("order_id"):
+                claimed.add(it["order_id"])
+    return claimed
+
+
+def _checkout_amount_label(amount: Decimal, currency: str) -> str:
+    if currency_exponent(currency) == 0:
+        return f"${int(quantize_money(amount, currency)):,}"
+    return f"${quantize_money(amount, currency):,.2f}"
+
+
+@router.post("/checkout")
+async def diner_checkout(request: Request, body: DinerCheckoutRequest):
+    """Diner taps 'Pedir la cuenta' → chooses scope (mine/table) + method
+    (card/cash) [+ optional tip, name, phone] → we build a real check from
+    THIS diner's (or the table's remaining) actual `table_orders` items,
+    attach a `web_chat` payment proposal, and fire a waiter_alerts hint.
+    No gateway, no payment link — see module docstring above.
+    """
+    ip = _client_ip(request)
+    if not await state_store.rate_limit_check(f"diner_checkout_ip:{ip}", max_requests=20, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    token = body.token.strip()
+    if not await state_store.rate_limit_check(f"diner_checkout:{token}", max_requests=5, window_seconds=30):
+        raise HTTPException(status_code=429, detail="Espera un momento antes de pedir la cuenta de nuevo.")
+
+    session = await _resolve_session_or_404(token)
+    org_id = int(session["org_id"])
+    bot_number = session["bot_number"]
+    location_id = session.get("location_id")
+    table_id = session.get("table_id")
+    table_name = session.get("table_name") or table_id
+    if session.get("order_mode") != "dine_in" or not table_id:
+        raise HTTPException(status_code=422, detail="Esta sesión no está asociada a una mesa")
+
+    with tenant_scope(org_id):
+        await diner_sessions_repo.touch_last_seen(token, org_id)
+
+        active = await db.db_get_active_session(token, bot_number)
+        if not active:
+            raise HTTPException(
+                status_code=422,
+                detail="Únete a la mesa con el código antes de pedir la cuenta.",
+            )
+
+        base_order_id = await tables_repo.db_get_base_order_id(table_id)
+        if not base_order_id:
+            raise HTTPException(status_code=422, detail="Todavía no has hecho ningún pedido en esta mesa.")
+
+        currency = await _currency_for_org(org_id)
+
+        lock_token = await state_store.table_checkout_lock_acquire(base_order_id)
+        if lock_token is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Ya se está procesando un cobro para esta mesa, espera un momento.",
+            )
+
+        try:
+            existing_checks = await tables_repo.db_get_checks(base_order_id)
+
+            # Idempotent replay: this SAME diner already has an outstanding
+            # (unpaid, unresolved) proposal — a double tap must not create a
+            # second check or a second waiter_alerts row.
+            own_pending = [
+                c for c in existing_checks
+                if c.get("proposal_customer_phone") == token
+                and c.get("status") == "open"
+                and c.get("proposal_status") in ("pending", "awaiting_proof", "proof_received")
+            ]
+            if own_pending:
+                c = own_pending[0]
+                subtotal_prev = to_decimal(c.get("subtotal") or c.get("total") or 0)
+                tip_prev = to_decimal(c.get("tip_amount") or c.get("proposed_tip") or 0)
+                return {
+                    "success": True,
+                    "check_id": c.get("id"),
+                    "base_order_id": base_order_id,
+                    "scope": body.scope,
+                    "method": body.method,
+                    "status": "pending_waiter",
+                    "subtotal": float(quantize_money(subtotal_prev, currency)),  # JSON boundary
+                    "tip_amount": float(quantize_money(tip_prev, currency)),  # JSON boundary
+                    "total": float(quantize_money(subtotal_prev + tip_prev, currency)),  # JSON boundary
+                    "currency": currency,
+                    "message": "Ya le avisamos al mesero, ya viene con tu cuenta.",
+                }
+
+            claimed_ids = _claimed_order_ids(existing_checks)
+
+            rows = await tables_repo.db_get_table_orders_by_base_id(base_order_id, branch_id=location_id)
+            billable_rows = [
+                r for r in rows
+                if r.get("status") not in ("cancelado", "cancelled") and r.get("id") not in claimed_ids
+            ]
+            if body.scope == "mine":
+                billable_rows = [r for r in billable_rows if r.get("phone") == token]
+                empty_message = "No tienes pedidos pendientes de pago."
+            else:
+                empty_message = "La mesa no tiene saldo pendiente por cobrar."
+
+            if not billable_rows:
+                raise HTTPException(status_code=422, detail=empty_message)
+
+            item_payload = []
+            for row in billable_rows:
+                order_id = row.get("id")
+                for it in _parse_items_list(row.get("items")):
+                    if not isinstance(it, dict):
+                        continue
+                    try:
+                        qty = int(it.get("quantity") or it.get("qty") or 1)
+                    except (ValueError, TypeError):
+                        qty = 1
+                    unit_price = to_decimal(it.get("price") if it.get("price") is not None else it.get("unit_price", 0))
+                    raw_subtotal = it.get("subtotal")
+                    line_subtotal = quantize_money(
+                        to_decimal(raw_subtotal) if raw_subtotal is not None else money_mul(unit_price, qty),
+                        currency,
+                    )
+                    item_payload.append({
+                        "name": it.get("name", ""),
+                        "qty": qty,
+                        "unit_price": float(unit_price),  # JSON boundary
+                        "subtotal": float(line_subtotal),  # JSON boundary
+                        "order_id": order_id,
+                    })
+
+            # Row totals (already computed + trusted at order-send time), not
+            # a re-sum of items — avoids drift against what the kitchen/mesero
+            # screens already show for these same rows.
+            subtotal_total = quantize_money(
+                money_sum(to_decimal(r.get("total") or 0) for r in billable_rows), currency,
+            )
+            if subtotal_total <= ZERO:
+                raise HTTPException(status_code=422, detail="El saldo a cobrar es cero.")
+
+            tip_d = quantize_money(to_decimal(body.tip_amount), currency)
+            if tip_d < ZERO:
+                tip_d = ZERO
+            if tip_d > money_mul(subtotal_total, Decimal("0.5")):
+                raise HTTPException(status_code=400, detail="La propina no puede superar el 50% del total")
+
+            new_check_number = max([c.get("check_number") or 0 for c in existing_checks], default=0) + 1
+            new_check = await tables_repo.db_insert_check(
+                base_order_id, new_check_number, item_payload,
+                subtotal_total, ZERO, subtotal_total,
+            )
+            if new_check is None:
+                # check_number collided with a concurrent writer despite our
+                # own lock (e.g. an external caller outside this endpoint) —
+                # never silently overwrite; surface as "try again".
+                raise HTTPException(
+                    status_code=409,
+                    detail="La mesa cambió justo ahora, por favor intenta de nuevo.",
+                )
+
+            method_label = _CHECKOUT_METHOD_LABELS[body.method]
+            await tables_repo.db_attach_proposal(
+                check_id=new_check["id"],
+                proposed_payments=[{"method": method_label, "amount": float(subtotal_total)}],  # JSON boundary
+                proposed_tip=float(tip_d),  # JSON boundary
+                proposal_source="web_chat",
+                proposal_status="pending",
+                customer_phone=token,
+            )
+            if tip_d > ZERO:
+                await tables_repo.db_set_check_tip(new_check["id"], float(tip_d))  # JSON boundary
+
+            total_to_collect = quantize_money(subtotal_total + tip_d, currency)
+
+            scope_label = "lo suyo" if body.scope == "mine" else "toda la mesa"
+            extra_bits = []
+            if body.customer_name and body.customer_name.strip():
+                extra_bits.append(f"Nombre: {body.customer_name.strip()[:100]}")
+            if body.customer_phone and body.customer_phone.strip():
+                extra_bits.append(f"Tel: {body.customer_phone.strip()[:30]}")
+            extra_txt = f" ({'; '.join(extra_bits)})" if extra_bits else ""
+            alert_message = (
+                f"Mesa {table_name}: cobrar {scope_label} — "
+                f"{_checkout_amount_label(total_to_collect, currency)} en "
+                f"{_CHECKOUT_METHOD_DISPLAY[body.method]}{extra_txt}."
+            )
+            try:
+                await tables_repo.db_create_waiter_alert(
+                    phone=token, bot_number=bot_number, alert_type="bill",
+                    message=alert_message, table_id=table_id, table_name=table_name,
+                    location_id=location_id,
+                )
+            except Exception:
+                # NO-ROMPER #17: a failed alert is a hint lost, not a reason
+                # to fail the checkout the diner already committed to.
+                log.exception("diner_checkout.waiter_alert_failed", org_id=org_id, table_id=table_id)
+        finally:
+            await state_store.table_checkout_lock_release(base_order_id, lock_token)
+
+    response = {
+        "success": True,
+        "check_id": new_check["id"],
+        "base_order_id": base_order_id,
+        "scope": body.scope,
+        "method": body.method,
+        "status": "pending_waiter",
+        "subtotal": float(subtotal_total),  # JSON boundary
+        "tip_amount": float(tip_d),  # JSON boundary
+        "total": float(total_to_collect),  # JSON boundary
+        "currency": currency,
+        "message": "Ya le avisamos al mesero, ya viene con tu cuenta.",
+    }
+    log.info(
+        "diner_checkout.success", org_id=org_id, table_id=table_id,
+        scope=body.scope, method=body.method, check_id=new_check["id"],
+    )
+    return response
+
+
+@router.get("/status")
+async def diner_status(token: str = Query(..., min_length=1, max_length=200)):
+    """Lightweight, frequently-polled status surface — payment state
+    ('pending_waiter' → 'paid') and, once the table's checks are fully
+    invoiced, the NPS survey block (see app/services/blocks.py
+    build_nps_prompt_block). Intentionally separate from GET /api/diner/table
+    (which returns the full order list and is only fetched while that panel
+    is open) so this can be polled globally without pulling the whole ticket
+    every few seconds.
+    """
+    if not await state_store.rate_limit_check(f"diner_status:{token}", max_requests=60, window_seconds=60):
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+
+    session = await _resolve_session_or_404(token)
+    org_id = int(session["org_id"])
+    bot_number = session["bot_number"]
+    location_id = session.get("location_id")
+    table_id = session.get("table_id")
+
+    with tenant_scope(org_id):
+        currency = await _currency_for_org(org_id)
+        # NOT db_get_base_order_id — that one deliberately excludes
+        # 'factura_entregada' (it answers "what group should a NEW round
+        # attach to"), which would make a just-fully-paid table's checkout
+        # status vanish back to null right when the diner most wants to see
+        # "paid". This is a read-only status view — see
+        # db_get_latest_base_order_id_for_table's docstring.
+        base_order_id = await tables_repo.db_get_latest_base_order_id_for_table(table_id) if table_id else None
+
+        checkout_status = None
+        if base_order_id:
+            rows = await tables_repo.db_get_table_orders_by_base_id(base_order_id, branch_id=location_id)
+            my_order_ids = {
+                r.get("id") for r in rows
+                if r.get("phone") == token and r.get("status") not in ("cancelado", "cancelled")
+            }
+            if my_order_ids:
+                checks = await tables_repo.db_get_checks(base_order_id)
+                best = None
+                for c in checks:
+                    if c.get("status") not in ("open", "paying", "invoiced"):
+                        continue
+                    covers_mine = any(
+                        isinstance(it, dict) and it.get("order_id") in my_order_ids
+                        for it in _parse_items_list(c.get("items"))
+                    )
+                    if not covers_mine:
+                        continue
+                    if c.get("status") == "invoiced":
+                        best = c
+                        break
+                    if best is None:
+                        best = c
+                if best is not None:
+                    amount = to_decimal(best.get("total") or 0) + to_decimal(best.get("tip_amount") or 0)
+                    checkout_status = {
+                        "check_id": best.get("id"),
+                        "status": "paid" if best.get("status") == "invoiced" else "pending_waiter",
+                        "amount": float(quantize_money(amount, currency)),  # JSON boundary
+                        "currency": currency,
+                    }
+
+        nps_state = await state_store.nps_get(token, bot_number)
+        nps_block = None
+        if nps_state and nps_state.get("state") in ("waiting_score", "waiting_comment"):
+            stage = "comment" if nps_state.get("state") == "waiting_comment" else "score"
+            nps_block = blocks.build_nps_prompt_block(stage)
+
+    return {"checkout": checkout_status, "nps": nps_block}

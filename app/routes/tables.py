@@ -135,12 +135,22 @@ async def _farewell_and_nps(phone: str, table_id: str | None, session_data: dict
     raw_bot_num = rest.get("whatsapp_number", "")
     clean_bot_num = raw_bot_num.split("_b")[0] if raw_bot_num else ""
     final_bot_num = (session_data.get("bot_number") if session_data else None) or clean_bot_num
-    
+
     rest_name = rest.get("name", "nuestro restaurante")
+    # Diner-web identities (Mesio-native chat, see app/routes/diner.py) are
+    # opaque "web:<uuid4>" tokens, never a real WhatsApp number. Sending
+    # Meta's interactive-message API a phone param of "web:xxxx" on every
+    # single table payment was a real bug (found 2026-09): the call always
+    # fails against Meta but still burns a request per diner per payment.
+    # The web diner still gets the SAME survey — rendered in their own chat
+    # via GET /api/diner/status + the nps_prompt block (blocks.py) once
+    # trigger_nps below sets the Redis state; only the WhatsApp push is skipped.
+    is_web_identity = phone.startswith("web:")
     # Disparamos directamente la encuesta NPS
     if final_bot_num:
         asyncio.create_task(trigger_nps(phone, final_bot_num, rest_name))
-        asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))
+        if not is_web_identity:
+            asyncio.create_task(send_wa_interactive_nps(phone, rest_name, db_phone_id))
         with bypass_tenant_scope("farewell_and_nps: mark session nps_pending by phone"):
             await db.db_mark_session_nps_pending(phone, final_bot_num)
 
@@ -1836,17 +1846,44 @@ async def pay_check(request: Request, base_order_id: str, check_id: str, body: P
                 log.warning("tables.loyalty_accrue_not_implemented", check_id=check_id)
 
             order_row = await db.db_get_first_table_order(base_order_id)
-            farewell_args = None
+            farewell_targets = []
             if order_row and order_row["status"] == "factura_entregada":
-                customer_phone = order_row.get("phone")
-                if customer_phone and customer_phone != "manual":
+                # Whole table just settled (every check invoiced/cancelled).
+                # Notify EVERY distinct diner who ordered here — not just
+                # order_row's phone (which is only the FIRST table_orders
+                # row's phone, i.e. whoever opened the table). On a normal
+                # single-phone WhatsApp table every row shares that same
+                # phone, so `distinct_phones` collapses to exactly one value
+                # and behaviour is unchanged; on a shared diner-web table
+                # (app/routes/diner.py — each participant's own "web:<uuid4>"
+                # phone) every diner who actually had orders here gets their
+                # own farewell/NPS trigger.
+                distinct_phones: list[str] = []
+                seen_phones: set[str] = set()
+                try:
+                    table_rows = await tr.db_get_table_orders_by_base_id(base_order_id)
+                except Exception:
+                    log.exception("tables.pay_check.farewell_targets_lookup_failed", base_order_id=base_order_id)
+                    table_rows = []
+                for row in table_rows:
+                    p = row.get("phone")
+                    if not p or p == "manual" or p in seen_phones:
+                        continue
+                    if row.get("status") in ("cancelado", "cancelled"):
+                        continue
+                    seen_phones.add(p)
+                    distinct_phones.append(p)
+                if not distinct_phones and order_row.get("phone") and order_row["phone"] != "manual":
+                    distinct_phones = [order_row["phone"]]
+
+                for customer_phone in distinct_phones:
                     sess = await db.db_get_open_session_by_phone(customer_phone)
                     session_phone_id = sess.get("meta_phone_id") if sess else None
-                    farewell_args = (customer_phone, order_row.get("table_id"), sess, session_phone_id)
+                    farewell_targets.append((customer_phone, order_row.get("table_id"), sess, session_phone_id))
 
         # Outside the ambient scope on purpose — see comment above the `with` block.
-        if farewell_args is not None:
-            await _farewell_and_nps(*farewell_args, "caja")
+        for args in farewell_targets:
+            await _farewell_and_nps(*args, "caja")
 
         return {
             "success":  True,

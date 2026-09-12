@@ -18,6 +18,7 @@ or invent new block types:
         "subtotal","note"}],"subtotal":<number>,"currency":"COP"}
     {"type":"payment_options","options":[{"label","value"}]}
     {"type":"waiter_ack","reason":"bill|cutlery|napkins|other","text":"..."}
+    {"type":"nps_prompt","stage":"score|comment","scale":5,"skip_value":"no calificar"}
 
 Money crossing the JSON boundary is ALWAYS float(quantize_money(...)) — never
 raw float arithmetic (CLAUDE.md "Capa Financiera Decimal").
@@ -211,3 +212,24 @@ def build_waiter_ack_block(reason: str, text: str) -> dict:
     if reason not in _VALID_WAITER_REASONS:
         reason = "other"
     return {"type": "waiter_ack", "reason": reason, "text": text or ""}
+
+
+_VALID_NPS_STAGES = ("score", "comment")
+
+
+def build_nps_prompt_block(stage: str = "score", scale: int = 5) -> dict:
+    """The web-chat equivalent of the WhatsApp NPS interactive button.
+
+    `stage="score"` — diner has not rated yet: render `scale` stars
+    (1..scale) plus a skip option. `stage="comment"` — a low score (<=3, see
+    app/services/agent.py::_handle_nps_flow) was just given and a free-text
+    comment is being requested next.
+
+    Backed entirely by the EXISTING agent.py NPS state machine — a star tap
+    or comment submit is just a normal POST /api/diner/chat message ("1".."5",
+    free text, or "no calificar"), so this module adds no new NPS logic, only
+    the render hint for a state that already exists server-side.
+    """
+    if stage not in _VALID_NPS_STAGES:
+        stage = "score"
+    return {"type": "nps_prompt", "stage": stage, "scale": scale, "skip_value": "no calificar"}

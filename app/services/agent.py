@@ -2269,8 +2269,19 @@ async def _try_nps_active_flow(user_phone: str, bot_number: str,
             await db.db_close_session(user_phone, bot_number, "nps_completed", "system")
         except Exception:
             log.exception("nps_close_session_failed", phone=_ofuscar_phone(user_phone), bot_number=bot_number)
+    else:
+        # Survey still active (waiting_score or, after a <=3 score,
+        # waiting_comment) — push the render hint for the diner-web chat
+        # (app/routes/diner.py). Side-channel only: never touches the
+        # WhatsApp-facing `message` text (Rule 8).
+        _nps_stage = "comment" if current_nps.get("state") == "waiting_comment" else "score"
+        blocks.push_block(blocks.build_nps_prompt_block(_nps_stage))
 
-    return {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
+    result = {"message": nps_reply or "Por favor responde con un número del 1 al 5 ⭐"}
+    _attach_blocks = await _build_turn_blocks(user_phone, bot_number)
+    if _attach_blocks:
+        result["blocks"] = _attach_blocks
+    return result
 
 
 async def _build_turn_blocks(user_phone: str, bot_number: str) -> list:
