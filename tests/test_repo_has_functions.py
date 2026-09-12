@@ -117,6 +117,8 @@ class TestOnboardingPostRefactor:
 
         restaurant = {
             "id":              1,
+            "org_id":          1,
+            "location_id":     1,
             "name":            "Test",
             "whatsapp_number": "+573001234567",
             "features":        {"billing_provider": "alegra"},
@@ -126,6 +128,10 @@ class TestOnboardingPostRefactor:
             "username":        "owner",
             "restaurant_name": "Test",
             "branch_id":       1,
+            # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+            # explicit org_id/location_id fields.
+            "org_id":          1,
+            "location_id":     1,
             "role":            "owner",
             "password_hash":   "$2b$12$placeholder",
         }
@@ -133,7 +139,9 @@ class TestOnboardingPostRefactor:
         monkeypatch.setattr("app.routes.deps.verify_token",
                             AsyncMock(return_value="owner"))
         monkeypatch.setattr(db_mod, "db_get_user", AsyncMock(return_value=user))
-        monkeypatch.setattr(db_mod, "db_get_restaurant_by_id",
+        monkeypatch.setattr(db_mod, "db_get_restaurant_by_org_id",
+                            AsyncMock(return_value=restaurant))
+        monkeypatch.setattr(db_mod, "db_get_restaurant_by_location_id",
                             AsyncMock(return_value=restaurant))
         monkeypatch.setattr(db_mod, "db_get_menu", AsyncMock(return_value={}))
 

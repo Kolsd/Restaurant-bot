@@ -192,6 +192,13 @@ def patch_auth(monkeypatch, *, restaurant_id: int = 1,
         "username":         username,
         "restaurant_name":  "Restaurante Test",
         "branch_id":        restaurant_id,
+        # P0 fix (2026-09): deps.get_current_restaurant now resolves ONLY
+        # via the explicit org_id/location_id fields (never guessed from
+        # branch_id) — the mocked user dict must carry them or every
+        # get_current_restaurant call denies with 403. Matriz-invariant
+        # convention: org_id == location_id == restaurant_id in this fixture.
+        "org_id":           restaurant_id,
+        "location_id":      restaurant_id,
         "role":             role,
         "password_hash":    "$2b$12$placeholder",
     }
@@ -199,7 +206,9 @@ def patch_auth(monkeypatch, *, restaurant_id: int = 1,
     monkeypatch.setattr("app.routes.deps.verify_token",
                         AsyncMock(return_value=username))
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=user))
-    monkeypatch.setattr(db, "db_get_restaurant_by_id",
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id",
+                        AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id",
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=False))

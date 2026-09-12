@@ -700,7 +700,7 @@ class TestDashboardEndpoints:
         monkeypatch.setattr(repo, "db_merge_restaurant_features", merge_mock)
         monkeypatch.setattr(repo, "db_update_restaurant_owner_phone", AsyncMock())
         monkeypatch.setattr(repo, "db_update_restaurant_timezone", AsyncMock())
-        monkeypatch.setattr(db_module, "db_get_restaurant_by_id",
+        monkeypatch.setattr(db_module, "db_get_restaurant_by_org_id",
                             AsyncMock(return_value=updated_restaurant))
 
         try:
@@ -867,7 +867,7 @@ class TestDashboardEndpointsExtra:
         monkeypatch.setattr(repo, "db_update_restaurant_owner_phone", phone_mock)
         monkeypatch.setattr(repo, "db_update_restaurant_timezone", AsyncMock())
         monkeypatch.setattr(repo, "db_merge_restaurant_features", AsyncMock())
-        monkeypatch.setattr(db_module, "db_get_restaurant_by_id",
+        monkeypatch.setattr(db_module, "db_get_restaurant_by_org_id",
                             AsyncMock(return_value=updated))
 
         try:
@@ -902,7 +902,7 @@ class TestDashboardEndpointsExtra:
         monkeypatch.setattr(repo, "db_update_restaurant_timezone", tz_mock)
         monkeypatch.setattr(repo, "db_update_restaurant_owner_phone", AsyncMock())
         monkeypatch.setattr(repo, "db_merge_restaurant_features", AsyncMock())
-        monkeypatch.setattr(db_module, "db_get_restaurant_by_id",
+        monkeypatch.setattr(db_module, "db_get_restaurant_by_org_id",
                             AsyncMock(return_value=updated))
 
         try:
@@ -967,7 +967,7 @@ class TestDashboardEndpointsExtra:
         monkeypatch.setattr(repo, "db_update_restaurant_owner_phone", phone_mock)
         monkeypatch.setattr(repo, "db_update_restaurant_timezone", AsyncMock())
         monkeypatch.setattr(repo, "db_merge_restaurant_features", AsyncMock())
-        monkeypatch.setattr(db_module, "db_get_restaurant_by_id",
+        monkeypatch.setattr(db_module, "db_get_restaurant_by_org_id",
                             AsyncMock(return_value=updated))
 
         try:
@@ -1003,7 +1003,7 @@ class TestDashboardEndpointsExtra:
         monkeypatch.setattr(repo, "db_update_restaurant_owner_phone", phone_mock)
         monkeypatch.setattr(repo, "db_update_restaurant_timezone", AsyncMock())
         monkeypatch.setattr(repo, "db_merge_restaurant_features", AsyncMock())
-        monkeypatch.setattr(db_module, "db_get_restaurant_by_id",
+        monkeypatch.setattr(db_module, "db_get_restaurant_by_org_id",
                             AsyncMock(return_value=updated))
 
         try:

@@ -104,6 +104,10 @@ _USER_ROW = {
     "restaurant_name": "Test Restaurant",
     "role": "owner",
     "branch_id": 1,
+    # P0 fix (2026-09): auth.login() now resolves ONLY via the explicit
+    # org_id/location_id columns (backfilled by users_org_location).
+    "org_id": 1,
+    "location_id": None,
     "parent_user": None,
 }
 
@@ -143,7 +147,7 @@ async def test_login_returns_org_and_locations_for_owner():
     with (
         patch("app.services.auth.db.db_get_user", AsyncMock(return_value=_USER_ROW)),
         patch(
-            "app.services.auth.db.db_get_restaurant_by_id",
+            "app.services.auth.db.db_get_restaurant_by_org_id",
             AsyncMock(return_value=_RESTAURANT_ROW),
         ),
         patch(
@@ -211,7 +215,7 @@ async def test_login_returns_staff_scoped_locations_for_mesero():
             AsyncMock(return_value=[_STAFF_ROW]),
         ),
         patch(
-            "app.services.auth.db.db_get_restaurant_by_id",
+            "app.services.auth.db.db_get_restaurant_by_org_id",
             AsyncMock(return_value=_RESTAURANT_BRANCH_ROW),
         ),
         patch(
@@ -258,7 +262,7 @@ async def test_login_preserves_legacy_restaurant_key():
     with (
         patch("app.services.auth.db.db_get_user", AsyncMock(return_value=_USER_ROW)),
         patch(
-            "app.services.auth.db.db_get_restaurant_by_id",
+            "app.services.auth.db.db_get_restaurant_by_org_id",
             AsyncMock(return_value=_RESTAURANT_ROW),
         ),
         patch(

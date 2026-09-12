@@ -152,11 +152,30 @@ async def _make_org_via_new_conn() -> dict:
         await conn.close()
 
 
+async def _resolve_org_id_for_location(location_id: int) -> int:
+    conn = await asyncpg.connect(TEST_DB_URL)
+    try:
+        return await conn.fetchval("SELECT org_id FROM locations WHERE id=$1", location_id)
+    finally:
+        await conn.close()
+
+
 def _auth_as_location(monkeypatch, location_id: int, username: str = "owner_test"):
     """Make `require_auth`/`get_current_user`/`get_current_restaurant`
-    resolve to a real seeded Location — WITHOUT mocking db_get_restaurant_by_id
-    itself, so the real RLS-backed lookup (org_id/location_id) is exercised."""
+    resolve to a real seeded Location — WITHOUT mocking db_get_restaurant_by_org_id
+    / db_get_restaurant_by_location_id themselves, so the real RLS-backed
+    lookup (org_id/location_id) is exercised.
+
+    P0 fix (2026-09): get_current_restaurant now REQUIRES the explicit
+    org_id field on the user dict (backfilled onto users.org_id by the
+    users_org_location migration) — it no longer resolves org_id from
+    branch_id at all. We resolve the real org_id for the seeded location
+    here (one extra real DB round-trip) so this mock matches the shape a
+    genuinely backfilled user row has post-migration.
+    """
     from app.services import database as db
+
+    org_id = _run(_resolve_org_id_for_location(location_id))
 
     async def _verify_token(token):
         return username
@@ -164,7 +183,11 @@ def _auth_as_location(monkeypatch, location_id: int, username: str = "owner_test
     async def _get_user(uname):
         if uname != username:
             return None
-        return {"username": username, "branch_id": location_id, "role": "owner", "restaurant_name": ""}
+        return {
+            "username": username, "branch_id": location_id,
+            "org_id": org_id, "location_id": location_id,
+            "role": "owner", "restaurant_name": "",
+        }
 
     monkeypatch.setattr("app.routes.deps.verify_token", _verify_token)
     monkeypatch.setattr(db, "db_get_user", _get_user)

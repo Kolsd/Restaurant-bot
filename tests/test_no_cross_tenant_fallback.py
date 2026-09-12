@@ -147,7 +147,9 @@ async def test_get_current_restaurant_raises_403_for_orphaned_owner():
     with (
         patch.object(deps, "get_current_user", AsyncMock(return_value=user_orphaned)),
         patch.object(deps.db, "db_get_all_orgs", AsyncMock(return_value=[other_org])),
-        patch.object(deps.db, "db_get_restaurant_by_id",
+        patch.object(deps.db, "db_get_restaurant_by_org_id",
+                     AsyncMock(side_effect=AssertionError("must NOT lookup other tenant"))),
+        patch.object(deps.db, "db_get_restaurant_by_location_id",
                      AsyncMock(side_effect=AssertionError("must NOT lookup other tenant"))),
     ):
         from fastapi import HTTPException

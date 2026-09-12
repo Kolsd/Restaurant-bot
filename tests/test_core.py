@@ -38,6 +38,7 @@ async def test_login_success():
         "username":        "owner",
         "restaurant_name": "El Bistro",
         "branch_id":       1,
+        "org_id":          1,
         "role":            "owner",
         "password_hash":   hashed,
     }
@@ -56,7 +57,7 @@ async def test_login_success():
 
     with (
         patch.object(auth.db, "db_get_user",           AsyncMock(return_value=mock_user)),
-        patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
+        patch.object(auth.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant)),
         patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value=fake_token)),
         patch("app.repositories.restaurant_repo.db_get_location_by_id", AsyncMock(return_value=mock_location)),
         patch("app.repositories.restaurant_repo.db_get_org_by_id",      AsyncMock(return_value=mock_org)),
@@ -115,6 +116,7 @@ async def test_login_legacy_sha256_triggers_bcrypt_upgrade():
         "username":        "owner",
         "restaurant_name": "El Bistro",
         "branch_id":       1,
+        "org_id":          1,
         "role":            "owner",
         "password_hash":   legacy_hash,
     }
@@ -125,7 +127,7 @@ async def test_login_legacy_sha256_triggers_bcrypt_upgrade():
 
     with (
         patch.object(auth.db, "db_get_user", AsyncMock(return_value=mock_user)),
-        patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
+        patch.object(auth.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant)),
         patch.object(auth.db, "db_update_user_password", update_mock),
         patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value="t" * 64)),
         patch("app.repositories.restaurant_repo.db_get_location_by_id", AsyncMock(return_value=mock_location)),
@@ -150,6 +152,7 @@ async def test_login_bcrypt_user_no_upgrade():
         "username":        "owner",
         "restaurant_name": "El Bistro",
         "branch_id":       1,
+        "org_id":          1,
         "role":            "owner",
         "password_hash":   hash_password("supersecreta"),
     }
@@ -160,7 +163,7 @@ async def test_login_bcrypt_user_no_upgrade():
 
     with (
         patch.object(auth.db, "db_get_user", AsyncMock(return_value=mock_user)),
-        patch.object(auth.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant)),
+        patch.object(auth.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant)),
         patch.object(auth.db, "db_update_user_password", update_mock),
         patch("app.repositories.sessions_repo.create_session", AsyncMock(return_value="t" * 64)),
         patch("app.repositories.restaurant_repo.db_get_location_by_id", AsyncMock(return_value=mock_location)),

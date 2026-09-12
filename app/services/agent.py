@@ -2350,9 +2350,15 @@ async def _load_restaurant_context(
     payment_methods = feats.get("payment_methods", [])
     payment_methods_text = "\n".join(f"• {m}" for m in payment_methods) if payment_methods else ""
 
-    # Override with branch-specific data when the client is sitting at a table
+    # Override with branch-specific data when the client is sitting at a table.
+    # P0 fix (2026-09): table_context["branch_id"] is a LOCATION id
+    # (restaurant_tables.branch_id joins locations.id) — the now-deleted
+    # db_get_restaurant_by_id also accepted org ids and, on ambiguity,
+    # preferred the ORG match, so a location id colliding with an unrelated
+    # org's id could serve THAT org's name/menu/features to this diner and
+    # then fail RLS on writes scoped to the real org (rule 11 + 14).
     if table_context and table_context.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(table_context["branch_id"])
+        r = await db.db_get_restaurant_by_location_id(table_context["branch_id"])
         if r:
             restaurant_obj = r
             restaurant_name = r.get("name", restaurant_name)

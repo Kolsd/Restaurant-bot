@@ -219,8 +219,11 @@ async def auth_options(request: Request, body: AuthOptionsBody):
 
     # Validate restaurant exists and has at least one registered credential before
     # generating a challenge — avoids leaking whether a restaurant_id exists.
+    # body.restaurant_id is an org_id — the kiosk bootstrap (staff-clock.js)
+    # hydrates SC_REST.id from the org id in the dashboard URL / ?r= param,
+    # same value used by /api/staff/pin-login's body.restaurant_id.
     with bypass_tenant_scope("webauthn_auth_options_validate_restaurant"):
-        restaurant_check = await db.db_get_restaurant_by_id(body.restaurant_id)
+        restaurant_check = await db.db_get_restaurant_by_org_id(body.restaurant_id)
     if not restaurant_check:
         raise HTTPException(status_code=404, detail="No encontrado")
 

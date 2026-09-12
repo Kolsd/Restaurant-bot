@@ -99,7 +99,7 @@ async def get_table_wa_number(table: dict) -> str:
     wa_number = ""
     bid = table.get("branch_id")
     if bid:
-        r = await db.db_get_restaurant_by_id(bid)
+        r = await db.db_get_restaurant_by_location_id(bid)
         if r:
             wa_number = r.get("whatsapp_number", "") or ""
 
@@ -114,7 +114,7 @@ async def _get_restaurant_for_table(table_id: str | None, session_data: dict | N
         if table:
             bid = table.get("branch_id")
             if bid:
-                r = await db.db_get_restaurant_by_id(bid)
+                r = await db.db_get_restaurant_by_location_id(bid)
                 if r:
                     return r
     if session_data and session_data.get("bot_number"):
@@ -155,24 +155,35 @@ async def get_tables(request: Request):
     await require_auth(request)
     user = await get_current_user(request)
 
-    # Por defecto, asumimos el branch_id del usuario (útil para meseros/gerentes)
-    branch_id = user.get("branch_id")
+    # P0 fix (2026-09): previously used user["branch_id"] (mixed id kind —
+    # for staff it is actually the ORG id, not a location id) directly as
+    # the location_id filter, under bypass_tenant_scope (no RLS net). If
+    # that number happened to collide with an unrelated org's real location
+    # id, this leaked that org's tables. Now scoped by the explicit org_id
+    # under REAL tenant_scope (RLS-protected), and X-Branch-ID is verified
+    # to belong to that org before being used as a location filter.
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=403, detail="No se pudo determinar la organización del usuario")
+    org_id = int(org_id)
 
-    # Si el dueño/admin usa el selector del Topbar:
-    branch_header = request.headers.get("X-Branch-ID")
     is_owner_or_admin = "owner" in user.get("role", "") or "admin" in user.get("role", "")
+    branch_header = request.headers.get("X-Branch-ID")
+    branch_id = None
     if is_owner_or_admin:
         if branch_header and branch_header.isdigit():
-            branch_id = int(branch_header)
-        # branch_id=None → admin global view (all branches)
+            candidate = int(branch_header)
+            candidate_rest = await db.db_get_restaurant_by_location_id(candidate)
+            if not candidate_rest or candidate_rest.get("org_id") != org_id:
+                raise HTTPException(status_code=403, detail="Sucursal no pertenece a tu organización")
+            branch_id = candidate
+        # branch_id=None → admin global view (all branches of this org)
     else:
-        # Non-admin: must always have a branch_id; fall back to restaurant_id if missing
-        if branch_id is None:
-            branch_id = user.get("restaurant_id")
-        if branch_id is None:
-            raise HTTPException(status_code=400, detail="No se pudo determinar la sucursal del usuario")
+        # Non-admin (mesero/gerente/etc): staff has no per-location
+        # assignment today, so they see every table of their own org.
+        branch_id = user.get("location_id")
 
-    with bypass_tenant_scope("get_tables: admin global view or branch-scoped via user.branch_id"):
+    with tenant_scope(org_id):
         tables = await db.db_get_tables(branch_id=branch_id)
     return {"tables": tables}
 
@@ -196,8 +207,13 @@ async def create_table(request: Request):
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit() and ("owner" in user.get("role", "") or "admin" in user.get("role", "")):
         candidate = int(branch_header)
-        branch_rest = await db.db_get_restaurant_by_id(candidate)
-        if branch_rest:
+        # P0 fix (2026-09): verify the candidate location actually belongs to
+        # the caller's own org before trusting it — previously ANY existing
+        # location id was accepted with no ownership check, letting an
+        # owner/admin create a table under a DIFFERENT tenant's location id
+        # while scoped under their own org (cross-tenant corruption).
+        branch_rest = await db.db_get_restaurant_by_location_id(candidate)
+        if branch_rest and branch_rest.get("org_id") == org_id:
             # Header value is the location_id of the selected sede. The
             # org_id stays the same — all branches of a Matriz share one org.
             branch_location_id = candidate
@@ -226,7 +242,7 @@ async def _verify_table_ownership(table_id: str, restaurant: dict) -> None:
         return
 
     # Cross-location check: verify the table's branch belongs to the same org
-    branch_rest = await db.db_get_restaurant_by_id(table_branch_id)
+    branch_rest = await db.db_get_restaurant_by_location_id(table_branch_id)
     if branch_rest and branch_rest.get("org_id") == org_id:
         return
 
@@ -1073,10 +1089,19 @@ async def get_pos_menu(request: Request):
     user = await get_current_user(request)
 
     wa_number = ""
-    if user and user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r:
-            wa_number = r.get("whatsapp_number", "") or ""
+    if user:
+        # P0 fix (2026-09): resolve the staff's specific sede via the
+        # explicit location_id when assigned, else fall back to the org's
+        # deterministic default location — never the ambiguous branch_id.
+        location_id = user.get("location_id")
+        if location_id:
+            r = await db.db_get_restaurant_by_location_id(location_id)
+            if r:
+                wa_number = r.get("whatsapp_number", "") or ""
+        if not wa_number and user.get("org_id"):
+            r = await db.db_get_restaurant_by_org_id(int(user["org_id"]))
+            if r:
+                wa_number = r.get("whatsapp_number", "") or ""
 
     if not wa_number:
         # Cannot resolve the staff's sede → return empty menu rather than a
@@ -1100,8 +1125,8 @@ async def get_tables_status(request: Request):
     # primary sede of an org. We need TWO distinct integers here:
     #   - org_id        : tenant key for tenant_scope() / RLS GUC
     #   - location_id   : the sede id stored in restaurant_tables.branch_id
-    # Both are consistently populated by db_get_restaurant_by_id (and now also
-    # by db_get_all_restaurants post the same-paso fix). If location_id is
+    # Both are consistently populated by db_get_restaurant_by_org_id / by_location_id
+    # (and by db_get_all_restaurants post the same-paso fix). If location_id is
     # missing we fail fast — silently falling back to org_id (the old
     # "Matriz invariant" trick) only works for orgs created BEFORE Wave-2 deploy
     # where 0034 backfilled org_id == matriz_location_id by coincidence.
@@ -1453,7 +1478,7 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
     # handling a branch order), retry without the branch filter. The ownership
     # check below still enforces restaurant boundaries.
     with bypass_tenant_scope("create_checks: ticket lookup by order ID across branches"):
-        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("location_id") or None)
         if not ticket:
             ticket = await db.db_get_order_ticket_data(base_order_id, None)
     if not ticket:
@@ -1466,16 +1491,14 @@ async def create_checks(request: Request, base_order_id: str, body: CreateChecks
         available[key] = available.get(key, 0) + int(item.get("quantity", item.get("qty", 1)))
 
     # Ownership check: ticket must belong to this user's org (Wave-2 tenant boundary)
+    # P0 fix (2026-09): use the explicit org_id off the user dict directly —
+    # no DB round-trip, and no risk of the old branch_id guess resolving to
+    # an unrelated org (this was the pay_check tenant-scope P0: user["branch_id"]
+    # is mixed-kind and was being fed into the now-deleted ambiguous lookup).
     ticket_org_id = ticket.get("org_id")
-    user_branch_id = user.get("branch_id") or user.get("restaurant_id")
-    user_org_id = None
-    if user_branch_id:
-        with bypass_tenant_scope("create_checks: resolve user org_id from branch_id"):
-            user_rest = await db.db_get_restaurant_by_id(int(user_branch_id))
-        if user_rest:
-            user_org_id = user_rest.get("org_id")
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
     # Fail closed: if either side is unresolvable, deny rather than allow cross-tenant write
-    if ticket_org_id is None or user_org_id is None or ticket_org_id != user_org_id:
+    if ticket_org_id is None or user_org_id is None or int(ticket_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu organización")
 
     # Validar que los checks no excedan las cantidades disponibles
@@ -1566,23 +1589,23 @@ async def pay_check_single(request: Request, base_order_id: str, body: PayCheckB
         raise HTTPException(status_code=429, detail="Ya hay un cobro de mesa en proceso. Espera unos segundos.")
 
     # Fetch ticket — cross-branch bypass mirrors the pattern in create_checks.
+    # db_get_order_ticket_data's branch_id param is a LOCATION id
+    # (table_orders.branch_id == location_id) — user["location_id"] is the
+    # correct explicit field for it (was user["branch_id"], mixed-kind).
     with bypass_tenant_scope("pay_check_single: ticket lookup across branches"):
-        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("branch_id") or None)
+        ticket = await db.db_get_order_ticket_data(base_order_id, user.get("location_id") or None)
         if not ticket:
             ticket = await db.db_get_order_ticket_data(base_order_id, None)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
 
-    # Ownership check: ticket must belong to this user's org
+    # Ownership check: ticket must belong to this user's org.
+    # P0 fix (2026-09): use the explicit org_id off the user dict directly —
+    # no DB round-trip, and no risk of the old branch_id guess resolving to
+    # an unrelated org (this was the pay_check tenant-scope P0).
     ticket_org_id = ticket.get("org_id")
-    user_branch_id = user.get("branch_id") or user.get("restaurant_id")
-    user_org_id = None
-    if user_branch_id:
-        with bypass_tenant_scope("pay_check_single: resolve user org_id from branch_id"):
-            user_rest = await db.db_get_restaurant_by_id(int(user_branch_id))
-        if user_rest:
-            user_org_id = user_rest.get("org_id")
-    if ticket_org_id is None or user_org_id is None or ticket_org_id != user_org_id:
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
+    if ticket_org_id is None or user_org_id is None or int(ticket_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="Este ticket no pertenece a tu organización")
 
     # Refuse if the order already has any non-cancelled check — caller should use /checks/{id}/pay

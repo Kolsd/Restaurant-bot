@@ -141,6 +141,9 @@ def team_client(monkeypatch, client):
     user_dict = {
         "username": "owner1",
         "branch_id": LOCATION_A,   # location_id in Wave-2 context
+        # P0 fix (2026-09): team_routes now reads user["org_id"] directly
+        # instead of resolving it via a DB lookup on branch_id.
+        "org_id": ORG_A,
         "role": "owner",
     }
 
@@ -167,7 +170,7 @@ def test_team_delete_branch_cross_tenant_blocked(team_client):
             return branch_row
         return None
 
-    with patch("app.routes.team_routes.db.db_get_restaurant_by_id", side_effect=_mock_get_by_id):
+    with patch("app.routes.team_routes.db.db_get_restaurant_by_location_id", side_effect=_mock_get_by_id):
         resp = team_client.delete(
             "/api/team/branches/55",
             headers={"Authorization": "Bearer test"},
@@ -191,7 +194,7 @@ def test_team_list_users_cross_tenant_blocked(team_client):
             return foreign_branch
         return None
 
-    with patch("app.routes.team_routes.db.db_get_restaurant_by_id", side_effect=_mock_get_by_id):
+    with patch("app.routes.team_routes.db.db_get_restaurant_by_location_id", side_effect=_mock_get_by_id):
         resp = team_client.get(
             "/api/team/users",
             headers={"Authorization": "Bearer test", "X-Branch-ID": "77"},

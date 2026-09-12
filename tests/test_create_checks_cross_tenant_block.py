@@ -9,9 +9,15 @@ split ANY ticket across tenants.
 
 The fix:
   1. `db_get_order_ticket_data` now returns `org_id` from the first row.
-  2. `create_checks` resolves the user's org_id via `db_get_restaurant_by_id`
-     and enforces `ticket_org_id == user_org_id`, failing closed if either
-     side is None.
+  2. `create_checks` enforces `ticket_org_id == user_org_id`, failing closed
+     if either side is None.
+
+P0 fix (2026-09): `create_checks` no longer resolves org_id via the
+(now-deleted, ambiguous) `db_get_restaurant_by_id(user["branch_id"])` — it
+reads the explicit `user["org_id"]` field directly (set by
+deps.get_current_user from staff.org_id / the backfilled users.org_id
+column). These tests now set org_id directly on the user dict instead of
+mocking a restaurant lookup.
 """
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -55,14 +61,17 @@ TICKET_NO_ORG = {
     # org_id intentionally absent
 }
 
-USER_DICT = {
-    "id": "u1",
-    "username": "caja_user",
-    "restaurant_name": "Test Resto",
-    "branch_id": LOCATION_ID,
-    "restaurant_id": None,
-    "role": "caja",
-}
+def _user_dict(org_id):
+    return {
+        "id": "u1",
+        "username": "caja_user",
+        "restaurant_name": "Test Resto",
+        "branch_id": LOCATION_ID,
+        "location_id": LOCATION_ID,
+        "org_id": org_id,
+        "restaurant_id": None,
+        "role": "caja",
+    }
 
 
 @pytest.fixture
@@ -82,16 +91,13 @@ def _patch_get_current_user(monkeypatch, user_dict):
 
 def test_same_org_allowed(client, monkeypatch):
     """ticket.org_id == user_org_id → ownership check passes, db_create_checks called."""
-    _patch_get_current_user(monkeypatch, USER_DICT)
+    _patch_get_current_user(monkeypatch, _user_dict(TICKET_ORG))
 
     ticket_mock = AsyncMock(return_value=TICKET_SAME_ORG)
-    # db_get_restaurant_by_id returns a restaurant whose org_id matches the ticket
-    rest_mock = AsyncMock(return_value={"id": LOCATION_ID, "org_id": TICKET_ORG, "location_id": LOCATION_ID})
     create_mock = AsyncMock(return_value=[{"check_id": "chk1"}])
 
     with (
         patch("app.routes.tables.db.db_get_order_ticket_data", ticket_mock),
-        patch("app.routes.tables.db.db_get_restaurant_by_id", rest_mock),
         patch("app.routes.tables.db.db_create_checks", create_mock),
     ):
         resp = client.post(
@@ -107,17 +113,14 @@ def test_same_org_allowed(client, monkeypatch):
 # ── Test 2: Cross-tenant blocked ─────────────────────────────────────────────
 
 def test_cross_tenant_blocked(client, monkeypatch):
-    """ticket.org_id=11, user resolves to org_id=99 → 403, db_create_checks NOT called."""
-    _patch_get_current_user(monkeypatch, USER_DICT)
+    """ticket.org_id=11, user org_id=99 → 403, db_create_checks NOT called."""
+    _patch_get_current_user(monkeypatch, _user_dict(OTHER_ORG))
 
     ticket_mock = AsyncMock(return_value=TICKET_SAME_ORG)  # org_id=11
-    # User's branch resolves to a different org
-    rest_mock = AsyncMock(return_value={"id": LOCATION_ID, "org_id": OTHER_ORG, "location_id": LOCATION_ID})
     create_mock = AsyncMock(return_value=[])
 
     with (
         patch("app.routes.tables.db.db_get_order_ticket_data", ticket_mock),
-        patch("app.routes.tables.db.db_get_restaurant_by_id", rest_mock),
         patch("app.routes.tables.db.db_create_checks", create_mock),
     ):
         resp = client.post(
@@ -134,15 +137,13 @@ def test_cross_tenant_blocked(client, monkeypatch):
 
 def test_missing_ticket_org_id_fails_closed(client, monkeypatch):
     """ticket dict has no org_id key → fails closed with 403, no crash."""
-    _patch_get_current_user(monkeypatch, USER_DICT)
+    _patch_get_current_user(monkeypatch, _user_dict(TICKET_ORG))
 
     ticket_mock = AsyncMock(return_value=TICKET_NO_ORG)
-    rest_mock = AsyncMock(return_value={"id": LOCATION_ID, "org_id": TICKET_ORG, "location_id": LOCATION_ID})
     create_mock = AsyncMock(return_value=[])
 
     with (
         patch("app.routes.tables.db.db_get_order_ticket_data", ticket_mock),
-        patch("app.routes.tables.db.db_get_restaurant_by_id", rest_mock),
         patch("app.routes.tables.db.db_create_checks", create_mock),
     ):
         resp = client.post(

@@ -402,6 +402,12 @@ async def convert_prospect_to_restaurant(
             restaurant_name=name,
             role="owner",
             branch_id=org["id"],
+            # P0 fix (2026-09): set the explicit org_id column too — this
+            # writer stores an ORG id in branch_id (owner of the whole org,
+            # not a specific sede), which is exactly the ambiguity that
+            # made auth resolution have to guess. location_id stays NULL:
+            # a fresh owner isn't scoped to one sede.
+            org_id=org["id"],
         )
         if not created:
             # Username collision — append org id to make unique

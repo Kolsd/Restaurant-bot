@@ -50,6 +50,8 @@ def _patch_restaurant(monkeypatch, *, restaurant_id=1,
 
     restaurant = {
         "id":              restaurant_id,
+        "org_id":          restaurant_id,
+        "location_id":     restaurant_id,
         "name":            "Test Restaurant",
         "whatsapp_number": whatsapp_number,
         "features":        features,
@@ -59,6 +61,10 @@ def _patch_restaurant(monkeypatch, *, restaurant_id=1,
         "username":        username,
         "restaurant_name": "Test Restaurant",
         "branch_id":       restaurant_id,
+        # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+        # explicit org_id/location_id fields.
+        "org_id":          restaurant_id,
+        "location_id":     restaurant_id,
         "role":            role,
         "password_hash":   "$2b$12$placeholder",
     }
@@ -66,7 +72,9 @@ def _patch_restaurant(monkeypatch, *, restaurant_id=1,
     monkeypatch.setattr("app.routes.deps.verify_token",
                         AsyncMock(return_value=username))
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=user))
-    monkeypatch.setattr(db, "db_get_restaurant_by_id",
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id",
+                        AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id",
                         AsyncMock(return_value=restaurant))
 
     # db_get_menu is only called as a fallback when restaurant.menu is empty/None

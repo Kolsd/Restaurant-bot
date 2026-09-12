@@ -259,8 +259,13 @@ async def sucursales_page():
 
 @router.get("/api/public/restaurant-info")
 async def public_restaurant_info(id: int):
-    """Return the restaurant name for a given restaurant ID (public, read-only)."""
-    restaurant = await db.db_get_restaurant_by_id(id)
+    """Return the restaurant name for a given restaurant ID (public, read-only).
+
+    `id` here is the org_id — this endpoint is only ever called from
+    login.html's `?r=` kiosk/login param, which is always an org id (see
+    static/js/pages/staff-clock.js's kiosk bootstrap comment).
+    """
+    restaurant = await db.db_get_restaurant_by_org_id(id)
     if not restaurant:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     return {"name": restaurant.get("name", "")}
@@ -772,8 +777,18 @@ async def restaurant_sitemap(restaurant_id: int):
     """
     Per-restaurant XML sitemap listing menu page + individual dish pages.
     Cached for 1 hour.
+
+    NOTE (P0 audit 2026-09): no current caller of this route was found in
+    the codebase (the SEO dish pages use slug-based URLs, not this route),
+    so the intended id kind for `restaurant_id` could not be confirmed from
+    a real call site. Treated as a location_id (the `restaurants` VIEW's
+    own PK) — the interpretation that matches the route's pre-Wave-2 naming
+    and the VIEW's `id` column. Low risk: this is a public, read-only,
+    already-public-data endpoint (no auth context, no writes), so a
+    genuine id collision would at worst show a different tenant's already
+    public menu sitemap, not leak private data.
     """
-    data = await db.db_get_restaurant_by_id(restaurant_id)
+    data = await db.db_get_restaurant_by_location_id(restaurant_id)
     if not data:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 

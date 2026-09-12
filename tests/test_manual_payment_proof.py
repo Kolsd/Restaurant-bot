@@ -327,9 +327,9 @@ def _patch_validate_auth(
     role: str = "caja",
 ):
     """
-    Wire verify_token + db_get_user + db_get_restaurant_by_id so the
-    /validate endpoint authenticates as a caja user belonging to the same
-    org as the order under test.
+    Wire verify_token + db_get_user + db_get_restaurant_by_org_id /
+    db_get_restaurant_by_location_id so the /validate endpoint authenticates
+    as a caja user belonging to the same org as the order under test.
     """
     monkeypatch.setattr(
         "app.routes.deps.verify_token",
@@ -343,18 +343,25 @@ def _patch_validate_auth(
             "restaurant_name": "ManualProofTestOrg",
             "branch_id":       user_org_id,
             "restaurant_id":   user_org_id,
+            # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+            # explicit org_id/location_id fields.
+            "org_id":          user_org_id,
+            "location_id":     user_org_id,
             "role":            role,
         }),
     )
+    _restaurant_mock = AsyncMock(return_value={
+        "id":          user_org_id,
+        "org_id":      user_org_id,
+        "location_id": user_org_id,
+        "name":        "ManualProofTestOrg",
+        "features":    {},
+    })
     monkeypatch.setattr(
-        "app.services.database.db_get_restaurant_by_id",
-        AsyncMock(return_value={
-            "id":          user_org_id,
-            "org_id":      user_org_id,
-            "location_id": user_org_id,
-            "name":        "ManualProofTestOrg",
-            "features":    {},
-        }),
+        "app.services.database.db_get_restaurant_by_org_id", _restaurant_mock,
+    )
+    monkeypatch.setattr(
+        "app.services.database.db_get_restaurant_by_location_id", _restaurant_mock,
     )
 
 
@@ -415,13 +422,9 @@ async def test_validate_delivery_endpoint_idempotent(
         AsyncMock(return_value=_stub_user(org_id)),
     )
 
-    # Stub db_get_restaurant_by_id (used by ownership check) so we don't need
-    # the user's org row to actually exist on this rolled-back transaction.
-    from app.services import database as _db
-    monkeypatch.setattr(
-        _db, "db_get_restaurant_by_id",
-        AsyncMock(return_value={"id": org_id, "org_id": org_id, "location_id": org_id}),
-    )
+    # P0 fix (2026-09): the ownership check now reads user["org_id"] (with
+    # a user["restaurant_id"] fallback, which _stub_user sets) directly —
+    # no DB lookup needed any more.
 
     # No-op the side effects.
     monkeypatch.setattr(
@@ -488,11 +491,9 @@ async def test_validate_delivery_endpoint_rejects_terminal_orders(
         ord_routes, "get_current_user",
         AsyncMock(return_value=_stub_user(org_id)),
     )
-    from app.services import database as _db
-    monkeypatch.setattr(
-        _db, "db_get_restaurant_by_id",
-        AsyncMock(return_value={"id": org_id, "org_id": org_id, "location_id": org_id}),
-    )
+    # P0 fix (2026-09): the ownership check now reads user["org_id"] (with
+    # a user["restaurant_id"] fallback, which _stub_user sets) directly —
+    # no DB lookup needed any more.
     monkeypatch.setattr(
         ord_routes, "send_delivery_notification", AsyncMock(return_value=None),
     )

@@ -90,6 +90,7 @@ _USER_ADMIN = {
     "username": "owner@test.com",
     "restaurant_id": 1,
     "branch_id": 1,
+    "org_id": 1,
     "role": "owner",
 }
 
@@ -97,6 +98,9 @@ _USER_STAFF_BRANCH = {
     "username": "staff:uuid-abc",
     "restaurant_id": 20,
     "branch_id": 20,
+    # P0 fix (2026-09): _resolve_org_id_for_user now reads ONLY the explicit
+    # org_id field (staff.org_id, mapped here to the parent org).
+    "org_id": 1,
     "role": "mesero",
 }
 
@@ -252,12 +256,13 @@ async def test_get_current_restaurant_legacy_still_returns_data():
                     "username": "owner@test.com",
                     "branch_id": 1,
                     "restaurant_id": 1,
+                    "org_id": 1,
                     "role": "owner",
                 }
             ),
         ),
         patch(
-            "app.routes.deps.db.db_get_restaurant_by_id",
+            "app.routes.deps.db.db_get_restaurant_by_org_id",
             AsyncMock(return_value=_restaurant),
         ),
     ):

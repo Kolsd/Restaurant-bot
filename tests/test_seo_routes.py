@@ -113,8 +113,10 @@ def client(monkeypatch):
         "app.repositories.restaurant_repo.db_get_restaurant_by_slug",
         mock_by_slug,
     )
+    # Sitemap route (P0 fix 2026-09) resolves via db_get_restaurant_by_location_id
+    # — treated as a location_id (see dashboard.py's restaurant_sitemap docstring).
     monkeypatch.setattr(
-        "app.services.database.db_get_restaurant_by_id",
+        "app.services.database.db_get_restaurant_by_location_id",
         mock_by_id,
     )
     # Also patch in routes.dashboard namespace
@@ -123,7 +125,7 @@ def client(monkeypatch):
         mock_by_slug,
     )
     monkeypatch.setattr(
-        "app.routes.dashboard.db.db_get_restaurant_by_id",
+        "app.routes.dashboard.db.db_get_restaurant_by_location_id",
         mock_by_id,
     )
     return TestClient(app)
@@ -277,7 +279,7 @@ class TestSitemap:
         async def mock_by_id(rid):
             return rest if rid == 1 else None
 
-        monkeypatch.setattr("app.routes.dashboard.db.db_get_restaurant_by_id", mock_by_id)
+        monkeypatch.setattr("app.routes.dashboard.db.db_get_restaurant_by_location_id", mock_by_id)
         c = TestClient(app)
         resp = c.get("/sitemap-1.xml")
         assert "active-dish" in resp.text

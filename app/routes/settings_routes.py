@@ -103,37 +103,24 @@ def _build_settings_response(restaurant: dict, features: dict) -> dict:
 
 @router.get("/api/settings")
 async def get_settings(request: Request):
-    user = await get_current_user(request)
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
+    # P0 fix (2026-09): get_current_restaurant resolves ONLY through the
+    # explicit users.org_id / users.location_id columns (+ a verified
+    # X-Branch-ID override) — replaces the old ambiguous branch_id guess,
+    # which also had NO ownership check on the X-Branch-ID header value.
+    restaurant = await get_current_restaurant(request)
     features = _parse_features(restaurant)
     return _build_settings_response(restaurant, features)
 
 
 @router.post("/api/settings")
 async def save_settings(request: Request):
-    user = await get_current_user(request)
-
-    branch_id = user.get("branch_id")
     branch_header = request.headers.get("X-Branch-ID")
 
     if branch_header == "all":
         raise HTTPException(status_code=400, detail="No puedes editar configuración en modo 'Todas las sucursales'. Selecciona una específica.")
 
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    # P0 fix (2026-09): see get_settings above.
+    restaurant = await get_current_restaurant(request)
 
     body = await request.json()
 
@@ -231,8 +218,9 @@ async def save_settings(request: Request):
         if _location_updates:
             await restaurant_repo.db_update_location(restaurant["id"], **_location_updates)
 
-    # Re-fetch to return authoritative state
-    updated = await db.db_get_restaurant_by_id(restaurant["id"])
+    # Re-fetch to return authoritative state. restaurant["id"] is already
+    # normalized to org_id by get_current_restaurant.
+    updated = await db.db_get_restaurant_by_org_id(restaurant["id"])
     if not updated:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     final_features = _parse_features(updated)
@@ -266,15 +254,10 @@ async def pause_restaurant(body: _PauseBody, request: Request):
             detail="Solo owner o admin pueden pausar/reanudar el restaurante",
         )
 
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and role in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
-
+    # P0 fix (2026-09): resolve via get_current_restaurant (explicit org_id /
+    # location_id + verified X-Branch-ID override) instead of the ambiguous
+    # branch_id guess.
+    restaurant = await get_current_restaurant(request)
     restaurant_id = restaurant["id"]
 
     if body.paused:
@@ -301,8 +284,8 @@ async def pause_restaurant(body: _PauseBody, request: Request):
         paused_by=user.get("username"),
     )
 
-    # Re-fetch to return authoritative state
-    updated = await db.db_get_restaurant_by_id(restaurant_id)
+    # Re-fetch to return authoritative state (restaurant_id is org_id here)
+    updated = await db.db_get_restaurant_by_org_id(restaurant_id)
     features = _parse_features(updated or {})
 
     return {
@@ -543,8 +526,8 @@ async def patch_weekly_report_settings(
                 enabled=body.enabled,
             )
 
-    # ── Re-fetch to return authoritative state ────────────────────────
-    updated = await db.db_get_restaurant_by_id(restaurant_id)
+    # ── Re-fetch to return authoritative state (restaurant_id is org_id) ──
+    updated = await db.db_get_restaurant_by_org_id(restaurant_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
@@ -573,15 +556,8 @@ async def get_onboarding_status(request: Request):
     Each criterion is checked independently; failures default to done=False.
     Score = number of completed steps × 20 (5 steps × 20 = 100 max).
     """
-    user = await get_current_user(request)
-    branch_id = user.get("branch_id")
-    branch_header = request.headers.get("X-Branch-ID")
-    if branch_header and branch_header.isdigit() and user.get("role", "") in ("owner", "admin"):
-        branch_id = int(branch_header)
-
-    restaurant = await db.db_get_restaurant_by_id(branch_id)
-    if not restaurant:
-        raise HTTPException(status_code=404, detail="Restaurante no encontrado")
+    # P0 fix (2026-09): resolve via get_current_restaurant (see get_settings).
+    restaurant = await get_current_restaurant(request)
 
     restaurant_id = restaurant["id"]
     whatsapp_number = restaurant.get("whatsapp_number") or ""
@@ -695,34 +671,44 @@ async def get_dashboard_filters(request: Request, period: str, custom_start: str
 
     role = user.get("role", "")
     branch_header = request.headers.get("X-Branch-ID")
+    user_org_id = user.get("org_id")
 
     # For owner/admin: respect X-Branch-ID. If they didn't explicitly pick a
     # sede (no header, 'matriz', 'all'), show all sedes of the org. The old
     # fallback to user.branch_id assumed branch_id == location_id, which broke
     # post-Wave-2 (user.branch_id is the org_id, not a location_id, so
     # filtering downstream by location_id matched nothing).
+    #
+    # P0 fix (2026-09): X-Branch-ID is always a location_id and MUST be
+    # verified to belong to the caller's own org before use — it previously
+    # had no ownership check at all, so any owner/admin could pass another
+    # tenant's location id and read that tenant's dashboard data.
     if role in ("owner", "admin"):
         if branch_header == "all":
             branch_id = "all"
         elif branch_header and branch_header.isdigit():
-            branch_id = int(branch_header)
+            candidate = int(branch_header)
+            candidate_rest = await db.db_get_restaurant_by_location_id(candidate)
+            if not candidate_rest or candidate_rest.get("org_id") != user_org_id:
+                raise HTTPException(status_code=403, detail="Sucursal no pertenece a tu organización")
+            branch_id = candidate
         else:
             # Default for owners/admins: cross-sede view ('all'). bot_number
             # filter (resolved below) provides tenant scoping.
             branch_id = "all"
     else:
         # gerente / staff: use "all" so that bot_number does the tenant scoping.
-        # user["branch_id"] stores org_id (not location_id) for staff users —
-        # passing it as location_id filter would return 0 rows post-Wave-2.
+        # user["org_id"] is the tenant key for staff users — passing it as a
+        # location_id filter would return 0 rows post-Wave-2.
         branch_id = "all"
 
     bot_number = None
     if branch_id and branch_id != "all":
-        r = await db.db_get_restaurant_by_id(branch_id)
+        r = await db.db_get_restaurant_by_location_id(branch_id)
         if r:
             bot_number = r.get("whatsapp_number")
-    elif branch_id == "all":
-        r = await db.db_get_restaurant_by_id(user.get("branch_id"))
+    elif branch_id == "all" and user_org_id:
+        r = await db.db_get_restaurant_by_org_id(int(user_org_id))
         if r:
             bot_number = r.get("whatsapp_number")
 
@@ -841,13 +827,9 @@ async def update_order_status(order_id: str, request: Request):
     if not order:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
+    # P0 fix (2026-09): use the explicit org_id off the user dict directly.
     order_org_id = order.get("org_id")
-    user_location_id = user.get("branch_id") or user.get("restaurant_id")
-    if user_location_id:
-        user_rest = await db.db_get_restaurant_by_id(user_location_id)
-        user_org_id = (user_rest or {}).get("org_id") or user_location_id
-    else:
-        user_org_id = None
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
 
     if order_org_id and user_org_id and int(order_org_id) != int(user_org_id):
         raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
@@ -869,12 +851,12 @@ async def get_closed_sessions(request: Request, hours: int = 24):
     try:
         # db_get_closed_sessions uses tenant_connection() — must be wrapped in tenant_scope.
         # branch_id may be an int, "all", or None; fall back to bypass when cross-tenant.
-        # Wave-2: branch_id from get_dashboard_filters is a LOCATION_ID (from
-        # user.branch_id or X-Branch-ID header). tenant_scope() requires an
-        # org_id; we resolve it via db_get_restaurant_by_id which normalizes
-        # `id` to org_id regardless of which key was passed in.
+        # Wave-2: branch_id from get_dashboard_filters is a LOCATION_ID (already
+        # ownership-verified there). tenant_scope() requires an org_id; we
+        # resolve it via db_get_restaurant_by_location_id which normalizes
+        # `id` to org_id.
         if isinstance(branch_id, int):
-            branch_rest = await db.db_get_restaurant_by_id(branch_id)
+            branch_rest = await db.db_get_restaurant_by_location_id(branch_id)
             org_id_for_scope = branch_rest["id"] if branch_rest else branch_id
             with tenant_scope(org_id_for_scope):
                 rows = await tr.db_get_closed_sessions(hours, bot_number)

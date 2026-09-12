@@ -100,7 +100,7 @@ def test_create_table_passes_org_id_to_tenant_scope_not_location_id(
         patch("app.routes.tables.require_auth", AsyncMock(return_value=None)),
         patch("app.routes.tables.get_current_user", AsyncMock(return_value=admin_user)),
         patch("app.routes.tables.get_current_restaurant", AsyncMock(return_value=matriz_org_dict)),
-        patch("app.routes.tables.db.db_get_restaurant_by_id",
+        patch("app.routes.tables.db.db_get_restaurant_by_location_id",
               AsyncMock(return_value={**matriz_org_dict, "id": ORG_ID, "location_id": LOCATION_ID})),
         patch("app.routes.tables.db.db_auto_create_table",
               AsyncMock(return_value={"id": "t1", "name": "Mesa 1", "number": 1})),
@@ -208,7 +208,7 @@ def test_closed_sessions_resolves_org_id_from_branch_id_for_tenant_scope(
         patch("app.routes.settings_routes.get_dashboard_filters",
               AsyncMock(return_value=(LOCATION_ID, "+57300", None, None))),
         # db_get_restaurant_by_id returns a dict with `id` normalized to ORG_ID
-        patch("app.routes.settings_routes.db.db_get_restaurant_by_id",
+        patch("app.routes.settings_routes.db.db_get_restaurant_by_location_id",
               AsyncMock(return_value={"id": ORG_ID, "org_id": ORG_ID, "location_id": LOCATION_ID})),
         patch("app.routes.settings_routes.tr.db_get_closed_sessions",
               AsyncMock(return_value=[])),

@@ -279,8 +279,17 @@ async def dashboard_menu(request: Request):
     
     if branch_header and branch_header.isdigit() and "owner" in user.get("role", ""):
         branch_id = int(branch_header)
-        branch_rest = await db.db_get_restaurant_by_id(branch_id)
-        if branch_rest and branch_rest.get("whatsapp_number"):
+        # P0 fix (2026-09): X-Branch-ID is a location_id — must be verified
+        # to belong to the caller's own org before trusting its whatsapp
+        # number (previously unchecked: any owner could pass another
+        # tenant's location id and have their bot_number filter switched
+        # to it, leaking that tenant's menu).
+        branch_rest = await db.db_get_restaurant_by_location_id(branch_id)
+        if (
+            branch_rest
+            and branch_rest.get("whatsapp_number")
+            and branch_rest.get("org_id") == restaurant.get("org_id", restaurant.get("id"))
+        ):
             bot_number = branch_rest["whatsapp_number"]
             
     return {"menu": await db.db_get_menu(bot_number) or {}}

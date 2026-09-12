@@ -335,7 +335,7 @@ def test_set_config_acepta_mesio_native(client, monkeypatch):
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(
         "app.routes.deps.db.db_get_user",
-        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}),
+        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}),
     )
     monkeypatch.setattr("app.routes.billing.save_billing_config", AsyncMock())
 
@@ -363,7 +363,7 @@ def test_get_billing_config_not_configured(client, monkeypatch):
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
     monkeypatch.setattr(
         "app.routes.deps.db.db_get_user",
-        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}),
+        AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}),
     )
     monkeypatch.setattr("app.routes.billing.get_billing_config", AsyncMock(return_value=None))
 

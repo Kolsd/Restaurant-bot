@@ -241,8 +241,10 @@ async def staff_pin_login(request: Request, body: StaffPinLoginRequest):
 
     roles = member.get("roles") or [member.get("role", "mesero")]
 
+    # body.restaurant_id is an org_id — db_get_staff_for_pin_login above
+    # already queried `staff WHERE org_id=$1`, confirming the id kind.
     with tenant_scope(body.restaurant_id):
-        restaurant_data = await db.db_get_restaurant_by_id(body.restaurant_id)
+        restaurant_data = await db.db_get_restaurant_by_org_id(body.restaurant_id)
     raw_features = restaurant_data.get("features") or {} if restaurant_data else {}
     if isinstance(raw_features, str):
         import json as _j

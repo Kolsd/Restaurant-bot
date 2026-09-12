@@ -411,11 +411,19 @@ async def db_fix_branch_ids() -> list[dict]:
     """
     Assign branch_id + role='owner' to users whose branch_id is NULL
     by matching restaurant_name. Returns list of fixed records.
+
+    P0 fix (2026-09): `restaurants.id` (the VIEW's own PK) IS a location_id
+    — also populate the explicit `location_id` and `org_id` columns so
+    downstream auth resolution (deps.get_current_user/get_current_restaurant)
+    never has to guess the kind of `branch_id` again.
     """
     pool = await _get_pool()
     fixed = []
     async with pool.acquire() as conn:
-        restaurants = await conn.fetch("SELECT id, name, whatsapp_number FROM restaurants")
+        restaurants = await conn.fetch(
+            "SELECT r.id, r.name, r.whatsapp_number, l.org_id "
+            "FROM restaurants r JOIN locations l ON l.id = r.id"
+        )
         rest_map    = {r["name"].lower().strip(): dict(r) for r in restaurants}
         users       = await conn.fetch(
             "SELECT username, restaurant_name, role FROM users WHERE branch_id IS NULL"
@@ -425,10 +433,15 @@ async def db_fix_branch_ids() -> list[dict]:
             if rname in rest_map:
                 rest = rest_map[rname]
                 await conn.execute(
-                    "UPDATE users SET branch_id=$1, role='owner' WHERE username=$2",
-                    rest["id"], user["username"],
+                    "UPDATE users SET branch_id=$1, role='owner', location_id=$1, org_id=$2 WHERE username=$3",
+                    rest["id"], rest["org_id"], user["username"],
                 )
-                fixed.append({"username": user["username"], "branch_id": rest["id"]})
+                fixed.append({
+                    "username": user["username"],
+                    "branch_id": rest["id"],
+                    "location_id": rest["id"],
+                    "org_id": rest["org_id"],
+                })
     return fixed
 
 
@@ -870,20 +883,44 @@ async def db_delete_branch(branch_id: int, parent_restaurant_id: int) -> bool:
     return True
 
 
-async def db_get_team_users(branch_id: int) -> list[dict]:
-    """Return users list with branch name for a given branch."""
+async def db_get_team_users(org_id: int, location_id: int = None) -> list[dict]:
+    """Return admin/owner users for a given org, optionally filtered to one sede.
+
+    P0 fix (2026-09): previously filtered on the raw `users.branch_id`
+    column directly (`WHERE u.branch_id = $1`), which has NO fixed id-kind
+    contract — some writers stored an org_id there, others a location_id —
+    so a caller passing an org_id (scheduler.py, for weekly-report owner
+    lookup) silently got ZERO rows for any user whose branch_id happened to
+    hold a location_id instead (e.g. a gerente created via team_invite).
+    Now filters on the explicit `users.org_id` / `users.location_id`
+    columns, populated by every writer going forward.
+    """
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT u.username, u.role, u.branch_id, r.name as branch_name
-            FROM users u
-            LEFT JOIN restaurants r ON u.branch_id = r.id
-            WHERE u.branch_id = $1
-            ORDER BY u.created_at DESC
-            """,
-            branch_id,
-        )
+        if location_id is not None:
+            rows = await conn.fetch(
+                """
+                SELECT u.username, u.role, u.branch_id, u.org_id, u.location_id,
+                       o.name AS branch_name
+                FROM users u
+                LEFT JOIN organizations o ON o.id = u.org_id
+                WHERE u.org_id = $1 AND u.location_id = $2
+                ORDER BY u.created_at DESC
+                """,
+                org_id, location_id,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT u.username, u.role, u.branch_id, u.org_id, u.location_id,
+                       o.name AS branch_name
+                FROM users u
+                LEFT JOIN organizations o ON o.id = u.org_id
+                WHERE u.org_id = $1
+                ORDER BY u.created_at DESC
+                """,
+                org_id,
+            )
     return [dict(r) for r in rows]
 
 
@@ -946,15 +983,26 @@ async def db_update_user_password(username: str, password_hash: str) -> bool:
 
 
 async def db_create_user(username: str, password_hash: str, restaurant_name: str,
-                          role: str = "owner", branch_id: int = None, parent_user: str = None):
+                          role: str = "owner", branch_id: int = None, parent_user: str = None,
+                          org_id: int = None, location_id: int = None):
+    """Create an admin/owner user row.
+
+    P0 fix (2026-09): `branch_id` is a legacy column with NO fixed id-kind
+    contract (some writers stored an org_id, others a location_id — see
+    users_org_location migration). New callers SHOULD pass the explicit
+    `org_id` (and `location_id` when the user is scoped to one specific
+    sede) so that auth/tenant resolution never has to guess again.
+    `branch_id` is still written for backward compat with code that has not
+    migrated to the explicit columns yet.
+    """
     import asyncpg  # noqa: PLC0415
     pool = await _get_pool()
     async with pool.acquire() as conn:
         try:
             await conn.execute("""
-                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, parent_user)
-                VALUES ($1,$2,$3,$4,$5,$6)
-            """, username.lower().strip(), password_hash, restaurant_name, role, branch_id, parent_user)
+                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, parent_user, org_id, location_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            """, username.lower().strip(), password_hash, restaurant_name, role, branch_id, parent_user, org_id, location_id)
             return True
         except asyncpg.UniqueViolationError:
             return False
@@ -1008,12 +1056,20 @@ async def db_get_restaurant_by_name(name: str):
         return _serialize(dict(row)) if row else None
 
 
-async def db_get_restaurant_by_id(restaurant_id: int):
-    """Lookup restaurant by location_id (VIEW id) OR org_id.
+async def db_get_restaurant_by_location_id(location_id: int):
+    """Lookup restaurant by location_id (the `restaurants` VIEW's own PK) ONLY.
 
-    Post-Wave-2: accepts either a location_id or an org_id. The returned
-    dict's `id` field is normalized to org_id (tenant key) for consistency
-    with db_get_restaurant_by_phone. `location_id` is preserved.
+    P0 fix (2026-09): replaces the old `db_get_restaurant_by_id`, which also
+    accepted an org_id and, on ambiguity, silently preferred the ORG match —
+    org ids and location ids are independent sequences over the same integer
+    range, so a location id can collide with an unrelated org's id for any
+    org created after Wave 2. This function never guesses: it filters ONLY
+    on `l.id`, so a colliding org id can never be returned by mistake.
+
+    Returns the same dict shape as before: `id` normalized to org_id (tenant
+    key), `location_id` preserved. Callers that received a location id from
+    the client (X-Branch-ID, body fields, table context) MUST also verify
+    the returned `org_id` matches the caller's own org before trusting it.
     """
     pool = await _get_pool()
     async with pool.acquire() as conn:
@@ -1022,11 +1078,38 @@ async def db_get_restaurant_by_id(restaurant_id: int):
             SELECT r.*, l.org_id, l.id AS location_id
             FROM restaurants r
             JOIN locations l ON l.id = r.id
-            WHERE r.id = $1 OR l.org_id = $1
-            ORDER BY (l.org_id = $1) DESC, l.id ASC
+            WHERE l.id = $1
+            """,
+            location_id,
+        )
+        if not row:
+            return None
+        d = _serialize(dict(row))
+        d["id"] = d["org_id"]
+        return d
+
+
+async def db_get_restaurant_by_org_id(org_id: int):
+    """Lookup restaurant by org_id ONLY — deterministic default location.
+
+    P0 fix (2026-09): replaces the old `db_get_restaurant_by_id` for callers
+    that already hold a known org_id. Returns the org's own deterministic
+    location (ORDER BY location id ASC — no "primary" concept, per the
+    Wave-2 model) shaped as a restaurant dict. Never guesses: filters ONLY
+    on `l.org_id`, so it can never resolve to an unrelated org.
+    """
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT r.*, l.org_id, l.id AS location_id
+            FROM restaurants r
+            JOIN locations l ON l.id = r.id
+            WHERE l.org_id = $1
+            ORDER BY l.id ASC
             LIMIT 1
             """,
-            restaurant_id,
+            org_id,
         )
         if not row:
             return None

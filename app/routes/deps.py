@@ -97,6 +97,10 @@ async def get_current_user(request: Request) -> dict:
                     "username": username,
                     "branch_id": mapped_branch_id,
                     "restaurant_id": staff_member["restaurant_id"],
+                    # Explicit tenant key (P0 fix 2026-09) — staff.org_id is
+                    # always the org id, never ambiguous like users.branch_id.
+                    "org_id": staff_member["restaurant_id"],
+                    "location_id": None,
                     "role": combined_role
                 }
 
@@ -107,66 +111,58 @@ async def get_current_user(request: Request) -> dict:
     raise HTTPException(status_code=401, detail="User not found")
 
 async def get_current_restaurant(request: Request) -> dict:
-    """Returns the restaurant for the authenticated user or raises 403."""
+    """Returns the restaurant for the authenticated user or raises 403.
+
+    P0 fix (2026-09): previously resolved via `user["branch_id"]`, a column
+    with NO fixed id-kind contract — some writers stored an org_id there,
+    others a location_id, and the now-deleted `db_get_restaurant_by_id`
+    guessed between the two, silently preferring the ORG match whenever a
+    location id collided with an unrelated org's id. That could serve — or
+    tenant_scope() a user into — a completely different tenant.
+
+    This now resolves ONLY through the explicit `org_id` / `location_id`
+    fields on the user dict (backfilled onto `users.org_id` /
+    `users.location_id` by the users_org_location migration, and populated
+    directly on the staff dict in get_current_user above). A user whose
+    org_id could not be resolved (genuine legacy ambiguity) is DENIED —
+    never guessed via name-match or branch_id fallback.
+    """
     user = await get_current_user(request)
 
-    # 1. Si es Gerente de una sucursal específica
-    if user.get("branch_id"):
-        r = await db.db_get_restaurant_by_id(user["branch_id"])
-        if r:
-            return r
-
-    # 2. Si es Staff operativo (resuelve su restaurante principal exacto)
-    if user.get("restaurant_id"):
-        r = await db.db_get_restaurant_by_id(user["restaurant_id"])
-        if r:
-            return r
-
-    # 3. Fallback para el Owner/Admin (sin branch_id en su registro de users).
-    # Wave-2: resolve the owner's org by NAME match against organizations,
-    # then return any one location of that org as the default sede dict.
-    # No cross-tenant fallback: if name match fails, raise 403 — much safer
-    # than the old `db_get_all_restaurants()[0]` which returned any tenant
-    # globally and would silently log the user into someone else's data.
-    target_name = (user.get("restaurant_name") or "").lower().strip()
-    if not target_name:
+    org_id = user.get("org_id")
+    if not org_id:
         raise HTTPException(status_code=403, detail="Restaurant not found")
+    org_id = int(org_id)
 
-    all_orgs = await db.db_get_all_orgs(active_only=False)
-    matching_org = next(
-        (o for o in all_orgs if (o.get("name") or "").lower().strip() == target_name),
-        None,
-    )
-    if matching_org is None:
-        raise HTTPException(status_code=403, detail="Restaurant not found")
+    location_id = user.get("location_id")
+    default_rest = None
+    if location_id:
+        default_rest = await db.db_get_restaurant_by_location_id(int(location_id))
+        # Ownership sanity check — a user's own location_id should always
+        # belong to their own org_id, but never trust that without checking.
+        if not default_rest or default_rest.get("org_id") != org_id:
+            default_rest = None
 
-    # Get any location of this org as the default sede (peers — no "primary").
-    from app.repositories.restaurant_repo import db_get_org_locations  # noqa: PLC0415
-    locations = await db_get_org_locations(matching_org["id"], active_only=True)
-    if not locations:
-        raise HTTPException(status_code=403, detail="Restaurant has no active locations")
-
-    # Default sede = first location ordered by id (deterministic, no judgement).
-    default_loc = locations[0]
-    main_rest = await db.db_get_restaurant_by_id(default_loc["id"])
-    if main_rest is None:
+    if default_rest is None:
+        default_rest = await db.db_get_restaurant_by_org_id(org_id)
+    if default_rest is None:
         raise HTTPException(status_code=403, detail="Restaurant not found")
 
     # 🛡️ MAGIA MULTI-SUCURSAL: Si el owner envía la cabecera, suplanta la sede.
-    # The selected sede must belong to the SAME org as the authenticated owner —
-    # verified via org_id (not the legacy parent_restaurant_id column).
+    # X-Branch-ID SIEMPRE carga un location_id. The selected sede must belong
+    # to the SAME org as the authenticated user — verified via org_id.
     branch_header = request.headers.get("X-Branch-ID")
     if branch_header and branch_header.isdigit():
         target_id = int(branch_header)
-        target_rest = await db.db_get_restaurant_by_id(target_id)
+        target_rest = await db.db_get_restaurant_by_location_id(target_id)
         if (
             target_rest
             and target_rest.get("org_id")
-            and target_rest.get("org_id") == main_rest.get("org_id")
+            and target_rest.get("org_id") == org_id
         ):
             return target_rest
 
-    return main_rest
+    return default_rest
 
 
 # NOTE: Decision — get_current_restaurant is called as a regular async function
@@ -201,7 +197,10 @@ async def get_current_user_scoped(request: Request):
     from app.services.tenant_context import tenant_scope
 
     user = await get_current_user(request)
-    rid = user.get("restaurant_id") or user.get("branch_id")
+    # P0 fix (2026-09): prefer the explicit org_id (unambiguous) over the
+    # legacy restaurant_id/branch_id fields, which for admin/owner users
+    # come straight from the mixed-kind users.branch_id column.
+    rid = user.get("org_id") or user.get("restaurant_id") or user.get("branch_id")
     if rid:
         with tenant_scope(int(rid)):
             yield user
@@ -341,35 +340,19 @@ async def require_page_access(request: Request, path: str):
 async def _resolve_org_id_for_user(user: dict) -> int | None:
     """Resolve the org_id for a user dict.
 
-    Post-0037 (Wave 2): we read org_id directly from canonical sources:
-      - Staff: user["restaurant_id"] is already s.org_id (see deps.get_current_user line ~60).
-      - Admin/users: lookup via db_get_location_by_id(branch_id) → row["org_id"].
-
-    Falls back to int(rid) for Matriz invariant (organizations.id == old
-    restaurants.id, guaranteed by migration 0034). The fallback is logged so
-    we can monitor how many tenants still hit it.
+    P0 fix (2026-09): reads ONLY the explicit `org_id` field — set directly
+    on the staff dict in get_current_user (from staff.org_id, canonical),
+    and backfilled onto `users.org_id` by the users_org_location migration
+    for admin/owner users. The old fallback guessed the org_id from the
+    mixed-kind `users.branch_id` column (via db_get_location_by_id, treating
+    branch_id as if it were always a location id) — for orgs where branch_id
+    actually held an org_id, or where it collided with an unrelated org's
+    location id, that guess could resolve to the WRONG tenant. A user whose
+    org_id genuinely could not be backfilled (logged by the migration) is
+    correctly denied here — never guessed.
     """
-    rid = user.get("restaurant_id") or user.get("branch_id")
-    if not rid:
-        return None
-
-    # Staff: user["restaurant_id"] already comes from staff.org_id (canonical).
-    # The dict produced by get_current_user puts s.org_id under "restaurant_id"
-    # for backward compat; for staff users it IS the org_id directly.
-    if str(user.get("username", "")).startswith("staff:"):
-        return int(rid)
-
-    # Admin/owner: resolve via locations table.
-    # TODO: mover org_id al payload del JWT para evitar este round-trip por request
-    try:
-        loc = await db.db_get_location_by_id(int(rid))
-        if loc and loc.get("org_id"):
-            return int(loc["org_id"])
-    except Exception:
-        _log.exception("auth.deps.location_lookup_failed", branch_id=int(rid))
-
-    _log.warning("auth.org_id_fallback_used", branch_id=int(rid))
-    return int(rid)
+    org_id = user.get("org_id")
+    return int(org_id) if org_id else None
 
 
 async def get_current_org(request: Request) -> dict:

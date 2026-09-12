@@ -26,15 +26,20 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 # ── AUTH HELPER ───────────────────────────────────────────────────────
 
 async def _get_restaurant_id(user: dict) -> int:
-    # 1. Si es un empleado (Staff con PIN), ya tiene el ID directo
+    # P0 fix (2026-09): prefer the explicit org_id (unambiguous tenant key,
+    # set on the user dict by deps.get_current_user / backfilled onto
+    # users.org_id). users.branch_id has no fixed id-kind contract — some
+    # writers stored an org_id there, others a location_id — so falling
+    # back to it here could scope billing into the WRONG tenant.
+    if user.get("org_id"):
+        return int(user["org_id"])
+
+    # Legacy staff shape without org_id (should not happen post-migration,
+    # kept defensively).
     if "restaurant_id" in user:
         return user["restaurant_id"]
 
-    # 2. Si es un Admin/Dueño, usamos su branch_id
-    if user.get("branch_id"):
-        return user["branch_id"]
-
-    # Name-based fallback removed: IDOR risk — trust only the JWT claims.
+    # No resolvable tenant: deny rather than guess via branch_id.
     raise HTTPException(status_code=401, detail="Token no contiene restaurante asignado")
 
 # ── MODELOS ──────────────────────────────────────────────────────────
@@ -127,7 +132,7 @@ async def emit(request: Request, payload: EmitInvoicePayload):
     restaurant_id = await _get_restaurant_id(user)
 
     # DIAN feature gate — must be explicitly enabled in /settings
-    restaurant = await db.db_get_restaurant_by_id(restaurant_id)
+    restaurant = await db.db_get_restaurant_by_org_id(restaurant_id)
     if not restaurant or not _is_dian_enabled((restaurant.get("features") or {})):
         raise HTTPException(
             status_code=422,

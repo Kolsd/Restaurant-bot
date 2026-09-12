@@ -102,8 +102,11 @@ async def get_whatsapp_media(
     if not bot:
         raise HTTPException(status_code=400, detail="Parámetro bot requerido")
 
-    tenant_restaurant_id = user.get("restaurant_id") or user.get("branch_id")
-    if not tenant_restaurant_id:
+    # P0 fix (2026-09): use the explicit org_id (unambiguous) instead of the
+    # mixed-kind branch_id — passing a location id here to the now-deleted
+    # db_get_restaurant_by_id could resolve to an unrelated org.
+    tenant_org_id = user.get("org_id") or user.get("restaurant_id")
+    if not tenant_org_id:
         raise HTTPException(status_code=403, detail="No autorizado")
 
     # Verificar que el bot_number pertenece al mismo org que el usuario autenticado.
@@ -111,7 +114,7 @@ async def get_whatsapp_media(
     from app.services.tenant_context import bypass_tenant_scope
     with bypass_tenant_scope("media_proxy_ownership_check"):
         tenant_rest = await db.db_get_restaurant_by_phone(bot)
-        user_rest = await db.db_get_restaurant_by_id(int(tenant_restaurant_id))
+        user_rest = await db.db_get_restaurant_by_org_id(int(tenant_org_id))
     if not tenant_rest or not user_rest:
         raise HTTPException(status_code=403, detail="No autorizado")
     if tenant_rest.get("org_id") != user_rest.get("org_id"):

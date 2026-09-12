@@ -50,6 +50,10 @@ def _make_user(org_id: int = ORG_A_ID) -> dict:
         "username":        "owner_test",
         "restaurant_name": f"Restaurante {org_id}",
         "branch_id":       org_id,
+        # P0 fix (2026-09): get_current_restaurant resolves ONLY via the
+        # explicit org_id/location_id fields.
+        "org_id":          org_id,
+        "location_id":     org_id,
         "role":            "owner",
         "password_hash":   "$2b$12$placeholder",
     }
@@ -88,7 +92,9 @@ def _auth_patches(monkeypatch, org_id: int = ORG_A_ID):
     monkeypatch.setattr("app.routes.deps.verify_token",
                         AsyncMock(return_value="owner_test"))
     monkeypatch.setattr(db, "db_get_user", AsyncMock(return_value=user))
-    monkeypatch.setattr(db, "db_get_restaurant_by_id",
+    monkeypatch.setattr(db, "db_get_restaurant_by_org_id",
+                        AsyncMock(return_value=restaurant))
+    monkeypatch.setattr(db, "db_get_restaurant_by_location_id",
                         AsyncMock(return_value=restaurant))
     monkeypatch.setattr(db, "db_check_module",
                         AsyncMock(return_value=True))

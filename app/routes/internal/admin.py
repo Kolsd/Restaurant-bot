@@ -296,7 +296,7 @@ async def admin_create_user(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
+    rest = await db.db_get_restaurant_by_org_id(request.restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
@@ -305,7 +305,10 @@ async def admin_create_user(
         password_hash=hash_password(request.password),
         restaurant_name=rest["name"],
         role="owner",
-        branch_id=request.restaurant_id
+        branch_id=request.restaurant_id,
+        # P0 fix (2026-09): request.restaurant_id is an org_id here (see
+        # db_get_restaurant_by_org_id call above) — set the explicit column.
+        org_id=request.restaurant_id,
     )
 
     if not success:
@@ -370,7 +373,7 @@ async def admin_get_restaurant_detail(
     _: None = Depends(verify_superadmin),
     _bypass: None = Depends(_bypass_internal_admin),
 ):
-    rest = await db.db_get_restaurant_by_id(restaurant_id)
+    rest = await db.db_get_restaurant_by_org_id(restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
     wa = rest.get("whatsapp_number", "")
@@ -385,7 +388,7 @@ async def admin_update_restaurant(
     _bypass: None = Depends(_bypass_internal_admin),
 ):
     from app.routes.dashboard import geocode_address
-    rest = await db.db_get_restaurant_by_id(request.restaurant_id)
+    rest = await db.db_get_restaurant_by_org_id(request.restaurant_id)
     if not rest:
         raise HTTPException(status_code=404, detail="Restaurante no encontrado")
 
@@ -424,7 +427,7 @@ async def admin_update_restaurant(
         features=merged_features,
         menu=parsed_menu,
     )
-    return {"success": True, "restaurant": await db.db_get_restaurant_by_id(request.restaurant_id)}
+    return {"success": True, "restaurant": await db.db_get_restaurant_by_org_id(request.restaurant_id)}
 
 
 @router.get("/billing-stats")

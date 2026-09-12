@@ -178,13 +178,13 @@ async def _resolve_session_or_404(token: str) -> dict:
 
 
 async def _resolve_diner_restaurant(org_id: int, location_id: int | None) -> dict | None:
-    """Safe replacement for `db.db_get_restaurant_by_id(location_id)`.
+    """Safe replacement for the now-deleted, ambiguous db_get_restaurant_by_id lookup (took a location_id).
 
-    P0 (found 2026-09, separate fix wave in progress on db_get_restaurant_by_id
-    itself): that function's SQL is `WHERE r.id = $1 OR l.org_id = $1 ORDER BY
-    (l.org_id = $1) DESC` — it accepts EITHER an org id OR a location id, and
+    P0 (found 2026-09, fixed across the whole app in the same wave): that
+    function's SQL was `WHERE r.id = $1 OR l.org_id = $1 ORDER BY
+    (l.org_id = $1) DESC` — it accepted EITHER an org id OR a location id, and
     org ids/location ids are independent sequences over the same integer
-    range, so passing a LOCATION id can resolve to a COMPLETELY DIFFERENT
+    range, so passing a LOCATION id could resolve to a COMPLETELY DIFFERENT
     org's restaurant whenever some other org happens to share that id.
     Passing an ORG id is safe (the org-id branch always wins the ORDER BY).
 
@@ -195,7 +195,7 @@ async def _resolve_diner_restaurant(org_id: int, location_id: int | None) -> dic
     location id colliding with an unrelated org's id can never leak that
     org's name/whatsapp_number into this session.
     """
-    org_restaurant = await db.db_get_restaurant_by_id(org_id)
+    org_restaurant = await db.db_get_restaurant_by_org_id(org_id)
     if not org_restaurant:
         return None
 
@@ -233,7 +233,7 @@ def _dish_cards_for_category(dishes: list, availability: dict, currency: str) ->
 
 async def _currency_for_org(org_id: int) -> str:
     """Caller must already be inside tenant_scope(org_id)."""
-    restaurant = await db.db_get_restaurant_by_id(org_id)
+    restaurant = await db.db_get_restaurant_by_org_id(org_id)
     feats = _features_dict((restaurant or {}).get("features"))
     return feats.get("currency", "COP")
 
@@ -438,7 +438,7 @@ async def diner_join(request: Request, body: DinerJoinRequest):
         # never a second table_sessions row.
         already = await db.db_get_active_session(token, bot_number)
         if already:
-            restaurant = await db.db_get_restaurant_by_id(org_id)
+            restaurant = await db.db_get_restaurant_by_org_id(org_id)
             restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
             currency = _features_dict((restaurant or {}).get("features")).get("currency", "COP")
             turn = await _opening_turn(bot_number, restaurant_name, table_name)
@@ -475,7 +475,7 @@ async def diner_join(request: Request, body: DinerJoinRequest):
 
         await tables_repo.db_mark_session_verified(new_session["id"])
 
-        restaurant = await db.db_get_restaurant_by_id(org_id)
+        restaurant = await db.db_get_restaurant_by_org_id(org_id)
         restaurant_name = (restaurant or {}).get("name") or "nuestro restaurante"
         currency = _features_dict((restaurant or {}).get("features")).get("currency", "COP")
         turn = await _opening_turn(bot_number, restaurant_name, table_name)
@@ -518,7 +518,7 @@ async def diner_chat(request: Request, body: DinerChatRequest):
             menu = await db.db_get_menu(bot_number) or {}
             dishes = menu.get(category)
             if isinstance(dishes, list) and dishes:
-                feats = _features_dict((await db.db_get_restaurant_by_id(org_id) or {}).get("features"))
+                feats = _features_dict((await db.db_get_restaurant_by_org_id(org_id) or {}).get("features"))
                 currency = feats.get("currency", "COP")
                 availability = await db.db_get_menu_availability(org_id)
                 dish_block = _dish_cards_for_category(dishes, availability, currency)
@@ -564,7 +564,7 @@ async def diner_menu(token: str = Query(..., min_length=1, max_length=200)):
 
     with tenant_scope(org_id):
         await diner_sessions_repo.touch_last_seen(token, org_id)
-        restaurant = await db.db_get_restaurant_by_id(org_id)
+        restaurant = await db.db_get_restaurant_by_org_id(org_id)
         menu = await db.db_get_menu(bot_number) or {}
         availability = await db.db_get_menu_availability(org_id)
 

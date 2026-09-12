@@ -306,7 +306,7 @@ async def send_delivery_notification(phone: str, status: str, bot_number: str = 
                     from app.repositories.restaurant_repo import db_get_default_location  # noqa: PLC0415
                     primary = await db_get_default_location(rest["org_id"])
                     parent = (
-                        await db.db_get_restaurant_by_id(primary["id"])
+                        await db.db_get_restaurant_by_location_id(primary["id"])
                         if primary and primary.get("id") and primary.get("id") != rest.get("location_id")
                         else None
                     )
@@ -468,17 +468,16 @@ async def validate_delivery_order(order_id: str, body: ValidateDeliveryBody, req
         )
 
     # 2. Ownership check (org-level, same pattern as update_delivery_status).
+    # P0 fix (2026-09): use the explicit org_id straight off the user dict —
+    # no DB round-trip needed, and no risk of the old branch_id guess
+    # resolving to an unrelated org.
     order_rid = order.get("org_id") or order.get("restaurant_id")
-    user_rid = user.get("branch_id") or user.get("restaurant_id")
-    if not order_rid or not user_rid:
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
+    if not order_rid or not user_org_id:
         raise HTTPException(status_code=403, detail="No se puede resolver la pertenencia de la orden")
-    if order_rid and user_rid:
-        with bypass_tenant_scope("validate_delivery_order: resolve user org_id"):
-            user_rest = await db.db_get_restaurant_by_id(int(user_rid))
-        user_org_id = (user_rest or {}).get("org_id") or user_rid
-        order_org_id = int(order.get("org_id") or order_rid)
-        if int(user_org_id) != order_org_id:
-            raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
+    order_org_id = int(order.get("org_id") or order_rid)
+    if int(user_org_id) != order_org_id:
+        raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
 
     scope_rid = int(order_rid) if order_rid else None
     if not scope_rid:
@@ -637,19 +636,15 @@ async def update_delivery_status(order_id: str, req: UpdateOrderStatusRequest, r
         raise HTTPException(status_code=404, detail="Orden no encontrada")
 
     # Ownership check: staff user can only touch orders of their own org.
-    # Wave-2: orders carry org_id; user resolves to org_id via db_get_restaurant_by_id.
+    # P0 fix (2026-09): use the explicit org_id off the user dict directly —
+    # no DB round-trip, and no risk of the old branch_id guess resolving to
+    # an unrelated org.
     order_rid = order.get("org_id") or order.get("restaurant_id")
-    user_rid = user.get("branch_id") or user.get("restaurant_id")
-    if order_rid and user_rid and int(order_rid) != int(user_rid):
-        # Resolve the user's org_id (location_id may differ from org_id in Wave-2)
-        with bypass_tenant_scope("update_delivery_status: check org ownership"):
-            user_rest = await db.db_get_restaurant_by_id(int(user_rid))
-        user_org_id = (user_rest or {}).get("org_id") or user_rid
-        order_org_id = int(order.get("org_id") or order_rid)
-        if int(user_org_id) != order_org_id:
-            raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
+    user_org_id = user.get("org_id") or user.get("restaurant_id")
+    if order_rid and user_org_id and int(order_rid) != int(user_org_id):
+        raise HTTPException(status_code=403, detail="La orden no pertenece a tu sucursal")
 
-    scope_rid = int(order_rid) if order_rid else int(user_rid) if user_rid else None
+    scope_rid = int(order_rid) if order_rid else int(user_org_id) if user_org_id else None
     if not scope_rid:
         raise HTTPException(status_code=500, detail="No se pudo resolver tenant de la orden")
 

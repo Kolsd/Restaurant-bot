@@ -15,7 +15,7 @@ def test_get_providers_list(client):
 def test_get_billing_config_authorized(client, monkeypatch):
     # 1. Burlamos la seguridad para que crea que somos un usuario válido
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
+    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}))
     
     # 2. Burlamos la configuración que viene de la base de datos
     mock_cfg = {
@@ -47,12 +47,12 @@ def test_get_billing_config_unauthorized(client, monkeypatch):
 def test_emit_manual_invoice_endpoint(client, monkeypatch):
     # Burlamos la seguridad nuevamente
     monkeypatch.setattr("app.routes.deps.verify_token", AsyncMock(return_value="admin_test"))
-    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1}))
+    monkeypatch.setattr("app.routes.deps.db.db_get_user", AsyncMock(return_value={"username": "admin", "restaurant_name": "Test", "branch_id": 1, "org_id": 1}))
 
     # Mock restaurant lookup with dian_enabled=True (gate check added 2026-05-07)
     mock_restaurant = {"id": 1, "name": "Test", "features": {"dian_enabled": True}}
     import app.routes.billing as _billing_routes_mod
-    monkeypatch.setattr(_billing_routes_mod.db, "db_get_restaurant_by_id", AsyncMock(return_value=mock_restaurant))
+    monkeypatch.setattr(_billing_routes_mod.db, "db_get_restaurant_by_org_id", AsyncMock(return_value=mock_restaurant))
 
     # Burlamos la función que emite la factura a Alegra/Siigo
     mock_emit = AsyncMock(return_value={"success": True, "provider": "alegra", "external_id": "999"})

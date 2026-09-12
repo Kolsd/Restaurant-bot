@@ -515,11 +515,16 @@ async def seed_restaurant(
 
             # ── Owner user ────────────────────────────────────────────────────
             # users.branch_id = org_id (the tenant key used by auth middleware).
+            # P0 fix (2026-09): also set the explicit org_id/location_id
+            # columns — deps.get_current_restaurant no longer resolves
+            # anything from the ambiguous branch_id column, it requires
+            # users.org_id to be populated (see users_org_location
+            # migration + memory/ambiguous-restaurant-lookup-p0.md).
             owner_email = f"e2e-owner-{org_id}@mesio.test"
             await conn.execute(
                 """
-                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO users (username, password_hash, restaurant_name, role, branch_id, org_id, location_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (username) DO NOTHING
                 """,
                 owner_email,
@@ -527,6 +532,8 @@ async def seed_restaurant(
                 name,
                 "owner",
                 org_id,
+                org_id,
+                principal_loc_id,
             )
 
             # ── Subscription usage ────────────────────────────────────────────

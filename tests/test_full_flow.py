@@ -399,12 +399,15 @@ class TestWaiterFlows:
         patch_auth(monkeypatch, role="owner")
         table_row = {"id": "table-1", "name": "Mesa 1", "number": 1, "active": True}
         monkeypatch.setattr(db, "db_get_tables", AsyncMock(return_value=[table_row]))
-        # Wave-2: db_get_restaurant_by_id must return org_id + location_id so the
-        # route resolves the sede id without falling back to the Matriz invariant.
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
+        # Wave-2: db_get_restaurant_by_org_id/_by_location_id must return
+        # org_id + location_id so the route resolves the sede id without
+        # falling back to the Matriz invariant.
+        _rest_mock = AsyncMock(return_value={
             "id": 1, "org_id": 1, "location_id": 1,
             "name": "Test", "parent_restaurant_id": None, "features": {}
-        }))
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
 
         session_row = make_row({"table_id": "table-1", "session_started_at": None,
                                 "has_waiter_alert": False, "has_open_check": False,
@@ -751,9 +754,11 @@ class TestCashierFlows:
         conn.execute = AsyncMock(return_value=None)
         conn.fetchrow = AsyncMock(return_value=order_row)
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
-            "id": 1, "features": {"dian_active": False}
-        }))
+        _rest_mock = AsyncMock(return_value={
+            "id": 1, "org_id": 1, "location_id": 1, "features": {"dian_active": False}
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
         monkeypatch.setattr("app.services.billing.get_billing_config", AsyncMock(return_value=None))
 
         resp = client.patch(
@@ -1283,9 +1288,11 @@ class TestEndToEndTableFlow:
         patch_auth(monkeypatch, role="owner")
         new_table = {"id": "t-new", "name": "Mesa 5", "number": 5, "active": True}
         monkeypatch.setattr(db, "db_auto_create_table", AsyncMock(return_value=new_table))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
-            "id": 1, "parent_restaurant_id": None
-        }))
+        _rest_mock = AsyncMock(return_value={
+            "id": 1, "org_id": 1, "location_id": 1, "parent_restaurant_id": None
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
 
         resp = client.post(
             "/api/tables",
@@ -1306,10 +1313,12 @@ class TestEndToEndTableFlow:
 
         table_row = {"id": "t-new", "name": "Mesa 5", "number": 5, "active": True}
         monkeypatch.setattr(db, "db_get_tables", AsyncMock(return_value=[table_row]))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={
+        _rest_mock = AsyncMock(return_value={
             "id": 1, "org_id": 1, "location_id": 1,
             "name": "Test", "parent_restaurant_id": None, "features": {}
-        }))
+        })
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock)
 
         conn = AsyncMock()
         # Call order: db_get_pending_orders_by_branch first, db_get_active_session_table_ids second.
@@ -1460,7 +1469,9 @@ class TestEndToEndTableFlow:
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
         monkeypatch.setattr(db, "db_close_table_bill", AsyncMock())
         monkeypatch.setattr(db, "db_get_table_by_id", AsyncMock(return_value={"id": "t-new"}))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={}))
+        _rest_mock_empty = AsyncMock(return_value={})
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock_empty)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_all_restaurants", AsyncMock(return_value=[{
             "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
         }]))
@@ -1492,7 +1503,9 @@ class TestEndToEndTableFlow:
         monkeypatch.setattr(db, "get_pool", AsyncMock(return_value=make_pool(conn)))
         monkeypatch.setattr(db, "db_close_table_bill", AsyncMock())
         monkeypatch.setattr(db, "db_get_table_by_id", AsyncMock(return_value={"id": "t-new"}))
-        monkeypatch.setattr(db, "db_get_restaurant_by_id", AsyncMock(return_value={}))
+        _rest_mock_empty = AsyncMock(return_value={})
+        monkeypatch.setattr(db, "db_get_restaurant_by_org_id", _rest_mock_empty)
+        monkeypatch.setattr(db, "db_get_restaurant_by_location_id", _rest_mock_empty)
         monkeypatch.setattr(db, "db_get_all_restaurants", AsyncMock(return_value=[{
             "id": 1, "name": "Test", "whatsapp_number": "+573009876543"
         }]))

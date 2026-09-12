@@ -343,15 +343,16 @@ def _mock_auth(monkeypatch):
     from app.services import database as db_mod
     async def mock_verify_token(token: str): return "caja_user"
     async def mock_get_user(username: str):
-        return {"username": "caja_user", "branch_id": 1, "role": "caja", "restaurant_name": "R"}
+        # P0 fix (2026-09): create_checks/pay_check_single now read the
+        # explicit org_id off the user dict directly (no more resolving it
+        # via a DB lookup on the ambiguous branch_id).
+        return {"username": "caja_user", "branch_id": 1, "org_id": 1,
+                "location_id": 1, "role": "caja", "restaurant_name": "R"}
     async def mock_get_restaurant(request):
-        return {"id": 1, "whatsapp_number": "+57300", "name": "R"}
+        return {"id": 1, "org_id": 1, "location_id": 1, "whatsapp_number": "+57300", "name": "R"}
     monkeypatch.setattr("app.routes.deps.verify_token", mock_verify_token)
     monkeypatch.setattr(db_mod, "db_get_user", mock_get_user)
     monkeypatch.setattr("app.routes.tables.get_current_restaurant", mock_get_restaurant)
-    # Needed for create_checks org_id ownership check (Wave-2)
-    monkeypatch.setattr(db_mod, "db_get_restaurant_by_id",
-                        AsyncMock(return_value={"id": 1, "org_id": 1, "location_id": 1}))
     return db_mod
 
 
