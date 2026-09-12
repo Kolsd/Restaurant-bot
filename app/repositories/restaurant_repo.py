@@ -326,6 +326,11 @@ async def db_get_restaurant_detail_stats(restaurant_id: int, wa: str) -> dict:
     Return 30-day and today order counts, table orders, conversation count,
     user count, fiscal invoice counts for a given restaurant.
 
+    `restaurant_id` is an ORG id: the only caller (internal/admin detail panel)
+    resolves it with db_get_restaurant_by_org_id. Table orders and users are
+    counted by their explicit `org_id` columns — never through the
+    `restaurants` VIEW id (a location id) or the ambiguous users.branch_id.
+
     Cross-tenant by design — called from internal/admin under bypass_tenant_scope.
     """
     from app.services.tenant_context import bypass_tenant_scope  # noqa: PLC0415
@@ -341,13 +346,17 @@ async def db_get_restaurant_detail_stats(restaurant_id: int, wa: str) -> dict:
                 wa,
             )
             table_30d    = await conn.fetchrow(
+                # Previously compared restaurants.whatsapp_number (text) with $1
+                # while also using $1 as an id (bigint): every call raised
+                # "operator does not exist: text = bigint" and the superadmin
+                # detail panel returned 500. It also mixed location and org ids.
                 "SELECT COUNT(*) AS cnt FROM table_orders "
-                "WHERE created_at >= NOW()-INTERVAL '30 days' AND status NOT IN ('cancelado') "
-                "AND (SELECT whatsapp_number FROM restaurants WHERE id=table_orders.branch_id OR id=$1 LIMIT 1)=$1",
+                "WHERE org_id=$1 AND created_at >= NOW()-INTERVAL '30 days' "
+                "AND status <> 'cancelado'",
                 restaurant_id,
             )
             convs        = await conn.fetchval("SELECT COUNT(*) FROM conversations WHERE bot_number=$1", wa)
-            users_cnt    = await conn.fetchval("SELECT COUNT(*) FROM users WHERE branch_id=$1", restaurant_id)
+            users_cnt    = await conn.fetchval("SELECT COUNT(*) FROM users WHERE org_id=$1", restaurant_id)
 
             has_invoices = await conn.fetchval("SELECT to_regclass('fiscal_invoices')")
             if has_invoices:
