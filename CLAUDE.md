@@ -287,6 +287,8 @@ Post-Wave-2 el schema canónico es `organizations` + `locations`. **Cada locatio
 | `parent_restaurant_id IS NULL` filter | LEGACY EMULATION (via VIEW) | `db_get_all_orgs()` |
 | `is_main_restaurant` parameter | VESTIGIAL | (drop) |
 | "Matriz invariant" fallback | REMOVED (Paso 7) | Explicit `restaurant["location_id"]` |
+| `db_get_restaurant_by_id()` | **DELETED 2026-09-11** — aceptaba location_id U org_id y en colisión devolvía OTRO restaurante (P0 cross-tenant) | `db_get_restaurant_by_location_id()` / `db_get_restaurant_by_org_id()` — elegir por intención, nunca adivinar. Guardia: `tests/test_no_ambiguous_restaurant_lookup.py` |
+| `users.branch_id` | AMBIGUO (sin FK; unos writers guardaban org_id, otros location_id) | `users.org_id` + `users.location_id` (migración 0081, con FK). Auth DENIEGA si `org_id` no se pudo resolver — nunca fallback |
 
 ### Patrón de uso
 
