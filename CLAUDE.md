@@ -1,4 +1,57 @@
-# Mesio Restaurant Bot — v12.0 (HQ Wave 2 + Security Audit shipped 2026-05-08; head = 0078_crm_lost_reason; 1368 tests passing)
+# Mesio Restaurant Bot — v13.0 (canal web propio + P0 multi-tenant cerrados 2026-09-12; head = 0081_users_org_location; 1741 tests passing con DB)
+
+## ▶ ESTADO ACTUAL Y SIGUIENTE SESIÓN — leer primero (actualizado 2026-09-12)
+
+### Qué pasó (sesiones 2026-09-10 → 12, 20 commits `0ab1641..ad8dca1`)
+- **La suite mentía.** Los "1368 tests verdes" venían de un subconjunto mockeado: `alembic upgrade head` no construía una DB desde cero, nadie corría los tests con DB y 260 se saltaban en silencio. Arreglado: la cadena de migraciones construye desde vacío (0079), los tests con DB corren y pasan, dependencias de test pinneadas.
+- **Pivote de producto: canal web propio en lugar de WhatsApp.** El bot sigue siendo el producto (chat-first). QR → `/chat/{table_id}` → el bot da la carta como tarjetas.
+- **Flujo de mesa completo, sin WhatsApp y sin LLM:** el escaneo abre la mesa y muestra un código → los amigos se unen con ese código → carrito determinista con nota por plato → "Enviar pedido" llega a cocina con la nota en la comanda → vista de mesa ("Tú" / "Otro comensal") → "Pedir la cuenta" (lo mío / toda la mesa, tarjeta / efectivo) → el mesero cobra con su datáfono → caja `pay_check` → NPS de 1 a 5 en el chat.
+- **P0 cerrados:** el cobro de mesa daba 500 siempre; `db_get_restaurant_by_id` devolvía OTRO restaurante cuando un id de sede coincidía con un id de organización (eliminada; `users.org_id`/`location_id` en 0081); el superadmin escribía sobre el cliente equivocado (endpoints legacy eliminados); "descartar aviso" hacía DELETE; el control de stock nunca funcionaba (doble `json.dumps`); cinco endpoints con RLS mal cableado; tres tests que fallaban solo de noche por zona horaria. El test estrella e2e ya no es intermitente: su "intermitencia" era la colisión de ids.
+- **Email transaccional** (`EMAIL_BACKEND=console|resend`) para reset de clave, reporte semanal y bienvenida del CRM, para poder retirar WhatsApp sin dejar dueños bloqueados.
+
+### Decisiones de producto cerradas (no re-discutir)
+1. Comensal anónimo (`web:<uuid4>`); nombre y teléfono opcionales, solo al pagar.
+2. El pedido va directo a cocina; el mesero recibe aviso, no aprueba.
+3. Botón de mesero flotante, siempre visible, que pregunta el motivo (cuenta / cubiertos / servilletas / otra cosa).
+4. Chat-first: el bot da la carta en tarjetas con foto y "+"; el primer mensaje saluda y muestra categorías; "Ver carta completa" abre un panel.
+5. Nota libre por plato, sin modificadores con precio.
+6. Mesa compartida: quien llega después se une con el código que ve el primero.
+7. Cobro al lanzamiento POR EL MESERO, sin pasarela: "pago lo mío" o "pago toda la mesa" (= saldo restante).
+8. NPS al terminar el servicio (al cobrar), dentro del chat.
+9. Wompi OFF (webhook roto, ver sección Wompi). Bold diferido como primera pasarela (ver sección Bold).
+10. WhatsApp se retira. Push web fuera de alcance hasta construir domicilios.
+11. El superadmin edita solo datos del negocio (organización); los datos de cada sede los edita el restaurante.
+12. Enganche comercial = 8 días gratis sobre el plan básico usando `comp_until` (NO un `plan_code='free'`). NO implementado; falta confirmar si es Pulso o Restaurante.
+
+### Siguiente sesión — en este orden
+1. **Validar el bot con el LLM real — bloqueante.** Todo lo verificado corrió SIN `ANTHROPIC_API_KEY`. El PM carga la clave; correr `pytest tests/e2e` completo (44 tests con LLM) y `python run_ai_sim.py` (~$2-5). Revisar: la tool `add_to_cart` crea líneas con `line_id`, el carrito entra al contexto con notas sanitizadas, NPS y checkout escritos por chat web.
+2. **Tiempo real:** SSE (+ Redis pub/sub, por los 4 workers) en kitchen / bar / mesero / caja y en el estado del comensal; sonido en KDS. Hoy todo es polling de 6 a 30 s.
+3. **Primer cliente:** trial de 8 días (`comp_until`) en el alta del CRM; verificar que el alta deja menú, mesas, QR y staff listos para operar.
+4. **Multi-sede:** la pantalla del mesero no filtra avisos por sede (el login de staff no guarda `location_id`). Obligatorio antes de vender a cadenas.
+5. Barrer el patrón `json.dumps()` pasado a `$n::jsonb` (doble codificación) en el resto del código.
+6. Apagar WhatsApp: migrar primero `tests/e2e/conftest.py` y `test_happy_path_full_flow` al canal web; nunca borrar antes de tener el harness equivalente.
+7. Antes de reactivar Wompi: arreglar el webhook (sección Wompi).
+- **Ops (Railway):** confirmar que `WOMPI_*` NO estén seteadas, que `REDIS_URL` y `DATABASE_URL_ADMIN` sí lo estén, y aplicar `alembic upgrade head` (0079-0081).
+
+### Estado verificado al cierre
+- Head `0081_users_org_location`, un solo head, construye desde una DB vacía.
+- `pytest tests/ --ignore=tests/e2e --ignore=tests/ai_sim`: **1741 passed / 0 failed** con DB · **1400 passed** sin DB.
+- `pytest tests/e2e -m e2e_no_llm`: **15/15**, 11 corridas seguidas limpias. `scripts/lint_frontend.py`: 0 violaciones. `sw.js` `CACHE_VERSION = 'v45'`.
+
+### Entorno local (Windows)
+- Python 3.12 en `.venv` · Postgres 16 local (superuser `postgres` / `mesio_local_dev`; rol `mesio_app` / `mesio_app_pw`) · sin Redis (fallback in-process).
+- DBs: `mesio_tests` (suite), `mesio_test` (e2e), `mesio_fresh` (scratch aislada). Todas con `ALTER DATABASE <db> SET timezone TO 'UTC'` — obligatorio.
+- Pins obligatorios: `pytest==8.4.2`, `pytest-asyncio==0.24.0` (la 1.x rompe ~94 tests con "coroutine was never awaited").
+- Para correr tests: `TEST_DATABASE_URL`, `DATABASE_URL` y `DATABASE_URL_ADMIN` apuntando a la DB; `DISABLE_META_SIGNATURE_VERIFY=1` para e2e.
+- Servidor local: `uvicorn` no está en el PATH y `.claude/launch.json` es un archivo versionado con 3 configuraciones — NO sobrescribirlo; usar un launcher propio que setee `DATABASE_URL`.
+
+### Reglas aprendidas en estas sesiones
+- **Un test que se salta en silencio es un test que miente.** Los tests con DB deben correr contra una DB real.
+- **Colisión de ids organización/sede:** nunca pasar un id de tipo dudoso a una búsqueda. Todo test de tenant debe sembrar ids que choquen A PROPÓSITO; los tests previos pasaban solo porque no chocaban.
+- **Firmas de pasarelas:** probar contra la documentación o un evento real, nunca contra una firma generada por nuestro propio código.
+- **Commit con archivos estáticos → subir `CACHE_VERSION` de `sw.js` en ese mismo commit**, y correr `test_sw_cache_version` después de commitear (solo mira el último commit).
+- **Fechas en tests:** comparar siempre en el mismo reloj (UTC). `date.today()` contra `utcnow()` rompió tres tests después de las 19:00.
+- **Agentes:** darles el porqué, exigir verificación en navegador y en DB, prohibir debilitar tests, y verificar cada reporte antes de commitear — varios diagnósticos iniciales (propios y de agentes) fueron incorrectos.
 
 ## Entorno y Comandos
 
@@ -45,6 +98,9 @@ Variables de entorno críticas:
   OTP_PEPPER,                   # Server-side pepper prepended to OTP before SHA-256. Without it, password-reset OTPs are brute-forceable offline if the DB leaks. Must be 32+ chars random.
   APP_DOMAIN,                   # Used as WebAuthn RP_ID. Production startup logs CRITICAL if unset (WebAuthn fallback to Host header is spoofable).
   ADMIN_KEY,                    # Internal /api/internal/* gate. Must be ≥ 32 chars (startup warns if shorter).
+  EMAIL_BACKEND,                # (opcional, default console) console|resend. console loguea sin enviar; resend sin RESEND_API_KEY cae a console con warning.
+  RESEND_API_KEY,               # (opcional) Proveedor de email transaccional (reset de clave, reporte semanal, bienvenida CRM).
+  EMAIL_FROM,                   # (opcional) Remitente de los emails transaccionales.
 ```
 
 ## Configuración Wompi per-restaurant
@@ -132,6 +188,7 @@ Restaurant-bot/
 │   │   ├── reservations.py          # Gestión avanzada de reservas, disponibilidad, stats
 │   │   ├── discounts.py             # Descuentos dinámicos por franja horaria (yield management)
 │   │   ├── reviews.py               # Reseñas públicas (extiende NPS) + analytics
+│   │   ├── diner.py                 # Canal web del comensal /api/diner/*: session, join, chat, menu, waiter-call, cart/*, order/send, table, checkout, status
 │   │   └── internal/                # Herramientas INTERNAS de Mesio — NO son features de restaurante
 │   │       ├── __init__.py
 │   │       ├── admin.py             # /api/internal/admin/* — Superadmin CRUD (login, restaurants, users)
@@ -154,6 +211,9 @@ Restaurant-bot/
 │   │   ├── alerts.py               # Health checks automáticos: dead letters, pool, latency, queue, errors → webhook
 │   │   ├── scheduler.py            # Background loop: inactivity, reminders, deposits, occupancy, alerts. Leader election via Redis. Tick wrapped en bypass_tenant_scope + per-iter tenant_scope(rid).
 │   │   ├── agent_tools.py           # 8 tool definitions para Claude tool_use API (TOOLS_SALON, TOOLS_EXTERNAL)
+│   │   ├── blocks.py                # Contrato de bloques del chat web: text, dish_cards, category_chips, cart_summary, payment_options, waiter_ack, nps_prompt
+│   │   ├── table_order_commit.py    # Creación de pedidos de mesa compartida por el bot (WhatsApp) y el canal web
+│   │   ├── email.py                 # Email transaccional provider-agnostic (console/resend) + email_templates.py
 │   │   └── reservation_payments.py  # Generación de links Wompi para depósitos de reserva
 │   ├── repositories/                # Patrón Repository — extracción completa de SQL desde routes
 │   │   ├── __init__.py              # Re-exporta InsufficientStockError, OrderCommitError, commit_order_transaction
@@ -170,6 +230,7 @@ Restaurant-bot/
 │   │   ├── reservations_repo.py     # 14 funciones: reservas, disponibilidad, stats, confirmación
 │   │   ├── discounts_repo.py        # 5 funciones: descuentos dinámicos por horario
 │   │   ├── reservation_deposits_repo.py  # 5 funciones: depósitos Wompi para reservas
+│   │   ├── diner_sessions_repo.py   # Sesiones del comensal web (token → org_id, location_id, mesa)
 │   │   ├── reviews_repo.py          # 8 funciones: reseñas públicas, snapshots ocupación, turn time
 │   │   └── internal/                # Repos para herramientas internas Mesio
 │   │       ├── __init__.py
@@ -229,7 +290,10 @@ Restaurant-bot/
 │   ├── 0075_pending_plan_downgrade.py         # 2026-05-07 wave 2 — organizations.{pending_plan_code, pending_plan_effective_at, pending_kept_location_id} for plan downgrade flow with 7-day grace + sucursal selection.
 │   ├── 0076_rls_restaurant_tables.py          # 2026-05-07 security audit — restaurant_tables had NO RLS policy. Now ENABLE + FORCE + org_isolation. Closes X-Branch-ID injection cross-tenant write vector.
 │   ├── 0077_hq_audit_log.py                   # 2026-05-08 HQ wave 1 — global table hq_audit_log (no RLS — internal tooling). Captures every Mesio team mutation on /api/internal/*. Schema: actor, action, target_type, target_id, org_id, payload, request_ip, user_agent, created_at + 4 indexes.
-│   └── 0078_crm_lost_reason.py                # 2026-05-08 HQ wave 1 — prospects.lost_reason TEXT + lost_at TIMESTAMPTZ + partial index. Required when moving prospect to "perdido" stage in CRM.
+│   ├── 0078_crm_lost_reason.py                # 2026-05-08 HQ wave 1 — prospects.lost_reason TEXT + lost_at TIMESTAMPTZ + partial index. Required when moving prospect to "perdido" stage in CRM.
+│   ├── 0079_bootstrap_role_grants.py          # 2026-09-10 — permisos de mesio_app/mesio_superadmin como migración (antes vivían fuera del repo). Junto con RESET ROLE en 0071 y transaction_per_migration=True, alembic upgrade head construye desde DB vacía.
+│   ├── 0080_diner_sessions.py                 # 2026-09-10 — tabla diner_sessions del canal web + RLS org_isolation (ENABLE + FORCE).
+│   └── 0081_users_org_location.py             # 2026-09-11 — users.org_id + users.location_id (FK) con backfill que desambigua users.branch_id; los casos irresolubles quedan NULL y auth los deniega.
 ```
 
 ## Blindaje Multi-tenant RLS — Fase 1 Security Roadmap (v11.0)
@@ -289,6 +353,7 @@ Post-Wave-2 el schema canónico es `organizations` + `locations`. **Cada locatio
 | "Matriz invariant" fallback | REMOVED (Paso 7) | Explicit `restaurant["location_id"]` |
 | `db_get_restaurant_by_id()` | **DELETED 2026-09-11** — aceptaba location_id U org_id y en colisión devolvía OTRO restaurante (P0 cross-tenant) | `db_get_restaurant_by_location_id()` / `db_get_restaurant_by_org_id()` — elegir por intención, nunca adivinar. Guardia: `tests/test_no_ambiguous_restaurant_lookup.py` |
 | `users.branch_id` | AMBIGUO (sin FK; unos writers guardaban org_id, otros location_id) | `users.org_id` + `users.location_id` (migración 0081, con FK). Auth DENIEGA si `org_id` no se pudo resolver — nunca fallback |
+| `db_update_restaurant_fields()` / `db_update_subscription()` y `POST /api/internal/admin/update-restaurant` + `/set-subscription` | **DELETED 2026-09-12** — resolvían la organización por subconsulta de sede; con colisión de ids escribían sobre OTRO cliente | `PATCH /api/internal/admin/organizations/{org_id}`. Guardia: `tests/test_no_legacy_restaurant_field_writes.py` |
 
 ### Patrón de uso
 
@@ -441,7 +506,7 @@ Requiere regulación financiera colombiana. Alternativa viable: extender loyalty
 
 **Operacionales (dark theme)**: `/caja` (POS), `/kitchen` (KDS), `/bar` (KDS variante), `/mesero` (tablet grid), `/domiciliario` (mobile).
 
-**Públicas**: `/login.html`, `/menu.html` (QR público), `/demo`, `/dashboard-demo`.
+**Públicas**: `/login.html`, `/menu.html` (QR público), `/demo`, `/dashboard-demo`, `/chat/{table_id}` (canal web del comensal: `diner-chat.html` + `pages/diner-chat.js` + `diner-session.js`).
 
 Detalle de sprints A-W del rediseño en [docs/history/sprints.md](docs/history/sprints.md). Para "lo que quedó para después" ver "Pendientes de calendario" arriba.
 
@@ -452,9 +517,9 @@ Detalle de sprints A-W del rediseño en [docs/history/sprints.md](docs/history/s
 `conversations`, `carts`, `staff`, `fiscal_invoices`, `inventory`, `dish_recipes`,
 `webhook_inbox`, `sessions` (con `token_hash`)
 
-### RLS (Row-Level Security) activo en 39 tablas (post-0076 + 0078; tightened phone_blocklist WITH CHECK in 0073)
+### RLS (Row-Level Security) activo en 40 tablas (post-0080; tightened phone_blocklist WITH CHECK in 0073)
 `attendance_deductions`, `billing_log`, `carts`, `contract_templates`, `conversations`,
-`customer_profiles`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
+`customer_profiles`, `diner_sessions`, `dish_recipes`, `fiscal_invoices`, `fiscal_resolution`, `inventory`,
 `loyalty_campaigns`, `loyalty_customers`, `loyalty_ledger`, `marketing_messages_log`, `menu_availability`,
 `menu_events`, `nps_responses`, `nps_waiting`, `occupancy_snapshots`, `orders`,
 `overtime_requests`, `payroll_runs`, `phone_blocklist`, `restaurant_tables`, `shift_swap_requests`,
@@ -1231,8 +1296,8 @@ Wrapper Cloudinary. Funciones clave:
   3. **`:param::tipo` rompe con `sa.text()` bound params**. El regex de SQLAlchemy se confunde con el `::` (cast operator) y deja `:param` literal en la query final → `psycopg2.errors.SyntaxError`. Usar `CAST(:param AS tipo)` en su lugar. Ej.: `INSERT ... VALUES (CAST(:menu AS jsonb))` ✅, NO `:menu::jsonb` ❌.
 - **Bot Intocable**: LEER la sección "Reglas del Bot — NO ROMPER" ANTES de tocar cualquier archivo del bot. Cada regla existe por un bug real que afectó a clientes.
 - **Tests Obligatorios**: Después de cualquier cambio en archivos del bot, correr `pytest tests/ --ignore=tests/ai_sim`.
-  - **Con `TEST_DATABASE_URL` exportada**: ~1198 passed / 0 failed / ~235 skipped en ~28s (sin e2e). Para acelerar: `pytest -n auto tests/ --ignore=tests/e2e --ignore=tests/ai_sim` baja a ~22s (~21% speedup). pytest-xdist está en requirements.txt.
-  - **Sin `TEST_DATABASE_URL`**: ~1000 passed / 0 failed / ~90+ skipped en ~15s (integration tests gatedos por URL son skipped).
+  - **Con `TEST_DATABASE_URL` exportada** (DB en UTC, migrada a head): **1741 passed / 0 failed / 6 skipped** en ~2.5 min (sin e2e).
+  - **Sin `TEST_DATABASE_URL`**: **1400 passed / 0 failed** (~350 skipped: los tests con DB). Nunca tomar este número como prueba de salud: no ejercita la DB.
   - **E2E tests (`tests/e2e/`)**: requieren `TEST_DATABASE_URL` + `ANTHROPIC_API_KEY` (los `e2e_no_llm` solo DB). Correr serial — son lentos por seed real + Anthropic real.
   - Cualquier failure nuevo es regresión real — no merguear hasta resolverla.
 - **Claim-then-ack**: NUNCA revertir inbox_worker a transacción larga. El patrón de 3 fases existe para evitar pool deadlock.
